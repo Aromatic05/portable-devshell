@@ -80,16 +80,37 @@ test("EnvelopeCodec restores byte-at-a-time fragmentation", async () => {
     assert.deepEqual(await received, envelope);
 });
 
+test("EnvelopeCodec preserves raw Stream DATA bytes", async () => {
+    const left = new FragmentChannel();
+    const right = new FragmentChannel();
+    left.connect(right);
+    right.connect(left);
+    const sender = new EnvelopeCodec(left);
+    const receiver = new EnvelopeCodec(right);
+    const received = new Promise<Envelope>((resolve) =>
+        receiver.onEnvelope(resolve),
+    );
+    const envelope: Envelope = {
+        source: { host: "a", port: "process" },
+        dest: { host: "b", port: "process" },
+        packet: {
+            protocol: "stream",
+            type: "data",
+            id: "stream-1",
+            seq: 1,
+            bytes: Uint8Array.of(0, 1, 2, 254, 255),
+        },
+    };
+    await sender.send(envelope);
+    assert.deepEqual(await received, envelope);
+});
+
 test("EnvelopeCodec closes malformed wire envelopes", async () => {
     const channel = new FragmentChannel();
     const codec = new EnvelopeCodec(channel);
     const closed = new Promise<Error | undefined>((resolve) =>
         codec.onClose(resolve),
     );
-    const body = new TextEncoder().encode(JSON.stringify({ source: {}, dest: {} }));
-    const wire = new Uint8Array(4 + body.byteLength);
-    new DataView(wire.buffer).setUint32(0, body.byteLength);
-    wire.set(body, 4);
-    channel.inject(wire);
-    assert.match((await closed)?.message ?? "", /packet is required/u);
+    channel.inject(Uint8Array.of(0));
+    assert.match((await closed)?.message ?? "", /Envelope source/u);
 });

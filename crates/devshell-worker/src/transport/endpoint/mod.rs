@@ -9,8 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::capability::rpc::error::RpcError as WorkerRpcError;
 use crate::capability::rpc::request::{RpcRequest, RpcRequestContext};
@@ -252,7 +251,8 @@ where
                             StreamPacket::Data {
                                 id,
                                 seq: active.send_seq,
-                                message: Some(json!({ "bytes": STANDARD.encode(data) })),
+                                message: None,
+                                bytes: Some(data),
                             },
                         )?,
                     )?;
@@ -371,9 +371,9 @@ fn dispatch_envelope(
         return Err(format!("Envelope destination {} is not this Endpoint.", envelope.dest.host));
     }
     let Envelope { source, dest, packet } = envelope;
-    match packet::decode(packet)? {
+    match packet {
         Packet::Rpc(packet) => dispatch_rpc(source, dest, packet, events, context),
-        Packet::Event => Ok(()),
+        Packet::Event(_) => Ok(()),
         Packet::Stream(packet) => dispatch_stream(source, dest, packet, streams, events),
     }
 }
@@ -399,13 +399,11 @@ fn dispatch_rpc(
                 let reply_dest = source;
                 let response = route_rpc(&router, &port, id, method, message);
                 let packet = rpc_response(response);
-                if let Ok(packet) = packet::encode("rpc", &packet) {
-                    let _ = events.send(EndpointEvent::Outbound(Envelope {
-                        source: reply_source,
-                        dest: reply_dest,
-                        packet,
-                    }));
-                }
+                let _ = events.send(EndpointEvent::Outbound(Envelope {
+                    source: reply_source,
+                    dest: reply_dest,
+                    packet: Packet::Rpc(packet),
+                }));
             });
             Ok(())
         }
@@ -513,18 +511,15 @@ fn dispatch_stream(
                         .send(EndpointEvent::Outbound(Envelope {
                             source: dest,
                             dest: source,
-                            packet: packet::encode(
-                                "stream",
-                                &StreamPacket::Cancel {
-                                    id,
-                                    error: Some(StreamError {
-                                        message: error,
-                                        code: None,
-                                        details: None,
-                                        retryable: None,
-                                    }),
-                                },
-                            )?,
+                            packet: Packet::Stream(StreamPacket::Cancel {
+                                id,
+                                error: Some(StreamError {
+                                    message: error,
+                                    code: None,
+                                    details: None,
+                                    retryable: None,
+                                }),
+                            }),
                         }))
                         .map_err(|error| error.to_string())?;
                     return Ok(());
@@ -539,7 +534,7 @@ fn dispatch_stream(
             )?;
             streams.insert(id, active);
         }
-        StreamPacket::Data { id, seq, message } => {
+        StreamPacket::Data { id, seq, bytes, .. } => {
             let active = streams
                 .get_mut(&id)
                 .ok_or_else(|| format!("Unknown Stream {id}."))?;
@@ -547,14 +542,11 @@ fn dispatch_stream(
                 return Err(format!("Stream {id} sequence is invalid."));
             }
             active.recv_seq = seq;
-            let bytes = message
-                .and_then(|value| value.get("bytes").and_then(Value::as_str).map(str::to_owned))
+            let bytes = bytes
                 .ok_or_else(|| "Stream byte packet is invalid.".to_string())?;
             active
                 .input
-                .send(StreamInputCommand::Data(
-                    STANDARD.decode(bytes).map_err(|error| error.to_string())?,
-                ))
+                .send(StreamInputCommand::Data(bytes))
                 .map_err(|error| error.to_string())?;
         }
         StreamPacket::Fin { id } => {
@@ -583,7 +575,7 @@ fn stream_envelope(active: &ActiveStream, packet: StreamPacket) -> Result<Envelo
     Ok(Envelope {
         source: active.source.clone(),
         dest: active.dest.clone(),
-        packet: packet::encode("stream", &packet)?,
+        packet: Packet::Stream(packet),
     })
 }
 
@@ -667,13 +659,10 @@ fn drain_notifications(
                     host: peer_host.to_string(),
                     port: port.to_string(),
                 },
-                packet: packet::encode(
-                    "event",
-                    &EventPacket {
-                        name: name.to_string(),
-                        message,
-                    },
-                )?,
+                packet: Packet::Event(EventPacket {
+                    name: name.to_string(),
+                    message,
+                }),
             },
         )?;
     }

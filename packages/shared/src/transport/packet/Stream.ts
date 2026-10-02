@@ -10,16 +10,18 @@ export interface StreamError {
 }
 
 export type StreamRead =
-    | { readonly type: "data"; readonly message?: Message; readonly seq: number }
+    | { readonly type: "data"; readonly bytes?: Uint8Array; readonly message?: Message; readonly seq: number }
     | { readonly type: "fin" }
     | { readonly type: "close"; readonly message?: Message };
 
 type StreamPacket =
     | { protocol: "stream"; type: "open"; id: string; name: string; message?: Message }
-    | { protocol: "stream"; type: "data"; id: string; seq: number; message?: Message }
+    | { protocol: "stream"; type: "data"; id: string; seq: number; bytes?: Uint8Array; message?: Message }
     | { protocol: "stream"; type: "fin"; id: string }
     | { protocol: "stream"; type: "close"; id: string; message?: Message }
     | { protocol: "stream"; type: "cancel"; id: string; error?: StreamError };
+
+const BINARY_CHUNK_SIZE = 64 * 1024;
 
 export class Stream {
     readonly #target: Connection | Port;
@@ -115,7 +117,7 @@ export class Stream {
         const stream = this.#streams.get(key);
         if (stream === undefined) return;
         if (packet.type === "data") {
-            await stream.acceptData(packet.seq, packet.message);
+            await stream.acceptData(packet.seq, packet.message, packet.bytes);
             return;
         }
         if (packet.type === "fin") {
@@ -146,7 +148,7 @@ export class MessageStream {
     >();
     readonly #closeListeners = new Set<(message?: Message) => void>();
     readonly #cancelListeners = new Set<(error?: StreamError) => void>();
-    readonly #pending: Array<{ message: Message | undefined; seq: number }> = [];
+    readonly #pending: Array<{ bytes?: Uint8Array; message?: Message; seq: number }> = [];
     readonly #readers: Array<{
         resolve(value: StreamRead): void;
         reject(error: Error): void;
@@ -187,16 +189,9 @@ export class MessageStream {
     async read(): Promise<Uint8Array | undefined> {
         const next = await this.readMessage();
         if (next.type === "close" || next.type === "fin") return undefined;
-        if (
-            typeof next.message !== "object" ||
-            next.message === null ||
-            Array.isArray(next.message) ||
-            typeof (next.message as Record<string, unknown>).bytes !== "string"
-        )
+        if (next.bytes === undefined)
             throw new Error("Stream byte packet is invalid.");
-        return decodeBase64(
-            (next.message as Record<string, unknown>).bytes as string,
-        );
+        return next.bytes;
     }
 
     send(message?: Message): Promise<void> {
@@ -211,8 +206,18 @@ export class MessageStream {
         } satisfies StreamPacket);
     }
 
-    write(data: Uint8Array): Promise<void> {
-        return this.send({ bytes: encodeBase64(data) });
+    async write(data: Uint8Array): Promise<void> {
+        if (data.byteLength === 0) {
+            await this.#sendBytes(data);
+            return;
+        }
+        for (let offset = 0; offset < data.byteLength; offset += BINARY_CHUNK_SIZE)
+            await this.#sendBytes(
+                data.subarray(
+                    offset,
+                    Math.min(offset + BINARY_CHUNK_SIZE, data.byteLength),
+                ),
+            );
     }
 
     async finish(): Promise<void> {
@@ -269,7 +274,13 @@ export class MessageStream {
         ) => Promise<void> | void,
     ): () => void {
         this.#dataListeners.add(listener);
-        const pending = this.#pending.splice(0);
+        const pending: Array<{ message: Message | undefined; seq: number }> = [];
+        for (let index = this.#pending.length - 1; index >= 0; index -= 1) {
+            const item = this.#pending[index]!;
+            if (item.bytes !== undefined) continue;
+            this.#pending.splice(index, 1);
+            pending.unshift({ message: item.message, seq: item.seq });
+        }
         if (pending.length > 0)
             queueMicrotask(() => {
                 void (async () => {
@@ -300,7 +311,11 @@ export class MessageStream {
         return () => this.#cancelListeners.delete(listener);
     }
 
-    async acceptData(seq: number, message?: Message): Promise<void> {
+    async acceptData(
+        seq: number,
+        message?: Message,
+        bytes?: Uint8Array,
+    ): Promise<void> {
         if (this.#closed) return;
         if (this.#remoteFinished)
             throw new Error(`Stream ${this.id} received DATA after FIN.`);
@@ -309,16 +324,33 @@ export class MessageStream {
                 `Stream ${this.id} expected seq ${this.#recvSeq + 1}, received ${seq}.`,
             );
         this.#recvSeq = seq;
+        const data = {
+            ...(bytes === undefined ? {} : { bytes }),
+            ...(message === undefined ? {} : { message }),
+            seq,
+        };
         const reader = this.#readers.shift();
         if (reader !== undefined) {
-            reader.resolve({ type: "data", message, seq });
+            reader.resolve({ type: "data", ...data });
             return;
         }
-        if (this.#dataListeners.size === 0) {
-            this.#pending.push({ message, seq });
+        if (bytes !== undefined || this.#dataListeners.size === 0) {
+            this.#pending.push(data);
             return;
         }
         for (const listener of this.#dataListeners) await listener(message, seq);
+    }
+
+    #sendBytes(bytes: Uint8Array): Promise<void> {
+        if (this.#closed || this.#localFinished)
+            throw new Error("Stream write side is closed.");
+        return this.#connection.send({
+            protocol: "stream",
+            type: "data",
+            id: this.id,
+            seq: ++this.#sendSeq,
+            bytes,
+        } satisfies StreamPacket);
     }
 
     acceptFin(): void {
@@ -363,21 +395,6 @@ function streamError(error?: StreamError): Error {
     });
 }
 
-function encodeBase64(data: Uint8Array): string {
-    let binary = "";
-    for (let offset = 0; offset < data.byteLength; offset += 0x8000)
-        binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000));
-    return btoa(binary);
-}
-
-function decodeBase64(value: string): Uint8Array {
-    const binary = atob(value);
-    const data = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index++)
-        data[index] = binary.charCodeAt(index);
-    return data;
-}
-
 function parse(value: unknown): StreamPacket | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const packet = value as Record<string, unknown>;
@@ -396,14 +413,20 @@ function parse(value: unknown): StreamPacket | undefined {
         packet.type === "data" &&
         typeof packet.seq === "number" &&
         Number.isSafeInteger(packet.seq)
-    )
+    ) {
+        if (packet.bytes !== undefined && !(packet.bytes instanceof Uint8Array))
+            throw new Error("Invalid Stream packet.");
+        if (packet.bytes !== undefined && packet.message !== undefined)
+            throw new Error("Invalid Stream packet.");
         return {
             protocol: "stream",
             type: "data",
             id: packet.id,
             seq: packet.seq,
+            ...(packet.bytes === undefined ? {} : { bytes: packet.bytes }),
             ...(packet.message === undefined ? {} : { message: packet.message }),
         };
+    }
     if (packet.type === "close")
         return {
             protocol: "stream",

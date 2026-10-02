@@ -3,10 +3,10 @@ pub mod stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Packet {
     Rpc(RpcPacket),
-    Event,
+    Event(EventPacket),
     Stream(StreamPacket),
 }
 
@@ -65,6 +65,8 @@ pub enum StreamPacket {
         seq: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bytes: Option<Vec<u8>>,
     },
     Fin {
         id: String,
@@ -92,7 +94,7 @@ pub struct StreamError {
     pub retryable: Option<bool>,
 }
 
-pub fn decode(value: Value) -> Result<Packet, String> {
+pub fn from_json(value: Value) -> Result<Packet, String> {
     let protocol = value
         .get("protocol")
         .and_then(Value::as_str)
@@ -101,8 +103,8 @@ pub fn decode(value: Value) -> Result<Packet, String> {
         "rpc" => serde_json::from_value(value)
             .map(Packet::Rpc)
             .map_err(|error| error.to_string()),
-        "event" => serde_json::from_value::<EventPacket>(value)
-            .map(|_| Packet::Event)
+        "event" => serde_json::from_value(value)
+            .map(Packet::Event)
             .map_err(|error| error.to_string()),
         "stream" => serde_json::from_value(value)
             .map(Packet::Stream)
@@ -111,8 +113,22 @@ pub fn decode(value: Value) -> Result<Packet, String> {
     }
 }
 
-pub fn encode<T: Serialize>(protocol: &str, packet: &T) -> Result<Value, String> {
-    let Value::Object(mut value) = serde_json::to_value(packet).map_err(|error| error.to_string())?
+pub fn to_json(packet: &Packet) -> Result<Value, String> {
+    match packet {
+        Packet::Rpc(packet) => encode("rpc", packet),
+        Packet::Event(packet) => encode("event", packet),
+        Packet::Stream(packet) => {
+            if matches!(packet, StreamPacket::Data { bytes: Some(_), .. }) {
+                return Err("Raw Stream DATA must use protobuf bytes.".to_string());
+            }
+            encode("stream", packet)
+        }
+    }
+}
+
+fn encode<T: Serialize>(protocol: &str, packet: &T) -> Result<Value, String> {
+    let Value::Object(mut value) =
+        serde_json::to_value(packet).map_err(|error| error.to_string())?
     else {
         return Err("Packet must serialize to an object.".to_string());
     };

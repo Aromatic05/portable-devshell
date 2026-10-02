@@ -236,6 +236,42 @@ test("Stream uses one Connection for byte messages", async (t) => {
     await echoed;
 });
 
+test("Stream chunks large raw writes without base64 envelopes", async (t) => {
+    const { client, server } = await endpoints();
+    t.after(() => {
+        client.close();
+        server.close();
+    });
+    const streams = new Stream(server.bind("process"));
+    const opened = new Promise<MessageStream>((resolve) =>
+        streams.onOpen((stream) => resolve(stream)),
+    );
+    const clientStreams = new Stream(await client.connect("worker", "process"));
+    const stream = await clientStreams.open("exec");
+    const remote = await opened;
+    t.after(() => {
+        clientStreams.close();
+        streams.close();
+    });
+    const bytes = new Uint8Array(64 * 1024 * 3 + 7);
+    bytes[0] = 1;
+    bytes[bytes.byteLength - 1] = 2;
+    await stream.write(bytes);
+
+    const chunks = [
+        await remote.read(),
+        await remote.read(),
+        await remote.read(),
+        await remote.read(),
+    ];
+    assert.deepEqual(
+        chunks.map((chunk) => chunk?.byteLength),
+        [64 * 1024, 64 * 1024, 64 * 1024, 7],
+    );
+    assert.equal(chunks[0]?.[0], 1);
+    assert.equal(chunks[3]?.[6], 2);
+});
+
 test("Stream close completes locally after transport disconnect", async (t) => {
     const { client, server } = await endpoints();
     t.after(() => {

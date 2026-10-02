@@ -293,7 +293,11 @@ importers:
         specifier: ^5.0.6
         version: 5.0.6
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      protobufjs:
+        specifier: 7.6.6
+        version: 7.6.6
 
   packages/tui:
     dependencies:

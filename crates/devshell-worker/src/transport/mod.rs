@@ -10,6 +10,7 @@ pub mod envelope;
 pub mod frame;
 pub mod packet;
 pub mod reverse;
+pub mod wire;
 
 pub fn run(instance: &str) -> Result<String, String> {
     let instance = InstanceName::parse(instance)?;
