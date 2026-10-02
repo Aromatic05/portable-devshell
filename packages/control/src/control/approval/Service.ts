@@ -10,7 +10,7 @@ import {
     type ApprovalTimeout,
     type InstanceName,
     type JsonValue,
-    type ToolCallContext,
+    type ToolCallSource,
 } from "@portable-devshell/shared";
 
 export class ApprovalError extends Error {
@@ -28,7 +28,10 @@ export class ApprovalError extends Error {
 
 export interface ApprovalEvaluationInput {
     callId: string;
-    context: ToolCallContext;
+    source: ToolCallSource;
+    requestId?: string;
+    ctxId?: string;
+    workspace?: string;
     inputSummary: string;
     recording?: "caller" | "host";
     required?: boolean;
@@ -71,6 +74,7 @@ export interface ApprovalEventPort {
 export interface ApprovalServiceOptions {
     instanceName: InstanceName;
     store: ApprovalStorePort;
+    events: ApprovalEventPort;
     policy?: ApprovalPolicy;
     timeout?: ApprovalTimeout;
     now?: () => number;
@@ -81,11 +85,13 @@ interface PendingApproval {
     request: ApprovalRequest;
     resolve: (value: ApprovalResolution) => void;
     timeout: NodeJS.Timeout;
+    removeAbortListener?: () => void;
 }
 
 export class ApprovalService {
     readonly #instance: InstanceName;
     readonly #store: ApprovalStorePort;
+    readonly #events: ApprovalEventPort;
     readonly #timeoutMs: number;
     readonly #now: () => number;
     readonly #createId: () => string;
@@ -97,6 +103,7 @@ export class ApprovalService {
     constructor(options: ApprovalServiceOptions) {
         this.#instance = options.instanceName;
         this.#store = options.store;
+        this.#events = options.events;
         this.#policy = options.policy ?? { mode: "disabled" };
         this.#timeoutMs = options.timeout?.ms ?? 300_000;
         this.#now = options.now ?? Date.now;
@@ -110,6 +117,7 @@ export class ApprovalService {
     close(): void {
         for (const pending of this.#pending.values()) {
             clearTimeout(pending.timeout);
+            pending.removeAbortListener?.();
             pending.resolve({
                 error: cancelled(this.#instance, pending.request.toolName),
                 status: "cancelled",
@@ -119,12 +127,15 @@ export class ApprovalService {
         this.#store.close?.();
     }
 
-    async evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
+    async evaluate(
+        input: ApprovalEvaluationInput,
+        signal?: AbortSignal,
+    ): Promise<ApprovalEvaluation> {
         await this.#ensureReady();
         return this.#exclusive(async () => {
             const outcome = policyDecision(
                 this.#policy,
-                input.context.source,
+                input.source,
                 input.toolName,
             );
             if (outcome === "deny") {
@@ -147,19 +158,19 @@ export class ApprovalService {
                 instance: this.#instance,
                 reason: `Approval required before running ${input.toolName}.`,
                 recording: input.recording ?? "host",
-                ...(input.context.requestId === undefined
+                ...(input.requestId === undefined
                     ? {}
-                    : { requestId: input.context.requestId }),
+                    : { requestId: input.requestId }),
                 riskLevel: "medium",
-                ...(input.context.ctxId === undefined
+                ...(input.ctxId === undefined
                     ? {}
-                    : { ctxId: input.context.ctxId }),
-                source: input.context.source,
+                    : { ctxId: input.ctxId }),
+                source: input.source,
                 status: "pending",
                 toolName: input.toolName,
-                ...(input.context.workspace === undefined
+                ...(input.workspace === undefined
                     ? {}
-                    : { workspace: input.context.workspace }),
+                    : { workspace: input.workspace }),
             };
             await this.#store.append(request);
 
@@ -174,6 +185,18 @@ export class ApprovalService {
             };
             this.#pending.set(request.approvalId, pending);
             this.#arm(request.approvalId, pending, this.#timeoutMs);
+            if (signal !== undefined) {
+                const cancelPending = () => {
+                    void this.cancel(request.approvalId, abortReason(signal.reason))
+                        .catch(() => undefined);
+                };
+                pending.removeAbortListener = () => {
+                    signal.removeEventListener("abort", cancelPending);
+                };
+                if (signal.aborted) cancelPending();
+                else signal.addEventListener("abort", cancelPending, { once: true });
+            }
+            await this.#events.append("approval.requested", eventData(request));
             return { decision: "ask", request, awaitDecision };
         });
     }
@@ -244,20 +267,16 @@ export class ApprovalService {
                 decision,
                 status: input.decision === "approve" ? "approved" : "denied",
             };
-            await this.#store.append(updated);
-            if (pending !== undefined) {
-                clearTimeout(pending.timeout);
-                this.#pending.delete(approvalId);
-                pending.resolve(
-                    input.decision === "approve"
-                        ? { decision, status: "approved" }
-                        : {
-                              decision,
-                              error: denied(this.#instance, request.toolName),
-                              status: "denied",
-                          },
-                );
-            }
+            await this.#complete(
+                updated,
+                input.decision === "approve"
+                    ? { decision, status: "approved" }
+                    : {
+                          decision,
+                          error: denied(this.#instance, request.toolName),
+                          status: "denied",
+                      },
+            );
             return updated;
         });
     }
@@ -286,15 +305,10 @@ export class ApprovalService {
         if (request.status !== "pending") return request;
 
         const updated = { ...request, status: "cancelled" as const };
-        await this.#store.append(updated);
-        if (pending !== undefined) {
-            clearTimeout(pending.timeout);
-            this.#pending.delete(approvalId);
-            pending.resolve({
-                error: cancelled(this.#instance, request.toolName, reason),
-                status: "cancelled",
-            });
-        }
+        await this.#complete(updated, {
+            error: cancelled(this.#instance, request.toolName, reason),
+            status: "cancelled",
+        }, reason);
         return updated;
     }
 
@@ -307,7 +321,12 @@ export class ApprovalService {
                         Date.parse(request.expiresAt) <= this.#now()
                             ? "expired"
                             : "cancelled";
-                    await this.#store.append({ ...request, status });
+                    await this.#complete({ ...request, status }, {
+                        error: status === "expired"
+                            ? expired(this.#instance, request.toolName)
+                            : cancelled(this.#instance, request.toolName),
+                        status,
+                    });
                 }
             })();
             this.#ready = ready;
@@ -320,7 +339,7 @@ export class ApprovalService {
 
     #arm(id: string, pending: PendingApproval, delay: number): void {
         pending.timeout = setTimeout(() => {
-            void this.#expire(id).then(pending.resolve, () => {
+            void this.#expire(id).catch(() => {
                 if (this.#pending.get(id) === pending) {
                     this.#arm(id, pending, Math.min(1000, Math.max(1, this.#timeoutMs)));
                 }
@@ -328,20 +347,38 @@ export class ApprovalService {
         }, delay);
     }
 
-    async #expire(id: string): Promise<ApprovalResolution> {
-        return this.#exclusive(async () => {
+    async #expire(id: string): Promise<void> {
+        await this.#exclusive(async () => {
             const pending = this.#pending.get(id);
-            if (pending === undefined) {
-                return { error: expired(this.#instance, "unknown"), status: "expired" };
-            }
+            if (pending === undefined) return;
             const request = { ...pending.request, status: "expired" as const };
-            await this.#store.append(request);
-            this.#pending.delete(id);
-            return {
+            await this.#complete(request, {
                 error: expired(this.#instance, request.toolName),
                 status: "expired",
-            };
+            });
         });
+    }
+
+    async #complete(
+        request: ApprovalRequest,
+        resolution: ApprovalResolution,
+        reason?: string,
+    ): Promise<void> {
+        await this.#store.append(request);
+        const pending = this.#pending.get(request.approvalId);
+        if (pending !== undefined) {
+            clearTimeout(pending.timeout);
+            pending.removeAbortListener?.();
+            this.#pending.delete(request.approvalId);
+        }
+        try {
+            await this.#events.append(
+                `approval.${resolution.status}`,
+                eventData(request, request.decision, reason),
+            );
+        } finally {
+            pending?.resolve(resolution);
+        }
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -361,7 +398,7 @@ export class ApprovalService {
 
 function policyDecision(
     policy: ApprovalPolicy,
-    source: ToolCallContext["source"],
+    source: ToolCallSource,
     tool: string,
 ): ApprovalPolicyDecision {
     if (!["disabled", "allow", "ask", "deny"].includes(policy.mode)) {
@@ -426,4 +463,43 @@ function cancelled(instance: InstanceName, toolName: string, reason?: string) {
         `Approval wait cancelled for ${toolName} on instance ${instance}.`,
         { instance, reason: reason ?? "client cancelled", toolName },
     );
+}
+
+function abortReason(reason: unknown): string {
+    if (reason instanceof Error && reason.message.length > 0) {
+        return reason.message;
+    }
+    if (typeof reason === "string" && reason.length > 0) return reason;
+    return "ToolCall was cancelled while awaiting approval.";
+}
+
+function eventData(
+    request: ApprovalRequest,
+    decision?: ApprovalDecision,
+    reason?: string,
+): Record<string, JsonValue> {
+    const fields: Record<string, JsonValue | undefined> = {
+        approvalId: request.approvalId,
+        callId: request.callId,
+        createdAt: request.createdAt,
+        decidedAt: decision?.decidedAt,
+        decidedBy: decision?.decidedBy,
+        decision: decision?.decision,
+        expiresAt: request.expiresAt,
+        inputSummary: request.inputSummary,
+        reason: reason ?? decision?.reason ?? request.reason,
+        recording: request.recording,
+        requestId: request.requestId,
+        remember: decision?.remember,
+        riskLevel: request.riskLevel,
+        ctxId: request.ctxId,
+        extensionId: request.extensionId,
+        source: request.source,
+        status: request.status,
+        toolName: request.toolName,
+        workspace: request.workspace,
+    };
+    return Object.fromEntries(
+        Object.entries(fields).filter(([, value]) => value !== undefined),
+    ) as Record<string, JsonValue>;
 }

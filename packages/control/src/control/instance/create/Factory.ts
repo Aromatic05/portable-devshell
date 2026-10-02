@@ -77,15 +77,13 @@ export class InstanceFactory {
             instanceName: name,
             policy: instance.approvalPolicy,
             store: approvalStore,
-        });
-        const approvalReview = new ApprovalToolCallReview({
-            service: approval,
             events: {
                 append: async (type, data) => {
                     await worker.appendControlEvent(type, data);
                 },
             },
         });
+        const approvalReview = new ApprovalToolCallReview({ service: approval });
         const terminal = new WorkerTerminalBackend({ worker });
 
         return {

@@ -15,6 +15,7 @@ test("instance approval store persists the latest approval record", async () => 
     const legacyPath = join(directory, "approvals.jsonl");
     const store = new InstanceApprovalStore(databasePath, legacyPath);
     const service = new ApprovalService({
+        events: { append: async () => {} },
         instanceName: asInstanceName("dev"),
         store,
         policy: { mode: "ask" },
@@ -24,7 +25,7 @@ test("instance approval store persists the latest approval record", async () => 
     try {
         await service.evaluate({
             callId: "call-1",
-            context: { source: "cli" },
+            source: "cli",
             inputSummary: "{}",
             toolName: "shell",
         });
@@ -37,6 +38,7 @@ test("instance approval store persists the latest approval record", async () => 
                 "pending",
             );
             const recovered = new ApprovalService({
+                events: { append: async () => {} },
                 instanceName: asInstanceName("dev"),
                 store: reopened,
                 policy: { mode: "ask" },
