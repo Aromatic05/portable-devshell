@@ -14,6 +14,7 @@
         "@portable-devshell/comment-extension": "workspace:*",
         "@portable-devshell/control": "workspace:*",
         "@portable-devshell/instance-extension": "workspace:*",
+        "@portable-devshell/recall-extension": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "@portable-devshell/tui": "workspace:*",
         "@portable-devshell/skill-extension": "workspace:*",

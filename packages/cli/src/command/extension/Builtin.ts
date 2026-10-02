@@ -3,6 +3,7 @@ import { artifactExtensionDirectory } from "@portable-devshell/artifact-extensio
 import { instanceExtensionDirectory } from "@portable-devshell/instance-extension";
 import { commentExtensionDirectory } from "@portable-devshell/comment-extension";
 import { mcpExtensionDirectory } from "@portable-devshell/mcp-extension";
+import { recallExtensionDirectory } from "@portable-devshell/recall-extension";
 import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
 import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
 import { storageExtensionDirectory } from "@portable-devshell/storage-extension";
@@ -18,6 +19,7 @@ export function cliBuiltinExtensionSources(): readonly CliBuiltinExtensionSource
         Object.freeze({ id: "artifact", path: artifactExtensionDirectory() }),
         Object.freeze({ id: "instance", path: instanceExtensionDirectory() }),
         Object.freeze({ id: "comment", path: commentExtensionDirectory() }),
+        Object.freeze({ id: "recall", path: recallExtensionDirectory() }),
         Object.freeze({ id: "skill", path: skillExtensionDirectory() }),
         Object.freeze({ id: "secret", path: secretExtensionDirectory() }),
         Object.freeze({ id: "storage", path: storageExtensionDirectory() }),

@@ -95,6 +95,10 @@ const workspacePackages = new Map([
         new URL("../../extension/src/domain/cli.ts", import.meta.url).href,
     ],
     [
+        "@portable-devshell/extension/context",
+        new URL("../../extension/src/domain/context.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/extension/control",
         new URL("../../extension/src/domain/control.ts", import.meta.url).href,
     ],
@@ -134,6 +138,10 @@ const workspacePackages = new Map([
         "@portable-devshell/instance-extension",
         new URL("../../../extensions/instance/src/index.ts", import.meta.url)
             .href,
+    ],
+    [
+        "@portable-devshell/recall-extension",
+        new URL("../../../extensions/recall/src/index.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/shared",

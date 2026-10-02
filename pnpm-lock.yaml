@@ -126,6 +126,12 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
 
+  extensions/recall:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+
   extensions/secret:
     dependencies:
       '@portable-devshell/extension':
@@ -164,6 +170,9 @@ importers:
       '@portable-devshell/mcp-extension':
         specifier: workspace:*
         version: link:../../extensions/mcp
+      '@portable-devshell/recall-extension':
+        specifier: workspace:*
+        version: link:../../extensions/recall
       '@portable-devshell/secret-extension':
         specifier: workspace:*
         version: link:../../extensions/secret

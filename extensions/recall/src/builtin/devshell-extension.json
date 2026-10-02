@@ -1,0 +1,28 @@
+{
+    "schemaVersion": "1.1.0",
+    "apiVersion": "4.3.0",
+    "activation": "lazy",
+    "id": "recall",
+    "name": "portable-devshell Recall",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": ["contextRuntime", "instanceRuntime"],
+    "extensions": {
+        "cli.native-commands": [
+            {
+                "id": "recall",
+                "title": "Recall",
+                "summary": "Inspect Workspace Contexts and tool-call history",
+                "usage": "recall [contexts|calls] [workspace] [options]"
+            }
+        ],
+        "cli.model-commands": [
+            {
+                "id": "recall",
+                "title": "Recall",
+                "summary": "Inspect retained history for the current model Workspace",
+                "usage": "recall [contexts|calls] [options]"
+            }
+        ]
+    }
+}

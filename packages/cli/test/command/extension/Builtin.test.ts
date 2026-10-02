@@ -7,6 +7,7 @@ import { artifactExtensionDirectory } from "@portable-devshell/artifact-extensio
 import { instanceExtensionDirectory } from "@portable-devshell/instance-extension";
 import { commentExtensionDirectory } from "@portable-devshell/comment-extension";
 import { mcpExtensionDirectory } from "@portable-devshell/mcp-extension";
+import { recallExtensionDirectory } from "@portable-devshell/recall-extension";
 import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
 import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
 import { storageExtensionDirectory } from "@portable-devshell/storage-extension";
@@ -21,6 +22,7 @@ test("CLI lifecycle injects every builtin Extension source including MCP", () =>
         { id: "artifact", path: artifactExtensionDirectory() },
         { id: "instance", path: instanceExtensionDirectory() },
         { id: "comment", path: commentExtensionDirectory() },
+        { id: "recall", path: recallExtensionDirectory() },
         { id: "skill", path: skillExtensionDirectory() },
         { id: "secret", path: secretExtensionDirectory() },
         { id: "storage", path: storageExtensionDirectory() },
