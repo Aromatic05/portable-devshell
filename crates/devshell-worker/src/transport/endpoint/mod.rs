@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::{ChildStdin, ChildStdout};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -79,7 +79,7 @@ enum StreamInput {
     PayloadRead,
     ReceiveWrite {
         finished: Arc<AtomicBool>,
-        offset_bytes: u64,
+        offset_bytes: Arc<AtomicU64>,
         receive_id: String,
         receives: Arc<ArtifactReceiveStore>,
     },
@@ -103,10 +103,11 @@ impl StreamInput {
                 receives,
                 ..
             } => {
+                let offset = offset_bytes.load(Ordering::SeqCst);
                 let result = receives
-                    .write_bytes(receive_id, *offset_bytes, data)
+                    .write_bytes(receive_id, offset, data)
                     .map_err(|error| error.message)?;
-                *offset_bytes = result.next_offset_bytes;
+                offset_bytes.store(result.next_offset_bytes, Ordering::SeqCst);
                 Ok(())
             }
         }
@@ -157,10 +158,17 @@ impl StreamOutput {
 enum ByteService {
     Tcp(TcpService),
     Exec(ExecService),
-    PayloadRead(Option<ArtifactPayloadReader>),
+    PayloadRead {
+        eof: bool,
+        offset_bytes: u64,
+        payload_id: String,
+        reader: Option<ArtifactPayloadReader>,
+        returned_bytes: usize,
+        total_bytes: usize,
+    },
     ReceiveWrite {
         finished: Arc<AtomicBool>,
-        offset_bytes: u64,
+        offset_bytes: Arc<AtomicU64>,
         receive_id: String,
         receives: Arc<ArtifactReceiveStore>,
     },
@@ -193,11 +201,24 @@ impl ByteService {
                 }
                 let input: Input =
                     serde_json::from_value(message).map_err(|error| error.to_string())?;
-                context
+                let reader = context
                     .payloads
                     .open_reader(&input.payload_id, input.offset_bytes, input.max_bytes)
-                    .map(|reader| Self::PayloadRead(Some(reader)))
-                    .map_err(|error| error.message)
+                    .map_err(|error| error.message)?;
+                let total_bytes = reader.total_bytes();
+                let offset =
+                    usize::try_from(input.offset_bytes).map_err(|error| error.to_string())?;
+                let returned_bytes = total_bytes
+                    .saturating_sub(offset)
+                    .min(input.max_bytes);
+                Ok(Self::PayloadRead {
+                    eof: offset.saturating_add(returned_bytes) >= total_bytes,
+                    offset_bytes: input.offset_bytes,
+                    payload_id: input.payload_id,
+                    reader: Some(reader),
+                    returned_bytes,
+                    total_bytes,
+                })
             }
             ("artifact", "receive.write") => {
                 #[derive(serde::Deserialize)]
@@ -210,7 +231,7 @@ impl ByteService {
                     serde_json::from_value(message).map_err(|error| error.to_string())?;
                 Ok(Self::ReceiveWrite {
                     finished: Arc::new(AtomicBool::new(false)),
-                    offset_bytes: input.offset_bytes,
+                    offset_bytes: Arc::new(AtomicU64::new(input.offset_bytes)),
                     receive_id: input.receive_id,
                     receives: Arc::clone(&context.receives),
                 })
@@ -223,7 +244,7 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.clone_stream().map(StreamInput::Tcp),
             Self::Exec(service) => service.take_stdin().map(|value| StreamInput::Exec(Some(value))),
-            Self::PayloadRead(_) => Ok(StreamInput::PayloadRead),
+            Self::PayloadRead { .. } => Ok(StreamInput::PayloadRead),
             Self::ReceiveWrite {
                 finished,
                 offset_bytes,
@@ -231,7 +252,7 @@ impl ByteService {
                 receives,
             } => Ok(StreamInput::ReceiveWrite {
                 finished: Arc::clone(finished),
-                offset_bytes: *offset_bytes,
+                offset_bytes: Arc::clone(offset_bytes),
                 receive_id: receive_id.clone(),
                 receives: Arc::clone(receives),
             }),
@@ -242,7 +263,7 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.clone_stream().map(StreamOutput::Tcp),
             Self::Exec(service) => service.take_stdout().map(StreamOutput::Exec),
-            Self::PayloadRead(reader) => reader
+            Self::PayloadRead { reader, .. } => reader
                 .take()
                 .map(StreamOutput::PayloadRead)
                 .ok_or_else(|| "artifact payload reader is already taken.".to_string()),
@@ -254,8 +275,48 @@ impl ByteService {
         match self {
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
-            Self::PayloadRead(_) => Ok(true),
+            Self::PayloadRead { .. } => Ok(true),
             Self::ReceiveWrite { finished, .. } => Ok(finished.load(Ordering::SeqCst)),
+        }
+    }
+
+    fn close_message(&self) -> Option<Value> {
+        match self {
+            Self::PayloadRead {
+                eof,
+                offset_bytes,
+                payload_id,
+                returned_bytes,
+                total_bytes,
+                ..
+            } => {
+                let next_offset_bytes = offset_bytes.saturating_add(*returned_bytes as u64);
+                Some(serde_json::json!({
+                    "eof": eof,
+                    "nextOffsetBytes": if *eof {
+                        Value::Null
+                    } else {
+                        serde_json::json!(next_offset_bytes)
+                    },
+                    "offsetBytes": offset_bytes,
+                    "payloadId": payload_id,
+                    "returnedBytes": returned_bytes,
+                    "totalBytes": total_bytes,
+                }))
+            }
+            Self::ReceiveWrite {
+                offset_bytes,
+                receive_id,
+                ..
+            } => {
+                let offset_bytes = offset_bytes.load(Ordering::SeqCst);
+                Some(serde_json::json!({
+                    "nextOffsetBytes": offset_bytes,
+                    "receivedBytes": offset_bytes,
+                    "receiveId": receive_id,
+                }))
+            }
+            Self::Tcp(_) | Self::Exec(_) => None,
         }
     }
 
@@ -263,7 +324,7 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.reset(),
             Self::Exec(service) => service.reset(),
-            Self::PayloadRead(_) | Self::ReceiveWrite { .. } => {}
+            Self::PayloadRead { .. } | Self::ReceiveWrite { .. } => {}
         }
     }
 }
@@ -706,13 +767,14 @@ fn finish_stream_if_ready(
     match ready {
         Ok(true) => {
             let active = streams.remove(id).expect("stream exists");
+            let message = active.service.close_message();
             queue_envelope(
                 pending,
                 stream_envelope(
                     &active,
                     StreamPacket::Close {
                         id: id.to_string(),
-                        message: None,
+                        message,
                     },
                 )?,
             )?;
