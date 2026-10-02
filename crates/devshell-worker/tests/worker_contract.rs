@@ -629,7 +629,7 @@ fn handshake_rejects_unsupported_protocol_versions() {
 
 #[cfg(unix)]
 #[test]
-fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_loss() {
+fn workspace_temporary_storage_migrates_to_managed_scratch_and_recovers_after_workspace_loss() {
     let env = TestEnv::new();
     let instance = "aromatic-context-temp";
     let context_temp_link = env.context_temp_link();
@@ -664,10 +664,7 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
             .file_type()
             .is_symlink()
     );
-    assert_eq!(
-        fs::read_link(&context_temp_link).unwrap(),
-        env.context_temp_target()
-    );
+    let target = fs::read_link(&context_temp_link).unwrap();
     let first_temporary =
         std::path::PathBuf::from(first["message"]["temporaryDirectory"].as_str().unwrap());
     assert!(first_temporary.starts_with(&context_temp_link));
@@ -675,10 +672,11 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
         first_temporary
             .canonicalize()
             .unwrap()
-            .starts_with(env.context_temp_target().canonicalize().unwrap())
+            .starts_with(target.canonicalize().unwrap())
     );
 
-    fs::remove_dir_all(env.context_temp_target()).unwrap();
+    let workspace_scratch = first_temporary.parent().unwrap().canonicalize().unwrap();
+    fs::remove_dir_all(workspace_scratch).unwrap();
     let second = prepare("workspace-prepare-2");
     assert_eq!(second["type"], "reply");
     let second_temporary =
@@ -688,7 +686,7 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
         second_temporary
             .canonicalize()
             .unwrap()
-            .starts_with(env.context_temp_target().canonicalize().unwrap())
+            .starts_with(target.canonicalize().unwrap())
     );
 
     env.json_command(&["stop", "--instance", instance]);
@@ -696,7 +694,7 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
 
 #[cfg(target_os = "linux")]
 #[test]
-fn workspace_temporary_storage_without_xdg_runtime_uses_shared_memory() {
+fn workspace_temporary_storage_without_xdg_runtime_uses_tmpfs() {
     let env = TestEnv::new();
     let instance = "aromatic-context-temp-fallback";
     env.command_without_runtime_dir()
@@ -718,7 +716,11 @@ fn workspace_temporary_storage_without_xdg_runtime_uses_shared_memory() {
     );
     assert_eq!(prepared["type"], "reply");
     let target = fs::read_link(env.context_temp_link()).unwrap();
-    assert!(target.starts_with("/dev/shm"));
+    assert!(target.starts_with("/tmp") || target.starts_with("/dev/shm"));
+    assert_eq!(
+        nix::sys::statfs::statfs(&target).unwrap().filesystem_type(),
+        nix::sys::statfs::TMPFS_MAGIC
+    );
     assert!(
         std::path::Path::new(prepared["message"]["temporaryDirectory"].as_str().unwrap())
             .canonicalize()

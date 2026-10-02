@@ -72,11 +72,16 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
     let home = devshell_home()
         .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error))?;
     let context_temp_root = ensure_context_temp_root(&home)?;
+    let workspace_temp_root = context_temp_workspace_path(&context_temp_root, &workspace);
+    ensure_dir(&workspace_temp_root, 0o700)
+        .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
+    touch_temporary_directory(&workspace_temp_root)?;
     gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
+    gc_stale_context_temp(&workspace_temp_root, CONTEXT_TEMP_TTL);
 
     let temporary_directory = tempfile::Builder::new()
-        .prefix(&format!("{}-", temporary_prefix(&workspace)))
-        .tempdir_in(&context_temp_root)
+        .prefix("context-")
+        .tempdir_in(&workspace_temp_root)
         .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error.to_string()))?
         .keep();
 
@@ -89,7 +94,7 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
     })
 }
 
-fn project_memory_key(workspace: &Path) -> String {
+fn workspace_key(workspace: &Path) -> String {
     let mut digest = Sha256::new();
     #[cfg(unix)]
     {
@@ -106,6 +111,27 @@ fn project_memory_key(workspace: &Path) -> String {
     #[cfg(not(any(unix, windows)))]
     digest.update(workspace.to_string_lossy().as_bytes());
     format!("{:x}", digest.finalize())
+}
+
+pub fn context_temporary_workspace_directory(workspace: &Path) -> Result<PathBuf, WorkspaceError> {
+    let workspace = workspace.canonicalize().map_err(|error| {
+        WorkspaceError::new(
+            "workspace.invalid",
+            format!(
+                "failed to resolve workspace {}: {error}",
+                workspace.display()
+            ),
+        )
+    })?;
+    let home = devshell_home()
+        .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
+    let root = ensure_context_temp_root(&home)?;
+    Ok(context_temp_workspace_path(&root, &workspace))
+}
+
+fn context_temp_workspace_path(root: &Path, workspace: &Path) -> PathBuf {
+    let key = workspace_key(workspace);
+    root.join(format!("{}-{}", temporary_prefix(workspace), &key[..16]))
 }
 
 pub fn touch_context_temporary_directory(path: &Path) -> Result<(), WorkspaceError> {
@@ -127,7 +153,11 @@ pub fn touch_context_temporary_directory(path: &Path) -> Result<(), WorkspaceErr
             ),
         ));
     }
-    touch_temporary_directory(&path)
+    touch_temporary_directory(&path)?;
+    if let Some(parent) = path.parent() {
+        touch_temporary_directory(parent)?;
+    }
+    Ok(())
 }
 
 fn touch_temporary_directory(path: &Path) -> Result<(), WorkspaceError> {
@@ -206,31 +236,13 @@ fn ensure_context_temp_root(home: &Path) -> Result<PathBuf, WorkspaceError> {
 
 #[cfg(unix)]
 fn context_temp_target(home: &Path) -> Result<PathBuf, WorkspaceError> {
-    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR")
-        && !runtime_dir.is_empty()
-    {
-        let parent = PathBuf::from(runtime_dir).join("devshell-worker");
-        ensure_dir(&parent, 0o700)
-            .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
-        let target = parent.join(CONTEXT_TEMP_ROOT);
-        ensure_dir(&target, 0o700)
-            .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
-        return Ok(target);
-    }
     use std::os::unix::fs::MetadataExt;
 
     let owner = std::fs::metadata(home)
         .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error.to_string()))?
         .uid();
     #[cfg(target_os = "linux")]
-    let base = if Path::new("/dev/shm").is_dir() {
-        PathBuf::from("/dev/shm")
-    } else {
-        return Err(WorkspaceError::new(
-            "workspace.temporaryUnavailable",
-            "XDG_RUNTIME_DIR is unavailable and /dev/shm is not usable for Context temporary storage",
-        ));
-    };
+    let base = linux_context_temp_base()?;
     #[cfg(not(target_os = "linux"))]
     let base = std::env::temp_dir();
     let parent = base.join(format!("devshell-worker-{owner}"));
@@ -239,6 +251,22 @@ fn context_temp_target(home: &Path) -> Result<PathBuf, WorkspaceError> {
     ensure_dir(&target, 0o700)
         .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
     Ok(target)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_context_temp_base() -> Result<PathBuf, WorkspaceError> {
+    for candidate in [Path::new("/tmp"), Path::new("/dev/shm")] {
+        if candidate.is_dir()
+            && nix::sys::statfs::statfs(candidate)
+                .is_ok_and(|status| status.filesystem_type() == nix::sys::statfs::TMPFS_MAGIC)
+        {
+            return Ok(candidate.to_path_buf());
+        }
+    }
+    Err(WorkspaceError::new(
+        "workspace.temporaryUnavailable",
+        "neither /tmp nor /dev/shm provides tmpfs storage for Context temporary files",
+    ))
 }
 
 #[cfg(unix)]
@@ -398,6 +426,42 @@ mod tests {
         assert_eq!(third.project_memory_directory, memory);
         assert_eq!(third.project_memory_agent_file, memory.join("INDEX.md"));
         assert!(third.project_memory_present);
+    }
+
+    #[test]
+    fn groups_context_temporary_directories_by_workspace() {
+        let first_workspace = crate::testing::temp_dir();
+        let second_workspace = crate::testing::temp_dir();
+        let first = prepare(first_workspace.path()).unwrap();
+        let second = prepare(first_workspace.path()).unwrap();
+        let other = prepare(second_workspace.path()).unwrap();
+
+        assert_eq!(
+            first.temporary_directory.parent(),
+            second.temporary_directory.parent()
+        );
+        assert_ne!(
+            first.temporary_directory.parent(),
+            other.temporary_directory.parent()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn context_temporary_storage_uses_tmpfs_outside_xdg_runtime() {
+        let workspace = crate::testing::temp_dir();
+        let prepared = prepare(workspace.path()).unwrap();
+        let path = prepared.temporary_directory.canonicalize().unwrap();
+
+        assert!(
+            path.starts_with("/tmp/") || path.starts_with("/dev/shm/"),
+            "unexpected context temporary path: {}",
+            path.display()
+        );
+        assert_eq!(
+            nix::sys::statfs::statfs(&path).unwrap().filesystem_type(),
+            nix::sys::statfs::TMPFS_MAGIC
+        );
     }
 
     #[test]
