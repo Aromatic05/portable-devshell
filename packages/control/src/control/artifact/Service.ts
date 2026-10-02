@@ -221,7 +221,7 @@ export class ArtifactService {
 
 export const ARTIFACT_RECORD_VERSION = 1;
 
-export const DEFAULT_ARTIFACT_CHUNK_BYTES = 512 * 1024;
+export const DEFAULT_ARTIFACT_CHUNK_BYTES = 2 * 1024 * 1024;
 
 export const DEFAULT_ARTIFACT_SHARE_TTL_SECONDS = 60 * 60;
 

@@ -42,7 +42,10 @@ export class ArtifactImageService {
             Number.isSafeInteger(requestedChunkBytes) &&
             requestedChunkBytes > 0
                 ? Math.min(requestedChunkBytes, MAX_ARTIFACT_IMAGE_CHUNK_BYTES)
-                : DEFAULT_ARTIFACT_CHUNK_BYTES;
+                : Math.min(
+                      DEFAULT_ARTIFACT_CHUNK_BYTES,
+                      MAX_ARTIFACT_IMAGE_CHUNK_BYTES,
+                  );
         this.#resolveEndpoint = options.resolveEndpoint;
         this.#store = new ArtifactImageStore(options.storageDir);
     }

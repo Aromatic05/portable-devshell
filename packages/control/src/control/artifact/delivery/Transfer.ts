@@ -46,6 +46,8 @@ export interface ArtifactTransferServiceOptions {
     terminalHistoryLimit: number;
 }
 
+const MAX_ARTIFACT_DIRECT_CHUNK_BYTES = 1024 * 1024;
+
 export class ArtifactTransferService {
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
@@ -690,6 +692,7 @@ export class ArtifactTransferExecutor {
                             await sourceEndpoint.pushArtifactPayloadDirect({
                                 maxBytes: Math.min(
                                     this.#chunkBytes,
+                                    MAX_ARTIFACT_DIRECT_CHUNK_BYTES,
                                     opened.descriptor.payloadBytes -
                                         offsetBytes,
                                 ),
