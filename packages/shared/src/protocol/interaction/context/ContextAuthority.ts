@@ -7,9 +7,6 @@ import type { McpContextStatus } from "./ContextRecord.js";
 
 export interface McpContextBinding {
     principal: string;
-    instance?: string;
-    temporaryDirectory?: string;
-    workspace?: string;
     environments?: McpContextEnvironment[];
 }
 

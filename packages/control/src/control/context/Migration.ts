@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { parseContextEnvironments } from "./Model.js";
+
 export async function upgradeContextDocument(filePath: string): Promise<void> {
     const contents = await readFile(filePath, "utf8");
     const migrated = migrateContextDocument(JSON.parse(contents) as unknown);
@@ -54,7 +56,7 @@ export function migrateContextDocument(value: unknown): Record<string, unknown> 
             (item.temporaryDirectory !== undefined && typeof item.temporaryDirectory !== "string") ||
             (item.status !== "active" && item.status !== "expired" && item.status !== "disabled") ||
             (item.cleanupPending !== undefined && typeof item.cleanupPending !== "boolean") ||
-            item.environments.some((environment) => !validEnvironment(environment)) ||
+            parseContextEnvironments(item.environments) === undefined ||
             (item.externalBindings !== undefined && (!Array.isArray(item.externalBindings) || item.externalBindings.some((binding) => !validExternalBinding(binding)))) ||
             (item.maskedInstances !== undefined && (!Array.isArray(item.maskedInstances) || item.maskedInstances.some((instance) => typeof instance !== "string" || instance.length === 0))) ||
             (item.remoteInstanceHandles !== undefined && (!Array.isArray(item.remoteInstanceHandles) || item.remoteInstanceHandles.some((handle) => !validRemoteHandle(handle)))) ||
@@ -76,12 +78,6 @@ export function migrateContextDocument(value: unknown): Record<string, unknown> 
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validEnvironment(value: unknown): boolean {
-    return isObject(value) && typeof value.instance === "string" && value.instance.length > 0 &&
-        (value.workspace === undefined || typeof value.workspace === "string") &&
-        (value.temporaryDirectory === undefined || typeof value.temporaryDirectory === "string");
 }
 
 function validExternalBinding(value: unknown): boolean {

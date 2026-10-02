@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import type { McpContextBinding } from "@portable-devshell/shared";
+
 import { ContextRegistry } from "../../../../src/control/context/Registry.js";
 
 test("creates an active Context without environment attachments", async () => {
@@ -11,6 +13,92 @@ test("creates an active Context without environment attachments", async () => {
     const record = await registry.create({ principal: "user-1" });
     assert.equal(record.status, "active");
     assert.deepEqual(record.environments, []);
+});
+
+test("rejects conflicting environments for the same instance before creating a Context", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-duplicate" });
+    await assert.rejects(registry.create({
+        principal: "user-1",
+        environments: [
+            { instance: "worker-a", workspace: "/work/a" },
+            { instance: "worker-a", workspace: "/work/b" },
+        ],
+    }), /Invalid Context environments/u);
+    assert.deepEqual(await registry.list(), []);
+});
+
+test("rejects invalid environment values without creating a Context", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-invalid" });
+    const invalidEnvironments: unknown[] = [
+        null,
+        [null],
+        [{ instance: "" }],
+        [{ instance: "worker-a", workspace: 1 }],
+        [{ instance: "worker-a", temporaryDirectory: 1 }],
+    ];
+    for (const environments of invalidEnvironments) {
+        await assert.rejects(registry.create({
+            principal: "user-1",
+            environments,
+        } as McpContextBinding), /Invalid Context environments/u);
+        assert.deepEqual(await registry.list(), []);
+    }
+});
+
+test("rejects duplicate instances in a v2 document without silently selecting a workspace", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "context-v2-duplicate-"));
+    const filePath = join(directory, "contexts.json");
+    const raw = JSON.stringify({
+        contexts: [{
+            ctxId: "ctx-duplicate",
+            principal: "user-1",
+            environments: [
+                { instance: "worker-a", workspace: "/work/a" },
+                { instance: "worker-a", workspace: "/work/b" },
+            ],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            lastAccessedAt: "2026-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            status: "active",
+        }],
+        version: 2,
+    });
+    await writeFile(filePath, raw);
+    try {
+        await assert.rejects(new ContextRegistry({ filePath }).initialize(), /Invalid MCP context registry record/u);
+        assert.equal(await readFile(filePath, "utf8"), raw);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test("rejects duplicate v1 environment instances before rewriting the original document", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "context-v1-duplicate-"));
+    const filePath = join(directory, "contexts.json");
+    const raw = JSON.stringify({
+        contexts: [{
+            ctxId: "ctx-duplicate",
+            principal: "user-1",
+            instance: "worker-a",
+            workspace: "/work/a",
+            environments: [
+                { instance: "worker-a", workspace: "/work/a" },
+                { instance: "worker-a", workspace: "/work/b" },
+            ],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            lastAccessedAt: "2026-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            status: "active",
+        }],
+        version: 1,
+    });
+    await writeFile(filePath, raw);
+    try {
+        await assert.rejects(new ContextRegistry({ filePath }).initialize(), /Invalid Context registry v1 environments/u);
+        assert.equal(await readFile(filePath, "utf8"), raw);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
 });
 
 test("detaching the last environment keeps the Context active and renewable", async () => {

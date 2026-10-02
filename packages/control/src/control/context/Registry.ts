@@ -21,6 +21,7 @@ import {
     MCP_CONTEXT_EXECUTION_LEASE_MS,
     defaultMcpContextTerminalHistory,
     defaultMcpContextTtlMs,
+    parseContextEnvironments,
     type McpContextAutomaticReentryMode,
     type McpContextAutomaticReentryState,
     type McpContextBinding,
@@ -121,18 +122,21 @@ export class ContextRegistry implements ContextRegistryPort {
     async create(binding: McpContextBinding): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
+            const environments = parseContextEnvironments(binding.environments === undefined ? [] : binding.environments);
+            if (environments === undefined) {
+                throw new Error("Invalid Context environments: each instance must have at most one valid environment.");
+            }
             const now = this.#now();
             let ctxId = this.#idFactory();
             while (this.#contexts.has(ctxId)) {
                 ctxId = `ctx-${randomUUID()}`;
             }
             const at = new Date(now).toISOString();
-            const environments = binding.environments ?? (binding.instance === undefined ? [] : [{ instance: binding.instance, temporaryDirectory: binding.temporaryDirectory, workspace: binding.workspace }]);
             const record: McpContextStoredRecord = {
                 principal: binding.principal,
                 createdAt: at,
                 ctxId,
-                environments: environments.map((environment) => ({ ...environment })),
+                environments,
                 expiresAt: new Date(now + this.#ttlMs).toISOString(),
                 lastAccessedAt: at,
                 status: "active",
@@ -1296,7 +1300,7 @@ export class ContextRegistry implements ContextRegistryPort {
     async updateWorkerState(
         ctxId: string,
         instance: string,
-        binding: Pick<McpContextBinding, "temporaryDirectory" | "workspace">,
+        binding: Pick<McpContextEnvironmentBinding, "temporaryDirectory" | "workspace">,
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -1808,18 +1812,11 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     ) {
         return undefined;
     }
-    if (!Array.isArray(record.environments)) return undefined;
-    const environments = record.environments.map(parseEnvironment);
-    if (environments.some((environment) => environment === undefined)) {
-        return undefined;
-    }
-    const byInstance = new Map<string, McpContextEnvironment>();
-    for (const environment of environments as McpContextEnvironment[]) {
-        byInstance.set(environment.instance, environment);
-    }
+    const environments = parseContextEnvironments(record.environments);
+    if (environments === undefined) return undefined;
     const automaticReentryInstance =
         typeof raw.automaticReentryInstance === "string" &&
-        byInstance.has(raw.automaticReentryInstance)
+        environments.some((environment) => environment.instance === raw.automaticReentryInstance)
             ? raw.automaticReentryInstance
             : undefined;
     return {
@@ -1892,7 +1889,7 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
             : {}),
         createdAt: record.createdAt,
         ctxId: record.ctxId,
-        environments: [...byInstance.values()],
+        environments,
         ...(externalBindings.length === 0 ? {} : { externalBindings }),
         ...(maskedInstances.length === 0
             ? {}
@@ -2163,32 +2160,6 @@ function uniqueExternalBindings(
         unique.set(`${binding.kind}\0${binding.value}`, binding);
     }
     return [...unique.values()];
-}
-
-function parseEnvironment(value: unknown): McpContextEnvironment | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-    const environment = value as Partial<McpContextEnvironment>;
-    if (
-        typeof environment.instance !== "string" ||
-        environment.instance.length === 0 ||
-        (environment.workspace !== undefined &&
-            typeof environment.workspace !== "string") ||
-        (environment.temporaryDirectory !== undefined &&
-            typeof environment.temporaryDirectory !== "string")
-    ) {
-        return undefined;
-    }
-    return {
-        instance: environment.instance,
-        ...(environment.temporaryDirectory === undefined
-            ? {}
-            : { temporaryDirectory: environment.temporaryDirectory }),
-        ...(environment.workspace === undefined
-            ? {}
-            : { workspace: environment.workspace }),
-    };
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {

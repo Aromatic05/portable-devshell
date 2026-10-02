@@ -4,7 +4,7 @@ import type {
     McpContextExternalBinding,
     McpContextEnvironmentCleanup,
 } from "@portable-devshell/shared";
-import type { McpContextRecord } from "@portable-devshell/shared";
+import type { McpContextEnvironment, McpContextRecord } from "@portable-devshell/shared";
 
 export type {
     McpContextAutomaticReentryMode,
@@ -65,4 +65,33 @@ export interface McpContextRegistryOptions {
 export interface McpContextDocument {
     contexts: McpContextStoredRecord[];
     version: 2;
+}
+
+export function parseContextEnvironments(value: unknown): McpContextEnvironment[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const environments: McpContextEnvironment[] = [];
+    const instances = new Set<string>();
+    for (const candidate of value) {
+        const environment = parseEnvironment(candidate);
+        if (environment === undefined || instances.has(environment.instance)) return undefined;
+        instances.add(environment.instance);
+        environments.push(environment);
+    }
+    return environments;
+}
+
+function parseEnvironment(value: unknown): McpContextEnvironment | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const environment = value as Partial<McpContextEnvironment>;
+    if (
+        typeof environment.instance !== "string" ||
+        environment.instance.length === 0 ||
+        (environment.workspace !== undefined && typeof environment.workspace !== "string") ||
+        (environment.temporaryDirectory !== undefined && typeof environment.temporaryDirectory !== "string")
+    ) return undefined;
+    return {
+        instance: environment.instance,
+        ...(environment.temporaryDirectory === undefined ? {} : { temporaryDirectory: environment.temporaryDirectory }),
+        ...(environment.workspace === undefined ? {} : { workspace: environment.workspace }),
+    };
 }

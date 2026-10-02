@@ -177,7 +177,9 @@ ctxId
 
 ## Workspace
 
-Workspace 是 Context 上的交互/恢复层：
+Workspace scope 是 instance 与 Worker canonical path 的组合，可以由多个 Context 关联；它不是 Context 独占的目录资源。
+
+Workspace App 是 Context 上的交互/恢复层，不是另一份 workspace 关联权威：
 
 ```text
 MCP App presentation
