@@ -4,11 +4,7 @@
 
 export type GoalStepStatus = "pending" | "active" | "completed" | "skipped";
 export type GoalStatus =
-    | "active"
-    | "blocked"
-    | "paused"
-    | "completed"
-    | "stopped";
+    "active" | "blocked" | "paused" | "completed" | "stopped";
 export type GoalAction =
     | "start"
     | "get"
@@ -19,10 +15,7 @@ export type GoalAction =
     | "finish"
     | "stop";
 export type GoalActivityKind =
-    | "observation"
-    | "execution"
-    | "mutation"
-    | "wait";
+    "observation" | "execution" | "mutation" | "wait";
 export type GoalContinuationAction =
     | "claim"
     | "validate"
@@ -136,4 +129,9 @@ export interface GoalSnapshot {
 export interface GoalSnapshotEnvelope {
     goals: GoalSnapshot[];
     lastSeq: number;
+}
+
+/** Instance activity events that change the goal projection. */
+export function isGoalEvent(type: string): boolean {
+    return type.startsWith("goal.");
 }

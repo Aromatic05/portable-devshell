@@ -24,6 +24,7 @@ export * from "./task/wait/Model.js";
 export * from "./task/goal/Model.js";
 export * from "./task/goal/Contract.js";
 export * from "./task/goal/Transport.js";
+export * from "./task/goal/ViewModel.js";
 export * from "./task/todo/Model.js";
 export * from "./task/todo/Contract.js";
 export * from "./task/todo/Transport.js";
@@ -32,6 +33,7 @@ export * from "./task/todo/ViewModel.js";
 export * from "./tool/Model.js";
 export * from "./tool/Contract.js";
 export * from "./tool/Transport.js";
+export * from "./tool/ViewModel.js";
 
 export * from "./terminal/Model.js";
 export * from "./terminal/Contract.js";
