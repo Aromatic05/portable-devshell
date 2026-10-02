@@ -59,8 +59,7 @@ class MemoryShareEndpoint implements ArtifactServiceEndpoint {
         );
         const nextOffsetBytes = input.offsetBytes + chunk.length;
         return {
-            content: chunk.toString("base64"),
-            encoding: "base64" as const,
+            bytes: chunk,
             eof: nextOffsetBytes >= this.#bytes.length,
             ...(nextOffsetBytes >= this.#bytes.length
                 ? {}

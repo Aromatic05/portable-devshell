@@ -221,8 +221,7 @@ export class ArtifactHostPayloadStore {
             const nextOffsetBytes = offsetBytes + bytesRead;
             const eof = nextOffsetBytes >= stored.descriptor.payloadBytes;
             return {
-                content: buffer.subarray(0, bytesRead).toString("base64"),
-                encoding: "base64",
+                bytes: buffer.subarray(0, bytesRead),
                 eof,
                 ...(eof ? {} : { nextOffsetBytes }),
                 offsetBytes,

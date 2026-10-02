@@ -142,10 +142,10 @@ export class ArtifactImageService {
             });
             throwIfAborted(signal);
             validateChunk(chunk, payloadId, offsetBytes, totalBytes);
-            const decoded = Buffer.from(chunk.content, "base64");
+            const decoded = Buffer.from(chunk.bytes);
             if (decoded.length !== chunk.returnedBytes) {
                 throw invalidPayload(
-                    "Artifact image payload returned an invalid base64 chunk.",
+                    "Artifact image payload returned an invalid byte chunk.",
                 );
             }
             chunks.push(decoded);

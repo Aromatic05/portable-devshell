@@ -116,23 +116,6 @@ export interface WorkerArtifactPayloadOpenResult {
     payloadId: string;
 }
 
-export interface WorkerArtifactPayloadReadInput {
-    maxBytes: number;
-    offsetBytes: number;
-    payloadId: string;
-}
-
-export interface WorkerArtifactPayloadReadResult {
-    content: string;
-    encoding: "base64";
-    eof: boolean;
-    nextOffsetBytes?: number;
-    offsetBytes: number;
-    payloadId: string;
-    returnedBytes: number;
-    totalBytes: number;
-}
-
 export interface WorkerArtifactReceiveBeginInput {
     descriptor: ArtifactPayloadDescriptor;
     overwrite: boolean;
@@ -142,18 +125,6 @@ export interface WorkerArtifactReceiveBeginInput {
 
 export interface WorkerArtifactReceiveBeginResult {
     nextOffsetBytes: number;
-    receiveId: string;
-}
-
-export interface WorkerArtifactReceiveWriteInput {
-    content: string;
-    offsetBytes: number;
-    receiveId: string;
-}
-
-export interface WorkerArtifactReceiveWriteResult {
-    nextOffsetBytes: number;
-    receivedBytes: number;
     receiveId: string;
 }
 
@@ -342,20 +313,6 @@ export class WorkerProtocolClient {
         await this.#request("artifact", "artifact.payload.close", { payloadId });
     }
 
-    async readArtifactPayload(
-        input: WorkerArtifactPayloadReadInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadReadResult> {
-        return asObjectResult<WorkerArtifactPayloadReadResult>(
-            await this.#request(
-                "artifact",
-                "artifact.payload.read",
-                input as unknown as JsonValue,
-                signal,
-            ),
-        );
-    }
-
     async beginArtifactReceive(
         input: WorkerArtifactReceiveBeginInput,
         signal?: AbortSignal,
@@ -382,20 +339,6 @@ export class WorkerProtocolClient {
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
         await this.#request("artifact", "artifact.receive.abort", { receiveId });
-    }
-
-    async writeArtifactReceive(
-        input: WorkerArtifactReceiveWriteInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveWriteResult> {
-        return asObjectResult<WorkerArtifactReceiveWriteResult>(
-            await this.#request(
-                "artifact",
-                "artifact.receive.write",
-                input as unknown as JsonValue,
-                signal,
-            ),
-        );
     }
 
     async openArtifactDirectReceive(

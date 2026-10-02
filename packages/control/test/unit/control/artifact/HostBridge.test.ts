@@ -60,7 +60,7 @@ async function readPayload(
             offsetBytes: offset,
             payloadId,
         });
-        chunks.push(Buffer.from(chunk.content, "base64"));
+        chunks.push(Buffer.from(chunk.bytes));
         offset += chunk.returnedBytes;
     }
     return Buffer.concat(chunks);
@@ -221,7 +221,7 @@ test("host target redirects any path to a direct child of ~/Download", async (t)
         workspace: homeDirectory,
     });
     await endpoint.writeArtifactReceive({
-        content: bytes.toString("base64"),
+        bytes,
         offsetBytes: 0,
         receiveId: receive.receiveId,
     });
@@ -262,7 +262,7 @@ test("host directory payload round-trips through tar.zst and restores executable
         workspace: root,
     });
     await endpoint.writeArtifactReceive({
-        content: archive.toString("base64"),
+        bytes: archive,
         offsetBytes: 0,
         receiveId: receive.receiveId,
     });

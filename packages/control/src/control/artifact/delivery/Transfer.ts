@@ -769,7 +769,7 @@ export class ArtifactTransferExecutor {
                     );
                     const written = await targetEndpoint.writeArtifactReceive(
                         {
-                            content: chunk.content,
+                            bytes: chunk.bytes,
                             offsetBytes,
                             receiveId,
                         },

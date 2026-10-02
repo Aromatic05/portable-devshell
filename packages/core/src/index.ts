@@ -65,19 +65,19 @@ export type {
     WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadInput,
-    WorkerArtifactPayloadReadResult,
     WorkerArtifactReceiveBeginInput,
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
-    WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult,
 } from "./worker/protocol/Client.js";
 export { WORKER_PROTOCOL_RANGE } from "./worker/protocol/Client.js";
 export { WorkerTransportFactory } from "./worker/transport/Factory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/Factory.js";
 export { WorkerTransportServiceClient } from "./worker/transport/service/Client.js";
 export type {
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult,
     WorkerExecProcessInput,
     WorkerTcpConnectInput,
 } from "./worker/transport/service/Model.js";

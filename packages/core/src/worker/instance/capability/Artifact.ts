@@ -5,27 +5,33 @@ import type {
     WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadInput,
-    WorkerArtifactPayloadReadResult,
     WorkerArtifactReceiveBeginInput,
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
-    WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult,
     WorkerProtocolClient,
 } from "../../protocol/Client.js";
+import { WorkerTransportServiceClient } from "../../transport/service/Client.js";
+import type {
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult,
+} from "../../transport/service/Model.js";
 interface WorkerInstanceArtifactOptions {
     assertReady(): void;
     protocolClient: WorkerProtocolClient;
+    serviceClient: WorkerTransportServiceClient;
 }
 
 export class WorkerInstanceArtifact {
     readonly #assertReady: WorkerInstanceArtifactOptions["assertReady"];
     readonly #protocolClient: WorkerProtocolClient;
+    readonly #serviceClient: WorkerTransportServiceClient;
 
     constructor(options: WorkerInstanceArtifactOptions) {
         this.#assertReady = options.assertReady;
         this.#protocolClient = options.protocolClient;
+        this.#serviceClient = options.serviceClient;
     }
 
     async openPayload(
@@ -41,7 +47,7 @@ export class WorkerInstanceArtifact {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactPayloadReadResult> {
         this.#assertReady();
-        return await this.#protocolClient.readArtifactPayload(input, signal);
+        return await this.#serviceClient.readArtifactPayload(input, signal);
     }
 
     async closePayload(payloadId: string): Promise<void> {
@@ -62,7 +68,7 @@ export class WorkerInstanceArtifact {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactReceiveWriteResult> {
         this.#assertReady();
-        return await this.#protocolClient.writeArtifactReceive(input, signal);
+        return await this.#serviceClient.writeArtifactReceive(input, signal);
     }
 
     async finishReceive(

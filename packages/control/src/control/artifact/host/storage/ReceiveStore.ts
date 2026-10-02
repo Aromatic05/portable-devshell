@@ -169,7 +169,7 @@ export class ArtifactHostReceiveStore {
                 `Expected offset ${stored.receivedBytes}, received ${input.offsetBytes}.`,
             );
         }
-        const bytes = decodeBase64(input.content);
+        const bytes = input.bytes;
         if (
             stored.receivedBytes + bytes.length >
             stored.descriptor.payloadBytes
@@ -478,20 +478,6 @@ function isSafeBasename(value: string): boolean {
         !value.includes("\\") &&
         !value.includes("\0")
     );
-}
-
-function decodeBase64(content: string): Buffer {
-    if (
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
-            content,
-        )
-    ) {
-        throw artifactError(
-            "artifact.payloadInvalid",
-            "Host receive chunk is not valid base64.",
-        );
-    }
-    return Buffer.from(content, "base64");
 }
 
 function validateDescriptor(descriptor: ArtifactPayloadDescriptor): void {

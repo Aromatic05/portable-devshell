@@ -127,8 +127,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         );
         const nextOffsetBytes = input.offsetBytes + chunk.length;
         return {
-            content: chunk.toString("base64"),
-            encoding: "base64" as const,
+            bytes: chunk,
             eof: nextOffsetBytes >= this.#bytes.length,
             ...(nextOffsetBytes >= this.#bytes.length
                 ? {}
@@ -155,7 +154,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
     }
 
     async writeArtifactReceive(input: {
-        content: string;
+        bytes: Uint8Array;
         offsetBytes: number;
         receiveId: string;
     }) {
@@ -164,7 +163,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         assert.equal(input.offsetBytes, current.length);
         const next = Buffer.concat([
             current,
-            Buffer.from(input.content, "base64"),
+            Buffer.from(input.bytes),
         ]);
         this.received.set(input.receiveId, next);
         return {

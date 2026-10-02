@@ -25,6 +25,10 @@ import type { WorkerCommandInteractiveSession } from "../transport/command/Trans
 import type { WorkerTransportConnection } from "../transport/Transport.js";
 import { WorkerTransportServiceClient } from "../transport/service/Client.js";
 import type {
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult,
     WorkerExecProcessInput,
     WorkerTcpConnectInput,
 } from "../transport/service/Model.js";
@@ -42,13 +46,9 @@ import type {
     WorkerArtifactDirectReceiveOpenResult,
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadInput,
-    WorkerArtifactPayloadReadResult,
     WorkerArtifactReceiveBeginInput,
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
-    WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult,
     WorkerExtensionResourcePrepareInput,
     WorkerExtensionResourcePrepareResult,
     WorkerHandshakeResult,
@@ -156,6 +156,7 @@ export class WorkerInstance {
         this.#artifact = new WorkerInstanceArtifact({
             assertReady: () => this.#assertReady(),
             protocolClient: dependencies.protocolClient,
+            serviceClient: this.#services,
         });
         this.#audit = new WorkerInstanceAudit({
             appendEvent: (type, data) => this.#state.appendEvent(type, data),

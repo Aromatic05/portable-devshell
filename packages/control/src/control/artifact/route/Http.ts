@@ -125,7 +125,6 @@ export class ArtifactHttpRoute {
                     requested,
                 );
                 if (
-                    chunk.encoding !== "base64" ||
                     chunk.offsetBytes !== offset ||
                     chunk.returnedBytes <= 0 ||
                     chunk.returnedBytes > requested ||
@@ -135,10 +134,10 @@ export class ArtifactHttpRoute {
                         "Artifact payload returned an invalid HTTP chunk.",
                     );
                 }
-                const bytes = Buffer.from(chunk.content, "base64");
+                const bytes = Buffer.from(chunk.bytes);
                 if (bytes.length !== chunk.returnedBytes) {
                     throw new Error(
-                        "Artifact payload byte count does not match its encoded content.",
+                        "Artifact payload byte count does not match its content.",
                     );
                 }
                 const nextOffset = offset + bytes.length;

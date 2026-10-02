@@ -168,12 +168,11 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
             offsetBytes,
             payloadId: opened.payloadId,
         });
-        const content = Buffer.from(chunk.content, "base64");
-        assert.ok(content.byteLength > 0);
-        assert.ok(content.byteLength <= 1024 * 1024);
-        sourceHash.update(content);
+        assert.ok(chunk.bytes.byteLength > 0);
+        assert.ok(chunk.bytes.byteLength <= 1024 * 1024);
+        sourceHash.update(chunk.bytes);
         const written = await instance.writeArtifactReceive({
-            content: chunk.content,
+            bytes: chunk.bytes,
             offsetBytes,
             receiveId: receive.receiveId,
         });

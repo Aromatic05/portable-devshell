@@ -20,6 +20,7 @@ import {
     WorkerInstallerRemote,
     WorkerTransportDriverSsh,
     WorkerBinary,
+    WorkerProtocolClient,
     WorkerTransportConnection,
     WorkerTransportServiceClient,
     getWorkerTargetByKey,
@@ -142,6 +143,10 @@ test(
             endpoint,
             `${instanceName}-worker`,
         );
+        const protocol = new WorkerProtocolClient(
+            endpoint,
+            `${instanceName}-worker`,
+        );
         t.after(async () => {
             endpoint.close();
             connection.close();
@@ -170,6 +175,40 @@ test(
             "frame-process\n",
         );
         assert.equal(await processStream.read(), undefined);
+
+        const artifactBytes = Buffer.alloc(256 * 1024, 0x5a);
+        await writeFile(join(homeDirectory, "artifact-source.bin"), artifactBytes);
+        const payload = await protocol.openArtifactPayload({
+            expiresAtMs: Date.now() + 60_000,
+            path: "./artifact-source.bin",
+            workspace: homeDirectory,
+        });
+        const chunk = await services.readArtifactPayload({
+            maxBytes: artifactBytes.byteLength,
+            offsetBytes: 0,
+            payloadId: payload.payloadId,
+        });
+        assert.deepEqual(Buffer.from(chunk.bytes), artifactBytes);
+        assert.equal(chunk.eof, true);
+        const receive = await protocol.beginArtifactReceive({
+            descriptor: payload.descriptor,
+            overwrite: false,
+            targetPath: "./artifact-copy.bin",
+            workspace: homeDirectory,
+        });
+        const written = await services.writeArtifactReceive({
+            bytes: chunk.bytes,
+            offsetBytes: receive.nextOffsetBytes,
+            receiveId: receive.receiveId,
+        });
+        assert.equal(written.nextOffsetBytes, artifactBytes.byteLength);
+        const finished = await protocol.finishArtifactReceive(receive.receiveId);
+        assert.equal(finished.bytes, artifactBytes.byteLength);
+        assert.deepEqual(
+            await readFile(join(homeDirectory, "artifact-copy.bin")),
+            artifactBytes,
+        );
+        await protocol.closeArtifactPayload(payload.payloadId);
 
         const stalled = await services.execProcess({
             executable: process.execPath,

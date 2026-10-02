@@ -48,7 +48,7 @@ async function endpoints(): Promise<{ client: Endpoint; server: Endpoint }> {
     return { client, server };
 }
 
-test("WorkerProtocolClient routes core, tool, and artifact calls by Endpoint port", async (t) => {
+test("WorkerProtocolClient routes core and tool calls by Endpoint port", async (t) => {
     const { client, server } = await endpoints();
     t.after(() => {
         client.close();
@@ -77,25 +77,9 @@ test("WorkerProtocolClient routes core, tool, and artifact calls by Endpoint por
             return { tools: [] };
         },
     });
-    const artifact = new Rpc(server.bind("artifact"), {
-        "artifact.payload.read": () => {
-            calls.push("artifact:artifact.payload.read");
-            return {
-                payloadId: "payload",
-                offsetBytes: 0,
-                returnedBytes: 3,
-                totalBytes: 3,
-                content: "YWJj",
-                encoding: "base64",
-                eof: true,
-                nextOffsetBytes: null,
-            };
-        },
-    });
     t.after(() => {
         core.close();
         tool.close();
-        artifact.close();
     });
 
     const worker = new WorkerProtocolClient(client, "worker");
@@ -114,20 +98,9 @@ test("WorkerProtocolClient routes core, tool, and artifact calls by Endpoint por
         WORKER_PROTOCOL_VERSION,
     );
     assert.deepEqual(await worker.listTools(), { tools: [] });
-    assert.equal(
-        (
-            await worker.readArtifactPayload({
-                payloadId: "payload",
-                offsetBytes: 0,
-                maxBytes: 3,
-            })
-        ).content,
-        "YWJj",
-    );
     assert.deepEqual(calls, [
         "core:worker.ping",
         "core:worker.handshake",
         "tool:tools.list",
-        "artifact:artifact.payload.read",
     ]);
 });

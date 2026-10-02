@@ -31,12 +31,12 @@ class MemoryArtifactReceiver {
     }
 
     async writeArtifactReceive(input: {
-        content: string;
+        bytes: Uint8Array;
         offsetBytes: number;
         receiveId: string;
     }) {
         assert.equal(input.receiveId, "receive-1");
-        const bytes = Buffer.from(input.content, "base64");
+        const bytes = Buffer.from(input.bytes);
         assert.equal(input.offsetBytes, Buffer.concat(this.chunks).length);
         this.chunks.push(bytes);
         return {
