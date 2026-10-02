@@ -69,7 +69,7 @@ export interface StateStore<TValue> {
     delete(key: string): Promise<void>;
 }
 
-export interface StateStoreOptions<TValue> {
+export interface StateMigrationOptions<TValue> {
     legacyCollection?: string;
     legacyFile?: string;
     key: (value: TValue) => string;
@@ -128,13 +128,9 @@ export class AuditDatabase {
         return new AuditRecordStoreSqlite(this, collection, options);
     }
 
-    stateStore<TValue>(
-        namespace: string,
-        options?: StateStoreOptions<TValue>,
-    ): StateStore<TValue> {
+    stateStore<TValue>(namespace: string): StateStore<TValue> {
         this.#assertOpen();
         validateStateIdentifier("namespace", namespace);
-        if (options !== undefined) this.#migrateState(namespace, options);
         return {
             put: async (key, value) => {
                 this.#assertOpen();
@@ -184,7 +180,10 @@ export class AuditDatabase {
         this.#walPendingBytes += Math.max(payloadBytes, WAL_MINIMUM_WRITE_BYTES);
     }
 
-    #migrateState<TValue>(namespace: string, options: StateStoreOptions<TValue>): void {
+    migrateState<TValue>(namespace: string, options: StateMigrationOptions<TValue>): void {
+        this.#assertOpen();
+        validateStateIdentifier("namespace", namespace);
+        validateStateMigrationOptions(options);
         if (options.legacyCollection === undefined && options.legacyFile === undefined) return;
         const migrationKey = `migration:state-v1:${namespace}`;
         if (this.#readMetadata(migrationKey) !== "complete") {
@@ -1463,6 +1462,12 @@ function validateStoreOptions<TRecord>(
 function validateStateIdentifier(kind: "key" | "namespace", value: string): void {
     if (typeof value !== "string" || value.length === 0) {
         throw new TypeError(`State ${kind} must be a non-empty string.`);
+    }
+}
+
+function validateStateMigrationOptions<TValue>(options: StateMigrationOptions<TValue>): void {
+    if (typeof options.key !== "function") {
+        throw new TypeError("State migration key must be a function.");
     }
 }
 

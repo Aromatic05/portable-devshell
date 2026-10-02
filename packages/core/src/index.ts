@@ -29,7 +29,7 @@ export { InstancePaths } from "./instance/Paths.js";
 export { AuditDatabase } from "./storage/audit/database/Database.js";
 export type {
     StateStore,
-    StateStoreOptions,
+    StateMigrationOptions,
     AuditDatabaseOptions,
     AuditRecordCollection,
     AuditStoreOptions,

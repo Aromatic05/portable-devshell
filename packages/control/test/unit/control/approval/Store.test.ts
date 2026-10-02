@@ -87,6 +87,18 @@ test("instance approval store upserts by approval id and keeps latest state afte
                 decision: "approve",
             },
         });
+        await store.delete("approval-1");
+        assert.equal(await store.get("approval-1"), undefined);
+        await store.append({
+            ...pending,
+            status: "approved",
+            decision: {
+                approvalId: pending.approvalId,
+                decidedAt: "2020-01-01T00:01:00.000Z",
+                decidedBy: "cli",
+                decision: "approve",
+            },
+        });
         store.close();
 
         const reopened = new InstanceApprovalStore(databasePath, legacyPath);

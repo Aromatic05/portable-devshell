@@ -529,7 +529,8 @@ test("StateStore migrates JSONL before expired audit snapshots and is idempotent
     };
     const database = new AuditDatabase(file, options);
     try {
-        const store = database.stateStore("current", migration);
+        database.migrateState("current", migration);
+        const store = database.stateStore<typeof snapshots[number]>("current");
         assert.deepEqual(await store.list(), [snapshots[1], snapshots[2], { id: "c", value: "file-latest", at: 0 }]);
         assert.equal(readAuditRecordCount(file), 0);
         assert.equal(readAuditMetadataValue(file, "payloadBytes:v1"), "0");
@@ -543,7 +544,8 @@ test("StateStore migrates JSONL before expired audit snapshots and is idempotent
         await writeFile(legacyFile, JSON.stringify({ id: "a", value: "stale", at: 0 }) + "\n");
         const reopened = new AuditDatabase(file, options);
         try {
-            const migrated = reopened.stateStore("current", migration);
+            reopened.migrateState("current", migration);
+            const migrated = reopened.stateStore<typeof snapshots[number]>("current");
             assert.deepEqual(await migrated.list(), [{ id: "a", value: "current", at: 3 }, snapshots[2]]);
             await assert.rejects(access(legacyFile), { code: "ENOENT" });
         } finally {
@@ -564,7 +566,7 @@ test("StateStore rolls back a failed migration and retries without losing legacy
         const store = database.stateStore<{ id: string }>("current");
         await store.put("keep", { id: "keep" });
         await writeFile(legacyFile, '{"id":"first"}\n{"id":null}\n');
-        assert.throws(() => database.stateStore("current", {
+        assert.throws(() => database.migrateState("current", {
             legacyFile,
             key: (record: { id: string }) => record.id.toUpperCase(),
         }), TypeError);
@@ -572,10 +574,11 @@ test("StateStore rolls back a failed migration and retries without losing legacy
         assert.equal(readAuditMetadataValue(file, "migration:state-v1:current"), undefined);
         await access(legacyFile);
         await writeFile(legacyFile, '{"id":"first"}\n{"id":"second"}\n');
-        const migrated = database.stateStore("current", {
+        database.migrateState("current", {
             legacyFile,
             key: (record: { id: string }) => record.id,
         });
+        const migrated = database.stateStore<{ id: string }>("current");
         assert.deepEqual(await migrated.list(), [{ id: "first" }, { id: "keep" }, { id: "second" }]);
         await assert.rejects(access(legacyFile), { code: "ENOENT" });
     } finally {

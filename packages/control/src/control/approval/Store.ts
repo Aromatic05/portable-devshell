@@ -16,11 +16,12 @@ export class InstanceApprovalStore implements ApprovalStorePort {
             filePath,
             resolveAuditStorageLimits(undefined),
         );
-        this.#store = this.#database.stateStore<ApprovalRequest>("approvals", {
+        this.#database.migrateState<ApprovalRequest>("approvals", {
             legacyCollection: "approvals",
             legacyFile,
             key: (request) => request.approvalId,
         });
+        this.#store = this.#database.stateStore<ApprovalRequest>("approvals");
     }
 
     append(request: ApprovalRequest): Promise<void> {
@@ -29,6 +30,10 @@ export class InstanceApprovalStore implements ApprovalStorePort {
 
     get(approvalId: string): Promise<ApprovalRequest | undefined> {
         return this.#store.get(approvalId);
+    }
+
+    delete(approvalId: string): Promise<void> {
+        return this.#store.delete(approvalId);
     }
 
     async list(): Promise<ApprovalRequest[]> {
