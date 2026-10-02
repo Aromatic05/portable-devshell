@@ -124,7 +124,8 @@ export class ControlRuntimeFactory {
                         new ExtensionContextObserveCapabilityControl({
                             allowed,
                             extensionId,
-                            listContexts: async (query) => await contexts.list(query),
+                            listContexts: async (query) =>
+                                await contexts.list(query),
                         }),
                     instanceFactory: ({
                         extensionId,
@@ -183,6 +184,7 @@ export class ControlRuntimeFactory {
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
                 config: () => options.state.requireConfig(),
+                configChanges: options.state.configChanges,
                 extensionPaths,
                 extensions,
                 instances: options.state.instances,

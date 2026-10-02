@@ -3,12 +3,22 @@ import {
     createPortClient,
     type PortClient,
 } from "../../transport/endpoint/PortClient.js";
+import {
+    EventStreamReader,
+    readStreamGapPayload,
+    type EventStreamPort,
+} from "../../transport/stream/EventStream.js";
+import type { JsonValue } from "../../transport/primitive/JsonValue.js";
 import { CONTROL_HOST } from "../connection/Control.js";
 import {
     configOperations,
+    readConfigChangeEvent,
+    readConfigSnapshot,
+    type ConfigChangeEvent,
     type ConfigOperation,
     type ConfigRequest,
     type ConfigResponse,
+    type ConfigSnapshot,
 } from "./Contract.js";
 import type {
     ConfigBatchUpdateRequest,
@@ -19,13 +29,17 @@ import type {
     ConfigView,
 } from "./Edit.js";
 
+export type ConfigChangeStreamPort = EventStreamPort<ConfigChangeEvent>;
+
 export interface ConfigTransport {
     get(): Promise<ConfigView>;
+    snapshot(): Promise<ConfigSnapshot>;
     update(request: ConfigBatchUpdateRequest): Promise<ConfigView>;
     updateInstance(request: ConfigUpdateInstanceRequest): Promise<ConfigView>;
     updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<ConfigView>;
     updateWeb(request: ConfigUpdateWebRequest): Promise<ConfigView>;
     validate(draft: ConfigDraft): Promise<ConfigView>;
+    subscribe(fromRevision: number): Promise<ConfigChangeStreamPort>;
 }
 
 export function createConfigTransport(endpoint: Endpoint): ConfigTransport {
@@ -40,6 +54,21 @@ export function configTransport(port: PortClient): ConfigTransport {
         port.request<ConfigResponse<Operation>>(operation, payload);
     return {
         get: () => request(configOperations.get, undefined),
+        snapshot: async () =>
+            readConfigSnapshot(
+                await port.request<JsonValue>(
+                    configOperations.snapshot,
+                    undefined,
+                ),
+            ),
+        subscribe: async (fromRevision) =>
+            new EventStreamReader<ConfigChangeEvent>(
+                await port.open(configOperations.subscribe, { fromRevision }),
+                {
+                    decodeEvent: readConfigChangeEvent,
+                    readGap: readStreamGapPayload,
+                },
+            ),
         update: (draft) => request(configOperations.update, draft),
         updateInstance: (draft) =>
             request(configOperations.updateInstance, draft),

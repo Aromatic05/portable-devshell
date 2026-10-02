@@ -4,10 +4,7 @@
 import type { JsonValue } from "../transport/primitive/JsonValue.js";
 
 export type ArtifactImageMediaType =
-    | "image/png"
-    | "image/jpeg"
-    | "image/gif"
-    | "image/webp";
+    "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
 export interface ArtifactImageContent {
     blake3: string;
@@ -152,8 +149,7 @@ export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescr
 }
 
 export type ArtifactPayloadDescriptor =
-    | ArtifactBytePayloadDescriptor
-    | ArtifactDirectoryPayloadDescriptor;
+    ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
 
 export type ArtifactTransferSourceInput =
     | {
@@ -210,6 +206,18 @@ export interface ArtifactTransferRecord {
 export interface ArtifactTransferResult {
     operation: "cancel" | "start" | "status";
     transfer: ArtifactTransferRecord;
+}
+
+/**
+ * One race-safe authoritative read of the whole artifact domain. `lastSeq` is
+ * the global event cursor captured in the same synchronous read as the share
+ * and transfer lists, so a subscriber that resumes from `lastSeq + 1` cannot
+ * miss an event that is not already reflected here.
+ */
+export interface ArtifactSnapshot {
+    lastSeq: number;
+    shares: ArtifactShareResult[];
+    transfers: ArtifactTransferRecord[];
 }
 
 export const artifactEventTypes = [

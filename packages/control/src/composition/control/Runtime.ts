@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import { ToolCallPipeline } from "@portable-devshell/core";
 
-
 import {
     controlRemoteRpcPath,
     controlWebBasePath,
@@ -14,6 +13,7 @@ import {
     type HttpHost,
 } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
+import type { ConfigChangeHub } from "../../control/config/Change.js";
 import { DebugPatchService } from "../../control/debug/Service.js";
 import { CliExtensionCommandService } from "../../control/extension/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../control/extension/tui/Route.js";
@@ -54,6 +54,7 @@ export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
+    configChanges: ConfigChangeHub;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
@@ -188,6 +189,7 @@ export class ControlRuntime {
                 surface: "native",
             }),
             config: options.mcp.configEditor,
+            configChanges: options.configChanges,
             ...(options.config === undefined
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),

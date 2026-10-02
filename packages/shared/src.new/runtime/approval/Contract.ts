@@ -1,8 +1,8 @@
 // Approval wire contract. list returns the authoritative pending set plus the
 // instance sequence at read time; without that cursor a client cannot close the
 // list-then-subscribe window, so it is part of the contract rather than
-// inferred. subscribe is a server-filtered approval stream (new server work)
-// that resumes from that cursor.
+// inferred. subscribe is a server-filtered approval stream that resumes from
+// that cursor.
 
 import type { InstanceEventSubscribeRequest } from "../activity/Contract.js";
 import type { JsonValue } from "../../transport/primitive/JsonValue.js";
@@ -16,6 +16,7 @@ export const approvalOperations = {
     decide: "decide",
     get: "get",
     list: "list",
+    snapshot: "snapshot",
     subscribe: "subscribe",
 } as const;
 
@@ -27,7 +28,10 @@ export interface ApprovalDecisionOptions {
 
 export interface ApprovalContract {
     decide: {
-        request: { approvalId: string; decision: ApprovalDecisionValue } & ApprovalDecisionOptions;
+        request: {
+            approvalId: string;
+            decision: ApprovalDecisionValue;
+        } & ApprovalDecisionOptions;
         response: ApprovalRequest;
     };
     get: {
@@ -35,6 +39,10 @@ export interface ApprovalContract {
         response: ApprovalRequest;
     };
     list: {
+        request: { pendingOnly?: boolean } | undefined;
+        response: ApprovalRequest[];
+    };
+    snapshot: {
         request: { pendingOnly?: boolean } | undefined;
         response: ApprovalListResult;
     };

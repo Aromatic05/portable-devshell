@@ -3,10 +3,7 @@
 // the existing UI) and then reconciled by an authoritative re-read; gap recovery
 // re-reads and resumes from lastSeq + 1.
 
-import {
-    type ApprovalDecisionValue,
-    type ApprovalRequest,
-} from "./Model.js";
+import { type ApprovalDecisionValue, type ApprovalRequest } from "./Model.js";
 import type { InstanceEvent } from "../activity/Model.js";
 import {
     InstanceEventSubscription,
@@ -48,7 +45,7 @@ export class ApprovalViewModel {
     async load(instance: string): Promise<void> {
         this.#instance = instance;
         const generation = ++this.#generation;
-        const result = await this.#transport.list(instance, {
+        const result = await this.#transport.snapshot(instance, {
             pendingOnly: true,
         });
         if (generation !== this.#generation) return;
@@ -60,7 +57,7 @@ export class ApprovalViewModel {
         if (this.#instance === undefined) return;
         const instance = this.#instance;
         const generation = this.#generation;
-        const result = await this.#transport.list(instance, {
+        const result = await this.#transport.snapshot(instance, {
             pendingOnly: true,
         });
         if (generation !== this.#generation) return;
@@ -139,7 +136,7 @@ export class ApprovalViewModel {
     async #recover(): Promise<number | undefined> {
         try {
             const instance = this.#requireInstance();
-            const result = await this.#transport.list(instance, {
+            const result = await this.#transport.snapshot(instance, {
                 pendingOnly: true,
             });
             this.#apply(result.approvals, result.lastSeq);

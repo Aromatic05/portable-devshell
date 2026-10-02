@@ -2,10 +2,6 @@
 // instance approval port. subscribe opens a server-filtered approval event
 // stream and resumes from the cursor returned by list, so the projection never
 // piggybacks on the generic runtime stream.
-//
-// NOTE: `approval.subscribe` is a new server operation; until the instance
-// approval route implements it, opening the stream surfaces a method-not-found
-// error and the view model keeps serving its authoritative list snapshot.
 
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import { Rpc } from "../../transport/packet/Rpc.js";
@@ -37,6 +33,10 @@ export interface ApprovalTransport {
         instance: string,
         options?: { pendingOnly?: boolean },
     ): Promise<ApprovalResponse<"list">>;
+    snapshot(
+        instance: string,
+        options?: { pendingOnly?: boolean },
+    ): Promise<ApprovalResponse<"snapshot">>;
     subscribe(
         instance: string,
         fromSeq: number,
@@ -70,14 +70,15 @@ export function createApprovalTransport(endpoint: Endpoint): ApprovalTransport {
             request(instance, approvalOperations.get, { approvalId }),
         list: (instance, options) =>
             request(instance, approvalOperations.list, options),
+        snapshot: (instance, options) =>
+            request(instance, approvalOperations.snapshot, options),
         subscribe: async (instance, fromSeq) => {
             const protocol = new Stream(
                 await endpoint.connect(instance, APPROVAL_PORT),
             );
-            const stream = await protocol.open(
-                approvalOperations.subscribe,
-                { fromSeq } satisfies JsonValue,
-            );
+            const stream = await protocol.open(approvalOperations.subscribe, {
+                fromSeq,
+            } satisfies JsonValue);
             const close = () => protocol.close();
             stream.onClose(close);
             stream.onCancel(close);

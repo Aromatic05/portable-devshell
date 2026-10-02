@@ -135,6 +135,20 @@ export function readTransferId(params?: JsonValue): string {
     return readRequiredString(params.transferId, "transferId");
 }
 
+export function readArtifactSubscriptionFromSeq(params?: JsonValue): number {
+    if (
+        !isRecord(params) ||
+        typeof params.fromSeq !== "number" ||
+        !Number.isSafeInteger(params.fromSeq) ||
+        params.fromSeq < 0
+    ) {
+        throw invalid(
+            "artifact.subscribe requires a non-negative integer fromSeq.",
+        );
+    }
+    return params.fromSeq;
+}
+
 function readPositiveInteger(
     value: JsonValue | undefined,
     field: string,

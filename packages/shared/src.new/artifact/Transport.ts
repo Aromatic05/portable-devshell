@@ -22,6 +22,7 @@ import {
     type ArtifactShareInput,
     type ArtifactShareResult,
     type ArtifactShareRevokeResult,
+    type ArtifactSnapshot,
     type ArtifactStoredImageResult,
     type ArtifactTransferRecord,
     type ArtifactTransferResult,
@@ -40,10 +41,9 @@ export interface ArtifactTransport {
         input: ArtifactShareInput,
     ): Promise<ArtifactShareResult>;
     getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
-    listShares(): Promise<ArtifactShareResult[]>;
-    listTransfers(): Promise<ArtifactTransferRecord[]>;
     readImage(imageRef: string): Promise<ArtifactStoredImageResult>;
     revokeShare(shareId: string): Promise<ArtifactShareRevokeResult>;
+    snapshot(): Promise<ArtifactSnapshot>;
     startTransfer(
         defaultInstance: string,
         input: ArtifactTransferStartInput,
@@ -55,9 +55,7 @@ export interface ArtifactTransport {
     ): Promise<ArtifactViewImageResult>;
 }
 
-export function createArtifactTransport(
-    endpoint: Endpoint,
-): ArtifactTransport {
+export function createArtifactTransport(endpoint: Endpoint): ArtifactTransport {
     const request = async <Operation extends ArtifactOperation>(
         operation: Operation,
         payload: ArtifactRequest<Operation>,
@@ -84,13 +82,11 @@ export function createArtifactTransport(
             }),
         getTransfer: (transferId) =>
             request(artifactOperations.getTransfer, { transferId }),
-        listShares: () => request(artifactOperations.listShares, undefined),
-        listTransfers: () =>
-            request(artifactOperations.listTransfers, undefined),
         readImage: (imageRef) =>
             request(artifactOperations.readImage, { imageRef }),
         revokeShare: (shareId) =>
             request(artifactOperations.revokeShare, { shareId }),
+        snapshot: () => request(artifactOperations.snapshot, undefined),
         startTransfer: (defaultInstance, input) =>
             request(artifactOperations.startTransfer, {
                 ...input,

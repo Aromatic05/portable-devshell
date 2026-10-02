@@ -1,18 +1,22 @@
 // Stateful configuration projection. It owns only the control config view and
-// the config editor actions and never reaches into another domain. `get` reads
-// the authoritative ConfigView; every successful update returns a fresh
-// ConfigView that is folded straight back into the projection. Read and write
-// requests share one monotonic generation so a slow response can never
-// overwrite a newer projection.
+// the config editor actions and never reaches into another domain. `get` loads
+// the race-safe authoritative snapshot (view plus server revision); the
+// projection then subscribes from `revision + 1`, coalesces change bursts into
+// one refresh, and recovers a replay gap by taking a fresh authoritative
+// snapshot. Read and write requests share one monotonic generation so a slow
+// response can never overwrite a newer projection.
 //
 // A method-not-found `get` means the control API does not expose configuration
 // at all. That is modelled explicitly as `supported: false` with no view and no
 // failure, so a missing API is a stable capability signal rather than a
 // permanent fatal projection; any other error stays in `failure`.
 //
-// `revision` is the stable snapshot identity: it only advances when the view
-// actually changes, so identical re-reads keep the same projection identity.
+// `revision` is the authoritative server revision the current view was read at,
+// so it only advances when a change was committed and identical re-reads keep
+// the same projection identity.
 
+import { readStreamGap } from "../../transport/stream/EventStream.js";
+import { EventSubscription } from "../../transport/stream/Subscription.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -21,7 +25,10 @@ import type {
     ConfigUpdateWebRequest,
     ConfigView,
 } from "./Edit.js";
+import type { ConfigChangeEvent, ConfigSnapshot } from "./Contract.js";
 import type { ConfigTransport } from "./Transport.js";
+
+const REFRESH_COALESCE_MS = 100;
 
 export interface ConfigViewModelState {
     failure?: Error;
@@ -29,7 +36,7 @@ export interface ConfigViewModelState {
     loading: boolean;
     /** True while a read or update runs with an existing projection. */
     refreshing: boolean;
-    /** Stable snapshot identity; advances only when the view changes. */
+    /** Server revision the current view was read at. */
     revision: number;
     /** False once `get` reports that the config API is unsupported. */
     supported: boolean;
@@ -42,8 +49,9 @@ export class ConfigViewModel {
     #epoch = 0;
     #generation = 0;
     #published: ConfigViewModelState = emptyConfigViewModelState();
-    #revision = 0;
+    #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ConfigViewModelState = emptyConfigViewModelState();
+    #subscription?: EventSubscription<ConfigChangeEvent>;
 
     constructor(transport: ConfigTransport) {
         this.#transport = transport;
@@ -58,12 +66,12 @@ export class ConfigViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    /** Reads the authoritative configuration. Alias of `refresh`. */
+    /** Loads the authoritative snapshot. Alias of `refresh`. */
     get(): Promise<ConfigView | undefined> {
         return this.#read();
     }
 
-    /** Re-reads the authoritative configuration. */
+    /** Re-reads the authoritative snapshot. */
     refresh(): Promise<ConfigView | undefined> {
         return this.#read();
     }
@@ -100,22 +108,48 @@ export class ConfigViewModel {
     close(): void {
         this.#epoch += 1;
         this.#generation += 1;
-        this.#revision = 0;
+        if (this.#refreshTimer !== undefined) {
+            clearTimeout(this.#refreshTimer);
+            this.#refreshTimer = undefined;
+        }
+        this.#stopSubscription();
         this.#listeners.clear();
         this.#state = emptyConfigViewModelState();
         this.#published = Object.freeze(this.#state);
     }
 
     async #read(): Promise<ConfigView | undefined> {
+        return (await this.#loadSnapshot())?.view;
+    }
+
+    async #mutate(request: () => Promise<ConfigView>): Promise<ConfigView> {
+        const epoch = this.#epoch;
+        const generation = ++this.#generation;
+        this.#begin();
+        let view: ConfigView;
+        try {
+            view = await request();
+        } catch (error) {
+            if (epoch === this.#epoch && generation === this.#generation)
+                this.#fail(error);
+            throw error;
+        }
+        if (epoch !== this.#epoch) return view;
+        await this.#loadSnapshot();
+        return view;
+    }
+
+    async #loadSnapshot(): Promise<ConfigSnapshot | undefined> {
         const epoch = this.#epoch;
         const generation = ++this.#generation;
         this.#begin();
         try {
-            const view = await this.#transport.get();
+            const snapshot = await this.#transport.snapshot();
             if (epoch !== this.#epoch || generation !== this.#generation)
                 return undefined;
-            this.#apply(view);
-            return view;
+            this.#applySnapshot(snapshot);
+            this.#ensureSubscription(snapshot.revision + 1);
+            return snapshot;
         } catch (error) {
             if (epoch !== this.#epoch || generation !== this.#generation)
                 return undefined;
@@ -128,21 +162,41 @@ export class ConfigViewModel {
         }
     }
 
-    async #mutate(request: () => Promise<ConfigView>): Promise<ConfigView> {
-        const epoch = this.#epoch;
-        const generation = ++this.#generation;
-        this.#begin();
-        try {
-            const view = await request();
-            if (epoch !== this.#epoch) return view;
-            if (generation === this.#generation) this.#apply(view);
-            else await this.#read();
-            return view;
-        } catch (error) {
-            if (epoch === this.#epoch && generation === this.#generation)
-                this.#fail(error);
-            throw error;
-        }
+    #ensureSubscription(fromRevision: number): void {
+        if (this.#subscription !== undefined) return;
+        const subscription = new EventSubscription<ConfigChangeEvent>(
+            fromRevision,
+            {
+                eventSeq: (event) => event.revision,
+                onEvent: (event) => {
+                    if (event.revision > this.#state.revision)
+                        this.#scheduleRefresh();
+                },
+                onGap: () => this.#recover(),
+                open: (cursor) => this.#transport.subscribe(cursor),
+                readGapError: readStreamGap,
+            },
+        );
+        this.#subscription = subscription;
+        subscription.start();
+    }
+
+    #scheduleRefresh(): void {
+        if (this.#refreshTimer !== undefined) return;
+        this.#refreshTimer = setTimeout(() => {
+            this.#refreshTimer = undefined;
+            void this.#read();
+        }, REFRESH_COALESCE_MS);
+    }
+
+    async #recover(): Promise<number | undefined> {
+        const snapshot = await this.#loadSnapshot();
+        return snapshot === undefined ? undefined : snapshot.revision + 1;
+    }
+
+    #stopSubscription(): void {
+        this.#subscription?.stop();
+        this.#subscription = undefined;
     }
 
     #begin(): void {
@@ -155,27 +209,30 @@ export class ConfigViewModel {
         this.#emit();
     }
 
-    #apply(view: ConfigView): void {
+    #applySnapshot(snapshot: ConfigSnapshot): void {
         const current = this.#state.view;
-        const changed = current === undefined || !sameConfigView(current, view);
+        const view =
+            current !== undefined && sameConfigView(current, snapshot.view)
+                ? current
+                : snapshot.view;
         this.#state = {
             failure: undefined,
             loading: false,
             refreshing: false,
-            revision: changed ? ++this.#revision : this.#revision,
+            revision: snapshot.revision,
             supported: true,
-            view: changed ? view : current,
+            view,
         };
         this.#emit();
     }
 
     #markUnsupported(): void {
-        const changed = this.#state.view !== undefined;
+        this.#stopSubscription();
         this.#state = {
             failure: undefined,
             loading: false,
             refreshing: false,
-            revision: changed ? ++this.#revision : this.#revision,
+            revision: 0,
             supported: false,
         };
         this.#emit();

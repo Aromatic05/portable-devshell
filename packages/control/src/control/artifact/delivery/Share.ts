@@ -22,6 +22,7 @@ import {
     DEFAULT_ARTIFACT_SHARE_TTL_SECONDS,
     MAX_ARTIFACT_SHARE_TTL_SECONDS,
     requireArtifactEndpoint,
+    type ArtifactEventRecorder,
     type ArtifactServiceEndpoint,
     type ArtifactServiceOptions,
     type ArtifactShareAccess,
@@ -29,6 +30,7 @@ import {
 } from "../Service.js";
 
 export interface ArtifactShareServiceOptions {
+    recordEvent: ArtifactEventRecorder;
     recordStore: ArtifactRecordStore;
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     shareUrl: ArtifactServiceOptions["shareUrl"];
@@ -37,6 +39,7 @@ export interface ArtifactShareServiceOptions {
 
 export class ArtifactShareService {
     readonly #activeDownloads = new Map<string, number>();
+    readonly #recordEvent: ArtifactEventRecorder;
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #shareUrl: ArtifactServiceOptions["shareUrl"];
@@ -47,6 +50,7 @@ export class ArtifactShareService {
     #lastTerminalAtMs = 0;
 
     constructor(options: ArtifactShareServiceOptions) {
+        this.#recordEvent = options.recordEvent;
         this.#recordStore = options.recordStore;
         this.#resolveEndpoint = options.resolveEndpoint;
         this.#shareUrl = options.shareUrl;
@@ -186,6 +190,7 @@ export class ArtifactShareService {
 
         this.#shares.set(shareId, stored);
         this.#shareIdsByToken.set(token, shareId);
+        this.#record("artifact.shareCreated", stored.authorityInstance, result);
         await this.#emitToEndpoint(endpoint, "artifact.shareCreated", result);
         return structuredClone(result);
     }
@@ -237,6 +242,11 @@ export class ArtifactShareService {
                 throw error;
             }
             await this.#closeSharePayload(share);
+            this.#record(
+                "artifact.shareRevoked",
+                share.authorityInstance,
+                share.result,
+            );
             const endpoint = this.#resolveEndpoint(
                 share.sourceInstance,
                 share.authorityInstance,
@@ -378,19 +388,34 @@ export class ArtifactShareService {
             throw error;
         }
 
+        const downloadData = {
+            ...(isJsonRecord(details) ? details : {}),
+            downloadCount: share.result.downloadCount,
+            shareId,
+        };
+        this.#record(
+            "artifact.shareDownloaded",
+            share.authorityInstance,
+            downloadData,
+        );
         const endpoint = this.#resolveEndpoint(
             share.sourceInstance,
             share.authorityInstance,
         );
         if (endpoint !== undefined) {
-            await this.#emitToEndpoint(endpoint, "artifact.shareDownloaded", {
-                ...(isJsonRecord(details) ? details : {}),
-                downloadCount: share.result.downloadCount,
-                shareId,
-            });
+            await this.#emitToEndpoint(
+                endpoint,
+                "artifact.shareDownloaded",
+                downloadData,
+            );
         }
         if (exhausted) {
             await this.#closeSharePayload(share);
+            this.#record(
+                "artifact.shareExhausted",
+                share.authorityInstance,
+                share.result,
+            );
             if (endpoint !== undefined) {
                 await this.#emitToEndpoint(
                     endpoint,
@@ -423,6 +448,11 @@ export class ArtifactShareService {
             }
         }
         await this.#closeSharePayload(share);
+        this.#record(
+            "artifact.shareExhausted",
+            share.authorityInstance,
+            share.result,
+        );
         const endpoint = this.#resolveEndpoint(
             share.sourceInstance,
             share.authorityInstance,
@@ -452,6 +482,11 @@ export class ArtifactShareService {
             }
         }
         await this.#closeSharePayload(share);
+        this.#record(
+            "artifact.shareExpired",
+            share.authorityInstance,
+            share.result,
+        );
         const endpoint = this.#resolveEndpoint(
             share.sourceInstance,
             share.authorityInstance,
@@ -512,6 +547,14 @@ export class ArtifactShareService {
         } catch {
             // Keep payloadClosed false so a later initialize or revoke can retry.
         }
+    }
+
+    #record(type: ArtifactEventType, instance: string, data?: unknown): void {
+        this.#recordEvent(
+            instance,
+            type,
+            data === undefined ? undefined : toJsonValue(data),
+        );
     }
 
     async #emitToEndpoint(

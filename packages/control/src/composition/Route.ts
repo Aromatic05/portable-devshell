@@ -18,6 +18,7 @@ import {
 } from "../control/extension/tui/Route.js";
 import type { ConfigEditorPort } from "../control/config/Route.js";
 import { createConfigRouteModule } from "../control/config/Route.js";
+import { ConfigChangeHub } from "../control/config/Change.js";
 import {
     createDebugRouteModule,
     type DebugPatchPort,
@@ -31,6 +32,7 @@ import {
     createInstanceRouteModule,
     type InstanceRouteModuleOptions,
 } from "../control/instance/Route.js";
+import { InstanceChangeHub } from "../control/instance/Change.js";
 import type { InstanceRegistry } from "../control/instance/registry/Registry.js";
 import {
     createContextRouteModule,
@@ -71,6 +73,7 @@ export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
+    configChanges?: ConfigChangeHub;
     contextAdmin?: () => ContextAdminPort | undefined;
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
@@ -94,17 +97,21 @@ export interface ControlRouteCompositionOptions {
 }
 
 export class ControlRouteComposition {
+    readonly #configChanges: ConfigChangeHub;
     readonly #overview: OperationalOverviewPort;
+    readonly #instanceChanges = new InstanceChangeHub();
     readonly #options: ControlRouteCompositionOptions;
     readonly #subscriptions: RuntimeSubscriptionManager;
     readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeExtensions: () => void;
+    readonly #unsubscribeConfigChanges: () => void;
     readonly #unsubscribeInstances: () => void;
     readonly #listeners = new Set<() => void>();
     #hosts: readonly ControlHostDefinition[];
 
     constructor(options: ControlRouteCompositionOptions) {
         this.#options = options;
+        this.#configChanges = options.configChanges ?? new ConfigChangeHub();
         this.#subscriptions =
             options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
         this.#overview =
@@ -117,9 +124,23 @@ export class ControlRouteComposition {
         this.#unsubscribeExtensions =
             options.extensionRoutes?.onChange(() => this.#rebuild()) ??
             (() => undefined);
-        this.#unsubscribeInstances = options.instances.onChange(() =>
-            this.#rebuild(),
+        this.#unsubscribeConfigChanges = this.#configChanges.onChange(
+            (change) => {
+                if (
+                    change.paths.some(
+                        (path) =>
+                            path === "instances" ||
+                            path.startsWith("instances."),
+                    )
+                ) {
+                    this.#instanceChanges.publish("config");
+                }
+            },
         );
+        this.#unsubscribeInstances = options.instances.onChange(() => {
+            this.#instanceChanges.publish("registry");
+            this.#rebuild();
+        });
     }
 
     hosts(): readonly ControlHostDefinition[] {
@@ -141,6 +162,7 @@ export class ControlRouteComposition {
 
     dispose(): void {
         this.#unsubscribeExtensions();
+        this.#unsubscribeConfigChanges();
         this.#unsubscribeInstances();
         this.#terminals.close();
     }
@@ -199,16 +221,25 @@ export class ControlRouteComposition {
                     createContextRouteModule(this.#options.contextAdmin),
                     ...(this.#options.toolCalls === undefined
                         ? []
-                        : [createControlToolRouteModule(this.#options.toolCalls)]),
-                    ...(this.#options.extensionRoutes?.modules("control") ?? []),
+                        : [
+                              createControlToolRouteModule(
+                                  this.#options.toolCalls,
+                              ),
+                          ]),
+                    ...(this.#options.extensionRoutes?.modules("control") ??
+                        []),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
+                        changes: this.#instanceChanges,
                         configuredInstances: this.#options.configuredInstances,
                         create: this.#options.instanceCreate,
                         editor: this.#options.config,
                         registry: this.#options.instances,
                     }),
-                    createConfigRouteModule(this.#options.config),
+                    createConfigRouteModule(
+                        this.#options.config,
+                        this.#configChanges,
+                    ),
                     createReverseRouteModule(this.#options.reverse),
                     createArtifactRouteModule(this.#options.artifact),
                 ],
@@ -230,11 +261,8 @@ export class ControlRouteComposition {
                 ...(this.#options.extensionRoutes?.modules("instance") ?? []),
                 createGoalRouteModule(descriptor),
                 createTodoRouteModule(descriptor, this.#subscriptions),
-                createApprovalRouteModule(descriptor),
-                createToolRouteModule(
-                    descriptor,
-                    this.#options.toolProvenance,
-                ),
+                createApprovalRouteModule(descriptor, this.#subscriptions),
+                createToolRouteModule(descriptor, this.#options.toolProvenance),
                 ...(descriptor.terminal === undefined
                     ? []
                     : [

@@ -161,10 +161,7 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         this.writeReceiveCalls += 1;
         const current = this.received.get(input.receiveId) ?? Buffer.alloc(0);
         assert.equal(input.offsetBytes, current.length);
-        const next = Buffer.concat([
-            current,
-            Buffer.from(input.bytes),
-        ]);
+        const next = Buffer.concat([current, Buffer.from(input.bytes)]);
         this.received.set(input.receiveId, next);
         return {
             nextOffsetBytes: next.length,
@@ -320,6 +317,13 @@ test("artifact transfer returns queued immediately and completes asynchronously"
         target.events.some(
             (event) => event.type === "artifact.transferCompleted",
         ),
+    );
+    const snapshot = service.snapshot();
+    assert.equal(snapshot.lastSeq, source.events.length);
+    assert.equal(snapshot.lastSeq, target.events.length);
+    assert.deepEqual(
+        source.events.map((event) => event.type),
+        target.events.map((event) => event.type),
     );
 });
 

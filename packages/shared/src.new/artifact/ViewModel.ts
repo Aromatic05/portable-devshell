@@ -1,13 +1,11 @@
 // Stateful artifact projection. It owns its update policy: a single dedicated
 // artifact event subscription reconnects with backoff and recovers gaps by
-// re-reading the authoritative share/transfer lists, and events are coalesced
-// into a re-read. No upper layer needs to call refresh() after an event. The
-// connect/retry engine itself is the generic transport/stream subscription.
+// re-reading the authoritative snapshot, and events are coalesced into a
+// snapshot re-read. The snapshot carries the global event cursor, so resume
+// never misses an event. No upper layer needs to call refresh() after an event.
+// The connect/retry engine itself is the generic transport/stream subscription.
 
-import {
-    readArtifactStreamGap,
-    type ArtifactStreamGap,
-} from "./Contract.js";
+import { readArtifactStreamGap, type ArtifactStreamGap } from "./Contract.js";
 import {
     EventSubscription,
     type SubscriptionStatus,
@@ -26,6 +24,8 @@ export type ArtifactSubscriptionStatus = SubscriptionStatus;
 
 export interface ArtifactViewModelState {
     failure?: Error;
+    /** Global artifact event cursor captured with the last authoritative read. */
+    lastSeq: number;
     shares: ArtifactShareResult[];
     status: ArtifactSubscriptionStatus;
     transfers: ArtifactTransferRecord[];
@@ -82,9 +82,11 @@ export class ArtifactViewModel {
     }
 
     async refresh(): Promise<void> {
+        const generation = this.#generation;
         try {
             await this.#reload();
         } catch (error) {
+            if (generation !== this.#generation) return;
             this.#state = { ...this.#state, failure: toError(error) };
             this.#emit();
         }
@@ -104,10 +106,7 @@ export class ArtifactViewModel {
         defaultInstance: string,
         input: ArtifactShareInput,
     ): Promise<ArtifactShareResult> {
-        const share = await this.#transport.createShare(
-            defaultInstance,
-            input,
-        );
+        const share = await this.#transport.createShare(defaultInstance, input);
         await this.refresh();
         return share;
     }
@@ -140,33 +139,34 @@ export class ArtifactViewModel {
 
     #openSubscription(): void {
         const generation = this.#generation;
-        this.#subscription = new EventSubscription<ArtifactEvent>(1, {
-            onEvent: () => this.#scheduleRefresh(generation),
-            onGap: (gap) => this.#recover(gap, generation),
-            onStatusChange: (status) => this.#setStatus(status),
-            open: (fromSeq) => this.#transport.subscribe(fromSeq),
-            eventSeq: (event) => event.seq,
-            readGapError: readArtifactStreamGap,
-            retryBaseMs: this.#retryBaseMs,
-            retryMaxMs: this.#retryMaxMs,
-        });
+        this.#subscription = new EventSubscription<ArtifactEvent>(
+            this.#state.lastSeq + 1,
+            {
+                eventSeq: (event) => event.seq,
+                onEvent: () => this.#scheduleRefresh(generation),
+                onGap: (gap) => this.#recover(gap, generation),
+                onStatusChange: (status) => this.#setStatus(status),
+                open: (fromSeq) => this.#transport.subscribe(fromSeq),
+                readGapError: readArtifactStreamGap,
+                retryBaseMs: this.#retryBaseMs,
+                retryMaxMs: this.#retryMaxMs,
+            },
+        );
         this.#subscription.start();
     }
 
     async #reload(): Promise<void> {
         const generation = this.#generation;
-        const [shares, transfers] = await Promise.all([
-            this.#transport.listShares(),
-            this.#transport.listTransfers(),
-        ]);
+        const snapshot = await this.#transport.snapshot();
         if (generation !== this.#generation) return;
         this.#state = {
             failure: undefined,
-            shares: [...shares].sort(
+            lastSeq: snapshot.lastSeq,
+            shares: [...snapshot.shares].sort(
                 (left, right) => right.expiresAtMs - left.expiresAtMs,
             ),
             status: this.#state.status,
-            transfers: [...transfers].sort((left, right) =>
+            transfers: [...snapshot.transfers].sort((left, right) =>
                 right.createdAt.localeCompare(left.createdAt),
             ),
         };
@@ -174,14 +174,14 @@ export class ArtifactViewModel {
     }
 
     async #recover(
-        gap: ArtifactStreamGap,
+        _gap: ArtifactStreamGap,
         generation: number,
     ): Promise<number | undefined> {
         try {
             await this.#reload();
             if (!this.#active || generation !== this.#generation)
                 return undefined;
-            return gap.lastSeq + 1;
+            return this.#state.lastSeq + 1;
         } catch {
             return undefined;
         }
@@ -210,7 +210,7 @@ export class ArtifactViewModel {
 }
 
 function emptyState(): ArtifactViewModelState {
-    return { shares: [], status: "stopped", transfers: [] };
+    return { lastSeq: 0, shares: [], status: "stopped", transfers: [] };
 }
 
 function toError(error: unknown): Error {

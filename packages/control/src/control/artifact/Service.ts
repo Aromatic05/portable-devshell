@@ -28,13 +28,19 @@ import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
     JsonValue,
+    MessageStream,
 } from "@portable-devshell/shared";
+import {
+    ArtifactEventLog,
+    DEFAULT_ARTIFACT_EVENT_HISTORY_LIMIT,
+} from "./EventLog.js";
 import { ArtifactRecordStore } from "./RecordStore.js";
 import { ArtifactImageService } from "./delivery/Image.js";
 import { ArtifactShareService } from "./delivery/Share.js";
 import { ArtifactTransferService } from "./delivery/Transfer.js";
 
 export class ArtifactService {
+    readonly #eventLog: ArtifactEventLog;
     readonly #imageService: ArtifactImageService;
     readonly #recordStore: ArtifactRecordStore;
     readonly #shareService: ArtifactShareService;
@@ -54,9 +60,14 @@ export class ArtifactService {
                 "Artifact terminalHistoryLimit must be a non-negative safe integer.",
             );
         }
+        this.#eventLog = new ArtifactEventLog(
+            options.eventHistoryLimit ?? DEFAULT_ARTIFACT_EVENT_HISTORY_LIMIT,
+        );
         this.#imageService = new ArtifactImageService(options);
         this.#recordStore = new ArtifactRecordStore(options.storageDir);
         this.#shareService = new ArtifactShareService({
+            recordEvent: (instance, type, data) =>
+                this.#recordEvent(instance, type, data),
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
             shareUrl: options.shareUrl,
@@ -65,6 +76,8 @@ export class ArtifactService {
         this.#transferService = new ArtifactTransferService({
             chunkBytes: options.chunkBytes,
             directTransfer: options.directTransfer,
+            recordEvent: (instance, type, data) =>
+                this.#recordEvent(instance, type, data),
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
             schedule: options.schedule,
@@ -79,6 +92,7 @@ export class ArtifactService {
 
         if (this.#cleanupPending) await this.stop();
         this.#cleanupPending = true;
+        this.#eventLog.reset();
 
         try {
             await this.#imageService.initialize();
@@ -110,6 +124,7 @@ export class ArtifactService {
 
         this.#initialized = false;
         this.#cleanupPending = true;
+        this.#eventLog.close();
         this.#shareService.stop();
         await this.#transferService.stop();
         this.#cleanupPending = false;
@@ -202,6 +217,125 @@ export class ArtifactService {
         return this.#transferService.listTransfers();
     }
 
+    /**
+     * Captures the authoritative shares, transfers, and global event cursor in
+     * one synchronous read. Because reads and event recording never interleave
+     * inside a single tick, a subscriber that resumes from `lastSeq + 1` sees
+     * every event that is not already reflected in this snapshot.
+     */
+    snapshot(): ArtifactSnapshot {
+        if (!this.#initialized) {
+            throw new Error("ArtifactService is not initialized.");
+        }
+        return {
+            lastSeq: this.#eventLog.lastSeq,
+            shares: this.#shareService.listShares(),
+            transfers: this.#transferService.listTransfers(),
+        };
+    }
+
+    /**
+     * Serves one cursor-resumable artifact event stream: an initial seed (or a
+     * stream.gap when the cursor fell out of the bounded replay window), then
+     * live events as they are recorded. The handler stays pending until the
+     * client closes the stream or aborts.
+     */
+    async subscribe(
+        stream: MessageStream,
+        fromSeq: number,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (!this.#initialized) {
+            throw new Error("ArtifactService is not initialized.");
+        }
+        let cursor = Math.max(1, fromSeq);
+        const initial = this.#eventLog.read(cursor);
+        if (initial.kind === "gap") {
+            await stream.send({
+                name: "gap",
+                payload: {
+                    latestSeq: initial.lastSeq,
+                    oldestAvailableSeq: initial.nextSeq,
+                    requestedFromSeq: cursor,
+                },
+                seq: initial.lastSeq,
+            });
+            cursor = initial.nextSeq;
+        } else {
+            await stream.send({
+                name: "seed",
+                payload: {
+                    events: initial.events as unknown as JsonValue,
+                    lastSeq: initial.lastSeq,
+                },
+            });
+            cursor = initial.lastSeq + 1;
+        }
+
+        let closed = false;
+        let wake: (() => void) | undefined;
+        const unsubscribe = this.#eventLog.subscribe(() => wake?.());
+        const onClose = () => {
+            closed = true;
+            wake?.();
+        };
+        stream.onClose(onClose);
+        stream.onCancel(onClose);
+        const onAbort = () => {
+            closed = true;
+            wake?.();
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+
+        try {
+            while (!closed && !this.#eventLog.closed) {
+                const slice = this.#eventLog.read(cursor);
+                if (slice.kind === "gap") {
+                    await stream.send({
+                        name: "gap",
+                        payload: {
+                            latestSeq: slice.lastSeq,
+                            oldestAvailableSeq: slice.nextSeq,
+                            requestedFromSeq: cursor,
+                        },
+                        seq: slice.lastSeq,
+                    });
+                    cursor = slice.nextSeq;
+                    continue;
+                }
+                if (slice.events.length > 0) {
+                    for (const event of slice.events) {
+                        await stream.send({
+                            name: "event",
+                            payload: event as unknown as JsonValue,
+                            seq: event.seq,
+                        });
+                        cursor = event.seq + 1;
+                        if (closed) break;
+                    }
+                    continue;
+                }
+                await new Promise<void>((resolve) => {
+                    wake = resolve;
+                    if (
+                        closed ||
+                        this.#eventLog.closed ||
+                        this.#eventLog.lastSeq >= cursor
+                    ) {
+                        wake = undefined;
+                        resolve();
+                    }
+                });
+                wake = undefined;
+            }
+        } catch {
+            // The client closed the stream or a send failed; stop serving it.
+        } finally {
+            unsubscribe();
+            signal?.removeEventListener("abort", onAbort);
+        }
+    }
+
     async lookupTransfer(
         input: ArtifactTransferLookupInput,
     ): Promise<ArtifactTransferResult> {
@@ -216,6 +350,14 @@ export class ArtifactService {
 
     async waitForTransfer(transferId: string): Promise<ArtifactTransferRecord> {
         return await this.#transferService.waitForTransfer(transferId);
+    }
+
+    #recordEvent(
+        instance: string,
+        type: ArtifactEventType,
+        data?: JsonValue,
+    ): void {
+        this.#eventLog.record(instance, type, data);
     }
 }
 
@@ -272,6 +414,7 @@ export interface ArtifactServiceEndpoint {
 export interface ArtifactServiceOptions {
     chunkBytes?: number;
     directTransfer?: boolean;
+    eventHistoryLimit?: number;
     resolveEndpoint: (
         instance: string,
         authorityInstance?: string,
@@ -280,6 +423,19 @@ export interface ArtifactServiceOptions {
     shareUrl: (token: string) => string;
     storageDir: string;
     terminalHistoryLimit?: number;
+}
+
+/** Records one logical artifact event into the global sequence. */
+export type ArtifactEventRecorder = (
+    instance: string,
+    type: ArtifactEventType,
+    data?: JsonValue,
+) => void;
+
+export interface ArtifactSnapshot {
+    lastSeq: number;
+    shares: ArtifactShareResult[];
+    transfers: ArtifactTransferRecord[];
 }
 
 export function requireArtifactEndpoint(

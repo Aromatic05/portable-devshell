@@ -30,6 +30,7 @@ import {
     requireArtifactEndpoint,
 } from "../Service.js";
 import type {
+    ArtifactEventRecorder,
     ArtifactServiceEndpoint,
     ArtifactServiceOptions,
     ArtifactServiceSchedule,
@@ -40,6 +41,7 @@ import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
 export interface ArtifactTransferServiceOptions {
     chunkBytes?: number;
     directTransfer?: boolean;
+    recordEvent: ArtifactEventRecorder;
     recordStore: ArtifactRecordStore;
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     schedule?: ArtifactServiceOptions["schedule"];
@@ -49,6 +51,7 @@ export interface ArtifactTransferServiceOptions {
 const MAX_ARTIFACT_DIRECT_CHUNK_BYTES = 1024 * 1024;
 
 export class ArtifactTransferService {
+    readonly #recordEvent: ArtifactEventRecorder;
     readonly #recordStore: ArtifactRecordStore;
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #terminalHistoryLimit: number;
@@ -70,6 +73,7 @@ export class ArtifactTransferService {
             );
         }
 
+        this.#recordEvent = options.recordEvent;
         this.#recordStore = options.recordStore;
         this.#resolveEndpoint = options.resolveEndpoint;
         this.#terminalHistoryLimit = options.terminalHistoryLimit;
@@ -369,6 +373,10 @@ export class ArtifactTransferService {
             transfer.defaultInstance,
         );
         const data = toJsonValue(transfer.record);
+
+        // The global sequence records one entry per logical transfer event even
+        // though the same event is fanned out to the source and target workers.
+        this.#recordEvent(transfer.defaultInstance, type, data);
 
         if (sourceEndpoint !== undefined) {
             await emitToEndpoint(sourceEndpoint, type, data);

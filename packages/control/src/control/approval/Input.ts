@@ -33,6 +33,20 @@ export function readApprovalListOptions(payload?: JsonValue): {
     return { pendingOnly: payload.pendingOnly === true };
 }
 
+export function readApprovalSubscriptionFromSeq(payload?: JsonValue): number {
+    if (
+        !isRecord(payload) ||
+        typeof payload.fromSeq !== "number" ||
+        !Number.isSafeInteger(payload.fromSeq) ||
+        payload.fromSeq < 0
+    ) {
+        throw invalid(
+            "approval.subscribe requires a non-negative integer fromSeq.",
+        );
+    }
+    return payload.fromSeq;
+}
+
 export function readApprovalDecision(payload?: JsonValue): {
     decision: ApprovalDecision["decision"];
     policyPatch?: JsonValue;

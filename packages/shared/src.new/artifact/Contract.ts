@@ -19,6 +19,7 @@ import type {
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
+    ArtifactSnapshot,
     ArtifactStoredImageResult,
     ArtifactTransferRecord,
     ArtifactTransferResult,
@@ -31,10 +32,9 @@ export const artifactOperations = {
     cancelTransfer: "cancelTransfer",
     createShare: "createShare",
     getTransfer: "getTransfer",
-    listShares: "listShares",
-    listTransfers: "listTransfers",
     readImage: "readImage",
     revokeShare: "revokeShare",
+    snapshot: "snapshot",
     startTransfer: "startTransfer",
     subscribe: "subscribe",
     viewImage: "viewImage",
@@ -53,14 +53,6 @@ export interface ArtifactContract {
         request: { transferId: string };
         response: ArtifactTransferRecord;
     };
-    listShares: {
-        request: undefined;
-        response: ArtifactShareResult[];
-    };
-    listTransfers: {
-        request: undefined;
-        response: ArtifactTransferRecord[];
-    };
     readImage: {
         request: { imageRef: string };
         response: ArtifactStoredImageResult;
@@ -68,6 +60,10 @@ export interface ArtifactContract {
     revokeShare: {
         request: { shareId: string };
         response: ArtifactShareRevokeResult;
+    };
+    snapshot: {
+        request: undefined;
+        response: ArtifactSnapshot;
     };
     startTransfer: {
         request: ArtifactTransferStartInput & { defaultInstance: string };

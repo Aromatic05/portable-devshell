@@ -17,10 +17,7 @@ import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
 } from "./editor/Lock.js";
-import {
-    buildApplyResult,
-    type ConfigApplyChange,
-} from "./editor/Result.js";
+import { buildApplyResult, type ConfigApplyChange } from "./editor/Result.js";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
@@ -140,7 +137,10 @@ export class ConfigEngine {
         return await this.#mutationRunner.runExclusive(operation);
     }
 
-    async preflight(previous: ControlConfig, next: ControlConfig): Promise<void> {
+    async preflight(
+        previous: ControlConfig,
+        next: ControlConfig,
+    ): Promise<void> {
         await this.#runtimePreflight.assertAvailable(previous, next);
     }
 
@@ -187,6 +187,7 @@ export class ConfigEngine {
         if (result.restartControlRequired) this.#markRestartControlRequired();
         this.#changeHub?.publish([
             ...diffConfigPaths(previous.control, next.control, "control"),
+            ...diffConfigPaths(previous.instances, next.instances, "instances"),
             ...diffConfigPaths(previous.mcp, next.mcp, "mcp"),
             ...diffConfigPaths(previous.web, next.web, "web"),
         ]);
