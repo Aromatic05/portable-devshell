@@ -11,7 +11,7 @@ import { CliExtensionCommandService } from "../../../../../src/control/extension
 import { ModelDevshellBroker } from "../../../../../src/control/extension/cli/command/ModelBroker.ts";
 import type { InstanceDescriptor } from "../../../../../src/control/instance/Descriptor.ts";
 import { InstanceRegistry } from "../../../../../src/control/instance/registry/Registry.ts";
-import type { ContextAdminPort } from "../../../../../src/composition/mcp/route/Context.ts";
+import type { ContextAdminPort } from "../../../../../src/control/context/Route.ts";
 import type {
     WorkerCommandSessionClose,
     WorkerCommandSessionOpen,
@@ -30,8 +30,14 @@ interface Harness {
 }
 
 function harness(
-    options: { allow?: boolean; contextWorkspace?: string } = {},
+    options: {
+        allow?: boolean;
+        contextWorkspace?: string;
+        instance?: string;
+    } = {},
 ): Harness {
+    const instance = options.instance ?? "demo-local";
+    const contextWorkspace = options.contextWorkspace ?? "/repo";
     let closeListener:
         ((request: WorkerCommandSessionClose) => void) | undefined;
     let openListener: ((request: WorkerCommandSessionOpen) => void) | undefined;
@@ -75,13 +81,13 @@ function harness(
         },
     };
     const descriptor = {
-        name: "demo-local",
+        name: instance,
         worker,
     } as unknown as InstanceDescriptor;
     const registry = new InstanceRegistry([descriptor]);
     const command: CliModelCommandBinding = async (argv, invocation) => {
-        assert.equal(invocation.instance, "demo-local");
-        assert.equal(invocation.workspace, options.contextWorkspace ?? "/repo");
+        assert.equal(invocation.instance, instance);
+        assert.equal(invocation.workspace, contextWorkspace);
         assert.notEqual(invocation.io, undefined);
         if (argv[0] === "wait") {
             await new Promise<void>((_resolve, reject) => {
@@ -126,11 +132,14 @@ function harness(
         },
         async validateForInstance(ctxId: string, instance: string) {
             assert.equal(ctxId, "ctx-a");
-            assert.equal(instance, "demo-local");
+            assert.equal(instance, options.instance ?? "demo-local");
             return {
                 ctxId,
-                instance,
-                workspace: options.contextWorkspace ?? "/repo",
+                environments: [
+                    { instance: "alpha", workspace: "/a" },
+                    { instance: "beta", workspace: "/b" },
+                    { instance: "demo-local", workspace: contextWorkspace },
+                ],
             } as McpContextRecord;
         },
     } as unknown as ContextAdminPort;
@@ -174,6 +183,27 @@ test("model devshell executes an allowed command only under matching active bash
     ]);
     assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
     assert.deepEqual(h.faults, []);
+});
+
+test("model devshell binds the requested workspace to that instance environment", async (t) => {
+    const allowed = harness({ contextWorkspace: "/b", instance: "beta" });
+    t.after(() => allowed.broker.dispose());
+    allowed.setRecord(toolRecord({ instance: "beta" as never, workspace: "/b" }));
+    allowed.open(openRequest({ workspace: "/b" }));
+    await waitFor(() => allowed.completions.length === 1);
+    assert.deepEqual(allowed.completions, [
+        { exitCode: 0, sessionId: "session-a" },
+    ]);
+    assert.deepEqual(allowed.faults, []);
+
+    const rejected = harness({ contextWorkspace: "/b", instance: "beta" });
+    t.after(() => rejected.broker.dispose());
+    rejected.setRecord(toolRecord({ instance: "beta" as never, workspace: "/a" }));
+    rejected.open(openRequest({ workspace: "/a" }));
+    await waitFor(() => rejected.completions.length === 1);
+    assert.equal(rejected.completions[0]?.exitCode, 1);
+    assert.match(rejected.outputs[0]?.data ?? "", /context binding does not match/u);
+    assert.equal(rejected.faults.length, 1);
 });
 
 test("model devshell Context projections use the authoritative audited ctxId", async (t) => {

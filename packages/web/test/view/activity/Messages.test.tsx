@@ -40,14 +40,18 @@ const state: WebState = {
             {
                 createdAt: "2026-09-01T00:00:00Z",
                 ctxId: "ctx-old-active",
+                environments: [
+                    {
+                        instance: "alpha",
+                        workspace: "/work/portable-devshell",
+                    },
+                ],
                 expiresAt: "2026-10-01T00:00:00Z",
-                instance: "alpha",
                 lastAccessedAt: new Date(
                     Date.now() - 5 * 60 * 1_000,
                 ).toISOString(),
                 principal: "client-alpha",
                 status: "active",
-                workspace: "/work/portable-devshell",
             },
         ],
         instances: [
@@ -1328,32 +1332,44 @@ describe("Messages", () => {
                     {
                         createdAt: "2026-09-01T08:00:00Z",
                         ctxId: "ctx-project-new",
+                        environments: [
+                            {
+                                instance: "alpha",
+                                workspace: "/work/portable-devshell",
+                            },
+                        ],
                         expiresAt: "2026-09-01T09:00:00Z",
-                        instance: "alpha",
                         lastAccessedAt: "2026-09-01T08:20:00Z",
                         principal: "client-alpha",
                         status: "expired",
-                        workspace: "/work/portable-devshell",
                     },
                     {
                         createdAt: "2026-09-01T07:00:00Z",
                         ctxId: "ctx-project-old",
+                        environments: [
+                            {
+                                instance: "alpha",
+                                workspace: "/work/portable-devshell",
+                            },
+                        ],
                         expiresAt: "2026-09-01T08:00:00Z",
-                        instance: "alpha",
                         lastAccessedAt: "2026-09-01T07:20:00Z",
                         principal: "client-alpha",
                         status: "expired",
-                        workspace: "/work/portable-devshell",
                     },
                     {
                         createdAt: "2026-08-31T08:00:00Z",
                         ctxId: "ctx-efilinux",
+                        environments: [
+                            {
+                                instance: "alpha",
+                                workspace: "/work/efilinux",
+                            },
+                        ],
                         expiresAt: "2026-08-31T09:00:00Z",
-                        instance: "alpha",
                         lastAccessedAt: "2026-08-31T08:20:00Z",
                         principal: "client-alpha",
                         status: "expired",
-                        workspace: "/work/efilinux",
                     },
                 ],
             },
@@ -1401,12 +1417,16 @@ describe("Messages", () => {
                             {
                                 createdAt: "2026-09-02T08:00:00Z",
                                 ctxId: "ctx-efilinux-newer",
+                                environments: [
+                                    {
+                                        instance: "alpha",
+                                        workspace: "/work/efilinux",
+                                    },
+                                ],
                                 expiresAt: "2026-09-02T09:00:00Z",
-                                instance: "alpha",
                                 lastAccessedAt: "2026-09-02T08:20:00Z",
                                 principal: "client-alpha",
                                 status: "expired",
-                                workspace: "/work/efilinux",
                             },
                             ...groupedState.readModel.contexts,
                         ],

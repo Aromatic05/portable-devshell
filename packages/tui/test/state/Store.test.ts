@@ -174,11 +174,9 @@ import {
                         { instance: "alpha", workspace: "/workspace/alpha" },
                     ],
                     expiresAt: "2099-07-31T00:00:00.000Z",
-                    instance: "alpha",
                     lastAccessedAt: "2026-07-31T00:00:01.000Z",
                     principal: "test",
                     status: "active",
-                    workspace: "/workspace/alpha",
                 },
             ],
         });

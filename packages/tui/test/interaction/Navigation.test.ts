@@ -654,11 +654,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                         },
                     ],
                     expiresAt: "2099-01-01T00:00:00.000Z",
-                    instance: "alpha",
                     lastAccessedAt: now,
                     principal: "client",
                     status: "active",
-                    workspace: "/workspace/message-search",
                 },
             ],
         });
@@ -810,11 +808,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                         { instance: "alpha", workspace: "/workspace/alpha" },
                     ],
                     expiresAt: "2026-08-02T01:00:00.000Z",
-                    instance: "alpha",
                     lastAccessedAt: "2026-08-02T00:05:00.000Z",
                     principal: "client-alpha",
                     status: "active",
-                    workspace: "/workspace/alpha",
                 },
             ],
         });
@@ -1251,11 +1247,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                         { instance: "alpha", workspace: "/workspace/project" },
                     ],
                     expiresAt: "2099-01-01T00:00:00.000Z",
-                    instance: "alpha",
                     lastAccessedAt: now,
                     principal: "client",
                     status: "active",
-                    workspace: "/workspace/project",
                 },
                 {
                     createdAt: now,
@@ -1264,11 +1258,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                         { instance: "beta", workspace: "/workspace/project" },
                     ],
                     expiresAt: "2099-01-01T00:00:00.000Z",
-                    instance: "beta",
                     lastAccessedAt: now,
                     principal: "client",
                     status: "active",
-                    workspace: "/workspace/project",
                 },
             ],
         });
@@ -4340,11 +4332,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 { instance: "alpha", workspace: "/workspace/alpha" },
             ],
             expiresAt: "2099-08-02T01:00:00.000Z",
-            instance: "alpha",
             lastAccessedAt: "2026-08-02T00:05:00.000Z",
             principal: "client-alpha",
             status,
-            workspace: "/workspace/alpha",
         };
     }
 

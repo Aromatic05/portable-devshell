@@ -938,11 +938,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 { instance: "alpha", workspace: "/workspace/alpha" },
             ],
             expiresAt: "2099-09-10T10:00:00.000Z",
-            instance: "alpha",
             lastAccessedAt: "2026-09-10T10:00:01.000Z",
             principal: "test",
             status,
-            workspace: "/workspace/alpha",
         };
     }
 

@@ -11,7 +11,7 @@ import {
     InstanceRegistry,
 } from "@portable-devshell/control/testing";
 import { type McpOAuthApprovalService } from "@portable-devshell/mcp";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import {
     requireTcpPort,
@@ -33,7 +33,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const proxy = await startLoopbackHttpProxy();
         const origin = proxy.origin;
         const endpoint = `${origin}/demo/mcp`;
-        const host = new McpHost({
+        const host = new TestMcpHost({
             instances: [
                 {
                     auth: {

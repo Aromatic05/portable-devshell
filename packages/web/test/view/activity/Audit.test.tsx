@@ -67,22 +67,22 @@ const state: WebState = {
             {
                 createdAt: "2026-07-01T00:00:00Z",
                 ctxId: "ctx-alpha",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/alpha" },
+                ],
                 expiresAt: "2026-12-01T00:00:00Z",
-                instance: "alpha",
                 lastAccessedAt: recentContextAccess,
                 principal: "client-alpha",
                 status: "active",
-                workspace: "/workspace/alpha",
             },
             {
                 createdAt: "2026-07-31T08:00:00Z",
                 ctxId: "ctx-beta",
+                environments: [],
                 expiresAt: "2026-12-01T00:00:00Z",
-                instance: "beta",
                 lastAccessedAt: recentContextAccess,
                 principal: "client-beta",
                 status: "active",
-                workspace: "/workspace/beta",
             },
         ],
         instances: [
@@ -686,16 +686,26 @@ describe("Audit", () => {
                 ...state,
                 readModel: {
                     ...state.readModel,
-                    contexts: state.readModel.contexts.map((context) =>
-                        context.ctxId === "ctx-alpha"
+                    contexts: state.readModel.contexts.map((context) => ({
+                        ...context,
+                        ...(context.ctxId === "ctx-alpha"
                             ? {
-                                  ...context,
-                                  lastAccessedAt: new Date(
-                                      Date.now() - 2 * 60 * 60 * 1_000,
-                                  ).toISOString(),
+                                  environments: [
+                                      {
+                                          instance: "alpha",
+                                          workspace: "/workspace/alpha",
+                                      },
+                                      {
+                                          instance: "beta",
+                                          workspace: "/workspace/beta",
+                                      },
+                                  ],
                               }
-                            : context,
-                    ),
+                            : {}),
+                        lastAccessedAt: new Date(
+                            Date.now() - 2 * 60 * 60 * 1_000,
+                        ).toISOString(),
+                    })),
                 },
             },
             store: { disableContexts },
@@ -708,6 +718,12 @@ describe("Audit", () => {
             name: "Disable inactive Contexts",
         });
         expect(within(dialog).getByText("ctx-alpha")).toBeInTheDocument();
+        expect(
+            within(dialog).getByRole("row", { name: /ctx-alpha/u }),
+        ).toHaveTextContent("alpha, beta");
+        expect(
+            within(dialog).getByText("No attached environments"),
+        ).toBeInTheDocument();
         fireEvent.change(within(dialog).getByLabelText("Inactive for"), {
             target: { value: "20" },
         });
@@ -860,6 +876,49 @@ describe("Audit", () => {
         expect(
             within(scope).getByRole("option", { name: /ctx-alpha · beta/u }),
         ).toBeInTheDocument();
+    });
+
+    it("uses the selected instance environment for Context controls", () => {
+        renderAudit({
+            route: {
+                page: "audit",
+                view: "timeline",
+                scope: {
+                    kind: "context",
+                    instance: "beta",
+                    ctxId: "ctx-alpha",
+                },
+            },
+            state: {
+                ...state,
+                readModel: {
+                    ...state.readModel,
+                    contexts: state.readModel.contexts.map((context) =>
+                        context.ctxId === "ctx-alpha"
+                            ? {
+                                  ...context,
+                                  environments: [
+                                      {
+                                          instance: "alpha",
+                                          workspace: "/workspace/alpha",
+                                      },
+                                      {
+                                          instance: "beta",
+                                          workspace: "/workspace/beta",
+                                      },
+                                  ],
+                              }
+                            : context,
+                    ),
+                },
+            },
+        });
+
+        const controls = screen.getByRole("region", {
+            name: "Context controls",
+        });
+        expect(controls).toHaveTextContent("/workspace/beta");
+        expect(controls).not.toHaveTextContent("/workspace/alpha");
     });
 });
 

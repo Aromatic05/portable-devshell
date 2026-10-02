@@ -229,10 +229,8 @@ function fakeContext(queries: HistoryQuery[]): ExtensionContext {
                                 { instance: "local", workspace: "/repo" },
                             ],
                             expiresAt: "2026-10-03T00:00:00.000Z",
-                            instance: "local",
                             lastAccessedAt: "2026-10-02T09:00:00.000Z",
                             status: "active",
-                            workspace: "/repo",
                         },
                     ];
                 },
