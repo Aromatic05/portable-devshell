@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, rmdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ResourceLimits } from "node:worker_threads";
@@ -33,12 +33,16 @@ import {
     sharedExtensionHostModuleResolver,
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
+import {
+    disposeInProcessGeneration,
+    disposeSandboxGeneration,
+    throwInProcessActivationFailure,
+    throwSandboxActivationFailure,
+} from "./Cleanup.js";
 import { readExtensionManifest } from "./Manifest.js";
 import {
     assertPlainDirectory,
     assertPlainFile,
-    isDirectoryNotEmpty,
-    isMissing,
     resolveContainedPath,
 } from "./Paths.js";
 import { ExtensionPathLayout } from "../state/Layout.js";
@@ -213,16 +217,16 @@ export class ExtensionLoader {
             const bindings = await registrations.finalize();
             return new ExtensionGeneration({
                 dispose: async () =>
-                    await disposeGeneration(
-                        module!,
+                    await disposeInProcessGeneration({
                         config,
+                        module: module!,
                         processes,
+                        releaseHostModules: hostModules.release,
+                        runtimeDirectory,
+                        runtimeRoot,
                         workerDelegate,
                         workerExecute,
-                        runtimeRoot,
-                        runtimeDirectory,
-                        hostModules.release,
-                    ),
+                    }),
                 generation,
                 manifest,
                 registrations: bindings,
@@ -240,37 +244,17 @@ export class ExtensionLoader {
                 },
             });
         } catch (error) {
-            const cleanupFailures: unknown[] = [];
-            await Promise.resolve(module?.deactivate?.()).catch(
-                (cleanupError: unknown) => cleanupFailures.push(cleanupError),
-            );
-            await processes
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            try {
-                config?.close();
-            } catch (cleanupError) {
-                cleanupFailures.push(cleanupError);
-            }
-            await workerDelegate
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await workerExecute
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
-                (cleanupError) => cleanupFailures.push(cleanupError),
-            );
-            try {
-                hostModules.release();
-            } catch (cleanupError) {
-                cleanupFailures.push(cleanupError);
-            }
-            if (cleanupFailures.length === 0) throw error;
-            throw new AggregateError(
-                [error, ...cleanupFailures],
-                `Extension ${id} activation failed and candidate cleanup was incomplete.`,
-            );
+            return await throwInProcessActivationFailure(error, {
+                config,
+                extensionId: id,
+                module,
+                processes,
+                releaseHostModules: hostModules.release,
+                runtimeDirectory,
+                runtimeRoot,
+                workerDelegate,
+                workerExecute,
+            });
         }
     }
 
@@ -372,15 +356,15 @@ export class ExtensionLoader {
             );
             candidate = new ExtensionGeneration({
                 dispose: async () =>
-                    await disposeSandboxGeneration(
+                    await disposeSandboxGeneration({
+                        config: input.config,
+                        processes: input.processes,
+                        runtimeDirectory: input.runtimeDirectory,
+                        runtimeRoot: input.runtimeRoot,
                         sandbox,
-                        input.config,
-                        input.processes,
-                        input.workerDelegate,
-                        input.workerExecute,
-                        input.runtimeRoot,
-                        input.runtimeDirectory,
-                    ),
+                        workerDelegate: input.workerDelegate,
+                        workerExecute: input.workerExecute,
+                    }),
                 generation: input.generation,
                 manifest: input.manifest,
                 registrations: bindings,
@@ -400,33 +384,16 @@ export class ExtensionLoader {
             if (sandbox.faultError !== undefined) throw sandbox.faultError;
             return candidate;
         } catch (error) {
-            const cleanupFailures: unknown[] = [];
-            await sandbox
-                .dispose()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.processes
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            try {
-                input.config?.close();
-            } catch (cleanupError) {
-                cleanupFailures.push(cleanupError);
-            }
-            await input.workerDelegate
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.workerExecute
-                .closeAll()
-                .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await cleanupRuntimeDirectory(
-                input.runtimeRoot,
-                input.runtimeDirectory,
-            ).catch((cleanupError) => cleanupFailures.push(cleanupError));
-            if (cleanupFailures.length === 0) throw error;
-            throw new AggregateError(
-                [error, ...cleanupFailures],
-                `Extension ${input.id} sandbox activation failed and candidate cleanup was incomplete.`,
-            );
+            return await throwSandboxActivationFailure(error, {
+                config: input.config,
+                extensionId: input.id,
+                processes: input.processes,
+                runtimeDirectory: input.runtimeDirectory,
+                runtimeRoot: input.runtimeRoot,
+                sandbox,
+                workerDelegate: input.workerDelegate,
+                workerExecute: input.workerExecute,
+            });
         }
     }
 }
@@ -461,85 +428,6 @@ async function registrationsFromSandbox(
         );
     }
     return await registrations.finalize();
-}
-
-async function disposeGeneration(
-    module: ExtensionModule,
-    config: ExtensionConfigRuntime | undefined,
-    processes: ExtensionProcessRuntime,
-    delegatedWorker: ExtensionWorkerRuntime,
-    worker: ExtensionWorkerRuntime,
-    runtimeRoot: string,
-    runtimeDirectory: string,
-    releaseHostModules: () => void,
-): Promise<void> {
-    const failures: unknown[] = [];
-    await Promise.resolve(module.deactivate?.()).catch((error) =>
-        failures.push(error),
-    );
-    try {
-        config?.close();
-    } catch (error) {
-        failures.push(error);
-    }
-    await processes.closeAll().catch((error) => failures.push(error));
-    await delegatedWorker.closeAll().catch((error) => failures.push(error));
-    await worker.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
-        (error) => failures.push(error),
-    );
-    try {
-        releaseHostModules();
-    } catch (error) {
-        failures.push(error);
-    }
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1)
-        throw new AggregateError(
-            failures,
-            "Extension generation cleanup failed.",
-        );
-}
-
-async function disposeSandboxGeneration(
-    sandbox: ExtensionSandboxHost,
-    config: ExtensionConfigRuntime | undefined,
-    processes: ExtensionProcessRuntime,
-    delegatedWorker: ExtensionWorkerRuntime,
-    worker: ExtensionWorkerRuntime,
-    runtimeRoot: string,
-    runtimeDirectory: string,
-): Promise<void> {
-    const failures: unknown[] = [];
-    await sandbox.dispose().catch((error) => failures.push(error));
-    try {
-        config?.close();
-    } catch (error) {
-        failures.push(error);
-    }
-    await processes.closeAll().catch((error) => failures.push(error));
-    await delegatedWorker.closeAll().catch((error) => failures.push(error));
-    await worker.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
-        (error) => failures.push(error),
-    );
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1)
-        throw new AggregateError(
-            failures,
-            "Extension sandbox generation cleanup failed.",
-        );
-}
-
-async function cleanupRuntimeDirectory(
-    runtimeRoot: string,
-    runtimeDirectory: string,
-): Promise<void> {
-    await rm(runtimeDirectory, { force: true, recursive: true });
-    await rmdir(runtimeRoot).catch((error: unknown) => {
-        if (isMissing(error) || isDirectoryNotEmpty(error)) return;
-        throw error;
-    });
 }
 
 function consoleExtensionLogger(
