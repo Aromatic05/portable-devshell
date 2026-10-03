@@ -15,6 +15,7 @@ import {
     type ExtensionCatalogRegistration,
 } from "./discovery/Catalog.js";
 import type { ExtensionPointRegistry } from "./registration/PointRegistry.js";
+import { ExtensionRetirementTracker } from "./registration/Retirement.js";
 import type { ConfigRegistry } from "../config/Registry.js";
 import { ExtensionConfigPublisher } from "./config/Publisher.js";
 import {
@@ -43,9 +44,7 @@ export class ExtensionHost {
     readonly #listeners = new Set<() => void>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
-    readonly #retired = new Map<string, Set<ExtensionGeneration>>();
-    readonly #retirementFailures = new Map<string, unknown[]>();
-    readonly #retirementPromises = new Set<Promise<void>>();
+    readonly #retirement: ExtensionRetirementTracker;
     #mutationTail: Promise<void> = Promise.resolve();
     #registrySnapshot?: ExtensionRegistrySnapshot;
     #started = false;
@@ -60,6 +59,10 @@ export class ExtensionHost {
         this.#config = new ExtensionConfigPublisher(options.configRegistry);
         this.#loader = options.loader;
         this.#registry = options.registry;
+        this.#retirement = new ExtensionRetirementTracker(
+            (id, generation, error) =>
+                this.#recordFailure(id, generation, error),
+        );
     }
 
     async start(): Promise<void> {
@@ -364,7 +367,7 @@ export class ExtensionHost {
             const active = this.#active.get(id);
             if (active !== undefined) {
                 this.#active.delete(id);
-                this.#trackRetired(id, active);
+                this.#retirement.track(id, active);
             }
             this.#failures.delete(id);
         });
@@ -441,30 +444,14 @@ export class ExtensionHost {
             const active = this.#active.get(id);
             if (active !== undefined) {
                 this.#active.delete(id);
-                this.#trackRetired(id, active);
+                this.#retirement.track(id, active);
             }
             this.#failures.delete(id);
         });
     }
 
     async waitForDrain(id: string): Promise<void> {
-        const retired = [...(this.#retired.get(id) ?? [])];
-        const settled = await Promise.allSettled(
-            retired.map(async (generation) => await generation.retire()),
-        );
-        const failures = uniqueFailures([
-            ...(this.#retirementFailures.get(id) ?? []),
-            ...settled.flatMap((result) =>
-                result.status === "rejected" ? [result.reason] : [],
-            ),
-        ]);
-        this.#retirementFailures.delete(id);
-        if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                `Extension ${id} failed to drain cleanly.`,
-            );
-        }
+        await this.#retirement.waitForDrain(id);
     }
 
     async forget(id: string): Promise<void> {
@@ -474,9 +461,7 @@ export class ExtensionHost {
             if (snapshot.extensions[id] === undefined)
                 throw extensionNotFound(id);
             if (
-                this.#active.has(id) ||
-                (this.#retired.get(id)?.size ?? 0) > 0 ||
-                (this.#retirementFailures.get(id)?.length ?? 0) > 0
+                this.#active.has(id) || this.#retirement.has(id)
             ) {
                 throw extensionInvalid(
                     id,
@@ -626,24 +611,12 @@ export class ExtensionHost {
             if (this.#stopping) return;
             this.#stopping = true;
             for (const [id, generation] of this.#active) {
-                this.#trackRetired(id, generation);
+                this.#retirement.track(id, generation);
             }
             this.#active.clear();
             this.#config.clear();
         });
-        const settled = await Promise.allSettled([...this.#retirementPromises]);
-        const failures = uniqueFailures([
-            ...settled.flatMap((result) =>
-                result.status === "rejected" ? [result.reason] : [],
-            ),
-            ...[...this.#retirementFailures.values()].flat(),
-        ]);
-        this.#retirementFailures.clear();
-        if (failures.length > 0)
-            throw new AggregateError(
-                failures,
-                "Extension generations failed to dispose cleanly.",
-            );
+        await this.#retirement.drainAll();
     }
 
     async #catalogEntry(
@@ -924,27 +897,7 @@ export class ExtensionHost {
         }
         const previous = this.#active.get(id);
         this.#active.set(id, candidate);
-        if (previous !== undefined) this.#trackRetired(id, previous);
-    }
-
-    #trackRetired(id: string, generation: ExtensionGeneration): void {
-        const retired = this.#retired.get(id) ?? new Set<ExtensionGeneration>();
-        retired.add(generation);
-        this.#retired.set(id, retired);
-        const retirement = generation.retire();
-        this.#retirementPromises.add(retirement);
-        void retirement
-            .catch((error: unknown) => {
-                const failures = this.#retirementFailures.get(id) ?? [];
-                failures.push(error);
-                this.#retirementFailures.set(id, failures);
-                this.#recordFailure(id, generation.generation, error);
-            })
-            .finally(() => {
-                this.#retirementPromises.delete(retirement);
-                retired.delete(generation);
-                if (retired.size === 0) this.#retired.delete(id);
-            });
+        if (previous !== undefined) this.#retirement.track(id, previous);
     }
 
     #record(id: string, entry: ExtensionRegistryEntry): ExtensionRuntimeRecord {
@@ -965,13 +918,7 @@ export class ExtensionHost {
                   }
                 : undefined;
         const failure = activeFailure ?? this.#failures.get(id);
-        const retired = [...(this.#retired.get(id) ?? [])].map(
-            (generation) => ({
-                generation: generation.generation,
-                inFlight: generation.inFlight,
-                state: generation.state,
-            }),
-        );
+        const retired = this.#retirement.list(id);
         return {
             ...(active === undefined
                 ? {}
@@ -1055,17 +1002,6 @@ class ExtensionCandidatePublicationError extends Error {
         );
         this.name = "ExtensionCandidatePublicationError";
     }
-}
-
-function uniqueFailures(failures: readonly unknown[]): unknown[] {
-    const unique: unknown[] = [];
-    const seen = new Set<unknown>();
-    for (const failure of failures) {
-        if (seen.has(failure)) continue;
-        seen.add(failure);
-        unique.push(failure);
-    }
-    return unique;
 }
 
 function extensionNotFound(id: string): Error {
