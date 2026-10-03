@@ -23,11 +23,11 @@ import {
     limitProcessLogResponse,
     readProcessLogQuery,
     readProcessSubscriptionFromSeq,
-} from "@portable-devshell/core";
-import { readTodoSubscriptionFromSeq } from "@portable-devshell/core";
+    readTodoSubscriptionFromSeq,
+    readToolCall,
+} from "@portable-devshell/core/testing";
 import {
     limitToolCallResponse,
-    readToolCall,
     readToolCallQuery,
 } from "@portable-devshell/core";
 

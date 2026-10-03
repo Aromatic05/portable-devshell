@@ -1,4 +1,4 @@
-import type { WorkerInstance } from "@portable-devshell/core";
+import type { WorkerInstance } from "@portable-devshell/core/testing";
 import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type {
@@ -6,7 +6,7 @@ import type {
     InstanceDescriptor,
     InstanceGoalPort,
     InstanceTodoPort,
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 
 export function createTestGoalPort(): InstanceGoalPort {
     return {

@@ -38,3 +38,21 @@ export * from "./worker/transport/service/Client.js";
 export * from "./worker/transport/service/Model.js";
 
 export * from "./worker/protocol/Terminal.js";
+
+export * from "./instance/Registry.js";
+export type {
+    InstanceApprovalPort,
+    InstanceGoalPort,
+    InstanceTodoPort,
+} from "./instance/Descriptor.js";
+export type {
+    TerminalProcess,
+    TerminalProcessExit,
+} from "./terminal/Backend.js";
+export {
+    limitProcessLogResponse,
+    readProcessLogQuery,
+    readProcessSubscriptionFromSeq,
+} from "./process/Route.js";
+export { readTodoSubscriptionFromSeq } from "./task/todo/Route.js";
+export { readToolCall } from "./tool/Input.js";
