@@ -1,6 +1,6 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
 import type { Address } from "../endpoint/Address.js";
-import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../primitive/Error.js";
+import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../Error.js";
 import type { Message } from "./Packet.js";
 
 export interface RpcError {

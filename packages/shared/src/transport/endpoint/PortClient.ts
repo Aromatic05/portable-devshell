@@ -2,7 +2,7 @@ import type { Endpoint } from "./Endpoint.js";
 import type { Host, PortName } from "./Address.js";
 import { Rpc } from "../packet/Rpc.js";
 import { Stream, type MessageStream } from "../packet/Stream.js";
-import { attachRequestCanceller } from "../primitive/RequestTimeout.js";
+import { attachRequestCanceller } from "../../client/Request.js";
 
 /**
  * Domain-blind RPC and stream surface of one endpoint port. Callers bind the
@@ -60,9 +60,7 @@ function request<T>(
             signal?.removeEventListener("abort", abort);
         }
     })();
-    return attachRequestCanceller(result, (reason) =>
-        controller.abort(reason),
-    );
+    return attachRequestCanceller(result, (reason) => controller.abort(reason));
 }
 
 async function open(

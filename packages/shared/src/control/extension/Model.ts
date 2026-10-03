@@ -1,17 +1,9 @@
-import type { JsonValue } from "../../transport/primitive/JsonValue.js";
+import type { JsonValue } from "../../types/Json.js";
 
 export type ExtensionRuntimeState =
-    | "active"
-    | "disabled"
-    | "failed"
-    | "installed";
+    "active" | "disabled" | "failed" | "installed";
 export type ExtensionGenerationRuntimeState =
-    | "active"
-    | "disposed"
-    | "dispose-failed"
-    | "draining"
-    | "faulted"
-    | "ready";
+    "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionRuntimeFailure {
     generation?: string;
@@ -58,12 +50,7 @@ export interface CliCommandWireResult {
 }
 
 export type TuiPageTone =
-    | "normal"
-    | "muted"
-    | "accent"
-    | "success"
-    | "warning"
-    | "danger";
+    "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface TuiPageDescriptor {
     readonly extensionId: string;

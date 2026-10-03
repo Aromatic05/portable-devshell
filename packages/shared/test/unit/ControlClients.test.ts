@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    createControlClients,
+    createToolTransport,
     Endpoint,
+    type JsonValue,
     Rpc,
     Stream,
 } from "@portable-devshell/shared";
 
-test("tool clients send calls to control ingress and sessions/history to the instance", async (t) => {
+test("tool transport routes all operations through the target instance tool port", async (t) => {
     const endpoint = new Endpoint({ host: "native-client" });
     const connections: Array<{ host: string; port: string }> = [];
     endpoint.connect = async (host, port) => {
@@ -16,14 +17,14 @@ test("tool clients send calls to control ingress and sessions/history to the ins
         return endpoint.bind(`client-${port}`).connect(host, port);
     };
     const payloads: unknown[] = [];
-    const controlPort = endpoint.bind("tool", "@control");
-    const calls = new Rpc(controlPort, {
+    const callPort = endpoint.bind("tool", "nonexistent");
+    const calls = new Rpc(callPort, {
         call: (payload) => {
             payloads.push(payload);
             return { ok: true };
         },
     });
-    const streams = new Stream(controlPort);
+    const streams = new Stream(callPort);
     streams.onOpen(async (stream, name, payload) => {
         assert.equal(name, "callStream");
         payloads.push(payload);
@@ -51,28 +52,53 @@ test("tool clients send calls to control ingress and sessions/history to the ins
         sessions.close();
         endpoint.close();
     });
-    const clients = createControlClients(endpoint, { clientKind: "cli" });
-    assert.deepEqual(await clients.tool.call("nonexistent", "file_read", { path: "a" }, "/workspace"), { ok: true });
+    const tool = createToolTransport(endpoint);
+    assert.deepEqual(
+        await tool.call("nonexistent", "file_read", { path: "a" }, "/workspace"),
+        { ok: true },
+    );
     const progress: unknown[] = [];
-    assert.deepEqual(await clients.tool.callStreaming("nonexistent", "file_read", { path: "b" }, "/workspace", {
-        operationId: "operation-1",
-        recording: "caller",
-        onProgress: (value) => progress.push(value),
-    }), { ok: true });
+    assert.deepEqual(
+        await tool.callStreaming(
+            "nonexistent",
+            "file_read",
+            { path: "b" },
+            "/workspace",
+            {
+                operationId: "operation-1",
+                recording: "caller",
+                onProgress: (value: JsonValue) => progress.push(value),
+            },
+        ),
+        { ok: true },
+    );
     assert.deepEqual(progress, [{ step: 1 }]);
-    assert.deepEqual(await clients.tool.openSession("existing", "/requested"), { tools: [], workspace: "/canonical" });
-    assert.deepEqual(await clients.tool.closeSession("existing"), {});
-    assert.deepEqual(await clients.tool.listCalls("existing", { limit: 5 }), []);
+    assert.deepEqual(await tool.openSession("existing", "/requested"), {
+        tools: [],
+        workspace: "/canonical",
+    });
+    assert.deepEqual(await tool.closeSession("existing"), {});
+    assert.deepEqual(await tool.listCalls("existing", { limit: 5 }), []);
     assert.deepEqual(connections, [
-        { host: "@control", port: "tool" },
-        { host: "@control", port: "tool" },
+        { host: "nonexistent", port: "tool" },
+        { host: "nonexistent", port: "tool" },
         { host: "existing", port: "tool" },
         { host: "existing", port: "tool" },
         { host: "existing", port: "tool" },
     ]);
     assert.deepEqual(payloads, [
-        { instance: "nonexistent", toolName: "file_read", input: { path: "a" }, workspace: "/workspace" },
-        { instance: "nonexistent", toolName: "file_read", input: { path: "b" }, workspace: "/workspace", operationId: "operation-1", recording: "caller" },
+        {
+            toolName: "file_read",
+            input: { path: "a" },
+            workspace: "/workspace",
+        },
+        {
+            toolName: "file_read",
+            input: { path: "b" },
+            workspace: "/workspace",
+            operationId: "operation-1",
+            recording: "caller",
+        },
         { workspace: "/requested" },
         {},
         { limit: 5 },

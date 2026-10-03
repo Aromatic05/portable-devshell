@@ -1,25 +1,22 @@
-import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
+import { CONTROL_HOST } from "../../client/Control.js";
 import {
-    createPortClient,
-    type PortClient,
-} from "../../transport/endpoint/PortClient.js";
-import {
+    type EventStreamPort,
     EventStreamReader,
     readStreamGapPayload,
-    type EventStreamPort,
-} from "../../transport/stream/EventStream.js";
-import type { JsonValue } from "../../transport/primitive/JsonValue.js";
-import { CONTROL_HOST } from "../connection/Control.js";
+} from "../../client/Stream.js";
+import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
+import { createPortClient } from "../../transport/endpoint/PortClient.js";
+import type { MessageStream } from "../../transport/packet/Stream.js";
+import type { JsonValue } from "../../types/Json.js";
 import {
-    configOperations,
+    type ConfigChangeEvent,
+    type ConfigSnapshot,
+    type InstanceChangeStreamPort,
     readConfigChangeEvent,
     readConfigSnapshot,
-    type ConfigChangeEvent,
-    type ConfigOperation,
-    type ConfigRequest,
-    type ConfigResponse,
-    type ConfigSnapshot,
-} from "./Contract.js";
+    readInstanceChangeEvent,
+    readInstanceChangeStreamGapPayload,
+} from "./Revision.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -27,54 +24,111 @@ import type {
     ConfigUpdateMcpRequest,
     ConfigUpdateWebRequest,
     ConfigView,
-} from "./Edit.js";
-
-export type ConfigChangeStreamPort = EventStreamPort<ConfigChangeEvent>;
+    InstanceChangeEvent,
+    InstanceCreateDraft,
+    InstanceCreateResult,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+    InstanceListEnvelope,
+} from "./Model.js";
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
+} from "./Preference.js";
 
 export interface ConfigTransport {
+    createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
+    createInstanceSchema(): Promise<InstanceCreateSchema>;
+    deleteInstance(instanceName: string): Promise<Record<string, JsonValue>>;
+    disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
+    enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     get(): Promise<ConfigView>;
+    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
+    listInstances(): Promise<InstanceListEnvelope["instances"]>;
     snapshot(): Promise<ConfigSnapshot>;
+    snapshotInstances(): Promise<InstanceListEnvelope>;
+    subscribe(fromRevision: number): Promise<EventStreamPort<ConfigChangeEvent>>;
+    subscribeInstances(fromRevision: number): Promise<InstanceChangeStreamPort>;
     update(request: ConfigBatchUpdateRequest): Promise<ConfigView>;
+    updateConversationPreferences(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot>;
     updateInstance(request: ConfigUpdateInstanceRequest): Promise<ConfigView>;
     updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<ConfigView>;
     updateWeb(request: ConfigUpdateWebRequest): Promise<ConfigView>;
     validate(draft: ConfigDraft): Promise<ConfigView>;
-    subscribe(fromRevision: number): Promise<ConfigChangeStreamPort>;
+    validateInstanceCreate(
+        draft: InstanceCreateDraft,
+    ): Promise<InstanceCreateSummary>;
 }
 
 export function createConfigTransport(endpoint: Endpoint): ConfigTransport {
-    return configTransport(createPortClient(endpoint, CONTROL_HOST, "config"));
-}
-
-export function configTransport(port: PortClient): ConfigTransport {
-    const request = <Operation extends ConfigOperation>(
-        operation: Operation,
-        payload: ConfigRequest<Operation>,
-    ): Promise<ConfigResponse<Operation>> =>
-        port.request<ConfigResponse<Operation>>(operation, payload);
+    const port = createPortClient(endpoint, CONTROL_HOST, "config");
     return {
-        get: () => request(configOperations.get, undefined),
-        snapshot: async () =>
-            readConfigSnapshot(
-                await port.request<JsonValue>(
-                    configOperations.snapshot,
-                    undefined,
-                ),
+        createInstance: (draft) =>
+            port.request<InstanceCreateResult>("createInstance", draft),
+        createInstanceSchema: () =>
+            port.request<InstanceCreateSchema>("createInstanceSchema"),
+        deleteInstance: (instanceName) =>
+            port.request<Record<string, JsonValue>>("deleteInstance", {
+                instanceName,
+            }),
+        disableInstance: (instanceName) =>
+            port.request<Record<string, JsonValue>>("disableInstance", {
+                instanceName,
+            }),
+        enableInstance: (instanceName) =>
+            port.request<Record<string, JsonValue>>("enableInstance", {
+                instanceName,
+            }),
+        get: () => port.request<ConfigView>("get"),
+        getConversationPreferences: () =>
+            port.request<ConversationPreferencesSnapshot>(
+                "getConversationPreferences",
             ),
+        listInstances: () =>
+            port.request<InstanceListEnvelope["instances"]>("listInstances"),
+        snapshot: async () =>
+            readConfigSnapshot(await port.request<JsonValue>("snapshot")),
+        snapshotInstances: () =>
+            port.request<InstanceListEnvelope>("snapshotInstances"),
         subscribe: async (fromRevision) =>
             new EventStreamReader<ConfigChangeEvent>(
-                await port.open(configOperations.subscribe, { fromRevision }),
+                await port.open("subscribe", { fromRevision }),
                 {
                     decodeEvent: readConfigChangeEvent,
                     readGap: readStreamGapPayload,
                 },
             ),
-        update: (draft) => request(configOperations.update, draft),
-        updateInstance: (draft) =>
-            request(configOperations.updateInstance, draft),
-        updateMcpEndpoint: (draft) =>
-            request(configOperations.updateMcpEndpoint, draft),
-        updateWeb: (draft) => request(configOperations.updateWeb, draft),
-        validate: (draft) => request(configOperations.validate, draft),
+        subscribeInstances: async (fromRevision) =>
+            new InstanceChangeStream(
+                await port.open("subscribeInstances", { fromRevision }),
+            ),
+        update: (request) => port.request<ConfigView>("update", request),
+        updateConversationPreferences: (patch) =>
+            port.request<ConversationPreferencesSnapshot>(
+                "updateConversationPreferences",
+                patch,
+            ),
+        updateInstance: (request) =>
+            port.request<ConfigView>("updateInstance", request),
+        updateMcpEndpoint: (request) =>
+            port.request<ConfigView>("updateMcpEndpoint", request),
+        updateWeb: (request) => port.request<ConfigView>("updateWeb", request),
+        validate: (draft) => port.request<ConfigView>("validate", draft),
+        validateInstanceCreate: (draft) =>
+            port.request<InstanceCreateSummary>(
+                "validateInstanceCreate",
+                draft,
+            ),
     };
+}
+
+class InstanceChangeStream extends EventStreamReader<InstanceChangeEvent> {
+    constructor(stream: MessageStream) {
+        super(stream, {
+            decodeEvent: readInstanceChangeEvent,
+            readGap: readInstanceChangeStreamGapPayload,
+        });
+    }
 }

@@ -1,7 +1,7 @@
 import {
     TRANSPORT_PROTOCOL_FRAME_TOO_LARGE_CODE,
     TRANSPORT_PROTOCOL_INVALID_FRAME_CODE,
-} from "../primitive/Error.js";
+} from "../Error.js";
 
 const LENGTH_SIZE = 4;
 const FRAME_HEADER_SIZE = 6;
@@ -181,7 +181,8 @@ export function encodeFrame(frame: Frame): Uint8Array {
 }
 
 export function decodeFrame(encoded: Uint8Array): Frame {
-    if (encoded.byteLength < LENGTH_SIZE) throw protocolError("Frame length is missing.");
+    if (encoded.byteLength < LENGTH_SIZE)
+        throw protocolError("Frame length is missing.");
     const length = readU32(encoded, 0);
     assertFrameSize(length);
     if (encoded.byteLength !== LENGTH_SIZE + length)
@@ -271,7 +272,10 @@ function decodeOpen(streamId: number, payload: Uint8Array): Frame {
         type: "open",
         streamId,
         receiveWindow,
-        service: decodeUtf8(payload.subarray(OPEN_FIXED_SIZE, serviceEnd), "OPEN service"),
+        service: decodeUtf8(
+            payload.subarray(OPEN_FIXED_SIZE, serviceEnd),
+            "OPEN service",
+        ),
         metadata: Uint8Array.from(metadata),
     };
 }

@@ -1,7 +1,7 @@
 // Stateful extension control projection. Owns the installed runtime catalog,
 // the optional TUI page catalog with its per-page snapshot cache, and the
 // optional Web application/page catalogs with their per-page snapshot caches.
-// Runtime mutations and page reads/actions update only this extension state;
+// Extension mutations and page reads/actions update only this extension state;
 // the projection never reaches into another control domain.
 //
 // Catalog reads are explicit (refreshCatalogs) and page snapshots are updated

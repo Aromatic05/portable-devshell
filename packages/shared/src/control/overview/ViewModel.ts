@@ -10,7 +10,7 @@
 import type { OperationalOverview } from "./Model.js";
 import type { OverviewTransport } from "./Transport.js";
 
-export type OverviewViewModelStatus =
+type OverviewViewModelStatus =
     "idle" | "ready" | "unsupported" | "failed";
 
 export interface OverviewViewModelState {

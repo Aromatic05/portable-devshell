@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    ControlError,
-    isControlErrorBody,
-    toControlErrorBody,
+    isRemoteErrorBody,
+    RemoteError,
+    toRemoteErrorBody,
 } from "@portable-devshell/shared";
 
-test("control error serializes nested control errors and structured details", () => {
-    const cause = new ControlError({
+test("remote error serializes nested causes and structured details", () => {
+    const cause = new RemoteError({
         code: "worker.offline",
         details: { instance: "local-one" },
         message: "worker offline",
         retryable: true,
     });
-    const error = new ControlError({
+    const error = new RemoteError({
         cause,
         code: "control.failed",
         details: { operation: "start" },
@@ -37,9 +37,9 @@ test("control error serializes nested control errors and structured details", ()
     assert.equal(error.cause, cause);
 });
 
-test("control error body validation recursively rejects malformed causes", () => {
+test("remote error body validation recursively rejects malformed causes", () => {
     assert.equal(
-        isControlErrorBody({
+        isRemoteErrorBody({
             cause: {
                 code: "worker.offline",
                 message: "offline",
@@ -65,7 +65,7 @@ test("control error body validation recursively rejects malformed causes", () =>
             retryable: false,
         },
     ]) {
-        assert.equal(isControlErrorBody(value), false);
+        assert.equal(isRemoteErrorBody(value), false);
     }
 });
 
@@ -78,7 +78,7 @@ test("plain errors are normalized with defaults and nested causes", () => {
         details: { operation: "status" },
     });
 
-    assert.deepEqual(toControlErrorBody(error), {
+    assert.deepEqual(toRemoteErrorBody(error), {
         cause: {
             code: "root.failed",
             message: "root cause",
@@ -91,15 +91,15 @@ test("plain errors are normalized with defaults and nested causes", () => {
     });
 });
 
-test("existing control error bodies pass through and unrelated values are ignored", () => {
+test("existing remote error bodies pass through and unrelated values are ignored", () => {
     const body = {
         code: "control.failed",
         message: "failed",
         retryable: false,
     };
 
-    assert.equal(toControlErrorBody(body), body);
-    assert.equal(toControlErrorBody(undefined), undefined);
-    assert.equal(toControlErrorBody("failed"), undefined);
-    assert.equal(toControlErrorBody({ code: "failed" }), undefined);
+    assert.equal(toRemoteErrorBody(body), body);
+    assert.equal(toRemoteErrorBody(undefined), undefined);
+    assert.equal(toRemoteErrorBody("failed"), undefined);
+    assert.equal(toRemoteErrorBody({ code: "failed" }), undefined);
 });

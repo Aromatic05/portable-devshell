@@ -1,9 +1,9 @@
-import type { ApprovalPolicy } from "../../runtime/approval/Model.js";
+import type { ApprovalPolicy } from "../../workspace/approval/Model.js";
 import type {
     InstanceContainerConfig,
     InstanceContainerDraft,
-} from "../instance/container/Model.js";
-import { configInputError } from "./Issue.js";
+} from "./Model.js";
+import { configInputError } from "./Error.js";
 import type {
     ConfigDraft,
     ConfigGlobalDraft,
@@ -16,7 +16,7 @@ import type {
     ConfigWebOAuth2Draft,
     ConfigWebPatch,
     ConfigWebView,
-} from "./Edit.js";
+} from "./Model.js";
 import {
     defaultConfigNormalizeContext,
     MASKED_CONFIG_TOKEN,
@@ -473,7 +473,10 @@ function normalizeGlobalMcpOAuth2(
     if (draft === undefined) return { approval: "tui" };
     const approval = draft.approval ?? "token";
     if (approval === "tui") return { approval };
-    return { approval, ...(draft.token === undefined ? {} : { token: draft.token }) };
+    return {
+        approval,
+        ...(draft.token === undefined ? {} : { token: draft.token }),
+    };
 }
 
 function toGlobalMcpOAuth2Draft(
@@ -525,7 +528,7 @@ function toWebAuthDraft(auth: ControlWebAuthConfig): {
     };
 }
 
-export function normalizePublicBaseUrl(
+function normalizePublicBaseUrl(
     value: string | null | undefined,
     listenHost: string,
     listenPort: number,

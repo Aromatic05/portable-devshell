@@ -1,5 +1,5 @@
 import type { Channel } from "../endpoint/channel/Channel.js";
-import { TRANSPORT_PROTOCOL_INVALID_FRAME_CODE } from "../primitive/Error.js";
+import { TRANSPORT_PROTOCOL_INVALID_FRAME_CODE } from "../Error.js";
 import {
     FRAME_MAX_DATA_SIZE,
     FrameBuffer,
@@ -339,7 +339,9 @@ export class FrameProtocol implements FrameStreamHost {
             throw this.#connectionError("Frame opener received an OPEN frame.");
         }
         if (this.#opened)
-            throw this.#connectionError("Frame Service stream is already open.");
+            throw this.#connectionError(
+                "Frame Service stream is already open.",
+            );
         this.#opened = true;
         const stream = new FrameStreamState({
             host: this,

@@ -7,6 +7,7 @@ export * from "./endpoint/PortClient.js";
 export * from "./endpoint/channel/Channel.js";
 export * from "./endpoint/channel/Local.js";
 export * from "./endpoint/channel/Web.js";
+export * from "./endpoint/route/Control.js";
 export * from "./endpoint/route/Route.js";
 
 export * from "./envelope/Codec.js";
@@ -18,9 +19,4 @@ export * from "./packet/Event.js";
 export * from "./packet/Rpc.js";
 export * from "./packet/Stream.js";
 
-export * from "./primitive/Error.js";
-export * from "./primitive/JsonValue.js";
-export * from "./primitive/RequestTimeout.js";
-
-export * from "./stream/EventStream.js";
-export * from "./stream/Subscription.js";
+export * from "./Error.js";

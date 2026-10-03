@@ -3,9 +3,9 @@ import type {
     ApprovalPolicyDecision,
     ApprovalPolicyMode,
     ApprovalPolicySourceScope,
-} from "../../runtime/approval/Model.js";
-import { configInputError, type ConfigPathSegment } from "./Issue.js";
-import type { InstanceContainerDraft } from "../instance/container/Model.js";
+} from "../../workspace/approval/Model.js";
+import { configInputError, type ConfigPathSegment } from "./Error.js";
+import type { InstanceContainerDraft } from "./Model.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -16,13 +16,12 @@ import type {
     ConfigInstanceTargetRequest,
     ConfigMcpAuthDraft,
     ConfigMcpPatch,
-    ConfigPatch,
     ConfigUpdateInstanceRequest,
     ConfigUpdateMcpRequest,
     ConfigUpdateWebRequest,
     ConfigWebOAuth2Draft,
     ConfigWebPatch,
-} from "./Edit.js";
+} from "./Model.js";
 import type {
     ControlInstanceAlertsConfig,
     ControlInstanceLogsConfig,
@@ -170,26 +169,6 @@ export function parseConfigInstanceDraft(
             record.workspace === undefined
                 ? undefined
                 : parseWorkspaceDraft(record.workspace, [...path, "workspace"]),
-    };
-}
-
-export function parseConfigPatch(value: unknown): ConfigPatch {
-    const record = readRecord(value, []);
-    assertKnownKeys(record, ["control", "mcp", "web"], []);
-
-    return {
-        control:
-            record.control === undefined
-                ? undefined
-                : parseControlDraft(record.control, ["control"]),
-        mcp:
-            record.mcp === undefined
-                ? undefined
-                : parseConfigMcpPatch(record.mcp, ["mcp"]),
-        web:
-            record.web === undefined
-                ? undefined
-                : parseConfigWebPatch(record.web, ["web"]),
     };
 }
 
@@ -549,10 +528,7 @@ function parseGlobalMcpDraft(
         oauth2:
             record.oauth2 === undefined
                 ? undefined
-                : parseGlobalMcpOAuth2Draft(record.oauth2, [
-                      ...path,
-                      "oauth2",
-                  ]),
+                : parseGlobalMcpOAuth2Draft(record.oauth2, [...path, "oauth2"]),
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"]),
         ),
@@ -568,7 +544,11 @@ function parseGlobalMcpOAuth2Draft(
     const approval =
         record.approval === undefined
             ? undefined
-            : readEnum(record.approval, [...path, "approval"], ["token", "tui"]);
+            : readEnum(
+                  record.approval,
+                  [...path, "approval"],
+                  ["token", "tui"],
+              );
     const token = readOptionalTrimmedString(record.token, [...path, "token"]);
     if (approval === "tui" && token !== undefined) {
         throw configInputError(
@@ -1494,4 +1474,3 @@ function assertKnownKeys(
     }
 }
 
-export type ParsedControlProviderKind = ControlProviderKind;

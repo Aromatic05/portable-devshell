@@ -1,4 +1,4 @@
-import { configInputError } from "./Issue.js";
+import { configInputError } from "./Error.js";
 import { minimumAuditStorageBytes } from "./Model.js";
 import type {
     ControlConfig,

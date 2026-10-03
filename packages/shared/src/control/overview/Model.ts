@@ -1,10 +1,10 @@
-import type { InstanceName } from "../../runtime/identity/Model.js";
-import type { InstanceSnapshot } from "../../runtime/state/Model.js";
-import type { ActiveTodoSummary } from "../../runtime/task/todo/Model.js";
+import type { InstanceName } from "../../types/Instance.js";
+import type { InstanceSnapshot } from "../../execution/process/Model.js";
+import type { ActiveTodoSummary } from "../../workspace/task/Model.js";
 import type {
     ToolCallSource,
     ToolCallStatus,
-} from "../../runtime/tool/Model.js";
+} from "../../execution/tool/Model.js";
 
 export type OperationalHealth = "healthy" | "attention" | "critical";
 export type OperationalAlertSeverity = "attention" | "critical";

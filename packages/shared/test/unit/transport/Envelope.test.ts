@@ -42,7 +42,7 @@ class FragmentChannel implements Channel {
         if (this.#closed) return;
         this.#closed = true;
         for (const listener of this.#closeListeners) listener(error);
-        this.#peer?.#remoteClose(error);
+        if (this.#peer !== undefined) this.#peer.#remoteClose(error);
     }
 
     inject(data: Uint8Array): void {
