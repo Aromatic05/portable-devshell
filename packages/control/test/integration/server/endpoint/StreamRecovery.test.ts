@@ -64,13 +64,13 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         lastSeq: 1,
     });
 
-    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    worker.emit("instance.started");
     const normal = await readMessage(stream);
     assert.equal(normal.name, "event");
     assert.equal(normal.seq, 2);
-    assert.equal((normal.payload as { type?: string }).type, "toolCall.completed");
+    assert.equal((normal.payload as { type?: string }).type, "instance.started");
 
-    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    worker.emit("instance.started");
     worker.dropBefore(4);
     const gap = await readMessage(stream);
     assert.equal(gap.name, "gap");
@@ -81,11 +81,11 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         requestedFromSeq: 3,
     });
 
-    worker.emit("toolCall.completed", { toolName: "bash_run" });
+    worker.emit("instance.started");
     const recovered = await readMessage(stream);
     assert.equal(recovered.name, "event");
     assert.equal(recovered.seq, 4);
-    assert.equal((recovered.payload as { type?: string }).type, "toolCall.completed");
+    assert.equal((recovered.payload as { type?: string }).type, "instance.started");
 });
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
