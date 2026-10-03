@@ -15,10 +15,7 @@ import type {
 } from "@portable-devshell/extension";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
 import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
-import type {
-    ExtensionManagedProcess,
-    ExtensionProcessCapability,
-} from "@portable-devshell/extension/process";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession,
@@ -47,7 +44,6 @@ import {
     type ExtensionSandboxCapabilityOperation,
     type ExtensionSandboxContextData,
     type ExtensionSandboxInvokeOperation,
-    type ExtensionSandboxProcessDescriptor,
     type ExtensionSandboxToHostMessage,
     type ExtensionSandboxWorkerData,
     type ExtensionSandboxWorkerSessionDescriptor,
@@ -70,6 +66,7 @@ import {
     type SandboxWorkerCloseInput,
     type SandboxWorkerOpenInput,
 } from "./Protocol.js";
+import { ExtensionSandboxProcessBridge } from "./ProcessBridge.js";
 import {
     DEFAULT_EXTENSION_SANDBOX_EXTERNAL_MEMORY_LIMIT_MB,
     DEFAULT_EXTENSION_SANDBOX_RESOURCE_LIMITS,
@@ -91,12 +88,6 @@ interface PendingInvocation {
     resolve(value: unknown): void;
 }
 
-interface SandboxManagedProcess {
-    process: ExtensionManagedProcess;
-    removeMessageListener: () => void;
-    removeStderrListener: () => void;
-    removeStdoutListener: () => void;
-}
 
 export interface ExtensionSandboxHostOptions {
     artifacts: ExtensionArtifactCapability;
@@ -167,8 +158,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #onFault?: (error: Error) => void;
     readonly #pending = new Map<string, PendingInvocation>();
     readonly #port: MessagePort;
-    readonly #processCapability: ExtensionProcessCapability;
-    readonly #processes = new Map<string, SandboxManagedProcess>();
+    readonly #processes: ExtensionSandboxProcessBridge;
     readonly #toolCallHistoryCapability: ToolCallHistoryCapability;
     readonly #capabilityControllers = new Map<string, AbortController>();
     readonly #workerDelegateCapability: ExtensionWorkerCapability;
@@ -231,7 +221,17 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             "Extension sandbox memory watch interval",
         );
         this.#onFault = options.onFault;
-        this.#processCapability = options.processes;
+        this.#processes = new ExtensionSandboxProcessBridge({
+            acceptanceError: () =>
+                this.#faulted ??
+                (this.#closing
+                    ? new Error(
+                          "Extension sandbox stopped accepting processes.",
+                      )
+                    : undefined),
+            capability: options.processes,
+            send: (message) => this.#send(message),
+        });
         this.#toolCallHistoryCapability = options.toolCallHistory;
         this.#workerDelegateCapability = options.workerDelegate;
         this.#workerExecuteCapability = options.workerExecute;
@@ -379,7 +379,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 () => undefined,
                 (error: unknown) => toError(error),
             );
-            this.#releaseProcessSubscriptions();
+            this.#processes.releaseSubscriptions();
             this.#releaseConfigSubscription();
             this.#closing = true;
             await this.#terminate();
@@ -410,7 +410,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             () => undefined,
             (error: unknown) => toError(error),
         );
-        this.#releaseProcessSubscriptions();
+        this.#processes.releaseSubscriptions();
         this.#releaseConfigSubscription();
         this.#closing = true;
         await this.#terminate();
@@ -721,64 +721,18 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     value.query,
                 );
             }
-            case "processes.start": {
-                const started = await this.#processCapability.start(
+            case "processes.start":
+                return await this.#processes.start(
                     input as SandboxProcessStartInput,
                 );
-                if (this.#faulted !== undefined || this.#closing) {
-                    await started.terminate();
-                    throw (
-                        this.#faulted ??
-                        new Error(
-                            "Extension sandbox stopped accepting processes.",
-                        )
-                    );
-                }
-                const processId = randomUUID();
-                const registration: SandboxManagedProcess = {
-                    process: started,
-                    removeMessageListener: started.onMessage((message) => {
-                        this.#send({
-                            message,
-                            processId,
-                            type: "processMessage",
-                        });
-                    }),
-                    removeStderrListener: started.onStderr((chunk) => {
-                        this.#send({ chunk, processId, type: "processStderr" });
-                    }),
-                    removeStdoutListener: started.onStdout((chunk) => {
-                        this.#send({ chunk, processId, type: "processStdout" });
-                    }),
-                };
-                this.#processes.set(processId, registration);
-                void started.closed
-                    .then((exit) => {
-                        if (this.#processes.get(processId) !== registration)
-                            return;
-                        this.#processes.delete(processId);
-                        registration.removeMessageListener();
-                        registration.removeStderrListener();
-                        registration.removeStdoutListener();
-                        this.#send({ exit, processId, type: "processClosed" });
-                    })
-                    .catch(() => undefined);
-                return {
-                    processId,
-                } satisfies ExtensionSandboxProcessDescriptor;
-            }
-            case "processes.send": {
-                const value = input as SandboxProcessSendInput;
-                await this.#requireProcess(value.processId).send(value.message);
+            case "processes.send":
+                await this.#processes.send(input as SandboxProcessSendInput);
                 return undefined;
-            }
-            case "processes.terminate": {
-                const value = input as SandboxProcessTerminateInput;
-                await this.#requireProcess(value.processId).terminate(
-                    value.signal,
+            case "processes.terminate":
+                await this.#processes.terminate(
+                    input as SandboxProcessTerminateInput,
                 );
                 return undefined;
-            }
             case "workerExecute.openSession": {
                 const opened = await this.#workerExecuteCapability.openSession(
                     input as SandboxWorkerOpenInput,
@@ -954,14 +908,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         );
     }
 
-    #requireProcess(id: string): ExtensionManagedProcess {
-        const process = this.#processes.get(id)?.process;
-        if (process !== undefined) return process;
-        throw new Error(
-            `Extension sandbox managed process is unavailable: ${id}.`,
-        );
-    }
-
     #send(message: ExtensionHostToSandboxMessage): void {
         if (this.#closing || this.#faulted !== undefined) return;
         assertExtensionSandboxMessage(
@@ -994,7 +940,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             controller.abort(error);
         this.#capabilityControllers.clear();
         this.#invocationInterfaces.clear();
-        this.#releaseProcessSubscriptions();
+        this.#processes.releaseSubscriptions();
         this.#releaseConfigSubscription();
         void this.#closeSessions().catch((cleanupError: unknown) => {
             this.#logger.warn(
@@ -1039,15 +985,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 "Extension sandbox Worker sessions failed to close.",
             );
         }
-    }
-
-    #releaseProcessSubscriptions(): void {
-        for (const registration of this.#processes.values()) {
-            registration.removeMessageListener();
-            registration.removeStderrListener();
-            registration.removeStdoutListener();
-        }
-        this.#processes.clear();
     }
 
     async #terminate(): Promise<void> {
