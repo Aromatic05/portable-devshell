@@ -27,7 +27,40 @@ import {
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 import { McpWorkspaceReentryArbiter } from "../../../../src/workspace/reentry/Arbiter.ts";
+import { readWorkspaceProjection } from "../../../../src/workspace/Snapshot.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+
+async function callProjectedAction(
+    handler: McpEndpointHandlerInteraction,
+    gateway: McpInteractionGateway,
+    context: ToolCallContext,
+    token: string,
+    operation: string,
+    targetId: string,
+    input: string | undefined,
+    callId: string,
+) {
+    const projection = await readWorkspaceProjection(
+        gateway,
+        "demo",
+        context.ctxId!,
+    );
+    const action = projection.actions.find(
+        (candidate) => candidate.operation === operation && candidate.targetId === targetId,
+    );
+    assert.ok(action, `missing projected ${operation} action for ${targetId}`);
+    return await handler.call(
+        "workspace_action",
+        {
+            actionId: action.actionId,
+            itemId: action.itemId,
+            ...(input === undefined ? {} : { input }),
+            token,
+        },
+        context,
+        callId,
+    );
+}
 
 {
     function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
@@ -496,12 +529,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.equal(wait.status, "waiting");
         assert.equal(settled, false);
 
-        await handler.call(
-            "workspace_answer",
-            { answer: "B", token, waitId: wait.waitId },
-            context,
-            "call-app",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "B", "call-app");
 
         assert.deepEqual(await held, {
             answer: "B",
@@ -533,20 +561,21 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             fake.waits.find((entry) => entry.waitId === wait.waitId)?.status,
             "detached",
         );
-        assert.deepEqual(
-            await handler.call(
-                "workspace_answer",
-                { answer: "yes", token, waitId: wait.waitId },
-                context,
-                "call-answer",
-            ),
-            {
-                answer: "yes",
-                detached: true,
-                questionId: wait.targetId,
-                waitId: wait.waitId,
-            },
-        );
+        const actionResult = await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "yes",
+            "call-answer",
+        ) as { status?: string };
+        assert.equal(actionResult.status, "applied");
+        const answered = fake.waits.find((entry) => entry.waitId === wait.waitId);
+        assert.equal(answered?.status, "resolved");
+        assert.deepEqual(answered?.result, { answer: "yes" });
+        assert.equal(typeof answered?.detachedAt, "string");
     });
 
     test("workspace_ask keeps a resolved answer recoverable when post-answer processing fails", async () => {
@@ -569,12 +598,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         );
         const wait = await fake.created;
 
-        await handler.call(
-            "workspace_answer",
-            { answer: "yes", token, waitId: wait.waitId },
-            context,
-            "call-answer-post-answer-failure",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer-post-answer-failure");
         await assert.rejects(held, /goal store unavailable/u);
         const recovered = fake.waits.find(
             (entry) => entry.waitId === wait.waitId,
@@ -637,12 +661,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         );
         const wait = await fake.created;
         assert.equal(wait.taskId, "task-1");
-        await handler.call(
-            "workspace_answer",
-            { answer: "yes", token, waitId: wait.waitId },
-            context,
-            "call-answer",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
         await held;
     });
 
@@ -708,12 +727,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
         assert.equal(wait.goalId, "goal-1");
         assert.equal(wait.taskId, undefined);
-        await handler.call(
-            "workspace_answer",
-            { answer: "continue", token, waitId: wait.waitId },
-            context,
-            "call-answer",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "continue", "call-answer");
         await held;
         assert.equal(goalTouches, 1);
     });
@@ -756,8 +770,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         );
         await assert.rejects(
             handler.call(
-                "workspace_approval",
-                { approvalId: "approval-1", decision: "approve" },
+                "workspace_action",
+                { itemId: "approval-1", actionId: "invalid-action" },
                 context,
                 "call-app",
             ),
@@ -795,12 +809,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             "call-after-reconnect",
         );
         const wait = await fake.created;
-        await handler.call(
-            "workspace_answer",
-            { answer: "yes", token, waitId: wait.waitId },
-            context,
-            "call-answer",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
         await assert.doesNotReject(held);
     });
 
@@ -1080,28 +1089,25 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.ok(result instanceof McpNativeToolResult);
         const snapshot = result.structuredContent as {
             agentBusy?: boolean;
-            background?: Array<Record<string, unknown>>;
-            currentEvent?: Record<string, unknown> | null;
             cursor?: number;
-            tasks?: Array<Record<string, unknown>>;
+            modelContext?: { content?: unknown[]; structuredContent?: { portableDevshellWorkspace?: unknown } };
+            presentation?: { background?: Array<Record<string, unknown>>; primary?: Record<string, unknown>; work?: Array<Record<string, unknown>> };
+            reentry?: { pending?: boolean; delivery?: { status?: string } };
         };
         assert.equal(snapshot.cursor, 7);
         assert.equal(snapshot.agentBusy, true);
-        const tmuxBackground = snapshot.background?.find(
-            (entry) => entry.waitId === "wait-tmux",
-        );
-        const questionRecovery = snapshot.background?.find(
-            (entry) => entry.waitId === "wait-question-resolved",
-        );
-        assert.equal(tmuxBackground?.tmuxTaskId, "tmux-task-1");
-        assert.equal(tmuxBackground?.taskId, "task-1");
-        assert.equal(questionRecovery?.kind, "question");
-        assert.equal(questionRecovery?.tmuxTaskId, undefined);
-        assert.deepEqual(questionRecovery?.result, { answer: "yes" });
-        assert.equal(snapshot.currentEvent, null);
-        assert.equal(Object.hasOwn(snapshot, "activity"), false);
-        assert.equal(Object.hasOwn(snapshot.tasks?.[0] ?? {}, "ctxId"), false);
-        assert.equal(Object.hasOwn(snapshot, "waits"), false);
+        assert.ok(snapshot.presentation);
+        assert.ok(snapshot.modelContext?.content);
+        assert.ok(snapshot.modelContext?.structuredContent?.portableDevshellWorkspace);
+        assert.ok(snapshot.reentry);
+        const items = [
+            ...(snapshot.presentation.primary ? [snapshot.presentation.primary] : []),
+            ...(snapshot.presentation.work ?? []),
+            ...(snapshot.presentation.background ?? []),
+        ];
+        for (const id of ["wait-tmux", "wait-question-resolved", "task-1"])
+            assert.ok(items.some((item) => item.id === id), id);
+        assert.equal(JSON.stringify(items).includes(context.ctxId!), false);
     });
 
     test("Workspace snapshot aggregates remote Context activity and approvals", async () => {
@@ -1179,13 +1185,15 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.ok(result instanceof McpNativeToolResult);
         const snapshot = result.structuredContent as {
             agentBusy?: boolean;
-            approvals?: Array<{ approvalId?: string }>;
+            presentation?: { primary?: Record<string, unknown>; work?: Array<Record<string, unknown>>; background?: Array<Record<string, unknown>> };
         };
         assert.equal(snapshot.agentBusy, true);
-        assert.deepEqual(
-            snapshot.approvals?.map((approval) => approval.approvalId),
-            ["approval-remote"],
-        );
+        const items = [
+            ...(snapshot.presentation?.primary ? [snapshot.presentation.primary] : []),
+            ...(snapshot.presentation?.work ?? []),
+            ...(snapshot.presentation?.background ?? []),
+        ];
+        assert.ok(items.some((item) => item.id === "approval-remote"));
     });
 
     test("Workspace snapshot never advances its cursor past state collected afterward", async () => {
@@ -1286,7 +1294,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.equal(watchReads, 1);
     });
 
-    test("Workspace currentEvent keeps human actions FIFO and ignores tmux waits", async () => {
+    test("Workspace presentation keeps human actions FIFO and projects tmux waits as background", async () => {
         const fake = createInteractionGateway();
         fake.waits.push(
             {
@@ -1339,13 +1347,18 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             "call-app",
         );
         assert.ok(result instanceof McpNativeToolResult);
-        const currentEvent = (
-            result.structuredContent as {
-                currentEvent?: Record<string, unknown>;
-            }
-        ).currentEvent;
-        assert.equal(currentEvent?.kind, "question");
-        assert.equal(currentEvent?.waitId, "wait-old");
+        const presentation = (result.structuredContent as {
+            presentation?: {
+                background?: Array<Record<string, unknown>>;
+                primary?: Record<string, unknown>;
+                work?: Array<Record<string, unknown>>;
+            };
+        }).presentation;
+        assert.equal(presentation?.primary?.kind, "question");
+        assert.equal(presentation?.primary?.id, "wait-old");
+        assert.equal(presentation?.primary?.prompt, "Oldest question");
+        assert.equal(presentation?.work?.some((item) => item.id === "wait-new"), false);
+        assert.ok(presentation?.background?.some((item) => item.id === "wait-tmux-new"));
     });
 
     test("Workspace question answer reports owner loss that races with resolution", async () => {
@@ -1384,13 +1397,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         });
         const token = await openWorkspace(handler);
 
-        const result = (await handler.call(
-            "workspace_answer",
-            { answer: "yes", token, waitId: "wait-question-race" },
-            context,
-            "call-answer-race",
-        )) as { detached?: boolean };
-        assert.equal(result.detached, true);
+        await callProjectedAction(handler, gateway, context, token, "question-answer", "wait-question-race", "yes", "call-answer-race");
+        assert.equal(typeof fake.waits[0]?.detachedAt, "string");
     });
 
     test("Workspace can interrupt a live tmux wait without cancelling the tmux task", async () => {
@@ -1413,22 +1421,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         });
         const token = await openWorkspace(handler);
 
-        assert.deepEqual(
-            await handler.call(
-                "workspace_interrupt",
-                { token, waitId: "wait-tmux" },
-                context,
-                "call-app",
-            ),
-            {
-                detached: false,
-                interrupted: true,
-                status: "resolved",
-                taskId: "task-1",
-                tmuxTaskId: "tmux-task-1",
-                waitId: "wait-tmux",
-            },
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "wait-interrupt", "wait-tmux", undefined, "call-app");
         assert.equal(fake.waits[0]?.status, "resolved");
         assert.deepEqual(fake.waits[0]?.result, {
             interrupted: true,
@@ -1471,13 +1464,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             instanceName: "demo",
         });
         const token = await openWorkspace(handler);
-        const result = (await handler.call(
-            "workspace_interrupt",
-            { token, waitId: "wait-tmux-race" },
-            context,
-            "call-interrupt-race",
-        )) as { detached?: boolean };
-        assert.equal(result.detached, true);
+        await callProjectedAction(handler, gateway, context, token, "wait-interrupt", "wait-tmux-race", undefined, "call-interrupt-race");
+        assert.equal(typeof fake.waits[0]?.detachedAt, "string");
     });
 
     test("Workspace Goal revision changes disable revision-only detached wait recovery", async () => {
@@ -1770,23 +1758,28 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             "call-watch",
         );
         assert.ok(result instanceof McpNativeToolResult);
-        assert.deepEqual(result.structuredContent, {
-            changed: false,
-            cursor: 11,
-            snapshot: {
-                agentBusy: false,
-                approvals: [],
-                background: [],
-                ctxId: context.ctxId,
-                currentEvent: null,
-                cursor: 11,
-                goal: null,
-                instance: "demo",
-                questions: [],
-                reentry: { epoch: 0, pending: false },
-                tasks: [],
-            },
-        });
+        const update = result.structuredContent as {
+            changed?: boolean;
+            cursor?: number;
+            snapshot?: {
+                agentBusy?: boolean;
+                ctxId?: string;
+                cursor?: number;
+                modelContext?: { structuredContent?: { portableDevshellWorkspace?: unknown } };
+                presentation?: { background?: unknown[]; primary?: unknown; work?: unknown[] };
+                reentry?: { pending?: boolean };
+            };
+        };
+        assert.equal(update.changed, false);
+        assert.equal(update.cursor, 11);
+        assert.equal(update.snapshot?.ctxId, context.ctxId);
+        assert.equal(update.snapshot?.cursor, 11);
+        assert.equal(update.snapshot?.agentBusy, false);
+        assert.equal(update.snapshot?.presentation?.primary, undefined);
+        assert.deepEqual(update.snapshot?.presentation?.work, []);
+        assert.deepEqual(update.snapshot?.presentation?.background, []);
+        assert.equal(update.snapshot?.reentry?.pending, false);
+        assert.ok(update.snapshot?.modelContext?.structuredContent?.portableDevshellWorkspace);
     });
 
     test("workspace_ask refuses to hold a call before Workspace is open", async () => {
@@ -1864,12 +1857,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             watchAbort.signal,
         );
         const wait = await fake.created;
-        await handler.call(
-            "workspace_answer",
-            { answer: "yes", token, waitId: wait.waitId },
-            context,
-            "call-answer",
-        );
+        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
         assert.deepEqual(await held, {
             answer: "yes",
             questionId: wait.targetId,
@@ -2027,14 +2015,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         });
         const token = await openWorkspace(handler);
 
-        const result = (await handler.call(
-            "workspace_resume",
-            { goalId: "goal-1", revision: 1, token },
-            context,
-            "call-goal-resume",
-        )) as { goal?: { status?: string } };
+        await callProjectedAction(handler, fake.gateway, context, token, "goal-resume", "goal-1", undefined, "call-goal-resume");
         assert.deepEqual(actions, ["resume"]);
-        assert.equal(result.goal?.status, "active");
         const wait = fake.waits.find(
             (entry) => entry.waitId === "wait-goal-resume",
         );
@@ -3659,20 +3641,14 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         }
     });
 
-    test("Workspace tool metadata keeps the explicit reopen compatibility tool and app-only action tools", () => {
+    test("Workspace tool metadata keeps reopen and exposes one unified action tool", () => {
         const definitions = new McpToolCatalogInteraction().list();
         const adapter = new McpToolSchemaAdapter();
         const open = definitions.find(
             (definition) => definition.name === "workspace_open",
         );
-        const answer = definitions.find(
-            (definition) => definition.name === "workspace_answer",
-        );
-        const interrupt = definitions.find(
-            (definition) => definition.name === "workspace_interrupt",
-        );
-        const recover = definitions.find(
-            (definition) => definition.name === "workspace_recover",
+        const action = definitions.find(
+            (definition) => definition.name === "workspace_action",
         );
         const watch = definitions.find(
             (definition) => definition.name === "workspace_watch",
@@ -3686,21 +3662,13 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         const goal = definitions.find(
             (definition) => definition.name === "workspace_goal",
         );
-        const goalResume = definitions.find(
-            (definition) => definition.name === "workspace_resume",
-        );
-        const goalStop = definitions.find(
-            (definition) => definition.name === "workspace_stop",
-        );
 
         assert.deepEqual(
             [...new Set(definitions.map((definition) => definition.group))],
             ["workspace"],
         );
         assert.ok(open);
-        assert.ok(answer);
-        assert.ok(interrupt);
-        assert.ok(recover);
+        assert.ok(action);
         assert.ok(watch);
         assert.ok(reconnect);
         assert.ok(ask);
@@ -3711,18 +3679,12 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             ),
             false,
         );
-        assert.ok(goalResume);
-        assert.ok(goalStop);
         assert.deepEqual(
             (reconnect.inputSchema as { required?: string[] }).required,
             ["token"],
         );
         const adaptedOpen = adapter.toMcpTool(open, open.description);
-        const adaptedAnswer = adapter.toMcpTool(answer, answer.description);
-        const adaptedInterrupt = adapter.toMcpTool(
-            interrupt,
-            interrupt.description,
-        );
+        const adaptedAction = adapter.toMcpTool(action, action.description);
         const adaptedWatch = adapter.toMcpTool(watch, watch.description);
         assert.equal(
             (adaptedOpen._meta as { ui?: { resourceUri?: string } })?.ui
@@ -3746,12 +3708,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             true,
         );
         assert.deepEqual(
-            (adaptedAnswer._meta as { ui?: { visibility?: string[] } })?.ui
-                ?.visibility,
-            ["app"],
-        );
-        assert.deepEqual(
-            (adaptedInterrupt._meta as { ui?: { visibility?: string[] } })?.ui
+            (adaptedAction._meta as { ui?: { visibility?: string[] } })?.ui
                 ?.visibility,
             ["app"],
         );
@@ -3765,28 +3722,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 ?.visibility,
             ["app"],
         );
-        const recoveryInputSchema = recover.inputSchema as {
-            properties?: {
-                action?: { enum?: string[] };
-                claimId?: unknown;
-                recoveryMessageId?: unknown;
-            };
-            required?: string[];
-        };
-        assert.deepEqual(recoveryInputSchema.properties?.action?.enum, [
-            "dismiss",
-        ]);
-        assert.equal(recoveryInputSchema.properties?.claimId, undefined);
-        assert.notEqual(
-            recoveryInputSchema.properties?.recoveryMessageId,
-            undefined,
-        );
-        assert.deepEqual(recoveryInputSchema.required, [
-            "action",
-            "recoveryMessageId",
-            "waitId",
-            "token",
-        ]);
         const askInputSchema = ask.inputSchema as {
             properties?: Record<string, unknown>;
             required?: string[];
@@ -3795,16 +3730,9 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.deepEqual(askInputSchema.required, ["question"]);
         assert.equal(ask._meta, undefined);
         assert.equal(goal._meta, undefined);
-        assert.deepEqual(
-            (goalResume._meta as { ui?: { visibility?: string[] } })?.ui
-                ?.visibility,
-            ["app"],
-        );
-        assert.deepEqual(
-            (goalStop._meta as { ui?: { visibility?: string[] } })?.ui
-                ?.visibility,
-            ["app"],
-        );
+        for (const name of ["workspace_answer", "workspace_interrupt", "workspace_task", "workspace_recover", "workspace_pause", "workspace_resume", "workspace_stop", "workspace_approval"]) {
+            assert.equal(definitions.some((definition) => definition.name === name), false, name);
+        }
 
         const compatibilityDefinitions = new McpToolCatalogInteraction().list();
         const compatibilityOpen = compatibilityDefinitions.find(
@@ -3820,12 +3748,9 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             compatibilitySnapshot?.outputSchema as {
                 properties?: {
                     ctxId?: unknown;
-                    questions?: {
-                        items?: { properties?: Record<string, unknown> };
-                    };
-                    tasks?: {
-                        items?: { properties?: Record<string, unknown> };
-                    };
+                    modelContext?: unknown;
+                    presentation?: unknown;
+                    reentry?: unknown;
                 };
             };
         assert.notEqual(compatibilityOpenSchema.properties?.ctxId, undefined);
@@ -3834,26 +3759,9 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             compatibilitySnapshotSchema.properties?.ctxId,
             undefined,
         );
-        assert.equal(
-            compatibilitySnapshotSchema.properties?.tasks?.items?.properties
-                ?.ctxId,
-            undefined,
-        );
-        assert.equal(
-            compatibilitySnapshotSchema.properties?.questions?.items?.properties
-                ?.createdByCtxId,
-            undefined,
-        );
-        assert.equal(
-            compatibilitySnapshotSchema.properties?.questions?.items?.properties
-                ?.ownerCallId,
-            undefined,
-        );
-        assert.equal(
-            compatibilitySnapshotSchema.properties?.questions?.items?.properties
-                ?.recoveryClaimId,
-            undefined,
-        );
+        assert.notEqual(compatibilitySnapshotSchema.properties?.presentation, undefined);
+        assert.notEqual(compatibilitySnapshotSchema.properties?.modelContext, undefined);
+        assert.notEqual(compatibilitySnapshotSchema.properties?.reentry, undefined);
         assert.equal(compatibilityOpen?.description, open.description);
     });
 

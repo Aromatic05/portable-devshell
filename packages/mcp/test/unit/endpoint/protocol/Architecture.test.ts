@@ -201,9 +201,15 @@ function createWorker(
         },
         async appendMcpToolCalled() {},
         approval: {
-            async listApprovals() { return []; },
-            async listPendingApprovals() { return []; },
-            async decideApproval() { throw new Error("unexpected approval decision"); },
+            async listApprovals() {
+                return [];
+            },
+            async listPendingApprovals() {
+                return [];
+            },
+            async decideApproval() {
+                throw new Error("unexpected approval decision");
+            },
         },
         assertReady() {},
         environment: () => worker.handshake,
@@ -1074,14 +1080,30 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(waits[0]?.automaticRecovery, true);
     assert.deepEqual(waits[0]?.payload, { line: 80 });
     assert.equal(waits[0]?.status, "waiting");
-    const interrupt = (await dispatch.callTool(
-        "workspace_interrupt",
-        { ctxId: environment.ctxId, token, waitId: waits[0]!.waitId },
+    const snapshot = structuredResult<{
+        presentation: {
+            background: Array<{ id: string; actions: Array<{ id: string; label: string }> }>;
+            primary?: { id: string; actions: Array<{ id: string; label: string }> };
+            work: Array<{ id: string; actions: Array<{ id: string; label: string }> }>;
+        };
+    }>(await dispatch.callTool(
+        "workspace_snapshot",
+        { ctxId: environment.ctxId, token },
+        { principal: "tester", requestId: "snapshot-before-interrupt" },
+    ));
+    const interruptItem = [
+        ...(snapshot.presentation.primary ? [snapshot.presentation.primary] : []),
+        ...snapshot.presentation.work,
+        ...snapshot.presentation.background,
+    ].find((item) => item.id === waits[0]!.waitId);
+    assert.ok(interruptItem);
+    const stopWaiting = interruptItem.actions.find((action) => action.label === "Stop waiting");
+    assert.ok(stopWaiting);
+    await dispatch.callTool(
+        "workspace_action",
+        { actionId: stopWaiting.id, ctxId: environment.ctxId, itemId: interruptItem.id, token },
         { principal: "tester", requestId: "interrupt-wait" },
-    )) as { detached?: boolean; interrupted?: boolean; tmuxTaskId?: string };
-    assert.equal(interrupt.interrupted, true);
-    assert.equal(interrupt.detached, false);
-    assert.equal(interrupt.tmuxTaskId, "task-1");
+    );
     const interrupted = await interruptible;
     assert.equal(interrupted.interrupted, true);
     assert.deepEqual(interrupted.task, { id: "task-1", status: "running" });

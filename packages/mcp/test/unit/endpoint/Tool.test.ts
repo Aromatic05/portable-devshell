@@ -107,7 +107,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
                 readOnlyHint: false,
             },
         );
-        assert.deepEqual(mcpToolAnnotations("workspace_approval"), {
+        assert.deepEqual(mcpToolAnnotations("workspace_action"), {
             destructiveHint: true,
             idempotentHint: false,
             openWorldHint: false,
@@ -311,7 +311,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             "pane",
             "task",
         ]);
-        assert.deepEqual(schema.required, ["input", "ctxId"]);
+        assert.deepEqual(schema.required?.sort(), ["ctxId", "input"]);
     });
 
     test("McpToolSchemaAdapter hides tmux_input wait/read fields only from model-facing schema", () => {
@@ -581,7 +581,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         );
         const platform = property(environment.outputSchema, "platform");
         assert.equal(record(platform).additionalProperties, false);
-        assert.deepEqual(required(platform), ["arch", "os"]);
+        assert.deepEqual(required(platform).sort(), ["arch", "os"]);
         assertProperties(platform, [
             "arch",
             "distribution",
@@ -591,7 +591,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         ]);
         const distribution = property(platform, "distribution");
         assert.equal(record(distribution).additionalProperties, false);
-        assert.deepEqual(required(distribution), ["id", "name"]);
+        assert.deepEqual(required(distribution).sort(), ["id", "name"]);
 
         assertProperties(
             definition(definitions, "workspace_open").outputSchema,
@@ -599,70 +599,29 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         );
         assertProperties(
             definition(definitions, "workspace_reconnect").outputSchema,
-            [
-                "approvals",
-                "background",
-                "ctxId",
-                "currentEvent",
-                "cursor",
-                "goal",
-                "instance",
-                "questions",
-                "tasks",
-            ],
+            ["agentBusy", "ctxId", "cursor", "instance", "modelContext", "presentation", "reentry"],
         );
         assertProperties(
             definition(definitions, "workspace_snapshot").outputSchema,
-            [
-                "approvals",
-                "background",
-                "ctxId",
-                "currentEvent",
-                "cursor",
-                "goal",
-                "instance",
-                "questions",
-                "tasks",
-            ],
+            ["agentBusy", "ctxId", "cursor", "instance", "modelContext", "presentation", "reentry"],
         );
-        const questions = record(
-            property(
-                definition(definitions, "workspace_snapshot").outputSchema,
-                "questions",
-            ),
-        );
-        const question = record(questions.items);
-        assert.equal(question.additionalProperties, false);
-        assert.deepEqual(required(question), [
-            "createdAt",
-            "kind",
-            "status",
-            "targetId",
-            "updatedAt",
-            "waitId",
-        ]);
-        assert.equal("result" in record(question.properties), false);
-        const questionPayload = property(question, "payload");
-        assert.equal(record(questionPayload).additionalProperties, false);
-        assert.deepEqual(required(questionPayload), [
-            "allowText",
-            "choices",
-            "question",
-        ]);
-        const currentEvent = record(
-            property(
-                definition(definitions, "workspace_snapshot").outputSchema,
-                "currentEvent",
-            ),
-        );
-        const currentEventVariants = currentEvent.anyOf as Array<
-            Record<string, unknown>
-        >;
-        assert.equal(currentEventVariants.length, 3);
-        assert.equal(
-            JSON.stringify(currentEventVariants).includes("tmux_run"),
-            false,
-        );
+        const snapshotSchema = record(definition(definitions, "workspace_snapshot").outputSchema);
+        const presentation = record(property(snapshotSchema, "presentation"));
+        assert.deepEqual(Object.keys(record(presentation.properties)).sort(), ["background", "primary", "work"]);
+        const modelContext = record(property(snapshotSchema, "modelContext"));
+        assertProperties(modelContext as JsonValue, ["content", "structuredContent"]);
+        const structuredContext = record(property(modelContext as JsonValue, "structuredContent"));
+        assertProperties(structuredContext as JsonValue, ["portableDevshellWorkspace"]);
+        const reentry = record(property(snapshotSchema, "reentry"));
+        assertProperties(reentry as JsonValue, ["pending", "delivery"]);
+        const action = record(property(definition(definitions, "workspace_action").inputSchema, "itemId"));
+        assert.equal(action.type, "string");
+        const actionInputSchema = record(definition(definitions, "workspace_action").inputSchema);
+        assert.deepEqual(required(actionInputSchema).sort(), ["actionId", "itemId", "token"]);
+        assert.equal(record(property(actionInputSchema as JsonValue, "input")).type, "string");
+        for (const name of ["workspace_answer", "workspace_interrupt", "workspace_task", "workspace_recover", "workspace_pause", "workspace_resume", "workspace_stop", "workspace_approval"]) {
+            assert.equal(definitions.some((entry) => entry.name === name), false, name);
+        }
         assertProperties(
             definition(definitions, "workspace_watch").outputSchema,
             ["changed", "cursor", "snapshot"],
@@ -677,35 +636,9 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             ),
             false,
         );
-        assert.deepEqual(
-            required(definition(definitions, "workspace_answer").outputSchema),
-            ["answer", "detached", "questionId", "waitId"],
-        );
-        assertProperties(
-            definition(definitions, "workspace_task").outputSchema,
-            ["items", "revision", "summary", "taskId", "tasks", "title"],
-        );
-        assertProperties(
-            definition(definitions, "workspace_recover").outputSchema,
-            ["dismissed", "kind", "targetId", "waitId"],
-        );
-        assertProperties(
-            definition(definitions, "workspace_approval").outputSchema,
-            [
-                "approvalId",
-                "callId",
-                "createdAt",
-                "decision",
-                "expiresAt",
-                "inputSummary",
-                "instance",
-                "reason",
-                "riskLevel",
-                "source",
-                "status",
-                "toolName",
-            ],
-        );
+        const actionOutputSchema = definition(definitions, "workspace_action").outputSchema;
+        assertProperties(actionOutputSchema, ["effect", "snapshot", "status"]);
+        assert.deepEqual(required(record(actionOutputSchema)).sort(), ["snapshot", "status"]);
 
         const adapter = new McpToolSchemaAdapter();
         const workspaceOpen = definition(definitions, "workspace_open");

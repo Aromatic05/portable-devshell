@@ -153,11 +153,15 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
         throw new Error("unused");
     };
     const gateway = {
+        ...createTestCallOperationGateway(),
         consumeWait: unused,
         createWait: unused,
-        decideApproval: unused,
         detachWait: unused,
-        listApprovals: async () => [],
+        approval: {
+            decideApproval: unused,
+            listApprovals: async () => [],
+            listPendingApprovals: async () => [],
+        },
         listTools: () => [],
         listWaits: async () => [],
         resolveWait: unused,
@@ -191,7 +195,7 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
                   securitySchemes?: JsonValue;
               }>
             | undefined;
-        const answer = tools?.find((tool) => tool.name === "workspace_answer");
+        const action = tools?.find((tool) => tool.name === "workspace_action");
         const environment = tools?.find((tool) => tool.name === "environ_info");
         const open = tools?.find((tool) => tool.name === "workspace_open");
         assert.notEqual(environment, undefined);
@@ -205,13 +209,13 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
                 ?.visibility,
             ["model", "app"],
         );
-        assert.notEqual(answer, undefined);
-        assert.notDeepEqual(answer?.outputSchema, { type: "object" });
-        assert.deepEqual(answer?._meta?.ui, { visibility: ["app"] });
-        assert.equal(answer?._meta?.["openai/visibility"], "private");
-        assert.equal(answer?._meta?.["openai/widgetAccessible"], true);
-        assert.deepEqual(answer?.securitySchemes, [{ type: "noauth" }]);
-        assert.deepEqual(answer?._meta?.securitySchemes, [{ type: "noauth" }]);
+        assert.notEqual(action, undefined);
+        assert.notDeepEqual(action?.outputSchema, { type: "object" });
+        assert.deepEqual(action?._meta?.ui, { visibility: ["app"] });
+        assert.equal(action?._meta?.["openai/visibility"], "private");
+        assert.equal(action?._meta?.["openai/widgetAccessible"], true);
+        assert.deepEqual(action?.securitySchemes, [{ type: "noauth" }]);
+        assert.deepEqual(action?._meta?.securitySchemes, [{ type: "noauth" }]);
         assert.notEqual(open, undefined);
         assert.deepEqual(
             (open?._meta?.ui as { visibility?: JsonValue } | undefined)
@@ -233,9 +237,12 @@ test("Workspace disable removes only Workspace tools and app metadata", () => {
     const gateway = {
         consumeWait: unused,
         createWait: unused,
-        decideApproval: unused,
         detachWait: unused,
-        listApprovals: async () => [],
+        approval: {
+            decideApproval: unused,
+            listApprovals: async () => [],
+            listPendingApprovals: async () => [],
+        },
         listTools: () => [],
         listWaits: async () => [],
         resolveWait: unused,
@@ -1299,11 +1306,15 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         throw new Error("unused");
     };
     const gateway = {
+        ...createTestCallOperationGateway(),
         consumeWait: unused,
         createWait: unused,
-        decideApproval: unused,
         detachWait: unused,
-        listApprovals: async () => [],
+        approval: {
+            decideApproval: unused,
+            listApprovals: async () => [],
+            listPendingApprovals: async () => [],
+        },
         listTools: () => [],
         listWaits: async () => [],
         readTodo: async () => ({
@@ -1339,7 +1350,7 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
     for (const name of [
         "workspace_snapshot",
         "workspace_watch",
-        "workspace_answer",
+        "workspace_action",
     ]) {
         const schema = inputSchema(name);
         assert.notEqual(schema?.properties?.ctxId, undefined, name);
@@ -1365,7 +1376,7 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
     const ctxId = (await registry.list())[0]?.ctxId;
     assert.equal(ctxId, "ctx-openai-workspace-app");
 
-    const snapshot = structuredResult<{ ctxId?: string }>(
+    const snapshot = structuredResult<{ ctxId?: string; modelContext?: unknown; presentation?: unknown; reentry?: unknown }>(
         await endpoint.callTool(
             "workspace_snapshot",
             { ctxId, token: token as string },
@@ -1376,6 +1387,9 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         ),
     );
     assert.equal(snapshot.ctxId, ctxId);
+    assert.ok(snapshot.presentation);
+    assert.ok(snapshot.modelContext);
+    assert.ok(snapshot.reentry);
 });
 
 test("expired OpenAI session binding renews the same internal Context on ordinary activity", async () => {
@@ -1658,6 +1672,7 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
         tools: [],
     });
     const gateway = {
+        ...createTestCallOperationGateway(),
         assertReady() {},
         async callTool() {
             return {};
@@ -1743,6 +1758,7 @@ test("artifact_viewImage returns native image content over SDK transport", async
         tools: [],
     });
     const gateway = {
+        ...createTestCallOperationGateway(),
         assertReady() {},
         async callTool() {
             return {};
@@ -2088,8 +2104,13 @@ async function createContext(
         },
         headers,
     );
+    assert.equal(
+        response.body.error,
+        undefined,
+        `environ_info returned a JSON-RPC error: ${JSON.stringify(response.body.error)}`,
+    );
     const ctxId = response.body.result?.structuredContent?.ctxId;
-    assert.equal(typeof ctxId, "string");
+    assert.equal(typeof ctxId, "string", JSON.stringify(response.body.result));
     return ctxId;
 }
 

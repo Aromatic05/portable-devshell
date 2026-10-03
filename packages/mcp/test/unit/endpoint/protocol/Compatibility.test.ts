@@ -8,20 +8,26 @@ test("legacy MCP compatibility aliases only the semantic superset", () => {
         kind: "alias",
         replacement: "workspace_ask",
     });
-    for (const [name, replacement] of [
-        ["workspace_question_answer", "workspace_answer"],
-        ["workspace_wait_interrupt", "workspace_interrupt"],
-        ["workspace_task_control", "workspace_task"],
-        ["workspace_goal_pause", "workspace_pause"],
-        ["workspace_goal_resume", "workspace_resume"],
-        ["workspace_goal_stop", "workspace_stop"],
-        ["workspace_approval_decide", "workspace_approval"],
+});
+
+test("removed Workspace action tools tombstone the old contract", () => {
+    for (const [name, help] of [
+        ["workspace_question_answer", "Workspace question responses now use the projected workspace_action contract."],
+        ["workspace_wait_interrupt", "Workspace wait controls now use the projected workspace_action contract."],
+        ["workspace_task_control", "Workspace task controls now use the projected workspace_action contract."],
+        ["workspace_goal_pause", "Workspace Goal controls now use the projected workspace_action contract."],
+        ["workspace_goal_resume", "Workspace Goal controls now use the projected workspace_action contract."],
+        ["workspace_goal_stop", "Workspace Goal controls now use the projected workspace_action contract."],
+        ["workspace_approval_decide", "Workspace decisions now use the projected workspace_action contract. Refresh the tool list to use the active App protocol."],
+        ["workspace_wait_recover", "Workspace wait controls now use the projected workspace_action contract."],
     ] as const) {
         assert.deepEqual(
             resolveMcpLegacyTool(name),
             {
-                kind: "alias",
-                replacement,
+                help,
+                kind: "tombstone",
+                removedIn: "0.7.10",
+                replacement: "workspace_action",
             },
             name,
         );
@@ -30,7 +36,6 @@ test("legacy MCP compatibility aliases only the semantic superset", () => {
 
 test("v0.6.15 Workspace app protocol remains a hidden wire compatibility surface", () => {
     for (const [name, replacement] of [
-        ["workspace_wait_recover", "workspace_recover"],
         ["workspace_goal_continue", "workspace_reentry"],
         ["workspace_reentry_control", "workspace_reentry"],
     ] as const) {

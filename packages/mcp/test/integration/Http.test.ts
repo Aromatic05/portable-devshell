@@ -305,7 +305,13 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         const opened = await callMcpTool(firstEndpoint, "workspace_open", {
             ctxId: created.ctxId,
         });
-        assert.notEqual(opened.result?.isError, true);
+        assert.equal(
+            opened.error,
+            undefined,
+            `workspace_open returned a JSON-RPC error: ${JSON.stringify(opened.error)}`,
+        );
+        assert.ok(opened.result, `workspace_open returned no result: ${JSON.stringify(opened)}`);
+        assert.equal(opened.result.isError, false);
         const token = (
             opened.result?._meta?.["portable-devshell/workspace"] as
                 { token?: unknown } | undefined
@@ -572,6 +578,7 @@ function createWorkspaceHost(
         instances: [
             {
                 gateway: {
+                    ...createTestCallOperationGateway(),
                     async cancelWait() {
                         throw new Error("unused");
                     },
@@ -581,14 +588,19 @@ function createWorkspaceHost(
                     async createWait() {
                         throw new Error("unused");
                     },
-                    async decideApproval() {
-                        throw new Error("unused");
-                    },
                     async detachWait() {
                         throw new Error("unused");
                     },
-                    async listApprovals() {
-                        return [];
+                    approval: {
+                        async decideApproval() {
+                            throw new Error("unused");
+                        },
+                        async listApprovals() {
+                            return [];
+                        },
+                        async listPendingApprovals() {
+                            return [];
+                        },
                     },
                     async listWaits() {
                         if (recovery?.detached !== true) return [];

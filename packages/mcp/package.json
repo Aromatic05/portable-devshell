@@ -36,11 +36,12 @@
         "@modelcontextprotocol/client": "2.0.0",
         "@portable-devshell/comment-extension": "workspace:*",
         "@portable-devshell/core": "workspace:*",
-        "@types/express": "^5.0.6"
+        "@types/express": "^5.0.6",
+        "esbuild": "0.28.2"
     },
     "scripts": {
-        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b && node scripts/build-workspace-client.mjs",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
-        "test": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\""
+        "test": "node scripts/build-workspace-client.mjs && node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\""
     }
 }
