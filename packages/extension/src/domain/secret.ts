@@ -1,6 +1,10 @@
 import type { ExtensionJsonValue } from "../ExtensionCore.js";
 import type { ToolCallRewriteContext } from "./toolcall.js";
 
+/**
+ * Builtin Secret's ToolCall rewrite interface. It is invocation-scoped Host
+ * state, not a manifest capability or a separately registrable Extension Point.
+ */
 export const secretRewriteInterfaceOperation = "secret.environment";
 
 export async function readSecretEnvironment(
@@ -14,7 +18,9 @@ export async function readSecretEnvironment(
         request,
     );
     if (!isRecord(value))
-        throw new TypeError("Secret rewrite interface returned an invalid environment.");
+        throw new TypeError(
+            "Secret rewrite interface returned an invalid environment.",
+        );
     const environment: Record<string, string> = {};
     for (const [name, entry] of Object.entries(value)) {
         if (typeof entry !== "string")

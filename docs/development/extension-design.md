@@ -596,6 +596,31 @@ extension.call
 
 不应成为 public Extension abstraction。
 
+### 6.8 Invocation-scoped Host interface
+
+Extension Point 的一次 binding invocation 可以由 point owner 注入一个只在本次调用期间存在的 Host interface。它与 capability 和 Extension Point 正交：
+
+```text
+Capability
+    generation-scoped Host resource authority
+    declared by manifest.capabilities
+
+Extension Point
+    Extension-provided implementation slot
+    declared by manifest.extensions
+
+Invocation-scoped Host interface
+    Host state narrowed to one active binding invocation
+    not declared in manifest
+    not retainable after the invocation lease ends
+```
+
+Invocation interface 不能成为绕过 capability model 的通用 service locator。它必须由具体 point/domain owner 定义，只暴露当前 authoritative invocation 已经拥有且被进一步收窄的状态；generic sandbox/runtime 只转发 opaque operation/input，不解释业务语义。
+
+当前真实例子是 toolcall.rewrite 的 secret.environment。Secret Extension 没有 Config/env capability；Control 只在当前 ToolCall rewrite lease 内，根据 authoritative instance 和当前 payload 中实际引用的 Secret placeholder 提供对应 env 条目。Extension 不能自行指定 instance、枚举任意 env，也不能把这个 interface 保存到下一次 ToolCall。
+
+因此 invocation interface 不进入 manifest.capabilities，也不进入 manifest.extensions。如果某项 authority 需要跨 invocation 保留、独立获取或形成 generation-owned resource，它就不再是 invocation interface，必须重新建模为 capability。
+
 ## 7. Public SDK 导出策略
 
 ### 7.1 不从 root 导出所有 domain API
@@ -1458,6 +1483,7 @@ portable-devshell 与这些系统不同之处在于：
 10. lifecycle 不允许退化成 generic callback bucket。
 11. 未发布错误 ABI 不保留兼容层。
 12. 没有真实用例的 Extension Point 不提前公开。
+13. Invocation-scoped Host interface 只能由 point owner 注入当前调用的收窄 authority，不能退化成通用 service locator 或 generation capability。
 ```
 
-这十二条是后续实现与 code review 的停止条件。
+这十三条是后续实现与 code review 的停止条件。

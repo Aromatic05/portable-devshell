@@ -310,6 +310,25 @@ Sandbox transport 同样保持 domain ownership。Worker `ready` registration �
 
 Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec registry 的 point-id 集合完全一致。这个 parity gate 只约束两套私有实现投影，避免新增 point 时只注册 declaration/binding owner 或只注册 sandbox codec；它不是第三套 public registry，也不会把 codec/transport identity 暴露给 Extension。
 
+### Invocation-scoped Host interface
+
+某些 Extension Point binding 在一次 invocation 内需要读取 Host 已经掌握、并且能够按当前 authoritative context 进一步收窄的状态。这类能力通过 invocation context 提供，不属于 generation capability，也不是新的 Extension Point。
+
+```text
+capability
+    generation-owned resource authority
+
+Extension Point
+    registered implementation
+
+invocation-scoped Host interface
+    one binding call only
+    point/domain-owned
+    no manifest grant
+```
+
+当前例子是 toolcall.rewrite 的 secret.environment：Control 只在当前 ToolCall lease 内向 builtin Secret rewrite 暴露当前 payload 实际引用的 Secret env 条目。它不能指定另一个 instance、不能枚举普通 env，也不能把 interface 保存到下一次调用。若某项 Host authority 需要跨 invocation 获取或持久持有，就必须建模为 capability，而不能扩展 requestInterface 成为通用 service locator。
+
 Public SDK 按 domain subpath 发布 leaf contract：
 
 ```text

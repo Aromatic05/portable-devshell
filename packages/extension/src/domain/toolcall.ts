@@ -109,6 +109,11 @@ export interface ToolCallReviewResult {
 
 export interface ToolCallReviewContext {
     readonly signal: AbortSignal;
+    /**
+     * Invoke a point-owned Host interface scoped to this single review
+     * invocation. Interfaces are not generation capabilities and cannot be
+     * retained outside the active binding call.
+     */
     requestInterface(
         operation: string,
         input?: ExtensionJsonValue,
@@ -122,6 +127,11 @@ export type ToolCallReviewBinding = (
 
 export interface ToolCallRewriteContext {
     readonly signal: AbortSignal;
+    /**
+     * Invoke a point-owned Host interface scoped to this single rewrite
+     * invocation. Interfaces are not generation capabilities and cannot be
+     * retained outside the active binding call.
+     */
     requestInterface(
         operation: string,
         input?: ExtensionJsonValue,
