@@ -6,15 +6,12 @@ import type { ResourceLimits } from "node:worker_threads";
 
 import {
     type ExtensionContext,
-    type ExtensionConfigDeclaration,
     type ExtensionJsonValue,
     type ExtensionLogger,
     type ExtensionManifest,
     type ExtensionModule,
 } from "@portable-devshell/extension";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
-import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
-import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
@@ -23,10 +20,12 @@ import type {
     ExtensionInstanceObserveCapability,
 } from "@portable-devshell/extension/instance";
 
-import type { InstanceRegistry } from "@portable-devshell/core";
-import { ExtensionAssetCapabilityControl } from "../capability/Asset.js";
-import { ExtensionProcessCapabilityControl } from "../capability/Process.js";
-import { projectExtensionCapabilities } from "../capability/Projection.js";
+import {
+    ExtensionCapabilityAssembler,
+    type ExtensionCapabilityAssemblerOptions,
+    type ExtensionProcessRuntime,
+    type ExtensionWorkerRuntime,
+} from "../capability/Assembly.js";
 import { ExtensionGeneration } from "../registration/Generation.js";
 import { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";
@@ -43,11 +42,6 @@ import {
     resolveContainedPath,
 } from "./Paths.js";
 import { ExtensionPathLayout } from "../state/Layout.js";
-import { ExtensionInstanceEventPublishCapabilityControl } from "../capability/Instance.js";
-import {
-    ExtensionToolCallHistoryCapabilityControl,
-    type ExtensionToolCallDecorator,
-} from "../capability/ToolCallHistory.js";
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import {
     ExtensionSandboxHost,
@@ -56,49 +50,13 @@ import {
 import type { ExtensionSandboxReadyDescriptor } from "../sandbox/bridge/Protocol.js";
 import type { ExtensionConfigRuntime } from "../config/Control.js";
 
-export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
-    closeAll(): Promise<void>;
-    retireInstance(instance: string): Promise<void>;
-}
+export type {
+    ExtensionProcessRuntime,
+    ExtensionWorkerRuntime,
+} from "../capability/Assembly.js";
 
-export interface ExtensionProcessRuntime extends ExtensionProcessCapability {
-    closeAll(): Promise<void>;
-}
-
-export interface ExtensionLoaderOptions {
-    artifactFactory?: (input: {
-        allowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionArtifactCapability;
-    assetsFactory?: (input: {
-        allowed: boolean;
-        dataDirectory: string;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionAssetCapability;
-    configFactory?: (input: {
-        declaration: ExtensionConfigDeclaration;
-        extensionId: string;
-        generation: string;
-        stateDirectory: string;
-    }) => ExtensionConfigRuntime;
-    contextObserveFactory?: (input: {
-        allowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionContextObserveCapability;
+export interface ExtensionLoaderOptions extends ExtensionCapabilityAssemblerOptions {
     importer?: (url: string) => Promise<unknown>;
-    instanceFactory?: (input: {
-        manageAllowed: boolean;
-        observeAllowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => {
-        manage: ExtensionInstanceManageCapability;
-        observe: ExtensionInstanceObserveCapability;
-    };
-    instances: InstanceRegistry;
     hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
@@ -107,28 +65,12 @@ export interface ExtensionLoaderOptions {
         options: ExtensionSandboxHostOptions,
     ) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
-    toolCallDecorator?: ExtensionToolCallDecorator;
-    workerDelegateFactory?: (input: {
-        allowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionWorkerRuntime;
-    workerExecuteFactory?: (input: {
-        allowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionWorkerRuntime;
 }
 
 export class ExtensionLoader {
-    readonly #artifactFactory?: ExtensionLoaderOptions["artifactFactory"];
-    readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
-    readonly #configFactory?: ExtensionLoaderOptions["configFactory"];
-    readonly #contextObserveFactory?: ExtensionLoaderOptions["contextObserveFactory"];
+    readonly #capabilities: ExtensionCapabilityAssembler;
     readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
-    readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
-    readonly #instances: InstanceRegistry;
     readonly #loggerFactory: (
         id: string,
         generation: string,
@@ -140,20 +82,12 @@ export class ExtensionLoader {
         options: ExtensionSandboxHostOptions,
     ) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
-    readonly #toolCallDecorator?: ExtensionToolCallDecorator;
-    readonly #workerDelegateFactory?: ExtensionLoaderOptions["workerDelegateFactory"];
-    readonly #workerExecuteFactory?: ExtensionLoaderOptions["workerExecuteFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
-        this.#artifactFactory = options.artifactFactory;
-        this.#assetsFactory = options.assetsFactory;
-        this.#configFactory = options.configFactory;
-        this.#contextObserveFactory = options.contextObserveFactory;
+        this.#capabilities = new ExtensionCapabilityAssembler(options);
         this.#importer = options.importer;
         this.#hostModuleResolver =
             options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
-        this.#instanceFactory = options.instanceFactory;
-        this.#instances = options.instances;
         this.#loggerFactory =
             options.loggerFactory ??
             ((id, generation) => consoleExtensionLogger(id, generation));
@@ -163,9 +97,6 @@ export class ExtensionLoader {
             options.sandboxFactory ??
             ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
-        this.#toolCallDecorator = options.toolCallDecorator;
-        this.#workerDelegateFactory = options.workerDelegateFactory;
-        this.#workerExecuteFactory = options.workerExecuteFactory;
     }
 
     async load(id: string, generation: string): Promise<ExtensionGeneration> {
@@ -193,90 +124,25 @@ export class ExtensionLoader {
             mkdir(stateDirectory, { mode: 0o700, recursive: true }),
         ]);
 
-        const config =
-            manifest.config === undefined
-                ? undefined
-                : this.#configFactory?.({
-                      declaration: manifest.config,
-                      extensionId: id,
-                      generation,
-                      stateDirectory,
-                  });
-        if (manifest.config !== undefined && config === undefined) {
-            throw new Error(
-                `Extension ${id} declares Config but the host does not provide Config support.`,
-            );
-        }
-        await config?.validate();
-
-        const assets =
-            this.#assetsFactory?.({
-                allowed: manifest.capabilities.includes("assets"),
-                dataDirectory,
-                extensionId: id,
-                generation,
-            }) ??
-            new ExtensionAssetCapabilityControl({
-                allowed: manifest.capabilities.includes("assets"),
-                dataDirectory,
-                extensionId: id,
-            });
-
-        const artifacts =
-            this.#artifactFactory?.({
-                allowed: manifest.capabilities.includes("artifacts"),
-                extensionId: id,
-                generation,
-            }) ?? unavailableArtifacts(id);
-        const contextObserve =
-            this.#contextObserveFactory?.({
-                allowed: manifest.capabilities.includes("context.observe"),
-                extensionId: id,
-                generation,
-            }) ?? unavailableContextObserve(id);
-        const instanceCapabilities = this.#instanceFactory?.({
-            manageAllowed: manifest.capabilities.includes("instance.manage"),
-            observeAllowed: manifest.capabilities.includes("instance.observe"),
+        const {
+            artifacts,
+            assets,
+            config,
+            contextCapabilities,
+            contextObserve,
+            instanceEventPublish,
+            instanceManage,
+            instanceObserve,
+            processes,
+            toolCallHistory,
+            workerDelegate,
+            workerExecute,
+        } = await this.#capabilities.assemble({
+            dataDirectory,
             extensionId: id,
             generation,
-        }) ?? {
-            manage: unavailableInstanceManage(id),
-            observe: unavailableInstanceObserve(id),
-        };
-        const instanceEventPublish: ExtensionInstanceEventPublishCapability =
-            new ExtensionInstanceEventPublishCapabilityControl({
-                allowed: manifest.capabilities.includes(
-                    "instance.events.publish",
-                ),
-                extensionId: id,
-                instances: this.#instances,
-            });
-        const toolCallHistory: ToolCallHistoryCapability =
-            new ExtensionToolCallHistoryCapabilityControl({
-                allowed: manifest.capabilities.includes("toolcall.history"),
-                extensionId: id,
-                instances: this.#instances,
-                toolCallDecorator: this.#toolCallDecorator,
-            });
-
-        const workerExecute = manifest.capabilities.includes("worker.execute")
-            ? (this.#workerExecuteFactory?.({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-              }) ?? unavailableWorkerRuntime(id, "worker.execute"))
-            : unavailableWorkerRuntime(id, "worker.execute");
-        const workerDelegate = manifest.capabilities.includes("worker.delegate")
-            ? (this.#workerDelegateFactory?.({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-              }) ?? unavailableWorkerRuntime(id, "worker.delegate"))
-            : unavailableWorkerRuntime(id, "worker.delegate");
-        const processes = new ExtensionProcessCapabilityControl({
-            allowed: manifest.capabilities.includes("processes"),
-            extensionId: id,
-            generation,
+            manifest,
+            stateDirectory,
         });
         const logger = this.#loggerFactory(id, generation);
         const registrations = new ExtensionRegistrationBuilder(
@@ -292,19 +158,7 @@ export class ExtensionLoader {
             registrations.register(point, localId, binding);
         };
         const context: ExtensionContext = Object.freeze({
-            capabilities: projectExtensionCapabilities(manifest.capabilities, {
-                artifacts: () => artifacts,
-                assets: () => assets,
-                configCore: () => requireCoreConfig(config, id),
-                contextObserve: () => contextObserve,
-                instanceEventPublish: () => instanceEventPublish,
-                instanceManage: () => instanceCapabilities.manage,
-                instanceObserve: () => instanceCapabilities.observe,
-                processes: () => processes,
-                toolCallHistory: () => toolCallHistory,
-                workerDelegate: () => workerDelegate,
-                workerExecute: () => workerExecute,
-            }),
+            capabilities: contextCapabilities,
             ...(config?.owned === undefined ? {} : { config: config.owned }),
             generation,
             id,
@@ -331,8 +185,8 @@ export class ExtensionLoader {
                 generation,
                 id,
                 instanceEventPublish,
-                instanceManage: instanceCapabilities.manage,
-                instanceObserve: instanceCapabilities.observe,
+                instanceManage,
+                instanceObserve,
                 logger,
                 manifest,
                 processes,
@@ -574,104 +428,6 @@ export class ExtensionLoader {
             );
         }
     }
-}
-
-function requireCoreConfig(
-    config: ExtensionConfigRuntime | undefined,
-    extensionId: string,
-) {
-    if (config?.core !== undefined) return config.core;
-    throw new Error(
-        "Extension " +
-            extensionId +
-            " declares config.core but the host did not create its Core Config capability.",
-    );
-}
-
-function unavailableArtifacts(
-    extensionId: string,
-): ExtensionArtifactCapability {
-    const unavailable = (): never => {
-        throw new Error(
-            `Extension ${extensionId} requested artifacts but the host did not configure that capability.`,
-        );
-    };
-    return Object.freeze({
-        cancelTransfer: async () => unavailable(),
-        createShare: async () => unavailable(),
-        getTransfer: async () => unavailable(),
-        listShares: async () => unavailable(),
-        listTransfers: async () => unavailable(),
-        revokeShare: async () => unavailable(),
-        startTransfer: async () => unavailable(),
-        waitForTransfer: async () => unavailable(),
-    });
-}
-
-function unavailableInstanceObserve(
-    extensionId: string,
-): ExtensionInstanceObserveCapability {
-    const unavailable = (): never => {
-        throw new Error(
-            `Extension ${extensionId} requested instance.observe but the host did not configure that capability.`,
-        );
-    };
-    return Object.freeze({
-        list: async () => unavailable(),
-        readLogs: async () => unavailable(),
-        refresh: async () => unavailable(),
-        snapshot: async () => unavailable(),
-        watchEvents: async () => unavailable(),
-    });
-}
-
-function unavailableInstanceManage(
-    extensionId: string,
-): ExtensionInstanceManageCapability {
-    const unavailable = (): never => {
-        throw new Error(
-            `Extension ${extensionId} requested instance.manage but the host did not configure that capability.`,
-        );
-    };
-    return Object.freeze({
-        create: async () => unavailable(),
-        createSchema: async () => unavailable(),
-        delete: async () => unavailable(),
-        disable: async () => unavailable(),
-        enable: async () => unavailable(),
-        start: async () => unavailable(),
-        stop: async () => unavailable(),
-        validateCreate: async () => unavailable(),
-    });
-}
-
-function unavailableContextObserve(
-    extensionId: string,
-): ExtensionContextObserveCapability {
-    const unavailable = (): never => {
-        throw new Error(
-            `Extension ${extensionId} requested context.observe but the host did not configure that capability.`,
-        );
-    };
-    return Object.freeze({
-        list: async () => unavailable(),
-    });
-}
-
-function unavailableWorkerRuntime(
-    extensionId: string,
-    capability: "worker.delegate" | "worker.execute",
-): ExtensionWorkerRuntime {
-    const unavailable = (): never => {
-        throw new Error(
-            `Extension ${extensionId} requested ${capability} but the host did not configure that capability.`,
-        );
-    };
-    return Object.freeze({
-        closeAll: async () => {},
-        openSession: async () => unavailable(),
-        retireInstance: async () => {},
-    });
 }
 
 async function registrationsFromSandbox(
