@@ -12,7 +12,7 @@ import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort, ContextCleanupPort } from "../../../../context/Port.js";
 import type { McpContextExternalBinding } from "@portable-devshell/shared";
 import type { McpContextSelector } from "../../../../context/Selector.js";
-import type { McpInstanceGateway } from "../../../Port.js";
+import type { McpInstanceGateway } from "../../../../instance/Gateway.js";
 import {
     mcpEnvironmentToolName,
     mcpRemoteEnvironmentToolName,
@@ -24,12 +24,12 @@ import {
 import type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
-} from "../../../Port.js";
+} from "../../../call/Port.js";
 import {
     callMcpEndpointToolOperation,
     mcpEndpointToolNotExposed,
     requireMcpEndpointEnvironment,
-} from "../../../dispatch/Support.js";
+} from "../../../call/Boundary.js";
 
 interface BoundContextLookup {
     bindings: McpContextExternalBinding[];
@@ -211,7 +211,6 @@ export class McpEndpointHandlerEnvironment {
             signal,
             targetInstance: this.#instanceName,
             toolName: mcpRemoteEnvironmentToolName,
-            worker: this.#worker,
         });
         return { ctxId: resultCtxId, structuredContent };
     }
@@ -347,7 +346,6 @@ export class McpEndpointHandlerEnvironment {
                 signal,
                 targetInstance: this.#instanceName,
                 toolName: mcpEnvironmentToolName,
-                worker: this.#worker,
             });
             return {
                 ctxId: attachedCtxId,

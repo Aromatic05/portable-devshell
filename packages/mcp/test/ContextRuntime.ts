@@ -20,10 +20,8 @@ import {
 } from "../src/endpoint/dispatch/Dispatch.ts";
 import { McpHost, McpRuntimeState } from "../src/host/Host.ts";
 import type { McpHostConfig } from "../src/host/Host.ts";
-import type {
-    McpEndpointWorkerPort,
-    McpInstanceGateway,
-} from "../src/endpoint/Port.ts";
+import type { McpEndpointWorkerPort } from "../src/endpoint/call/Port.ts";
+import type { McpInstanceGateway } from "../src/instance/Gateway.ts";
 import {
     ToolCallHookSequence,
     ToolCallPipeline,

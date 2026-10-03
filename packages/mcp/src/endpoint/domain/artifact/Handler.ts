@@ -5,15 +5,15 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../../Port.js";
+import type { McpInstanceGateway } from "../../../instance/Gateway.js";
 import type { McpToolCatalogArtifactName } from "./Catalog.js";
-import { waitForMcpEndpointAbortable } from "../../dispatch/Support.js";
+import { waitForMcpEndpointAbortable } from "../../call/Boundary.js";
 import { readMcpArtifactViewImageInput } from "./Input.js";
-import { McpNativeToolResult, type McpEndpointResult } from "../../Endpoint.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../../call/Boundary.js";
 import {
     mcpEndpointToolNotExposed,
     requireMcpEndpointGateway,
-} from "../../dispatch/Support.js";
+} from "../../call/Boundary.js";
 
 export class McpEndpointHandlerArtifact {
     constructor(

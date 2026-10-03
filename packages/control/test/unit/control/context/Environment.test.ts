@@ -6,7 +6,7 @@ import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type {
     McpEndpointWorkerPort,
     McpInstanceGateway,
-} from "../../../../../mcp/src/endpoint/Port.js";
+} from "@portable-devshell/mcp";
 import { ContextCleanupService } from "../../../../src/context/Service/Cleanup.js";
 import { ContextEnvironmentService } from "../../../../src/context/Service/Scope.js";
 import { ContextRegistry } from "../../../../src/context/Registry/index.js";

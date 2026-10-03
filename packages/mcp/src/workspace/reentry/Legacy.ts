@@ -15,8 +15,9 @@ import {
     isMcpWorkspaceGateway,
     type McpInstanceGateway,
     type McpWorkspaceActionGateway,
-} from "../../endpoint/Port.js";
+} from "../../instance/Gateway.js";
 import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
+import { readWorkspaceContextInstances } from "../ContextScope.js";
 
 /**
  * @compat mcp-workspace-app-v0615
@@ -358,18 +359,11 @@ export class McpWorkspaceLegacyV0615 {
     async #contextInstances(ctxId: string): Promise<string[]> {
         const registry = this.options.contextRegistry;
         if (registry === undefined) return [this.options.instanceName];
-        const record = await registry.validateForInstance(
-            ctxId,
+        return await readWorkspaceContextInstances(
+            registry,
             this.options.instanceName,
+            ctxId,
         );
-        return [
-            ...new Set([
-                this.options.instanceName,
-                ...record.environments.map(
-                    (environment) => environment.instance,
-                ),
-            ]),
-        ];
     }
 }
 

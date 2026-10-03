@@ -6,12 +6,15 @@ import {
     type McpContextRecord,
 } from "@portable-devshell/shared";
 
-import { readOptionalMcpContextInput } from "../endpoint/dispatch/Input.js";
-import type { McpEndpointCallContext } from "../endpoint/Port.js";
 import type {
     ContextRegistryPort,
     McpContextExternalBinding,
 } from "@portable-devshell/shared";
+
+export interface McpContextRequestContext {
+    principal: string;
+    requestMeta?: Record<string, unknown>;
+}
 
 export interface McpResolvedContext {
     input: JsonValue;
@@ -22,13 +25,13 @@ export interface McpContextSelector {
     readonly id: ControlMcpContextMode;
     readonly requiresExplicitContextId: boolean;
     bindings(
-        requestContext: McpEndpointCallContext,
+        requestContext: McpContextRequestContext,
     ): McpContextExternalBinding[];
     expose(record: McpContextRecord): Record<string, JsonValue>;
     resolve(
         registry: ContextRegistryPort,
         input: JsonValue,
-        requestContext: McpEndpointCallContext,
+        requestContext: McpContextRequestContext,
         instanceName: string,
         options?: { allowExpired?: boolean; touch?: boolean },
     ): Promise<McpResolvedContext>;
@@ -50,7 +53,7 @@ class UnifiedContextSelector implements McpContextSelector {
     }
 
     bindings(
-        requestContext: McpEndpointCallContext,
+        requestContext: McpContextRequestContext,
     ): McpContextExternalBinding[] {
         if (this.id !== "openai-session") return [];
         const session = requestContext.requestMeta?.["openai/session"];
@@ -66,7 +69,7 @@ class UnifiedContextSelector implements McpContextSelector {
     async resolve(
         registry: ContextRegistryPort,
         input: JsonValue,
-        requestContext: McpEndpointCallContext,
+        requestContext: McpContextRequestContext,
         _instanceName: string,
         options?: { allowExpired?: boolean; touch?: boolean },
     ): Promise<McpResolvedContext> {
@@ -150,4 +153,42 @@ class UnifiedContextSelector implements McpContextSelector {
             retryable: false,
         });
     }
+}
+
+export function readMcpContextInput(input: JsonValue): {
+    ctxId: string;
+    input: JsonValue;
+} {
+    const context = readOptionalMcpContextInput(input);
+    if (context.ctxId === undefined) {
+        throw createRemoteError({
+            code: contextErrorCodes.invalid,
+            message:
+                "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
+            retryable: false,
+        });
+    }
+    return { ctxId: context.ctxId, input: context.input };
+}
+
+export function readOptionalMcpContextInput(input: JsonValue): {
+    ctxId?: string;
+    input: JsonValue;
+} {
+    if (!isRecord(input) || input.ctxId === undefined) return { input };
+    if (typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
+        throw createRemoteError({
+            code: contextErrorCodes.invalid,
+            message: "ctxId must be a non-empty Context ID.",
+            retryable: false,
+        });
+    }
+    const { ctxId, ...toolInput } = input;
+    return { ctxId: ctxId.trim(), input: toolInput };
+}
+
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

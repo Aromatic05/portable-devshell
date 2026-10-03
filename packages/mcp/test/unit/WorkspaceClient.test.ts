@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { App } from "@modelcontextprotocol/ext-apps/app-with-deps";
-import type { WorkspaceSnapshot } from "../../src/workspace/Contract.ts";
+import type { WorkspaceSnapshot } from "../../src/workspace/model/Contract.ts";
 import { WorkspaceConnection } from "../../src/workspace/app/client/Connection.ts";
 import {
     pendingDirectives,
@@ -18,7 +18,7 @@ import type {
 import { WorkspaceHost } from "../../src/workspace/app/client/Host.ts";
 import { WorkspaceView } from "../../src/workspace/app/client/View.ts";
 import { WorkspaceRuntime } from "../../src/workspace/app/client/Runtime.ts";
-import type { WorkspaceActionRequest } from "../../src/workspace/Contract.ts";
+import type { WorkspaceActionRequest } from "../../src/workspace/model/Contract.ts";
 
 class CardRoot extends EventTarget {
     innerHTML = "";

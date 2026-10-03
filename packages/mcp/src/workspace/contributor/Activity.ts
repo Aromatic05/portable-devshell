@@ -3,7 +3,7 @@ import type { InstanceEventRecord } from "@portable-devshell/shared";
 import {
     isMcpWorkspaceGateway,
     type McpWorkspaceActionGateway,
-} from "../../endpoint/Port.js";
+} from "../../instance/Gateway.js";
 
 export async function readWorkspaceCursor(
     gateway: McpWorkspaceActionGateway,

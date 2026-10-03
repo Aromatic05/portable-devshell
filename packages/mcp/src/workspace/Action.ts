@@ -1,7 +1,7 @@
 import { runtimeErrorCodes, type JsonValue, type ToolCallContext, type WaitRecord } from "@portable-devshell/shared";
-import type { McpWorkspaceActionGateway } from "../endpoint/Port.js";
+import type { McpWorkspaceActionGateway } from "../instance/Gateway.js";
 import { readWorkspaceProjection } from "./Projection.js";
-import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction, WorkspaceSnapshot } from "./Contract.js";
+import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction, WorkspaceSnapshot } from "./model/Contract.js";
 import { WorkspaceActionStore } from "./ActionStore.js";
 
 const contextQueues = new Map<string, Promise<void>>();

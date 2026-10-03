@@ -1,4 +1,3 @@
-import type { CallToolResult } from "@modelcontextprotocol/server";
 import type {
     ControlMcpContextMode,
     JsonValue,
@@ -9,7 +8,7 @@ import type { McpAuthConfig } from "../auth/Config.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort, ContextCleanupPort } from "../context/Port.js";
 import { createMcpContextSelector } from "../context/Selector.js";
-import type { McpInstanceGateway } from "./Port.js";
+import type { McpInstanceGateway } from "../instance/Gateway.js";
 import type { McpTool } from "./tool/Schema.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
@@ -17,17 +16,18 @@ import type { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
 import type { WorkspaceActionStore } from "../workspace/ActionStore.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
-import {
-    McpEndpointDispatch,
-    type McpEndpointCallContext,
-    type McpEndpointWorkerPort,
-} from "./dispatch/Dispatch.js";
+import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
+import type {
+    McpEndpointCallContext,
+    McpEndpointWorkerPort,
+} from "./call/Port.js";
+import type { McpEndpointResult } from "./call/Boundary.js";
 
 export type {
     McpEndpointCallContext,
-    McpEndpointEnvironmentHandshake,
     McpEndpointWorkerPort,
-} from "./dispatch/Dispatch.js";
+} from "./call/Port.js";
+export type { McpEndpointEnvironmentHandshake } from "../instance/Gateway.js";
 
 export interface McpEndpointWorkerOptions {
     auth?: McpAuthConfig;
@@ -148,23 +148,4 @@ export class McpEndpointWorker {
     }
 }
 
-export class McpNativeToolResult {
-    readonly _meta?: CallToolResult["_meta"];
-    readonly content: CallToolResult["content"];
-    readonly isError: boolean;
-    readonly structuredContent: JsonValue;
-
-    constructor(input: {
-        _meta?: CallToolResult["_meta"];
-        content: CallToolResult["content"];
-        isError?: boolean;
-        structuredContent: JsonValue;
-    }) {
-        this._meta = input._meta;
-        this.content = input.content;
-        this.isError = input.isError ?? false;
-        this.structuredContent = input.structuredContent;
-    }
-}
-
-export type McpEndpointResult = JsonValue | McpNativeToolResult;
+export { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";

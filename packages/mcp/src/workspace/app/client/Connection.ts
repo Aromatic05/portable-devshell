@@ -1,4 +1,4 @@
-import type { WorkspaceActionRequest, WorkspaceActionResult, WorkspaceHostModelContext, WorkspaceSnapshot } from "../../Contract.js";
+import type { WorkspaceActionRequest, WorkspaceActionResult, WorkspaceHostModelContext, WorkspaceSnapshot } from "../../model/Contract.js";
 import type { WorkspaceSession } from "./Session.js";
 
 export interface WorkspaceToolResult { structuredContent?: unknown; _meta?: Record<string, unknown>; isError?: boolean; }

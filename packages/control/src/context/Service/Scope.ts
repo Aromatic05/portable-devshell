@@ -19,7 +19,7 @@ import {
     isMcpGoalGateway,
     type McpInstanceGateway,
     type McpEndpointWorkerPort,
-} from "../../../../mcp/src/endpoint/Port.js";
+} from "@portable-devshell/mcp";
 import { ContextCleanupService } from "./Cleanup.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {

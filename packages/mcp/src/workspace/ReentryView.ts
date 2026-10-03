@@ -6,13 +6,13 @@ import type {
 import type {
     WorkspaceReentryDirective,
     WorkspaceReentryView,
-} from "./Contract.js";
+} from "./model/Contract.js";
 
 export type {
     WorkspaceSnapshot,
     WorkspaceReentryDirective,
     WorkspaceResolvedAction,
-} from "./Contract.js";
+} from "./model/Contract.js";
 
 export function projectWorkspaceReentry(
     value: JsonValue | undefined,

@@ -1,6 +1,6 @@
 import type { TodoTaskSummary } from "@portable-devshell/shared";
-import type { WorkspaceAction, WorkspaceResolvedAction, WorkspaceWorkItem } from "../Contract.js";
-import { workspaceIdentity } from "../Identity.js";
+import type { WorkspaceAction, WorkspaceResolvedAction, WorkspaceWorkItem } from "../model/Contract.js";
+import { workspaceIdentity } from "../model/Identity.js";
 
 const actionView: Record<"task-pause" | "task-resume" | "task-cancel", Omit<WorkspaceAction, "id">> = {
     "task-pause": { label: "Pause", tone: "default" },

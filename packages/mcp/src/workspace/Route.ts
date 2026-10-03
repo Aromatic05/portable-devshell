@@ -3,14 +3,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { HttpHost } from "../host/Http.js";
 import {
     isMcpWorkspaceActionGateway,
     isMcpWorkspaceGateway,
     type McpWorkspaceActionGateway,
     type McpInstanceGateway,
     type McpWorkspaceGateway,
-} from "../endpoint/Port.js";
+} from "../instance/Gateway.js";
 import { readWorkspaceSnapshot } from "./Projection.js";
 import { workspaceEventBelongsTo } from "./contributor/Activity.js";
 import { WorkspaceAppLeaseStore } from "./app/Lease.js";
@@ -20,11 +19,22 @@ import { WorkspaceActionStore } from "./ActionStore.js";
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_POLL_MS = 250;
 
+export interface McpWorkspaceLiveRouteHost {
+    registerRawRoute(
+        method: "delete" | "get" | "head" | "options" | "post",
+        path: string,
+        handler: (
+            request: IncomingMessage,
+            response: ServerResponse,
+        ) => void | Promise<void>,
+    ): () => void;
+}
+
 export interface McpWorkspaceLiveRouteOptions {
     contextRegistry: ContextRegistryPort;
     gateway?: McpInstanceGateway;
     heartbeatMs?: number;
-    host: HttpHost;
+    host: McpWorkspaceLiveRouteHost;
     instanceName: string;
     leases: WorkspaceAppLeaseStore;
     actions: WorkspaceActionStore;

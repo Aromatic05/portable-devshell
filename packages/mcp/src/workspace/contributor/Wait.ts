@@ -4,8 +4,8 @@ import type {
     WorkspaceBackgroundItem,
     WorkspaceQuestionItem,
     WorkspaceResolvedAction,
-} from "../Contract.js";
-import { workspaceIdentity } from "../Identity.js";
+} from "../model/Contract.js";
+import { workspaceIdentity } from "../model/Identity.js";
 
 const questionAction: Omit<WorkspaceAction, "id"> = {
     label: "Answer",

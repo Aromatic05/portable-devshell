@@ -16,8 +16,9 @@ export type {
     McpToolProvenanceRecorder,
 } from "./endpoint/tool/Provenance.js";
 export { HttpHost } from "./host/Http.js";
-export { isMcpGoalGateway } from "./endpoint/Port.js";
-export type { McpApprovalPort, McpInstanceGateway, McpEndpointWorkerPort } from "./endpoint/Port.js";
+export { isMcpGoalGateway } from "./instance/Gateway.js";
+export type { McpApprovalPort, McpInstanceGateway } from "./instance/Gateway.js";
+export type { McpEndpointWorkerPort } from "./endpoint/call/Port.js";
 export { resolvePortableDevshellApplicationVersion } from "./Version.js";
 
 export * from "./workspace/app/Lease.js";

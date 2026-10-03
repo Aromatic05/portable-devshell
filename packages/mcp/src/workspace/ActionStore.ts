@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { WorkspaceActionEffect, WorkspaceResolvedAction } from "./Contract.js";
+import type { WorkspaceActionEffect, WorkspaceResolvedAction } from "./model/Contract.js";
 
 export type WorkspaceActionReceiptStatus = "prepared" | "applied" | "attempting" | "attempted" | "reporting" | "settled" | "suppressed" | "conflicted";
 

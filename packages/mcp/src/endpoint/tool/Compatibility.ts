@@ -1,4 +1,4 @@
-import { McpNativeToolResult } from "./Endpoint.js";
+import { McpNativeToolResult } from "../call/Boundary.js";
 
 interface McpLegacyToolAlias {
     kind: "alias";

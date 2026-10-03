@@ -1,4 +1,4 @@
-import type { WorkspaceAction, WorkspaceActionInput, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../Contract.js";
+import type { WorkspaceAction, WorkspaceActionInput, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../model/Contract.js";
 
 export interface WorkspaceCardEvents {
     action(request: { itemId: string; actionId: string; input?: string }): void;

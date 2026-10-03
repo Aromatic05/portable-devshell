@@ -21,7 +21,7 @@ import {
 import {
     withMcpContextId,
     withMcpInstanceTarget,
-} from "../../../../src/endpoint/dispatch/Input.ts";
+} from "../../../../src/endpoint/tool/Input.ts";
 
 const bashTool: ToolDefinition = {
     requiredCapabilities: ["execute"],

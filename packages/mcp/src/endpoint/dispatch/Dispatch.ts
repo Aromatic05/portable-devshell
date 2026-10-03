@@ -14,6 +14,7 @@ import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort, ContextCleanupPort } from "../../context/Port.js";
 import {
     createMcpContextSelector,
+    readMcpContextInput,
     type McpContextSelector,
 } from "../../context/Selector.js";
 import {
@@ -21,7 +22,7 @@ import {
     isMcpTmuxWaitGateway,
     type McpInstanceGateway,
     type McpTmuxWaitGateway,
-} from "../Port.js";
+} from "../../instance/Gateway.js";
 import type { McpToolCatalogArtifactName } from "../domain/artifact/Catalog.js";
 import { mcpEnvironmentToolName } from "../domain/context/environment/Catalog.js";
 import type { McpToolCatalogWorkspaceName } from "../workspace/Catalog.js";
@@ -29,29 +30,26 @@ import type { McpToolCatalogTodoName } from "../domain/task/Catalog.js";
 import type { WorkspaceAppLeaseStore } from "../../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../../workspace/app/Presence.js";
 import type { WorkspaceActionStore } from "../../workspace/ActionStore.js";
+import { readCurrentTaskAssociation } from "../../workspace/contributor/Task.js";
 import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
 import {
     throwIfMcpEndpointAborted,
     waitForMcpEndpointAbortable,
     waitForMcpGatewayReady,
     requireMcpEndpointGateway,
-} from "./Support.js";
+} from "../call/Boundary.js";
 import {
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool,
-} from "../Compatibility.js";
-import type {
-    McpEndpointCatalog,
-    McpEndpointCatalogWorker,
-} from "../tool/Catalog.js";
+} from "../tool/Compatibility.js";
+import type { McpEndpointCatalog } from "../tool/Catalog.js";
 import { mcpToolActivity } from "../tool/Metadata.js";
 import {
-    readMcpContextInput,
     readMcpProvenanceInput,
     readMcpRoutedInput,
-} from "./Input.js";
-import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../Port.js";
-import { McpNativeToolResult, type McpEndpointResult } from "../Endpoint.js";
+} from "../tool/Input.js";
+import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../call/Port.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../call/Boundary.js";
 import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
 import { McpEndpointHandlerArtifact } from "../domain/artifact/Handler.js";
 import { McpEndpointHandlerEnvironment } from "../domain/context/environment/Handler.js";
@@ -62,13 +60,13 @@ import {
     callMcpEndpointToolOperation,
     assertMcpEndpointReady,
     mcpEndpointToolNotExposed,
-} from "./Support.js";
+} from "../call/Boundary.js";
 
 export type {
     McpEndpointCallContext,
-    McpEndpointEnvironmentHandshake,
     McpEndpointWorkerPort,
-} from "../Port.js";
+} from "../call/Port.js";
+export type { McpEndpointEnvironmentHandshake } from "../../instance/Gateway.js";
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
@@ -180,7 +178,7 @@ export class McpEndpointDispatch {
     }
 
     assertReady(
-        worker: Pick<McpEndpointCatalogWorker, "snapshot"> = this.#worker,
+        worker: Pick<McpEndpointWorkerPort, "snapshot"> = this.#worker,
         instanceName: string = this.#instanceName,
     ): void {
         assertMcpEndpointReady(worker, instanceName);
@@ -191,15 +189,6 @@ export class McpEndpointDispatch {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
-    ): Promise<McpEndpointResult> {
-        return await this.#callTool(toolName, input, requestContext, signal);
-    }
-
-    async #callTool(
-        toolName: string,
-        input: JsonValue,
-        requestContext: McpEndpointCallContext,
-        signal: AbortSignal | undefined,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const requestedToolName = toolName;
@@ -284,7 +273,7 @@ export class McpEndpointDispatch {
                       this.#instanceName,
                   )
                 : { input, instance: this.#instanceName };
-        const context = await this.#createToolContext(
+        const context = this.#createToolContext(
             resolvedContext.record,
             requestContext,
             routed.instance,
@@ -347,7 +336,8 @@ export class McpEndpointDispatch {
             ) {
                 this.#catalog.assertAdaptable(selected.definition);
                 return appendWorkspaceAdvice(
-                    await this.#callTmuxRun(
+                    await this.#callTmuxWait(
+                        "run",
                         routed.input,
                         context,
                         routed.instance,
@@ -365,7 +355,8 @@ export class McpEndpointDispatch {
             ) {
                 this.#catalog.assertAdaptable(selected.definition);
                 return appendWorkspaceAdvice(
-                    await this.#callTmuxRead(
+                    await this.#callTmuxWait(
+                        "read",
                         routed.input,
                         context,
                         routed.instance,
@@ -446,7 +437,11 @@ export class McpEndpointDispatch {
             const definition = gateway.listTools(instance).find((tool) => tool.name === value.toolName);
             if (definition === undefined) throw mcpEndpointToolNotExposed(value.toolName, instance);
             this.#catalog.assertAdaptable(definition);
-            const prepared = await this.#ensureContextWorkerState(record, instance, value.context.workspace);
+            const prepared = await this.#environmentService.ensurePrepared(
+                record.ctxId,
+                instance,
+                value.context.workspace,
+            );
             const alerts = await this.#touchAlerts(instance, prepared.workspace!);
             workspaceAdvice = alerts.advice.map((advice) => advice.text);
         }
@@ -468,7 +463,8 @@ export class McpEndpointDispatch {
         return { value, executionEpoch, goalActivity, workspaceAdvice };
     }
 
-    async #callTmuxRead(
+    async #callTmuxWait(
+        mode: "read" | "run",
         input: JsonValue,
         context: ToolCallContext,
         instance: string,
@@ -477,7 +473,11 @@ export class McpEndpointDispatch {
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
-            throw new Error("tmux_read durable wait state is unavailable.");
+            throw new Error(
+                mode === "read"
+                    ? "tmux_read durable wait state is unavailable."
+                    : "tmux_run block wait state is unavailable.",
+            );
         }
         const startedAt = Date.now();
         let finalValue: ToolCallHookValue;
@@ -486,28 +486,53 @@ export class McpEndpointDispatch {
             const prepared = await prepareCall(callId, value);
             finalValue = value;
             executionEpoch = prepared.executionEpoch;
-            return {
-                consumeOutput: false,
-                line: 0,
-                task: readTmuxReadTask(rewrittenInput),
-                timeMs: 0,
-            };
+            return mode === "read"
+                ? {
+                      consumeOutput: false,
+                      line: 0,
+                      task: readTmuxReadTask(rewrittenInput),
+                      timeMs: 0,
+                  }
+                : {
+                      ...(isRecord(rewrittenInput) ? rewrittenInput : {}),
+                      consumeOutput: false,
+                      wait: "nonblock",
+                  };
         };
         const transformResult = async (observed: JsonValue, callId: string) => {
-            return await this.#finishTmuxRead(
-                finalValue.payload,
-                finalValue.context,
-                callId,
-                finalValue.context.instance,
-                finalValue.context.workspace,
-                observed,
-                startedAt,
-                signal,
-                executionEpoch,
-            );
+            const value = finalValue;
+            return mode === "read"
+                ? await this.#finishTmuxRead(
+                      value.payload,
+                      value.context,
+                      callId,
+                      value.context.instance,
+                      value.context.workspace,
+                      observed,
+                      startedAt,
+                      signal,
+                      executionEpoch,
+                  )
+                : await this.#finishTmuxRun(
+                      value.payload,
+                      value.context,
+                      callId,
+                      value.context.instance,
+                      value.context.workspace,
+                      observed,
+                      startedAt,
+                      signal,
+                      executionEpoch,
+                  );
         };
         return await gateway.callTool(
-            instance, "tmux_read", input, context, signal, transformResult, invocationInput,
+            instance,
+            mode === "read" ? "tmux_read" : "tmux_run",
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
         );
     }
 
@@ -535,11 +560,12 @@ export class McpEndpointDispatch {
             );
         const observed = observedValue;
         if (tmuxReadReady(observed, line)) {
-            const completed = await this.#consumeTmuxRead(
+            const completed = await this.#invokeTmuxRead(
                 instance,
                 task,
-                line,
                 context,
+                { line, timeMs: 0 },
+                "result",
                 signal,
             );
             await this.#supersedeObservedTmuxWaits(
@@ -563,7 +589,8 @@ export class McpEndpointDispatch {
         const goal = await this.#currentGoal(this.#instanceName, context.ctxId);
         const taskAssociation =
             goal === undefined
-                ? await this.#currentTaskAssociation(
+                ? await readCurrentTaskAssociation(
+                      gateway,
                       this.#instanceName,
                       context.ctxId,
                   )
@@ -602,141 +629,43 @@ export class McpEndpointDispatch {
                 ? {}
                 : { workspace: ownerWorkspace }),
         });
-        this.#ensureTmuxReadWaitTracker(
+        this.#ensureTmuxWaitTracker(
             this.#instanceName,
             wait.waitId,
-            instance,
-            task,
             context,
             callId,
-            line,
-            startedAt + timeout,
+            (gateway, signal) =>
+                this.#trackTmuxReadReady(
+                    gateway,
+                    instance,
+                    task,
+                    context,
+                    signal,
+                    line,
+                    startedAt + timeout,
+                ),
         );
 
-        let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
-        const boundary = new Promise<{ kind: "boundary" }>((resolve) => {
-            boundaryTimer = setTimeout(
-                () => resolve({ kind: "boundary" }),
-                this.#tmuxBlockSyncMs,
-            );
-        });
-        const resolution = gateway
-            .waitForWait(this.#instanceName, wait.waitId)
-            .then(
-                (record) => ({ kind: "wait" as const, record }),
-                (error: unknown) => ({ kind: "waitError" as const, error }),
-            );
-
-        let outcome:
-            | Awaited<typeof resolution>
-            | { kind: "boundary" }
-            | { kind: "transport" };
-        try {
-            outcome = await waitForMcpEndpointAbortable(
-                Promise.race([resolution, boundary]),
-                signal,
-            );
-        } catch (error) {
-            if (signal?.aborted !== true) throw error;
-            outcome = { kind: "transport" };
-        } finally {
-            if (boundaryTimer !== undefined) clearTimeout(boundaryTimer);
-        }
-
-        let current =
-            outcome.kind === "wait"
-                ? outcome.record
-                : (await gateway.listWaits(this.#instanceName)).find(
-                      (entry) => entry.waitId === wait.waitId,
-                  );
-        if (outcome.kind === "transport")
-            await this.#reentry.releaseExecutionActivity(
-                context.ctxId,
-                executionEpoch,
-                instance,
-            );
-        if (
-            (outcome.kind === "boundary" && current?.status === "waiting") ||
-            (outcome.kind === "transport" &&
-                (current?.status === "waiting" ||
-                    (current?.status === "resolved" &&
-                        current.detachedAt === undefined)))
-        ) {
-            try {
-                current = await gateway.detachWait(
-                    this.#instanceName,
-                    wait.waitId,
-                );
-            } catch {
-                current = (await gateway.listWaits(this.#instanceName)).find(
-                    (entry) => entry.waitId === wait.waitId,
-                );
-            }
-        }
-        if (
-            current?.status === "detached" ||
-            (current?.status === "resolved" && current.detachedAt !== undefined)
-        ) {
-            return { ...observed, detached: true };
-        }
-        if (current?.status === "resolved") {
-            await gateway.consumeWait(this.#instanceName, wait.waitId);
-            const completed = await this.#consumeTmuxRead(
+        const settled = await this.#settleTmuxWait(
+            gateway,
+            wait.waitId,
+            context.ctxId,
+            instance,
+            "tmux_read",
+            executionEpoch,
+            signal,
+        );
+        if (settled.kind === "detached") return { ...observed, detached: true };
+        if (settled.kind === "resolved") {
+            return await this.#invokeTmuxRead(
                 instance,
                 task,
-                line,
                 context,
+                { line, timeMs: 0 },
+                "result",
             );
-            return completed;
         }
-        if (current?.status === "cancelled" && outcome.kind === "waitError")
-            throw outcome.error;
-        if (outcome.kind === "waitError") throw outcome.error;
-        throw new Error(
-            `tmux_read wait ${wait.waitId} entered an unexpected state.`,
-        );
-    }
-
-    async #callTmuxRun(
-        input: JsonValue,
-        context: ToolCallContext,
-        instance: string,
-        prepareCall: (callId: string, value: ToolCallHookValue) => Promise<McpAcceptedCall>,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        const gateway = this.#gateway;
-        if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
-            throw new Error("tmux_run block wait state is unavailable.");
-        }
-        const startedAt = Date.now();
-        let finalValue: ToolCallHookValue;
-        let executionEpoch: number | undefined;
-        const invocationInput = async (rewrittenInput: JsonValue, callId: string, value: ToolCallHookValue): Promise<JsonValue> => {
-            const prepared = await prepareCall(callId, value);
-            finalValue = value;
-            executionEpoch = prepared.executionEpoch;
-            return {
-                ...(isRecord(rewrittenInput) ? rewrittenInput : {}),
-                consumeOutput: false,
-                wait: "nonblock",
-            };
-        };
-        const transformResult = async (started: JsonValue, callId: string) => {
-            return await this.#finishTmuxRun(
-                finalValue.payload,
-                finalValue.context,
-                callId,
-                finalValue.context.instance,
-                finalValue.context.workspace,
-                started,
-                startedAt,
-                signal,
-                executionEpoch,
-            );
-        };
-        return await gateway.callTool(
-            instance, "tmux_run", input, context, signal, transformResult, invocationInput,
-        );
+        throw settled.error;
     }
 
     async #finishTmuxRun(
@@ -779,7 +708,8 @@ export class McpEndpointDispatch {
         const goal = await this.#currentGoal(this.#instanceName, context.ctxId);
         const taskAssociation =
             goal === undefined
-                ? await this.#currentTaskAssociation(
+                ? await readCurrentTaskAssociation(
+                      gateway,
                       this.#instanceName,
                       context.ctxId,
                   )
@@ -823,13 +753,67 @@ export class McpEndpointDispatch {
         this.#ensureTmuxWaitTracker(
             this.#instanceName,
             wait.waitId,
-            instance,
-            task,
             context,
             callId,
-            timeout === undefined ? undefined : startedAt + timeout,
+            (gateway, signal) =>
+                this.#trackTmuxTask(
+                    gateway,
+                    instance,
+                    task,
+                    context,
+                    signal,
+                    timeout === undefined ? undefined : startedAt + timeout,
+                ),
         );
 
+        const settled = await this.#settleTmuxWait(
+            gateway,
+            wait.waitId,
+            context.ctxId,
+            instance,
+            "tmux_run",
+            executionEpoch,
+            signal,
+        );
+        if (settled.kind === "detached") return { ...started, detached: true };
+        if (settled.kind === "throw") throw settled.error;
+        if (settled.result === undefined || !isRecord(settled.result)) {
+            throw new Error(
+                "tmux_run wait resolved without a task result.",
+            );
+        }
+        if (isTmuxTaskRunning(settled.result, task)) {
+            const completed = await this.#readTmuxTaskOutput(
+                instance,
+                task,
+                line,
+                context,
+                signal,
+            );
+            return { ...started, ...settled.result, ...completed };
+        }
+        const completed = await this.#readTmuxTaskOutput(
+            instance,
+            task,
+            line,
+            context,
+        );
+        return { ...started, ...settled.result, ...completed };
+    }
+
+    async #settleTmuxWait(
+        gateway: McpTmuxWaitGateway,
+        waitId: string,
+        ctxId: string,
+        instance: string,
+        operation: "tmux_read" | "tmux_run",
+        executionEpoch?: number,
+        signal?: AbortSignal,
+    ): Promise<
+        | { kind: "detached" }
+        | { kind: "resolved"; result?: JsonValue }
+        | { kind: "throw"; error: unknown }
+    > {
         let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
         const boundary = new Promise<{ kind: "boundary" }>((resolve) => {
             boundaryTimer = setTimeout(
@@ -837,12 +821,10 @@ export class McpEndpointDispatch {
                 this.#tmuxBlockSyncMs,
             );
         });
-        const resolution = gateway
-            .waitForWait(this.#instanceName, wait.waitId)
-            .then(
-                (record) => ({ kind: "wait" as const, record }),
-                (error: unknown) => ({ kind: "waitError" as const, error }),
-            );
+        const resolution = gateway.waitForWait(this.#instanceName, waitId).then(
+            (record) => ({ kind: "wait" as const, record }),
+            (error: unknown) => ({ kind: "waitError" as const, error }),
+        );
 
         let outcome:
             | Awaited<typeof resolution>
@@ -864,11 +846,11 @@ export class McpEndpointDispatch {
             outcome.kind === "wait"
                 ? outcome.record
                 : (await gateway.listWaits(this.#instanceName)).find(
-                      (entry) => entry.waitId === wait.waitId,
+                      (entry) => entry.waitId === waitId,
                   );
         if (outcome.kind === "transport")
             await this.#reentry.releaseExecutionActivity(
-                context.ctxId,
+                ctxId,
                 executionEpoch,
                 instance,
             );
@@ -880,13 +862,10 @@ export class McpEndpointDispatch {
                         current.detachedAt === undefined)))
         ) {
             try {
-                current = await gateway.detachWait(
-                    this.#instanceName,
-                    wait.waitId,
-                );
+                current = await gateway.detachWait(this.#instanceName, waitId);
             } catch {
                 current = (await gateway.listWaits(this.#instanceName)).find(
-                    (entry) => entry.waitId === wait.waitId,
+                    (entry) => entry.waitId === waitId,
                 );
             }
         }
@@ -894,39 +873,22 @@ export class McpEndpointDispatch {
             current?.status === "detached" ||
             (current?.status === "resolved" && current.detachedAt !== undefined)
         ) {
-            return { ...started, detached: true };
+            return { kind: "detached" };
         }
         if (current?.status === "resolved") {
-            await gateway.consumeWait(this.#instanceName, wait.waitId);
-            if (current.result === undefined || !isRecord(current.result)) {
-                throw new Error(
-                    "tmux_run wait resolved without a task result.",
-                );
-            }
-            if (isTmuxTaskRunning(current.result, task)) {
-                const completed = await this.#readTmuxTaskOutput(
-                    instance,
-                    task,
-                    line,
-                    context,
-                    signal,
-                );
-                return { ...started, ...current.result, ...completed };
-            }
-            const completed = await this.#readTmuxTaskOutput(
-                instance,
-                task,
-                line,
-                context,
-            );
-            return { ...started, ...current.result, ...completed };
+            await gateway.consumeWait(this.#instanceName, waitId);
+            return { kind: "resolved", result: current.result };
         }
         if (current?.status === "cancelled" && outcome.kind === "waitError")
-            throw outcome.error;
-        if (outcome.kind === "waitError") throw outcome.error;
-        throw new Error(
-            `tmux_run wait ${wait.waitId} entered an unexpected state.`,
-        );
+            return { kind: "throw", error: outcome.error };
+        if (outcome.kind === "waitError")
+            return { kind: "throw", error: outcome.error };
+        return {
+            kind: "throw",
+            error: new Error(
+                `${operation} wait ${waitId} entered an unexpected state.`,
+            ),
+        };
     }
 
     async #currentGoal(instance: string, ctxId: string) {
@@ -939,162 +901,34 @@ export class McpEndpointDispatch {
             : undefined;
     }
 
-    async #currentTaskAssociation(
-        instance: string,
-        ctxId: string,
-    ): Promise<
-        | { kind: "none" }
-        | { kind: "ambiguous" }
-        | { kind: "one"; revision: number; taskId: string; todoItemId: string }
-    > {
-        const gateway = this.#gateway;
-        if (gateway === undefined) return { kind: "none" };
-        const todo = await gateway.readTodo(instance);
-        if (
-            typeof todo !== "object" ||
-            todo === null ||
-            Array.isArray(todo) ||
-            !Array.isArray(todo.tasks)
-        ) {
-            return { kind: "none" };
-        }
-        const active = todo.tasks.filter(
-            (task) =>
-                typeof task === "object" &&
-                task !== null &&
-                !Array.isArray(task) &&
-                task.ctxId === ctxId &&
-                task.status === "in_progress" &&
-                typeof task.taskId === "string",
-        );
-        if (active.length === 0) return { kind: "none" };
-        if (active.length !== 1) return { kind: "ambiguous" };
-        const task = active[0];
-        if (
-            typeof task !== "object" ||
-            task === null ||
-            Array.isArray(task) ||
-            typeof task.taskId !== "string"
-        ) {
-            return { kind: "none" };
-        }
-        const detail = await gateway.readTodo(instance, {
-            taskId: task.taskId,
-        });
-        if (
-            typeof detail !== "object" ||
-            detail === null ||
-            Array.isArray(detail) ||
-            !Array.isArray(detail.items)
-        ) {
-            return { kind: "ambiguous" };
-        }
-        const current = detail.items.filter(
-            (item) =>
-                typeof item === "object" &&
-                item !== null &&
-                !Array.isArray(item) &&
-                item.status === "in_progress" &&
-                typeof item.id === "string",
-        );
-        if (current.length !== 1 || typeof detail.revision !== "number")
-            return { kind: "ambiguous" };
-        return {
-            kind: "one",
-            revision: detail.revision,
-            taskId: task.taskId,
-            todoItemId: (current[0] as { id: string }).id,
-        };
-    }
-
     #ensureTmuxWaitTracker(
         waitInstance: string,
         waitId: string,
-        targetInstance: string,
-        taskId: string,
-        context: ToolCallContext,
-        ownerCallId?: string,
-        deadlineAt?: number,
-    ): Promise<JsonValue> {
-        const gateway = this.#gateway;
-        if (!isMcpTmuxWaitGateway(gateway)) {
-            throw new Error("tmux_run block wait state is unavailable.");
-        }
-        const key = `${waitInstance}:${waitId}`;
-        const existing = this.#tmuxWaitTrackers.get(key);
-        if (existing !== undefined) return existing.promise;
-        const controller = new AbortController();
-        const tracker = this.#trackTmuxTask(
-            gateway,
-            targetInstance,
-            taskId,
-            context,
-            controller.signal,
-            deadlineAt,
-        )
-            .then(
-                async (result) => {
-                    const consumeIfDetached =
-                        await this.#contextExecutionActive(
-                            context.ctxId,
-                            ownerCallId,
-                        );
-                    await gateway.resolveWait(waitInstance, waitId, result, {
-                        consumeIfDetached,
-                    });
-                    return result;
-                },
-                async (error: unknown) => {
-                    if (!controller.signal.aborted) {
-                        await gateway
-                            .cancelWait(waitInstance, waitId)
-                            .catch(() => undefined);
-                    }
-                    throw error;
-                },
-            )
-            .finally(() => {
-                this.#tmuxWaitTrackers.delete(key);
-            });
-        this.#tmuxWaitTrackers.set(key, { controller, promise: tracker });
-        void tracker.catch(() => undefined);
-        return tracker;
-    }
-
-    #ensureTmuxReadWaitTracker(
-        waitInstance: string,
-        waitId: string,
-        targetInstance: string,
-        taskId: string,
         context: ToolCallContext,
         ownerCallId: string | undefined,
-        line: number,
-        deadlineAt: number,
+        track: (
+            gateway: McpTmuxWaitGateway,
+            signal: AbortSignal,
+        ) => Promise<JsonValue>,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway)) {
-            throw new Error("tmux_read durable wait state is unavailable.");
+            throw new Error("tmux wait state is unavailable.");
         }
         const key = `${waitInstance}:${waitId}`;
         const existing = this.#tmuxWaitTrackers.get(key);
         if (existing !== undefined) return existing.promise;
         const controller = new AbortController();
-        const tracker = this.#trackTmuxReadReady(
-            gateway,
-            targetInstance,
-            taskId,
-            context,
-            controller.signal,
-            line,
-            deadlineAt,
-        )
+        const tracker = track(gateway, controller.signal)
             .then(
                 async (result) => {
                     const consumeIfDetached =
-                        await this.#contextExecutionActive(
-                            context.ctxId,
-                            ownerCallId,
-                        );
+                        context.ctxId === undefined
+                            ? false
+                            : await this.#reentry.executionActive(
+                                  context.ctxId,
+                                  ownerCallId,
+                              );
                     await gateway.resolveWait(waitInstance, waitId, result, {
                         consumeIfDetached,
                     });
@@ -1134,31 +968,47 @@ export class McpEndpointDispatch {
                 const payload = isRecord(wait.payload)
                     ? wait.payload
                     : undefined;
-                if (
-                    payload?.operation === "read" &&
-                    wait.deadlineAt !== undefined
-                ) {
-                    this.#ensureTmuxReadWaitTracker(
+                const context: ToolCallContext = {
+                    ctxId: wait.createdByCtxId,
+                    source: "mcp",
+                };
+                const targetInstance = wait.targetInstance ?? instance;
+                const deadlineAt =
+                    wait.deadlineAt === undefined
+                        ? undefined
+                        : Date.parse(wait.deadlineAt);
+                if (payload?.operation === "read" && deadlineAt !== undefined) {
+                    this.#ensureTmuxWaitTracker(
                         instance,
                         wait.waitId,
-                        wait.targetInstance ?? instance,
-                        wait.targetId,
-                        { ctxId: wait.createdByCtxId, source: "mcp" },
+                        context,
                         wait.ownerCallId,
-                        readTmuxLine(payload),
-                        Date.parse(wait.deadlineAt),
+                        (gateway, signal) =>
+                            this.#trackTmuxReadReady(
+                                gateway,
+                                targetInstance,
+                                wait.targetId,
+                                context,
+                                signal,
+                                readTmuxLine(payload),
+                                deadlineAt,
+                            ),
                     );
                 } else {
                     this.#ensureTmuxWaitTracker(
                         instance,
                         wait.waitId,
-                        wait.targetInstance ?? instance,
-                        wait.targetId,
-                        { ctxId: wait.createdByCtxId, source: "mcp" },
+                        context,
                         wait.ownerCallId,
-                        wait.deadlineAt === undefined
-                            ? undefined
-                            : Date.parse(wait.deadlineAt),
+                        (gateway, signal) =>
+                            this.#trackTmuxTask(
+                                gateway,
+                                targetInstance,
+                                wait.targetId,
+                                context,
+                                signal,
+                                deadlineAt,
+                            ),
                     );
                 }
             }
@@ -1175,13 +1025,23 @@ export class McpEndpointDispatch {
         }
     }
 
-    async #contextExecutionActive(
-        ctxId: string | undefined,
-        ownerCallId?: string,
-    ): Promise<boolean> {
-        return ctxId === undefined
-            ? false
-            : await this.#reentry.executionActive(ctxId, ownerCallId);
+    async #waitForTmuxPoll(
+        deadlineAt: number | undefined,
+        signal: AbortSignal,
+    ): Promise<void> {
+        const remaining =
+            deadlineAt === undefined
+                ? this.#tmuxWaitPollMs
+                : Math.max(1, deadlineAt - Date.now());
+        await waitForMcpEndpointAbortable(
+            new Promise<void>((resolve) =>
+                setTimeout(
+                    resolve,
+                    Math.min(this.#tmuxWaitPollMs, remaining),
+                ),
+            ),
+            signal,
+        );
     }
 
     async #trackTmuxTask(
@@ -1221,37 +1081,11 @@ export class McpEndpointDispatch {
                     result.waitReason === "output" ||
                     result.waitReason === undefined
                 ) {
-                    await waitForMcpEndpointAbortable(
-                        new Promise<void>((resolve) =>
-                            setTimeout(
-                                resolve,
-                                Math.min(
-                                    this.#tmuxWaitPollMs,
-                                    deadlineAt === undefined
-                                        ? this.#tmuxWaitPollMs
-                                        : Math.max(1, deadlineAt - Date.now()),
-                                ),
-                            ),
-                        ),
-                        signal,
-                    );
+                    await this.#waitForTmuxPoll(deadlineAt, signal);
                 }
             } catch (error) {
                 if (!isRetryableTmuxObservationError(error)) throw error;
-                await waitForMcpEndpointAbortable(
-                    new Promise<void>((resolve) =>
-                        setTimeout(
-                            resolve,
-                            Math.min(
-                                this.#tmuxWaitPollMs,
-                                deadlineAt === undefined
-                                    ? this.#tmuxWaitPollMs
-                                    : Math.max(1, deadlineAt - Date.now()),
-                            ),
-                        ),
-                    ),
-                    signal,
-                );
+                await this.#waitForTmuxPoll(deadlineAt, signal);
             }
         }
     }
@@ -1281,36 +1115,36 @@ export class McpEndpointDispatch {
                 if (Date.now() >= deadlineAt)
                     return { ...result, waitReason: "timeout" };
                 if (line < 0 && result.waitReason === "output") {
-                    await waitForMcpEndpointAbortable(
-                        new Promise<void>((resolve) =>
-                            setTimeout(
-                                resolve,
-                                Math.min(
-                                    this.#tmuxWaitPollMs,
-                                    Math.max(1, deadlineAt - Date.now()),
-                                ),
-                            ),
-                        ),
-                        signal,
-                    );
+                    await this.#waitForTmuxPoll(deadlineAt, signal);
                 }
             } catch (error) {
                 if (!isRetryableTmuxObservationError(error)) throw error;
                 if (Date.now() >= deadlineAt) throw error;
-                await waitForMcpEndpointAbortable(
-                    new Promise<void>((resolve) =>
-                        setTimeout(
-                            resolve,
-                            Math.min(
-                                this.#tmuxWaitPollMs,
-                                Math.max(1, deadlineAt - Date.now()),
-                            ),
-                        ),
-                    ),
-                    signal,
-                );
+                await this.#waitForTmuxPoll(deadlineAt, signal);
             }
         }
+    }
+
+    async #invokeTmuxRead(
+        instance: string,
+        taskId: string,
+        context: ToolCallContext,
+        input: { consumeOutput?: boolean; line: number; timeMs?: number },
+        resultKind: "observation" | "result",
+        signal?: AbortSignal,
+    ): Promise<Record<string, JsonValue>> {
+        const result = await this.#invokeToolInternal(
+            instance,
+            "tmux_read",
+            { ...input, task: taskId },
+            context,
+            signal,
+        );
+        if (!isRecord(result))
+            throw new Error(
+                `tmux_read returned an invalid ${resultKind} for task ${taskId}.`,
+            );
+        return result;
     }
 
     async #observeTmuxRead(
@@ -1321,41 +1155,14 @@ export class McpEndpointDispatch {
         line: number,
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
-        const input = { consumeOutput: false, line, task: taskId, timeMs };
-        const result = await this.#invokeToolInternal(
+        return await this.#invokeTmuxRead(
             instance,
-            "tmux_read",
-            input,
+            taskId,
             context,
+            { consumeOutput: false, line, timeMs },
+            "observation",
             signal,
         );
-        if (!isRecord(result))
-            throw new Error(
-                `tmux_read returned an invalid observation for task ${taskId}.`,
-            );
-        return result;
-    }
-
-    async #consumeTmuxRead(
-        instance: string,
-        taskId: string,
-        line: number,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<Record<string, JsonValue>> {
-        const input = { line, task: taskId, timeMs: 0 };
-        const result = await this.#invokeToolInternal(
-            instance,
-            "tmux_read",
-            input,
-            context,
-            signal,
-        );
-        if (!isRecord(result))
-            throw new Error(
-                `tmux_read returned an invalid result for task ${taskId}.`,
-            );
-        return result;
     }
 
     async #supersedeObservedTmuxWaits(
@@ -1406,20 +1213,14 @@ export class McpEndpointDispatch {
         context: ToolCallContext,
         signal?: AbortSignal,
     ): Promise<Record<string, JsonValue>> {
-        const input = { line, task: taskId };
-        const result = await this.#invokeToolInternal(
+        return await this.#invokeTmuxRead(
             instance,
-            "tmux_read",
-            input,
+            taskId,
             context,
+            { line },
+            "result",
             signal,
         );
-        if (!isRecord(result)) {
-            throw new Error(
-                `tmux_read returned an invalid result for task ${taskId}.`,
-            );
-        }
-        return result;
     }
 
     async #invokeToolInternal(
@@ -1465,12 +1266,12 @@ export class McpEndpointDispatch {
             ?.controller.abort("Workspace interrupted tmux_run");
     }
 
-    async #createToolContext(
+    #createToolContext(
         record: McpContextRecord,
         requestContext: McpEndpointCallContext,
         instance: string,
         signal?: AbortSignal,
-    ): Promise<ToolCallContext> {
+    ): ToolCallContext {
         const environment = contextEnvironment(record, instance);
         const context: ToolCallContext = {
             ctxId: record.ctxId,
@@ -1498,14 +1299,6 @@ export class McpEndpointDispatch {
                   principal: requestContext.principal,
               });
         return { input: contextInput.input, record };
-    }
-
-    async #ensureContextWorkerState(
-        record: McpContextRecord,
-        instance: string,
-        workspace?: string,
-    ): Promise<McpContextEnvironment> {
-        return await this.#environmentService.ensurePrepared(record.ctxId, instance, workspace);
     }
 
     async #appendMcpToolCalled(

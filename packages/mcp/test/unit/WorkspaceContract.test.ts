@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
-import type { McpWorkspaceActionGateway } from "../../src/endpoint/Port.ts";
+import type { McpWorkspaceActionGateway } from "../../src/instance/Gateway.ts";
 import {
     workspaceActionOutputSchema,
     workspaceSnapshotOutputSchema,

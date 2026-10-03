@@ -1,13 +1,13 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { McpWorkspaceActionGateway } from "../endpoint/Port.js";
+import type { McpWorkspaceActionGateway } from "../instance/Gateway.js";
 import { workspaceModelContext } from "./ModelContext.js";
 import { projectWorkspaceReentry } from "./ReentryView.js";
 import type {
     WorkspaceReentryDirective,
     WorkspaceResolvedAction,
     WorkspaceSnapshot,
-} from "./Contract.js";
+} from "./model/Contract.js";
 import {
     readWorkspaceBusy,
     readWorkspaceCursor,

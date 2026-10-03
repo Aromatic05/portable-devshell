@@ -9,11 +9,12 @@ import type {
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     isMcpGoalGateway,
-    isMcpWorkspaceActionGateway,
     isMcpWaitRecoveryGateway,
+    requireMcpGoalGateway as requireGoalGateway,
+    requireMcpWorkspaceActionGateway as requireInteractionGateway,
     type McpInstanceGateway,
     type McpWorkspaceActionGateway,
-} from "../../endpoint/Port.js";
+} from "../../instance/Gateway.js";
 import {
     explicitReentryDelivery,
     goalReentryDelivery,
@@ -21,7 +22,10 @@ import {
     type WorkspaceExplicitReentryKind,
     type WorkspaceReentryDelivery,
 } from "./Delivery.js";
-import { readWorkspaceSnapshot } from "../Projection.js";
+import {
+    readContextWorkspaceSnapshot,
+    readWorkspaceContextInstances,
+} from "../ContextScope.js";
 
 export async function assertWorkspaceWaitRecoveryAssociationAvailable(
     options: { gateway?: McpInstanceGateway; instanceName: string },
@@ -216,12 +220,7 @@ export class McpWorkspaceReentryArbiter {
             );
         }
         await this.#releaseSource(gateway, ctxId, claimId);
-        const state = await registry.reentry.releaseAutomaticReentry(
-            ctxId,
-            this.options.instanceName,
-            claimId,
-        );
-        return { ...state, released: true } as unknown as JsonValue;
+        return await this.#releaseClaim(ctxId, claimId, "released");
     }
 
     async observeExecutionStart(ctxId: string, instance = this.options.instanceName): Promise<number | undefined> {
@@ -258,6 +257,20 @@ export class McpWorkspaceReentryArbiter {
         ctxId: string,
         ownerCallId?: string,
     ): Promise<boolean> {
+        return await this.#executionBusy(
+            this.options.gateway,
+            ctxId,
+            ownerCallId,
+            true,
+        );
+    }
+
+    async #executionBusy(
+        gateway: McpInstanceGateway | undefined,
+        ctxId: string,
+        ownerCallId: string | undefined,
+        tolerateMetadataFailure: boolean,
+    ): Promise<boolean> {
         try {
             const state =
                 await this.options.contextRegistry.reentry.readAutomaticReentry(
@@ -265,25 +278,28 @@ export class McpWorkspaceReentryArbiter {
                     this.options.instanceName,
                 );
             if (state.executionActive || state.attempted) return true;
-        } catch {
+        } catch (error) {
+            if (!tolerateMetadataFailure) throw error;
             // A detached wait can outlive Context metadata; live tool calls remain the fallback signal.
         }
-        return await this.#hasActiveToolCall(ctxId, ownerCallId);
+        return await this.#hasActiveToolCall(ctxId, ownerCallId, gateway);
     }
 
-    async #claimAutomatic(
+    async #beginClaim(
         gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
-    ): Promise<JsonValue> {
+    ): Promise<{ done: JsonValue } | { ctxId: string }> {
         const ctxId = requireCtxId(context);
         const arbitration = await this.#claimContext(gateway, ctxId, claimId);
         if (!arbitration.claimed)
             return {
-                ...arbitration.state,
-                claimed: false,
-                claimId,
-            } as unknown as JsonValue;
+                done: {
+                    ...arbitration.state,
+                    claimed: false,
+                    claimId,
+                } as unknown as JsonValue,
+            };
 
         const waitDelivery = await this.#claimResolvedWaitDelivery(
             gateway,
@@ -297,30 +313,45 @@ export class McpWorkspaceReentryArbiter {
                     this.options.instanceName,
                 );
             return {
-                ...state,
-                claimed: true,
-                claimId,
-                delivery: waitDelivery,
-            } as unknown as JsonValue;
+                done: {
+                    ...state,
+                    claimed: true,
+                    claimId,
+                    delivery: waitDelivery,
+                } as unknown as JsonValue,
+            };
         }
         if (
             (await this.#hasBlockingAutomaticWait(gateway, ctxId)) ||
             (await this.#hasPendingContextApproval(gateway, ctxId))
         ) {
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return {
+                done: await this.#releaseClaim(ctxId, claimId, "unclaimed"),
+            };
         }
+        return { ctxId };
+    }
 
+    async #claimAutomatic(
+        gateway: McpWorkspaceActionGateway,
+        context: ToolCallContext,
+        claimId: string,
+    ): Promise<JsonValue> {
+        const begin = await this.#beginClaim(gateway, context, claimId);
+        if ("done" in begin) return begin.done;
+
+        const { ctxId } = begin;
         const goalGateway = isMcpGoalGateway(this.options.gateway)
             ? this.options.gateway
             : undefined;
         if (goalGateway === undefined)
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
         const goal = await goalGateway.readGoal(
             this.options.instanceName,
             ctxId,
         );
         if (goal?.continuationDue !== true)
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
 
         const claimedValue = await goalGateway.goalContinuation(
             this.options.instanceName,
@@ -329,7 +360,7 @@ export class McpWorkspaceReentryArbiter {
         );
         const claimed = asRecord(claimedValue);
         if (claimed?.claimed !== true)
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
         if (
             (await this.#contextExecutionBusy(gateway, ctxId)) ||
             (await this.#hasBlockingAutomaticWait(gateway, ctxId)) ||
@@ -348,7 +379,7 @@ export class McpWorkspaceReentryArbiter {
             if (await this.#contextExecutionBusy(gateway, ctxId)) {
                 await this.#consumeResolvedWaitsDuringExecution(gateway, ctxId);
             }
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
         }
 
         const claimedGoal = await goalGateway.readGoal(
@@ -366,7 +397,7 @@ export class McpWorkspaceReentryArbiter {
                         ctxId,
                     ),
             );
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
         }
         try {
             await this.options.contextRegistry.reentry.bindAutomaticReentrySource(
@@ -424,39 +455,10 @@ export class McpWorkspaceReentryArbiter {
         intent: WorkspaceExplicitReentryKind,
         sourceId: string,
     ): Promise<JsonValue> {
-        const ctxId = requireCtxId(context);
-        const arbitration = await this.#claimContext(gateway, ctxId, claimId);
-        if (!arbitration.claimed)
-            return {
-                ...arbitration.state,
-                claimed: false,
-                claimId,
-            } as unknown as JsonValue;
+        const begin = await this.#beginClaim(gateway, context, claimId);
+        if ("done" in begin) return begin.done;
 
-        const waitDelivery = await this.#claimResolvedWaitDelivery(
-            gateway,
-            context,
-            claimId,
-        );
-        if (waitDelivery !== undefined) {
-            const state =
-                await this.options.contextRegistry.reentry.readAutomaticReentry(
-                    ctxId,
-                    this.options.instanceName,
-                );
-            return {
-                ...state,
-                claimed: true,
-                claimId,
-                delivery: waitDelivery,
-            } as unknown as JsonValue;
-        }
-        if (
-            (await this.#hasBlockingAutomaticWait(gateway, ctxId)) ||
-            (await this.#hasPendingContextApproval(gateway, ctxId))
-        ) {
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
-        }
+        const { ctxId } = begin;
         if (
             !(await this.#explicitSourceAvailable(
                 gateway,
@@ -465,7 +467,7 @@ export class McpWorkspaceReentryArbiter {
                 sourceId,
             ))
         ) {
-            return await this.#releaseUnclaimedContext(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "unclaimed");
         }
         let state;
         try {
@@ -591,27 +593,15 @@ export class McpWorkspaceReentryArbiter {
                     claimedWait.waitId,
                 );
             else await this.#releaseSource(gateway, ctxId, claimId);
-            const state =
-                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
-                    ctxId,
-                    this.options.instanceName,
-                    claimId,
-                );
-            return { ...state, valid: false } as unknown as JsonValue;
+            return await this.#releaseClaim(ctxId, claimId, "invalid");
         }
         if (await this.#hasPendingContextApproval(gateway, ctxId)) {
             await this.#releaseSource(gateway, ctxId, claimId);
-            const state =
-                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
-                    ctxId,
-                    this.options.instanceName,
-                    claimId,
-                );
-            return { ...state, valid: false } as unknown as JsonValue;
+            return await this.#releaseClaim(ctxId, claimId, "invalid");
         }
         if (sourceKind === "wait") {
             if (claimedWait === undefined)
-                return await this.#invalidClaim(ctxId, claimId);
+                return await this.#releaseClaim(ctxId, claimId, "invalid");
             try {
                 await assertWorkspaceWaitRecoveryAssociationAvailable(
                     this.options,
@@ -623,13 +613,13 @@ export class McpWorkspaceReentryArbiter {
                     this.options.instanceName,
                     claimedWait.waitId,
                 );
-                return await this.#invalidClaim(ctxId, claimId);
+                return await this.#releaseClaim(ctxId, claimId, "invalid");
             }
             return { ...validation.state, valid: true } as unknown as JsonValue;
         }
         if (await this.#hasBlockingAutomaticWait(gateway, ctxId)) {
             await this.#releaseSource(gateway, ctxId, claimId);
-            return await this.#invalidClaim(ctxId, claimId);
+            return await this.#releaseClaim(ctxId, claimId, "invalid");
         }
         if (
             sourceKind === "goal-resume" ||
@@ -647,7 +637,7 @@ export class McpWorkspaceReentryArbiter {
                 ));
             if (!valid) {
                 await this.#releaseSource(gateway, ctxId, claimId);
-                return await this.#invalidClaim(ctxId, claimId);
+                return await this.#releaseClaim(ctxId, claimId, "invalid");
             }
             return { ...validation.state, valid: true } as unknown as JsonValue;
         }
@@ -984,19 +974,12 @@ export class McpWorkspaceReentryArbiter {
         claimId: string,
         error: unknown,
     ): Promise<never> {
-        try {
-            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
-                ctxId,
-                this.options.instanceName,
-                claimId,
-            );
-        } catch (contextError) {
-            throw new AggregateError(
-                [error, contextError],
-                "Workspace re-entry operation failed and Context claim rollback was incomplete.",
-            );
-        }
-        throw error;
+        return await this.#releaseContextOrAggregate(
+            ctxId,
+            claimId,
+            error,
+            "Workspace re-entry operation failed and Context claim rollback was incomplete.",
+        );
     }
 
     async #rollbackUnboundSourceClaim(
@@ -1013,6 +996,20 @@ export class McpWorkspaceReentryArbiter {
                 "Workspace re-entry source claim rollback was incomplete.",
             );
         }
+        return await this.#releaseContextOrAggregate(
+            ctxId,
+            claimId,
+            error,
+            "Workspace re-entry Context claim rollback was incomplete.",
+        );
+    }
+
+    async #releaseContextOrAggregate(
+        ctxId: string,
+        claimId: string,
+        error: unknown,
+        message: string,
+    ): Promise<never> {
         try {
             await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
@@ -1020,10 +1017,7 @@ export class McpWorkspaceReentryArbiter {
                 claimId,
             );
         } catch (contextError) {
-            throw new AggregateError(
-                [error, contextError],
-                "Workspace re-entry Context claim rollback was incomplete.",
-            );
+            throw new AggregateError([error, contextError], message);
         }
         throw error;
     }
@@ -1274,12 +1268,7 @@ export class McpWorkspaceReentryArbiter {
         gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<boolean> {
-        const state = await this.options.contextRegistry.reentry.readAutomaticReentry(
-            ctxId,
-            this.options.instanceName,
-        );
-        if (state.executionActive || state.attempted) return true;
-        return await this.#hasActiveToolCall(ctxId, undefined, gateway);
+        return await this.#executionBusy(gateway, ctxId, undefined, false);
     }
 
     async #hasActiveToolCall(
@@ -1346,55 +1335,26 @@ export class McpWorkspaceReentryArbiter {
         gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<JsonValue> {
-        const record = await this.options.contextRegistry.validateForInstance(
-            ctxId,
-            this.options.instanceName,
-        );
-        const reentry = await this.options.contextRegistry.reentry.readAutomaticReentry(
-            ctxId,
-            this.options.instanceName,
-        );
-        return await readWorkspaceSnapshot(
+        return await readContextWorkspaceSnapshot(
+            this.options.contextRegistry,
             gateway,
             this.options.instanceName,
             ctxId,
-            {
-                instances: record.environments.map(
-                    (environment) => environment.instance,
-                ),
-                reentry: reentry as unknown as JsonValue,
-            },
         );
     }
 
     async #contextInstances(ctxId: string): Promise<string[]> {
-        const record = await this.options.contextRegistry.validateForInstance(
-            ctxId,
+        return await readWorkspaceContextInstances(
+            this.options.contextRegistry,
             this.options.instanceName,
+            ctxId,
         );
-        return [
-            ...new Set([
-                this.options.instanceName,
-                ...record.environments.map(
-                    (environment) => environment.instance,
-                ),
-            ]),
-        ];
     }
 
-    async #invalidClaim(ctxId: string, claimId: string): Promise<JsonValue> {
-        const state =
-            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
-                ctxId,
-                this.options.instanceName,
-                claimId,
-            );
-        return { ...state, valid: false } as unknown as JsonValue;
-    }
-
-    async #releaseUnclaimedContext(
+    async #releaseClaim(
         ctxId: string,
         claimId: string,
+        outcome: "invalid" | "released" | "unclaimed",
     ): Promise<JsonValue> {
         const state =
             await this.options.contextRegistry.reentry.releaseAutomaticReentry(
@@ -1402,7 +1362,11 @@ export class McpWorkspaceReentryArbiter {
                 this.options.instanceName,
                 claimId,
             );
-        return { ...state, claimed: false, claimId } as unknown as JsonValue;
+        if (outcome === "invalid")
+            return { ...state, valid: false } as unknown as JsonValue;
+        if (outcome === "unclaimed")
+            return { ...state, claimed: false, claimId } as unknown as JsonValue;
+        return { ...state, released: true } as unknown as JsonValue;
     }
 }
 
@@ -1475,26 +1439,6 @@ function readReentryControl(input: JsonValue): {
             ? { sourceId: record.sourceId }
             : {}),
     };
-}
-
-function requireInteractionGateway(
-    gateway: McpInstanceGateway | undefined,
-    instanceName: string,
-): McpWorkspaceActionGateway {
-    if (isMcpWorkspaceActionGateway(gateway)) return gateway;
-    throw new Error(
-        `Workspace interaction backend is unavailable for ${instanceName}.`,
-    );
-}
-
-function requireGoalGateway(
-    gateway: McpInstanceGateway | undefined,
-    instanceName: string,
-) {
-    if (isMcpGoalGateway(gateway)) return gateway;
-    throw new Error(
-        `Workspace Goal backend is unavailable for ${instanceName}.`,
-    );
 }
 
 function requireWaitRecoveryGateway(

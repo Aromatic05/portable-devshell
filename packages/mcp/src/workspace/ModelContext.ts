@@ -2,7 +2,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type {
     WorkspaceHostModelContext,
     WorkspaceSnapshot,
-} from "./Contract.js";
+} from "./model/Contract.js";
 
 export function workspaceModelContext(
     snapshot: WorkspaceSnapshot,

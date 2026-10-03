@@ -3,12 +3,12 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../../Port.js";
+import type { McpInstanceGateway } from "../../../instance/Gateway.js";
 import type { McpToolCatalogTodoName } from "./Catalog.js";
 import { readTodoInput } from "./Input.js";
-import { waitForMcpEndpointAbortable } from "../../dispatch/Support.js";
-import type { McpEndpointResult } from "../../Endpoint.js";
-import { requireMcpEndpointGateway } from "../../dispatch/Support.js";
+import { waitForMcpEndpointAbortable } from "../../call/Boundary.js";
+import type { McpEndpointResult } from "../../call/Boundary.js";
+import { requireMcpEndpointGateway } from "../../call/Boundary.js";
 
 export class McpEndpointHandlerTodo {
     constructor(

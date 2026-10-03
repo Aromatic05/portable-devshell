@@ -194,36 +194,14 @@ export class HttpHost {
             response: ServerResponse,
         ) => void | Promise<void>,
     ): () => void {
-        let active = true;
-        this.#app[method](
-            path,
-            (request: Request, response: Response, next: NextFunction) => {
-                if (!active) {
-                    next();
-                    return;
-                }
-                void Promise.resolve(
-                    handler(
-                        request as IncomingMessage,
-                        response as unknown as ServerResponse,
-                    ),
-                ).catch((error: unknown) => {
-                    if (!response.headersSent) {
-                        response.status(500).json({
-                            error:
-                                error instanceof Error
-                                    ? error.message
-                                    : "Internal server error",
-                        });
-                        return;
-                    }
-                    response.end();
-                });
-            },
+        return this.#registerRequestHandler(
+            (routeHandler) => this.#app[method](path, routeHandler),
+            (request, response) =>
+                handler(
+                    request as IncomingMessage,
+                    response as unknown as ServerResponse,
+                ),
         );
-        return () => {
-            active = false;
-        };
     }
 
     registerRawPrefix(
@@ -234,36 +212,14 @@ export class HttpHost {
         ) => void | Promise<void>,
     ): () => void {
         const prefix = normalizeRoutePrefix(path);
-        let active = true;
-        this.#app.use(
-            prefix,
-            (request: Request, response: Response, next: NextFunction) => {
-                if (!active) {
-                    next();
-                    return;
-                }
-                void Promise.resolve(
-                    handler(
-                        request as IncomingMessage,
-                        response as unknown as ServerResponse,
-                    ),
-                ).catch((error: unknown) => {
-                    if (!response.headersSent) {
-                        response.status(500).json({
-                            error:
-                                error instanceof Error
-                                    ? error.message
-                                    : "Internal server error",
-                        });
-                        return;
-                    }
-                    response.end();
-                });
-            },
+        return this.#registerRequestHandler(
+            (routeHandler) => this.#app.use(prefix, routeHandler),
+            (request, response) =>
+                handler(
+                    request as IncomingMessage,
+                    response as unknown as ServerResponse,
+                ),
         );
-        return () => {
-            active = false;
-        };
     }
 
     registerAuthenticatedRawRoute(
@@ -275,27 +231,40 @@ export class HttpHost {
             auth: AuthInfo,
         ) => void | Promise<void>,
     ): () => void {
-        let active = true;
-        this.#app[method](
-            path,
-            ...this.#createAuthHandlers(path),
-            (request: Request, response: Response, next: NextFunction) => {
-                if (!active) {
-                    next();
-                    return;
-                }
+        return this.#registerRequestHandler(
+            (routeHandler) =>
+                this.#app[method](
+                    path,
+                    ...this.#createAuthHandlers(path),
+                    routeHandler,
+                ),
+            (request, response) => {
                 const auth = readRequestAuth(request);
                 if (auth === undefined) {
                     response.status(401).json({ error: "Unauthorized" });
                     return;
                 }
-                void Promise.resolve(
-                    handler(
-                        request as IncomingMessage,
-                        response as unknown as ServerResponse,
-                        auth,
-                    ),
-                ).catch((error: unknown) => {
+                return handler(
+                    request as IncomingMessage,
+                    response as unknown as ServerResponse,
+                    auth,
+                );
+            },
+        );
+    }
+
+    #registerRequestHandler(
+        register: (handler: RequestHandler) => void,
+        handler: (request: Request, response: Response) => void | Promise<void>,
+    ): () => void {
+        let active = true;
+        register((request: Request, response: Response, next: NextFunction) => {
+            if (!active) {
+                next();
+                return;
+            }
+            void Promise.resolve(handler(request, response)).catch(
+                (error: unknown) => {
                     if (!response.headersSent) {
                         response.status(500).json({
                             error:
@@ -306,9 +275,9 @@ export class HttpHost {
                         return;
                     }
                     response.end();
-                });
-            },
-        );
+                },
+            );
+        });
         return () => {
             active = false;
         };

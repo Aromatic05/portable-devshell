@@ -1,7 +1,7 @@
 import type {
     WorkspaceReentryDirective,
     WorkspaceSnapshot,
-} from "../../Contract.js";
+} from "../../model/Contract.js";
 import { WorkspaceConnection } from "./Connection.js";
 import { WorkspaceHost } from "./Host.js";
 import { WorkspacePresentation } from "./Presentation.js";

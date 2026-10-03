@@ -22,6 +22,35 @@ export class McpToolSchemaUnavailableError extends Error {
     }
 }
 
+const commentOutputSchema: JsonValue = {
+    description: "Actionable notes.",
+    items: { minLength: 1, type: "string" },
+    type: "array",
+};
+
+export function withMcpCommentOutputSchema(
+    tool: ToolDefinition,
+): ToolDefinition {
+    if (
+        !isRecord(tool.outputSchema) ||
+        !isObjectSchemaType(tool.outputSchema.type)
+    ) {
+        throw new McpToolSchemaUnavailableError(tool.name);
+    }
+    return {
+        ...tool,
+        outputSchema: {
+            ...tool.outputSchema,
+            properties: {
+                ...(isRecord(tool.outputSchema.properties)
+                    ? tool.outputSchema.properties
+                    : {}),
+                comment: commentOutputSchema,
+            },
+        },
+    };
+}
+
 export class McpToolSchemaAdapter {
     toMcpTool(
         tool: ToolDefinition,
@@ -463,6 +492,14 @@ function isNumericType(value: JsonValue | undefined): boolean {
     return (
         Array.isArray(value) &&
         value.some((entry) => entry === "integer" || entry === "number")
+    );
+}
+
+function isObjectSchemaType(type: JsonValue | undefined): boolean {
+    return (
+        type === undefined ||
+        type === "object" ||
+        (Array.isArray(type) && type.includes("object"))
     );
 }
 

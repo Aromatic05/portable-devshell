@@ -24,7 +24,7 @@ import {
 
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
 import { McpEndpointWorker } from "./Endpoint.js";
-import { McpNativeToolResult, type McpEndpointResult } from "./Endpoint.js";
+import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
 
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;

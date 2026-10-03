@@ -1,6 +1,6 @@
 import type { GoalSnapshot } from "@portable-devshell/shared";
-import type { WorkspaceAction, WorkspaceResolvedAction, WorkspaceWorkItem } from "../Contract.js";
-import { workspaceIdentity } from "../Identity.js";
+import type { WorkspaceAction, WorkspaceResolvedAction, WorkspaceWorkItem } from "../model/Contract.js";
+import { workspaceIdentity } from "../model/Identity.js";
 
 const actionView: Record<"goal-pause" | "goal-resume" | "goal-retry" | "goal-stop", Omit<WorkspaceAction, "id">> = {
     "goal-pause": { label: "Pause Goal", tone: "default" },

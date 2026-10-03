@@ -1,10 +1,8 @@
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import type {
+    ApprovalRequest,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
-} from "@portable-devshell/shared";
-import type {
-    ApprovalRequest,
     GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
@@ -14,52 +12,11 @@ import type {
     TodoReadInput,
     TodoTaskControlAction,
     ToolCallContext,
-    ToolCallQuery,
     ToolCallRecord,
     ToolDefinition,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
-import type { McpEndpointCatalogWorker } from "./tool/Catalog.js";
-
-export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
-    appendMcpSessionClosed(sessionId: string): Promise<void>;
-    appendMcpSessionOpened(sessionId: string): Promise<void>;
-    appendMcpToolCalled(
-        toolName: string,
-        context: { requestId?: string; ctxId?: string },
-    ): Promise<void>;
-    invokeToolInternal?(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue>;
-    prepareExtensionResource?(input: {
-        collection: string;
-        extensionId: string;
-    }): Promise<{ directory: string }>;
-    prepareWorkspace?(workspace: string): Promise<{
-        projectMemoryAgentFile: string;
-        projectMemoryDirectory: string;
-        projectMemoryPresent?: boolean;
-        temporaryDirectory: string;
-        workspace: string;
-    }>;
-    readToolCalls?(query: ToolCallQuery): Promise<ToolCallRecord[]>;
-    readAlerts(workspace: string): Promise<{
-        advice: Array<{ code: string; text: string }>;
-    }>;
-    releaseAlerts?(workspace: string): Promise<void>;
-    touchAlerts?(workspace: string): Promise<
-        | void
-        | {
-              advice: Array<{ code: string; text: string }>;
-          }
-    >;
-    touchTemporaryDirectory?(path: string): Promise<void>;
-    readonly handshake?: McpEndpointEnvironmentHandshake;
-}
 
 export interface McpEndpointEnvironmentHandshake {
     homeDirectory: string;
@@ -79,12 +36,6 @@ export interface McpEndpointEnvironmentHandshake {
             version: string;
         };
     };
-}
-
-export interface McpEndpointCallContext {
-    principal: string;
-    requestMeta?: Record<string, unknown>;
-    requestId?: string;
 }
 
 export interface McpWorkspaceEventSlice {
@@ -341,6 +292,16 @@ export function isMcpWorkspaceActionGateway(
     );
 }
 
+export function requireMcpWorkspaceActionGateway(
+    gateway: McpInstanceGateway | undefined,
+    instanceName: string,
+): McpWorkspaceActionGateway {
+    if (isMcpWorkspaceActionGateway(gateway)) return gateway;
+    throw new Error(
+        `Workspace interaction backend is unavailable for ${instanceName}.`,
+    );
+}
+
 export type McpWaitRecoveryGateway = McpWorkspaceActionGateway &
     Required<
         Pick<
@@ -421,5 +382,15 @@ export function isMcpGoalGateway(
         gateway.goalContinuation !== undefined &&
         gateway.manageGoal !== undefined &&
         gateway.readGoal !== undefined
+    );
+}
+
+export function requireMcpGoalGateway(
+    gateway: McpInstanceGateway | undefined,
+    instanceName: string,
+): McpGoalGateway {
+    if (isMcpGoalGateway(gateway)) return gateway;
+    throw new Error(
+        `Workspace Goal backend is unavailable for ${instanceName}.`,
     );
 }

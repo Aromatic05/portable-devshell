@@ -7,13 +7,14 @@ import type {
 
 import {
     isMcpGoalGateway,
+    type McpInstanceGateway,
     type McpWorkspaceActionGateway,
-} from "../../endpoint/Port.js";
+} from "../../instance/Gateway.js";
 import type {
     WorkspaceBackgroundItem,
     WorkspaceResolvedAction,
     WorkspaceWorkItem,
-} from "../Contract.js";
+} from "../model/Contract.js";
 import { contributeGoal } from "./Goal.js";
 import { contributeTodo } from "./Todo.js";
 import { contributeWaits } from "./Wait.js";
@@ -29,6 +30,54 @@ export interface WorkspaceTaskContribution {
     };
     primaryOrder: ReturnType<typeof contributeWaits>["primaryOrder"];
     work: WorkspaceWorkItem[];
+}
+
+export type WorkspaceTaskAssociation =
+    | { kind: "none" }
+    | { kind: "ambiguous" }
+    | {
+          kind: "one";
+          revision: number;
+          taskId: string;
+          todoItemId: string;
+      };
+
+export async function readCurrentTaskAssociation(
+    gateway: Pick<McpInstanceGateway, "readTodo">,
+    instance: string,
+    ctxId: string,
+): Promise<WorkspaceTaskAssociation> {
+    const todo = record(await gateway.readTodo(instance));
+    if (!Array.isArray(todo?.tasks)) return { kind: "none" };
+    const active = todo.tasks
+        .map(record)
+        .filter(
+            (task) =>
+                task?.ctxId === ctxId &&
+                task.status === "in_progress" &&
+                typeof task.taskId === "string",
+        );
+    if (active.length === 0) return { kind: "none" };
+    if (active.length !== 1) return { kind: "ambiguous" };
+    const taskId = active[0]?.taskId;
+    if (typeof taskId !== "string") return { kind: "ambiguous" };
+    const detail = record(await gateway.readTodo(instance, { taskId }));
+    if (!Array.isArray(detail?.items) || typeof detail.revision !== "number")
+        return { kind: "ambiguous" };
+    const current = detail.items
+        .map(record)
+        .filter(
+            (item) =>
+                item?.status === "in_progress" && typeof item.id === "string",
+        );
+    if (current.length !== 1 || typeof current[0]?.id !== "string")
+        return { kind: "ambiguous" };
+    return {
+        kind: "one",
+        revision: detail.revision,
+        taskId,
+        todoItemId: current[0].id,
+    };
 }
 
 export async function readTaskContribution(

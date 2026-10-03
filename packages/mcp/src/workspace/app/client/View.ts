@@ -1,4 +1,4 @@
-import type { WorkspaceAction, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../Contract.js";
+import type { WorkspaceAction, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../model/Contract.js";
 import { actionKey, bindWorkspaceCards, renderWorkspace, type WorkspaceCardEvents } from "./Cards.js";
 
 export class WorkspaceView {

@@ -16,7 +16,7 @@ export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
 }
 
 import type { McpContextEnvironmentCleanup } from "@portable-devshell/shared";
-import type { McpInstanceGateway } from "../../../../mcp/src/endpoint/Port.js";
+import type { McpInstanceGateway } from "@portable-devshell/mcp";
 import type { ContextInstanceCleanupPort } from "../../../../mcp/src/context/Port.js";
 
 export class ContextCleanupService {

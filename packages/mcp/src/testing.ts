@@ -10,7 +10,29 @@ export * from "./endpoint/Endpoint.js";
 export * from "./endpoint/extension/Contract.js";
 export * from "./endpoint/extension/Registry.js";
 export * from "./endpoint/extension/Workspace.js";
-export * from "./endpoint/Port.js";
+export * from "./endpoint/call/Port.js";
+export {
+    isMcpGoalGateway,
+    isMcpTmuxWaitGateway,
+    isMcpWaitRecoveryGateway,
+    isMcpWaitTrackingGateway,
+    isMcpWorkspaceActionGateway,
+    isMcpWorkspaceGateway,
+    requireMcpGoalGateway,
+    requireMcpWorkspaceActionGateway,
+} from "./instance/Gateway.js";
+export type {
+    McpApprovalPort,
+    McpExtensionToolResult,
+    McpGoalGateway,
+    McpInstanceGateway,
+    McpTmuxWaitGateway,
+    McpWaitRecoveryGateway,
+    McpWaitTrackingGateway,
+    McpWorkspaceActionGateway,
+    McpWorkspaceEventSlice,
+    McpWorkspaceGateway,
+} from "./instance/Gateway.js";
 export * from "./endpoint/domain/artifact/Catalog.js";
 export * from "./endpoint/domain/context/environment/Catalog.js";
 export * from "./endpoint/workspace/Catalog.js";

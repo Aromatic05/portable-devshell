@@ -1,3 +1,4 @@
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import {
     createRemoteError,
@@ -6,18 +7,16 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../Port.js";
-import type { McpEndpointCatalogWorker } from "../tool/Catalog.js";
 import type {
     McpEndpointEnvironmentHandshake,
-    McpEndpointWorkerPort,
-} from "../Port.js";
+    McpInstanceGateway,
+} from "../../instance/Gateway.js";
 
 const DEFAULT_READY_WAIT_MS = 5_000;
 const DEFAULT_READY_POLL_MS = 50;
 
 export function assertMcpEndpointReady(
-    worker: Pick<McpEndpointCatalogWorker, "snapshot">,
+    worker: { snapshot(): { ready?: boolean } },
     instanceName: string,
 ): void {
     if (!worker.snapshot().ready) {
@@ -27,30 +26,6 @@ export function assertMcpEndpointReady(
             message: `Instance ${instanceName} is not ready.`,
             retryable: false,
         });
-    }
-}
-
-export async function waitForMcpEndpointReady(
-    worker: Pick<McpEndpointCatalogWorker, "snapshot">,
-    instanceName: string,
-    signal?: AbortSignal,
-    options: { timeoutMs?: number; pollMs?: number } = {},
-): Promise<void> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_READY_WAIT_MS;
-    const pollMs = options.pollMs ?? DEFAULT_READY_POLL_MS;
-    const deadline = Date.now() + timeoutMs;
-
-    while (worker.snapshot().ready !== true) {
-        throwIfMcpEndpointAborted(signal);
-        if (Date.now() >= deadline) {
-            throw createRemoteError({
-                code: runtimeErrorCodes.instanceNotReady,
-                details: { instance: instanceName, waitedMs: timeoutMs },
-                message: `Instance ${instanceName} is not ready.`,
-                retryable: false,
-            });
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
 }
 
@@ -117,7 +92,6 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
     signal?: AbortSignal;
     targetInstance: string;
     toolName: string;
-    worker?: McpEndpointWorkerPort;
 }): Promise<T> {
     return await requireMcpEndpointGateway(
         options.gateway,
@@ -133,7 +107,7 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
 }
 
 export function requireMcpEndpointEnvironment(
-    worker: McpEndpointWorkerPort,
+    worker: { readonly handshake?: McpEndpointEnvironmentHandshake },
     instanceName: string,
 ): McpEndpointEnvironmentHandshake {
     if (worker.handshake !== undefined) {
@@ -196,3 +170,24 @@ function mcpEndpointCancellationError(reason: unknown) {
         },
     });
 }
+
+export class McpNativeToolResult {
+    readonly _meta?: CallToolResult["_meta"];
+    readonly content: CallToolResult["content"];
+    readonly isError: boolean;
+    readonly structuredContent: JsonValue;
+
+    constructor(input: {
+        _meta?: CallToolResult["_meta"];
+        content: CallToolResult["content"];
+        isError?: boolean;
+        structuredContent: JsonValue;
+    }) {
+        this._meta = input._meta;
+        this.content = input.content;
+        this.isError = input.isError ?? false;
+        this.structuredContent = input.structuredContent;
+    }
+}
+
+export type McpEndpointResult = JsonValue | McpNativeToolResult;

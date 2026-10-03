@@ -1,6 +1,5 @@
 import {
     createRemoteError,
-    contextErrorCodes,
     type JsonValue,
     type ToolCallProvenance,
     type ToolDefinition,
@@ -80,38 +79,6 @@ export function readMcpProvenanceInput(input: JsonValue): {
     };
 }
 
-export function readMcpContextInput(input: JsonValue): {
-    ctxId: string;
-    input: JsonValue;
-} {
-    const context = readOptionalMcpContextInput(input);
-    if (context.ctxId === undefined) {
-        throw createRemoteError({
-            code: contextErrorCodes.invalid,
-            message:
-                "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
-            retryable: false,
-        });
-    }
-    return { ctxId: context.ctxId, input: context.input };
-}
-
-export function readOptionalMcpContextInput(input: JsonValue): {
-    ctxId?: string;
-    input: JsonValue;
-} {
-    if (!isRecord(input) || input.ctxId === undefined) return { input };
-    if (typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
-        throw createRemoteError({
-            code: contextErrorCodes.invalid,
-            message: "ctxId must be a non-empty Context ID.",
-            retryable: false,
-        });
-    }
-    const { ctxId, ...toolInput } = input;
-    return { ctxId: ctxId.trim(), input: toolInput };
-}
-
 export function withMcpInstanceTarget(tool: ToolDefinition): ToolDefinition {
     return withInputProperty(tool, "instance", {
         description: "Managed instance name from devshell instance list.",
@@ -142,16 +109,6 @@ export function readMcpRoutedInput(
     }
     const { instance: _ignored, ...workerInput } = input;
     return { input: workerInput, instance: target.trim() };
-}
-
-export function readMcpWorkspace(input: JsonValue, toolName: string): string {
-    if (
-        !isRecord(input) ||
-        Object.keys(input).some((key) => key !== "workspace")
-    ) {
-        throw invalidArguments(`${toolName} accepts only workspace.`);
-    }
-    return requiredString(input.workspace, "workspace");
 }
 
 function withInputProperty(
@@ -241,14 +198,6 @@ function resolveLocalDefinition(
         return undefined;
     const definition = root.$defs[reference.slice(prefix.length)];
     return isRecord(definition) ? definition : undefined;
-}
-
-function requiredString(value: JsonValue | undefined, field: string): string {
-    const normalized = optionalString(value, field);
-    if (normalized === undefined) {
-        throw invalidArguments(`${field} is required.`);
-    }
-    return normalized;
 }
 
 function optionalString(

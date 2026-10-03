@@ -12,7 +12,7 @@ import {
     createMcpContextSelector,
     type McpContextSelector,
 } from "../../context/Selector.js";
-import { isMcpWorkspaceActionGateway, type McpInstanceGateway } from "../Port.js";
+import { isMcpWorkspaceActionGateway, type McpInstanceGateway } from "../../instance/Gateway.js";
 import {
     mcpToolAnnotations,
     mcpToolPreserveInputDescriptions,
@@ -22,6 +22,7 @@ import { mcpToolInvocationStatus, mcpToolTitle } from "./Metadata.js";
 import {
     McpToolSchemaAdapter,
     McpToolSchemaUnavailableError,
+    withMcpCommentOutputSchema,
     type McpTool,
 } from "./Schema.js";
 import { McpToolCatalogArtifact } from "../domain/artifact/Catalog.js";
@@ -31,12 +32,11 @@ import {
 } from "../domain/context/environment/Catalog.js";
 import { McpToolCatalogWorkspace } from "../workspace/Catalog.js";
 import { McpToolCatalogTodo } from "../domain/task/Catalog.js";
-import { withMcpCommentOutputSchema } from "../workspace/Handler.js";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
     withMcpProvenance,
-} from "../dispatch/Input.js";
+} from "./Input.js";
 
 export interface McpEndpointCatalogWorker {
     hasToolSchemaCache?(): boolean;

@@ -12,7 +12,7 @@ import type { ContextRuntimePort } from "../context/Runtime.js";
 import {
     isMcpWorkspaceActionGateway,
     type McpInstanceGateway,
-} from "../endpoint/Port.js";
+} from "../instance/Gateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";

@@ -3,7 +3,7 @@ import test from "node:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { GoalSnapshot, TodoTaskSummary, WaitRecord } from "@portable-devshell/shared";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
-import type { McpWorkspaceActionGateway } from "../../src/endpoint/Port.js";
+import type { McpWorkspaceActionGateway } from "../../src/instance/Gateway.js";
 import { workspaceSnapshotOutputSchema } from "../../src/endpoint/workspace/Schema.js";
 import { contributeGoal } from "../../src/workspace/contributor/Goal.js";
 import { contributeTodo } from "../../src/workspace/contributor/Todo.js";

@@ -5,7 +5,7 @@ import test from "node:test";
 import type { JsonValue, ToolCallContext, WaitRecord } from "@portable-devshell/shared";
 import { attemptWorkspaceDelivery, executeWorkspaceAction, readWorkspaceDeliveryOutcome, reportWorkspaceDelivery, validateWorkspaceDirectiveClaim, validateWorkspaceQuestionAnswer, WorkspaceActionStaleError, workspaceWaitReentryEffect } from "../../src/workspace/Action.ts";
 import { WorkspaceActionStore } from "../../src/workspace/ActionStore.ts";
-import { workspaceIdentity } from "../../src/workspace/Identity.ts";
+import { workspaceIdentity } from "../../src/workspace/model/Identity.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("Workspace action receipt persists effect before delivery and fails closed after an uncertain attempt", async () => {

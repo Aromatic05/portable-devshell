@@ -1,11 +1,11 @@
 import type { ApprovalRequest } from "@portable-devshell/shared";
-import type { McpWorkspaceActionGateway } from "../../endpoint/Port.js";
+import type { McpWorkspaceActionGateway } from "../../instance/Gateway.js";
 import type {
     WorkspaceAction,
     WorkspaceDecisionItem,
     WorkspaceResolvedAction,
-} from "../Contract.js";
-import { workspaceIdentity } from "../Identity.js";
+} from "../model/Contract.js";
+import { workspaceIdentity } from "../model/Identity.js";
 
 const actionView: Record<
     "approval-approve" | "approval-deny",
