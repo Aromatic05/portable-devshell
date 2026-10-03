@@ -2,7 +2,7 @@ import {
     defineExtensionPoint,
     type ExtensionJsonValue,
     type ExtensionPointDeclaration,
-} from "../ExtensionApi.js";
+} from "../ExtensionCore.js";
 
 export type McpToolActivity =
     | "execution"

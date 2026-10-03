@@ -1,7 +1,7 @@
 import {
     defineExtensionPoint,
     type ExtensionPointDeclaration,
-} from "../ExtensionApi.js";
+} from "../ExtensionCore.js";
 
 export type TuiPageTone =
     | "normal"

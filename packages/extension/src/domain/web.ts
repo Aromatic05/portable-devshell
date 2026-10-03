@@ -1,7 +1,7 @@
 import {
     defineExtensionPoint,
     type ExtensionPointDeclaration,
-} from "../ExtensionApi.js";
+} from "../ExtensionCore.js";
 
 export interface WebApplicationDeclaration extends ExtensionPointDeclaration {
     readonly id: string;

@@ -1,3 +1,8 @@
+import type {
+    ExtensionJsonValue,
+    ExtensionPoint,
+    ExtensionPointDeclaration,
+} from "./ExtensionCore.js";
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
 import type { ExtensionAssetCapability } from "./domain/asset.js";
 import type {
@@ -13,12 +18,6 @@ import type {
 import type { ToolCallHistoryCapability } from "./domain/toolcall.js";
 import type { ExtensionProcessCapability } from "./domain/process.js";
 import type { ExtensionWorkerCapability } from "./domain/worker.js";
-
-export type ExtensionJsonPrimitive = boolean | number | string | null;
-export type ExtensionJsonValue =
-    | ExtensionJsonPrimitive
-    | ExtensionJsonValue[]
-    | { [key: string]: ExtensionJsonValue };
 
 export interface ExtensionErrorOptions {
     readonly code: string;
@@ -79,11 +78,6 @@ export type ExtensionCapability =
     | "worker.delegate"
     | "worker.execute";
 
-export interface ExtensionPointDeclaration {
-    readonly id: string;
-    readonly [key: string]: ExtensionJsonValue | undefined;
-}
-
 export interface ExtensionManifest {
     activation: ExtensionActivationPolicy;
     apiVersion: string;
@@ -131,35 +125,6 @@ export interface ExtensionCapabilities {
     /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
     readonly workerDelegate?: ExtensionWorkerCapability;
     readonly workerExecute?: ExtensionWorkerCapability;
-}
-
-declare const extensionPointDeclarationType: unique symbol;
-declare const extensionPointBindingType: unique symbol;
-
-/** Stable domain-owned point identity plus compile-time declaration/binding types. */
-export interface ExtensionPoint<
-    Declaration extends ExtensionPointDeclaration,
-    Binding,
-> {
-    readonly id: string;
-    readonly [extensionPointBindingType]?: Binding;
-    readonly [extensionPointDeclarationType]?: Declaration;
-}
-
-/**
- * Define a stable Extension Point descriptor. Runtime identity is the id string,
- * never JavaScript object identity, so descriptors may safely be bundled.
- */
-export function defineExtensionPoint<
-    Declaration extends ExtensionPointDeclaration,
-    Binding,
->(id: string): ExtensionPoint<Declaration, Binding> {
-    if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(id)) {
-        throw new TypeError(
-            "Extension Point id must be a lowercase namespaced identifier.",
-        );
-    }
-    return Object.freeze({ id }) as ExtensionPoint<Declaration, Binding>;
 }
 
 export interface ExtensionContext {

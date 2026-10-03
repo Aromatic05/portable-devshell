@@ -1,4 +1,4 @@
-import type { ExtensionJsonValue } from "../ExtensionApi.js";
+import type { ExtensionJsonValue } from "../ExtensionCore.js";
 import type { ToolCallRewriteContext } from "./toolcall.js";
 
 export const secretRewriteInterfaceOperation = "secret.environment";

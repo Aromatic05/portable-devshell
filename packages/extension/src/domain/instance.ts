@@ -1,4 +1,4 @@
-import type { ExtensionJsonValue } from "../ExtensionApi.js";
+import type { ExtensionJsonValue } from "../ExtensionCore.js";
 
 export type ExtensionInstanceProvider =
     "docker" | "local" | "podman" | "reverse" | "ssh";

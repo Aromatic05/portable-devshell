@@ -1,10 +1,12 @@
 import type {
     ExtensionCapability,
     ExtensionConfigAccess,
-    ExtensionJsonValue,
     ExtensionManifest,
-    ExtensionPointDeclaration,
 } from "./ExtensionApi.js";
+import type {
+    ExtensionJsonValue,
+    ExtensionPointDeclaration,
+} from "./ExtensionCore.js";
 
 export const EXTENSION_API_VERSION = "5.0.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
