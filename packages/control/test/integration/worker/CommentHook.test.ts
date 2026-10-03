@@ -11,9 +11,7 @@ import {
     createCommentToolCallGate,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
-import {
-    type McpInstanceGateway,
-} from "@portable-devshell/mcp/testing";
+import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 import {
     CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
     asInstanceName,
@@ -23,7 +21,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
-import { ToolCallPipeline, ToolCallExecutionTarget } from "../../../../../packages/core/src/toolcall/Pipeline.ts";
+import {
+    ToolCallPipeline,
+    ToolCallExecutionTarget,
+} from "../../../../../packages/core/src/toolcall/Pipeline.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
@@ -113,7 +114,8 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         },
     } as never);
     const execution = new ToolCallPipeline({
-        hooks: async (context, signal, recording) => await binding.acquire(context, signal, recording),
+        hooks: async (context, signal, recording) =>
+            await binding.acquire(context, signal, recording),
         resolveTarget: () => target,
     });
     const worker = createWorker(workspace);
@@ -253,7 +255,10 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
     );
     assert.equal(executions, 5);
 
-    const pendingReport = await comment.comment.pendingReport(instanceName, ctxId);
+    const pendingReport = await comment.comment.pendingReport(
+        instanceName,
+        ctxId,
+    );
     await comment.conversation.recordReport(instanceName, {
         callId: "push-report",
         ctxId,
@@ -286,13 +291,21 @@ function commentReviewRegistrationHost(comment: CommentPort) {
             id: "toolcall-gate",
             pointId: "toolcall.review",
         },
-        { hook: "500-todo-access", id: "todo-access", pointId: "toolcall.rewrite" },
+        {
+            hook: "500-todo-access",
+            id: "todo-access",
+            pointId: "toolcall.rewrite",
+        },
         {
             hook: "501-todo-invalid",
             id: "todo-invalid",
             pointId: "toolcall.rewrite",
         },
-        { hook: "502-tool-advice", id: "tool-advice", pointId: "toolcall.rewrite" },
+        {
+            hook: "502-tool-advice",
+            id: "tool-advice",
+            pointId: "toolcall.rewrite",
+        },
         {
             hook: "510-comment-delivery",
             id: "comment-delivery",
@@ -383,8 +396,11 @@ function createCommentGateway(
     return {
         async appendMcpToolCalled() {},
         assertReady() {},
-        callToolOperation: (...args: Parameters<McpInstanceGateway["callToolOperation"]>) => execution.callOperation(...args),
-        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => execution.call(...args),
+        callToolOperation: (
+            ...args: Parameters<McpInstanceGateway["callToolOperation"]>
+        ) => execution.callOperation(...args),
+        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) =>
+            execution.call(...args),
         environment() {
             return worker.handshake as never;
         },
@@ -413,17 +429,17 @@ async function queueComment(
 ): Promise<void> {
     const module = comment.routes
         .instance(instanceName)
-        .find((candidate) => candidate.name === "contextMessage");
+        .find((candidate) => candidate.name === "message");
     const queue = module?.operations.find(
-        (operation) => operation.name === "queue",
+        (operation) => operation.name === "queueContextMessage",
     );
     if (queue === undefined)
-        throw new Error("contextMessage.queue is unavailable");
+        throw new Error("message.queueContextMessage is unavailable");
     queueSequence += 1;
     await queue.handle(
         {
             id: `queue-${queueSequence}`,
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId, text },
         },
         undefined as never,

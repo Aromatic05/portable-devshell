@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ControlPortContext } from "@portable-devshell/shared";
+import type {
+    ApprovalEvent,
+    ControlPortContext,
+    InstanceEventRecord,
+} from "@portable-devshell/shared";
 
 import { createApprovalRouteModule } from "../../../../src/control/approval/Route.ts";
 
@@ -111,7 +115,9 @@ test("approval routes expose legacy reads plus snapshot and subscribe", () => {
 test("approval subscribe uses the shared runtime stream with approval filter", async () => {
     let fromSeq: number | undefined;
     let instanceName: string | undefined;
-    let filter: ((event: { type: string }) => boolean) | undefined;
+    let project:
+        | ((event: InstanceEventRecord) => ApprovalEvent | undefined)
+        | undefined;
     const module = createApprovalRouteModule(
         {
             approval: {} as never,
@@ -125,11 +131,11 @@ test("approval subscribe uses the shared runtime stream with approval filter", a
                 nextInstanceName,
                 _worker,
                 nextFromSeq,
-                nextFilter,
+                nextProject,
             ) {
                 fromSeq = nextFromSeq;
                 instanceName = nextInstanceName;
-                filter = nextFilter as typeof filter;
+                project = nextProject;
             },
         },
     );
@@ -145,6 +151,15 @@ test("approval subscribe uses the shared runtime stream with approval filter", a
     );
     assert.equal(fromSeq, 8);
     assert.equal(instanceName, "demo");
-    assert.equal(filter?.({ type: "approval.requested" }), true);
-    assert.equal(filter?.({ type: "todo.updated" }), false);
+    const approval = {
+        at: "2026-10-03T00:00:00.000Z",
+        instanceName: "demo",
+        seq: 9,
+        type: "approval.requested",
+    } as InstanceEventRecord;
+    assert.deepEqual(project?.(approval), approval);
+    assert.equal(
+        project?.({ ...approval, type: "todo.updated" } as InstanceEventRecord),
+        undefined,
+    );
 });

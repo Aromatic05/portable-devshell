@@ -17,7 +17,7 @@ import { CommentService } from "../../../../../extensions/comment/src/comment/Co
 import { ConversationStore } from "../../../../../extensions/comment/src/conversation/store/ConversationStore.ts";
 import { ConversationPreferenceStore } from "../../../../../extensions/comment/src/conversation/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
-import { createTuiClients } from "../../../src/app/control/Client.ts";
+import { createTuiDomainSession } from "../../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.js";
 import {
     currentTuiRoute,
@@ -217,6 +217,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(() =>
             selectSidebarModel(
                 harness.runtime.store.getState(),
+                harness.runtime.reader,
             ).context.items.some(
                 (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
@@ -316,6 +317,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(() =>
             selectSidebarModel(
                 harness.runtime.store.getState(),
+                harness.runtime.reader,
             ).context.items.some(
                 (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
@@ -334,7 +336,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         const state = harness.runtime.store.getState();
         const key = currentTuiRouteScrollKey(state);
         assert.equal(state.ui.scrollOffsets[key], Number.MAX_SAFE_INTEGER);
-        const region = buildTuiHitRegions(state, {
+        const region = buildTuiHitRegions(state, harness.runtime.reader, {
             columns: 120,
             rows: 40,
         }).find((candidate) => candidate.target.kind === "messagesViewport");
@@ -370,6 +372,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(() =>
             selectSidebarModel(
                 harness.runtime.store.getState(),
+                harness.runtime.reader,
             ).context.items.some(
                 (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
@@ -392,10 +395,14 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 "sidebarContext",
         );
 
-        const region = buildTuiHitRegions(harness.runtime.store.getState(), {
-            columns: 120,
-            rows: 40,
-        }).find((candidate) => candidate.target.kind === "messagesViewport");
+        const region = buildTuiHitRegions(
+            harness.runtime.store.getState(),
+            harness.runtime.reader,
+            {
+                columns: 120,
+                rows: 40,
+            },
+        ).find((candidate) => candidate.target.kind === "messagesViewport");
         assert.ok(region);
         harness.terminal.write(`\u001B[<0;${region.x};${region.y}M`);
         harness.terminal.write(`\u001B[<0;${region.x};${region.y}m`);
@@ -518,6 +525,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         );
         const nextFocused = selectMainScreenModel(
             harness.runtime.store.getState(),
+            harness.runtime.reader,
         ).boxes.find((candidate) => candidate.focused);
         assert.notEqual(nextFocused, undefined);
         assert.equal(
@@ -600,11 +608,11 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             socketPath,
         });
         await server.start();
-        const clients = createTuiClients({ socketPath });
+        const domains = createTuiDomainSession({ socketPath });
         const terminal = createTerminal();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients, inkDebug: true },
+            { domains, inkDebug: true },
         );
         let running: Promise<void> | undefined;
 
@@ -624,6 +632,11 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         `${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(runtime.store.getState().connection)}`,
                     );
                 });
+                await waitUntil(() =>
+                    runtime.reader.instances.instances.some(
+                        (instance) => instance.name === "alpha",
+                    ),
+                );
                 await waitUntil(() => terminal.rawModes.includes(true)).catch(
                     (error) => {
                         throw new Error(
@@ -635,7 +648,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             async close() {
                 await runtime.stop();
                 if (running !== undefined) await running;
-                clients.close();
+                domains.close();
                 await server.stop();
                 commentStore.close();
                 await rm(root, { force: true, recursive: true });
@@ -658,6 +671,45 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             ready: true,
             status: "ready",
         };
+        const configView = {
+            control: { artifactDirectTransfer: false, logLevel: "info" },
+            instances: [
+                {
+                    approvalPolicy: { mode: "ask" },
+                    enabled: true,
+                    extensions: { model: [] },
+                    mcp: {
+                        auth: { mode: "none" },
+                        contextMode: "explicit",
+                        enabled: true,
+                        path: "/alpha/mcp",
+                    },
+                    name: "alpha",
+                    provider: "local",
+                    security: { mode: "disabled" },
+                    workspace: { enabled: true },
+                },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                oauth2: { approval: "tui" },
+            },
+            web: {
+                auth: { mode: "none" },
+                enabled: false,
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                publicBaseUrl: "http://127.0.0.1",
+            },
+        };
+        const emptySubscription = async (stream: MessageStream) => {
+            await stream.send({
+                name: "seed",
+                payload: { events: [] },
+            });
+        };
         return [
             {
                 host: "@control",
@@ -677,38 +729,55 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                 }),
                             },
                             { name: "ping", handle: () => ({ pong: true }) },
+                            {
+                                name: "status",
+                                handle: () => ({ instanceCount: 1, ok: true }),
+                            },
                         ],
                     },
                     {
                         name: "config",
                         operations: [
                             {
-                                name: "get",
+                                name: "snapshot",
+                                handle: () => ({
+                                    revision: 1,
+                                    view: configView,
+                                }),
+                            },
+                            {
+                                name: "snapshotInstances",
                                 handle: () => ({
                                     instances: [
                                         {
                                             enabled: true,
-                                            mcp: {
-                                                enabled: true,
-                                                tools: {
-                                                    capabilities: [
-                                                        "read",
-                                                        "write",
-                                                        "execute",
-                                                    ],
-                                                    groups: ["bash"],
-                                                },
-                                            },
+                                            homeDirectory: "/workspace/alpha",
+                                            mcpEnabled: true,
                                             name: "alpha",
-                                            provider: "local",
+                                            snapshot,
                                         },
                                     ],
-                                    mcp: {
-                                        enabled: true,
-                                        listenHost: "127.0.0.1",
-                                        listenPort: 3210,
-                                    },
+                                    revision: 1,
                                 }),
+                            },
+                            {
+                                name: "getConversationPreferences",
+                                handle: async () =>
+                                    (await preferences.read()) as unknown as JsonValue,
+                            },
+                            {
+                                name: "updateConversationPreferences",
+                                handle: async (request) =>
+                                    (await preferences.update(
+                                        (request.payload ?? {}) as never,
+                                    )) as unknown as JsonValue,
+                            },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
+                            {
+                                name: "subscribeInstances",
+                                handle: emptySubscription,
                             },
                         ],
                     },
@@ -740,47 +809,13 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         ],
                     },
                     {
-                        name: "conversation",
-                        operations: [
-                            {
-                                name: "preferences",
-                                handle: async () =>
-                                    (await preferences.read()) as unknown as JsonValue,
-                            },
-                            {
-                                name: "updatePreferences",
-                                handle: async (request) =>
-                                    (await preferences.update(
-                                        (request.payload ?? {}) as never,
-                                    )) as unknown as JsonValue,
-                            },
-                        ],
-                    },
-                    {
-                        name: "instance",
-                        operations: [
-                            {
-                                name: "list",
-                                handle: () => [
-                                    {
-                                        homeDirectory: "/workspace/alpha",
-                                        enabled: true,
-                                        mcpEnabled: true,
-                                        name: "alpha",
-                                        provider: "local",
-                                        snapshot,
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                    {
-                        name: "mcp",
+                        name: "auth",
                         operations: [
                             {
                                 name: "status",
                                 handle: () => ({ running: false }),
                             },
+                            { name: "listApprovals", handle: () => [] },
                         ],
                     },
                     {
@@ -788,17 +823,26 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         operations: [{ name: "get", handle: () => overview() }],
                     },
                     {
-                        name: "tui",
+                        name: "extension",
                         operations: [
-                            { name: "pages", handle: () => [] },
-                            { name: "page", handle: () => ({}) },
+                            { name: "tuiPages", handle: () => [] },
+                            { name: "tuiPage", handle: () => ({}) },
                         ],
                     },
                     {
                         name: "artifact",
                         operations: [
-                            { name: "listShares", handle: () => [] },
-                            { name: "listTransfers", handle: () => [] },
+                            {
+                                name: "snapshot",
+                                handle: () => ({
+                                    lastSeq: 1,
+                                    shares: [],
+                                    transfers: [],
+                                }),
+                            },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
                         ],
                     },
                 ],
@@ -807,7 +851,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 host: asInstanceName("alpha"),
                 ports: [
                     {
-                        name: "runtime",
+                        name: "process",
                         operations: [
                             {
                                 name: "refresh",
@@ -820,62 +864,63 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                             { name: "readLogs", handle: () => [] },
                         ],
                         streams: [
+                            { name: "subscribe", handle: emptySubscription },
+                        ],
+                    },
+                    {
+                        name: "task",
+                        operations: [
                             {
-                                name: "subscribe",
-                                handle: async (stream) => {
-                                    await stream.send({
-                                        name: "seed",
-                                        payload: { events: [], lastSeq: 1 },
-                                    });
-                                },
+                                name: "getGoals",
+                                handle: () => ({ goals: [], lastSeq: 1 }),
+                            },
+                            {
+                                name: "getTodo",
+                                handle: () => ({
+                                    lastSeq: 1,
+                                    todo: {
+                                        items: [],
+                                        revision: 0,
+                                        summary: { completed: 0, total: 0 },
+                                        taskId: "task-1",
+                                        title: "Todo",
+                                    },
+                                }),
                             },
                         ],
-                    },
-                    {
-                        name: "goal",
-                        operations: [
-                            { name: "get", handle: () => ({ goal: null }) },
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
                         ],
                     },
                     {
-                        name: "conversation",
+                        name: "message",
                         operations: [
                             {
-                                name: "list",
+                                name: "listConversationEntries",
                                 handle: (request) =>
-                                    conversationStore.list(
-                                        (request.payload ?? {}) as never,
-                                    ) as unknown as JsonValue,
+                                    ({
+                                        entries: conversationStore.list(
+                                            (request.payload ?? {}) as never,
+                                        ),
+                                        lastSeq: 1,
+                                    }) as unknown as JsonValue,
                             },
-                        ],
-                    },
-                    {
-                        name: "tool",
-                        operations: [
                             {
-                                name: "listCalls",
-                                handle: () =>
-                                    [...toolCalls] as unknown as JsonValue,
-                            },
-                            { name: "listApprovals", handle: () => [] },
-                        ],
-                    },
-                    {
-                        name: "contextMessage",
-                        operations: [
-                            {
-                                name: "list",
+                                name: "listContextMessages",
                                 handle: async (request) => {
                                     const payload = (request.payload ?? {}) as {
                                         ctxId?: string;
                                     };
-                                    return (await messages.list(
-                                        payload.ctxId,
-                                    )) as unknown as JsonValue;
+                                    return {
+                                        lastSeq: 1,
+                                        messages: await messages.list(
+                                            payload.ctxId,
+                                        ),
+                                    } as unknown as JsonValue;
                                 },
                             },
                             {
-                                name: "queue",
+                                name: "queueContextMessage",
                                 handle: async (request) => {
                                     const payload = request.payload as {
                                         ctxId: string;
@@ -888,23 +933,34 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                 },
                             },
                         ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
+                        ],
                     },
                     {
-                        name: "todo",
+                        name: "tool",
                         operations: [
                             {
-                                name: "get",
-                                handle: () => ({
-                                    lastSeq: 1,
-                                    todo: {
-                                        items: [],
-                                        revision: 0,
-                                        summary: { completed: 0, total: 0 },
-                                        taskId: "task-1",
-                                        title: "Todo",
-                                    },
-                                }),
+                                name: "listCalls",
+                                handle: () =>
+                                    [...toolCalls] as unknown as JsonValue,
                             },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
+                        ],
+                    },
+                    {
+                        name: "approval",
+                        operations: [
+                            { name: "list", handle: () => [] },
+                            {
+                                name: "snapshot",
+                                handle: () => ({ approvals: [], lastSeq: 1 }),
+                            },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
                         ],
                     },
                 ],
@@ -1019,9 +1075,10 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     }
 
     function box(runtime: TuiRuntime, id: string) {
-        return selectMainScreenModel(runtime.store.getState()).boxes.find(
-            (candidate) => candidate.id === id,
-        );
+        return selectMainScreenModel(
+            runtime.store.getState(),
+            runtime.reader,
+        ).boxes.find((candidate) => candidate.id === id);
     }
 
     function draft(runtime: TuiRuntime, ctxId: string): string {
@@ -1033,7 +1090,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     }
 
     function conversationText(runtime: TuiRuntime): string {
-        return selectMainScreenModel(runtime.store.getState())
+        return selectMainScreenModel(runtime.store.getState(), runtime.reader)
             .boxes.flatMap((candidate) => [
                 candidate.title,
                 ...candidate.collapsedLines.map((line) => line.text),

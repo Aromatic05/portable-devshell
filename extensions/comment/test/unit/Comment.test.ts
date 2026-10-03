@@ -3,7 +3,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-    errorCodes,
+    controlErrorCodes,
     type JsonValue,
     type ControlPortContext,
 } from "@portable-devshell/shared";
@@ -24,7 +24,6 @@ const routeContext = {
     requestId: "request-comment",
     signal: new AbortController().signal,
 } as ControlPortContext;
-
 
 class TestCommentInstances implements CommentInstanceSource {
     readonly #listeners = new Set<() => void>();
@@ -73,24 +72,25 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
 
     assert.deepEqual(
         extension.routes.instance("alpha").map((route) => route.name),
-        ["contextMessage", "conversation"],
+        ["message", "message"],
     );
     assert.deepEqual(
         extension.routes.control().map((route) => route.name),
-        ["conversation"],
+        ["config"],
     );
 
-    const contextMessage = extension
-        .routes.instance("alpha")
-        .find((route) => route.name === "contextMessage");
-    const queue = contextMessage?.operations.find(
-        (operation) => operation.name === "queue",
+    const message = extension.routes
+        .instance("alpha")
+        .find((route) => route.name === "message");
+    const queue = message?.operations.find(
+        (operation) => operation.name === "queueContextMessage",
     );
-    if (queue === undefined) throw new Error("contextMessage.queue is missing");
+    if (queue === undefined)
+        throw new Error("message.queueContextMessage is missing");
     await queue.handle(
         {
             id: "queue-1",
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId: "ctx-alpha", text: "Persist this Comment" },
         },
         routeContext,
@@ -110,15 +110,25 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
         },
     ]);
 
-    const conversation = extension
-        .routes.instance("alpha")
-        .find((route) => route.name === "conversation");
+    const conversation = extension.routes
+        .instance("alpha")
+        .find(
+            (route) =>
+                route.name === "message" &&
+                route.operations.some(
+                    (operation) => operation.name === "listConversationEntries",
+                ),
+        );
     const list = conversation?.operations.find(
-        (operation) => operation.name === "list",
+        (operation) => operation.name === "listConversationEntries",
     );
     if (list === undefined) throw new Error("conversation.list is missing");
     const history = (await list.handle(
-        { id: "list-1", name: "list", payload: { ctxId: "ctx-alpha" } },
+        {
+            id: "list-1",
+            name: "listConversationEntries",
+            payload: { ctxId: "ctx-alpha" },
+        },
         routeContext,
     )) as Array<{ kind: string; text: string }>;
     assert.deepEqual(
@@ -128,37 +138,47 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
 
     const preferenceRoute = extension.routes.control()[0]!;
     const updatePreferences = preferenceRoute.operations.find(
-        (operation) => operation.name === "updatePreferences",
+        (operation) => operation.name === "updateConversationPreferences",
     );
     const preferences = preferenceRoute.operations.find(
-        (operation) => operation.name === "preferences",
+        (operation) => operation.name === "getConversationPreferences",
     );
     if (updatePreferences === undefined || preferences === undefined)
         throw new Error("Conversation preference routes are missing");
     await updatePreferences.handle(
         {
             id: "preferences-update",
-            name: "updatePreferences",
+            name: "updateConversationPreferences",
             payload: { titles: { "alpha\\u0000ctx-alpha": "Alpha" } },
         },
         routeContext,
     );
     assert.equal(
-        ((await preferences.handle(
-            { id: "preferences", name: "preferences" },
-            routeContext,
-        )) as { titles: Record<string, string> }).titles["alpha\\u0000ctx-alpha"],
+        (
+            (await preferences.handle(
+                {
+                    id: "preferences",
+                    name: "getConversationPreferences",
+                },
+                routeContext,
+            )) as { titles: Record<string, string> }
+        ).titles["alpha\\u0000ctx-alpha"],
         "Alpha",
     );
 
     instances.replace([]);
     assert.deepEqual(extension.routes.instance("alpha"), []);
     await extension.close();
-    assert.equal(events.some((event) => event.type === "context.message.queued"), true);
+    assert.equal(
+        events.some((event) => event.type === "context.message.queued"),
+        true,
+    );
 });
 
 test("CommentExtension preserves state across a transient disable until committed retirement", async () => {
-    const root = await createTestTempDirectory("comment-extension-disable-rollback");
+    const root = await createTestTempDirectory(
+        "comment-extension-disable-rollback",
+    );
     const key = {};
     const conversationDatabaseFile = join(root, "conversation.sqlite3");
     const source = (enabled: boolean): CommentExtensionInstance => ({
@@ -175,17 +195,18 @@ test("CommentExtension preserves state across a transient disable until committe
         preferencesFile: join(root, "conversation-preferences.json"),
     });
 
-    const contextMessage = extension
-        .routes.instance("alpha")
-        .find((route) => route.name === "contextMessage");
-    const queue = contextMessage?.operations.find(
-        (operation) => operation.name === "queue",
+    const message = extension.routes
+        .instance("alpha")
+        .find((route) => route.name === "message");
+    const queue = message?.operations.find(
+        (operation) => operation.name === "queueContextMessage",
     );
-    if (queue === undefined) throw new Error("contextMessage.queue is missing");
+    if (queue === undefined)
+        throw new Error("message.queueContextMessage is missing");
     await queue.handle(
         {
             id: "queue-before-disable",
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId: "ctx-alpha", text: "Keep this Comment" },
         },
         routeContext,
@@ -210,7 +231,9 @@ test("CommentExtension preserves state across a transient disable until committe
 });
 
 test("CommentExtension fences a captured route before committed retirement drains and closes state", async () => {
-    const root = await createTestTempDirectory("comment-extension-retire-fence");
+    const root = await createTestTempDirectory(
+        "comment-extension-retire-fence",
+    );
     const conversationDatabaseFile = join(root, "conversation.sqlite3");
     let releaseQueued!: () => void;
     const queuedGate = new Promise<void>((resolve) => {
@@ -224,7 +247,8 @@ test("CommentExtension fences a captured route before committed retirement drain
     const instances = new TestCommentInstances([
         {
             appendEvent: async (type) => {
-                if (type !== "context.message.queued" || !holdQueuedEvent) return;
+                if (type !== "context.message.queued" || !holdQueuedEvent)
+                    return;
                 holdQueuedEvent = false;
                 markQueuedStarted();
                 await queuedGate;
@@ -240,18 +264,19 @@ test("CommentExtension fences a captured route before committed retirement drain
         instances,
         preferencesFile: join(root, "conversation-preferences.json"),
     });
-    const contextMessage = extension
-        .routes.instance("alpha")
-        .find((route) => route.name === "contextMessage");
-    const queue = contextMessage?.operations.find(
-        (operation) => operation.name === "queue",
+    const message = extension.routes
+        .instance("alpha")
+        .find((route) => route.name === "message");
+    const queue = message?.operations.find(
+        (operation) => operation.name === "queueContextMessage",
     );
-    if (queue === undefined) throw new Error("contextMessage.queue is missing");
+    if (queue === undefined)
+        throw new Error("message.queueContextMessage is missing");
 
     const admitted = queue.handle(
         {
             id: "queue-admitted",
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId: "ctx-alpha", text: "Already admitted" },
         },
         routeContext,
@@ -267,7 +292,7 @@ test("CommentExtension fences a captured route before committed retirement drain
             await queue.handle(
                 {
                     id: "queue-late",
-                    name: "queue",
+                    name: "queueContextMessage",
                     payload: { ctxId: "ctx-alpha", text: "Must never reopen" },
                 },
                 routeContext,
@@ -275,7 +300,7 @@ test("CommentExtension fences a captured route before committed retirement drain
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.instanceMissing,
+                controlErrorCodes.instanceNotFound,
             );
             return true;
         },

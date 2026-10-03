@@ -28,23 +28,14 @@ import {
             options.initialHomeDirectory === undefined
                 ? "/home/alpha"
                 : options.initialHomeDirectory;
-        store.patchControlReadModel({
-            instances: [
-                {
-                    enabled: true,
-                    ...(initialHomeDirectory === null
-                        ? {}
-                        : { homeDirectory: initialHomeDirectory }),
-                    mcpEnabled: false,
-                    name: "alpha",
-                    provider: "local",
-                },
-            ],
-        });
+        const homeDirectories: Record<string, string | undefined> = {};
+        if (initialHomeDirectory !== null) {
+            homeDirectories.alpha = initialHomeDirectory;
+        }
         const calls: string[] = [];
         const refreshed: string[] = [];
         let reconnectAttempts = 0;
-        const clients: TuiRuntimeOperationClients = {
+        const clients = {
             artifact: {
                 async cancelTransfer(transferId: string) {
                     calls.push(`artifact.cancel:${transferId}`);
@@ -54,31 +45,11 @@ import {
                 },
             },
             config: {
-                async update() {
-                    calls.push("config.update");
-                    return {};
-                },
-                async updateInstance(input: { instanceName: string }) {
-                    calls.push(`config.instance:${input.instanceName}`);
-                    if (options.failConfigUpdate)
-                        throw new Error("config update failed");
-                },
-                async updateMcpEndpoint() {
-                    calls.push("config.mcp");
-                },
-                async updateWeb() {
-                    calls.push("config.web");
-                },
-                async validate() {
-                    calls.push("config.validate");
-                },
-            },
-            instance: {
-                async create(draft: InstanceCreateDraft) {
+                async createInstance(draft: InstanceCreateDraft) {
                     calls.push(`instance.create:${draft.name}`);
                     return { name: draft.name };
                 },
-                async createSchema() {
+                async createInstanceSchema() {
                     return {
                         container: {
                             defaultMode: "preset" as const,
@@ -99,10 +70,28 @@ import {
                         providers: ["local" as const],
                     };
                 },
-                async delete(instance: string) {
+                async deleteInstance(instance: string) {
                     calls.push(`instance.delete:${instance}`);
                 },
-                async validateCreate(draft: InstanceCreateDraft) {
+                async update() {
+                    calls.push("config.update");
+                    return {};
+                },
+                async updateInstance(input: { instanceName: string }) {
+                    calls.push(`config.instance:${input.instanceName}`);
+                    if (options.failConfigUpdate)
+                        throw new Error("config update failed");
+                },
+                async updateMcpEndpoint() {
+                    calls.push("config.mcp");
+                },
+                async updateWeb() {
+                    calls.push("config.web");
+                },
+                async validate() {
+                    calls.push("config.validate");
+                },
+                async validateInstanceCreate(draft: InstanceCreateDraft) {
                     calls.push("instance.validate");
                     return {
                         enabled: true,
@@ -135,8 +124,8 @@ import {
                     calls.push("service.restart");
                 },
             },
-            todo: {
-                async delete(instance: string, taskId: string) {
+            task: {
+                async deleteTodo(instance: string, taskId: string) {
                     calls.push(`todo.delete:${instance}:${taskId}`);
                 },
             },
@@ -153,7 +142,7 @@ import {
                     return {};
                 },
             },
-        };
+        } as unknown as TuiRuntimeOperationClients;
         const runtime = {
             async refresh(instance: string) {
                 calls.push(`runtime.refresh:${instance}`);
@@ -245,17 +234,7 @@ import {
             async refreshInstances() {
                 refreshed.push("instances");
                 if (options.startedHomeDirectory !== undefined) {
-                    store.patchControlReadModel({
-                        instances: store.getState().instances.map((instance) =>
-                            instance.name === "alpha"
-                                ? {
-                                      ...instance,
-                                      homeDirectory:
-                                          options.startedHomeDirectory,
-                                  }
-                                : instance,
-                        ),
-                    });
+                    homeDirectories.alpha = options.startedHomeDirectory;
                 }
             },
             async refreshInstance(instance: string) {
@@ -273,6 +252,12 @@ import {
             async refreshTodo(instance: string) {
                 refreshed.push(`todo:${instance}`);
             },
+            homeDirectory(instance: string) {
+                return homeDirectories[instance];
+            },
+            toolCallsForInstance() {
+                return [];
+            },
         };
         const operations = new TuiRuntimeOperations({
             clients,
@@ -283,6 +268,7 @@ import {
         });
         return {
             calls,
+            homeDirectory: (instance: string) => homeDirectories[instance],
             operations,
             reconnectAttempts: () => reconnectAttempts,
             refreshed,
@@ -305,7 +291,7 @@ import {
                 ? undefined
                 : harness.store.getState().relayByCommand[command.commandId];
         assert.deepEqual(relay?.output, ["starting alpha\n"]);
-        assert.equal(relay?.provider, "local");
+        assert.equal(relay?.provider, undefined);
         assert.equal(relay?.requestId, "request-start");
     });
 
@@ -315,15 +301,9 @@ import {
             startedHomeDirectory: "/home/started-alpha",
         });
 
-        assert.equal(
-            harness.store.getState().instances[0]?.homeDirectory,
-            undefined,
-        );
+        assert.equal(harness.homeDirectory("alpha"), undefined);
         await harness.operations.runInstanceAction("start", "alpha");
-        assert.equal(
-            harness.store.getState().instances[0]?.homeDirectory,
-            "/home/started-alpha",
-        );
+        assert.equal(harness.homeDirectory("alpha"), "/home/started-alpha");
         assert.equal(
             await harness.operations.callTool(
                 "alpha",
@@ -378,14 +358,6 @@ import {
 
     test("failed disable delegates worker rollback to Control instead of duplicating lifecycle logic", async () => {
         const harness = createHarness({ failConfigUpdate: true });
-        harness.store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 1,
-            name: "alpha",
-            ready: true,
-            status: "ready",
-        } as never);
 
         await assert.rejects(
             harness.operations.setInstanceEnabled("alpha", false),
@@ -397,20 +369,6 @@ import {
 
     test("disabling an online self-managed reverse instance never stops the remote worker", async () => {
         const harness = createHarness();
-        harness.store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 1,
-            name: "alpha",
-            ready: true,
-            reverse: {
-                availability: "online",
-                enrollmentState: "enrolled",
-                managementMode: "selfManaged",
-                transport: "sse",
-            },
-            status: "ready",
-        } as never);
 
         await harness.operations.setInstanceEnabled("alpha", false);
 

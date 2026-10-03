@@ -99,16 +99,16 @@ test("native control tool.call admits a nonexistent original instance to host in
             },
         },
     });
-    const control = routes.hosts().find((host) => host.host === "@control")!;
-    const tool = control.ports.filter((port) => port.name === "tool");
+    const dynamic = routes.hosts().find((host) => host.host === "*")!;
+    const tool = dynamic.ports.filter((port) => port.name === "tool");
     assert.equal(tool.length, 1);
     assert.deepEqual(tool[0]!.operations.map((entry) => entry.name), ["call"]);
     assert.deepEqual(tool[0]!.streams!.map((entry) => entry.name), ["callStream"]);
     assert.deepEqual(await tool[0]!.operations[0]!.handle({
         id: "call-unknown",
         name: "call",
-        payload: { instance: "nonexistent", toolName: "file_read", input: { path: "file.txt" }, workspace: "/workspace" },
-    }, createContext("@control")), { content: "read" });
+        payload: { toolName: "file_read", input: { path: "file.txt" }, workspace: "/workspace" },
+    }, createContext("nonexistent")), { content: "read" });
     assert.deepEqual(calls, ["nonexistent"]);
     routes.dispose();
 });

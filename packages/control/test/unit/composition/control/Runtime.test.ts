@@ -11,17 +11,21 @@ import {
 
 import {
     ControlPathHome,
-    createPersistentControlClients,
+    Endpoint,
     LocalChannel,
+    ServiceSession,
     type JsonValue,
     CONTROL_WEB_RPC_PATH,
     CONTROL_WEB_SESSION_PATH,
     createDefaultControlConfig,
     createEmptyConversationPreferences,
+    createServiceTransport,
+    createToolTransport,
     type ControlConfig,
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../../../src/testing.ts";
+import { ConfigChangeHub } from "../../../../src/control/config/Change.ts";
 import { ExtensionPathLayout } from "../../../../src/control/extension/state/Layout.ts";
 import { ControlRuntimeMcp } from "../../../../src/composition/control/subsystem/Mcp.ts";
 import { ControlRuntimeContext } from "../../../../src/composition/control/subsystem/Context.ts";
@@ -47,6 +51,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     let artifactStopping = false;
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -107,6 +112,7 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
     const calls: string[] = [];
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
@@ -228,6 +234,7 @@ test("runtime registers one Extension generation retirement handler", async (t) 
     > = [];
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
         extensionPaths: testExtensionPaths(),
         extensions: {
@@ -372,6 +379,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     const calls: string[] = [];
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -466,6 +474,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
     };
     new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -536,6 +545,7 @@ test("Web hot replacement preserves the original failure when host rollback also
     };
     new ControlRuntime({
         contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -605,6 +615,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
     };
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -669,6 +680,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -758,6 +770,7 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
     });
     const runtime = new ControlRuntime({
         contexts: new ControlRuntimeContext({ contextFile: controlPaths.contextsFile, instances: state.instances }),
+        configChanges: state.configChanges,
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
@@ -923,6 +936,7 @@ test("runtime installs builtin Extensions through the normal installer before op
     } as never;
     const runtime = new ControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         artifact: {
             service: undefined,
             async stop() {},
@@ -974,6 +988,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     await mkdir(source, { recursive: true });
     const runtime = new ControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
+        configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths: new ExtensionPathLayout({
@@ -1118,6 +1133,7 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     };
     const runtime = new ControlRuntime({
         contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
+        configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,
@@ -1144,18 +1160,22 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     });
 
     await runtime.start();
-    const clients = createPersistentControlClients({
-        clientKind: "cli",
+    const endpoint = new Endpoint({
         connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
     });
-    t.after(() => clients.close());
-    await clients.service.hello();
-    assert.deepEqual(await clients.tool.call("nonexistent", "file_read", {}, "/workspace"), { instance: "existing" });
+    const service = new ServiceSession(
+        endpoint,
+        createServiceTransport(endpoint, { clientKind: "cli" }),
+    );
+    const tools = createToolTransport(endpoint);
+    t.after(() => service.close());
+    await service.connect();
+    assert.deepEqual(await tools.call("nonexistent", "file_read", {}, "/workspace"), { instance: "existing" });
     assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:existing", "target:existing", "dispatch:existing", "release:existing"]);
 
     events.length = 0;
     reviewDecision = "reject";
-    const rejected = await clients.tool.call("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    const rejected = await tools.call("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
     assert.equal(rejected.result, null);
     assert.deepEqual(events, ["review:nonexistent"]);
 
@@ -1168,14 +1188,14 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     for (const listener of [...listeners]) listener();
     targetInstance = "added";
     events.length = 0;
-    assert.deepEqual(await clients.tool.call("nonexistent", "file_read", {}, "/workspace"), { instance: "added" });
+    assert.deepEqual(await tools.call("nonexistent", "file_read", {}, "/workspace"), { instance: "added" });
     assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
 
     dispatchFailure = true;
     events.length = 0;
-    const failed = await clients.tool.callStreaming("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    const failed = await tools.callStreaming("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
     assert.equal(failed.result, null);
     assert.equal((failed.error as Record<string, JsonValue>).message, "dispatch failed");
     assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
-    clients.close();
+    service.close();
 });

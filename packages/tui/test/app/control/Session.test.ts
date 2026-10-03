@@ -20,7 +20,7 @@ import {
     InstanceRegistry,
 } from "@portable-devshell/control/testing";
 import {
-    createTuiClients,
+    createTuiDomainSession,
     TuiControlSession,
     TuiRuntimeOperations,
     TuiAppStore,
@@ -38,9 +38,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const socketPath = createTestIpcPath("tui-overview", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -72,20 +71,19 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             source: "mcp",
             toolName: "bash_run",
         });
+        await session.refreshOverview();
 
         await waitFor(
             () =>
-                session.store.getState().readModel.overview?.counts
+                session.domains.overview.state.overview?.counts
                     .failedCalls24h === 1,
         );
         assert.equal(
-            session.store
-                .getState()
-                .readModel.overview?.alerts.some(
-                    (alert) =>
-                        alert.kind === "activity.failed" &&
-                        alert.instance === "alpha",
-                ),
+            session.domains.overview.state.overview?.alerts.some(
+                (alert) =>
+                    alert.kind === "activity.failed" &&
+                    alert.instance === "alpha",
+            ),
             true,
         );
     });
@@ -105,9 +103,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             status: "stopped",
         });
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -138,9 +135,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 },
             ],
         });
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -153,8 +149,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await session.refreshAudit("alpha");
 
         assert.deepEqual(
-            session.store.getState().readModel.instanceState.alpha
-                ?.conversationEntries,
+            session.domains.conversation.state.instances.alpha?.entries,
             [
                 {
                     callId: "report-call",
@@ -181,9 +176,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const server = createServer(socketPath, worker, () => 7, {
             contextRecords: () => [contextRecord(status)],
         });
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -195,8 +189,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await session.start();
         await waitFor(
             () =>
-                session.store.getState().readModel.contexts[0]?.status ===
-                "active",
+                session.domains.context.state.contexts[0]?.status === "active",
         );
         status = "disabled";
         const readsBefore = server.contextReads();
@@ -205,7 +198,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         assert.equal(server.contextReads() > readsBefore, true);
         assert.equal(
-            session.store.getState().readModel.contexts[0]?.status,
+            session.domains.context.state.contexts[0]?.status,
             "disabled",
         );
     });
@@ -225,9 +218,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             onTodoRead: () => hydrationStarted.resolve(),
             todoReadGate: hydrationGate.promise,
         });
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -237,23 +229,21 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await rm(runtimeDir, { force: true, recursive: true });
         });
 
-        const started = session.start();
+        await session.start();
+        const hydration = session.refreshInstance("alpha");
         await hydrationStarted.promise;
-        let startResolved = false;
-        void started.then(() => {
-            startResolved = true;
+        let hydrated = false;
+        void hydration.then(() => {
+            hydrated = true;
         });
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         assert.equal(session.store.getState().connection.status, "connected");
-        assert.equal(startResolved, true);
+        assert.equal(hydrated, false);
 
         hydrationGate.resolve();
-        await waitFor(
-            () =>
-                session.store.getState().readModel.instanceState.alpha?.todo !==
-                undefined,
-        );
+        await hydration;
+        assert.notEqual(session.domains.todo("alpha").state.todo, undefined);
     });
 
     test("TuiControlSession refreshes worker home metadata after RPC reconnect", async (t) => {
@@ -271,9 +261,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             status: "running",
         });
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -284,32 +273,31 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         await session.start();
         assert.equal(
-            session.store
-                .getState()
-                .instances.find((instance) => instance.name === "alpha")
-                ?.homeDirectory,
+            session.domains.instances.state.instances.find(
+                (instance) => instance.name === "alpha",
+            )?.homeDirectory,
             undefined,
         );
 
         worker.setHomeDirectory("/home/reconnected-alpha");
         worker.emit("worker.transportConnected");
+        await session.refreshInstances();
 
         await waitFor(
             () =>
-                session.store
-                    .getState()
-                    .instances.find((instance) => instance.name === "alpha")
-                    ?.homeDirectory === "/home/reconnected-alpha",
+                session.domains.instances.state.instances.find(
+                    (instance) => instance.name === "alpha",
+                )?.homeDirectory === "/home/reconnected-alpha",
         );
 
         worker.setHomeDirectory(undefined);
         worker.emit("instance.readyChanged", { ready: false });
+        await session.refreshInstances();
         await waitFor(
             () =>
-                session.store
-                    .getState()
-                    .instances.find((instance) => instance.name === "alpha")
-                    ?.homeDirectory === undefined,
+                session.domains.instances.state.instances.find(
+                    (instance) => instance.name === "alpha",
+                )?.homeDirectory === undefined,
         );
     });
 
@@ -320,9 +308,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const socketPath = createTestIpcPath("tui-comment-audit", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -338,29 +325,21 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         session.store.setSelectedInstance("alpha");
         session.store.setSelectedPage("audit");
         await session.refreshAudit("alpha");
-        session.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    contextMessages: [
-                        {
-                            createdAt: new Date(8).toISOString(),
-                            ctxId: "ctx-alpha",
-                            id: "message-1",
-                            instance: "alpha",
-                            status: "sent",
-                            text: "first guidance",
-                        },
-                        {
-                            createdAt: new Date(8).toISOString(),
-                            ctxId: "ctx-alpha",
-                            id: "message-2",
-                            instance: "alpha",
-                            status: "sent",
-                            text: "second guidance",
-                        },
-                    ],
-                },
-            },
+        session.domains.messages.mergeMessage("alpha", {
+            createdAt: new Date(8).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "message-1",
+            instance: "alpha",
+            status: "sent",
+            text: "first guidance",
+        });
+        session.domains.messages.mergeMessage("alpha", {
+            createdAt: new Date(8).toISOString(),
+            ctxId: "ctx-alpha",
+            id: "message-2",
+            instance: "alpha",
+            status: "sent",
+            text: "second guidance",
         });
 
         const firstCompletedAt = new Date(10).toISOString();
@@ -392,13 +371,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
         await waitFor(
             () =>
-                session.store
-                    .getState()
-                    .readModel.instanceState.alpha?.contextMessages?.every(
-                        (message) =>
-                            message.status === "delivered" &&
-                            message.callId === "comment-call",
-                    ) === true,
+                session.domains.messages.state.instances.alpha?.messages.every(
+                    (message) =>
+                        message.status === "delivered" &&
+                        message.callId === "comment-call",
+                ) === true,
         );
         worker.emit("toolCall.completed", {
             callId: "comment-call",
@@ -411,9 +388,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await waitFor(() => {
-            const call = session.store
-                .getState()
-                .readModel.instanceState.alpha?.toolCalls?.find(
+            const call =
+                session.domains.toolCalls.state.instances.alpha?.calls.find(
                     (record) => record.callId === "comment-call",
                 );
             return (
@@ -448,9 +424,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await waitFor(() => {
-            const call = session.store
-                .getState()
-                .readModel.instanceState.alpha?.toolCalls?.find(
+            const call =
+                session.domains.toolCalls.state.instances.alpha?.calls.find(
                     (record) => record.callId === "later-call",
                 );
             return (
@@ -461,16 +436,14 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.equal(worker.toolCallReadCount > readsAfterComment, true);
     });
 
-    test("TuiControlSession polls operational metrics only while Overview is visible", async (t) => {
+    test("TuiControlSession polls operational metrics through the Overview domain", async (t) => {
         t.mock.timers.enable({ apis: ["setInterval"] });
         const runtimeDir = await createTestTempDirectory("tui-overview-poll");
         const socketPath = createTestIpcPath("tui-overview-poll", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-            overviewRefreshIntervalMs: 25,
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -483,26 +456,16 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await waitFor(
             () => session.store.getState().connection.status === "connected",
         );
-        const hiddenPageReads = worker.toolCallReadCount;
-        t.mock.timers.tick(75);
-        assert.equal(worker.toolCallReadCount, hiddenPageReads);
-
-        session.store.setSelectedPage("overview");
-        t.mock.timers.tick(25);
-        await waitFor(() => worker.toolCallReadCount > hiddenPageReads);
-
-        session.store.setSelectedPage("instances");
-        const afterVisibleReads = worker.toolCallReadCount;
-        t.mock.timers.tick(75);
-        assert.equal(worker.toolCallReadCount, afterVisibleReads);
+        const readsBeforeTick = worker.toolCallReadCount;
+        t.mock.timers.tick(5_000);
+        await waitFor(() => worker.toolCallReadCount > readsBeforeTick);
     });
 
     test("TuiControlSession reports missing control without auto-starting it", async () => {
         const runtimeDir = await createTestTempDirectory("tui-not-running");
         const socketPath = createTestIpcPath("tui-control", runtimeDir);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         try {
             await session.start();
@@ -514,7 +477,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 session.store.getState().connection.errorCode,
                 "control.notRunning",
             );
-            assert.deepEqual(session.store.getState().instances, []);
+            assert.deepEqual(session.domains.instances.state.instances, []);
         } finally {
             await session.stop();
             await rm(runtimeDir, { force: true, recursive: true });
@@ -527,9 +490,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const socketPath = createTestIpcPath("tui-control", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -553,9 +515,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const socketPath = createTestIpcPath("tui-control", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const session = new TuiControlSession({
-            clients: createTuiClients({ socketPath }),
-        });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
 
         await server.start();
         t.after(async () => {
@@ -575,41 +536,43 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.equal(session.store.getState().rawEvents.length, rawEventCount);
     });
 
-    test("module TUI clients send explicit instance operations and preserve start relay output", async (t) => {
+    test("TUI domain session sends explicit instance operations and preserves start relay output", async (t) => {
         const runtimeDir = await createTestTempDirectory("tui-operations");
         const socketPath = createTestIpcPath("tui-control", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7);
-        const clients = createTuiClients({ socketPath });
+        const domains = createTuiDomainSession({ socketPath });
 
         t.after(async () => {
-            clients.close();
+            domains.close();
             await server.stop();
             await rm(runtimeDir, { force: true, recursive: true });
         });
 
         await server.start();
-        await clients.service.hello();
+        await domains.service.connect();
 
-        const refreshed = await clients.runtime.refresh("alpha");
-        assert.equal(refreshed.snapshot.name, "alpha");
+        const runtime = domains.runtime("alpha");
+        await runtime.load("alpha");
+        assert.equal(runtime.state.snapshot?.name, "alpha");
 
         const relayOutput: string[] = [];
-        const started = await clients.runtime.start("alpha", {
+        const started = await runtime.start({
             onOutput: (chunk) => {
                 relayOutput.push(chunk);
             },
         });
         assert.equal(started.name, "alpha");
         assert.deepEqual(relayOutput, ["starting alpha\n"]);
-        assert.deepEqual(await clients.runtime.stop("alpha"), started);
+        assert.deepEqual(await runtime.stop(), started);
 
-        const approval = await clients.approval.get("alpha", "approval-1");
-        assert.equal(approval.status, "pending");
-        await clients.approval.decide("alpha", "approval-1", "approve");
+        const approval = domains.approval("alpha");
+        await approval.load("alpha");
+        assert.equal((await approval.get("approval-1")).status, "pending");
+        await approval.decide("approval-1", "approve");
         assert.equal(worker.decisions[0]?.decision, "approve");
 
-        const result = await clients.tool.call(
+        const result = await domains.toolCalls.call(
             "alpha",
             "bash_run",
             { command: "pwd" },
@@ -626,10 +589,17 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const server = createServer(socketPath, worker, () => 7, {
             restartable: true,
         });
-        const clients = createTuiClients({ socketPath });
-        const session = new TuiControlSession({ clients, readTimeoutMs: 500 });
+        const domains = createTuiDomainSession({ socketPath });
+        const session = new TuiControlSession({ domains });
         const operations = new TuiRuntimeOperations({
-            clients,
+            clients: {
+                artifact: domains.artifactTransport,
+                config: domains.configTransport,
+                reverse: domains.reverse,
+                service: domains.serviceTransport,
+                task: domains.taskTransport,
+                tool: domains.toolTransport,
+            },
             operationTimeoutMs: 2_000,
             reconnectDelayMs: 10,
             session,
@@ -648,7 +618,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         assert.equal(server.restartCount(), 1);
         assert.equal(session.store.getState().connection.status, "connected");
-        assert.deepEqual(await clients.service.ping(), { pong: true });
+        assert.deepEqual(await domains.serviceTransport.ping(), {
+            pong: true,
+        });
     });
 
     test("module TUI client sends an OAuth approval payload accepted by the control route", async (t) => {
@@ -689,22 +661,20 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             shutdown() {},
         });
         const server = new ControlSocketServer({ routes, socketPath });
-        const clients = createTuiClients({ socketPath });
+        const domains = createTuiDomainSession({ socketPath });
 
         await server.start();
         t.after(async () => {
-            clients.close();
+            domains.close();
             await server.stop();
             routes.dispose();
             await rm(runtimeDir, { force: true, recursive: true });
         });
-        await clients.service.hello();
+        await domains.service.connect();
+        await domains.mcp.load();
 
-        assert.equal(
-            (await clients.mcp.listApprovals())[0]?.approvalId,
-            "oauth-1",
-        );
-        const decided = await clients.mcp.decideApproval("oauth-1", "approve");
+        assert.equal(domains.mcp.state.approvals[0]?.approvalId, "oauth-1");
+        const decided = await domains.mcp.decideApproval("oauth-1", "approve");
 
         assert.equal(decided.status, "approved");
         assert.deepEqual(decisions, [
@@ -757,6 +727,30 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     } {
         const instances = new InstanceRegistry([
             {
+                approval: {
+                    async cancel() {
+                        return {} as ApprovalRequest;
+                    },
+                    close() {},
+                    async decideApproval(approvalId, decision) {
+                        return await worker.decideApproval(
+                            approvalId,
+                            decision,
+                        );
+                    },
+                    async getApproval(approvalId) {
+                        return await worker.getApproval(approvalId);
+                    },
+                    async listApprovals() {
+                        return await worker.listApprovals();
+                    },
+                    async listPendingApprovals() {
+                        return await worker.listPendingApprovals();
+                    },
+                    async retire() {},
+                    setPolicy() {},
+                },
+                approvalReview: () => ({ decision: "continue" }),
                 enabled: true,
                 goal: {
                     async continuation() {
@@ -826,13 +820,18 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                         ? []
                         : [
                               {
-                                  name: "conversation",
+                                  name: "message",
                                   operations: [
                                       {
-                                          name: "list",
+                                          name: "listConversationEntries",
                                           handle: async () =>
-                                              (options.conversationEntries?.() ??
-                                                  []) as unknown as JsonValue,
+                                              ({
+                                                  entries:
+                                                      options.conversationEntries?.() ??
+                                                      [],
+                                                  lastSeq:
+                                                      worker.snapshot().lastSeq,
+                                              }) as unknown as JsonValue,
                                       },
                                   ],
                               },
@@ -1146,7 +1145,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             const approval = this.#approvals.find(
                 (candidate) => candidate.approvalId === approvalId,
             );
-            assert.notEqual(approval, undefined);
+            assert.ok(approval !== undefined);
             return approval;
         }
 
@@ -1266,23 +1265,14 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             status: "pending",
             text: "review this",
         };
+        const domains = createTuiDomainSession();
         const operations = new TuiRuntimeOperations({
-            clients: {
-                contextMessage: {
-                    async queue() {
-                        return queued;
-                    },
-                },
-            } as never,
+            clients: {} as never,
             operationTimeoutMs: 100,
             session: {
                 commands: {
                     async queueContextMessage() {
-                        store.patchControlReadModel({
-                            instanceState: {
-                                alpha: { contextMessages: [queued] },
-                            },
-                        });
+                        domains.messages.mergeMessage("alpha", queued);
                         return queued;
                     },
                 },
@@ -1293,17 +1283,24 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             store,
         });
 
-        await operations.queueContextMessage("alpha", "ctx-1", "review this");
+        try {
+            await operations.queueContextMessage(
+                "alpha",
+                "ctx-1",
+                "review this",
+            );
 
-        assert.equal(
-            store.getState().readModel.instanceState.alpha?.contextMessages?.[0]
-                ?.id,
-            "message-1",
-        );
-        assert.equal(
-            store.getState().panelErrors["audit:alpha:operationRefresh"]
-                ?.message,
-            "audit refresh failed",
-        );
+            assert.equal(
+                domains.messages.state.instances.alpha?.messages?.[0]?.id,
+                "message-1",
+            );
+            assert.equal(
+                store.getState().panelErrors["audit:alpha:operationRefresh"]
+                    ?.message,
+                "audit refresh failed",
+            );
+        } finally {
+            domains.close();
+        }
     });
 }

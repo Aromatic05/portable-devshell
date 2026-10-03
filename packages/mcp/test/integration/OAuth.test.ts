@@ -38,7 +38,10 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import { ToolCallHookSequence, ToolCallPipeline } from "@portable-devshell/core";
+import {
+    ToolCallHookSequence,
+    ToolCallPipeline,
+} from "@portable-devshell/core";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -76,15 +79,16 @@ async function queueComment(
 ): Promise<ContextMessageRecord> {
     const route = comment.routes
         .instance("real-comment")
-        .find((candidate) => candidate.name === "contextMessage");
+        .find((candidate) => candidate.name === "message");
     const operation = route?.operations.find(
-        (candidate) => candidate.name === "queue",
+        (candidate) => candidate.name === "queueContextMessage",
     );
-    if (operation === undefined) throw new Error("contextMessage.queue is missing");
+    if (operation === undefined)
+        throw new Error("message.queueContextMessage is missing");
     return (await operation.handle(
         {
             id: `queue-${ctxId}-${text}`,
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId, text },
         },
         commentRouteContext,
@@ -97,15 +101,16 @@ async function listComments(
 ): Promise<ContextMessageRecord[]> {
     const route = comment.routes
         .instance("real-comment")
-        .find((candidate) => candidate.name === "contextMessage");
+        .find((candidate) => candidate.name === "message");
     const operation = route?.operations.find(
-        (candidate) => candidate.name === "list",
+        (candidate) => candidate.name === "listContextMessages",
     );
-    if (operation === undefined) throw new Error("contextMessage.list is missing");
+    if (operation === undefined)
+        throw new Error("message.listContextMessages is missing");
     return (await operation.handle(
         {
             id: `list-${ctxId}`,
-            name: "list",
+            name: "listContextMessages",
             payload: { ctxId },
         },
         commentRouteContext,
@@ -198,10 +203,7 @@ test(
                 ],
                 onChange: () => () => undefined,
             },
-            preferencesFile: join(
-                contextRoot,
-                "conversation-preferences.json",
-            ),
+            preferencesFile: join(contextRoot, "conversation-preferences.json"),
         });
         let sequence = new ToolCallHookSequence({});
         const pipeline = new ToolCallPipeline({
@@ -211,10 +213,29 @@ test(
         const gateway = {
             async appendMcpToolCalled() {},
             assertReady() {},
-            async callToolOperation<T extends JsonValue>(instance: string, name: string, input: JsonValue, context: ToolCallContext, operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>, signal?: AbortSignal): Promise<T> {
-                return await pipeline.callOperation(instance, name, input, context, operation, signal);
+            async callToolOperation<T extends JsonValue>(
+                instance: string,
+                name: string,
+                input: JsonValue,
+                context: ToolCallContext,
+                operation: (
+                    callId: string,
+                    input: JsonValue,
+                    finalValue: ToolCallHookValue,
+                ) => Promise<T>,
+                signal?: AbortSignal,
+            ): Promise<T> {
+                return await pipeline.callOperation(
+                    instance,
+                    name,
+                    input,
+                    context,
+                    operation,
+                    signal,
+                );
             },
-            callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => pipeline.call(...args),
+            callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) =>
+                pipeline.call(...args),
             environment() {
                 return undefined;
             },
@@ -276,29 +297,35 @@ test(
             },
         };
         sequence = new ToolCallHookSequence({
-                reviews: [
-                    async (input) =>
-                        await commentGate(input as never, unsupportedInvocation as never),
-                ],
-                rewrites: [
-                    async (input) =>
-                        await commentTodoAccess(
-                            input as never,
-                            unsupportedInvocation as never,
-                        ) as unknown as ToolCallHookValue,
-                    async (input) =>
-                        await commentTodoInvalid(
-                            input as never,
-                            unsupportedInvocation as never,
-                        ) as unknown as ToolCallHookValue,
-                    async (input) =>
-                        await commentAdvice(input as never, unsupportedInvocation as never) as unknown as ToolCallHookValue,
-                    async (input) =>
-                        await commentDelivery(
-                            input as never,
-                            unsupportedInvocation as never,
-                        ) as unknown as ToolCallHookValue,
-                ],
+            reviews: [
+                async (input) =>
+                    await commentGate(
+                        input as never,
+                        unsupportedInvocation as never,
+                    ),
+            ],
+            rewrites: [
+                async (input) =>
+                    (await commentTodoAccess(
+                        input as never,
+                        unsupportedInvocation as never,
+                    )) as unknown as ToolCallHookValue,
+                async (input) =>
+                    (await commentTodoInvalid(
+                        input as never,
+                        unsupportedInvocation as never,
+                    )) as unknown as ToolCallHookValue,
+                async (input) =>
+                    (await commentAdvice(
+                        input as never,
+                        unsupportedInvocation as never,
+                    )) as unknown as ToolCallHookValue,
+                async (input) =>
+                    (await commentDelivery(
+                        input as never,
+                        unsupportedInvocation as never,
+                    )) as unknown as ToolCallHookValue,
+            ],
         });
         cleanupDirs.push(contextRoot);
 
@@ -896,7 +923,9 @@ test(
                         request.status,
                         request.decidedBy,
                     ])
-                    .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+                    .sort((left, right) =>
+                        String(left[0]).localeCompare(String(right[0])),
+                    ),
                 [
                     ["authorization", "approved", "web"],
                     ["registration", "approved", "web"],
@@ -1291,10 +1320,12 @@ async function startFrozenWorkerHost(
         instances: [
             {
                 auth,
-                gateway: gateway ?? createTestWorkerGateway(
-                    () => instance.toolCallTarget(),
-                    () => instance.listTools(),
-                ),
+                gateway:
+                    gateway ??
+                    createTestWorkerGateway(
+                        () => instance.toolCallTarget(),
+                        () => instance.listTools(),
+                    ),
                 name,
                 worker: instance,
             },

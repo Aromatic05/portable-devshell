@@ -5,7 +5,7 @@ import type { ControlPortContext } from "@portable-devshell/shared";
 
 import { createCommentRouteModule } from "../../src/comment/CommentService.ts";
 
-test("contextMessage.queue persists independently of Context lifecycle authority", async () => {
+test("message.queueContextMessage persists independently of Context lifecycle authority", async () => {
     const calls: string[] = [];
     const service = {
         async list() {
@@ -25,10 +25,10 @@ test("contextMessage.queue persists independently of Context lifecycle authority
     };
     const module = createCommentRouteModule(service);
     const queue = module.operations.find(
-        (operation) => operation.name === "queue",
+        (operation) => operation.name === "queueContextMessage",
     );
     if (queue === undefined)
-        throw new Error("contextMessage.queue operation is missing");
+        throw new Error("message.queueContextMessage operation is missing");
     const routeContext = {
         afterReply() {},
         connectionId: "conn",
@@ -41,7 +41,7 @@ test("contextMessage.queue persists independently of Context lifecycle authority
     const disabled = await queue.handle(
         {
             id: "1",
-            name: "queue",
+            name: "queueContextMessage",
             payload: { ctxId: "ctx-disabled", text: "still writable" },
         },
         routeContext,
@@ -49,7 +49,7 @@ test("contextMessage.queue persists independently of Context lifecycle authority
     const missing = await queue.handle(
         {
             id: "2",
-            name: "queue",
+            name: "queueContextMessage",
             payload: {
                 ctxId: "ctx-history-only",
                 text: "history remains writable",

@@ -120,6 +120,68 @@ test("Endpoint routes Rpc across host:port and Envelope fragmentation", async (t
     assert.equal(await clientRpc.request("echo", message), message);
 });
 
+test("Endpoint wildcard host preserves the concrete RPC destination and exact routes win", async (t) => {
+    const { client, server } = await endpoints();
+    t.after(() => {
+        client.close();
+        server.close();
+    });
+    const wildcard = new Rpc(server.bind("tool", "*"), {
+        call: (_message, context) => {
+            assert.deepEqual(context.local, {
+                host: "nonexistent",
+                port: "tool",
+            });
+            return { route: "wildcard" };
+        },
+    });
+    const exact = new Rpc(server.bind("tool", "known"), {
+        call: (_message, context) => {
+            assert.deepEqual(context.local, { host: "known", port: "tool" });
+            return { route: "exact" };
+        },
+    });
+    t.after(() => {
+        wildcard.close();
+        exact.close();
+    });
+
+    const missing = new Rpc(await client.connect("nonexistent", "tool"));
+    const known = new Rpc(await client.connect("known", "tool"));
+    t.after(() => {
+        missing.close();
+        known.close();
+    });
+    assert.deepEqual(await missing.request("call"), { route: "wildcard" });
+    assert.deepEqual(await known.request("call"), { route: "exact" });
+});
+
+test("Endpoint wildcard host preserves the concrete Stream destination", async (t) => {
+    const { client, server } = await endpoints();
+    t.after(() => {
+        client.close();
+        server.close();
+    });
+    const serverStreams = new Stream(server.bind("tool", "*"));
+    serverStreams.onOpen(async (stream, name, _message, _peer, local) => {
+        assert.equal(name, "callStream");
+        assert.deepEqual(local, { host: "nonexistent", port: "tool" });
+        await stream.close({ route: local.host });
+    });
+    const clientStreams = new Stream(
+        await client.connect("nonexistent", "tool"),
+    );
+    t.after(() => {
+        clientStreams.close();
+        serverStreams.close();
+    });
+    const stream = await clientStreams.open("callStream");
+    assert.deepEqual(await stream.readMessage(), {
+        message: { route: "nonexistent" },
+        type: "close",
+    });
+});
+
 test("Rpc rejects when the remote route is unavailable", async (t) => {
     const { client, server } = await endpoints();
     t.after(() => {

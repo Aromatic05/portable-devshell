@@ -3,13 +3,13 @@ import test from "node:test";
 
 import { attachToolCallErrorPayload } from "@portable-devshell/core";
 import {
-    createError,
+    createRemoteError,
     type JsonValue,
     type ToolCallContext,
     type ControlPortContext,
 } from "@portable-devshell/shared";
 
-import { createControlToolRouteModule, createToolRouteModule } from "../../../../src/instance/execution/tool/Route.ts";
+import { createToolRouteModule } from "../../../../src/instance/execution/tool/Route.ts";
 
 function routeContext(connectionId: string): ControlPortContext {
     return {
@@ -26,14 +26,25 @@ function callHandler(
     callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>,
     comments: readonly string[] = [],
 ) {
-    const module = createControlToolRouteModule({
-        async call(_instance, toolName, input) {
-            const result = await callTool(toolName, input).catch((error) => {
-                throw attachToolCallErrorPayload(error, { comment: [...comments] });
-            });
-            return { ...(result as Record<string, JsonValue>), comment: [...comments] };
+    const module = createToolRouteModule(
+        { name: "demo", worker: {} as never },
+        undefined,
+        {
+            async call(_instance, toolName, input) {
+                const result = await callTool(toolName, input).catch(
+                    (error) => {
+                        throw attachToolCallErrorPayload(error, {
+                            comment: [...comments],
+                        });
+                    },
+                );
+                return {
+                    ...(result as Record<string, JsonValue>),
+                    comment: [...comments],
+                };
+            },
         },
-    });
+    );
     const operation = module.operations.find((entry) => entry.name === "call");
     if (operation === undefined)
         throw new Error("tool.call operation is missing");
@@ -57,7 +68,6 @@ test("control tool route appends the worker result hint", async () => {
             id: "1",
             name: "call",
             payload: {
-                instance: "demo",
                 input: { command: "pwd" },
                 toolName: "bash_run",
                 workspace: "/workspace",
@@ -76,25 +86,21 @@ test("control tool route appends the worker result hint", async () => {
 });
 
 test("control tool route turns a thrown error into a structured hint instead of copying the message", async () => {
-    const handle = callHandler(
-        async () => {
-            throw createError({
-                code: "file.revisionMismatch",
-                message: "stale revision",
-                retryable: true,
-            });
-        },
-        [
-            "[file.revisionMismatch] Read the latest content and regenerate the operation before retrying.",
-        ],
-    );
+    const handle = callHandler(async () => {
+        throw createRemoteError({
+            code: "file.revisionMismatch",
+            message: "stale revision",
+            retryable: true,
+        });
+    }, [
+        "[file.revisionMismatch] Read the latest content and regenerate the operation before retrying.",
+    ]);
 
     const result = (await handle(
         {
             id: "1",
             name: "call",
             payload: {
-                instance: "demo",
                 input: {},
                 toolName: "file_edit",
                 workspace: "/workspace",
@@ -120,32 +126,36 @@ test("control tool stream forwards progress before completing the unchanged fina
     let completed: JsonValue | undefined;
     let workerContext: ToolCallContext | undefined;
     let workerRecording: "caller" | "host" | undefined;
-    const module = createControlToolRouteModule({
-        async call(
-            instance,
-            _toolName,
-            _input,
-            context,
-            signal,
-            _transformResult,
-            _invocationInput,
-            onProgress,
-            recording,
-        ) {
-            assert.equal(instance, "demo");
-            assert.equal(signal, streamContext.signal);
-            workerContext = context;
-            workerRecording = recording;
-            onProgress?.({ stdout: "one" });
-            onProgress?.({ stdout: "one\ntwo" });
-            return {
-                exitCode: 0,
-                stdout: "one\ntwo",
-                stderr: "",
-                termination: "exited",
-            };
+    const module = createToolRouteModule(
+        { name: "demo", worker: {} as never },
+        undefined,
+        {
+            async call(
+                instance,
+                _toolName,
+                _input,
+                context,
+                signal,
+                _transformResult,
+                _invocationInput,
+                onProgress,
+                recording,
+            ) {
+                assert.equal(instance, "demo");
+                assert.equal(signal, streamContext.signal);
+                workerContext = context;
+                workerRecording = recording;
+                onProgress?.({ stdout: "one" });
+                onProgress?.({ stdout: "one\ntwo" });
+                return {
+                    exitCode: 0,
+                    stdout: "one\ntwo",
+                    stderr: "",
+                    termination: "exited",
+                };
+            },
         },
-    });
+    );
     const operation = module.streams?.find(
         (entry) => entry.name === "callStream",
     );
@@ -168,8 +178,7 @@ test("control tool stream forwards progress before completing the unchanged fina
                 id: "stream-request",
                 name: "callStream",
                 payload: {
-                    instance: "demo",
-                input: { command: "printf one; printf two" },
+                    input: { command: "printf one; printf two" },
                     operationId: "pi-call-1",
                     recording: "caller",
                     toolName: "bash_run",
