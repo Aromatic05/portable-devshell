@@ -305,14 +305,18 @@ test("Extension loader validates declared Config and injects context.config", as
                 close() {
                     calls.push("close");
                 },
-                async get(path) {
-                    calls.push(`get:${path}`);
-                    return path === `${id}.enabled` ? false : undefined;
+                owned: {
+                    close() {},
+                    async get(path) {
+                        calls.push(`get:${path}`);
+                        return path === `${id}.enabled` ? false : undefined;
+                    },
+                    onChange() {
+                        return () => undefined;
+                    },
+                    async update() {},
+                    async validate() {},
                 },
-                onChange() {
-                    return () => undefined;
-                },
-                async update() {},
                 async validate() {
                     calls.push("validate");
                 },

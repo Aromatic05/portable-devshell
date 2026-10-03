@@ -16,7 +16,7 @@ import {
     EXTENSION_API_VERSION,
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
-import { errorCodes } from "@portable-devshell/shared";
+import { controlErrorCodes } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/control/artifact/host/storage/Archive.ts";
@@ -247,13 +247,13 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
         control.disable("comment"),
         (error: unknown) =>
             (error as { code?: string }).code ===
-            errorCodes.controlExtensionAccessDenied,
+            controlErrorCodes.extensionAccessDenied,
     );
     await assert.rejects(
         control.remove("comment", false),
         (error: unknown) =>
             (error as { code?: string }).code ===
-            errorCodes.controlExtensionAccessDenied,
+            controlErrorCodes.extensionAccessDenied,
     );
 
     const installed = await h.service.installBuiltin("skill", source);
@@ -265,7 +265,7 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
         control.remove("skill", false),
         (error: unknown) =>
             (error as { code?: string }).code ===
-            errorCodes.controlExtensionAccessDenied,
+            controlErrorCodes.extensionAccessDenied,
     );
     await assert.rejects(
         h.service.installBuiltin(

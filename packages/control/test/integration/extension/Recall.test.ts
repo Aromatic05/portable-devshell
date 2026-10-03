@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { AuditDatabase } from "@portable-devshell/core";
 import {
     asInstanceName,
+    type ToolCallQuery,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -79,7 +80,7 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
             enabled: true,
             name: instanceName,
             worker: {
-                async readToolCalls(query) {
+                async readToolCalls(query: ToolCallQuery) {
                     return await audit.readQuery(query);
                 },
             },

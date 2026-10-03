@@ -22,7 +22,7 @@ function factories(calls: string[]): ExtensionCapabilityRuntimeFactories {
                 return { key } as never;
             },
         ]),
-    ) as ExtensionCapabilityRuntimeFactories;
+    ) as unknown as ExtensionCapabilityRuntimeFactories;
 }
 
 test("Extension capability projection maps every canonical grant to one runtime field", () => {

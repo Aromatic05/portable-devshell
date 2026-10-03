@@ -61,27 +61,28 @@ test("Extension Config owns one schema-backed domain, emits committed paths, and
         stateDirectory,
         updateCoreConfig: noopCoreUpdate,
     });
+    const firstOwned = first.owned!;
     const firstChanges: string[][] = [];
-    first.onChange((change) => firstChanges.push([...change.paths]));
+    firstOwned.onChange((change) => firstChanges.push([...change.paths]));
 
     try {
         await first.validate();
-        assert.equal(await first.get("example.enabled"), false);
-        assert.equal(await first.get("example.nested.count"), 1);
+        assert.equal(await firstOwned.get("example.enabled"), false);
+        assert.equal(await firstOwned.get("example.nested.count"), 1);
 
-        await first.update({
+        await firstOwned.update({
             "example.enabled": true,
             "example.nested.count": 2,
         });
-        assert.equal(await first.get("example.enabled"), true);
-        assert.equal(await first.get("example.nested.count"), 2);
+        assert.equal(await firstOwned.get("example.enabled"), true);
+        assert.equal(await firstOwned.get("example.nested.count"), 2);
         assert.deepEqual(firstChanges, [
             ["example.enabled", "example.nested.count"],
         ]);
 
         await assert.rejects(
             async () =>
-                await first.update({
+                await firstOwned.update({
                     "example.nested.count": "invalid",
                 }),
             /does not match/u,
@@ -105,13 +106,14 @@ test("Extension Config owns one schema-backed domain, emits committed paths, and
             stateDirectory,
             updateCoreConfig: noopCoreUpdate,
         });
+        const secondOwned = second.owned!;
         try {
             await second.validate();
-            await second.update({ "example.nested.count": 3 });
-            assert.equal(await first.get("example.nested.count"), 3);
+            await secondOwned.update({ "example.nested.count": 3 });
+            assert.equal(await firstOwned.get("example.nested.count"), 3);
             await assert.rejects(
                 async () =>
-                    await first.update({ "example.nested.count": 4 }),
+                    await firstOwned.update({ "example.nested.count": 4 }),
                 /not writable by this generation/u,
             );
         } finally {
@@ -131,7 +133,7 @@ test("Extension Config reads only explicitly requested Core exports and filters 
     const config = new ExtensionConfigControl({
         changeHub,
         declaration: {
-            access: {
+            coreAccess: {
                 "mcp.listenPort": "read",
             },
         },
@@ -143,19 +145,21 @@ test("Extension Config reads only explicitly requested Core exports and filters 
         stateDirectory,
         updateCoreConfig: noopCoreUpdate,
     });
+    assert.equal(config.owned, undefined);
+    const core = config.core!;
     const changes: string[][] = [];
-    config.onChange((change) => changes.push([...change.paths]));
+    core.onChange((change) => changes.push([...change.paths]));
 
     try {
         await config.validate();
-        assert.equal(await config.get("mcp.listenPort"), coreConfig.mcp.listenPort);
+        assert.equal(await core.get("mcp.listenPort"), coreConfig.mcp.listenPort);
         await assert.rejects(
-            async () => await config.get("mcp.listenHost"),
+            async () => await core.get("mcp.listenHost"),
             /not authorized/u,
         );
         await assert.rejects(
-            async () => await config.update({ "observer.enabled": true }),
-            /does not own a Config domain/u,
+            async () => await core.update({ "observer.enabled": true }),
+            /not authorized/u,
         );
 
         changeHub.publish(["mcp.listenHost", "mcp.listenPort"]);
@@ -163,7 +167,7 @@ test("Extension Config reads only explicitly requested Core exports and filters 
 
         const unexported = new ExtensionConfigControl({
             changeHub,
-            declaration: { access: { "web.auth": "read" } },
+            declaration: { coreAccess: { "web.auth": "read" } },
             extensionId: "unexported",
             generation: "gen-a",
             mutationRunner: new ControlConfigMutationLock(),
@@ -183,7 +187,7 @@ test("Extension Config reads only explicitly requested Core exports and filters 
 
         const excessive = new ExtensionConfigControl({
             changeHub,
-            declaration: { access: { "mcp.listenPort": "read-write" } },
+            declaration: { coreAccess: { "mcp.listenPort": "read-write" } },
             extensionId: "excessive",
             generation: "gen-a",
             mutationRunner: new ControlConfigMutationLock(),
@@ -218,7 +222,7 @@ test("Extension Config writes only explicitly requested read-write Core exports"
     const config = new ExtensionConfigControl({
         changeHub,
         declaration: {
-            access: {
+            coreAccess: {
                 "mcp.publicBaseUrl": "read-write",
             },
         },
@@ -240,12 +244,13 @@ test("Extension Config writes only explicitly requested read-write Core exports"
             changeHub.publish(Object.keys(patch));
         },
     });
+    const core = config.core!;
     const changes: string[][] = [];
-    config.onChange((change) => changes.push([...change.paths]));
+    core.onChange((change) => changes.push([...change.paths]));
 
     try {
         await config.validate();
-        await config.update({
+        await core.update({
             "mcp.publicBaseUrl": "https://public.example.test/mcp",
         });
         assert.deepEqual(writes, [
@@ -254,12 +259,12 @@ test("Extension Config writes only explicitly requested read-write Core exports"
             },
         ]);
         assert.equal(
-            await config.get("mcp.publicBaseUrl"),
+            await core.get("mcp.publicBaseUrl"),
             "https://public.example.test/mcp",
         );
         assert.deepEqual(changes, [["mcp.publicBaseUrl"]]);
         await assert.rejects(
-            async () => await config.update({ "mcp.listenPort": 19000 }),
+            async () => await core.update({ "mcp.listenPort": 19000 }),
             /not authorized/u,
         );
     } finally {

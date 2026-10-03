@@ -34,7 +34,7 @@ import type {
     CliNativeCommandInvocationContext,
     CliCommandResult,
 } from "@portable-devshell/extension/cli";
-import { toControlErrorBody } from "@portable-devshell/shared";
+import { toRemoteErrorBody } from "@portable-devshell/shared";
 
 import {
     createCliModelSandboxBinding,
@@ -226,7 +226,7 @@ export function activate(context) {
     await sandbox.start();
 
     await assert.rejects(cliText(sandbox, [], "structured-error"), (error) => {
-        assert.deepEqual(toControlErrorBody(error), {
+        assert.deepEqual(toRemoteErrorBody(error), {
             code: "example.rejected",
             details: { reason: "policy" },
             message: "Rejected by Extension policy.",

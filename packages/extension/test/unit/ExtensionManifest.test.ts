@@ -24,7 +24,9 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
     assert.deepEqual(
         parseExtensionManifest({
             ...base,
-            capabilities: [...EXTENSION_CAPABILITY_IDS],
+            capabilities: EXTENSION_CAPABILITY_IDS.filter(
+                (capability) => capability !== "config.core",
+            ),
             extensions: {
                 "cli.native-commands": [
                     {
@@ -66,9 +68,9 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
     );
 });
 
-test("Extension manifest parses owned Config schema and declared Core access", () => {
+test("Extension manifest keeps owned Config separate from scoped config.core authority", () => {
     const config = {
-        access: { "mcp.publicBaseUrl": "read" },
+        coreAccess: { "mcp.publicBaseUrl": "read" },
         default: { enabled: false },
         schema: {
             additionalProperties: false,
@@ -78,13 +80,47 @@ test("Extension manifest parses owned Config schema and declared Core access", (
         },
     };
 
-    assert.deepEqual(parseExtensionManifest({ ...base, config }).config, config);
     assert.deepEqual(
         parseExtensionManifest({
             ...base,
-            config: { access: { "mcp.listenPort": "read" } },
+            capabilities: ["config.core"],
+            config,
         }).config,
-        { access: { "mcp.listenPort": "read" } },
+        config,
+    );
+    assert.deepEqual(
+        parseExtensionManifest({
+            ...base,
+            capabilities: ["config.core"],
+            config: { coreAccess: { "mcp.listenPort": "read" } },
+        }).config,
+        { coreAccess: { "mcp.listenPort": "read" } },
+    );
+    assert.deepEqual(
+        parseExtensionManifest({
+            ...base,
+            config: {
+                default: { enabled: false },
+                schema: { type: "object" },
+            },
+        }).capabilities,
+        [],
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { coreAccess: { "mcp.listenPort": "read" } },
+            }),
+        /must be declared together/u,
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                capabilities: ["config.core"],
+            }),
+        /must be declared together/u,
     );
     assert.throws(
         () =>
@@ -118,7 +154,7 @@ test("Extension manifest parses owned Config schema and declared Core access", (
         () =>
             parseExtensionManifest({
                 ...base,
-                config: { access: { mcp: "read" } },
+                config: { coreAccess: { mcp: "read" } },
             }),
         /access path/u,
     );
@@ -126,12 +162,12 @@ test("Extension manifest parses owned Config schema and declared Core access", (
         () =>
             parseExtensionManifest({
                 ...base,
-                config: { access: { "mcp.listenPort": "write" } },
+                config: { coreAccess: { "mcp.listenPort": "write" } },
             }),
         /must be read or read-write/u,
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, config: { access: {} } }),
+        () => parseExtensionManifest({ ...base, config: { coreAccess: {} } }),
         /must not be empty/u,
     );
 });

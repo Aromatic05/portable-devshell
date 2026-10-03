@@ -17,6 +17,7 @@ import type {
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
 } from "@portable-devshell/extension/asset";
+import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
@@ -118,6 +119,7 @@ interface PendingProcessEvents {
 
 const data = workerData as ExtensionSandboxWorkerData;
 const capabilityRequests = new Map<string, PendingCapabilityRequest>();
+const configCoreListeners = new Set<(change: ExtensionConfigChange) => void>();
 const configListeners = new Set<(change: ExtensionConfigChange) => void>();
 const interfaceRequests = new Map<string, PendingInterfaceRequest>();
 const invocationControllers = new Map<string, AbortController>();
@@ -234,6 +236,10 @@ async function acceptHostMessage(
         }
         case "configChange":
             for (const listener of [...configListeners])
+                listener(message.change);
+            return;
+        case "configCoreChange":
+            for (const listener of [...configCoreListeners])
                 listener(message.change);
             return;
         case "workerSessionClosed": {
@@ -367,6 +373,7 @@ function createContext(): ExtensionContext {
         {
             artifacts: createArtifactCapability,
             assets: createAssets,
+            configCore: createCoreConfigCapability,
             contextObserve: createContextObserveCapability,
             instanceEventPublish: createInstanceEventPublishCapability,
             instanceManage: createInstanceManageCapability,
@@ -427,6 +434,25 @@ function createConfig(): ExtensionConfig {
         },
         update: async (patch: Readonly<Record<string, ExtensionJsonValue>>) => {
             await requestCapability("config.update", {
+                ...patch,
+            } satisfies SandboxConfigUpdateInput);
+        },
+    });
+}
+
+function createCoreConfigCapability(): ExtensionCoreConfigCapability {
+    return Object.freeze({
+        get: async (path: string) =>
+            (await requestCapability("configCore.get", {
+                path,
+            } satisfies SandboxConfigGetInput)) as
+                ExtensionJsonValue | undefined,
+        onChange: (listener: (change: ExtensionConfigChange) => void) => {
+            configCoreListeners.add(listener);
+            return () => configCoreListeners.delete(listener);
+        },
+        update: async (patch: Readonly<Record<string, ExtensionJsonValue>>) => {
+            await requestCapability("configCore.update", {
                 ...patch,
             } satisfies SandboxConfigUpdateInput);
         },

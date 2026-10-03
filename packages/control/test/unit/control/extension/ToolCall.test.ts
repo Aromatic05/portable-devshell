@@ -3,7 +3,11 @@ import test from "node:test";
 
 import type {
     ToolCallReviewBinding,
+    ToolCallReviewContext,
+    ToolCallReviewInvocation,
     ToolCallRewriteBinding,
+    ToolCallRewriteContext,
+    ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
 
@@ -269,7 +273,10 @@ test("ToolCall binding holds exact registration leases for the call", async () =
 test("ToolCall sandbox codecs expose only callId direction value and context signal", async () => {
     const signal = new AbortController().signal;
     const review = await toolCallReviewSandboxCodec.invokeBinding(
-        async (input, invocation) => {
+        async (
+            input: ToolCallReviewInvocation,
+            invocation: ToolCallReviewContext,
+        ) => {
             assert.deepEqual(Object.keys(input).sort(), [
                 "callId",
                 "direction",
@@ -303,7 +310,10 @@ test("ToolCall sandbox codecs expose only callId direction value and context sig
     assert.deepEqual(review, { decision: "continue" });
 
     const rewritten = await toolCallRewriteSandboxCodec.invokeBinding(
-        async (input, invocation) => {
+        async (
+            input: ToolCallRewriteInvocation,
+            invocation: ToolCallRewriteContext,
+        ) => {
             assert.deepEqual(Object.keys(input).sort(), [
                 "callId",
                 "direction",

@@ -7,20 +7,20 @@ import type {
 import { requirePort, routeModule } from "../../../server/Route.js";
 import { readMcpApprovalDecision, readMcpApprovalId } from "./Input.js";
 
-export interface McpRouteModuleOptions {
+export interface AuthRouteModuleOptions {
     approvals(): McpOAuthApprovalService | undefined;
     status(): JsonValue;
 }
 
-export function createMcpRouteModule(
-    options: McpRouteModuleOptions,
+export function createAuthRouteModule(
+    options: AuthRouteModuleOptions,
 ): ControlPortDefinition {
     const approvals = () =>
         requirePort(
             options.approvals(),
             "MCP OAuth approvals are not available.",
         );
-    return routeModule("mcp", {
+    return routeModule("auth", {
         status: () => options.status(),
         listApprovals: async () => (await approvals().list()) as never,
         decideApproval: async (request, context) =>

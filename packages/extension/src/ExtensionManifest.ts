@@ -10,14 +10,12 @@ import type {
 export const EXTENSION_API_VERSION = "5.0.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
 
-export type ExtensionConfigAccess = "read" | "read-write";
+export type ExtensionCoreConfigAccess = "read" | "read-write";
 
 export interface ExtensionConfigDeclaration {
-    readonly access?: Readonly<Record<string, ExtensionConfigAccess>>;
+    readonly coreAccess?: Readonly<Record<string, ExtensionCoreConfigAccess>>;
     readonly default?: Readonly<Record<string, ExtensionJsonValue>>;
-    readonly schema?:
-        | boolean
-        | Readonly<Record<string, ExtensionJsonValue>>;
+    readonly schema?: boolean | Readonly<Record<string, ExtensionJsonValue>>;
 }
 
 export type ExtensionActivationPolicy = "eager" | "lazy";
@@ -113,13 +111,22 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
             "Extension capabilities must not contain duplicates.",
         );
     }
+    const config =
+        supportsConfig && value.config !== undefined
+            ? readConfig(value.config)
+            : undefined;
+    const hasCoreConfigCapability = parsedCapabilities.includes("config.core");
+    const hasCoreConfigScope = config?.coreAccess !== undefined;
+    if (hasCoreConfigCapability !== hasCoreConfigScope) {
+        throw new TypeError(
+            "Extension config.core capability and config.coreAccess scope must be declared together.",
+        );
+    }
     return {
         activation,
         apiVersion,
         capabilities: parsedCapabilities,
-        ...(supportsConfig && value.config !== undefined
-            ? { config: readConfig(value.config) }
-            : {}),
+        ...(config === undefined ? {} : { config }),
         entry,
         extensions: readExtensions(value.extensions),
         hostDependencies: readHostDependencies(
@@ -136,7 +143,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
 function readConfig(value: unknown): NonNullable<ExtensionManifest["config"]> {
     if (!isRecord(value))
         throw new TypeError("Extension manifest config must be an object.");
-    assertOnlyKeys(value, ["access", "default", "schema"]);
+    assertOnlyKeys(value, ["coreAccess", "default", "schema"]);
     const hasDefault = Object.hasOwn(value, "default");
     const hasSchema = Object.hasOwn(value, "schema");
     if (hasDefault !== hasSchema) {
@@ -144,13 +151,13 @@ function readConfig(value: unknown): NonNullable<ExtensionManifest["config"]> {
             "Extension manifest config.default and config.schema must be declared together.",
         );
     }
-    const access = readConfigAccess(value.access);
-    if (!hasDefault && access === undefined) {
+    const coreAccess = readCoreConfigAccess(value.coreAccess);
+    if (!hasDefault && coreAccess === undefined) {
         throw new TypeError(
-            "Extension manifest config must declare an owned schema or access requests.",
+            "Extension manifest config must declare an owned schema or coreAccess scope.",
         );
     }
-    if (!hasDefault) return { access: access! };
+    if (!hasDefault) return { coreAccess: coreAccess! };
 
     const defaultValue = cloneJsonValue(value.default, "config.default");
     if (!isRecord(defaultValue)) {
@@ -165,37 +172,37 @@ function readConfig(value: unknown): NonNullable<ExtensionManifest["config"]> {
         );
     }
     return {
-        ...(access === undefined ? {} : { access }),
+        ...(coreAccess === undefined ? {} : { coreAccess }),
         default: defaultValue as Record<string, ExtensionJsonValue>,
-        schema: schema as
-            | boolean
-            | Record<string, ExtensionJsonValue>,
+        schema: schema as boolean | Record<string, ExtensionJsonValue>,
     };
 }
 
-function readConfigAccess(
+function readCoreConfigAccess(
     value: unknown,
-): Readonly<Record<string, ExtensionConfigAccess>> | undefined {
+): Readonly<Record<string, ExtensionCoreConfigAccess>> | undefined {
     if (value === undefined) return undefined;
     if (!isRecord(value))
-        throw new TypeError("Extension manifest config.access must be an object.");
-    const access: Record<string, ExtensionConfigAccess> = {};
+        throw new TypeError(
+            "Extension manifest config.coreAccess must be an object.",
+        );
+    const access: Record<string, ExtensionCoreConfigAccess> = {};
     for (const [path, permission] of Object.entries(value)) {
         if (!isConfigPath(path)) {
             throw new TypeError(
-                `Invalid Extension Config access path: ${path}.`,
+                `Invalid Extension Core Config access path: ${path}.`,
             );
         }
         if (permission !== "read" && permission !== "read-write") {
             throw new TypeError(
-                `Extension Config access for ${path} must be read or read-write.`,
+                `Extension Core Config access for ${path} must be read or read-write.`,
             );
         }
         access[path] = permission;
     }
     if (Object.keys(access).length === 0)
         throw new TypeError(
-            "Extension manifest config.access must not be empty.",
+            "Extension manifest config.coreAccess must not be empty.",
         );
     return access;
 }
@@ -204,9 +211,7 @@ function isConfigPath(value: string): boolean {
     return /^[a-z][a-z0-9-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+$/u.test(value);
 }
 
-function readActivationPolicy(
-    value: unknown,
-): ExtensionManifest["activation"] {
+function readActivationPolicy(value: unknown): ExtensionManifest["activation"] {
     if (value === "lazy" || value === "eager") return value;
     throw new TypeError(
         "Extension manifest activation must be either lazy or eager.",
@@ -451,7 +456,10 @@ export function satisfiesExtensionVersionRange(
     if (compareSemVer(current, requested) < 0) return false;
     if (operator === "=") return compareSemVer(current, requested) === 0;
     if (operator === "~")
-        return current.major === requested.major && current.minor === requested.minor;
+        return (
+            current.major === requested.major &&
+            current.minor === requested.minor
+        );
     if (requested.major > 0) return current.major === requested.major;
     if (requested.minor > 0)
         return current.major === 0 && current.minor === requested.minor;
@@ -464,9 +472,8 @@ export function satisfiesExtensionVersionRange(
 
 function isExtensionVersionRange(value: string): boolean {
     if (value === "*") return true;
-    const candidate = value.startsWith("^") || value.startsWith("~")
-        ? value.slice(1)
-        : value;
+    const candidate =
+        value.startsWith("^") || value.startsWith("~") ? value.slice(1) : value;
     return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(candidate);
 }
 

@@ -20,7 +20,7 @@ import {
     createCoreConfigRegistry,
 } from "../config/Registry.js";
 import {
-    assertExtensionConfigAccess,
+    assertExtensionCoreConfigAccess,
     extensionConfigDomainDefinition,
 } from "./config/Control.js";
 import {
@@ -932,7 +932,13 @@ export class ExtensionHost {
         manifest: ExtensionManifest,
     ): void {
         if (manifest.config === undefined) return;
-        assertExtensionConfigAccess(id, this.#configRegistry, manifest.config);
+        if (manifest.config.coreAccess !== undefined) {
+            assertExtensionCoreConfigAccess(
+                id,
+                this.#configRegistry,
+                manifest.config.coreAccess,
+            );
+        }
         const definition = extensionConfigDomainDefinition(
             id,
             generation,
@@ -951,7 +957,13 @@ export class ExtensionHost {
             this.#removeConfigDomain(id);
             return;
         }
-        assertExtensionConfigAccess(id, this.#configRegistry, manifest.config);
+        if (manifest.config.coreAccess !== undefined) {
+            assertExtensionCoreConfigAccess(
+                id,
+                this.#configRegistry,
+                manifest.config.coreAccess,
+            );
+        }
         const definition = extensionConfigDomainDefinition(
             id,
             generation,

@@ -17,7 +17,6 @@ import {
     type InstanceCreateResult,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
-    type InstanceEventType,
     type InstanceLogEntry,
     type JsonValue,
     runtimeErrorCodes,
@@ -54,9 +53,7 @@ export interface ExtensionInstanceObserveCapabilityControlOptions {
 }
 
 /** Read-only Instance observation backed by Control's authoritative registry. */
-export class ExtensionInstanceObserveCapabilityControl
-    implements ExtensionInstanceObserveCapability
-{
+export class ExtensionInstanceObserveCapabilityControl implements ExtensionInstanceObserveCapability {
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
@@ -131,7 +128,8 @@ export class ExtensionInstanceObserveCapabilityControl
                 ...(eventTypes === undefined
                     ? {}
                     : {
-                          eventFilter: (event) => eventTypes.has(event.type),
+                          projectEvent: (event) =>
+                              eventTypes.has(event.type) ? event : undefined,
                       }),
                 onEvent: async (event) => await watch.onEvent(toEvent(event)),
                 onGap: async (gap) => {
@@ -163,9 +161,7 @@ export interface ExtensionInstanceManageCapabilityControlOptions {
 }
 
 /** Instance lifecycle/configuration authority, intentionally separate from observation. */
-export class ExtensionInstanceManageCapabilityControl
-    implements ExtensionInstanceManageCapability
-{
+export class ExtensionInstanceManageCapabilityControl implements ExtensionInstanceManageCapability {
     readonly #allowed: boolean;
     readonly #create: ExtensionInstanceCreatePort;
     readonly #editor: ExtensionInstanceEditorPort;
@@ -254,9 +250,7 @@ export class ExtensionInstanceManageCapabilityControl
 }
 
 /** Write-only publication into the host-owned Instance event stream. */
-export class ExtensionInstanceEventPublishCapabilityControl
-    implements ExtensionInstanceEventPublishCapability
-{
+export class ExtensionInstanceEventPublishCapabilityControl implements ExtensionInstanceEventPublishCapability {
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
@@ -278,7 +272,7 @@ export class ExtensionInstanceEventPublishCapabilityControl
     ): Promise<void> {
         this.#assertAllowed();
         await requireInstance(this.#instances, name).worker.appendControlEvent(
-            requireEventType(type) as InstanceEventType,
+            requireEventType(type),
             data as JsonValue | undefined,
         );
     }

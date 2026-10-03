@@ -14,6 +14,7 @@ import type {
     ExtensionLogger,
 } from "@portable-devshell/extension";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
@@ -92,6 +93,7 @@ export interface ExtensionSandboxHostOptions {
     capabilities: readonly ExtensionCapability[];
     codeDirectory: string;
     config?: ExtensionConfig;
+    configCore?: ExtensionCoreConfigCapability;
     context: ExtensionSandboxContextData;
     contextObserve: ExtensionContextObserveCapability;
     entryUrl: string;
@@ -143,6 +145,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #artifactCapability: ExtensionArtifactCapability;
     readonly #assets: ExtensionAssetCapability;
     readonly #config?: ExtensionConfig;
+    readonly #configCore?: ExtensionCoreConfigCapability;
     readonly #contextObserveCapability: ExtensionContextObserveCapability;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
@@ -172,6 +175,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #worker: Worker;
     readonly #workerExecuteCapability: ExtensionWorkerCapability;
     #closing = false;
+    #configCoreUnsubscribe?: () => void;
     #configUnsubscribe?: () => void;
     #faulted?: Error;
     #healthDeadlineTimer?: NodeJS.Timeout;
@@ -191,6 +195,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
         this.#config = options.config;
+        this.#configCore = options.configCore;
         this.#contextObserveCapability = options.contextObserve;
         this.#externalMemoryLimitBytes =
             positiveMegabytes(
@@ -242,6 +247,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#port = channel.port1;
         this.#configUnsubscribe = this.#config?.onChange((change) =>
             this.#send({ change, type: "configChange" }),
+        );
+        this.#configCoreUnsubscribe = this.#configCore?.onChange((change) =>
+            this.#send({ change, type: "configCoreChange" }),
         );
         this.#worker = factory(sandboxWorkerModuleUrl(), {
             env: { ...process.env, ESBUILD_WORKER_THREADS: "0" },
@@ -604,6 +612,15 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     input as SandboxConfigUpdateInput,
                 );
                 return undefined;
+            case "configCore.get":
+                return await this.#requireCoreConfig().get(
+                    (input as SandboxConfigGetInput).path,
+                );
+            case "configCore.update":
+                await this.#requireCoreConfig().update(
+                    input as SandboxConfigUpdateInput,
+                );
+                return undefined;
             case "contextObserve.list":
                 return await this.#contextObserveCapability.list(
                     input as SandboxContextObserveListInput | undefined,
@@ -920,6 +937,13 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         throw new Error("Extension sandbox Config is unavailable.");
     }
 
+    #requireCoreConfig(): ExtensionCoreConfigCapability {
+        if (this.#configCore !== undefined) return this.#configCore;
+        throw new Error(
+            "Extension sandbox config.core capability is unavailable.",
+        );
+    }
+
     #requireSession(id: string): ExtensionWorkerSession {
         const session = this.#sessions.get(id);
         if (session !== undefined) return session;
@@ -988,6 +1012,8 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     #releaseConfigSubscription(): void {
         this.#configUnsubscribe?.();
         this.#configUnsubscribe = undefined;
+        this.#configCoreUnsubscribe?.();
+        this.#configCoreUnsubscribe = undefined;
     }
 
     async #closeSessions(): Promise<void> {

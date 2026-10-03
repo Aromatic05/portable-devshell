@@ -19,6 +19,7 @@ export type ExtensionCapabilityRuntimeFactories = {
 export const EXTENSION_CAPABILITY_CONTEXT_KEYS = Object.freeze({
     artifacts: "artifacts",
     assets: "assets",
+    "config.core": "configCore",
     "context.observe": "contextObserve",
     "instance.events.publish": "instanceEventPublish",
     "instance.manage": "instanceManage",

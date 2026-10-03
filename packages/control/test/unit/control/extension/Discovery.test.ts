@@ -5,7 +5,7 @@ import type {
     ControlPortContext,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
-import { errorCodes, toControlErrorBody } from "@portable-devshell/shared";
+import { controlErrorCodes, toRemoteErrorBody } from "@portable-devshell/shared";
 import type {
     CliModelCommandInvocationContext,
     CliNativeCommandInvocationContext,
@@ -221,8 +221,8 @@ test("model CLI state never falls back to native Extension commands", async () =
                 workspace: "/repo",
             }),
         (error: unknown) => {
-            const body = toControlErrorBody(error);
-            assert.equal(body?.code, errorCodes.controlCliCommandFailed);
+            const body = toRemoteErrorBody(error);
+            assert.equal(body?.code, controlErrorCodes.cliCommandFailed);
             assert.deepEqual(body?.details, { commandId: "status" });
             return true;
         },
@@ -326,21 +326,21 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     const tui = createTuiPageRouteModule(tuiPages);
 
     assert.deepEqual(
-        await operation(web, "pages").handle(
+        await operation(web, "webPages").handle(
             { id: "1", name: "pages" },
             context("web"),
         ),
         [{ extensionId: "access", id: "access", title: "Access Web" }],
     );
     assert.deepEqual(
-        await operation(tui, "pages").handle(
+        await operation(tui, "tuiPages").handle(
             { id: "2", name: "pages" },
             context("tui", "local-owner"),
         ),
         [{ extensionId: "access", id: "access", title: "Access TUI" }],
     );
     assert.deepEqual(
-        await operation(web, "page").handle(
+        await operation(web, "webPage").handle(
             { id: "3", name: "page", payload: { kind: "read", pageId: "access" } },
             context("web"),
         ),
@@ -357,7 +357,7 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
         },
     );
     assert.deepEqual(
-        await operation(tui, "page").handle(
+        await operation(tui, "tuiPage").handle(
             { id: "4", name: "page", payload: { kind: "read", pageId: "access" } },
             context("tui", "local-owner"),
         ),
@@ -373,7 +373,7 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     );
     await assert.rejects(
         async () =>
-            await operation(web, "page").handle(
+            await operation(web, "webPage").handle(
                 { id: "5", name: "page", payload: { kind: "read", pageId: "access" } },
                 context("tui", "local-owner"),
             ),
@@ -381,7 +381,7 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     );
     await assert.rejects(
         async () =>
-            await operation(tui, "page").handle(
+            await operation(tui, "tuiPage").handle(
                 { id: "6", name: "page", payload: { kind: "read", pageId: "access" } },
                 context("web"),
             ),
@@ -494,7 +494,7 @@ test("CLI command route owns invocation, caller cwd, and payload validation", as
         { surface: "native" },
     );
     const cli = createCliRouteModule(service);
-    const command = operation(cli, "command");
+    const command = operation(cli, "cliCommand");
 
     assert.deepEqual(
         await command.handle(
@@ -619,7 +619,7 @@ test("CLI command acquisition failure is translated without leaking ExtensionHos
         surface: "native",
     });
     const cli = createCliRouteModule(service);
-    const command = operation(cli, "command");
+    const command = operation(cli, "cliCommand");
 
     await assert.rejects(
         async () =>
@@ -632,8 +632,8 @@ test("CLI command acquisition failure is translated without leaking ExtensionHos
                 context("cli", "local-owner"),
             ),
         (error: unknown) => {
-            const body = toControlErrorBody(error);
-            assert.equal(body?.code, errorCodes.controlCliCommandFailed);
+            const body = toRemoteErrorBody(error);
+            assert.equal(body?.code, controlErrorCodes.cliCommandFailed);
             assert.equal(body?.message, "CLI command missing is unavailable.");
             assert.deepEqual(body?.details, { commandId: "missing" });
             assert.equal(body?.cause, undefined);
@@ -662,7 +662,7 @@ test("CLI and Web discovery routes enforce their owning client domain", async ()
     });
 
     assert.deepEqual(
-        await operation(cli, "commands").handle(
+        await operation(cli, "cliCommands").handle(
             { id: "1", name: "commands" },
             context("cli"),
         ),
@@ -670,7 +670,7 @@ test("CLI and Web discovery routes enforce their owning client domain", async ()
     );
     await assert.rejects(
         async () =>
-            await operation(cli, "commands").handle(
+            await operation(cli, "cliCommands").handle(
                 { id: "2", name: "commands" },
                 context("web"),
             ),
@@ -678,7 +678,7 @@ test("CLI and Web discovery routes enforce their owning client domain", async ()
     );
 
     assert.deepEqual(
-        await operation(web, "applications").handle(
+        await operation(web, "webApplications").handle(
             { id: "3", name: "applications" },
             context("web"),
         ),
@@ -686,7 +686,7 @@ test("CLI and Web discovery routes enforce their owning client domain", async ()
     );
     await assert.rejects(
         async () =>
-            await operation(web, "applications").handle(
+            await operation(web, "webApplications").handle(
                 { id: "4", name: "applications" },
                 context("cli"),
             ),

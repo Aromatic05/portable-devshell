@@ -29,6 +29,7 @@ const snapshot: ExtensionInstanceSnapshot = {
 const capabilityKeys: readonly (keyof ExtensionCapabilities)[] = [
     "artifacts",
     "assets",
+    "configCore",
     "contextObserve",
     "instanceEventPublish",
     "instanceManage",
@@ -48,6 +49,7 @@ test("Runtime ExtensionCapabilities expose the v5 capability taxonomy", () => {
     assert.deepEqual([...capabilityKeys].sort(), [
         "artifacts",
         "assets",
+        "configCore",
         "contextObserve",
         "instanceEventPublish",
         "instanceManage",

@@ -106,6 +106,8 @@ export type ExtensionSandboxCapabilityOperation =
     | "assets.resolveBundle"
     | "config.get"
     | "config.update"
+    | "configCore.get"
+    | "configCore.update"
     | "contextObserve.list"
     | "instanceEventPublish.appendEvent"
     | "instanceManage.create"
@@ -254,6 +256,10 @@ export type ExtensionHostToSandboxMessage =
     | {
           change: ExtensionConfigChange;
           type: "configChange";
+      }
+    | {
+          change: ExtensionConfigChange;
+          type: "configCoreChange";
       }
     | {
           sessionId: string;

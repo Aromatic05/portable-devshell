@@ -288,6 +288,7 @@ export class ExtensionLoader {
             capabilities: projectExtensionCapabilities(manifest.capabilities, {
                 artifacts: () => artifacts,
                 assets: () => assets,
+                configCore: () => requireCoreConfig(config, id),
                 contextObserve: () => contextObserve,
                 instanceEventPublish: () => instanceEventPublish,
                 instanceManage: () => instanceCapabilities.manage,
@@ -297,7 +298,7 @@ export class ExtensionLoader {
                 workerDelegate: () => workerDelegate,
                 workerExecute: () => workerExecute,
             }),
-            ...(config === undefined ? {} : { config }),
+            ...(config?.owned === undefined ? {} : { config: config.owned }),
             generation,
             id,
             logger,
@@ -480,9 +481,10 @@ export class ExtensionLoader {
             assets: input.assets,
             capabilities: input.manifest.capabilities,
             codeDirectory: input.codeDirectory,
-            config: input.config,
+            config: input.config?.owned,
+            configCore: input.config?.core,
             context: {
-                config: input.config !== undefined,
+                config: input.config?.owned !== undefined,
                 generation: input.generation,
                 id: input.id,
                 paths: input.context.paths,
@@ -580,6 +582,18 @@ export class ExtensionLoader {
             );
         }
     }
+}
+
+function requireCoreConfig(
+    config: ExtensionConfigRuntime | undefined,
+    extensionId: string,
+) {
+    if (config?.core !== undefined) return config.core;
+    throw new Error(
+        "Extension " +
+            extensionId +
+            " declares config.core but the host did not create its Core Config capability.",
+    );
 }
 
 function unavailableArtifacts(

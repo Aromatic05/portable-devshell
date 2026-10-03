@@ -26,6 +26,10 @@
             "types": "./dist/domain/context.d.ts",
             "default": "./dist/domain/context.js"
         },
+        "./config": {
+            "types": "./dist/domain/config.d.ts",
+            "default": "./dist/domain/config.js"
+        },
         "./instance": {
             "types": "./dist/domain/instance.d.ts",
             "default": "./dist/domain/instance.js"

@@ -6,6 +6,11 @@ import type {
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
 import type { ExtensionAssetCapability } from "./domain/asset.js";
 import type {
+    ExtensionConfigChange as ExtensionConfigChangeContract,
+    ExtensionConfigStore,
+    ExtensionCoreConfigCapability,
+} from "./domain/config.js";
+import type {
     ExtensionContextEnvironmentRetiredEvent,
     ExtensionContextObserveCapability,
 } from "./domain/context.js";
@@ -44,17 +49,10 @@ export class ExtensionError extends Error {
     }
 }
 
-export interface ExtensionConfigChange {
-    readonly paths: readonly string[];
-}
+export type ExtensionConfigChange = ExtensionConfigChangeContract;
 
-export interface ExtensionConfig {
-    get(path: string): Promise<ExtensionJsonValue | undefined>;
-    onChange(listener: (change: ExtensionConfigChange) => void): () => void;
-    update(
-        patch: Readonly<Record<string, ExtensionJsonValue>>,
-    ): Promise<void>;
-}
+/** Persistent Config owned by this Extension identity. */
+export interface ExtensionConfig extends ExtensionConfigStore {}
 
 export interface ExtensionPaths {
     /** Immutable directory containing the selected Extension generation. */
@@ -78,6 +76,7 @@ export interface ExtensionLogger {
 export interface ExtensionCapabilities {
     readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
+    readonly configCore?: ExtensionCoreConfigCapability;
     readonly contextObserve?: ExtensionContextObserveCapability;
     readonly instanceEventPublish?: ExtensionInstanceEventPublishCapability;
     readonly instanceManage?: ExtensionInstanceManageCapability;
@@ -121,5 +120,7 @@ export interface ExtensionModule {
 function requireExtensionErrorCode(value: string): string {
     if (/^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/u.test(value))
         return value;
-    throw new TypeError("Extension error code must be a namespaced identifier.");
+    throw new TypeError(
+        "Extension error code must be a namespaced identifier.",
+    );
 }

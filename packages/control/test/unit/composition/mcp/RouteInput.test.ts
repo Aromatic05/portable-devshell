@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    errorCodes,
+    controlErrorCodes,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -20,9 +20,9 @@ import {
 } from "../../../../src/composition/mcp/route/Input.ts";
 import { readReverseInstanceName } from "../../../../src/control/reverse/Input.ts";
 import {
-    limitRuntimeLogResponse,
-    readRuntimeLogQuery,
-    readRuntimeSubscriptionFromSeq,
+    limitProcessLogResponse,
+    readProcessLogQuery,
+    readProcessSubscriptionFromSeq,
 } from "../../../../src/instance/execution/runtime/Route.ts";
 import { readTodoSubscriptionFromSeq } from "../../../../src/instance/workflow/todo/Route.ts";
 import {
@@ -173,47 +173,47 @@ test("MCP and reverse route inputs accept only their closed decision and identit
     }
 });
 
-test("runtime route inputs clamp log queries and strictly validate subscription cursors", () => {
-    assert.deepEqual(readRuntimeLogQuery(), {
+test("process route inputs clamp log queries and strictly validate subscription cursors", () => {
+    assert.deepEqual(readProcessLogQuery(), {
         fromSeq: undefined,
         limit: 100,
         maxDecodedBytes: 1024 * 1024,
     });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 0 }), {
+    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 0 }), {
         fromSeq: 10,
         limit: 1,
         maxDecodedBytes: 1024 * 1024,
     });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 500 }), {
+    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 500 }), {
         fromSeq: 10,
         limit: 100,
         maxDecodedBytes: 1024 * 1024,
     });
-    assert.deepEqual(readRuntimeLogQuery({ fromSeq: 10, limit: 1.5 }), {
+    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 1.5 }), {
         fromSeq: 10,
         limit: 100,
         maxDecodedBytes: 1024 * 1024,
     });
-    assert.deepEqual(readRuntimeLogQuery({ maxDecodedBytes: 256 * 1024 }), {
+    assert.deepEqual(readProcessLogQuery({ maxDecodedBytes: 256 * 1024 }), {
         fromSeq: undefined,
         limit: 100,
         maxDecodedBytes: 256 * 1024,
     });
     assert.deepEqual(
-        readRuntimeLogQuery({ maxDecodedBytes: 2 * 1024 * 1024 }),
+        readProcessLogQuery({ maxDecodedBytes: 2 * 1024 * 1024 }),
         { fromSeq: undefined, limit: 100, maxDecodedBytes: 1024 * 1024 },
     );
 
     for (const cursor of [0, 1, Number.MAX_SAFE_INTEGER]) {
         assert.equal(
-            readRuntimeSubscriptionFromSeq({ fromSeq: cursor }),
+            readProcessSubscriptionFromSeq({ fromSeq: cursor }),
             cursor,
         );
         assert.equal(readTodoSubscriptionFromSeq({ fromSeq: cursor }), cursor);
     }
     for (const cursor of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
         assertTargetInvalid(() =>
-            readRuntimeSubscriptionFromSeq({ fromSeq: cursor }),
+            readProcessSubscriptionFromSeq({ fromSeq: cursor }),
         );
         assertTargetInvalid(() =>
             readTodoSubscriptionFromSeq({ fromSeq: cursor }),
@@ -227,7 +227,7 @@ test("runtime log response limiting stays within one MiB and retains the newest 
         { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
         { message: "newest", seq: 3 },
     ];
-    const limited = limitRuntimeLogResponse(logs, true);
+    const limited = limitProcessLogResponse(logs, true);
 
     assert.equal(limited.length, 2);
     assert.match(limited[0]?.message ?? "", /TAIL$/u);
@@ -245,7 +245,7 @@ test("runtime log response limiting preserves the oldest unread prefix for curso
         { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
         { message: "later", seq: 3 },
     ];
-    const limited = limitRuntimeLogResponse(logs, false);
+    const limited = limitProcessLogResponse(logs, false);
 
     assert.equal(limited.length, 2);
     assert.equal(limited[0]?.message, "first");
@@ -265,7 +265,6 @@ test("tool route inputs preserve control-host call defaults and filters", () => 
             workspace: "/workspace",
         }),
         {
-            instance: asInstanceName("demo-local"),
             input: null,
             toolName: "bash_run",
             workspace: "/workspace",
@@ -279,7 +278,6 @@ test("tool route inputs preserve control-host call defaults and filters", () => 
             workspace: "/workspace",
         }),
         {
-            instance: asInstanceName("demo-local"),
             input: { command: "pwd" },
             toolName: "bash_run",
             workspace: "/workspace",
@@ -393,7 +391,10 @@ test("tool call responses stay bounded while preserving pagination direction", (
 
 function assertTargetInvalid(action: () => unknown): void {
     assert.throws(action, (error: unknown) => {
-        assert.equal(readErrorField(error, "code"), errorCodes.targetInvalid);
+        assert.equal(
+            readErrorField(error, "code"),
+            controlErrorCodes.invalidTarget,
+        );
         assert.equal(readErrorField(error, "retryable"), false);
         return true;
     });
