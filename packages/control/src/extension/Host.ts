@@ -1,10 +1,5 @@
 import type { ExtensionManifest } from "@portable-devshell/extension";
-import {
-    createRemoteError,
-    controlErrorCodes,
-    toRemoteErrorBody,
-    type ExtensionRuntimeRecord,
-} from "@portable-devshell/shared";
+import type { ExtensionRuntimeRecord } from "@portable-devshell/shared";
 
 import {
     ExtensionGeneration,
@@ -23,6 +18,13 @@ import type { ExtensionPointRegistry } from "./registration/PointRegistry.js";
 import { ExtensionRetirementTracker } from "./registration/Retirement.js";
 import type { ConfigRegistry } from "../config/Registry.js";
 import { ExtensionConfigPublisher } from "./config/Publisher.js";
+import {
+    ExtensionCandidatePublicationError,
+    extensionFailure,
+    extensionInvalid,
+    extensionNotActive,
+    extensionNotFound,
+} from "./Errors.js";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
@@ -884,63 +886,4 @@ export class ExtensionHost {
             release();
         }
     }
-}
-
-class ExtensionCandidatePublicationError extends Error {
-    constructor(generation: string, cause: unknown) {
-        const detail = cause instanceof Error ? cause.message : String(cause);
-        super(
-            `Extension generation ${generation} failed before publication: ${detail}`,
-            { cause },
-        );
-        this.name = "ExtensionCandidatePublicationError";
-    }
-}
-
-function extensionNotFound(id: string): Error {
-    return createRemoteError({
-        code: controlErrorCodes.extensionNotFound,
-        details: { extensionId: id },
-        message: `Extension ${id} is not installed.`,
-        retryable: false,
-    });
-}
-
-function extensionNotActive(id: string, reason?: string): Error {
-    return createRemoteError({
-        code: controlErrorCodes.extensionNotActive,
-        details: {
-            extensionId: id,
-            ...(reason === undefined ? {} : { reason }),
-        },
-        message: `Extension ${id} is not active${reason === undefined ? "." : `: ${reason}.`}`,
-        retryable: false,
-    });
-}
-
-function extensionInvalid(id: string, reason: string): Error {
-    return createRemoteError({
-        code: controlErrorCodes.extensionInvalid,
-        details: { extensionId: id, reason },
-        message: `Extension ${id} ${reason}.`,
-        retryable: false,
-    });
-}
-
-function extensionFailure(
-    id: string,
-    generation: string | undefined,
-    error: unknown,
-): Error {
-    if (toRemoteErrorBody(error) !== undefined) return error as Error;
-    return createRemoteError({
-        code: controlErrorCodes.extensionFailed,
-        cause: error,
-        details: {
-            extensionId: id,
-            ...(generation === undefined ? {} : { generation }),
-        },
-        message: error instanceof Error ? error.message : String(error),
-        retryable: false,
-    });
 }
