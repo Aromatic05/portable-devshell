@@ -49,6 +49,7 @@ import type {
 } from "@portable-devshell/extension/toolcall";
 
 import { createControlExtensionSandboxPointRegistry } from "../../../../composition/Sandbox.js";
+import { projectExtensionCapabilities } from "../capability/Projection.js";
 import type {
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
@@ -361,38 +362,21 @@ async function invoke(
 }
 
 function createContext(): ExtensionContext {
-    const capabilities: ExtensionCapabilities = Object.freeze({
-        ...(data.capabilities.includes("artifacts")
-            ? { artifacts: createArtifactCapability() }
-            : {}),
-        ...(data.capabilities.includes("assets")
-            ? { assets: createAssets() }
-            : {}),
-        ...(data.capabilities.includes("context.observe")
-            ? { contextObserve: createContextObserveCapability() }
-            : {}),
-        ...(data.capabilities.includes("instance.events.publish")
-            ? { instanceEventPublish: createInstanceEventPublishCapability() }
-            : {}),
-        ...(data.capabilities.includes("instance.manage")
-            ? { instanceManage: createInstanceManageCapability() }
-            : {}),
-        ...(data.capabilities.includes("instance.observe")
-            ? { instanceObserve: createInstanceObserveCapability() }
-            : {}),
-        ...(data.capabilities.includes("processes")
-            ? { processes: createProcessCapability() }
-            : {}),
-        ...(data.capabilities.includes("toolcall.history")
-            ? { toolCallHistory: createToolCallHistoryCapability() }
-            : {}),
-        ...(data.capabilities.includes("worker.delegate")
-            ? { workerDelegate: createWorkerCapability("workerDelegate") }
-            : {}),
-        ...(data.capabilities.includes("worker.execute")
-            ? { workerExecute: createWorkerCapability("workerExecute") }
-            : {}),
-    });
+    const capabilities: ExtensionCapabilities = projectExtensionCapabilities(
+        data.capabilities,
+        {
+            artifacts: createArtifactCapability,
+            assets: createAssets,
+            contextObserve: createContextObserveCapability,
+            instanceEventPublish: createInstanceEventPublishCapability,
+            instanceManage: createInstanceManageCapability,
+            instanceObserve: createInstanceObserveCapability,
+            processes: createProcessCapability,
+            toolCallHistory: createToolCallHistoryCapability,
+            workerDelegate: () => createWorkerCapability("workerDelegate"),
+            workerExecute: () => createWorkerCapability("workerExecute"),
+        },
+    );
     const register: ExtensionContext["register"] = (point, id, binding) => {
         registerBinding(point.id, id, binding);
     };

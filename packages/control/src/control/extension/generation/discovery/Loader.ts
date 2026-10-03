@@ -27,6 +27,7 @@ import type {
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 import { ExtensionAssetCapabilityControl } from "../capability/Asset.js";
 import { ExtensionProcessCapabilityControl } from "../capability/Process.js";
+import { projectExtensionCapabilities } from "../capability/Projection.js";
 import { ExtensionGeneration } from "../registration/Generation.js";
 import { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";
@@ -95,11 +96,6 @@ export interface ExtensionLoaderOptions {
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
     paths: ExtensionPathLayout;
     points: ExtensionPointRegistry;
-    processFactory?: (input: {
-        allowed: boolean;
-        extensionId: string;
-        generation: string;
-    }) => ExtensionProcessRuntime;
     sandboxFactory?: (
         options: ExtensionSandboxHostOptions,
     ) => ExtensionSandboxHost;
@@ -132,7 +128,6 @@ export class ExtensionLoader {
     ) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
     readonly points: ExtensionPointRegistry;
-    readonly #processFactory?: ExtensionLoaderOptions["processFactory"];
     readonly #runtimeRoots = new Map<string, Promise<void>>();
     readonly #sandboxFactory: (
         options: ExtensionSandboxHostOptions,
@@ -157,7 +152,6 @@ export class ExtensionLoader {
             ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
         this.points = options.points;
-        this.#processFactory = options.processFactory;
         this.#sandboxFactory =
             options.sandboxFactory ??
             ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
@@ -272,17 +266,11 @@ export class ExtensionLoader {
                   generation,
               }) ?? unavailableWorkerRuntime(id, "worker.delegate"))
             : unavailableWorkerRuntime(id, "worker.delegate");
-        const processes =
-            this.#processFactory?.({
-                allowed: manifest.capabilities.includes("processes"),
-                extensionId: id,
-                generation,
-            }) ??
-            new ExtensionProcessCapabilityControl({
-                allowed: manifest.capabilities.includes("processes"),
-                extensionId: id,
-                generation,
-            });
+        const processes = new ExtensionProcessCapabilityControl({
+            allowed: manifest.capabilities.includes("processes"),
+            extensionId: id,
+            generation,
+        });
         const logger = this.#loggerFactory(id, generation);
         const registrations = new ExtensionRegistrationBuilder(
             manifest,
@@ -297,35 +285,17 @@ export class ExtensionLoader {
             registrations.register(point, localId, binding);
         };
         const context: ExtensionContext = Object.freeze({
-            capabilities: Object.freeze({
-                ...(manifest.capabilities.includes("artifacts")
-                    ? { artifacts }
-                    : {}),
-                ...(manifest.capabilities.includes("assets") ? { assets } : {}),
-                ...(manifest.capabilities.includes("context.observe")
-                    ? { contextObserve }
-                    : {}),
-                ...(manifest.capabilities.includes("instance.events.publish")
-                    ? { instanceEventPublish }
-                    : {}),
-                ...(manifest.capabilities.includes("instance.manage")
-                    ? { instanceManage: instanceCapabilities.manage }
-                    : {}),
-                ...(manifest.capabilities.includes("instance.observe")
-                    ? { instanceObserve: instanceCapabilities.observe }
-                    : {}),
-                ...(manifest.capabilities.includes("processes")
-                    ? { processes }
-                    : {}),
-                ...(manifest.capabilities.includes("toolcall.history")
-                    ? { toolCallHistory }
-                    : {}),
-                ...(manifest.capabilities.includes("worker.delegate")
-                    ? { workerDelegate }
-                    : {}),
-                ...(manifest.capabilities.includes("worker.execute")
-                    ? { workerExecute }
-                    : {}),
+            capabilities: projectExtensionCapabilities(manifest.capabilities, {
+                artifacts: () => artifacts,
+                assets: () => assets,
+                contextObserve: () => contextObserve,
+                instanceEventPublish: () => instanceEventPublish,
+                instanceManage: () => instanceCapabilities.manage,
+                instanceObserve: () => instanceCapabilities.observe,
+                processes: () => processes,
+                toolCallHistory: () => toolCallHistory,
+                workerDelegate: () => workerDelegate,
+                workerExecute: () => workerExecute,
             }),
             ...(config === undefined ? {} : { config }),
             generation,
