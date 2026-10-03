@@ -29,6 +29,10 @@ import {
     type ExtensionRegistrySnapshot,
 } from "./state/Model.js";
 import type { ExtensionRegistryPort } from "./state/Store.js";
+import {
+    projectExtensionRuntimeRecord,
+    type ExtensionFailureRecord,
+} from "./state/View.js";
 
 export interface ExtensionGenerationLoader {
     readonly points: ExtensionPointRegistry;
@@ -36,16 +40,11 @@ export interface ExtensionGenerationLoader {
     readManifest(id: string, generation: string): Promise<ExtensionManifest>;
 }
 
-interface ExtensionFailure {
-    generation?: string;
-    message: string;
-}
-
 export class ExtensionHost {
     readonly #active = new Map<string, ExtensionGeneration>();
     readonly #catalog: ExtensionCatalog;
     readonly #config: ExtensionConfigPublisher;
-    readonly #failures = new Map<string, ExtensionFailure>();
+    readonly #failures = new Map<string, ExtensionFailureRecord>();
     readonly #listeners = new Set<() => void>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
@@ -831,50 +830,14 @@ export class ExtensionHost {
     }
 
     #record(id: string, entry: ExtensionRegistryEntry): ExtensionRuntimeRecord {
-        const active = this.#active.get(id);
-        const manifest =
-            active?.manifest ?? this.#catalog.getExtension(id)?.manifest;
-        const activeFailure =
-            active?.state === "faulted"
-                ? {
-                      generation: active.generation,
-                      message:
-                          active.faultError instanceof Error
-                              ? active.faultError.message
-                              : String(
-                                    active.faultError ??
-                                        "Extension sandbox faulted.",
-                                ),
-                  }
-                : undefined;
-        const failure = activeFailure ?? this.#failures.get(id);
-        const retired = this.#retirement.list(id);
-        return {
-            ...(active === undefined
-                ? {}
-                : { activeGeneration: active.generation }),
-            enabled: entry.enabled,
-            ...(failure === undefined ? {} : { failure: { ...failure } }),
+        return projectExtensionRuntimeRecord({
+            active: this.#active.get(id),
+            catalogManifest: this.#catalog.getExtension(id)?.manifest,
+            entry,
+            failure: this.#failures.get(id),
             id,
-            ...(entry.lastKnownGoodGeneration === undefined
-                ? {}
-                : { lastKnownGoodGeneration: entry.lastKnownGoodGeneration }),
-            ...(manifest === undefined ? {} : { name: manifest.name }),
-            retired,
-            ...(entry.selectedGeneration === undefined
-                ? {}
-                : { selectedGeneration: entry.selectedGeneration }),
-            state: !entry.enabled
-                ? "disabled"
-                : active?.state === "faulted"
-                  ? "failed"
-                  : active !== undefined
-                    ? "active"
-                    : failure !== undefined
-                      ? "failed"
-                      : "installed",
-            ...(manifest === undefined ? {} : { version: manifest.version }),
-        };
+            retired: this.#retirement.list(id),
+        });
     }
 
     #recordFailure(
