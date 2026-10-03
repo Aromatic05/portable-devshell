@@ -3,9 +3,10 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    errorCodes,
+    STREAM_GAP_CODE,
+    type InstanceEventRecord,
     type InstanceEventStreamPort,
-    type InstanceStreamMessage,
+    type StreamMessage,
 } from "@portable-devshell/shared";
 
 import { CliClientEventStream } from "../../src/transport/Client.js";
@@ -39,14 +40,16 @@ test("CLI event stream maps gaps and terminal closure to actionable errors", asy
                 oldestAvailableSeq: 10,
                 requestedFromSeq: 2,
             },
-            fromSeq: 2,
+            gap: {
+                fromSeq: 2,
+                lastSeq: 20,
+                nextSeq: 10,
+            },
             kind: "gap",
-            lastSeq: 20,
-            nextSeq: 10,
         }),
     );
     await assert.rejects(gap.nextEvent(), (error: unknown) => {
-        assert.equal(readField(error, "code"), errorCodes.streamGap);
+        assert.equal(readField(error, "code"), STREAM_GAP_CODE);
         assert.equal(readField(error, "retryable"), true);
         assert.deepEqual(readField(error, "details"), {
             latestSeq: 20,
@@ -93,7 +96,9 @@ test("CLI event stream closes the shared stream once", () => {
     assert.equal(closed, 1);
 });
 
-function stream(message: InstanceStreamMessage): InstanceEventStreamPort {
+function stream(
+    message: StreamMessage<InstanceEventRecord>,
+): InstanceEventStreamPort<InstanceEventRecord> {
     return {
         close() {},
         async next() {

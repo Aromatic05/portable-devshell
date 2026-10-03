@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import type { ControlClients, MessageStream } from "@portable-devshell/shared";
+import {
+    Endpoint,
+    PROCESS_PORT,
+    type Packet,
+    type ProcessTransport,
+} from "@portable-devshell/shared";
 
 import { createCliRuntimeAdapter } from "../../src/transport/Runtime.js";
 
@@ -24,26 +29,20 @@ test(
             rawModes.push(mode);
         };
 
-        const stream = {
-            onCancel() {
-                return () => undefined;
-            },
-            onClose() {
-                return () => undefined;
-            },
-            onData() {
-                return () => undefined;
-            },
-            async send() {
-                throw new Error("relay send failed");
-            },
-        } as unknown as MessageStream;
-        const runtime = {
-            async openStart() {
-                return stream;
-            },
-        } as unknown as ControlClients["runtime"];
-        const adapter = createCliRuntimeAdapter(runtime);
+        const endpoint = new Endpoint({ host: "alpha" });
+        const connection = await endpoint.connect("alpha", PROCESS_PORT);
+        let sends = 0;
+        const deliver = connection.send.bind(connection);
+        connection.send = async (packet: Packet) => {
+            sends += 1;
+            if (sends > 1) throw new Error("relay send failed");
+            await deliver(packet);
+        };
+        endpoint.connect = async () => connection;
+        const adapter = createCliRuntimeAdapter(
+            endpoint,
+            {} as ProcessTransport,
+        );
 
         const started = adapter.start("alpha", {
             input,
@@ -56,5 +55,6 @@ test(
         assert.deepEqual(rawModes, [true, false]);
         assert.equal(input.listenerCount("data"), 0);
         assert.equal(input.listenerCount("end"), 0);
+        endpoint.close();
     },
 );

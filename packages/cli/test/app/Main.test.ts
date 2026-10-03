@@ -1715,7 +1715,7 @@ test("CliMain rejects an incompatible protocol before a business request", async
                     },
                 },
                 instance: {
-                    async list() {
+                    async listInstances() {
                         listCalls += 1;
                         return [];
                     },
@@ -1774,8 +1774,13 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
                     calls.push("config.get");
                     return {};
                 },
-                async listContextMessages(instance: string, ctxId?: string) {
-                    calls.push(`context.messages:${instance}:${ctxId ?? ""}`);
+                async listContextMessages(
+                    instance: string,
+                    query?: { ctxId?: string },
+                ) {
+                    calls.push(
+                        `context.messages:${instance}:${query?.ctxId ?? ""}`,
+                    );
                     return [];
                 },
                 async listMcpApprovals() {
@@ -1960,7 +1965,11 @@ function testClients(client: Record<string, unknown>) {
         },
         config: {
             get: (...args: unknown[]) => invoke("getConfig", args),
+            getConversationPreferences: (...args: unknown[]) =>
+                invoke("getConversationPreferences", args),
             update: (...args: unknown[]) => invoke("updateConfig", args),
+            updateConversationPreferences: (...args: unknown[]) =>
+                invoke("updateConversationPreferences", args),
             validate: (...args: unknown[]) => invoke("validateConfig", args),
         },
         context: {
@@ -1969,8 +1978,12 @@ function testClients(client: Record<string, unknown>) {
             renew: (...args: unknown[]) => invoke("contextRenew", args),
         },
         contextMessage: {
-            list: (...args: unknown[]) => invoke("listContextMessages", args),
-            queue: (...args: unknown[]) => invoke("createContextMessage", args),
+            listContextMessages: (...args: unknown[]) =>
+                invoke("listContextMessages", args),
+            listConversationEntries: (...args: unknown[]) =>
+                invoke("listConversationEntries", args),
+            queueContextMessage: (...args: unknown[]) =>
+                invoke("createContextMessage", args),
         },
         extension: {
             disable: (...args: unknown[]) => invoke("extensionDisable", args),
@@ -1982,14 +1995,14 @@ function testClients(client: Record<string, unknown>) {
             remove: (...args: unknown[]) => invoke("extensionRemove", args),
         },
         instance: {
-            create: (...args: unknown[]) => invoke("createInstance", args),
-            createSchema: (...args: unknown[]) =>
+            createInstance: (...args: unknown[]) => invoke("createInstance", args),
+            createInstanceSchema: (...args: unknown[]) =>
                 invoke("getInstanceCreateSchema", args),
-            delete: (...args: unknown[]) => invoke("deleteInstance", args),
-            disable: (...args: unknown[]) => invoke("disableInstance", args),
-            enable: (...args: unknown[]) => invoke("enableInstance", args),
-            list: (...args: unknown[]) => invoke("listInstances", args),
-            validateCreate: (...args: unknown[]) =>
+            deleteInstance: (...args: unknown[]) => invoke("deleteInstance", args),
+            disableInstance: (...args: unknown[]) => invoke("disableInstance", args),
+            enableInstance: (...args: unknown[]) => invoke("enableInstance", args),
+            listInstances: (...args: unknown[]) => invoke("listInstances", args),
+            validateInstanceCreate: (...args: unknown[]) =>
                 invoke("validateInstanceCreateDraft", args),
         },
         mcp: {
@@ -2019,8 +2032,8 @@ function testClients(client: Record<string, unknown>) {
             subscribe: (...args: unknown[]) => invoke("subscribe", args),
         },
         todo: {
-            delete: (...args: unknown[]) => invoke("deleteTodo", args),
-            get: (...args: unknown[]) => invoke("getTodo", args),
+            deleteTodo: (...args: unknown[]) => invoke("deleteTodo", args),
+            getTodo: (...args: unknown[]) => invoke("getTodo", args),
             subscribe: (...args: unknown[]) =>
                 invoke(
                     typeof client.subscribeTodo === "function"

@@ -37,7 +37,7 @@ test("init starts stopped Control before reconciling first-run state through RPC
                 calls.push("reconnect");
             },
             instance: {
-                async create(draft: unknown) {
+                async createInstance(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
                         mcp: {
@@ -93,7 +93,6 @@ test("init starts stopped Control before reconciling first-run state through RPC
     assert.match(renderedText, /Instance: local-pc \(ready\)/u);
     assert.match(renderedText, /http:\/\/127\.0\.0\.1:17890\/local-pc\/mcp/u);
     assert.match(renderedText, /ds_[A-Za-z0-9_-]{40,}/u);
-
 });
 
 test("init reconciles a running fresh-like Control through RPC without restarting it", async () => {
@@ -123,7 +122,7 @@ test("init reconciles a running fresh-like Control through RPC without restartin
                 },
             },
             instance: {
-                async create(draft: unknown) {
+                async createInstance(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
                         mcp: {
@@ -198,7 +197,7 @@ test("init preserves TUI approval and reuses an existing local instance", async 
                 },
             },
             instance: {
-                async create() {
+                async createInstance() {
                     throw new Error("existing local instance must be reused");
                 },
             },
@@ -238,7 +237,11 @@ test("fresh interactive init offers Access choices through the optional Access c
                 async commands() {
                     return [{ id: "access" }];
                 },
-                async command(commandId: string, args: readonly string[], options: unknown) {
+                async command(
+                    commandId: string,
+                    args: readonly string[],
+                    options: unknown,
+                ) {
                     calls.push(`cli:${commandId}:${args.join(" ")}`);
                     assert.equal(commandId, "access");
                     assert.deepEqual(args, ["cloudflare"]);
@@ -263,7 +266,7 @@ test("fresh interactive init offers Access choices through the optional Access c
                 },
             },
             instance: {
-                async create() {
+                async createInstance() {
                     view = configView({ token: "********" });
                     return { enabled: true, name: "local-pc" };
                 },
@@ -327,7 +330,7 @@ test("fresh interactive init silently skips Access when the Access command is ab
                 },
             },
             instance: {
-                async create() {
+                async createInstance() {
                     view = configView({ token: "********" });
                     return { enabled: true, name: "local-pc" };
                 },

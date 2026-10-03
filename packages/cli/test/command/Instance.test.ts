@@ -633,19 +633,20 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                         protocolVersion: CONTROL_PROTOCOL_VERSION,
                     }),
                 }),
-                new Rpc(endpoint.bind("cli", "@control"), {
-                    commands: () => [],
+                new Rpc(endpoint.bind("extension", "@control"), {
+                    cliCommands: () => [],
                 }),
-                new Rpc(endpoint.bind("instance", "@control"), {
-                    list: () => [
+                new Rpc(endpoint.bind("config", "@control"), {
+                    listInstances: () => [
                         {
+                            enabled: true,
                             mcpEnabled: true,
                             name: "demo-local",
                             snapshot: stoppedSnapshot(),
                         },
                     ],
                 }),
-                new Rpc(endpoint.bind("runtime", "demo-local"), {
+                new Rpc(endpoint.bind("process", "demo-local"), {
                     snapshot: () => ({
                         lastSeq: 1,
                         snapshot: stoppedSnapshot(),
@@ -680,7 +681,7 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                 }),
             ];
 
-            const runtime = new Stream(endpoint.bind("runtime", "demo-local"));
+            const runtime = new Stream(endpoint.bind("process", "demo-local"));
             runtime.onOpen(async (stream, name) => {
                 if (name === "start") {
                     await stream.close(readySnapshot());
@@ -714,21 +715,12 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
             });
             protocols.push(runtime);
 
-            const tool = new Stream(endpoint.bind("tool", "demo-local"));
-            tool.onOpen(async (stream, name) => {
-                if (name !== "callStream") {
-                    await stream.cancel({
-                        code: "control.methodNotFound",
-                        message: `unknown tool stream ${name}`,
-                        retryable: false,
-                    });
-                    return;
-                }
-                await stream.close({
+            const tool = new Rpc(endpoint.bind("tool", "demo-local"), {
+                call: () => ({
                     exitCode: 0,
                     stderr: "",
                     stdout: "/tmp/ws\n",
-                });
+                }),
             });
             protocols.push(tool);
 

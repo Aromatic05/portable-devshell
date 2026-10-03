@@ -39,9 +39,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                     };
                 },
             }),
-            new Rpc(endpoint.bind("instance", "@control"), {
-                list: () => {
-                    methods.push("instance.list");
+            new Rpc(endpoint.bind("config", "@control"), {
+                listInstances: () => {
+                    methods.push("config.listInstances");
                     return [
                         {
                             mcpEnabled: true,
@@ -58,9 +58,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                     ];
                 },
             }),
-            new Rpc(endpoint.bind("runtime", "demo-local"), {
+            new Rpc(endpoint.bind("process", "demo-local"), {
                 readLogs: () => {
-                    methods.push("runtime.readLogs");
+                    methods.push("process.readLogs");
                     return [
                         {
                             at: "2026-07-08T00:00:00.000Z",
@@ -95,7 +95,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
         await rm(runtimeRoot, { force: true, recursive: true });
     });
     await negotiateCliControl(clients);
-    const instances = await clients.instance.list();
+    const instances = await clients.instance.listInstances();
     const logs = await clients.runtime.readLogs("demo-local", { limit: 1 });
 
     assert.equal(instances[0]?.name, "demo-local");
@@ -103,8 +103,8 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     assert.equal(logs[0]?.message, "ready\n");
     assert.deepEqual(methods, [
         "service.hello",
-        "instance.list",
-        "runtime.readLogs",
+        "config.listInstances",
+        "process.readLogs",
     ]);
 });
 
@@ -130,9 +130,9 @@ test("CliMain negotiates Control before a control-plane business request", async
                     };
                 },
             }),
-            new Rpc(endpoint.bind("cli", "@control"), {
-                commands: () => {
-                    methods.push("cli.commands");
+            new Rpc(endpoint.bind("extension", "@control"), {
+                cliCommands: () => {
+                    methods.push("extension.cliCommands");
                     return [];
                 },
             }),
@@ -170,7 +170,7 @@ test("CliMain negotiates Control before a control-plane business request", async
     assert.equal(await cli.run(["overview"]), 0);
     assert.deepEqual(methods, [
         "service.hello",
-        "cli.commands",
+        "extension.cliCommands",
         "overview.get",
     ]);
     assert.equal(stderr.flush(), "");
