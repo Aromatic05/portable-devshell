@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rm, rmdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, rm, rmdir } from "node:fs/promises";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ResourceLimits } from "node:worker_threads";
 
 import {
-    parseExtensionManifest,
     type ExtensionContext,
     type ExtensionConfigDeclaration,
     type ExtensionJsonValue,
@@ -35,6 +34,14 @@ import {
     sharedExtensionHostModuleResolver,
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
+import { readExtensionManifest } from "./Manifest.js";
+import {
+    assertPlainDirectory,
+    assertPlainFile,
+    isDirectoryNotEmpty,
+    isMissing,
+    resolveContainedPath,
+} from "./Paths.js";
 import { ExtensionPathLayout } from "../state/Layout.js";
 import { ExtensionInstanceEventPublishCapabilityControl } from "../capability/Instance.js";
 import {
@@ -416,22 +423,7 @@ export class ExtensionLoader {
         id: string,
         generation: string,
     ): Promise<ExtensionManifest> {
-        const codeDirectory = this.#paths.generationDirectory(id, generation);
-        await assertPlainDirectory(
-            codeDirectory,
-            `Extension generation directory for ${id}`,
-        );
-        const manifestPath = this.#paths.manifestFile(id, generation);
-        await assertPlainFile(manifestPath, `Extension manifest for ${id}`);
-        const manifest = parseExtensionManifest(
-            JSON.parse(await readFile(manifestPath, "utf8")) as unknown,
-        );
-        if (manifest.id !== id) {
-            throw new Error(
-                `Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`,
-            );
-        }
-        return manifest;
+        return await readExtensionManifest(this.#paths, id, generation);
     }
 
     async #prepareRuntimeRoot(runtimeRoot: string): Promise<void> {
@@ -851,62 +843,6 @@ async function cleanupRuntimeDirectory(
         if (isMissing(error) || isDirectoryNotEmpty(error)) return;
         throw error;
     });
-}
-
-function resolveContainedPath(
-    root: string,
-    candidate: string,
-    label: string,
-): string {
-    if (isAbsolute(candidate))
-        throw new TypeError(
-            `${label} must be relative to the Extension generation.`,
-        );
-    const resolved = resolve(root, candidate);
-    const relativePath = relative(root, resolved);
-    if (
-        relativePath === "" ||
-        (!relativePath.startsWith("..") && !isAbsolute(relativePath))
-    )
-        return resolved;
-    throw new TypeError(`${label} must stay inside the Extension generation.`);
-}
-
-async function assertPlainDirectory(
-    path: string,
-    label: string,
-): Promise<void> {
-    const metadata = await lstat(path);
-    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
-        throw new TypeError(
-            `${label} must be a real directory, not a symlink.`,
-        );
-    }
-}
-
-async function assertPlainFile(path: string, label: string): Promise<void> {
-    const metadata = await lstat(path);
-    if (metadata.isSymbolicLink() || !metadata.isFile()) {
-        throw new TypeError(`${label} must be a regular file, not a symlink.`);
-    }
-}
-
-function isMissing(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOENT"
-    );
-}
-
-function isDirectoryNotEmpty(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOTEMPTY"
-    );
 }
 
 function consoleExtensionLogger(
