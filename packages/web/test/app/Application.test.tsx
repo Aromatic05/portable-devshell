@@ -9,19 +9,15 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
-    CONTROL_PROTOCOL_VERSION,
-    createInitialControlReadModelState,
     type InstanceSnapshot,
-} from "@portable-devshell/shared/browser";
+    type OperationalOverview,
+} from "@portable-devshell/shared";
 
-import type {
-    WebClients,
-    WebRuntimeStream,
-} from "../../src/app/transport/Client.js";
 import type { WebSession } from "../../src/app/session/Session.js";
 import type { WebState, WebStore } from "../../src/state/Store.js";
 import { App } from "../../src/app/App.js";
 import { Application } from "../../src/app/Application.js";
+import { WebTestDomains } from "../support/DomainHarness.js";
 
 import {
     pageRoute,
@@ -40,6 +36,39 @@ const snapshot: InstanceSnapshot = {
     status: "ready",
 };
 
+function operationalOverview(
+    overrides: Partial<OperationalOverview> = {},
+): OperationalOverview {
+    return {
+        activity: [],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 1 },
+        counts: {
+            activeTodos: 0,
+            failedCalls24h: 0,
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesReady: 1,
+            instancesTotal: 1,
+            pendingApprovals: 0,
+        },
+        generatedAt: "2026-09-14T10:00:02Z",
+        health: "healthy",
+        instances: [],
+        todos: [],
+        ...overrides,
+    };
+}
+
+function setServiceStatus(
+    domains: WebTestDomains,
+    status: "connecting" | "offline" | "online",
+): void {
+    Object.assign(domains.service, {
+        state: { ...domains.service.state, status },
+    });
+}
+
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -48,7 +77,7 @@ afterEach(() => {
 
 describe("authenticated application shell", () => {
     it("renders discovered Extension pages inside the Web shell instead of navigating to a standalone application", async () => {
-        const clients = fakeClients();
+        const domains = new WebTestDomains();
         const pageSnapshot = {
             tables: [
                 {
@@ -71,22 +100,21 @@ describe("authenticated application shell", () => {
                 },
             ],
         };
-        clients.web.pages = vi.fn(async () => [
-            {
-                extensionId: "access",
-                id: "access",
-                title: "Access",
-            },
-        ]);
-        clients.web.page = vi.fn(async () => pageSnapshot);
-        clients.web.action = vi.fn(async () => pageSnapshot);
+        domains.extension.patch({
+            webPages: [
+                { extensionId: "access", id: "access", title: "Access" },
+            ],
+        });
+        const readWebPage = vi.fn(async () => pageSnapshot);
+        const webAction = vi.fn(async () => pageSnapshot);
+        Object.assign(domains.extension, { readWebPage, webAction });
         const session = fakeSession({
             authMode: "none",
             check: false,
             establish: true,
         });
 
-        render(<App createClients={() => clients} session={session} />);
+        render(<App createDomains={() => domains.domains} session={session} />);
 
         fireEvent.click(
             await screen.findByRole("button", {
@@ -99,33 +127,32 @@ describe("authenticated application shell", () => {
         expect(await screen.findByText("cloudflare-mcp")).toBeVisible();
         fireEvent.click(screen.getByRole("button", { name: "Disable" }));
         await waitFor(() =>
-            expect(clients.web.action).toHaveBeenCalledWith(
+            expect(webAction).toHaveBeenCalledWith(
                 "access",
                 "disable",
                 "cloudflare-mcp",
             ),
         );
-        expect(clients.web.pages).toHaveBeenCalledOnce();
-        expect(clients.web.page).toHaveBeenCalledWith("access");
+        expect(readWebPage).toHaveBeenCalledWith("access");
         window.location.hash = "";
     });
 
     it("renders discovered Extension applications as Web-domain navigation without invoking them", async () => {
-        const clients = fakeClients();
-        clients.web.applications = vi.fn(async () => [
-            {
-                extensionId: "agent",
-                id: "agent",
-                title: "Agent",
-            },
-        ]);
+        const domains = new WebTestDomains();
+        domains.extension.patch({
+            webApplications: [
+                { extensionId: "agent", id: "agent", title: "Agent" },
+            ],
+        });
+        const readWebPage = vi.fn(async () => ({ tables: [] }));
+        Object.assign(domains.extension, { readWebPage });
         const session = fakeSession({
             authMode: "none",
             check: false,
             establish: true,
         });
 
-        render(<App createClients={() => clients} session={session} />);
+        render(<App createDomains={() => domains.domains} session={session} />);
 
         fireEvent.click(
             await screen.findByRole("button", {
@@ -134,7 +161,7 @@ describe("authenticated application shell", () => {
         );
         const link = await screen.findByRole("link", { name: "Agent" });
         expect(link).toHaveAttribute("href", "./extensions/agent/");
-        expect(clients.web.applications).toHaveBeenCalledOnce();
+        expect(readWebPage).not.toHaveBeenCalled();
         const trigger = screen.getByRole("button", {
             name: "Switch page, current Overview",
         });
@@ -147,37 +174,42 @@ describe("authenticated application shell", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(new Response(null, { status: 204 }));
         vi.stubGlobal("fetch", request);
-        const createClients = vi.fn(fakeClients);
+        const domains = new WebTestDomains();
+        const createDomains = vi.fn(() => domains.domains);
 
-        render(<App createClients={createClients} />);
+        render(<App createDomains={createDomains} />);
 
         expect(
             await screen.findByRole("heading", { name: "Overview" }),
         ).toBeInTheDocument();
-        await waitFor(() => expect(createClients).toHaveBeenCalledOnce());
+        await waitFor(() => expect(createDomains).toHaveBeenCalledOnce());
         expect(request).toHaveBeenCalledOnce();
     });
 
-    it("boots auth=none anonymously before creating clients", async () => {
+    it("boots auth=none anonymously before creating domains", async () => {
         const session = fakeSession({
             authMode: "none",
             check: false,
             establish: true,
         });
-        const createClients = vi.fn(fakeClients);
+        const domains = new WebTestDomains();
+        const createDomains = vi.fn(() => domains.domains);
 
-        render(<App createClients={createClients} session={session} />);
+        render(<App createDomains={createDomains} session={session} />);
 
         expect(
             await screen.findByRole("heading", { name: "Overview" }),
         ).toBeInTheDocument();
         expect(session.establish).toHaveBeenCalledWith();
-        expect(createClients).toHaveBeenCalledOnce();
+        expect(createDomains).toHaveBeenCalledOnce();
     });
 
     it("shows token login without submitting an empty bearer token", async () => {
         const session = fakeSession({ authMode: "token", check: false });
-        render(<App createClients={fakeClients} session={session} />);
+        const domains = new WebTestDomains();
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         expect(
             await screen.findByRole("button", { name: "Sign in" }),
@@ -191,7 +223,10 @@ describe("authenticated application shell", () => {
             check: false,
             establish: false,
         });
-        render(<App createClients={fakeClients} session={session} />);
+        const domains = new WebTestDomains();
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         const token = await screen.findByLabelText("Access token");
         fireEvent.change(token, { target: { value: "secret-token" } });
@@ -205,7 +240,10 @@ describe("authenticated application shell", () => {
 
     it("toggles access token visibility without losing the entered token", async () => {
         const session = fakeSession({ authMode: "token", check: false });
-        render(<App createClients={fakeClients} session={session} />);
+        const domains = new WebTestDomains();
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         const token = await screen.findByLabelText("Access token");
         fireEvent.change(token, { target: { value: "secret-token" } });
@@ -235,7 +273,10 @@ describe("authenticated application shell", () => {
             check: false,
             establish: false,
         });
-        render(<App createClients={fakeClients} session={session} />);
+        const domains = new WebTestDomains();
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
         expect(session.establish).not.toHaveBeenCalled();
@@ -244,7 +285,10 @@ describe("authenticated application shell", () => {
 
     it("keeps a submitted token in component state only and logs out", async () => {
         const session = fakeSession({ check: false, establish: false });
-        render(<App createClients={fakeClients} session={session} />);
+        const domains = new WebTestDomains();
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         const token = await screen.findByLabelText("Access token");
         fireEvent.change(token, { target: { value: "secret-token" } });
@@ -273,19 +317,13 @@ describe("authenticated application shell", () => {
 
     it("returns to login when reconnect finds an expired session", async () => {
         const session = fakeSession({ check: true });
-        const clients = fakeClients();
-        const close = vi.fn();
-        clients.close = close;
-        clients.service.hello = vi
-            .fn()
-            .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            });
-        const createClients = vi.fn(() => clients);
+        const domains = new WebTestDomains();
+        setServiceStatus(domains, "offline");
+        const close = vi.spyOn(domains.domains, "close");
 
-        render(<App createClients={createClients} session={session} />);
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
         await screen.findByRole("button", { name: "Reconnect" });
         session.check.mockResolvedValue(false);
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
@@ -303,15 +341,11 @@ describe("authenticated application shell", () => {
     it("makes reconnect single-flight while checking the session", async () => {
         let releaseCheck!: (available: boolean) => void;
         const session = fakeSession({ check: true });
-        const clients = fakeClients();
-        clients.service.hello = vi
-            .fn()
-            .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            });
-        render(<App createClients={() => clients} session={session} />);
+        const domains = new WebTestDomains();
+        setServiceStatus(domains, "offline");
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         await screen.findByRole("button", { name: "Reconnect" });
         session.check.mockImplementation(
@@ -343,22 +377,23 @@ describe("authenticated application shell", () => {
             startOAuth: () => undefined,
         };
         const second = fakeSession({ check: false, establish: false });
-        const createClients = vi.fn(fakeClients);
+        const domains = new WebTestDomains();
+        const createDomains = vi.fn(() => domains.domains);
         const view = render(
-            <App createClients={createClients} session={first} />,
+            <App createDomains={createDomains} session={first} />,
         );
 
-        view.rerender(<App createClients={createClients} session={second} />);
+        view.rerender(<App createDomains={createDomains} session={second} />);
         expect(
             await screen.findByRole("button", { name: "Sign in" }),
         ).toBeInTheDocument();
         resolveFirstCheck(true);
         await Promise.resolve();
 
-        expect(createClients).not.toHaveBeenCalled();
+        expect(createDomains).not.toHaveBeenCalled();
     });
 
-    it("does not recreate clients after an unmounted bootstrap resolves", async () => {
+    it("does not recreate domains after an unmounted bootstrap resolves", async () => {
         let resolveCheck!: (available: boolean) => void;
         const session: WebSession = {
             authMode: async () => "token",
@@ -370,28 +405,32 @@ describe("authenticated application shell", () => {
             logout: async () => undefined,
             startOAuth: () => undefined,
         };
-        const createClients = vi.fn(fakeClients);
+        const domains = new WebTestDomains();
+        const createDomains = vi.fn(() => domains.domains);
         const view = render(
-            <App createClients={createClients} session={session} />,
+            <App createDomains={createDomains} session={session} />,
         );
 
         view.unmount();
         resolveCheck(true);
         await Promise.resolve();
 
-        expect(createClients).not.toHaveBeenCalled();
+        expect(createDomains).not.toHaveBeenCalled();
     });
 
     it("makes logout single-flight while the session revocation is pending", async () => {
         let releaseLogout!: () => void;
         const session = fakeSession({ check: true });
+        const domains = new WebTestDomains();
         session.logout.mockImplementation(
             async () =>
                 await new Promise<void>((resolve) => {
                     releaseLogout = resolve;
                 }),
         );
-        render(<App createClients={fakeClients} session={session} />);
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         const logout = await screen.findByRole("button", { name: "Log out" });
         fireEvent.click(logout);
@@ -410,13 +449,17 @@ describe("authenticated application shell", () => {
     it("disables runtime actions while logout is pending", async () => {
         let releaseLogout!: () => void;
         const session = fakeSession({ check: true });
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
         session.logout.mockImplementation(
             async () =>
                 await new Promise<void>((resolve) => {
                     releaseLogout = resolve;
                 }),
         );
-        render(<App createClients={fakeClients} session={session} />);
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
         fireEvent.click(
             await screen.findByRole("button", {
                 name: "Switch page, current Overview",
@@ -442,10 +485,13 @@ describe("authenticated application shell", () => {
 
     it("shows a failed logout without leaving the application", async () => {
         const session = fakeSession({ check: true });
+        const domains = new WebTestDomains();
         session.logout.mockRejectedValue(
             new Error("Session revocation failed"),
         );
-        render(<App createClients={fakeClients} session={session} />);
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
 
@@ -459,15 +505,11 @@ describe("authenticated application shell", () => {
 
     it("shows a session verification error when reconnect checking fails", async () => {
         const session = fakeSession({ check: true });
-        const clients = fakeClients();
-        clients.service.hello = vi
-            .fn()
-            .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            });
-        render(<App createClients={() => clients} session={session} />);
+        const domains = new WebTestDomains();
+        setServiceStatus(domains, "offline");
+        render(
+            <App createDomains={() => domains.domains} session={session} />,
+        );
 
         await screen.findByRole("button", { name: "Reconnect" });
         session.check.mockRejectedValue(new Error("Session unavailable"));
@@ -484,9 +526,8 @@ describe("authenticated application shell", () => {
 
     it("clears the ready store before bootstrapping a replacement session", async () => {
         let resolveCheck!: (available: boolean) => void;
-        const initialClients = fakeClients();
-        const close = vi.fn();
-        initialClients.close = close;
+        const domains = new WebTestDomains();
+        const close = vi.spyOn(domains.domains, "close");
         const initial = fakeSession({ check: true });
         const replacement: WebSession = {
             authMode: async () => "token",
@@ -498,14 +539,14 @@ describe("authenticated application shell", () => {
             logout: async () => undefined,
             startOAuth: () => undefined,
         };
-        const createClients = vi.fn(() => initialClients);
+        const createDomains = vi.fn(() => domains.domains);
         const view = render(
-            <App createClients={createClients} session={initial} />,
+            <App createDomains={createDomains} session={initial} />,
         );
 
         await screen.findByRole("button", { name: "Log out" });
         view.rerender(
-            <App createClients={createClients} session={replacement} />,
+            <App createDomains={createDomains} session={replacement} />,
         );
 
         expect(close).toHaveBeenCalledOnce();
@@ -517,9 +558,11 @@ describe("authenticated application shell", () => {
 
     it("exposes direct primary navigation while retaining the responsive Page Switcher", async () => {
         window.location.hash = "#/overview";
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
         render(
             <App
-                createClients={fakeClients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -577,9 +620,11 @@ describe("authenticated application shell", () => {
 
     it("uses Overview summary links as bookmarkable navigation", async () => {
         window.location.hash = "#/overview";
+        const domains = new WebTestDomains();
+        domains.setOverview(operationalOverview());
         render(
             <App
-                createClients={fakeClients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -596,38 +641,26 @@ describe("authenticated application shell", () => {
     });
 
     it("links each Overview activity directly to its Tool Call", async () => {
-        const clients = fakeClients();
-        clients.overview.get = vi.fn(async () => ({
-            activity: [
-                {
-                    callId: "call-direct",
-                    completedAt: "2026-09-14T10:00:01Z",
-                    instance: asInstanceName("demo"),
-                    startedAt: "2026-09-14T10:00:00Z",
-                    status: "completed" as const,
-                    toolName: "file_read",
-                },
-            ],
-            alerts: [],
-            controller: { pid: 1, uptimeSeconds: 1 },
-            counts: {
-                activeTodos: 0,
-                failedCalls24h: 0,
-                instancesAttention: 0,
-                instancesCritical: 0,
-                instancesReady: 1,
-                instancesTotal: 1,
-                pendingApprovals: 0,
-            },
-            generatedAt: "2026-09-14T10:00:02Z",
-            health: "healthy" as const,
-            instances: [],
-            todos: [],
-        }));
+        const domains = new WebTestDomains();
+        domains.setOverview(
+            operationalOverview({
+                activity: [
+                    {
+                        callId: "call-direct",
+                        completedAt: "2026-09-14T10:00:01Z",
+                        instance: asInstanceName("demo"),
+                        source: "cli",
+                        startedAt: "2026-09-14T10:00:00Z",
+                        status: "completed",
+                        toolName: "file_read",
+                    },
+                ],
+            }),
+        );
         window.location.hash = "#/overview";
         render(
             <App
-                createClients={() => clients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -642,13 +675,15 @@ describe("authenticated application shell", () => {
     });
 
     it("lets the user dismiss stale global errors", async () => {
-        const clients = fakeClients();
-        clients.service.hello = vi.fn(async () => {
-            throw new Error("Control offline");
+        const domains = new WebTestDomains();
+        Object.assign(domains.domains, {
+            load: vi.fn(async () => {
+                throw new Error("Control offline");
+            }),
         });
         render(
             <App
-                createClients={() => clients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -668,9 +703,11 @@ describe("authenticated application shell", () => {
 describe("application chrome", () => {
     it("sets the document title from the active route and conversation context", async () => {
         window.location.hash = "#/overview";
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
         render(
             <App
-                createClients={fakeClients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -699,29 +736,25 @@ describe("application chrome", () => {
     });
 
     it("badges Instances with the count needing attention", async () => {
-        const clients = fakeClients();
-        clients.overview.get = vi.fn(async () => ({
-            activity: [],
-            alerts: [],
-            controller: { pid: 1, uptimeSeconds: 1 },
-            counts: {
-                activeTodos: 0,
-                failedCalls24h: 0,
-                instancesAttention: 2,
-                instancesCritical: 1,
-                instancesReady: 0,
-                instancesTotal: 3,
-                pendingApprovals: 0,
-            },
-            generatedAt: "2026-09-14T10:00:02Z",
-            health: "attention" as const,
-            instances: [],
-            todos: [],
-        }));
+        const domains = new WebTestDomains();
+        domains.setOverview(
+            operationalOverview({
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: 0,
+                    instancesAttention: 2,
+                    instancesCritical: 1,
+                    instancesReady: 0,
+                    instancesTotal: 3,
+                    pendingApprovals: 0,
+                },
+                health: "attention",
+            }),
+        );
         window.location.hash = "#/overview";
         render(
             <App
-                createClients={() => clients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -739,9 +772,10 @@ describe("application chrome", () => {
 
     it("hides the Instances badge when nothing needs attention", async () => {
         window.location.hash = "#/overview";
+        const domains = new WebTestDomains();
         render(
             <App
-                createClients={fakeClients}
+                createDomains={() => domains.domains}
                 session={fakeSession({ check: true })}
             />,
         );
@@ -761,7 +795,7 @@ describe("application notice feedback", () => {
     it("auto-dismisses a success notice after five seconds", () => {
         vi.useFakeTimers();
         window.location.hash = "#/overview";
-        const { emit, store } = fakeApplicationStore("online");
+        const { emit, store } = fakeApplicationStore();
         render(
             <Application
                 onLogout={async () => undefined}
@@ -789,7 +823,7 @@ describe("application notice feedback", () => {
     it("restarts the auto-dismiss timer when the notice text changes", () => {
         vi.useFakeTimers();
         window.location.hash = "#/overview";
-        const { emit, store } = fakeApplicationStore("online");
+        const { emit, store } = fakeApplicationStore();
         render(
             <Application
                 onLogout={async () => undefined}
@@ -815,20 +849,18 @@ describe("application notice feedback", () => {
     });
 });
 
-function fakeApplicationStore(connection: WebState["connection"]): {
+function fakeApplicationStore(): {
     emit(patch: Partial<WebState>): void;
     store: WebStore;
 } {
-    let state: WebState = {
-        connection,
-        operations: {},
-        readModel: createInitialControlReadModelState(),
-    };
+    const domains = new WebTestDomains();
+    let state: WebState = { operations: {} };
     const listeners = new Set<() => void>();
     const notify = () => {
         for (const listener of listeners) listener();
     };
     const store = {
+        domains: domains.domains,
         get state() {
             return state;
         },
@@ -875,140 +907,6 @@ function fakeSession(result: {
         establish: vi.fn(async () => result.establish ?? false),
         logout: vi.fn(async () => undefined),
         startOAuth: vi.fn(() => undefined),
-    };
-}
-
-function fakeClients(): WebClients {
-    const stream = {
-        close() {},
-        next: async () => await new Promise<never>(() => undefined),
-    } as unknown as WebRuntimeStream;
-    return {
-        close() {},
-        onTransportClose: () => () => undefined,
-        reconnect: async () => undefined,
-        artifact: {
-            cancelTransfer: async (transferId: string) => ({
-                status: "cancelled" as const,
-                transferId,
-            }),
-            listShares: async () => [],
-            listTransfers: async () => [],
-            revokeShare: async (shareId: string) => ({
-                revoked: true as const,
-                shareId,
-            }),
-        } as unknown as WebClients["artifact"],
-        cli: {} as WebClients["cli"],
-        config: {
-            get: async () => ({
-                instances: [{ enabled: true, name: "demo", provider: "local" }],
-            }),
-        } as unknown as WebClients["config"],
-        conversation: {
-            list: async () => [],
-            preferences: async () => ({
-                orderByWorkspace: {},
-                titles: {},
-                version: 1,
-                workspaceOrder: [],
-            }),
-            updatePreferences: async () => ({
-                orderByWorkspace: {},
-                titles: {},
-                version: 1,
-                workspaceOrder: [],
-            }),
-        },
-        reverse: {} as WebClients["reverse"],
-        terminal: {} as WebClients["terminal"],
-        service: {
-            hello: async () => ({
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            }),
-            ping: async () => ({ pong: true }),
-            restart: async () => ({ accepted: true }),
-            status: async () => ({ instanceCount: 1, ok: true }),
-        },
-        instance: {
-            list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
-        } as WebClients["instance"],
-        overview: {
-            get: async () => ({
-                activity: [],
-                alerts: [],
-                controller: { pid: 1, uptimeSeconds: 1 },
-                counts: {
-                    activeTodos: 0,
-                    failedCalls24h: 0,
-                    instancesAttention: 0,
-                    instancesCritical: 0,
-                    instancesReady: 1,
-                    instancesTotal: 1,
-                    pendingApprovals: 0,
-                },
-                generatedAt: "2026-07-31T00:00:00Z",
-                health: "healthy",
-                instances: [],
-                todos: [],
-            }),
-        },
-        runtime: {
-            snapshot: async () => ({ lastSeq: 1, snapshot }),
-            refresh: async () => ({ lastSeq: 1, snapshot }),
-            readLogs: async () => [],
-            start: async () => snapshot,
-            stop: async () => snapshot,
-            subscribe: async () => stream,
-        },
-        tool: {
-            listCalls: async () => [],
-            listApprovals: async () => [],
-            getApproval: async () => {
-                throw new Error("Not used.");
-            },
-            decideApproval: async () => {
-                throw new Error("Not used.");
-            },
-        },
-        contextMessage: {
-            list: async () => [],
-            queue: async (_instance, input) => ({
-                createdAt: "2026-07-31T00:00:00Z",
-                id: "message",
-                instance: "demo",
-                status: "pending",
-                ...input,
-            }),
-        },
-        todo: {
-            get: async () => ({
-                lastSeq: 1,
-                todo: {
-                    items: [],
-                    revision: 1,
-                    summary: { completed: 0, total: 0 },
-                },
-            }),
-        },
-        mcp: {
-            status: async () => ({
-                authMode: "none",
-                oauthReady: false,
-                running: true,
-            }),
-            listApprovals: async () => [],
-            decideApproval: async () => {
-                throw new Error("Not used.");
-            },
-        },
-        web: {
-            action: async () => ({ tables: [] }),
-            applications: async () => [],
-            page: async () => ({ tables: [] }),
-            pages: async () => [],
-        },
     };
 }
 

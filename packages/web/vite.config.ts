@@ -14,10 +14,6 @@ export default defineConfig({
             ),
             "@portable-devshell/shared": resolve(
                 import.meta.dirname,
-                "../shared/src/browser.ts",
-            ),
-            "@portable-devshell/shared": resolve(
-                import.meta.dirname,
                 "../shared/src/index.ts",
             ),
         },

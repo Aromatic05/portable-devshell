@@ -1,32 +1,21 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import {
-    asInstanceName,
-    createInitialControlReadModelState,
-} from "@portable-devshell/shared/browser";
+import { asInstanceName } from "@portable-devshell/shared";
 
 import { Config } from "../../../src/view/page/Config.js";
-import type { WebState } from "../../../src/state/Model.js";
-import type { WebStore } from "../../../src/state/Store.js";
+import { WebStore } from "../../../src/state/Store.js";
+import {
+    WebTestDomains,
+    withWebDomains,
+} from "../../support/DomainHarness.js";
 
 describe("Web Config", () => {
     it("requires Save & Restart for restart-bound changes on a running worker", async () => {
-        const state = configState();
-        const store = {
-            state,
-            start: vi.fn(async () => true),
-            stop: vi.fn(async () => true),
-            updateInstanceConfig: vi.fn(async () => true),
-            validateConfig: vi.fn(async () => true),
-        } as unknown as WebStore;
-        render(
-            <Config
-                disabled={false}
-                instance="alpha"
-                state={state}
-                store={store}
-            />,
-        );
+        const { store } = renderConfig();
+        const validateConfig = vi.spyOn(store, "validateConfig");
+        const stop = vi.spyOn(store, "stop");
+        const updateInstanceConfig = vi.spyOn(store, "updateInstanceConfig");
+        const start = vi.spyOn(store, "start");
 
         fireEvent.change(
             screen.getByRole("spinbutton", { name: "Log retention days" }),
@@ -40,36 +29,23 @@ describe("Web Config", () => {
         expect(restart).toBeEnabled();
         fireEvent.click(restart);
 
+        await waitFor(() => expect(validateConfig).toHaveBeenCalledTimes(1));
+        expect(stop).toHaveBeenCalledWith("alpha");
         await waitFor(() =>
-            expect(store.validateConfig).toHaveBeenCalledTimes(1),
-        );
-        expect(store.stop).toHaveBeenCalledWith("alpha");
-        await waitFor(() =>
-            expect(store.updateInstanceConfig).toHaveBeenCalledWith(
+            expect(updateInstanceConfig).toHaveBeenCalledWith(
                 "alpha",
                 expect.objectContaining({ logs: { retentionDays: 30 } }),
             ),
         );
-        expect(store.start).toHaveBeenCalledWith("alpha");
+        expect(start).toHaveBeenCalledWith("alpha");
     });
 
     it("hot-saves workspace changes without restarting the worker", async () => {
-        const state = configState();
-        const store = {
-            state,
-            start: vi.fn(async () => true),
-            stop: vi.fn(async () => true),
-            updateInstanceConfig: vi.fn(async () => true),
-            validateConfig: vi.fn(async () => true),
-        } as unknown as WebStore;
-        render(
-            <Config
-                disabled={false}
-                instance="alpha"
-                state={state}
-                store={store}
-            />,
-        );
+        const { store } = renderConfig();
+        const validateConfig = vi.spyOn(store, "validateConfig");
+        const stop = vi.spyOn(store, "stop");
+        const start = vi.spyOn(store, "start");
+        const updateInstanceConfig = vi.spyOn(store, "updateInstanceConfig");
 
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Workspace enabled" }),
@@ -83,30 +59,18 @@ describe("Web Config", () => {
         fireEvent.click(save);
 
         await waitFor(() =>
-            expect(store.updateInstanceConfig).toHaveBeenCalledWith(
+            expect(updateInstanceConfig).toHaveBeenCalledWith(
                 "alpha",
                 expect.objectContaining({ workspace: { enabled: false } }),
             ),
         );
-        expect(store.stop).not.toHaveBeenCalled();
-        expect(store.start).not.toHaveBeenCalled();
+        expect(validateConfig).toHaveBeenCalledTimes(1);
+        expect(stop).not.toHaveBeenCalled();
+        expect(start).not.toHaveBeenCalled();
     });
 
     it("keeps raw JSON available as an advanced editor", () => {
-        const state = configState();
-        const store = {
-            state,
-            updateInstanceConfig: vi.fn(async () => true),
-            validateConfig: vi.fn(async () => true),
-        } as unknown as WebStore;
-        render(
-            <Config
-                disabled={false}
-                instance="alpha"
-                state={state}
-                store={store}
-            />,
-        );
+        renderConfig();
 
         expect(
             (
@@ -118,65 +82,81 @@ describe("Web Config", () => {
     });
 });
 
-function configState(): WebState {
-    return {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            configView: {
-                control: {
-                    artifactDirectTransfer: true,
-                    logLevel: "info",
-                },
-                instances: [
-                    {
-                        approvalPolicy: { mode: "disabled" },
-                        enabled: true,
-                        extensions: { model: ["instance"] },
-                        logs: { retentionDays: 7 },
-                        mcp: {
-                            auth: "none",
-                            contextMode: "explicit",
-                            enabled: true,
-                            path: "/alpha/mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
-                        security: {
-                            effectiveMode: "disabled",
-                            mode: "disabled",
-                        },
-                        workspace: { enabled: true },
-                    },
-                ],
-                mcp: {
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3100,
-                },
-                restartControlRequired: false,
-                web: {
-                    auth: "none",
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3101,
-                    publicBaseUrl: "",
-                },
-            },
-            instanceState: {
-                alpha: {
-                    ...createInitialControlReadModelState().instanceState.alpha,
-                    snapshot: {
-                        connectionState: "connected",
-                        daemonState: "running",
-                        lastSeq: 1,
-                        name: asInstanceName("alpha"),
-                        ready: true,
-                        status: "ready",
-                    },
-                },
+function renderConfig({
+    disabled = false,
+    instance = "alpha",
+}: {
+    disabled?: boolean;
+    instance?: string;
+} = {}) {
+    const domains = new WebTestDomains();
+    domains.setConfig(configView());
+    domains.setInstances([
+        {
+            mcpEnabled: true,
+            name: "alpha",
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 1,
+                name: asInstanceName("alpha"),
+                ready: true,
+                status: "ready",
             },
         },
-    } as WebState;
+    ]);
+    const store = new WebStore(domains.domains);
+    return {
+        domains,
+        store,
+        ...render(
+            withWebDomains(
+                domains,
+                <Config disabled={disabled} instance={instance} store={store} />,
+            ),
+        ),
+    };
+}
+
+function configView() {
+    return {
+        control: {
+            artifactDirectTransfer: true,
+            logLevel: "info",
+        },
+        instances: [
+            {
+                approvalPolicy: { mode: "disabled" },
+                enabled: true,
+                extensions: { model: ["instance"] },
+                logs: { retentionDays: 7 },
+                mcp: {
+                    auth: "none",
+                    contextMode: "explicit",
+                    enabled: true,
+                    path: "/alpha/mcp",
+                },
+                name: "alpha",
+                provider: "local",
+                security: {
+                    effectiveMode: "disabled",
+                    mode: "disabled",
+                },
+                workspace: { enabled: true },
+            },
+        ],
+        mcp: {
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3100,
+        },
+        restartControlRequired: false,
+        web: {
+            auth: "none",
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3101,
+            publicBaseUrl: "",
+        },
+    };
 }

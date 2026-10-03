@@ -5,55 +5,74 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
-import {
-    asInstanceName,
-    createInitialControlReadModelState,
-} from "@portable-devshell/shared/browser";
 import { expect, it, vi } from "vitest";
 
 import { Todos } from "../../../src/view/page/Todos.js";
-import type { WebState, WebStore } from "../../../src/state/Store.js";
+import { WebStore } from "../../../src/state/Store.js";
+import {
+    WebTestDomains,
+    withWebDomains,
+} from "../../support/DomainHarness.js";
 
-it("identifies the exact instance and task before permanently deleting a Todo project", async () => {
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            instances: [{ mcpEnabled: true, name: "alpha" }],
-            instanceState: {
+function renderTodos(
+    options: {
+        disabled?: boolean;
+        goals?: readonly unknown[];
+        instances?: readonly unknown[];
+        todo?: unknown;
+    } = {},
+) {
+    const domains = new WebTestDomains();
+    Object.assign(domains.goals, { load: async () => undefined });
+    domains.setInstances(options.instances ?? []);
+    if (options.todo !== undefined) domains.setTodo("alpha", options.todo);
+    if (options.goals !== undefined) {
+        domains.goals.patch({
+            instances: {
                 alpha: {
-                    approvals: [],
-                    commentCalls: [],
-                    contextMessages: [],
-                    logs: [],
-                    sequence: 0,
-                    toolCalls: [],
-                    todo: {
-                        items: [
-                            {
-                                content: "Ship",
-                                id: "ship",
-                                status: "in_progress",
-                            },
-                        ],
-                        revision: 3,
-                        summary: {
-                            completed: 0,
-                            currentItemId: "ship",
-                            total: 1,
-                        },
-                        taskId: "task-1",
-                        title: "Release portable-devshell",
-                    },
+                    goals: [...options.goals],
+                    lastSeq: 0,
+                    status: "stopped",
                 },
             },
-        },
+        });
+    }
+    const store = new WebStore(domains.domains);
+    return {
+        domains,
+        store,
+        ...render(
+            withWebDomains(
+                domains,
+                <Todos disabled={options.disabled} store={store} />,
+            ),
+        ),
     };
-    const deleteTodo = vi.fn(async () => true);
-    const store = { deleteTodo } as unknown as WebStore;
+}
 
-    render(<Todos state={state} store={store} />);
+it("identifies the exact instance and task before permanently deleting a Todo project", async () => {
+    const { store } = renderTodos({
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        todo: {
+            items: [
+                {
+                    content: "Ship",
+                    id: "ship",
+                    status: "in_progress",
+                },
+            ],
+            revision: 3,
+            summary: {
+                completed: 0,
+                currentItemId: "ship",
+                total: 1,
+            },
+            taskId: "task-1",
+            title: "Release portable-devshell",
+        },
+    });
+    const deleteTodo = vi.spyOn(store, "deleteTodo").mockResolvedValue(true);
+
     fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
 
     const dialog = screen.getByRole("dialog", { name: "Confirm delete" });
@@ -71,48 +90,32 @@ it("identifies the exact instance and task before permanently deleting a Todo pr
 });
 
 it("shows current Todo work, checkpoint, blockers, and task steps for supervision", () => {
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            instanceState: {
-                alpha: {
-                    approvals: [],
-                    commentCalls: [],
-                    contextMessages: [],
-                    logs: [],
-                    sequence: 0,
-                    toolCalls: [],
-                    todo: {
-                        checkpoint: {
-                            blockers: ["Waiting for review"],
-                            next: "Run release checks",
-                            summary: "Implementation is ready for review.",
-                            updatedAt: "2026-09-14T10:00:00Z",
-                        },
-                        items: [
-                            {
-                                content: "Ship",
-                                id: "ship",
-                                status: "in_progress",
-                            },
-                        ],
-                        revision: 3,
-                        summary: {
-                            completed: 0,
-                            currentItemId: "ship",
-                            total: 1,
-                        },
-                        taskId: "task-supervision",
-                        title: "Release supervision",
-                    },
-                },
+    renderTodos({
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        todo: {
+            checkpoint: {
+                blockers: ["Waiting for review"],
+                next: "Run release checks",
+                summary: "Implementation is ready for review.",
+                updatedAt: "2026-09-14T10:00:00Z",
             },
+            items: [
+                {
+                    content: "Ship",
+                    id: "ship",
+                    status: "in_progress",
+                },
+            ],
+            revision: 3,
+            summary: {
+                completed: 0,
+                currentItemId: "ship",
+                total: 1,
+            },
+            taskId: "task-supervision",
+            title: "Release supervision",
         },
-    };
-
-    render(<Todos state={state} store={{} as WebStore} />);
+    });
 
     expect(
         screen.getByText("Implementation is ready for review."),
@@ -127,45 +130,32 @@ it("shows current Todo work, checkpoint, blockers, and task steps for supervisio
 });
 
 it("keeps failed Todo deletion in context and shows the error in the dialog", async () => {
-    const state: WebState = {
-        connection: "online",
+    const { store } = renderTodos({
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        todo: {
+            items: [
+                {
+                    content: "Ship",
+                    id: "ship",
+                    status: "in_progress",
+                },
+            ],
+            revision: 3,
+            summary: {
+                completed: 0,
+                currentItemId: "ship",
+                total: 1,
+            },
+            taskId: "task-1",
+            title: "Release portable-devshell",
+        },
+    });
+    vi.spyOn(store, "state", "get").mockReturnValue({
         error: "Todo deletion failed.",
         operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            instanceState: {
-                alpha: {
-                    approvals: [],
-                    commentCalls: [],
-                    contextMessages: [],
-                    logs: [],
-                    sequence: 0,
-                    toolCalls: [],
-                    todo: {
-                        items: [
-                            {
-                                content: "Ship",
-                                id: "ship",
-                                status: "in_progress",
-                            },
-                        ],
-                        revision: 3,
-                        summary: {
-                            completed: 0,
-                            currentItemId: "ship",
-                            total: 1,
-                        },
-                        taskId: "task-1",
-                        title: "Release portable-devshell",
-                    },
-                },
-            },
-        },
-    };
-    const deleteTodo = vi.fn(async () => false);
-    render(
-        <Todos state={state} store={{ deleteTodo } as unknown as WebStore} />,
-    );
+    });
+    const deleteTodo = vi.spyOn(store, "deleteTodo").mockResolvedValue(false);
+
     fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
     fireEvent.click(
         within(
@@ -181,43 +171,27 @@ it("keeps failed Todo deletion in context and shows the error in the dialog", as
 });
 
 it("disables Todo deletion during a session-level operation", () => {
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            instances: [{ mcpEnabled: true, name: "alpha" }],
-            instanceState: {
-                alpha: {
-                    approvals: [],
-                    commentCalls: [],
-                    contextMessages: [],
-                    logs: [],
-                    sequence: 0,
-                    toolCalls: [],
-                    todo: {
-                        items: [
-                            {
-                                content: "Ship",
-                                id: "ship",
-                                status: "in_progress",
-                            },
-                        ],
-                        revision: 3,
-                        summary: {
-                            completed: 0,
-                            currentItemId: "ship",
-                            total: 1,
-                        },
-                        taskId: "task-1",
-                        title: "Release portable-devshell",
-                    },
+    renderTodos({
+        disabled: true,
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        todo: {
+            items: [
+                {
+                    content: "Ship",
+                    id: "ship",
+                    status: "in_progress",
                 },
+            ],
+            revision: 3,
+            summary: {
+                completed: 0,
+                currentItemId: "ship",
+                total: 1,
             },
+            taskId: "task-1",
+            title: "Release portable-devshell",
         },
-    };
-
-    render(<Todos disabled state={state} store={{} as WebStore} />);
+    });
 
     expect(
         screen.getByRole("button", { name: "Delete project" }),
@@ -225,57 +199,35 @@ it("disables Todo deletion during a session-level operation", () => {
 });
 
 it("renders active Workspace Goals on the Todo page", () => {
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            instances: [{ mcpEnabled: true, name: "alpha" }],
-            instanceState: {
-                alpha: {
-                    approvals: [],
-                    commentCalls: [],
-                    contextMessages: [],
-                    goals: [
-                        {
-                            autoContinueExhausted: false,
-                            continuationCount: 1,
-                            continuationDue: false,
-                            continuationDueAt: "2026-08-31T10:00:00.000Z",
-                            continuationPending: false,
-                            continuationUncertain: false,
-                            createdAt: "2026-08-31T09:00:00.000Z",
-                            goalId: "goal-visible",
-                            lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
-                            lastProgressAt: "2026-08-31T09:30:00.000Z",
-                            maxContinuations: 10,
-                            objective: "Ship Workspace recovery",
-                            revision: 4,
-                            status: "active",
-                            steps: [
-                                {
-                                    id: "inspect",
-                                    status: "completed",
-                                    text: "Inspect",
-                                },
-                                { id: "fix", status: "active", text: "Fix" },
-                            ],
-                            updatedAt: "2026-08-31T09:30:00.000Z",
-                            workspace:
-                                "/home/aromatic/Applications/OwnProject/portable-devshell",
-                        },
-                    ],
-                    logs: [],
-                    sequence: 0,
-                    toolCalls: [],
-                },
+    const { container } = renderTodos({
+        instances: [{ mcpEnabled: true, name: "alpha" }],
+        goals: [
+            {
+                autoContinueExhausted: false,
+                continuationCount: 1,
+                continuationDue: false,
+                continuationDueAt: "2026-08-31T10:00:00.000Z",
+                continuationPending: false,
+                continuationUncertain: false,
+                createdAt: "2026-08-31T09:00:00.000Z",
+                goalId: "goal-visible",
+                lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
+                lastProgressAt: "2026-08-31T09:30:00.000Z",
+                maxContinuations: 10,
+                objective: "Ship Workspace recovery",
+                revision: 4,
+                status: "active",
+                steps: [
+                    { id: "inspect", status: "completed", text: "Inspect" },
+                    { id: "fix", status: "active", text: "Fix" },
+                ],
+                updatedAt: "2026-08-31T09:30:00.000Z",
+                workspace:
+                    "/home/aromatic/Applications/OwnProject/portable-devshell",
             },
-        },
-    };
+        ],
+    });
 
-    const { container } = render(
-        <Todos state={state} store={{} as WebStore} />,
-    );
     const goal = container.querySelector('[data-goal-id="goal-visible"]');
     expect(goal).not.toBeNull();
     expect(goal).toHaveAttribute("data-goal-status", "active");

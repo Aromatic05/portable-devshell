@@ -6,10 +6,8 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
-import {
-    asInstanceName,
-    createInitialControlReadModelState,
-} from "@portable-devshell/shared/browser";
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,108 +17,182 @@ import {
 } from "../../../src/view/page/activity/messages/Model.js";
 import type { WebRoute } from "../../../src/app/Route.js";
 import type { WebState } from "../../../src/state/Model.js";
-import type { WebStore } from "../../../src/state/Store.js";
+import { WebStore } from "../../../src/state/Store.js";
 import { buildConversationMarkdown } from "../../../src/view/page/activity/messages/Export.js";
 import { formatMessageDate } from "../../../src/view/page/activity/messages/conversation/History.js";
 import { Messages } from "../../../src/view/page/activity/messages/Page.js";
 
-const state: WebState = {
-    connection: "online",
-    conversationPreferences: {
-        hiddenContexts: {},
-        orderByWorkspace: {},
-        titles: {},
-        version: 1,
-        workspaceOrder: [],
-    },
-    operations: {},
-    readModel: {
-        ...createInitialControlReadModelState(),
-        contexts: [
-            {
-                createdAt: "2026-09-01T00:00:00Z",
-                ctxId: "ctx-old-active",
-                environments: [
-                    {
-                        instance: "alpha",
-                        workspace: "/work/portable-devshell",
-                    },
-                ],
-                expiresAt: "2026-10-01T00:00:00Z",
-                lastAccessedAt: new Date(
-                    Date.now() - 5 * 60 * 1_000,
-                ).toISOString(),
-                principal: "client-alpha",
-                status: "active",
-            },
-        ],
-        instances: [
-            {
-                mcpEnabled: true,
-                name: "alpha",
-                snapshot: {
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 1,
-                    name: asInstanceName("alpha"),
-                    ready: true,
-                    status: "ready",
-                },
-            },
-        ],
-        instanceState: {
-            alpha: {
-                approvals: [],
-                commentCalls: [],
-                conversationEntries: [
-                    {
-                        createdAt: "2026-09-02T10:00:00Z",
-                        ctxId: "ctx-old-active",
-                        id: "comment-1",
-                        kind: "comment",
-                        status: "delivered",
-                        text: "Check the route model.",
-                    },
-                    {
-                        callId: "report-1",
-                        createdAt: "2026-09-02T10:01:00Z",
-                        ctxId: "ctx-old-active",
-                        id: "report-1",
-                        kind: "report",
-                        text: "Route model is now green.",
-                    },
-                ],
-                contextMessages: [
-                    {
-                        createdAt: "2026-09-02T10:00:00Z",
-                        ctxId: "ctx-old-active",
-                        id: "comment-1",
-                        instance: "alpha",
-                        status: "delivered",
-                        text: "Check the route model.",
-                    },
-                ],
-                goals: [],
-                logs: [],
-                reportCalls: [
-                    {
-                        callId: "report-1",
-                        completedAt: "2026-09-02T10:01:00Z",
-                        ctxId: "ctx-old-active",
-                        input: { message: "Route model is now green." },
-                        instance: asInstanceName("alpha"),
-                        source: "mcp",
-                        startedAt: "2026-09-02T10:00:30Z",
-                        status: "completed",
-                        toolName: "todo_report",
-                    },
-                ],
-                sequence: 1,
-                toolCalls: [],
-            },
+import { WebTestDomains, withWebDomains } from "../../support/DomainHarness.js";
+
+const activeLastAccessedAt = new Date(
+    Date.now() - 5 * 60 * 1_000,
+).toISOString();
+
+const baseInstances = [
+    {
+        enabled: true,
+        mcpEnabled: true,
+        name: "alpha",
+        snapshot: {
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 1,
+            name: asInstanceName("alpha"),
+            ready: true,
+            status: "ready",
         },
     },
+];
+
+const baseConversationEntries = [
+    {
+        createdAt: "2026-09-02T10:00:00Z",
+        ctxId: "ctx-old-active",
+        id: "comment-1",
+        kind: "comment" as const,
+        status: "delivered" as const,
+        text: "Check the route model.",
+    },
+    {
+        callId: "report-1",
+        createdAt: "2026-09-02T10:01:00Z",
+        ctxId: "ctx-old-active",
+        id: "report-1",
+        kind: "report" as const,
+        text: "Route model is now green.",
+    },
+];
+
+const baseMessages = [
+    {
+        createdAt: "2026-09-02T10:00:00Z",
+        ctxId: "ctx-old-active",
+        id: "comment-1",
+        instance: "alpha",
+        status: "delivered" as const,
+        text: "Check the route model.",
+    },
+];
+
+/** Local WebStore state; the domain data lives in the WebTestDomains sources. */
+const state: WebState = {
+    operations: {},
 };
+
+function alphaContext(
+    overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+    return {
+        createdAt: "2026-09-01T00:00:00Z",
+        ctxId: "ctx-old-active",
+        environments: [
+            {
+                instance: "alpha",
+                workspace: "/work/portable-devshell",
+            },
+        ],
+        expiresAt: "2026-10-01T00:00:00Z",
+        lastAccessedAt: activeLastAccessedAt,
+        principal: "client-alpha",
+        status: "active",
+        ...overrides,
+    };
+}
+
+function alphaDomains(): WebTestDomains {
+    const domains = new WebTestDomains();
+    domains.setInstances(baseInstances);
+    domains.setContexts([alphaContext()]);
+    domains.setConversation("alpha", baseConversationEntries);
+    domains.setMessages("alpha", baseMessages);
+    return domains;
+}
+
+function twoActiveDomains(): WebTestDomains {
+    const domains = new WebTestDomains();
+    const firstAt = new Date(Date.now() - 20 * 60 * 1_000).toISOString();
+    const secondAt = new Date(Date.now() - 10 * 60 * 1_000).toISOString();
+    domains.setInstances(baseInstances);
+    domains.setContexts([
+        alphaContext({
+            createdAt: firstAt,
+            ctxId: "ctx-first",
+            lastAccessedAt: firstAt,
+        }),
+        alphaContext({
+            createdAt: secondAt,
+            ctxId: "ctx-second",
+            lastAccessedAt: secondAt,
+        }),
+    ]);
+    domains.setConversation("alpha", [
+        {
+            createdAt: firstAt,
+            ctxId: "ctx-first",
+            id: "first-comment",
+            kind: "comment",
+            status: "delivered",
+            text: "Investigate the first regression in Audit.",
+        },
+        {
+            createdAt: secondAt,
+            ctxId: "ctx-second",
+            id: "second-comment",
+            kind: "comment",
+            status: "delivered",
+            text: "Review the Messages navigation.",
+        },
+    ]);
+    return domains;
+}
+
+function projection(domains: WebTestDomains) {
+    return {
+        contexts: domains.context.state.contexts,
+        conversation: domains.conversation.state,
+        instances: domains.instances.state.instances,
+        messages: domains.messages.state,
+    };
+}
+
+function webStore(domains: WebTestDomains): WebStore {
+    return new WebStore(domains.domains);
+}
+
+function messageStore(overrides: Record<string, unknown> = {}): WebStore {
+    return {
+        queueContextMessage: vi.fn(async () => true),
+        refreshMessageActivity: vi.fn(async () => undefined),
+        refreshMessages: vi.fn(async () => undefined),
+        state,
+        subscribe: vi.fn(() => () => undefined),
+        updateConversationPreferences: vi.fn(async () => true),
+        ...overrides,
+    } as unknown as WebStore;
+}
+
+function messagesElement(
+    domains: WebTestDomains,
+    route: Extract<WebRoute, { page: "messages" }>,
+    store: WebStore,
+    navigate: (route: WebRoute) => void = vi.fn(),
+): ReactElement {
+    return withWebDomains(
+        domains,
+        <Messages navigate={navigate} route={route} store={store} />,
+    ) as ReactElement;
+}
+
+async function renderMessages(
+    domains: WebTestDomains,
+    route: Extract<WebRoute, { page: "messages" }>,
+    store: WebStore,
+    navigate: (route: WebRoute) => void = vi.fn(),
+) {
+    const view = render(messagesElement(domains, route, store, navigate));
+    await act(async () => undefined);
+    return view;
+}
 
 const threadRoute: Extract<WebRoute, { page: "messages" }> = {
     page: "messages",
@@ -128,63 +200,6 @@ const threadRoute: Extract<WebRoute, { page: "messages" }> = {
     instance: "alpha",
     ctxId: "ctx-old-active",
 };
-
-function messageStore(overrides: Record<string, unknown> = {}): WebStore {
-    return {
-        queueContextMessage: vi.fn(async () => true),
-        updateConversationPreferences: vi.fn(async () => true),
-        ...overrides,
-    } as unknown as WebStore;
-}
-
-function twoActiveConversationState(): WebState {
-    const firstAt = new Date(Date.now() - 20 * 60 * 1_000).toISOString();
-    const secondAt = new Date(Date.now() - 10 * 60 * 1_000).toISOString();
-    return {
-        ...state,
-        readModel: {
-            ...state.readModel,
-            contexts: [
-                {
-                    ...state.readModel.contexts[0]!,
-                    createdAt: firstAt,
-                    ctxId: "ctx-first",
-                    lastAccessedAt: firstAt,
-                },
-                {
-                    ...state.readModel.contexts[0]!,
-                    createdAt: secondAt,
-                    ctxId: "ctx-second",
-                    lastAccessedAt: secondAt,
-                },
-            ],
-            instanceState: {
-                ...state.readModel.instanceState,
-                alpha: {
-                    ...state.readModel.instanceState.alpha!,
-                    conversationEntries: [
-                        {
-                            createdAt: firstAt,
-                            ctxId: "ctx-first",
-                            id: "first-comment",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "Investigate the first regression in Audit.",
-                        },
-                        {
-                            createdAt: secondAt,
-                            ctxId: "ctx-second",
-                            id: "second-comment",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "Review the Messages navigation.",
-                        },
-                    ],
-                },
-            },
-        },
-    };
-}
 
 describe("Messages", () => {
     afterEach(() => {
@@ -194,7 +209,8 @@ describe("Messages", () => {
 
     it("keeps only sessions active within the last 30 minutes", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
-        expect(selectWebMessageSessions(state, now)).toEqual([
+        const domains = alphaDomains();
+        expect(selectWebMessageSessions(projection(domains), now)).toEqual([
             expect.objectContaining({
                 ctxId: "ctx-old-active",
                 instance: "alpha",
@@ -203,70 +219,39 @@ describe("Messages", () => {
             }),
         ]);
 
-        expect(
-            selectWebMessageSessions(
-                {
-                    ...state,
-                    readModel: {
-                        ...state.readModel,
-                        contexts: state.readModel.contexts.map((context) => ({
-                            ...context,
-                            lastAccessedAt: "2026-09-02T09:20:00Z",
-                        })),
-                        instanceState: {
-                            ...state.readModel.instanceState,
-                            alpha: {
-                                ...state.readModel.instanceState.alpha!,
-                                conversationEntries: [],
-                                contextMessages: [],
-                                reportCalls: [],
-                            },
-                        },
-                    },
-                },
-                now,
-            ),
-        ).toEqual([]);
+        domains.setContexts([
+            alphaContext({ lastAccessedAt: "2026-09-02T09:20:00Z" }),
+        ]);
+        domains.setConversation("alpha", []);
+        domains.setMessages("alpha", []);
+        expect(selectWebMessageSessions(projection(domains), now)).toEqual([]);
     });
 
     it("partitions loaded conversations into active and history sessions", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
-        const mixedState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) => ({
-                    ...context,
-                    lastAccessedAt: "2026-09-02T10:00:00Z",
-                })),
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        conversationEntries: [
-                            ...state.readModel.instanceState.alpha!
-                                .conversationEntries,
-                            {
-                                createdAt: "2026-09-02T09:00:00Z",
-                                ctxId: "ctx-history",
-                                id: "comment-history",
-                                kind: "comment",
-                                status: "delivered",
-                                text: "Older conversation.",
-                            },
-                        ],
-                    },
-                },
+        const domains = alphaDomains();
+        domains.setContexts([
+            alphaContext({ lastAccessedAt: "2026-09-02T10:00:00Z" }),
+        ]);
+        domains.setConversation("alpha", [
+            ...baseConversationEntries,
+            {
+                createdAt: "2026-09-02T09:00:00Z",
+                ctxId: "ctx-history",
+                id: "comment-history",
+                kind: "comment",
+                status: "delivered",
+                text: "Older conversation.",
             },
-        };
+        ]);
 
         expect(
-            selectWebMessageSessions(mixedState, now).map(
+            selectWebMessageSessions(projection(domains), now).map(
                 (session) => session.ctxId,
             ),
         ).toEqual(["ctx-old-active"]);
         expect(
-            selectWebMessageHistorySessions(mixedState, now).map(
+            selectWebMessageHistorySessions(projection(domains), now).map(
                 (session) => session.ctxId,
             ),
         ).toEqual(["ctx-history"]);
@@ -274,60 +259,48 @@ describe("Messages", () => {
 
     it("uses the first Comment as the conversation summary and keeps positions stable as activity changes", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
-        const multiState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: [
-                    {
-                        ...state.readModel.contexts[0]!,
-                        createdAt: "2026-09-02T09:00:00Z",
-                        ctxId: "ctx-first",
-                        lastAccessedAt: "2026-09-02T10:04:00Z",
-                    },
-                    {
-                        ...state.readModel.contexts[0]!,
-                        createdAt: "2026-09-02T09:30:00Z",
-                        ctxId: "ctx-second",
-                        lastAccessedAt: "2026-09-02T10:03:00Z",
-                    },
-                ],
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        conversationEntries: [
-                            {
-                                createdAt: "2026-09-02T09:00:00Z",
-                                ctxId: "ctx-first",
-                                id: "first-comment",
-                                kind: "comment",
-                                status: "delivered",
-                                text: "Investigate the first regression in Audit.",
-                            },
-                            {
-                                createdAt: "2026-09-02T10:04:00Z",
-                                ctxId: "ctx-first",
-                                id: "first-report",
-                                kind: "report",
-                                text: "A later report must not move this conversation.",
-                            },
-                            {
-                                createdAt: "2026-09-02T09:30:00Z",
-                                ctxId: "ctx-second",
-                                id: "second-comment",
-                                kind: "comment",
-                                status: "delivered",
-                                text: "Review the Messages navigation.",
-                            },
-                        ],
-                    },
-                },
+        const domains = alphaDomains();
+        domains.setContexts([
+            alphaContext({
+                createdAt: "2026-09-02T09:00:00Z",
+                ctxId: "ctx-first",
+                lastAccessedAt: "2026-09-02T10:04:00Z",
+            }),
+            alphaContext({
+                createdAt: "2026-09-02T09:30:00Z",
+                ctxId: "ctx-second",
+                lastAccessedAt: "2026-09-02T10:03:00Z",
+            }),
+        ]);
+        domains.setMessages("alpha", []);
+        domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-02T09:00:00Z",
+                ctxId: "ctx-first",
+                id: "first-comment",
+                kind: "comment",
+                status: "delivered",
+                text: "Investigate the first regression in Audit.",
             },
-        };
+            {
+                createdAt: "2026-09-02T10:04:00Z",
+                ctxId: "ctx-first",
+                id: "first-report",
+                kind: "report",
+                text: "A later report must not move this conversation.",
+            },
+            {
+                createdAt: "2026-09-02T09:30:00Z",
+                ctxId: "ctx-second",
+                id: "second-comment",
+                kind: "comment",
+                status: "delivered",
+                text: "Review the Messages navigation.",
+            },
+        ]);
 
         expect(
-            selectWebMessageSessions(multiState, now).map(
+            selectWebMessageSessions(projection(domains), now).map(
                 ({ ctxId, title }) => ({ ctxId, title }),
             ),
         ).toEqual([
@@ -340,8 +313,13 @@ describe("Messages", () => {
     });
 
     it("projects canonical Conversation entries into one chronological conversation", () => {
+        const domains = alphaDomains();
         expect(
-            selectWebMessageEntries(state, "alpha", "ctx-old-active"),
+            selectWebMessageEntries(
+                projection(domains),
+                "alpha",
+                "ctx-old-active",
+            ),
         ).toEqual([
             expect.objectContaining({
                 kind: "comment",
@@ -355,11 +333,12 @@ describe("Messages", () => {
     });
 
     it("exports the current conversation as readable Markdown", () => {
+        const domains = alphaDomains();
         expect(
             buildConversationMarkdown({
                 ctxId: "ctx-old-active",
                 entries: selectWebMessageEntries(
-                    state,
+                    projection(domains),
                     "alpha",
                     "ctx-old-active",
                 ),
@@ -389,7 +368,7 @@ describe("Messages", () => {
         );
     });
 
-    it("downloads the current conversation from the composer", () => {
+    it("downloads the current conversation from the composer", async () => {
         const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(
             URL,
             "createObjectURL",
@@ -418,14 +397,8 @@ describe("Messages", () => {
         });
 
         try {
-            render(
-                <Messages
-                    navigate={vi.fn()}
-                    route={threadRoute}
-                    state={state}
-                    store={messageStore()}
-                />,
-            );
+            const domains = alphaDomains();
+            await renderMessages(domains, threadRoute, webStore(domains));
 
             fireEvent.click(
                 screen.getByRole("button", { name: "Export Markdown" }),
@@ -459,15 +432,9 @@ describe("Messages", () => {
     });
 
     it("renders conversation history, a floating Comment composer, and deep-links to Audit", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={state}
-                store={messageStore({ queueContextMessage })}
-            />,
-        );
+        const domains = alphaDomains();
+        const queueContextMessage = vi.spyOn(domains.messages, "queue");
+        await renderMessages(domains, threadRoute, webStore(domains));
 
         expect(
             screen.getByRole("log", { name: "Conversation history" }),
@@ -507,24 +474,16 @@ describe("Messages", () => {
         ).toHaveAttribute("href", "#/audit/context/alpha/ctx-old-active");
     });
     it("adds text directives from the composer control menu without structured message metadata", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={state}
-                store={messageStore({ queueContextMessage })}
-            />,
-        );
+        const domains = alphaDomains();
+        const queueContextMessage = vi.spyOn(domains.messages, "queue");
+        await renderMessages(domains, threadRoute, webStore(domains));
         const composer = screen.getByRole("textbox", { name: "Comment" });
         fireEvent.click(
             screen.getByRole("button", { name: "Add message control" }),
         );
         expect(screen.getByRole("button", { name: /^Push/u })).toBeEnabled();
         expect(screen.getByRole("button", { name: /^Stop/u })).toBeEnabled();
-        expect(
-            screen.getByRole("button", { name: /^Resume/u }),
-        ).toBeEnabled();
+        expect(screen.getByRole("button", { name: /^Resume/u })).toBeEnabled();
         fireEvent.click(screen.getByRole("button", { name: /^Push/u }));
         expect(
             within(composer.closest("form")!).getByText("#push"),
@@ -542,15 +501,9 @@ describe("Messages", () => {
         );
     });
     it("can send #stop and #resume as standalone text controls", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={state}
-                store={messageStore({ queueContextMessage })}
-            />,
-        );
+        const domains = alphaDomains();
+        const queueContextMessage = vi.spyOn(domains.messages, "queue");
+        await renderMessages(domains, threadRoute, webStore(domains));
         const form = screen
             .getByRole("textbox", { name: "Comment" })
             .closest("form")!;
@@ -583,20 +536,9 @@ describe("Messages", () => {
     it("shows a send failure next to the composer and preserves the draft", async () => {
         const failedState = { ...state, error: "Control connection was lost." };
         const queueContextMessage = vi.fn(async () => false);
-        const store = messageStore({
-            get state() {
-                return failedState;
-            },
-            queueContextMessage,
-        });
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={failedState}
-                store={store}
-            />,
-        );
+        const store = messageStore({ queueContextMessage, state: failedState });
+        const domains = alphaDomains();
+        await renderMessages(domains, threadRoute, store);
 
         const composer = screen.getByRole("textbox", { name: "Comment" });
         fireEvent.change(composer, { target: { value: "Keep this draft." } });
@@ -617,30 +559,25 @@ describe("Messages", () => {
             value: scrollIntoView,
         });
         try {
-            const view = render(
-                <Messages
-                    navigate={vi.fn()}
-                    route={threadRoute}
-                    state={state}
-                    store={messageStore()}
-                />,
-            );
+            const domains = alphaDomains();
+            const store = webStore(domains);
+            const view = await renderMessages(domains, threadRoute, store);
             await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
             const initialCalls = scrollIntoView.mock.calls.length;
 
             view.rerender(
-                <Messages
-                    navigate={vi.fn()}
-                    route={{
+                messagesElement(
+                    domains,
+                    {
                         page: "messages",
                         view: "thread",
                         instance: "alpha",
                         ctxId: "ctx-second",
-                    }}
-                    state={state}
-                    store={messageStore()}
-                />,
+                    },
+                    store,
+                ),
             );
+            await act(async () => undefined);
             await waitFor(() =>
                 expect(scrollIntoView.mock.calls.length).toBeGreaterThan(
                     initialCalls,
@@ -659,19 +596,10 @@ describe("Messages", () => {
     });
 
     it("keeps the floating composer writable when the Context registry record is absent", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        const historyOnlyState: WebState = {
-            ...state,
-            readModel: { ...state.readModel, contexts: [] },
-        };
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={historyOnlyState}
-                store={messageStore({ queueContextMessage })}
-            />,
-        );
+        const domains = alphaDomains();
+        domains.setContexts([]);
+        const queueContextMessage = vi.spyOn(domains.messages, "queue");
+        await renderMessages(domains, threadRoute, webStore(domains));
 
         const composer = screen.getByRole("textbox", { name: "Comment" });
         expect(composer).not.toBeDisabled();
@@ -687,25 +615,10 @@ describe("Messages", () => {
     });
 
     it("keeps the floating composer writable for a disabled Context", async () => {
-        const queueContextMessage = vi.fn(async () => true);
-        const disabledState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) => ({
-                    ...context,
-                    status: "disabled" as const,
-                })),
-            },
-        };
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={disabledState}
-                store={messageStore({ queueContextMessage })}
-            />,
-        );
+        const domains = alphaDomains();
+        domains.setContexts([alphaContext({ status: "disabled" })]);
+        const queueContextMessage = vi.spyOn(domains.messages, "queue");
+        await renderMessages(domains, threadRoute, webStore(domains));
 
         const composer = screen.getByRole("textbox", { name: "Comment" });
         fireEvent.change(composer, {
@@ -723,13 +636,12 @@ describe("Messages", () => {
 
     it("uses the two-line drawer trigger, closes it on selection, and restores focus", async () => {
         const navigate = vi.fn();
-        const view = render(
-            <Messages
-                navigate={navigate}
-                route={{ page: "messages", view: "contexts" }}
-                state={state}
-                store={messageStore()}
-            />,
+        const domains = alphaDomains();
+        const view = await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
+            navigate,
         );
 
         expect(
@@ -754,15 +666,15 @@ describe("Messages", () => {
 
     it("renames a conversation through server preferences and restores it in a new browser", async () => {
         localStorage.clear();
-        const nextState = twoActiveConversationState();
-        const updateConversationPreferences = vi.fn(async () => true);
-        const first = render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        const domains = twoActiveDomains();
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
+        const first = await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         fireEvent.doubleClick(
@@ -783,22 +695,18 @@ describe("Messages", () => {
         );
 
         first.unmount();
-        const secondBrowserState: WebState = {
-            ...nextState,
-            conversationPreferences: {
-                ...nextState.conversationPreferences!,
+        domains.conversationPreferences.patch({
+            preferences: {
+                ...domains.conversationPreferences.state.preferences,
                 titles: {
                     "alpha\u0000ctx-second": "Messages navigation review",
                 },
             },
-        };
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={secondBrowserState}
-                store={messageStore()}
-            />,
+        });
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
         expect(
             screen.getByRole("button", { name: /Messages navigation review/u }),
@@ -812,15 +720,15 @@ describe("Messages", () => {
 
     it("persists manual ordering through server preferences instead of browser storage", async () => {
         localStorage.clear();
-        const nextState = twoActiveConversationState();
-        const updateConversationPreferences = vi.fn(async () => true);
-        const first = render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        const domains = twoActiveDomains();
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
+        const first = await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
         const list = screen.getByRole("navigation", { name: "Conversations" });
         const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
@@ -872,10 +780,9 @@ describe("Messages", () => {
         ).toHaveTextContent("Investigate the first regression in Audit.");
 
         first.unmount();
-        const secondBrowserState: WebState = {
-            ...nextState,
-            conversationPreferences: {
-                ...nextState.conversationPreferences!,
+        domains.conversationPreferences.patch({
+            preferences: {
+                ...domains.conversationPreferences.state.preferences,
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
@@ -884,14 +791,11 @@ describe("Messages", () => {
                 },
                 workspaceOrder: ["/work/portable-devshell"],
             },
-        };
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={secondBrowserState}
-                store={messageStore()}
-            />,
+        });
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
         expect(
             screen
@@ -906,16 +810,17 @@ describe("Messages", () => {
     });
 
     it("soft-hides conversations and whole projects and restores them from Hidden", async () => {
-        const nextState = twoActiveConversationState();
-        const updateConversationPreferences = vi.fn(async () => true);
+        const domains = twoActiveDomains();
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
         const navigate = vi.fn();
-        render(
-            <Messages
-                navigate={navigate}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
+            navigate,
         );
 
         const reviewRow = screen
@@ -980,7 +885,7 @@ describe("Messages", () => {
     });
 
     it("migrates legacy browser preferences once and deletes them only after server persistence succeeds", async () => {
-        const nextState = twoActiveConversationState();
+        const domains = twoActiveDomains();
         localStorage.setItem(
             "portable-devshell:web:conversation-preferences:v1",
             JSON.stringify({
@@ -994,15 +899,15 @@ describe("Messages", () => {
                 workspaceOrder: ["/work/portable-devshell"],
             }),
         );
-        const updateConversationPreferences = vi.fn(async () => true);
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
 
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         await waitFor(() =>
@@ -1028,7 +933,7 @@ describe("Messages", () => {
     });
 
     it("retains legacy browser preferences when server migration fails", async () => {
-        const nextState = twoActiveConversationState();
+        const domains = twoActiveDomains();
         const legacy = JSON.stringify({
             titles: { "alpha\u0000ctx-second": "Legacy title" },
         });
@@ -1036,15 +941,14 @@ describe("Messages", () => {
             "portable-devshell:web:conversation-preferences:v1",
             legacy,
         );
-        const updateConversationPreferences = vi.fn(async () => false);
+        const updateConversationPreferences = vi
+            .spyOn(domains.conversationPreferences, "update")
+            .mockRejectedValueOnce(new Error("server migration failed"));
 
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         await waitFor(() =>
@@ -1063,10 +967,10 @@ describe("Messages", () => {
     });
 
     it("discovers new server ordering entries without pruning unloaded workspaces or overwriting existing order", async () => {
-        const nextState = twoActiveConversationState();
-        const serverState: WebState = {
-            ...nextState,
-            conversationPreferences: {
+        const domains = twoActiveDomains();
+        domains.conversationPreferences.patch({
+            preferences: {
+                hiddenContexts: {},
                 orderByWorkspace: {
                     "/work/portable-devshell": ["alpha\u0000ctx-first"],
                     "/work/hidden": ["beta\u0000ctx-hidden"],
@@ -1075,16 +979,16 @@ describe("Messages", () => {
                 version: 1,
                 workspaceOrder: ["/work/hidden", "/work/portable-devshell"],
             },
-        };
-        const updateConversationPreferences = vi.fn(async () => true);
+        });
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
 
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={serverState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         await waitFor(() =>
@@ -1105,15 +1009,13 @@ describe("Messages", () => {
         );
     });
 
-    it("keeps an idle Current conversation in place until the user archives idle conversations", () => {
-        const nextState = twoActiveConversationState();
-        const view = render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore()}
-            />,
+    it("keeps an idle Current conversation in place until the user archives idle conversations", async () => {
+        const domains = twoActiveDomains();
+        const store = webStore(domains);
+        const view = await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            store,
         );
         expect(
             screen.getByRole("button", {
@@ -1122,37 +1024,27 @@ describe("Messages", () => {
         ).toBeInTheDocument();
 
         const idleAt = new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString();
-        const idleState: WebState = {
-            ...nextState,
-            readModel: {
-                ...nextState.readModel,
-                contexts: nextState.readModel.contexts.map((context) => ({
-                    ...context,
-                    lastAccessedAt: idleAt,
-                })),
-                instanceState: {
-                    ...nextState.readModel.instanceState,
-                    alpha: {
-                        ...nextState.readModel.instanceState.alpha!,
-                        conversationEntries:
-                            nextState.readModel.instanceState.alpha!.conversationEntries.map(
-                                (entry) => ({
-                                    ...entry,
-                                    createdAt: idleAt,
-                                }),
-                            ),
-                    },
-                },
-            },
-        };
-        view.rerender(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={idleState}
-                store={messageStore()}
-            />,
+        domains.setContexts(
+            domains.context.state.contexts.map((context) => ({
+                ...context,
+                lastAccessedAt: idleAt,
+            })),
         );
+        domains.setConversation(
+            "alpha",
+            domains.conversation.state.instances.alpha.entries.map((entry) => ({
+                ...entry,
+                createdAt: idleAt,
+            })),
+        );
+        view.rerender(
+            messagesElement(
+                domains,
+                { page: "messages", view: "contexts" },
+                store,
+            ),
+        );
+        await act(async () => undefined);
 
         expect(
             screen.getByRole("button", {
@@ -1181,49 +1073,38 @@ describe("Messages", () => {
     it("refreshes Context activity and ages Current conversations every 20 seconds", async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
-        const nextState = twoActiveConversationState();
+        const domains = twoActiveDomains();
         const almostIdleAt = new Date(
             Date.now() - 30 * 60 * 1_000 + 10_000,
         ).toISOString();
-        const timerState: WebState = {
-            ...nextState,
-            readModel: {
-                ...nextState.readModel,
-                contexts: nextState.readModel.contexts.map((context) =>
-                    context.ctxId === "ctx-first"
-                        ? {
-                              ...context,
-                              createdAt: almostIdleAt,
-                              lastAccessedAt: almostIdleAt,
-                          }
-                        : context,
-                ),
-                instanceState: {
-                    ...nextState.readModel.instanceState,
-                    alpha: {
-                        ...nextState.readModel.instanceState.alpha!,
-                        conversationEntries:
-                            nextState.readModel.instanceState.alpha!.conversationEntries.map(
-                                (entry) =>
-                                    entry.ctxId === "ctx-first"
-                                        ? {
-                                              ...entry,
-                                              createdAt: almostIdleAt,
-                                          }
-                                        : entry,
-                            ),
-                    },
-                },
-            },
-        };
-        const refreshMessageActivity = vi.fn(async () => undefined);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={timerState}
-                store={messageStore({ refreshMessageActivity })}
-            />,
+        domains.setContexts(
+            domains.context.state.contexts.map((context) =>
+                context.ctxId === "ctx-first"
+                    ? {
+                          ...context,
+                          createdAt: almostIdleAt,
+                          lastAccessedAt: almostIdleAt,
+                      }
+                    : context,
+            ),
+        );
+        domains.setConversation(
+            "alpha",
+            domains.conversation.state.instances.alpha.entries.map((entry) =>
+                entry.ctxId === "ctx-first"
+                    ? { ...entry, createdAt: almostIdleAt }
+                    : entry,
+            ),
+        );
+        const store = webStore(domains);
+        const refreshMessageActivity = vi.spyOn(
+            store,
+            "refreshMessageActivity",
+        );
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            store,
         );
         const conversation = screen.getByRole("button", {
             name: /Investigate the first regression/u,
@@ -1239,21 +1120,13 @@ describe("Messages", () => {
     });
 
     it("closes the message control disclosure with Escape and restores focus", async () => {
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={state}
-                store={messageStore()}
-            />,
-        );
+        const domains = alphaDomains();
+        await renderMessages(domains, threadRoute, webStore(domains));
         const trigger = screen.getByRole("button", {
             name: "Add message control",
         });
         fireEvent.click(trigger);
-        expect(
-            screen.getByLabelText("Message controls"),
-        ).toBeInTheDocument();
+        expect(screen.getByLabelText("Message controls")).toBeInTheDocument();
         fireEvent.keyDown(document, { key: "Escape" });
         expect(
             screen.queryByLabelText("Message controls"),
@@ -1261,38 +1134,23 @@ describe("Messages", () => {
         await waitFor(() => expect(trigger).toHaveFocus());
     });
 
-    it("switches the sidebar between active and history conversations", () => {
-        const historyState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        conversationEntries: [
-                            ...state.readModel.instanceState.alpha!
-                                .conversationEntries,
-                            {
-                                createdAt: "2026-09-01T08:00:00Z",
-                                ctxId: "ctx-history",
-                                id: "comment-history",
-                                kind: "comment",
-                                status: "delivered",
-                                text: "Historical conversation.",
-                            },
-                        ],
-                    },
-                },
+    it("switches the sidebar between active and history conversations", async () => {
+        const domains = alphaDomains();
+        domains.setConversation("alpha", [
+            ...baseConversationEntries,
+            {
+                createdAt: "2026-09-01T08:00:00Z",
+                ctxId: "ctx-history",
+                id: "comment-history",
+                kind: "comment",
+                status: "delivered",
+                text: "Historical conversation.",
             },
-        };
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={historyState}
-                store={messageStore()}
-            />,
+        ]);
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         const active = screen.getByRole("button", { name: "Current" });
@@ -1322,65 +1180,57 @@ describe("Messages", () => {
         ).toBeInTheDocument();
     });
 
-    it("groups history conversations by workspace and lets each workspace collapse", () => {
-        const groupedState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: [
-                    ...state.readModel.contexts,
+    it("groups history conversations by workspace and lets each workspace collapse", async () => {
+        const domains = alphaDomains();
+        domains.setContexts([
+            alphaContext(),
+            {
+                createdAt: "2026-09-01T08:00:00Z",
+                ctxId: "ctx-project-new",
+                environments: [
                     {
-                        createdAt: "2026-09-01T08:00:00Z",
-                        ctxId: "ctx-project-new",
-                        environments: [
-                            {
-                                instance: "alpha",
-                                workspace: "/work/portable-devshell",
-                            },
-                        ],
-                        expiresAt: "2026-09-01T09:00:00Z",
-                        lastAccessedAt: "2026-09-01T08:20:00Z",
-                        principal: "client-alpha",
-                        status: "expired",
-                    },
-                    {
-                        createdAt: "2026-09-01T07:00:00Z",
-                        ctxId: "ctx-project-old",
-                        environments: [
-                            {
-                                instance: "alpha",
-                                workspace: "/work/portable-devshell",
-                            },
-                        ],
-                        expiresAt: "2026-09-01T08:00:00Z",
-                        lastAccessedAt: "2026-09-01T07:20:00Z",
-                        principal: "client-alpha",
-                        status: "expired",
-                    },
-                    {
-                        createdAt: "2026-08-31T08:00:00Z",
-                        ctxId: "ctx-efilinux",
-                        environments: [
-                            {
-                                instance: "alpha",
-                                workspace: "/work/efilinux",
-                            },
-                        ],
-                        expiresAt: "2026-08-31T09:00:00Z",
-                        lastAccessedAt: "2026-08-31T08:20:00Z",
-                        principal: "client-alpha",
-                        status: "expired",
+                        instance: "alpha",
+                        workspace: "/work/portable-devshell",
                     },
                 ],
+                expiresAt: "2026-09-01T09:00:00Z",
+                lastAccessedAt: "2026-09-01T08:20:00Z",
+                principal: "client-alpha",
+                status: "expired",
             },
-        };
-        const view = render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={groupedState}
-                store={messageStore()}
-            />,
+            {
+                createdAt: "2026-09-01T07:00:00Z",
+                ctxId: "ctx-project-old",
+                environments: [
+                    {
+                        instance: "alpha",
+                        workspace: "/work/portable-devshell",
+                    },
+                ],
+                expiresAt: "2026-09-01T08:00:00Z",
+                lastAccessedAt: "2026-09-01T07:20:00Z",
+                principal: "client-alpha",
+                status: "expired",
+            },
+            {
+                createdAt: "2026-08-31T08:00:00Z",
+                ctxId: "ctx-efilinux",
+                environments: [
+                    {
+                        instance: "alpha",
+                        workspace: "/work/efilinux",
+                    },
+                ],
+                expiresAt: "2026-08-31T09:00:00Z",
+                lastAccessedAt: "2026-08-31T08:20:00Z",
+                principal: "client-alpha",
+                status: "expired",
+            },
+        ]);
+        const view = await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         fireEvent.click(screen.getByRole("button", { name: "History" }));
@@ -1405,36 +1255,31 @@ describe("Messages", () => {
             within(groups[0]!).getAllByText(/portable-devshell · ctx-projec/u),
         ).toHaveLength(2);
 
-        view.rerender(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={{
-                    ...groupedState,
-                    readModel: {
-                        ...groupedState.readModel,
-                        contexts: [
-                            {
-                                createdAt: "2026-09-02T08:00:00Z",
-                                ctxId: "ctx-efilinux-newer",
-                                environments: [
-                                    {
-                                        instance: "alpha",
-                                        workspace: "/work/efilinux",
-                                    },
-                                ],
-                                expiresAt: "2026-09-02T09:00:00Z",
-                                lastAccessedAt: "2026-09-02T08:20:00Z",
-                                principal: "client-alpha",
-                                status: "expired",
-                            },
-                            ...groupedState.readModel.contexts,
-                        ],
+        domains.setContexts([
+            {
+                createdAt: "2026-09-02T08:00:00Z",
+                ctxId: "ctx-efilinux-newer",
+                environments: [
+                    {
+                        instance: "alpha",
+                        workspace: "/work/efilinux",
                     },
-                }}
-                store={messageStore()}
-            />,
+                ],
+                expiresAt: "2026-09-02T09:00:00Z",
+                lastAccessedAt: "2026-09-02T08:20:00Z",
+                principal: "client-alpha",
+                status: "expired",
+            },
+            ...domains.context.state.contexts,
+        ]);
+        view.rerender(
+            messagesElement(
+                domains,
+                { page: "messages", view: "contexts" },
+                webStore(domains),
+            ),
         );
+        await act(async () => undefined);
         const stableGroups = within(
             screen.getByRole("navigation", { name: "Conversations" }),
         ).getAllByRole("group");
@@ -1444,15 +1289,15 @@ describe("Messages", () => {
     });
 
     it("renames a conversation from the row action menu", async () => {
-        const nextState = twoActiveConversationState();
-        const updateConversationPreferences = vi.fn(async () => true);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        const domains = twoActiveDomains();
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
 
         const reviewRow = screen
@@ -1481,13 +1326,11 @@ describe("Messages", () => {
     });
 
     it("closes the conversation action menu with Escape and keeps the sidebar open", async () => {
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={twoActiveConversationState()}
-                store={messageStore()}
-            />,
+        const domains = twoActiveDomains();
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
         fireEvent.click(
             screen.getByRole("button", { name: "Open conversations" }),
@@ -1513,15 +1356,15 @@ describe("Messages", () => {
     });
 
     it("reorders conversations from the row action menu and disables boundary moves", async () => {
-        const nextState = twoActiveConversationState();
-        const updateConversationPreferences = vi.fn(async () => true);
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={{ page: "messages", view: "contexts" }}
-                state={nextState}
-                store={messageStore({ updateConversationPreferences })}
-            />,
+        const domains = twoActiveDomains();
+        const updateConversationPreferences = vi.spyOn(
+            domains.conversationPreferences,
+            "update",
+        );
+        await renderMessages(
+            domains,
+            { page: "messages", view: "contexts" },
+            webStore(domains),
         );
         const list = screen.getByRole("navigation", { name: "Conversations" });
         const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
@@ -1562,15 +1405,9 @@ describe("Messages", () => {
         ).toHaveTextContent("Investigate the first regression in Audit.");
     });
 
-    it("shows a draft length hint only near the maximum length", () => {
-        render(
-            <Messages
-                navigate={vi.fn()}
-                route={threadRoute}
-                state={state}
-                store={messageStore()}
-            />,
-        );
+    it("shows a draft length hint only near the maximum length", async () => {
+        const domains = alphaDomains();
+        await renderMessages(domains, threadRoute, webStore(domains));
         const composer = screen.getByRole("textbox", { name: "Comment" });
         const form = composer.closest("form")!;
         expect(

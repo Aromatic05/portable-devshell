@@ -7,14 +7,14 @@ import {
     WebChannel,
     type Channel,
     type WebSocketClientLike,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import {
     connectBrowserWebChannel,
     rpcUrl,
 } from "../../src/app/transport/Socket.js";
 import { webRoutePath } from "../../src/app/transport/Route.js";
-import { createWebClients } from "../../src/app/transport/Client.js";
+import { createWebDomainSession } from "../../src/app/transport/Client.js";
 
 describe("WebChannel", () => {
     it("writes raw binary data and notifies close once", async () => {
@@ -214,7 +214,7 @@ class DeferredBlob extends Blob {
     }
 }
 
-describe("web client transport", () => {
+describe("web domain transport", () => {
     it("reports an unexpected persistent transport close", async () => {
         const clientChannel = new MemoryChannel();
         const serverChannel = new MemoryChannel();
@@ -227,14 +227,18 @@ describe("web client transport", () => {
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: CONTROL_PROTOCOL_VERSION,
             }),
+            status: () => ({ instanceCount: 0, ok: true }),
         });
-        const clients = createWebClients(async () => clientChannel);
-        const closed = new Promise<string>((resolve) =>
-            clients.onTransportClose((error) =>
-                resolve(error?.message ?? "closed"),
-            ),
-        );
-        await clients.service.hello();
+        const domains = createWebDomainSession(async () => clientChannel);
+        const closed = new Promise<string>((resolve) => {
+            const unsubscribe = domains.service.subscribe(() => {
+                const state = domains.service.state;
+                if (state.status !== "offline") return;
+                unsubscribe();
+                resolve(state.failure?.message ?? "closed");
+            });
+        });
+        await domains.service.connect();
         await accepting;
 
         serverChannel.close(new Error("transport lost"));
@@ -242,6 +246,7 @@ describe("web client transport", () => {
         expect(await closed).toBe("transport lost");
         service.close();
         server.close();
+        domains.close();
     });
 });
 

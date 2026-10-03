@@ -1,18 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
-    CONTROL_PROTOCOL_VERSION,
+    createEmptyConversationPreferences,
     type ContextMessageRecord,
-    type ControlProtocolHelloResponse,
     type InstanceCreateDraft,
+    type InstanceCreateSchema,
     type InstanceSnapshot,
-} from "@portable-devshell/shared/browser";
+    type McpContextRecord,
+    type ProcessStartOptions,
+} from "@portable-devshell/shared";
 
-import type {
-    WebClients,
-    WebRuntimeStream,
-} from "../src/app/transport/Client.js";
 import { WebStore } from "../src/state/Store.js";
+import { WebTestDomains } from "./support/DomainHarness.js";
 
 const snapshot: InstanceSnapshot = {
     connectionState: "connected",
@@ -28,101 +27,83 @@ afterEach(() => {
 });
 
 describe("WebStore", () => {
-    it("waits for Control hello before loading Conversation preferences", async () => {
-        const clients = fakeClients();
-        let resolveHello!: (value: ControlProtocolHelloResponse) => void;
-        clients.service.hello = vi.fn(
-            async () =>
-                await new Promise<ControlProtocolHelloResponse>((resolve) => {
-                    resolveHello = resolve;
+    it("waits for the domain session before completing its load", async () => {
+        const domains = new WebTestDomains();
+        let resolveLoad!: () => void;
+        domains.domains.load = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    resolveLoad = resolve;
                 }),
         );
-        clients.conversation.preferences = vi.fn(async () => ({
-            hiddenContexts: {},
-            orderByWorkspace: {},
-            titles: {},
-            version: 1 as const,
-            workspaceOrder: [],
-        }));
-        const store = new WebStore(clients);
+        const store = new WebStore(domains.domains);
 
-        const loading = store.load();
-        await Promise.resolve();
-        expect(clients.conversation.preferences).not.toHaveBeenCalled();
-
-        resolveHello({
-            capabilities: ["request", "stream", "streamResume"],
-            protocolVersion: CONTROL_PROTOCOL_VERSION,
+        let settled = false;
+        const loading = store.load().then(() => {
+            settled = true;
         });
+        await Promise.resolve();
+        expect(domains.domains.load).toHaveBeenCalledOnce();
+        expect(settled).toBe(false);
+
+        resolveLoad();
         await loading;
-        expect(clients.conversation.preferences).toHaveBeenCalledOnce();
+        expect(settled).toBe(true);
+        expect(store.state.error).toBeUndefined();
     });
 
-    it("loads and updates server-backed Conversation preferences", async () => {
-        const clients = fakeClients();
-        clients.conversation.preferences = vi.fn(async () => ({
+    it("updates server-backed Conversation preferences", async () => {
+        const domains = new WebTestDomains();
+        const server = {
             hiddenContexts: {},
             orderByWorkspace: { "/work/demo": ["demo\u0000ctx-a"] },
             titles: { "demo\u0000ctx-a": "Server title" },
             version: 1 as const,
             workspaceOrder: ["/work/demo"],
-        }));
-        clients.conversation.updatePreferences = vi.fn(async (patch) => ({
-            hiddenContexts: {},
-            orderByWorkspace: {
-                "/work/demo": ["demo\u0000ctx-b", "demo\u0000ctx-a"],
-            },
-            titles: {
-                "demo\u0000ctx-a": "Server title",
-                ...Object.fromEntries(
-                    Object.entries(patch.titles ?? {}).flatMap(
-                        ([key, value]) =>
-                            value === null ? [] : [[key, value]],
-                    ),
-                ),
-            },
-            version: 1 as const,
-            workspaceOrder: ["/work/demo"],
-        }));
-        const store = new WebStore(clients);
+        };
+        domains.conversationPreferences.patch({ preferences: server });
+        const updatePreferences = vi.spyOn(
+            domains.domains.conversationPreferences,
+            "update",
+        );
+        const store = new WebStore(domains.domains);
 
         await store.load();
         expect(
-            store.state.conversationPreferences?.titles["demo\u0000ctx-a"],
+            domains.domains.conversationPreferences.state.preferences.titles[
+                "demo\u0000ctx-a"
+            ],
         ).toBe("Server title");
         expect(
             await store.updateConversationPreferences({
                 titles: { "demo\u0000ctx-b": "Second browser" },
             }),
         ).toBe(true);
-        expect(clients.conversation.updatePreferences).toHaveBeenCalledWith({
+        expect(updatePreferences).toHaveBeenCalledWith({
             titles: { "demo\u0000ctx-b": "Second browser" },
         });
         expect(
-            store.state.conversationPreferences?.titles["demo\u0000ctx-b"],
+            domains.domains.conversationPreferences.state.preferences.titles[
+                "demo\u0000ctx-b"
+            ],
         ).toBe("Second browser");
     });
 
     it("does not replay queued Conversation preference mutations after the store generation changes", async () => {
-        const clients = fakeClients();
-        const snapshot = {
-            hiddenContexts: {},
-            orderByWorkspace: {},
-            titles: {},
-            version: 1 as const,
-            workspaceOrder: [],
-        };
+        const domains = new WebTestDomains();
+        const preferences = createEmptyConversationPreferences();
         let releaseFirst!: () => void;
-        clients.conversation.updatePreferences = vi
+        const updatePreferences = vi
             .fn()
-            .mockImplementationOnce(async () => {
-                await new Promise<void>((resolve) => {
-                    releaseFirst = resolve;
-                });
-                return snapshot;
-            })
-            .mockResolvedValue(snapshot);
-        const store = new WebStore(clients);
+            .mockImplementationOnce(
+                () =>
+                    new Promise<typeof preferences>((resolve) => {
+                        releaseFirst = () => resolve(preferences);
+                    }),
+            )
+            .mockResolvedValue(preferences);
+        domains.domains.conversationPreferences.update = updatePreferences;
+        const store = new WebStore(domains.domains);
         await store.load();
 
         const first = store.updateConversationPreferences({
@@ -132,43 +113,44 @@ describe("WebStore", () => {
             titles: { "demo\u0000ctx-b": "B" },
         });
         await Promise.resolve();
-        expect(clients.conversation.updatePreferences).toHaveBeenCalledTimes(1);
+        expect(updatePreferences).toHaveBeenCalledTimes(1);
 
         store.close();
         releaseFirst();
         expect(await first).toBe(false);
         expect(await second).toBe(false);
-        expect(clients.conversation.updatePreferences).toHaveBeenCalledTimes(1);
+        expect(updatePreferences).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the Web session online but exposes Conversation preference load failures", async () => {
-        const clients = fakeClients();
-        clients.conversation.preferences = vi.fn(async () => {
-            throw new Error("Preference store unavailable");
+    it("keeps the service online while exposing a Conversation preference load failure", async () => {
+        const domains = new WebTestDomains();
+        domains.domains.load = vi.fn(async () => {
+            domains.conversationPreferences.patch({
+                failure: new Error("Preference store unavailable"),
+            });
         });
-        const store = new WebStore(clients);
+        const store = new WebStore(domains.domains);
 
         await store.load();
 
-        expect(store.state.connection).toBe("online");
-        expect(store.state.conversationPreferences).toBeUndefined();
-        expect(store.state.conversationPreferencesError).toBe(
+        expect(domains.service.state.status).toBe("online");
+        expect(domains.conversationPreferences.state.failure?.message).toBe(
             "Preference store unavailable",
         );
+        expect(store.state.error).toBeUndefined();
     });
 
-    it("does not request OAuth approvals when OAuth is disabled", async () => {
-        const clients = fakeClients();
-        const listApprovals = vi.fn(async () => []);
-        clients.mcp.listApprovals = listApprovals;
+    it("does not read MCP approvals while loading the store", async () => {
+        const domains = new WebTestDomains();
+        const refresh = vi.spyOn(domains.domains.mcp, "refresh");
 
-        await new WebStore(clients).load();
+        await new WebStore(domains.domains).load();
 
-        expect(listApprovals).not.toHaveBeenCalled();
+        expect(refresh).not.toHaveBeenCalled();
     });
 
-    it("loads Audit data lazily and queues Context messages through the instance routes", async () => {
-        const clients = fakeClients();
+    it("loads Audit data lazily and queues Context messages through the message domain", async () => {
+        const domains = new WebTestDomains();
         const call = {
             callId: "call-1",
             ctxId: "ctx-demo",
@@ -179,117 +161,135 @@ describe("WebStore", () => {
             status: "running" as const,
             toolName: "bash_run",
         };
-        const queued = {
+        const queued: ContextMessageRecord = {
             createdAt: "2026-07-31T00:00:01Z",
             ctxId: "ctx-demo",
             id: "message-1",
             instance: "demo",
-            status: "pending" as const,
+            status: "pending",
             text: "Continue with the next check.",
         };
-        clients.tool.listCalls = vi.fn(async () => [call]);
-        clients.conversation.list = vi.fn(async () => []);
-        clients.contextMessage.queue = vi.fn(async () => queued);
-        clients.overview.get = vi.fn(async () => operationalOverview());
-        const store = new WebStore(clients);
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        const loadToolCalls = vi.fn(async (_instance: string) => {
+            domains.setToolCalls("demo", [call]);
+        });
+        const queue = vi.fn(
+            async (
+                _instance: string,
+                _ctxId: string,
+                _text: string,
+            ): Promise<ContextMessageRecord> => queued,
+        );
+        domains.domains.toolCalls.load = loadToolCalls;
+        domains.domains.messages.queue = queue;
+        const conversationRefresh = vi.spyOn(
+            domains.domains.conversation,
+            "refreshInstance",
+        );
+        const messagesRefresh = vi.spyOn(
+            domains.domains.messages,
+            "refreshInstance",
+        );
+        const contextRefresh = vi.spyOn(domains.domains.context, "refresh");
+        const runtimeLoad = vi.spyOn(domains.domains.runtime("demo"), "load");
+        const store = new WebStore(domains.domains);
 
         await store.load();
-        expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        expect(clients.conversation.list).not.toHaveBeenCalled();
+        expect(loadToolCalls).not.toHaveBeenCalled();
+        expect(conversationRefresh).not.toHaveBeenCalled();
+        expect(runtimeLoad).not.toHaveBeenCalled();
+
         await store.refreshAudit();
-        expect(store.state.readModel.instanceState.demo?.toolCalls).toEqual([
-            call,
-        ]);
+
+        expect(loadToolCalls).toHaveBeenCalledWith("demo");
+        expect(domains.toolCalls.state.instances.demo?.calls).toEqual([call]);
+        expect(conversationRefresh).toHaveBeenCalledWith("demo");
+        expect(messagesRefresh).toHaveBeenCalledWith("demo");
+        expect(contextRefresh).toHaveBeenCalledOnce();
+
         expect(
             await store.queueContextMessage("demo", "ctx-demo", queued.text),
         ).toBe(true);
-        expect(clients.contextMessage.queue).toHaveBeenCalledWith("demo", {
-            ctxId: "ctx-demo",
-            text: queued.text,
-        });
-        expect(
-            store.state.readModel.instanceState.demo?.contextMessages,
-        ).toEqual([queued]);
-        expect(clients.conversation.list).toHaveBeenCalledTimes(2);
-        expect(clients.contextMessage.list).not.toHaveBeenCalled();
-        expect(store.state.readModel.instanceState.demo?.commentCalls).toEqual(
-            [],
-        );
-        expect(clients.overview.get).toHaveBeenCalledOnce();
+        expect(queue).toHaveBeenCalledWith("demo", "ctx-demo", queued.text);
     });
 
     it("refreshes Messages without materializing Audit logs or Tool Calls", async () => {
-        const clients = fakeClients();
-        clients.conversation.list = vi.fn(async () => []);
-        clients.runtime.readLogs = vi.fn(async () => []);
-        clients.tool.listCalls = vi.fn(async () => []);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        const conversationLoad = vi.fn(
+            async (_instances: readonly string[]) => undefined,
+        );
+        const messagesLoad = vi.fn(
+            async (_instances: readonly string[]) => undefined,
+        );
+        domains.domains.conversation.load = conversationLoad;
+        domains.domains.messages.load = messagesLoad;
+        const readLogs = vi.spyOn(domains.domains.runtime("demo"), "readLogs");
+        const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
+        const store = new WebStore(domains.domains);
 
         await store.load();
         await store.refreshMessages();
 
-        expect(clients.conversation.list).toHaveBeenCalledWith("demo", {
-            limit: 400,
-            maxBytes: 1024 * 1024,
-        });
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
-        expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        store.close();
+        expect(conversationLoad).toHaveBeenCalledWith(["demo"]);
+        expect(messagesLoad).toHaveBeenCalledWith(["demo"]);
+        expect(readLogs).not.toHaveBeenCalled();
+        expect(loadToolCalls).not.toHaveBeenCalled();
     });
 
     it("refreshes only Context state for Message activity", async () => {
-        const clients = fakeClients();
-        clients.context.list = vi.fn(async () => []);
-        clients.conversation.list = vi.fn(async () => []);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        const domains = new WebTestDomains();
+        const contextRefresh = vi.spyOn(domains.domains.context, "refresh");
+        const conversationRefresh = vi.spyOn(
+            domains.domains.conversation,
+            "refreshInstance",
+        );
+        const store = new WebStore(domains.domains);
 
         await store.load();
-        vi.mocked(clients.context.list).mockClear();
-        vi.mocked(clients.conversation.list).mockClear();
+        contextRefresh.mockClear();
+        conversationRefresh.mockClear();
 
         await store.refreshMessageActivity();
 
-        expect(clients.context.list).toHaveBeenCalledOnce();
-        expect(clients.conversation.list).not.toHaveBeenCalled();
-        store.close();
+        expect(contextRefresh).toHaveBeenCalledOnce();
+        expect(conversationRefresh).not.toHaveBeenCalled();
     });
 
     it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
-        const clients = fakeClients();
-        clients.approval.list = vi.fn(async () => []);
-        clients.runtime.readLogs = vi.fn(async () => []);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        const load = vi.spyOn(runtime, "load");
+        const readLogs = vi.spyOn(runtime, "readLogs");
+        const store = new WebStore(domains.domains);
 
         await store.load();
+        expect(readLogs).not.toHaveBeenCalled();
 
-        expect(clients.approval.list).toHaveBeenCalledWith("demo", {
-            pendingOnly: true,
-        });
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         await store.refreshInstance("demo");
-        expect(clients.runtime.refresh).toHaveBeenCalledWith("demo");
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
-        store.close();
+
+        expect(load).toHaveBeenCalledWith("demo");
+        expect(readLogs).not.toHaveBeenCalled();
     });
 
     it("surfaces snapshot failures from a manual Instance refresh without reading logs", async () => {
-        const clients = fakeClients();
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
-        await store.load();
-        clients.runtime.refresh = vi.fn(async () => {
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => {
             throw new Error("snapshot refresh failed");
         });
-        clients.runtime.readLogs = vi.fn(async () => []);
+        const readLogs = vi.spyOn(runtime, "readLogs");
+        const store = new WebStore(domains.domains);
+        await store.load();
 
         await expect(store.refreshInstance("demo")).rejects.toThrow(
             "snapshot refresh failed",
         );
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
-        store.close();
+        expect(readLogs).not.toHaveBeenCalled();
     });
 
-    it("hydrates artifact activity and refreshes it after revoke and cancel", async () => {
-        const clients = fakeClients();
+    it("revokes and cancels artifacts through the artifact domain", async () => {
+        const domains = new WebTestDomains();
         const share = {
             blake3: "share-blake3",
             bytes: 1024,
@@ -323,385 +323,163 @@ describe("WebStore", () => {
             transferredBytes: 1024,
             updatedAt: "2026-09-16T00:00:01.000Z",
         };
-        clients.artifact.listShares = vi.fn(async () => [share]);
-        clients.artifact.listTransfers = vi.fn(async () => [transfer]);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        domains.setArtifacts({ shares: [share], transfers: [transfer] });
+        const revokeShare = vi.fn(async (_shareId: string) => undefined);
+        const cancelTransfer = vi.fn(async (_transferId: string) => undefined);
+        domains.domains.artifact.revokeShare = revokeShare;
+        domains.domains.artifact.cancelTransfer = cancelTransfer;
+        const store = new WebStore(domains.domains);
 
         await store.load();
 
-        expect(store.state.readModel.artifactShares).toEqual([share]);
-        expect(store.state.readModel.artifactTransfers).toEqual([transfer]);
-        expect(clients.artifact.listShares).toHaveBeenCalledOnce();
-        expect(clients.artifact.listTransfers).toHaveBeenCalledOnce();
+        expect(domains.artifact.state.shares).toEqual([share]);
+        expect(domains.artifact.state.transfers).toEqual([transfer]);
 
         await expect(store.revokeArtifactShare("share-1")).resolves.toBe(true);
-        expect(clients.artifact.revokeShare).toHaveBeenCalledWith("share-1");
-        expect(clients.artifact.listShares).toHaveBeenCalledTimes(2);
+        expect(revokeShare).toHaveBeenCalledWith("share-1");
 
         await expect(store.cancelArtifactTransfer("transfer-1")).resolves.toBe(
             true,
         );
-        expect(clients.artifact.cancelTransfer).toHaveBeenCalledWith(
-            "transfer-1",
-        );
-        expect(clients.artifact.listTransfers).toHaveBeenCalledTimes(3);
-        store.close();
+        expect(cancelTransfer).toHaveBeenCalledWith("transfer-1");
     });
 
     it("surfaces recorded Tool Call or log failures from a manual Tool Call refresh", async () => {
-        const clients = fakeClients();
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        const domains = new WebTestDomains();
+        const store = new WebStore(domains.domains);
         await store.load();
-        clients.tool.listCalls = vi.fn(async () => {
+        domains.domains.toolCalls.load = vi.fn(async (_instance: string) => {
             throw new Error("tool calls refresh failed");
         });
-        clients.runtime.readLogs = vi.fn(async () => []);
+        const readLogs = vi.spyOn(domains.domains.runtime("demo"), "readLogs");
 
         await expect(store.refreshToolCall("demo")).rejects.toThrow(
             "tool calls refresh failed",
         );
-        store.close();
+        expect(readLogs).toHaveBeenCalled();
     });
 
     it("refreshes every Audit read surface", async () => {
-        const clients = fakeClients();
-        clients.context.list = vi.fn(async () => []);
-        clients.tool.listCalls = vi.fn(async () => []);
-        clients.conversation.list = vi.fn(async () => []);
-        clients.runtime.readLogs = vi.fn(async () => []);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        const contextRefresh = vi.spyOn(domains.domains.context, "refresh");
+        const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
+        const conversationRefresh = vi.spyOn(
+            domains.domains.conversation,
+            "refreshInstance",
+        );
+        const messagesRefresh = vi.spyOn(
+            domains.domains.messages,
+            "refreshInstance",
+        );
+        const runtimeLoad = vi.spyOn(domains.domains.runtime("demo"), "load");
+        const readLogs = vi.spyOn(domains.domains.runtime("demo"), "readLogs");
+        const approvalLoad = vi.spyOn(domains.domains.approval("demo"), "load");
+        const store = new WebStore(domains.domains);
         await store.load();
 
-        vi.mocked(clients.context.list).mockClear();
-        vi.mocked(clients.tool.listCalls).mockClear();
-        vi.mocked(clients.conversation.list).mockClear();
-        vi.mocked(clients.runtime.readLogs).mockClear();
         await store.refreshAudit();
 
-        expect(clients.context.list).toHaveBeenCalledOnce();
-        expect(clients.tool.listCalls).toHaveBeenCalledOnce();
-        expect(clients.tool.listCalls).toHaveBeenCalledWith("demo", {
-            includeInput: false,
-            includeOutput: false,
-            limit: 200,
-            maxBytes: 512 * 1024,
-        });
-        expect(clients.conversation.list).toHaveBeenCalledOnce();
-        expect(clients.contextMessage.list).not.toHaveBeenCalled();
-        expect(clients.runtime.readLogs).toHaveBeenCalledOnce();
-        store.close();
+        expect(contextRefresh).toHaveBeenCalledOnce();
+        expect(loadToolCalls).toHaveBeenCalledWith("demo");
+        expect(conversationRefresh).toHaveBeenCalledWith("demo");
+        expect(messagesRefresh).toHaveBeenCalledWith("demo");
+        expect(runtimeLoad).toHaveBeenCalledWith("demo");
+        expect(readLogs).toHaveBeenCalledOnce();
+        expect(approvalLoad).toHaveBeenCalledWith("demo");
     });
 
-    it("refreshes heavy event state only after that state has been materialized", async () => {
-        const stream = controllableStream();
-        const clients = fakeClients({ subscribe: async () => stream });
-        clients.tool.listCalls = vi.fn(async () => []);
-        clients.contextMessage.list = vi.fn(async () => []);
-        clients.runtime.readLogs = vi.fn(async () => []);
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
-
-        await store.load();
-        expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        expect(clients.contextMessage.list).not.toHaveBeenCalled();
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
-
-        stream.push({
-            event: {
-                at: "2026-07-31T00:00:10Z",
-                instanceName: asInstanceName("demo"),
-                seq: 10,
-                type: "log.appended",
+    it("attempts every Context in a batch disable and reports the failure", async () => {
+        const domains = new WebTestDomains();
+        const disable = vi.fn(
+            async (ctxId: string): Promise<McpContextRecord> => {
+                if (ctxId === "ctx-b") throw new Error("ctx-b refused");
+                return { ctxId } as McpContextRecord;
             },
-            kind: "event",
-        });
-        stream.push({
-            event: {
-                at: "2026-07-31T00:00:11Z",
-                instanceName: asInstanceName("demo"),
-                seq: 11,
-                type: "toolCall.completed",
-            },
-            kind: "event",
-        });
-        await vi.waitFor(() =>
-            expect(store.state.readModel.instanceState.demo?.sequence).toBe(11),
         );
-        expect(clients.tool.listCalls).not.toHaveBeenCalled();
-        expect(clients.conversation.list).not.toHaveBeenCalled();
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
-
-        await store.refreshAudit();
-        vi.mocked(clients.tool.listCalls).mockClear();
-        vi.mocked(clients.conversation.list).mockClear();
-        vi.mocked(clients.runtime.readLogs).mockClear();
-
-        stream.push({
-            event: {
-                at: "2026-07-31T00:00:12Z",
-                instanceName: asInstanceName("demo"),
-                seq: 12,
-                type: "log.appended",
-            },
-            kind: "event",
-        });
-        stream.push({
-            event: {
-                at: "2026-07-31T00:00:13Z",
-                data: { toolName: "bash_run" },
-                instanceName: asInstanceName("demo"),
-                seq: 13,
-                type: "toolCall.completed",
-            },
-            kind: "event",
-        });
-        await vi.waitFor(() => {
-            expect(clients.runtime.readLogs).toHaveBeenCalled();
-            expect(clients.tool.listCalls).toHaveBeenCalled();
-        });
-        expect(clients.conversation.list).not.toHaveBeenCalled();
-
-        stream.push({
-            event: {
-                at: "2026-07-31T00:00:14Z",
-                data: { toolName: "todo_report" },
-                instanceName: asInstanceName("demo"),
-                seq: 14,
-                type: "toolCall.completed",
-            },
-            kind: "event",
-        });
-        await vi.waitFor(() =>
-            expect(clients.conversation.list).toHaveBeenCalledOnce(),
-        );
-        store.close();
-    });
-
-    it("attempts every Context in a batch disable and refreshes Context state after partial failure", async () => {
-        const clients = fakeClients();
-        clients.context.list = vi.fn(async () => []);
-        clients.context.disable = vi.fn(async (ctxId) => {
-            if (ctxId === "ctx-b") throw new Error("ctx-b refused");
-            return {} as Awaited<ReturnType<WebClients["context"]["disable"]>>;
-        });
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        domains.domains.context.disable = disable;
+        const store = new WebStore(domains.domains);
         await store.load();
-        vi.mocked(clients.context.list).mockClear();
 
         expect(await store.disableContexts(["ctx-a", "ctx-b", "ctx-c"])).toBe(
             false,
         );
-        expect(clients.context.disable).toHaveBeenCalledTimes(3);
-        expect(clients.context.disable).toHaveBeenNthCalledWith(1, "ctx-a");
-        expect(clients.context.disable).toHaveBeenNthCalledWith(2, "ctx-b");
-        expect(clients.context.disable).toHaveBeenNthCalledWith(3, "ctx-c");
-        expect(clients.context.list).toHaveBeenCalledOnce();
+        expect(disable).toHaveBeenCalledTimes(3);
+        expect(disable).toHaveBeenNthCalledWith(1, "ctx-a");
+        expect(disable).toHaveBeenNthCalledWith(2, "ctx-b");
+        expect(disable).toHaveBeenNthCalledWith(3, "ctx-c");
         expect(store.state.error).toContain("ctx-b");
-        store.close();
     });
 
-    it("automatically advances a queued Comment to delivered after the instance delivery event", async () => {
-        const stream = controllableStream();
-        const clients = fakeClients({ subscribe: async () => stream });
-        const queued: ContextMessageRecord = {
-            createdAt: "2026-08-07T00:00:00Z",
-            ctxId: "ctx-demo",
-            id: "message-delivery",
-            instance: "demo",
-            status: "sent",
-            text: "Continue after the next tool call.",
-        };
-        const delivered: ContextMessageRecord = {
-            ...queued,
-            callId: "call-delivery",
-            deliveredAt: "2026-08-07T00:00:01Z",
-            status: "delivered",
-        };
-        let messages: ContextMessageRecord[] = [];
-        clients.conversation.list = vi.fn(async () =>
-            messages.map((message) => ({
-                ...(message.callId === undefined
-                    ? {}
-                    : { callId: message.callId }),
-                createdAt: message.createdAt,
-                ctxId: message.ctxId,
-                ...(message.deliveredAt === undefined
-                    ? {}
-                    : { deliveredAt: message.deliveredAt }),
-                id: message.id,
-                kind: "comment" as const,
-                status: message.status,
-                text: message.text,
-            })),
-        );
-        clients.contextMessage.queue = vi.fn(async () => {
-            messages = [queued];
-            return queued;
+    it("reconnects the domain session and clears previous feedback", async () => {
+        const domains = new WebTestDomains();
+        domains.service.patch({ status: "offline" });
+        const reconnect = vi.fn(async () => {
+            domains.service.patch({ status: "online" });
         });
-        clients.tool.listCalls = vi.fn(async (_instance, query) =>
-            query?.callIds?.includes("call-delivery")
-                ? [
-                      {
-                          callId: "call-delivery",
-                          completedAt: "2026-08-07T00:00:01Z",
-                          ctxId: "ctx-demo",
-                          inputSummary: "{}",
-                          instance: asInstanceName("demo"),
-                          output: { comment: [queued.text] },
-                          source: "mcp" as const,
-                          startedAt: "2026-08-07T00:00:00Z",
-                          status: "completed" as const,
-                          toolName: "bash_run",
-                      },
-                  ]
-                : [],
-        );
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
-        await store.load();
-
-        expect(
-            await store.queueContextMessage("demo", queued.ctxId, queued.text),
-        ).toBe(true);
-        await vi.waitFor(() =>
-            expect(
-                store.state.readModel.instanceState.demo?.contextMessages.find(
-                    (message) => message.id === queued.id,
-                )?.status,
-            ).toBe("sent"),
-        );
-
-        messages = [delivered];
-        stream.push({
-            event: {
-                at: delivered.deliveredAt!,
-                data: {
-                    callId: delivered.callId!,
-                    ctxId: delivered.ctxId,
-                    ids: [delivered.id],
-                    status: "delivered",
-                },
-                instanceName: asInstanceName("demo"),
-                seq: 4,
-                type: "context.message.delivered",
-            },
-            kind: "event",
-        });
-
-        await vi.waitFor(() => {
-            const message =
-                store.state.readModel.instanceState.demo?.contextMessages.find(
-                    (candidate) => candidate.id === queued.id,
-                );
-            expect(message?.status).toBe("delivered");
-            expect(message?.callId).toBe("call-delivery");
-            expect(
-                store.state.readModel.instanceState.demo?.commentCalls[0]
-                    ?.callId,
-            ).toBe("call-delivery");
-        });
-        store.close();
-    });
-
-    it("uses the server overview as the authoritative operational read model", async () => {
-        const clients = fakeClients();
-        const overview = {
-            ...operationalOverview(),
-            alerts: [
-                {
-                    detail: "The server classified this alert.",
-                    id: "server-alert",
-                    kind: "overview.partial" as const,
-                    severity: "attention" as const,
-                    title: "Server alert",
-                },
-            ],
-            health: "critical" as const,
-        };
-        clients.overview.get = vi.fn(async () => overview);
-
-        const store = new WebStore(clients);
-        await store.load();
-
-        expect(store.state.readModel.overview).toBe(overview);
-        expect(clients.overview.get).toHaveBeenCalledOnce();
-    });
-
-    it("reconnects once and restores bounded subscriptions from the last sequence", async () => {
-        const subscriptions: number[] = [];
-        const clients = fakeClients({
-            subscribe: async (_name, fromSeq) => {
-                subscriptions.push(fromSeq);
-                return pendingStream();
-            },
-        });
-        const store = new WebStore(clients);
+        domains.domains.reconnect = reconnect;
+        const store = new WebStore(domains.domains);
 
         await store.load();
-        await Promise.all([store.reconnect(), store.reconnect()]);
+        await store.reconnect();
 
-        expect(clients.reconnect).toHaveBeenCalledOnce();
-        expect(subscriptions).toEqual([9, 9]);
-        expect(store.state.connection).toBe("online");
+        expect(reconnect).toHaveBeenCalledOnce();
+        expect(store.state.error).toBeUndefined();
+        expect(domains.service.state.status).toBe("online");
     });
 
     it("does not let an old mutation clear a new connection operation", async () => {
-        const clients = fakeClients();
-        let releaseOld!: () => void;
-        let releaseNew!: () => void;
-        clients.runtime.stop = vi
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => undefined);
+        const oldStop = deferred<InstanceSnapshot>();
+        const newStop = deferred<InstanceSnapshot>();
+        runtime.stop = vi
             .fn()
-            .mockImplementationOnce(
-                () =>
-                    new Promise<void>((resolve) => {
-                        releaseOld = resolve;
-                    }),
-            )
-            .mockImplementationOnce(
-                () =>
-                    new Promise<void>((resolve) => {
-                        releaseNew = resolve;
-                    }),
-            );
-        const store = new WebStore(clients);
+            .mockImplementationOnce(() => oldStop.promise)
+            .mockImplementationOnce(() => newStop.promise);
+        const store = new WebStore(domains.domains);
         await store.load();
 
         const oldOperation = store.stop("demo");
         await store.reconnect();
         const newOperation = store.stop("demo");
-        releaseOld();
+        oldStop.resolve(snapshot);
         await oldOperation;
 
         expect(store.state.operations["stop:demo"]).toBe("pending");
         expect(store.state.notice).toBeUndefined();
         expect(store.state.error).toBeUndefined();
-        releaseNew();
+        newStop.resolve(snapshot);
         await newOperation;
         expect(store.state.operations["stop:demo"]).toBeUndefined();
         store.close();
     });
 
     it("does not send duplicate start or stop mutations while an operation is pending", async () => {
-        const clients = fakeClients();
-        let finish!: () => void;
-        clients.runtime.stop = vi.fn(
-            () =>
-                new Promise<InstanceSnapshot>((resolve) => {
-                    finish = () => resolve(snapshot);
-                }),
-        );
-        const store = new WebStore(clients);
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => undefined);
+        const finish = deferred<InstanceSnapshot>();
+        const stop = vi.fn(() => finish.promise);
+        runtime.stop = stop;
+        const store = new WebStore(domains.domains);
         await store.load();
 
         const first = store.stop("demo");
         const second = store.stop("demo");
-        expect(clients.runtime.stop).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
         expect(store.state.operations["stop:demo"]).toBe("pending");
-        finish();
+        finish.resolve(snapshot);
         await Promise.all([first, second]);
         expect(store.state.operations["stop:demo"]).toBeUndefined();
     });
 
-    it("publishes a lifecycle snapshot through both instance read-model views", async () => {
-        const clients = fakeClients();
+    it("applies a lifecycle snapshot through the instance runtime", async () => {
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => undefined);
         const stopped: InstanceSnapshot = {
             ...snapshot,
             connectionState: "disconnected",
@@ -710,26 +488,27 @@ describe("WebStore", () => {
             ready: false,
             status: "stopped",
         };
-        clients.runtime.stop = vi.fn(async () => stopped);
-        const store = new WebStore(clients);
+        const stop = vi.fn(async () => {
+            domains.setRuntime("demo", { snapshot: stopped });
+            return stopped;
+        });
+        runtime.stop = stop;
+        const store = new WebStore(domains.domains);
         await store.load();
 
-        expect(store.state.readModel.instances[0]?.snapshot.status).toBe(
+        expect(domains.instances.state.instances[0]?.snapshot.status).toBe(
             "ready",
         );
         await store.stop("demo");
 
-        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe(
-            "stopped",
-        );
-        expect(store.state.readModel.instances[0]?.snapshot.status).toBe(
-            "stopped",
-        );
+        expect(stop).toHaveBeenCalledOnce();
+        expect(domains.runtime("demo").state.snapshot?.status).toBe("stopped");
+        expect(store.state.notice).toBe("demo stop requested.");
         store.close();
     });
 
-    it("creates reverse instances, returns enrollment, and refreshes control state", async () => {
-        const clients = fakeClients();
+    it("creates reverse instances, returns enrollment, and refreshes the registry", async () => {
+        const domains = new WebTestDomains();
         const draft = {
             approvalPolicy: { mode: "disabled" as const },
             enabled: true,
@@ -744,11 +523,11 @@ describe("WebStore", () => {
             security: { mode: "disabled" as const },
             workspace: { enabled: true },
         } satisfies InstanceCreateDraft;
-        clients.instance.create = vi.fn(async () => ({
+        const create = vi.fn(async (_draft: InstanceCreateDraft) => ({
             enabled: true,
             name: "reverse-web",
         }));
-        clients.instance.createSchema = vi.fn(async () => ({
+        const createSchema = vi.fn(async (): Promise<InstanceCreateSchema> => ({
             container: {
                 defaultMode: "existingImage" as const,
                 modes: [
@@ -767,7 +546,7 @@ describe("WebStore", () => {
             defaultSecurityMode: "disabled" as const,
             providers: ["local", "reverse"] as const,
         }));
-        clients.instance.validateCreate = vi.fn(async () => ({
+        const validateCreate = vi.fn(async (_draft: InstanceCreateDraft) => ({
             enabled: true,
             extensions: { model: ["instance"] },
             mcp: {
@@ -779,13 +558,18 @@ describe("WebStore", () => {
             provider: "reverse" as const,
             security: { mode: "disabled" as const },
         }));
-        clients.reverse.createCode = vi.fn(async () => ({
+        const createCode = vi.fn(async (_instance: string) => ({
             controllerUrl: "https://controller.example.test",
             deviceCode: "device-code",
             expiresAt: "2026-09-16T12:00:00.000Z",
             instance: asInstanceName("reverse-web"),
         }));
-        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        domains.domains.instances.create = create;
+        domains.domains.instances.createSchema = createSchema;
+        domains.domains.instances.validateCreate = validateCreate;
+        domains.domains.reverse.createCode = createCode;
+        const refresh = vi.spyOn(domains.domains.instances, "refresh");
+        const store = new WebStore(domains.domains);
         await store.load();
 
         await expect(store.getInstanceCreateSchema()).resolves.toMatchObject({
@@ -798,8 +582,9 @@ describe("WebStore", () => {
         });
         const result = await store.createInstance(draft);
 
-        expect(clients.instance.create).toHaveBeenCalledWith(draft);
-        expect(clients.reverse.createCode).toHaveBeenCalledWith("reverse-web");
+        expect(create).toHaveBeenCalledWith(draft);
+        expect(refresh).toHaveBeenCalled();
+        expect(createCode).toHaveBeenCalledWith("reverse-web");
         expect(result).toEqual({
             enrollment:
                 "devshell-worker enroll --controller https://controller.example.test --device-code device-code (expires 2026-09-16T12:00:00.000Z)",
@@ -808,288 +593,48 @@ describe("WebStore", () => {
         store.close();
     });
 
-    it("polls overview only while online, visible, observed, and on Overview", async () => {
-        vi.useFakeTimers();
-        let visible = true;
-        const clients = fakeClients();
-        clients.overview.get = vi.fn(async () => operationalOverview());
-        const store = new WebStore(clients, {
-            isPageVisible: () => visible,
-            overviewRefreshIntervalMs: 1_000,
-        });
-        const unsubscribe = store.subscribe(() => undefined);
+    it("toggles the Overview activity through the overview domain", async () => {
+        const domains = new WebTestDomains();
+        const start = vi.spyOn(domains.domains.overview, "start");
+        const stop = vi.spyOn(domains.domains.overview, "stop");
+        const scheduleRefresh = vi.spyOn(
+            domains.domains.overview,
+            "scheduleRefresh",
+        );
+        const store = new WebStore(domains.domains);
         await store.load();
 
-        expect(clients.overview.get).toHaveBeenCalledOnce();
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledOnce();
-
         store.setOverviewActive(true);
-        await vi.advanceTimersByTimeAsync(0);
-        expect(clients.overview.get).toHaveBeenCalledTimes(2);
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledTimes(3);
+        expect(start).toHaveBeenCalledOnce();
+        expect(scheduleRefresh).toHaveBeenCalledWith(0);
 
-        visible = false;
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledTimes(3);
-
-        visible = true;
-        unsubscribe();
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledTimes(3);
-        store.close();
-        vi.useRealTimers();
+        store.setOverviewActive(false);
+        expect(stop).toHaveBeenCalledOnce();
     });
 });
 
-function fakeClients(
-    overrides: { subscribe?: WebClients["runtime"]["subscribe"] } = {},
-): WebClients & {
-    reconnect: ReturnType<typeof vi.fn>;
-    emitTransportClose(error: Error): void;
-    runtime: WebClients["runtime"] & { refresh: ReturnType<typeof vi.fn> };
-} {
-    const transportListeners = new Set<(error: Error) => void>();
-    const refresh = vi.fn(async () => ({
-        lastSeq: 9,
-        snapshot: { ...snapshot, lastSeq: 9 },
-    }));
-    return {
-        close() {},
-        emitTransportClose(error) {
-            for (const listener of transportListeners) listener(error);
-        },
-        onTransportClose(listener) {
-            transportListeners.add(listener);
-            return () => transportListeners.delete(listener);
-        },
-        reconnect: vi.fn(async () => undefined),
-        artifact: {
-            cancelTransfer: vi.fn(async (transferId: string) => ({
-                status: "cancelled" as const,
-                transferId,
-            })),
-            listShares: vi.fn(async () => []),
-            listTransfers: vi.fn(async () => []),
-            revokeShare: vi.fn(async (shareId: string) => ({
-                revoked: true as const,
-                shareId,
-            })),
-        } as unknown as WebClients["artifact"],
-        cli: {} as WebClients["cli"],
-        config: {
-            get: vi.fn(async () => ({
-                instances: [{ enabled: true, name: "demo", provider: "local" }],
-            })),
-        } as unknown as WebClients["config"],
-        conversation: {
-            list: vi.fn(async () => []),
-            preferences: vi.fn(async () => ({
-                hiddenContexts: {},
-                orderByWorkspace: {},
-                titles: {},
-                version: 1 as const,
-                workspaceOrder: [],
-            })),
-            updatePreferences: vi.fn(async () => ({
-                hiddenContexts: {},
-                orderByWorkspace: {},
-                titles: {},
-                version: 1 as const,
-                workspaceOrder: [],
-            })),
-        },
-        extension: {} as WebClients["extension"],
-        context: {
-            disable: async () => {
-                throw new Error("Not used.");
-            },
-            list: async () => [],
-            renew: async () => {
-                throw new Error("Not used.");
-            },
-        },
-        debug: {} as WebClients["debug"],
-        reverse: {} as WebClients["reverse"],
-        service: {
-            hello: async () => ({
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            }),
-            ping: async () => ({ pong: true }),
-            restart: async () => ({ accepted: true }),
-            status: async () => ({ instanceCount: 1, ok: true }),
-        },
-        instance: {
-            list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
-        } as WebClients["instance"],
-        overview: { get: async () => operationalOverview() },
-        tool: {
-            call: async () => ({}),
-            callStreaming: async () => ({}),
-            closeSession: async () => ({}),
-            listCalls: async () => [],
-            listApprovals: async () => [],
-            getApproval: async () => {
-                throw new Error("Not used.");
-            },
-            decideApproval: async () => {
-                throw new Error("Not used.");
-            },
-            openSession: async (_instance, workspace) => ({
-                tools: [],
-                workspace,
-            }),
-        },
-        terminal: {
-            attach: async () => {
-                throw new Error("Not used.");
-            },
-            get: async () => {
-                throw new Error("Not used.");
-            },
-            kill: async () => {
-                throw new Error("Not used.");
-            },
-            list: async () => [],
-            open: async () => {
-                throw new Error("Not used.");
-            },
-        },
-        goal: { get: async () => ({ goals: [], lastSeq: 3 }) },
-        contextMessage: {
-            list: vi.fn(async () => []),
-            queue: async (_instance, input) => ({
-                createdAt: "2026-07-31T00:00:00Z",
-                id: "message",
-                instance: "demo",
-                status: "pending",
-                ...input,
-            }),
-        },
-        todo: {
-            delete: async () => ({}),
-            get: async () => ({
-                lastSeq: 3,
-                todo: {
-                    items: [],
-                    revision: 1,
-                    summary: { completed: 0, total: 0 },
-                },
-            }),
-            subscribe: async () => pendingStream(),
-        },
-        mcp: {
-            status: async () => ({
-                authMode: "none",
-                oauthReady: false,
-                running: true,
-            }),
-            listApprovals: async () => [],
-            decideApproval: async () => {
-                throw new Error("Not used.");
-            },
-        },
-        tui: {
-            action: async () => ({ items: [] }),
-            page: async () => ({ items: [] }),
-            pages: async () => [],
-        },
-        runtime: {
-            openStart: async () => {
-                throw new Error("Not used.");
-            },
-            snapshot: async () => ({ lastSeq: 3, snapshot }),
-            refresh,
-            readLogs: async () => [],
-            start: async () => snapshot,
-            stop: async () => snapshot,
-            subscribe: overrides.subscribe ?? (async () => pendingStream()),
-        },
-        web: {
-            action: async () => ({ tables: [] }),
-            applications: async () => [],
-            page: async () => ({ tables: [] }),
-            pages: async () => [],
-        },
-    };
-}
-
-function operationalOverview() {
-    return {
-        activity: [],
-        alerts: [],
-        controller: { pid: 1, uptimeSeconds: 1 },
-        counts: {
-            activeTodos: 0,
-            failedCalls24h: 0,
-            instancesAttention: 0,
-            instancesCritical: 0,
-            instancesReady: 1,
-            instancesTotal: 1,
-            pendingApprovals: 0,
-        },
-        generatedAt: "2026-07-31T00:00:00Z",
-        health: "healthy" as const,
-        instances: [],
-        todos: [],
-    };
-}
-
-function pendingStream(): WebRuntimeStream {
-    return {
-        close() {},
-        next: async () => await new Promise<never>(() => undefined),
-    } as unknown as WebRuntimeStream;
-}
-
-type WebRuntimeMessage = Awaited<ReturnType<WebRuntimeStream["next"]>>;
-
-function controllableStream(): WebRuntimeStream & {
-    push(message: WebRuntimeMessage): void;
-} {
-    const queued: WebRuntimeMessage[] = [];
-    const waiting: Array<(message: WebRuntimeMessage) => void> = [];
-    let closed = false;
-    return {
-        close() {
-            if (closed) return;
-            closed = true;
-            for (const resolve of waiting.splice(0))
-                resolve({ kind: "closed" });
-        },
-        async next() {
-            const message = queued.shift();
-            if (message !== undefined) return message;
-            if (closed) return { kind: "closed" };
-            return await new Promise<WebRuntimeMessage>((resolve) =>
-                waiting.push(resolve),
-            );
-        },
-        push(message) {
-            const resolve = waiting.shift();
-            if (resolve === undefined) queued.push(message);
-            else resolve(message);
-        },
-    } as WebRuntimeStream & { push(message: WebRuntimeMessage): void };
-}
-
 describe("WebStore recovery and consistency", () => {
     it("returns the result of each Context message operation independently", async () => {
-        const clients = fakeClients();
-        clients.contextMessage.queue = vi.fn(async (_instance, input) => {
-            if (input.ctxId === "ctx-b") throw new Error("queue b failed");
-            return {
-                createdAt: "2026-07-31T00:00:00Z",
-                ctxId: input.ctxId,
-                id: input.ctxId,
-                instance: "demo",
-                status: "pending" as const,
-                text: input.text,
-            };
-        });
-        const store = new WebStore(clients);
+        const domains = new WebTestDomains();
+        const queue = vi.fn(
+            async (
+                _instance: string,
+                ctxId: string,
+                text: string,
+            ): Promise<ContextMessageRecord> => {
+                if (ctxId === "ctx-b") throw new Error("queue b failed");
+                return {
+                    createdAt: "2026-07-31T00:00:00Z",
+                    ctxId,
+                    id: ctxId,
+                    instance: "demo",
+                    status: "pending",
+                    text,
+                };
+            },
+        );
+        domains.domains.messages.queue = queue;
+        const store = new WebStore(domains.domains);
         await store.load();
 
         const result = await Promise.all([
@@ -1102,91 +647,86 @@ describe("WebStore recovery and consistency", () => {
     });
 
     it("loads logs with Tool Calls when Audit is materialized", async () => {
-        const clients = fakeClients();
-        clients.runtime.readLogs = vi.fn(async () => [
-            {
-                at: "2026-07-31T00:00:01Z",
-                callId: "call-1",
-                instanceName: asInstanceName("demo"),
-                message: "output",
-                seq: 4,
-                stream: "stdout" as const,
-            },
-        ]);
-        const store = new WebStore(clients);
+        const domains = new WebTestDomains();
+        domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        domains.setRuntime("demo", {
+            logs: [
+                {
+                    at: "2026-07-31T00:00:01Z",
+                    callId: "call-1",
+                    instanceName: asInstanceName("demo"),
+                    message: "output",
+                    seq: 4,
+                    stream: "stdout",
+                },
+            ],
+        });
+        const readLogs = vi.spyOn(domains.domains.runtime("demo"), "readLogs");
+        const store = new WebStore(domains.domains);
 
         await store.load();
-        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+        expect(readLogs).not.toHaveBeenCalled();
         await store.refreshAudit();
 
-        expect(
-            store.state.readModel.instanceState.demo?.logs?.[0]?.callId,
-        ).toBe("call-1");
+        expect(readLogs).toHaveBeenCalledOnce();
+        expect(domains.runtime("demo").state.logs?.[0]?.callId).toBe("call-1");
     });
 });
 
 describe("WebStore operation and transport boundaries", () => {
     it("restarts Control through reconnect without cancelling its own result", async () => {
-        const clients = fakeClients();
-        clients.service.restart = vi.fn(async () => ({ accepted: true }));
-        const store = new WebStore(clients, {
-            overviewRefreshIntervalMs: 0,
-        });
+        const domains = new WebTestDomains();
+        const restart = vi.fn(async () => ({}));
+        const reconnect = vi.fn(async () => undefined);
+        domains.domains.service.restart = restart;
+        domains.domains.reconnect = reconnect;
+        const store = new WebStore(domains.domains);
         await store.load();
 
         await expect(store.restartControl()).resolves.toBe(true);
 
-        expect(clients.service.restart).toHaveBeenCalledOnce();
-        expect(clients.reconnect).toHaveBeenCalledOnce();
-        expect(store.state.connection).toBe("online");
+        expect(restart).toHaveBeenCalledOnce();
+        expect(reconnect).toHaveBeenCalledOnce();
+        expect(domains.service.state.status).toBe("online");
         expect(store.state.notice).toBe("Control runtime restarted.");
-        store.close();
     });
 
     it("completes a successful lifecycle operation without waiting for auxiliary reads", async () => {
-        const clients = fakeClients();
-        const store = new WebStore(clients, {
-            requestTimeoutMs: 0,
-            overviewRefreshIntervalMs: 0,
-        });
-        await store.load();
-        clients.runtime.start = vi.fn(async (): Promise<InstanceSnapshot> => ({
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => undefined);
+        const running: InstanceSnapshot = {
             ...snapshot,
             lastSeq: 10,
             status: "running",
-        }));
-        clients.runtime.refresh = vi.fn(
-            async () => await new Promise<never>(() => undefined),
-        );
-        clients.contextMessage.list = vi.fn(
-            async () => await new Promise<never>(() => undefined),
-        );
-        clients.overview.get = vi.fn(
-            async () => await new Promise<never>(() => undefined),
-        );
+        };
+        runtime.start = vi.fn(async (_options?: ProcessStartOptions) => {
+            domains.setRuntime("demo", { snapshot: running });
+            return running;
+        });
+        const store = new WebStore(domains.domains, { requestTimeoutMs: 0 });
+        await store.load();
 
         await store.start("demo");
 
-        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe(
-            "running",
-        );
+        expect(domains.runtime("demo").state.snapshot?.status).toBe("running");
         expect(store.state.operations["start:demo"]).toBeUndefined();
-        store.close();
     });
 
     it("clears a primary operation when its RPC exceeds the operation timeout", async () => {
         vi.useFakeTimers();
-        const clients = fakeClients();
-        const store = new WebStore(clients, {
-            operationTimeoutMs: 100,
-            overviewRefreshIntervalMs: 0,
-        });
-        await store.load();
+        const domains = new WebTestDomains();
+        const runtime = domains.domains.runtime("demo");
+        runtime.load = vi.fn(async (_instance: string) => undefined);
         let operationSignal: AbortSignal | undefined;
-        clients.runtime.start = vi.fn(async (_instance, options) => {
+        runtime.start = vi.fn(async (options?: ProcessStartOptions) => {
             operationSignal = options?.signal;
             return await new Promise<InstanceSnapshot>(() => undefined);
         });
+        const store = new WebStore(domains.domains, {
+            operationTimeoutMs: 100,
+        });
+        await store.load();
 
         const request = store.start("demo");
         await vi.advanceTimersByTimeAsync(100);
@@ -1195,19 +735,13 @@ describe("WebStore operation and transport boundaries", () => {
         expect(store.state.operations["start:demo"]).toBeUndefined();
         expect(operationSignal?.aborted).toBe(true);
         expect(store.state.error).toBeTruthy();
-        store.close();
-        vi.useRealTimers();
-    });
-
-    it("marks the control connection offline when the shared transport closes", async () => {
-        const clients = fakeClients();
-        const store = new WebStore(clients);
-        await store.load();
-
-        clients.emitTransportClose(new Error("WebSocket connection closed."));
-
-        expect(store.state.connection).toBe("offline");
-        expect(store.state.error).toBe("WebSocket connection closed.");
-        store.close();
     });
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((settle) => {
+        resolve = settle;
+    });
+    return { promise, resolve };
+}

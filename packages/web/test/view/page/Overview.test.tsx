@@ -1,20 +1,26 @@
 import { render, screen, within } from "@testing-library/react";
-import {
-    asInstanceName,
-    createInitialControlReadModelState,
-} from "@portable-devshell/shared/browser";
+import { asInstanceName } from "@portable-devshell/shared";
 import { expect, it } from "vitest";
 
-import { WorkerDiagnostics } from "../../../src/view/page/Instances.js";
-import { Overview } from "../../../src/view/page/Overview.js";
-import type { WebState } from "../../../src/state/Store.js";
 import {
     formatBytes,
     formatDuration,
     formatPercent,
-} from "@portable-devshell/shared/browser";
+} from "../../../src/view/Presentation.js";
+import { WorkerDiagnostics } from "../../../src/view/page/Instances.js";
+import { Overview } from "../../../src/view/page/Overview.js";
 import { overviewAlertRoute } from "../../../src/view/ReadModel.js";
 import { presentWorker } from "../../../src/view/page/Instances.js";
+import {
+    WebTestDomains,
+    withWebDomains,
+} from "../../support/DomainHarness.js";
+
+function renderOverview(overview?: unknown) {
+    const domains = new WebTestDomains();
+    if (overview !== undefined) domains.setOverview(overview);
+    return render(withWebDomains(domains, <Overview />));
+}
 
 it("formats resource boundaries without representing unavailable values as zero", () => {
     expect(formatBytes(0)).toBe("0 B");
@@ -43,7 +49,7 @@ it("presents worker handshake metadata only when the server supplied it", () => 
             packageManager: "apt",
             shell: { executable: "/bin/zsh", kind: "zsh", version: "5.9" },
         },
-        protocolVersion: 3,
+        protocolVersion: "3",
         version: "1.2.3",
     };
     expect(presentWorker(worker)?.platform).toBe("linux / arm64");
@@ -55,70 +61,52 @@ it("presents worker handshake metadata only when the server supplied it", () => 
 });
 
 it("shows an Overview failure instead of an endless loading message", () => {
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            failures: {
-                overview: {
-                    error: new Error("overview timed out"),
-                    id: "overview",
-                    key: "overview",
-                },
-            },
-        },
-    };
+    const domains = new WebTestDomains();
+    Object.assign(domains.overview.state, {
+        failure: new Error("overview timed out"),
+    });
 
-    render(<Overview state={state} />);
+    render(withWebDomains(domains, <Overview />));
 
     expect(screen.getByText(/overview timed out/)).toBeInTheDocument();
 });
 
 it("links an Overview instance directly to its bookmarkable detail route", () => {
     const demo = asInstanceName("demo");
-    const state: WebState = {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            overview: {
-                activity: [],
-                alerts: [],
-                controller: { pid: 1, uptimeSeconds: 1 },
-                counts: {
-                    activeTodos: 0,
-                    failedCalls24h: 0,
-                    instancesAttention: 0,
-                    instancesCritical: 0,
-                    instancesReady: 1,
-                    instancesTotal: 1,
-                    pendingApprovals: 0,
-                },
-                generatedAt: "2026-09-16T00:00:00Z",
-                health: "healthy",
-                instances: [
-                    {
-                        mcpEnabled: true,
-                        name: demo,
-                        pendingApprovals: 0,
-                        provider: "local",
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 1,
-                            name: demo,
-                            ready: true,
-                            status: "ready",
-                        },
-                    },
-                ],
-                todos: [],
-            },
-        },
-    };
 
-    render(<Overview state={state} />);
+    renderOverview({
+        activity: [],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 1 },
+        counts: {
+            activeTodos: 0,
+            failedCalls24h: 0,
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesReady: 1,
+            instancesTotal: 1,
+            pendingApprovals: 0,
+        },
+        generatedAt: "2026-09-16T00:00:00Z",
+        health: "healthy",
+        instances: [
+            {
+                mcpEnabled: true,
+                name: demo,
+                pendingApprovals: 0,
+                provider: "local",
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: demo,
+                    ready: true,
+                    status: "ready",
+                },
+            },
+        ],
+        todos: [],
+    });
 
     expect(screen.getByRole("link", { name: "demo" })).toHaveAttribute(
         "href",
@@ -130,43 +118,34 @@ function overviewState(counts: {
     instancesAttention: number;
     instancesCritical: number;
     instancesTotal: number;
-}): WebState {
+}) {
     return {
-        connection: "online",
-        operations: {},
-        readModel: {
-            ...createInitialControlReadModelState(),
-            overview: {
-                activity: [],
-                alerts: [],
-                controller: { pid: 1, uptimeSeconds: 1 },
-                counts: {
-                    activeTodos: 0,
-                    failedCalls24h: 0,
-                    instancesAttention: counts.instancesAttention,
-                    instancesCritical: counts.instancesCritical,
-                    instancesReady: 0,
-                    instancesTotal: counts.instancesTotal,
-                    pendingApprovals: 0,
-                },
-                generatedAt: "2026-09-16T00:00:00Z",
-                health: "healthy",
-                instances: [],
-                todos: [],
-            },
+        activity: [],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 1 },
+        counts: {
+            activeTodos: 0,
+            failedCalls24h: 0,
+            instancesAttention: counts.instancesAttention,
+            instancesCritical: counts.instancesCritical,
+            instancesReady: 0,
+            instancesTotal: counts.instancesTotal,
+            pendingApprovals: 0,
         },
+        generatedAt: "2026-09-16T00:00:00Z",
+        health: "healthy",
+        instances: [],
+        todos: [],
     };
 }
 
 it("separates the Instances total from attention and critical annotations", () => {
-    render(
-        <Overview
-            state={overviewState({
-                instancesAttention: 2,
-                instancesCritical: 1,
-                instancesTotal: 5,
-            })}
-        />,
+    renderOverview(
+        overviewState({
+            instancesAttention: 2,
+            instancesCritical: 1,
+            instancesTotal: 5,
+        }),
     );
 
     const metrics = screen.getByLabelText("Operational summary");
@@ -178,14 +157,12 @@ it("separates the Instances total from attention and critical annotations", () =
 });
 
 it("omits zero instance attention and critical annotations", () => {
-    render(
-        <Overview
-            state={overviewState({
-                instancesAttention: 0,
-                instancesCritical: 0,
-                instancesTotal: 5,
-            })}
-        />,
+    renderOverview(
+        overviewState({
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesTotal: 5,
+        }),
     );
 
     const metrics = screen.getByLabelText("Operational summary");
@@ -194,14 +171,12 @@ it("omits zero instance attention and critical annotations", () => {
 });
 
 it("renders the Alerts heading as plain text instead of a self-referential link", () => {
-    render(
-        <Overview
-            state={overviewState({
-                instancesAttention: 0,
-                instancesCritical: 0,
-                instancesTotal: 0,
-            })}
-        />,
+    renderOverview(
+        overviewState({
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesTotal: 0,
+        }),
     );
 
     expect(

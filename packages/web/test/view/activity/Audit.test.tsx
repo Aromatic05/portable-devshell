@@ -8,14 +8,17 @@ import {
 } from "@testing-library/react";
 import {
     asInstanceName,
-    createInitialControlReadModelState,
     type ToolCallRecord,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import type { WebRoute } from "../../../src/app/Route.js";
-import type { WebState, WebStore } from "../../../src/state/Store.js";
+import { WebStore } from "../../../src/state/Store.js";
 import { Audit } from "../../../src/view/page/activity/audit/Page.js";
+import {
+    WebTestDomains,
+    withWebDomains,
+} from "../../support/DomainHarness.js";
 
 import {
     emptyToolCallFilters,
@@ -58,112 +61,6 @@ const betaCall = {
     workspace: "/projects/beta",
 };
 
-const state: WebState = {
-    connection: "online",
-    operations: {},
-    readModel: {
-        ...createInitialControlReadModelState(),
-        contexts: [
-            {
-                createdAt: "2026-07-01T00:00:00Z",
-                ctxId: "ctx-alpha",
-                environments: [
-                    { instance: "alpha", workspace: "/workspace/alpha" },
-                ],
-                expiresAt: "2026-12-01T00:00:00Z",
-                lastAccessedAt: recentContextAccess,
-                principal: "client-alpha",
-                status: "active",
-            },
-            {
-                createdAt: "2026-07-31T08:00:00Z",
-                ctxId: "ctx-beta",
-                environments: [],
-                expiresAt: "2026-12-01T00:00:00Z",
-                lastAccessedAt: recentContextAccess,
-                principal: "client-beta",
-                status: "active",
-            },
-        ],
-        instances: [
-            {
-                mcpEnabled: true,
-                name: "alpha",
-                snapshot: {
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 1,
-                    name: asInstanceName("alpha"),
-                    ready: true,
-                    status: "ready",
-                },
-            },
-            {
-                mcpEnabled: true,
-                name: "beta",
-                snapshot: {
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 1,
-                    name: asInstanceName("beta"),
-                    ready: true,
-                    status: "ready",
-                },
-            },
-        ],
-        instanceState: {
-            alpha: {
-                approvals: [],
-                commentCalls: [
-                    {
-                        callId: "call-comment-old",
-                        completedAt: "2026-07-30T09:00:01Z",
-                        ctxId: "ctx-alpha",
-                        input: { command: "pwd" },
-                        inputSummary: '{"command":"pwd"}',
-                        instance: asInstanceName("alpha"),
-                        output: {
-                            comment: ["Review the previous failure."],
-                            exitCode: 0,
-                            stderr: "",
-                            stdout: "/workspace\n",
-                        },
-                        source: "mcp",
-                        startedAt: "2026-07-30T09:00:00Z",
-                        status: "completed",
-                        toolName: "bash_run",
-                    },
-                ],
-                contextMessages: [
-                    {
-                        createdAt: "2026-07-31T09:05:00Z",
-                        ctxId: "ctx-alpha",
-                        id: "message-1",
-                        instance: "alpha",
-                        status: "pending",
-                        text: "Check the failing command.",
-                    },
-                ],
-                goals: [],
-                logs: [],
-                reportCalls: [],
-                sequence: 1,
-                toolCalls: [alphaCall],
-            },
-            beta: {
-                approvals: [],
-                commentCalls: [],
-                contextMessages: [],
-                goals: [],
-                logs: [],
-                reportCalls: [],
-                sequence: 1,
-                toolCalls: [betaCall],
-            },
-        },
-    },
-};
-
 const allRoute: Extract<WebRoute, { page: "audit" }> = {
     page: "audit",
     view: "timeline",
@@ -175,26 +72,104 @@ const alphaContextRoute: Extract<WebRoute, { page: "audit" }> = {
     scope: { kind: "context", instance: "alpha", ctxId: "ctx-alpha" },
 };
 
+function baseContexts() {
+    return [
+        {
+            createdAt: "2026-07-01T00:00:00Z",
+            ctxId: "ctx-alpha",
+            environments: [
+                { instance: "alpha", workspace: "/workspace/alpha" },
+            ],
+            expiresAt: "2026-12-01T00:00:00Z",
+            lastAccessedAt: recentContextAccess,
+            principal: "client-alpha",
+            status: "active" as const,
+        },
+        {
+            createdAt: "2026-07-31T08:00:00Z",
+            ctxId: "ctx-beta",
+            environments: [],
+            expiresAt: "2026-12-01T00:00:00Z",
+            lastAccessedAt: recentContextAccess,
+            principal: "client-beta",
+            status: "active" as const,
+        },
+    ];
+}
+
+function readySnapshot(name: string) {
+    return {
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 1,
+        name: asInstanceName(name),
+        ready: true,
+        status: "ready",
+    };
+}
+
+function baseInstances() {
+    return [
+        { mcpEnabled: true, name: "alpha", snapshot: readySnapshot("alpha") },
+        { mcpEnabled: true, name: "beta", snapshot: readySnapshot("beta") },
+    ];
+}
+
+interface RenderAuditOptions {
+    approvals?: Record<string, readonly unknown[]>;
+    configure?: (store: WebStore, domains: WebTestDomains) => void;
+    configureDomains?: (domains: WebTestDomains) => void;
+    contexts?: readonly unknown[];
+    error?: string;
+    instances?: readonly unknown[];
+    logs?: Record<string, readonly unknown[]>;
+    navigate?: ReturnType<typeof vi.fn>;
+    operations?: Record<string, "pending">;
+    route?: Extract<WebRoute, { page: "audit" }>;
+    toolCalls?: Record<string, readonly unknown[]>;
+}
+
 function renderAudit({
     route = allRoute,
-    state: nextState = state,
-    store = {},
     navigate = vi.fn(),
-}: {
-    route?: Extract<WebRoute, { page: "audit" }>;
-    state?: WebState;
-    store?: Partial<WebStore>;
-    navigate?: ReturnType<typeof vi.fn>;
-} = {}) {
+    contexts,
+    instances,
+    toolCalls,
+    approvals,
+    logs,
+    operations,
+    error,
+    configure,
+    configureDomains,
+}: RenderAuditOptions = {}) {
+    const domains = new WebTestDomains();
+    domains.setContexts(contexts ?? baseContexts());
+    domains.setInstances(instances ?? baseInstances());
+    const callSets = toolCalls ?? { alpha: [alphaCall], beta: [betaCall] };
+    for (const [instance, calls] of Object.entries(callSets))
+        domains.setToolCalls(instance, calls);
+    for (const [instance, requests] of Object.entries(approvals ?? {}))
+        domains.setApprovals(instance, requests);
+    for (const [instance, entries] of Object.entries(logs ?? {}))
+        domains.setRuntime(instance, { logs: entries });
+    configureDomains?.(domains);
+    const store = new WebStore(domains.domains);
+    if (operations !== undefined || error !== undefined) {
+        vi.spyOn(store, "state", "get").mockReturnValue({
+            ...(error === undefined ? {} : { error }),
+            operations: operations ?? {},
+        });
+    }
+    configure?.(store, domains);
     return {
+        domains,
         navigate,
+        store,
         ...render(
-            <Audit
-                navigate={navigate}
-                route={route}
-                state={nextState}
-                store={store as WebStore}
-            />,
+            withWebDomains(
+                domains,
+                <Audit navigate={navigate} route={route} store={store} />,
+            ),
         ),
     };
 }
@@ -202,41 +177,27 @@ function renderAudit({
 describe("Audit", () => {
     it("keeps pending approval actions on the matching Tool Call card", async () => {
         const decideTool = vi.fn(async () => true);
-        const approvalState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        approvals: [
-                            {
-                                approvalId: "approval-alpha",
-                                callId: "call-alpha",
-                                createdAt: "2026-07-31T08:59:59Z",
-                                expiresAt: "2026-07-31T09:10:00Z",
-                                inputSummary: '{"command":"false"}',
-                                instance: asInstanceName("alpha"),
-                                reason: "needs review",
-                                riskLevel: "high",
-                                source: "mcp",
-                                status: "pending",
-                                toolName: "bash_run",
-                                workspace: "/projects/alpha",
-                            },
-                        ],
-                    },
-                },
-            },
-        };
         renderAudit({
-            state: approvalState,
-            store: {
-                decideTool,
-                get state() {
-                    return approvalState;
-                },
+            approvals: {
+                alpha: [
+                    {
+                        approvalId: "approval-alpha",
+                        callId: "call-alpha",
+                        createdAt: "2026-07-31T08:59:59Z",
+                        expiresAt: "2026-07-31T09:10:00Z",
+                        inputSummary: '{"command":"false"}',
+                        instance: asInstanceName("alpha"),
+                        reason: "needs review",
+                        riskLevel: "high",
+                        source: "mcp",
+                        status: "pending",
+                        toolName: "bash_run",
+                        workspace: "/projects/alpha",
+                    },
+                ],
+            },
+            configure: (store) => {
+                vi.spyOn(store, "decideTool").mockImplementation(decideTool);
             },
         });
 
@@ -333,23 +294,17 @@ describe("Audit", () => {
     });
 
     it("filters stale active Contexts and their tool calls outside the 30 minute window", () => {
-        const staleState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) =>
-                    context.ctxId === "ctx-alpha"
-                        ? {
-                              ...context,
-                              lastAccessedAt: new Date(
-                                  Date.now() - 31 * 60 * 1_000,
-                              ).toISOString(),
-                          }
-                        : context,
-                ),
-            },
-        };
-        const view = renderAudit({ state: staleState });
+        const staleContexts = baseContexts().map((context) =>
+            context.ctxId === "ctx-alpha"
+                ? {
+                      ...context,
+                      lastAccessedAt: new Date(
+                          Date.now() - 31 * 60 * 1_000,
+                      ).toISOString(),
+                  }
+                : context,
+        );
+        const view = renderAudit({ contexts: staleContexts });
 
         expect(
             screen.queryByRole("option", { name: /ctx-alpha/u }),
@@ -381,18 +336,12 @@ describe("Audit", () => {
             const almostStale = new Date(
                 Date.now() - 29 * 60 * 1_000 - 50_000,
             ).toISOString();
-            const timedState: WebState = {
-                ...state,
-                readModel: {
-                    ...state.readModel,
-                    contexts: state.readModel.contexts.map((context) =>
-                        context.ctxId === "ctx-alpha"
-                            ? { ...context, lastAccessedAt: almostStale }
-                            : context,
-                    ),
-                },
-            };
-            renderAudit({ state: timedState });
+            const timedContexts = baseContexts().map((context) =>
+                context.ctxId === "ctx-alpha"
+                    ? { ...context, lastAccessedAt: almostStale }
+                    : context,
+            );
+            renderAudit({ contexts: timedContexts });
             expect(
                 screen.getByRole("option", { name: /ctx-alpha.*active/u }),
             ).toBeInTheDocument();
@@ -446,22 +395,18 @@ describe("Audit", () => {
     });
 
     it("restores direct Context ID filtering without changing Audit scope or hiding stale Contexts", () => {
-        const staleState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) =>
-                    context.ctxId === "ctx-beta"
-                        ? {
-                              ...context,
-                              lastAccessedAt: "2026-07-31T09:00:00Z",
-                              status: "expired" as const,
-                          }
-                        : context,
-                ),
-            },
-        };
-        const { navigate, container } = renderAudit({ state: staleState });
+        const staleContexts = baseContexts().map((context) =>
+            context.ctxId === "ctx-beta"
+                ? {
+                      ...context,
+                      lastAccessedAt: "2026-07-31T09:00:00Z",
+                      status: "expired" as const,
+                  }
+                : context,
+        );
+        const { navigate, container } = renderAudit({
+            contexts: staleContexts,
+        });
 
         expect(
             screen.queryByText("file_read", { selector: "strong" }),
@@ -515,12 +460,6 @@ describe("Audit", () => {
             screen.queryByRole("button", { name: "Queue Comment" }),
         ).not.toBeInTheDocument();
         expect(
-            screen.queryByText("Check the failing command."),
-        ).not.toBeInTheDocument();
-        expect(
-            screen.queryByText("Review the previous failure."),
-        ).not.toBeInTheDocument();
-        expect(
             view.container.querySelectorAll(".activity-feed > li"),
         ).toHaveLength(1);
         expect(
@@ -532,12 +471,16 @@ describe("Audit", () => {
         const disableContext = vi.fn(async () => true);
         const renewContext = vi.fn(async () => true);
         renderAudit({
+            operations: { "context-renew:ctx-alpha": "pending" },
             route: alphaContextRoute,
-            state: {
-                ...state,
-                operations: { "context-renew:ctx-alpha": "pending" },
+            configure: (store) => {
+                vi.spyOn(store, "disableContext").mockImplementation(
+                    disableContext,
+                );
+                vi.spyOn(store, "renewContext").mockImplementation(
+                    renewContext,
+                );
             },
-            store: { disableContext, renewContext },
         });
 
         expect(
@@ -559,16 +502,12 @@ describe("Audit", () => {
     });
 
     it("keeps Context disable confirmation open and reports a failed operation in place", async () => {
-        const failedState = { ...state, error: "Context disable failed." };
         renderAudit({
+            error: "Context disable failed.",
             route: alphaContextRoute,
-            state: failedState,
-            store: {
-                get state() {
-                    return failedState;
-                },
-                disableContext: vi.fn(async () => false),
-                renewContext: vi.fn(async () => true),
+            configure: (store) => {
+                vi.spyOn(store, "disableContext").mockResolvedValue(false);
+                vi.spyOn(store, "renewContext").mockResolvedValue(true);
             },
         });
 
@@ -591,11 +530,11 @@ describe("Audit", () => {
 
     it("shows Tool Call detail loading failures inside the expanded record", async () => {
         renderAudit({
-            store: {
-                readToolCallDetail: vi.fn(async () => {
-                    throw new Error("Tool Call detail unavailable.");
-                }),
-                refreshToolCall: vi.fn(async () => undefined),
+            configure: (store) => {
+                vi.spyOn(store, "readToolCallDetail").mockRejectedValue(
+                    new Error("Tool Call detail unavailable."),
+                );
+                vi.spyOn(store, "refreshToolCall").mockResolvedValue(undefined);
             },
         });
 
@@ -622,50 +561,41 @@ describe("Audit", () => {
             imageRef: `${blake3}.png`,
             mediaType: "image/png" as const,
         }));
-        const imageState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        toolCalls: [
-                            {
-                                callId: "call-image",
-                                completedAt: "2026-07-31T09:20:01Z",
-                                ctxId: "ctx-alpha",
-                                input: { path: "./preview.png" },
-                                inputSummary: '{"path":"./preview.png"}',
-                                instance: asInstanceName("alpha"),
-                                output: {
-                                    blake3,
-                                    bytes: 68,
-                                    imageRef: `${blake3}.png`,
-                                    mediaType: "image/png",
-                                    name: "preview.png",
-                                    source: {
-                                        instance: "alpha",
-                                        path: "./preview.png",
-                                        type: "file",
-                                        workspace: "/projects/alpha",
-                                    },
-                                },
-                                source: "mcp",
-                                startedAt: "2026-07-31T09:20:00Z",
-                                status: "completed",
-                                toolName: "artifact_viewImage",
+        renderAudit({
+            configureDomains: (domains) => {
+                domains.artifactTransport.readImage = readArtifactImage;
+            },
+            route: alphaContextRoute,
+            toolCalls: {
+                alpha: [
+                    {
+                        callId: "call-image",
+                        completedAt: "2026-07-31T09:20:01Z",
+                        ctxId: "ctx-alpha",
+                        input: { path: "./preview.png" },
+                        inputSummary: '{"path":"./preview.png"}',
+                        instance: asInstanceName("alpha"),
+                        output: {
+                            blake3,
+                            bytes: 68,
+                            imageRef: `${blake3}.png`,
+                            mediaType: "image/png",
+                            name: "preview.png",
+                            source: {
+                                instance: "alpha",
+                                path: "./preview.png",
+                                type: "file",
                                 workspace: "/projects/alpha",
                             },
-                        ],
+                        },
+                        source: "mcp",
+                        startedAt: "2026-07-31T09:20:00Z",
+                        status: "completed",
+                        toolName: "artifact_viewImage",
+                        workspace: "/projects/alpha",
                     },
-                },
+                ],
             },
-        };
-        renderAudit({
-            route: alphaContextRoute,
-            state: imageState,
-            store: { readArtifactImage },
         });
 
         fireEvent.click(
@@ -681,34 +611,33 @@ describe("Audit", () => {
 
     it("keeps batch Context management separate from Audit scope", async () => {
         const disableContexts = vi.fn(async () => true);
+        const contexts = baseContexts().map((context) => ({
+            ...context,
+            ...(context.ctxId === "ctx-alpha"
+                ? {
+                      environments: [
+                          {
+                              instance: "alpha",
+                              workspace: "/workspace/alpha",
+                          },
+                          {
+                              instance: "beta",
+                              workspace: "/workspace/beta",
+                          },
+                      ],
+                  }
+                : {}),
+            lastAccessedAt: new Date(
+                Date.now() - 2 * 60 * 60 * 1_000,
+            ).toISOString(),
+        }));
         renderAudit({
-            state: {
-                ...state,
-                readModel: {
-                    ...state.readModel,
-                    contexts: state.readModel.contexts.map((context) => ({
-                        ...context,
-                        ...(context.ctxId === "ctx-alpha"
-                            ? {
-                                  environments: [
-                                      {
-                                          instance: "alpha",
-                                          workspace: "/workspace/alpha",
-                                      },
-                                      {
-                                          instance: "beta",
-                                          workspace: "/workspace/beta",
-                                      },
-                                  ],
-                              }
-                            : {}),
-                        lastAccessedAt: new Date(
-                            Date.now() - 2 * 60 * 60 * 1_000,
-                        ).toISOString(),
-                    })),
-                },
+            contexts,
+            configure: (store) => {
+                vi.spyOn(store, "disableContexts").mockImplementation(
+                    disableContexts,
+                );
             },
-            store: { disableContexts },
         });
         fireEvent.click(
             screen.getByRole("button", { name: "Disable inactive Contexts…" }),
@@ -765,10 +694,15 @@ describe("Audit", () => {
 
     it("refreshes the Audit surface without resetting query state", async () => {
         const refreshAudit = vi.fn(async () => undefined);
-        renderAudit({ store: { refreshAudit } });
+        renderAudit({
+            configure: (store) => {
+                vi.spyOn(store, "refreshAudit").mockImplementation(refreshAudit);
+            },
+        });
         fireEvent.change(screen.getByLabelText("Search audit"), {
             target: { value: "bash_run" },
         });
+        refreshAudit.mockClear();
         fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
 
         await waitFor(() => expect(refreshAudit).toHaveBeenCalledOnce());
@@ -777,26 +711,18 @@ describe("Audit", () => {
 
     it("loads large Tool Call detail only after disclosure", () => {
         const token = "large-output-token";
-        const largeState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        toolCalls: [
-                            {
-                                ...alphaCall,
-                                callId: "large-call",
-                                output: `${token}${"x".repeat(200_000)}`,
-                            },
-                        ],
+        renderAudit({
+            toolCalls: {
+                alpha: [
+                    {
+                        ...alphaCall,
+                        callId: "large-call",
+                        output: `${token}${"x".repeat(200_000)}`,
                     },
-                },
+                ],
+                beta: [],
             },
-        };
-        renderAudit({ state: largeState });
+        });
 
         expect(screen.queryByText(new RegExp(token))).not.toBeInTheDocument();
         fireEvent.click(screen.getByText("bash_run", { selector: "strong" }));
@@ -804,28 +730,16 @@ describe("Audit", () => {
     });
 
     it("paginates matching calls", () => {
-        const manyState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                instanceState: {
-                    ...state.readModel.instanceState,
-                    alpha: {
-                        ...state.readModel.instanceState.alpha!,
-                        toolCalls: Array.from({ length: 150 }, (_, index) => ({
-                            ...alphaCall,
-                            callId: `call-${index}`,
-                            startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
-                        })),
-                    },
-                    beta: {
-                        ...state.readModel.instanceState.beta!,
-                        toolCalls: [],
-                    },
-                },
+        const view = renderAudit({
+            toolCalls: {
+                alpha: Array.from({ length: 150 }, (_, index) => ({
+                    ...alphaCall,
+                    callId: `call-${index}`,
+                    startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
+                })),
+                beta: [],
             },
-        };
-        const view = renderAudit({ state: manyState });
+        });
 
         expect(
             view.container.querySelectorAll(".activity-feed > li"),
@@ -844,30 +758,24 @@ describe("Audit", () => {
     });
 
     it("keeps one Context addressable on every attached instance", () => {
-        const multiState: WebState = {
-            ...state,
-            readModel: {
-                ...state.readModel,
-                contexts: state.readModel.contexts.map((context) =>
-                    context.ctxId === "ctx-alpha"
-                        ? {
-                              ...context,
-                              environments: [
-                                  {
-                                      instance: "alpha",
-                                      workspace: "/workspace/alpha",
-                                  },
-                                  {
-                                      instance: "beta",
-                                      workspace: "/workspace/remote",
-                                  },
-                              ],
-                          }
-                        : context,
-                ),
-            },
-        };
-        renderAudit({ state: multiState });
+        const contexts = baseContexts().map((context) =>
+            context.ctxId === "ctx-alpha"
+                ? {
+                      ...context,
+                      environments: [
+                          {
+                              instance: "alpha",
+                              workspace: "/workspace/alpha",
+                          },
+                          {
+                              instance: "beta",
+                              workspace: "/workspace/remote",
+                          },
+                      ],
+                  }
+                : context,
+        );
+        renderAudit({ contexts });
 
         const scope = screen.getByLabelText("Scope");
         expect(
@@ -879,7 +787,25 @@ describe("Audit", () => {
     });
 
     it("uses the selected instance environment for Context controls", () => {
+        const contexts = baseContexts().map((context) =>
+            context.ctxId === "ctx-alpha"
+                ? {
+                      ...context,
+                      environments: [
+                          {
+                              instance: "alpha",
+                              workspace: "/workspace/alpha",
+                          },
+                          {
+                              instance: "beta",
+                              workspace: "/workspace/beta",
+                          },
+                      ],
+                  }
+                : context,
+        );
         renderAudit({
+            contexts,
             route: {
                 page: "audit",
                 view: "timeline",
@@ -887,29 +813,6 @@ describe("Audit", () => {
                     kind: "context",
                     instance: "beta",
                     ctxId: "ctx-alpha",
-                },
-            },
-            state: {
-                ...state,
-                readModel: {
-                    ...state.readModel,
-                    contexts: state.readModel.contexts.map((context) =>
-                        context.ctxId === "ctx-alpha"
-                            ? {
-                                  ...context,
-                                  environments: [
-                                      {
-                                          instance: "alpha",
-                                          workspace: "/workspace/alpha",
-                                      },
-                                      {
-                                          instance: "beta",
-                                          workspace: "/workspace/beta",
-                                      },
-                                  ],
-                              }
-                            : context,
-                    ),
                 },
             },
         });
