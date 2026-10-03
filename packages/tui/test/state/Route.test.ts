@@ -8,44 +8,37 @@ import {
     selectMainScrollKey,
     TuiAppStore,
     TuiCommandDispatcherNavigation,
-    tuiViewProjection,
     type TuiCommandDispatcherFocus,
     type TuiFocusManager,
 } from "../../src/testing.ts";
+import { TuiTestDomains } from "../support/DomainHarness.js";
 
 {
-    function createStore(): TuiAppStore {
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                { enabled: true, mcpEnabled: true, name: "alpha" },
-                { enabled: true, mcpEnabled: true, name: "beta" },
-            ],
-        });
+    function createStore(): { domains: TuiTestDomains; store: TuiAppStore } {
+        const domains = new TuiTestDomains();
+        const store = new TuiAppStore({ domains: domains.reader });
+        domains.setInstances([
+            { enabled: true, mcpEnabled: true, name: "alpha" },
+            { enabled: true, mcpEnabled: true, name: "beta" },
+        ]);
         store.setSelectedInstance("alpha");
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "call-2",
-                            ctxId: "ctx-a",
-                            inputSummary: "{}",
-                            instance: "alpha" as never,
-                            source: "mcp",
-                            startedAt: "2026-07-31T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                callId: "call-2",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: "alpha" as never,
+                source: "mcp",
+                startedAt: "2026-07-31T00:00:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
             },
-        });
-        return store;
+        ]);
+        return { domains, store };
     }
 
     test("route stacks are isolated by feature page and instance and restore route view state", () => {
-        const store = createStore();
+        const { store } = createStore();
 
         store.setSelectedPage("audit");
         assert.deepEqual(currentTuiRoute(store.getState()), {
@@ -111,8 +104,8 @@ import {
     });
 
     test("Extension pages use a global route stack and render TUI-owned snapshots as native boxes", () => {
-        const store = createStore();
-        store.patchControlReadModel({
+        const { domains, store } = createStore();
+        domains.setExtension({
             tuiPages: [
                 {
                     extensionId: "access",
@@ -123,7 +116,7 @@ import {
         });
         store.setSelectedPage("extensions");
 
-        let model = selectMainScreenModel(store.getState());
+        let model = selectMainScreenModel(store.getState(), domains.reader);
         assert.deepEqual(
             model.boxes.map((box) => box.id),
             ["extension:access"],
@@ -134,27 +127,41 @@ import {
         });
 
         store.pushRoute({ page: "extensions", pageId: "access", view: "page" });
-        assert.equal(selectMainScreenModel(store.getState()).loadState.kind, "loading");
-        store.setExtensionPageSnapshot("access", {
-            items: [
-                {
-                    actions: [{ id: "disable", label: "Disable" }],
-                    detail: [{ text: "target mcp" }],
-                    id: "cloudflare-mcp",
-                    status: "ready",
-                    summary: [{ text: "cloudflared -> mcp" }],
-                    title: "cloudflare-mcp",
-                },
-            ],
+        assert.equal(
+            selectMainScreenModel(store.getState(), domains.reader).loadState
+                .kind,
+            "loading",
+        );
+        domains.setExtension({
+            tuiSnapshots: new Map([
+                [
+                    "access",
+                    {
+                        items: [
+                            {
+                                actions: [{ id: "disable", label: "Disable" }],
+                                detail: [{ text: "target mcp" }],
+                                id: "cloudflare-mcp",
+                                status: "ready",
+                                summary: [{ text: "cloudflared -> mcp" }],
+                                title: "cloudflare-mcp",
+                            },
+                        ],
+                    },
+                ],
+            ]),
         });
 
-        model = selectMainScreenModel(store.getState());
+        model = selectMainScreenModel(store.getState(), domains.reader);
         assert.equal(model.loadState.kind, "ready");
-        assert.deepEqual(model.boxes.map((box) => box.id), ["cloudflare-mcp"]);
-        assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
-            "extensions",
-            "Access",
-        ]);
+        assert.deepEqual(
+            model.boxes.map((box) => box.id),
+            ["cloudflare-mcp"],
+        );
+        assert.deepEqual(
+            selectBreadcrumbSegments(store.getState(), domains.reader),
+            ["extensions", "Access"],
+        );
 
         store.setSelectedInstance("beta");
         assert.deepEqual(currentTuiRoute(store.getState()), {
@@ -165,22 +172,16 @@ import {
     });
 
     test("Messages enters a thread at the sticky bottom instead of restoring an old scroll position", () => {
-        const store = createStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-11T06:00:00.000Z",
-                            ctxId: "ctx-a",
-                            id: "report-a",
-                            kind: "report",
-                            text: "latest report",
-                        },
-                    ],
-                },
+        const { domains, store } = createStore();
+        domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-11T06:00:00.000Z",
+                ctxId: "ctx-a",
+                id: "report-a",
+                kind: "report",
+                text: "latest report",
             },
-        });
+        ]);
         store.setSelectedPage("messages");
         store.pushRoute({
             ctxId: "ctx-a",
@@ -206,26 +207,20 @@ import {
     });
 
     test("resource refresh removes invalid trailing routes instead of retaining a blank detail page", () => {
-        const store = createStore();
+        const { domains, store } = createStore();
         store.setSelectedPage("audit");
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "call-1",
-                            ctxId: "ctx-a",
-                            inputSummary: "{}",
-                            instance: "alpha" as never,
-                            source: "mcp",
-                            startedAt: "2026-07-31T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                callId: "call-1",
+                ctxId: "ctx-a",
+                inputSummary: "{}",
+                instance: "alpha" as never,
+                source: "mcp",
+                startedAt: "2026-07-31T00:00:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
             },
-        });
+        ]);
         store.pushRoute({
             ctxId: "ctx-a",
             page: "audit",
@@ -233,10 +228,9 @@ import {
             view: "context",
         });
 
-        store.patchControlReadModel({
-            instanceState: { ["alpha"]: { toolCalls: [] } },
-        });
+        domains.setToolCalls("alpha", []);
 
+        store.bumpRedrawNonce();
         assert.deepEqual(currentTuiRoute(store.getState()), {
             page: "audit",
             view: "contexts",
@@ -244,25 +238,19 @@ import {
     });
 
     test("footer breadcrumb follows the route stack and excludes overlay state", () => {
-        const store = createStore();
+        const { domains, store } = createStore();
         store.setSelectedPage("audit");
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "bash_run",
-                            inputSummary: "{}",
-                            instance: "alpha" as never,
-                            source: "mcp",
-                            startedAt: "2026-07-31T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                callId: "bash_run",
+                inputSummary: "{}",
+                instance: "alpha" as never,
+                source: "mcp",
+                startedAt: "2026-07-31T00:00:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
             },
-        });
+        ]);
         store.pushRoute({
             page: "audit",
             scope: "unscoped",
@@ -278,14 +266,14 @@ import {
             title: "Confirm",
         });
 
-        assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
-            "audit",
-            "unscoped",
-        ]);
+        assert.deepEqual(
+            selectBreadcrumbSegments(store.getState(), domains.reader),
+            ["audit", "unscoped"],
+        );
     });
 
     test("Audit footer exposes Comment only on concrete Context routes", () => {
-        const store = createStore();
+        const { store } = createStore();
         store.setSelectedPage("audit");
         store.setFocusScope("mainBoxes");
 
@@ -313,7 +301,7 @@ import {
     });
 
     test("section sidebar footer prioritizes the actions available at the current location", () => {
-        const store = createStore();
+        const { store } = createStore();
         store.setSelectedPage("messages");
         store.setFocusScope("sidebarContext");
 
@@ -335,7 +323,7 @@ import {
     });
 
     test("Audit Comment footer reflects browse and edit modes", () => {
-        const store = createStore();
+        const { store } = createStore();
         store.setSelectedPage("audit");
         store.pushRoute({
             ctxId: "ctx-a",
@@ -362,40 +350,34 @@ import {
     });
 
     test("Todo detail breadcrumb uses the task title instead of the selected instance", () => {
-        const store = createStore();
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    todo: {
-                        items: [],
-                        revision: 1,
-                        summary: { completed: 0, total: 0 },
-                        tasks: [
-                            {
-                                completed: 0,
-                                revision: 1,
-                                status: "pending",
-                                taskId: "task-1",
-                                title: "Implement router",
-                                total: 3,
-                                updatedAt: "2026-07-31T00:00:00.000Z",
-                            },
-                        ],
-                    },
+        const { domains, store } = createStore();
+        domains.setTodo("alpha", {
+            items: [],
+            revision: 1,
+            summary: { completed: 0, total: 0 },
+            tasks: [
+                {
+                    completed: 0,
+                    revision: 1,
+                    status: "pending",
+                    taskId: "task-1",
+                    title: "Implement router",
+                    total: 3,
+                    updatedAt: "2026-07-31T00:00:00.000Z",
                 },
-            },
+            ],
         });
         store.setSelectedPage("todo");
         store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
 
-        assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
-            "todo",
-            "Implement router",
-        ]);
+        assert.deepEqual(
+            selectBreadcrumbSegments(store.getState(), domains.reader),
+            ["todo", "Implement router"],
+        );
     });
 
     test("page changes made from the sidebar preserve sidebar focus until the user enters the page", () => {
-        const store = createStore();
+        const { store } = createStore();
         store.setFocusScope("sidebarContext");
 
         store.setSelectedPage("terminal");

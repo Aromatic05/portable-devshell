@@ -10,49 +10,48 @@ import {
     TuiAppStore,
     selectMainScreenModel,
 } from "../../src/testing.ts";
+import { TuiTestDomains } from "../support/DomainHarness.js";
 
 {
-    test("TuiAppStore keeps page, instance, and expanded boxes stable across events", () => {
-        const store = new TuiAppStore({ maxRawEvents: 2 });
+    test("TuiAppStore keeps page, instance, and expanded boxes stable across instance events", () => {
+        const domains = new TuiTestDomains();
+        const store = new TuiAppStore({
+            domains: domains.reader,
+            maxRawEvents: 2,
+        });
 
         store.setConnectionState("connected");
-        store.patchControlReadModel({
-            instances: [
-                { enabled: true, mcpEnabled: false, name: "alpha" },
-                { enabled: true, mcpEnabled: true, name: "beta" },
-            ],
-        });
+        domains.setInstances([
+            { enabled: true, mcpEnabled: false, name: "alpha" },
+            { enabled: true, mcpEnabled: true, name: "beta" },
+        ]);
         store.setSelectedPage("audit");
         store.setSelectedInstance("beta");
         store.toggleExpanded("audit:beta:test");
-        store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 2,
-            name: asInstanceName("beta"),
-            ready: true,
-            status: "ready",
-        });
-        store.patchControlReadModel({
-            instanceState: {
-                ["beta"]: {
-                    logs: [
-                        {
-                            at: "2026-07-09T00:00:03.000Z",
-                            instanceName: "beta",
-                            message: "payload",
-                            seq: 3,
-                            stream: "stdout",
-                        },
-                    ],
-                },
+        domains.setRuntime("beta", {
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 2,
+                name: asInstanceName("beta"),
+                ready: true,
+                status: "ready",
             },
         });
-        store.applyInstanceEvent({
-            at: "2026-07-09T00:00:03.000Z",
-            instanceName: asInstanceName("beta"),
-            seq: 3,
-            type: "log.appended",
+        domains.setRuntime("beta", {
+            logs: [
+                {
+                    at: "2026-07-09T00:00:03.000Z",
+                    instanceName: "beta",
+                    message: "payload",
+                    seq: 3,
+                    stream: "stdout",
+                },
+            ],
+        });
+        store.dispatch({
+            rawEvent: { event: "log.appended", instance: "beta", seq: 3 },
+            type: "event.append",
         });
 
         const state = store.getState();
@@ -61,50 +60,9 @@ import {
         assert.equal(state.ui.selectedPage, "audit");
         assert.equal(state.ui.selectedInstance, "beta");
         assert.equal(state.ui.expandedBoxes["audit:beta:test"], true);
-        assert.equal(state.readModel.instanceState.beta?.logs.length, 1);
+        assert.equal(domains.reader.runtime("beta").logs.length, 1);
+        assert.equal(domains.reader.runtime("beta").snapshot?.name, "beta");
         assert.equal(state.rawEvents.at(-1)?.seq, 3);
-        assert.equal(state.globalDerived.connectedInstanceCount, 1);
-    });
-
-    test("global pending Approval count includes tool and OAuth approvals", () => {
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    approvals: [
-                        {
-                            approvalId: "tool-pending",
-                            callId: "call-1",
-                            createdAt: "2026-09-10T10:00:00.000Z",
-                            expiresAt: "2026-09-10T11:00:00.000Z",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            reason: "test",
-                            riskLevel: "low",
-                            source: "mcp",
-                            status: "pending",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
-            },
-            oauthApprovals: [
-                {
-                    approvalId: "oauth-pending",
-                    clientId: "client-1",
-                    clientName: "Client",
-                    createdAt: "2026-09-10T10:00:00.000Z",
-                    expiresAt: "2026-09-10T11:00:00.000Z",
-                    kind: "registration",
-                    redirectUris: [],
-                    requestedResources: [],
-                    requestedScopes: [],
-                    status: "pending",
-                },
-            ],
-        });
-
-        assert.equal(store.getState().globalDerived.pendingApprovalCount, 2);
     });
 
     test("TuiRenderScheduler batches multiple store updates into one render notification", (t) => {
@@ -131,75 +89,61 @@ import {
         assert.equal(scheduler.getSnapshot().ui.selectedPage, "help");
     });
 
-    test("TuiRenderScheduler redraws visible Overview and Audit context message changes", (t) => {
+    test("TuiRenderScheduler coalesces attached domain source changes into one redraw", (t) => {
         t.mock.timers.enable({ apis: ["setTimeout"] });
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [{ enabled: true, mcpEnabled: true, name: "alpha" }],
-        });
-        store.setSelectedInstance("alpha");
         const scheduler = new TuiRenderScheduler(store, 2);
+        const domains = new TuiTestDomains((source) =>
+            scheduler.attach(source),
+        );
         let renders = 0;
         const unsubscribe = scheduler.subscribe(() => {
             renders += 1;
         });
 
-        store.setSelectedPage("overview");
-        t.mock.timers.tick(2);
-        renders = 0;
-        store.patchControlReadModel({ overview: emptyOverview() });
+        domains.setOverview(emptyOverview());
+        domains.setMessages("alpha", [contextMessage("message-1")]);
         assert.equal(renders, 0);
         t.mock.timers.tick(2);
         assert.equal(renders, 1);
 
-        store.setSelectedPage("audit");
-        t.mock.timers.tick(2);
         renders = 0;
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: { contextMessages: [contextMessage("message-1")] },
+        domains.setContexts([
+            {
+                createdAt: "2026-07-31T00:00:00.000Z",
+                ctxId: "ctx-a",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/alpha" },
+                ],
+                expiresAt: "2099-07-31T00:00:00.000Z",
+                lastAccessedAt: "2026-07-31T00:00:01.000Z",
+                principal: "test",
+                status: "active",
             },
-        });
-        assert.equal(renders, 0);
-        t.mock.timers.tick(2);
-        assert.equal(renders, 1);
-
-        renders = 0;
-        store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: "2026-07-31T00:00:00.000Z",
-                    ctxId: "ctx-a",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/alpha" },
-                    ],
-                    expiresAt: "2099-07-31T00:00:00.000Z",
-                    lastAccessedAt: "2026-07-31T00:00:01.000Z",
-                    principal: "test",
-                    status: "active",
-                },
-            ],
-        });
+        ]);
         assert.equal(renders, 0);
         t.mock.timers.tick(2);
         assert.equal(renders, 1);
 
         unsubscribe();
         scheduler.dispose();
+        domains.dispose();
     });
 
-    test("TuiAppStore does not publish an unchanged OAuth approval collection", () => {
+    test("TuiRenderScheduler stops notifying listeners after dispose", (t) => {
+        t.mock.timers.enable({ apis: ["setTimeout"] });
         const store = new TuiAppStore();
-        let notifications = 0;
-        const unsubscribe = store.subscribe(() => {
-            notifications += 1;
+        const scheduler = new TuiRenderScheduler(store, 2);
+        let renders = 0;
+        scheduler.subscribe(() => {
+            renders += 1;
         });
 
-        store.patchControlReadModel({ oauthApprovals: [] });
-        store.patchControlReadModel({ oauthApprovals: [] });
+        scheduler.dispose();
+        store.setSelectedPage("help");
+        t.mock.timers.tick(2);
 
-        unsubscribe();
-        assert.equal(notifications, 0);
+        assert.equal(renders, 0);
     });
 
     test("TuiAppStore does not publish unchanged interaction state", () => {
@@ -246,104 +190,52 @@ import {
         assert.equal(notifications, 0);
     });
 
-    test("TuiRenderScheduler ignores updates outside the visible page and instance", (t) => {
-        t.mock.timers.enable({ apis: ["setTimeout"] });
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                { enabled: true, mcpEnabled: true, name: "alpha" },
-                { enabled: true, mcpEnabled: true, name: "beta" },
-            ],
-        });
-        store.setSelectedPage("help");
-        store.setSelectedInstance("alpha");
-        const scheduler = new TuiRenderScheduler(store, 2);
-        let renderCount = 0;
-        const unsubscribe = scheduler.subscribe(() => {
-            renderCount += 1;
-        });
-
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: { toolCalls: [toolCall("alpha-help")] },
-            },
-        });
-        assert.equal(renderCount, 0);
-
-        store.setSelectedPage("audit");
-        t.mock.timers.tick(2);
-        renderCount = 0;
-
-        store.patchControlReadModel({
-            instanceState: {
-                ["beta"]: { toolCalls: [toolCall("beta-audit")] },
-            },
-        });
-        assert.equal(renderCount, 0);
-
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: { toolCalls: [toolCall("alpha-audit")] },
-            },
-        });
-        assert.equal(renderCount, 0);
-        t.mock.timers.tick(2);
-        assert.equal(renderCount, 1);
-
-        unsubscribe();
-        scheduler.dispose();
-    });
-
     test("Audit page creates expensive input and output detail only for expanded records", () => {
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [{ enabled: true, mcpEnabled: true, name: "alpha" }],
-        });
+        const domains = new TuiTestDomains();
+        const store = new TuiAppStore({ domains: domains.reader });
+        domains.setInstances([
+            { enabled: true, mcpEnabled: true, name: "alpha" },
+        ]);
         store.setSelectedInstance("alpha");
         store.setSelectedPage("audit");
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            ...toolCall("large-output"),
-                            input: { command: "x".repeat(20_000) },
-                            output: { stdout: "y".repeat(20_000) },
-                        },
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                ...toolCall("large-output"),
+                input: { command: "x".repeat(20_000) },
+                output: { stdout: "y".repeat(20_000) },
             },
-        });
+        ]);
 
-        const contexts = selectMainScreenModel(store.getState()).boxes;
+        const contexts = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes;
         assert.equal(contexts[0]?.id, "audit-scope:unscoped");
 
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            ...toolCall("large-output"),
-                            ctxId: "ctx-large",
-                            input: { command: "x".repeat(20_000) },
-                            output: { stdout: "y".repeat(20_000) },
-                        },
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                ...toolCall("large-output"),
+                ctxId: "ctx-large",
+                input: { command: "x".repeat(20_000) },
+                output: { stdout: "y".repeat(20_000) },
             },
-        });
+        ]);
         store.pushRoute({
             ctxId: "ctx-large",
             page: "audit",
             scope: "context",
             view: "context",
         });
-        const collapsed = selectMainScreenModel(store.getState()).boxes[0];
+        const collapsed = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes[0];
         assert.equal(collapsed?.expanded, false);
         assert.deepEqual(collapsed?.expandedLines, []);
 
         store.toggleExpanded(collapsed!.expandedKey);
-        const expanded = selectMainScreenModel(store.getState()).boxes[0];
+        const expanded = selectMainScreenModel(store.getState(), domains.reader)
+            .boxes[0];
         assert.equal(expanded?.expanded, true);
         assert.equal(
             expanded?.expandedLines.some((line) =>

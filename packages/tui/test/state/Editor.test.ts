@@ -8,6 +8,7 @@ import {
 import { TuiAppStore } from "../../src/state/store/App.ts";
 import { createDefaultInstanceDraft } from "../../src/state/editor/Instance.ts";
 import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.ts";
+import { TuiTestDomains } from "../support/DomainHarness.js";
 
 {
     const schema: InstanceCreateSchema = {
@@ -32,6 +33,7 @@ import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.
 
     function wizard(step: number, patch: Record<string, JsonValue> = {}) {
         const store = new TuiAppStore();
+        const domains = new TuiTestDomains();
         store.setSelectedPage("instances");
         store.setEditor({
             editing: false,
@@ -45,10 +47,16 @@ import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.
             deepMerge(createDefaultInstanceDraft(), patch),
             true,
         );
-        const box = buildInstancesPageBoxes(store.getState())[0];
+        const box = buildInstancesPageBoxes(
+            store.getState(),
+            domains.reader,
+        )[0];
         assert.ok(box);
         store.toggleExpanded(box.expandedKey);
-        const expanded = buildInstancesPageBoxes(store.getState())[0];
+        const expanded = buildInstancesPageBoxes(
+            store.getState(),
+            domains.reader,
+        )[0];
         assert.ok(expanded?.expanded);
         return expanded.expandedLines
             .map((line) => line.id)
@@ -61,6 +69,7 @@ import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.
         summary?: InstanceCreateSummary,
     ): string {
         const store = new TuiAppStore();
+        const domains = new TuiTestDomains();
         store.setSelectedPage("instances");
         store.setEditor({
             editing: false,
@@ -75,10 +84,16 @@ import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.
             deepMerge(createDefaultInstanceDraft(), patch),
             true,
         );
-        const box = buildInstancesPageBoxes(store.getState())[0];
+        const box = buildInstancesPageBoxes(
+            store.getState(),
+            domains.reader,
+        )[0];
         assert.ok(box);
         store.toggleExpanded(box.expandedKey);
-        const expanded = buildInstancesPageBoxes(store.getState())[0];
+        const expanded = buildInstancesPageBoxes(
+            store.getState(),
+            domains.reader,
+        )[0];
         assert.ok(expanded?.expanded);
         return expanded.expandedLines.map((line) => line.text).join("\n");
     }

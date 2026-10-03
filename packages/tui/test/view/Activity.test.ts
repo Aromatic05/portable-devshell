@@ -2,21 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     asInstanceName,
-    CONTROL_PROTOCOL_VERSION,
     type ArtifactShareResult,
     type ArtifactTransferRecord,
-    type JsonValue,
 } from "@portable-devshell/shared";
 import {
     buildFocusGraphForState,
     TuiCommandDispatcher,
     selectMainScreenModel,
     TuiAppStore,
-    TuiControlSession,
     TuiFocusManager,
     topTuiOverlay,
-    tuiViewProjection,
 } from "@portable-devshell/tui/testing";
+import { TuiTestDomains } from "../support/DomainHarness.ts";
 import { projectAuditContexts } from "../../src/view/page/activity/audit/projection/Context.ts";
 import { PassThrough } from "node:stream";
 import { type WriteStream } from "node:tty";
@@ -74,341 +71,43 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         updatedAt: "2026-07-13T00:00:01.000Z",
     };
 
-    function toJsonValue(value: unknown): JsonValue {
-        return JSON.parse(JSON.stringify(value)) as JsonValue;
-    }
-
-    test("TUI startup pulls artifact shares and transfers from Control", async () => {
-        const store = new TuiAppStore();
-        const session = new TuiControlSession({
-            clients: {
-                artifact: {
-                    async listShares() {
-                        return [share];
-                    },
-                    async listTransfers() {
-                        return [transfer];
-                    },
-                },
-                close() {},
-                onTransportClose() {
-                    return () => undefined;
-                },
-                config: {
-                    async get() {
-                        return {};
-                    },
-                },
-                instance: {
-                    async list() {
-                        return [];
-                    },
-                },
-                mcp: {
-                    async status() {
-                        return {};
-                    },
-                },
-                overview: {
-                    async get() {
-                        return {
-                            activity: [],
-                            alerts: [],
-                            controller: { pid: 1, uptimeSeconds: 10 },
-                            counts: {
-                                activeTodos: 0,
-                                failedCalls24h: 0,
-                                instancesAttention: 0,
-                                instancesCritical: 0,
-                                instancesReady: 0,
-                                instancesTotal: 0,
-                                pendingApprovals: 0,
-                            },
-                            generatedAt: "2026-07-31T00:00:00.000Z",
-                            health: "healthy",
-                            instances: [],
-                            todos: [],
-                        };
-                    },
-                },
-                async reconnect() {},
-                service: {
-                    async hello() {
-                        return {
-                            capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: CONTROL_PROTOCOL_VERSION,
-                        };
-                    },
-                    async ping() {
-                        return { pong: true };
-                    },
-                },
-            } as never,
-            store,
-        });
-
-        await session.start();
-        await waitFor(
-            () =>
-                store.getState().readModel.artifactShares.length === 1 &&
-                store.getState().readModel.artifactTransfers.length === 1,
-        );
-        assert.deepEqual(store.getState().readModel.artifactShares, [share]);
-        assert.deepEqual(store.getState().readModel.artifactTransfers, [
-            transfer,
-        ]);
-        await session.stop();
-    });
-
-    test("TUI clears an OAuth polling failure after the background refresh recovers", async (t) => {
-        t.mock.timers.enable({ apis: ["setInterval"] });
-        const store = new TuiAppStore();
-        let approvalReads = 0;
-        const session = new TuiControlSession({
-            clients: {
-                artifact: {
-                    async listShares() {
-                        return [];
-                    },
-                    async listTransfers() {
-                        return [];
-                    },
-                },
-                close() {},
-                onTransportClose() {
-                    return () => undefined;
-                },
-                config: {
-                    async get() {
-                        return { mcp: { enabled: true } };
-                    },
-                },
-                instance: {
-                    async list() {
-                        return [];
-                    },
-                },
-                mcp: {
-                    async listApprovals() {
-                        approvalReads += 1;
-                        if (approvalReads === 2)
-                            throw new Error("OAuth service unavailable");
-                        return [];
-                    },
-                    async status() {
-                        return {
-                            authMode: "oauth2",
-                            oauthReady: true,
-                            running: true,
-                        };
-                    },
-                },
-                overview: {
-                    async get() {
-                        return {
-                            activity: [],
-                            alerts: [],
-                            controller: { pid: 1, uptimeSeconds: 10 },
-                            counts: {
-                                activeTodos: 0,
-                                failedCalls24h: 0,
-                                instancesAttention: 0,
-                                instancesCritical: 0,
-                                instancesReady: 0,
-                                instancesTotal: 0,
-                                pendingApprovals: 0,
-                            },
-                            generatedAt: "2026-07-31T00:00:00.000Z",
-                            health: "healthy" as const,
-                            instances: [],
-                            todos: [],
-                        };
-                    },
-                },
-                async reconnect() {},
-                service: {
-                    async hello() {
-                        return {
-                            capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: CONTROL_PROTOCOL_VERSION,
-                        };
-                    },
-                    async ping() {
-                        return { pong: true };
-                    },
-                },
-            } as never,
-            store,
-        });
-
-        try {
-            await session.start();
-            await waitFor(() => approvalReads >= 1);
-            t.mock.timers.tick(1_000);
-            await waitFor(
-                () =>
-                    store.getState().panelErrors["connections:-:oauth"] !==
-                    undefined,
-            );
-
-            assert.equal(
-                store.getState().panelErrors["connections:-:oauth"]?.message,
-                "OAuth service unavailable",
-            );
-            assert.equal(store.getState().connection.status, "connected");
-            t.mock.timers.tick(1_000);
-            await waitFor(
-                () =>
-                    approvalReads >= 3 &&
-                    store.getState().panelErrors["connections:-:oauth"] ===
-                        undefined,
-            );
-        } finally {
-            await session.stop();
-        }
-    });
-
-    test("TUI stops OAuth polling after a connection refresh fails", async (t) => {
-        t.mock.timers.enable({ apis: ["setInterval"] });
-        let approvalReads = 0;
-        let failPing = false;
-        const session = new TuiControlSession({
-            clients: sessionClients({
-                config: {
-                    async get() {
-                        return { mcp: { enabled: true } };
-                    },
-                },
-                mcp: {
-                    async listApprovals() {
-                        approvalReads += 1;
-                        return [];
-                    },
-                    async status() {
-                        return {
-                            authMode: "oauth2",
-                            oauthReady: true,
-                            running: true,
-                        };
-                    },
-                },
-                service: {
-                    async hello() {
-                        return {
-                            capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: CONTROL_PROTOCOL_VERSION,
-                        };
-                    },
-                    async ping() {
-                        if (failPing) throw new Error("control unavailable");
-                        return { pong: true };
-                    },
-                },
-            }),
-        });
-
-        try {
-            await session.start();
-            failPing = true;
-            await session.refresh();
-            const readsAfterFailure = approvalReads;
-            t.mock.timers.tick(2_000);
-
-            assert.equal(session.store.getState().connection.status, "error");
-            assert.equal(approvalReads, readsAfterFailure);
-        } finally {
-            await session.stop();
-        }
-    });
-
-    test("TUI ignores an old visible Overview failure after reconnect", async () => {
-        let rejectOldOverview!: (error: Error) => void;
-        const oldOverview = new Promise<never>((_resolve, reject) => {
-            rejectOldOverview = reject;
-        });
-        let useOldOverview = false;
-        let oldOverviewReads = 0;
-        const session = new TuiControlSession({
-            clients: sessionClients({
-                overview: {
-                    async get() {
-                        if (useOldOverview) {
-                            oldOverviewReads += 1;
-                            return await oldOverview;
-                        }
-                        return {
-                            activity: [],
-                            alerts: [],
-                            controller: { pid: 1, uptimeSeconds: 1 },
-                            counts: {
-                                activeTodos: 0,
-                                failedCalls24h: 0,
-                                instancesAttention: 0,
-                                instancesCritical: 0,
-                                instancesReady: 0,
-                                instancesTotal: 0,
-                                pendingApprovals: 0,
-                            },
-                            generatedAt: "2026-07-31T00:00:00.000Z",
-                            health: "healthy" as const,
-                            instances: [],
-                            todos: [],
-                        };
-                    },
-                },
-            }),
-            overviewRefreshIntervalMs: 10,
-        });
-
-        try {
-            await session.start();
-            session.store.setSelectedPage("overview");
-            useOldOverview = true;
-            const staleRefresh = session.refreshOverview();
-            await waitFor(() => oldOverviewReads === 1);
-            useOldOverview = false;
-            await session.reconnect();
-            rejectOldOverview(new Error("stale overview failure"));
-            await staleRefresh;
-
-            assert.equal(
-                session.store.getState().interaction.screenStatusByPage
-                    .overview,
-                undefined,
-            );
-        } finally {
-            await session.stop();
-        }
-    });
     test("instance box shows artifact activity and confirms revoke or cancel before dispatch", async () => {
-        const store = seededStore();
+        const domains = new TuiTestDomains();
+        const store = seededStore(domains);
         const revoked: string[] = [];
         const cancelled: string[] = [];
         const focusManager = new TuiFocusManager(store, {
             boxIdForLine: (lineId) =>
-                selectMainScreenModel(store.getState()).boxes.find((box) =>
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) =>
                     box.expandedLines.some((line) => line.id === lineId),
                 )?.id,
             currentPage: () => store.getState().ui.selectedPage,
             expandedKeyFor: (boxId) =>
-                selectMainScreenModel(store.getState()).boxes.find(
-                    (box) => box.id === boxId,
-                )?.expandedKey,
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) => box.id === boxId)?.expandedKey,
             graphFor: (page, mode) =>
-                buildFocusGraphForState({
-                    ...store.getState(),
-                    interaction: {
-                        ...store.getState().interaction,
-                        focusScope: mode,
+                buildFocusGraphForState(
+                    {
+                        ...store.getState(),
+                        interaction: {
+                            ...store.getState().interaction,
+                            focusScope: mode,
+                        },
+                        ui: { ...store.getState().ui, selectedPage: page },
                     },
-                    ui: { ...store.getState().ui, selectedPage: page },
-                }),
+                    domains.reader,
+                ),
             mode: () => store.getState().interaction.focusScope,
         });
         const dispatcher = new TuiCommandDispatcher({
             focusManager,
             mainViewportRows: () => 20,
-            projection: tuiViewProjection,
+            projection: domains.projection,
             onApprovalDecision: async () => undefined,
             onArtifactCancelTransfer: async (transferId) => {
                 cancelled.push(transferId);
@@ -425,9 +124,10 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
             store,
         });
 
-        const box = selectMainScreenModel(store.getState()).boxes.find(
-            (candidate) => candidate.id === "instance:instance-a",
-        )!;
+        const box = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes.find((candidate) => candidate.id === "instance:instance-a")!;
         assert.match(
             box.collapsedLines[1]?.text ?? "",
             /artifacts shares=1 transfers=1 active=2/u,
@@ -480,165 +180,71 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.deepEqual(cancelled, [transfer.transferId]);
     });
 
-    function seededStore(): TuiAppStore {
+    function seededStore(domains: TuiTestDomains): TuiAppStore {
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                {
-                    homeDirectory: "/workspace/a",
-                    enabled: true,
-                    mcpEnabled: true,
-                    name: "instance-a",
-                    provider: "local",
-                },
-            ],
+        domains.setInstances([
+            {
+                enabled: true,
+                homeDirectory: "/workspace/a",
+                mcpEnabled: true,
+                name: "instance-a",
+                provider: "local",
+            },
+        ]);
+        domains.setArtifacts({
+            shares: [share],
+            transfers: [transfer],
         });
-        store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 0,
-            name: asInstanceName("instance-a"),
-            ready: true,
-            status: "ready",
-        });
-        store.patchControlReadModel({ artifactShares: [share] });
-        store.patchControlReadModel({ artifactTransfers: [transfer] });
         store.setSelectedPage("instances");
         store.setSelectedInstance("instance-a");
         store.setMainFocusId("instance:instance-a");
         store.toggleExpanded("instances:instance-a:instance");
         return store;
     }
-
-    async function waitFor(predicate: () => boolean): Promise<void> {
-        const deadline = Date.now() + 2_000;
-        while (!predicate()) {
-            if (Date.now() > deadline) {
-                throw new Error("Timed out waiting for TUI state.");
-            }
-            await new Promise<void>((resolve) => setImmediate(resolve));
-        }
-    }
-
-    function sessionClients(overrides: Record<string, unknown> = {}) {
-        return {
-            artifact: {
-                async listShares() {
-                    return [];
-                },
-                async listTransfers() {
-                    return [];
-                },
-            },
-            close() {},
-            onTransportClose() {
-                return () => undefined;
-            },
-            config: {
-                async get() {
-                    return {};
-                },
-            },
-            instance: {
-                async list() {
-                    return [];
-                },
-            },
-            mcp: {
-                async status() {
-                    return {};
-                },
-            },
-            overview: {
-                async get() {
-                    return {
-                        activity: [],
-                        alerts: [],
-                        controller: { pid: 1, uptimeSeconds: 1 },
-                        counts: {
-                            activeTodos: 0,
-                            failedCalls24h: 0,
-                            instancesAttention: 0,
-                            instancesCritical: 0,
-                            instancesReady: 0,
-                            instancesTotal: 0,
-                            pendingApprovals: 0,
-                        },
-                        generatedAt: "2026-07-31T00:00:00.000Z",
-                        health: "healthy" as const,
-                        instances: [],
-                        todos: [],
-                    };
-                },
-            },
-            async reconnect() {},
-            service: {
-                async hello() {
-                    return {
-                        capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: CONTROL_PROTOCOL_VERSION,
-                    };
-                },
-                async ping() {
-                    return { pong: true };
-                },
-            },
-            ...overrides,
-        } as never;
-    }
 }
 
 {
     test("Audit excludes caller-recorded delegated Worker activity", () => {
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    approvals: [
-                        {
-                            approvalId: "approval-agent",
-                            callId: "call-agent",
-                            createdAt: "2026-09-10T12:00:00.000Z",
-                            ctxId: "ext-agent-session",
-                            expiresAt: "2026-09-10T12:05:00.000Z",
-                            extensionId: "agent",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            reason: "Approval required.",
-                            recording: "caller",
-                            riskLevel: "medium",
-                            source: "extension",
-                            status: "pending",
-                            toolName: "file_read",
-                            workspace: "/workspace",
-                        },
-                        {
-                            approvalId: "approval-host",
-                            callId: "call-host",
-                            createdAt: "2026-09-10T12:01:00.000Z",
-                            ctxId: "ctx-host",
-                            expiresAt: "2026-09-10T12:06:00.000Z",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            reason: "Approval required.",
-                            recording: "host",
-                            riskLevel: "medium",
-                            source: "mcp",
-                            status: "pending",
-                            toolName: "bash_run",
-                            workspace: "/workspace",
-                        },
-                    ],
-                },
+        const domains = new TuiTestDomains();
+        domains.setApprovals("alpha", [
+            {
+                approvalId: "approval-agent",
+                callId: "call-agent",
+                createdAt: "2026-09-10T12:00:00.000Z",
+                ctxId: "ext-agent-session",
+                expiresAt: "2026-09-10T12:05:00.000Z",
+                extensionId: "agent",
+                inputSummary: "{}",
+                instance: asInstanceName("alpha"),
+                reason: "Approval required.",
+                recording: "caller",
+                riskLevel: "medium",
+                source: "extension",
+                status: "pending",
+                toolName: "file_read",
+                workspace: "/workspace",
             },
-        });
+            {
+                approvalId: "approval-host",
+                callId: "call-host",
+                createdAt: "2026-09-10T12:01:00.000Z",
+                ctxId: "ctx-host",
+                expiresAt: "2026-09-10T12:06:00.000Z",
+                inputSummary: "{}",
+                instance: asInstanceName("alpha"),
+                reason: "Approval required.",
+                recording: "host",
+                riskLevel: "medium",
+                source: "mcp",
+                status: "pending",
+                toolName: "bash_run",
+                workspace: "/workspace",
+            },
+        ]);
 
-        assert.equal(
-            store.getState().readModel.instanceState.alpha?.approvals.length,
-            2,
-        );
+        assert.equal(domains.reader.approval("alpha").approvals.length, 2);
         assert.deepEqual(
-            projectAuditContexts(store.getState(), "alpha").map((context) =>
+            projectAuditContexts(domains.reader, "alpha").map((context) =>
                 context.key.kind === "context" ? context.key.ctxId : "unscoped",
             ),
             ["ctx-host"],
@@ -648,91 +254,75 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
 
 {
     test("Messages merges registered sessions with exact comment and report history", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: "2026-09-10T10:00:00.000Z",
-                    ctxId: "ctx-alpha",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/project" },
-                    ],
-                    expiresAt: "2099-09-10T10:00:00.000Z",
-                    lastAccessedAt: "2026-09-10T10:02:00.000Z",
-                    principal: "client",
-                    status: "active",
-                },
-                {
-                    createdAt: "2026-09-10T09:00:00.000Z",
-                    ctxId: "ctx-empty",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/empty" },
-                    ],
-                    expiresAt: "2099-09-10T10:00:00.000Z",
-                    lastAccessedAt: "2026-09-10T10:04:00.000Z",
-                    principal: "client",
-                    status: "active",
-                },
-            ],
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-10T10:03:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "comment-1",
-                            kind: "comment",
-                            status: "sent",
-                            text: "user comment",
-                        },
-                        {
-                            callId: "report-1",
-                            createdAt: "2026-09-10T10:04:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "report-1",
-                            kind: "report",
-                            text: "agent report",
-                        },
-                    ],
-                    contextMessages: [
-                        {
-                            createdAt: "2026-09-10T10:03:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "comment-1",
-                            instance: "alpha",
-                            status: "sent",
-                            text: "user comment",
-                        },
-                    ],
-                    reportCalls: [
-                        {
-                            callId: "report-1",
-                            completedAt: "2026-09-10T10:04:00.000Z",
-                            ctxId: "ctx-alpha",
-                            input: { message: "agent report" },
-                            inputSummary: '{"message":"agent report"}',
-                            instance: asInstanceName("alpha"),
-                            source: "mcp",
-                            startedAt: "2026-09-10T10:03:59.000Z",
-                            status: "completed",
-                            toolName: "todo_report",
-                        },
-                    ],
-                },
+        domains.setInstances([
+            { enabled: true, mcpEnabled: true, name: "alpha", provider: "local" },
+        ]);
+        domains.setContexts([
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-alpha",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/project" },
+                ],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                lastAccessedAt: "2026-09-10T10:02:00.000Z",
+                principal: "client",
+                status: "active",
             },
-        });
+            {
+                createdAt: "2026-09-10T09:00:00.000Z",
+                ctxId: "ctx-empty",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/empty" },
+                ],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                lastAccessedAt: "2026-09-10T10:04:00.000Z",
+                principal: "client",
+                status: "active",
+            },
+        ]);
+        domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-10T10:03:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "comment-1",
+                kind: "comment",
+                status: "sent",
+                text: "user comment",
+            },
+            {
+                callId: "report-1",
+                createdAt: "2026-09-10T10:04:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "report-1",
+                kind: "report",
+                text: "agent report",
+            },
+        ]);
+        domains.setMessages("alpha", [
+            {
+                createdAt: "2026-09-10T10:03:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "comment-1",
+                instance: "alpha",
+                status: "sent",
+                text: "user comment",
+            },
+        ]);
         store.setSelectedInstance("alpha");
         store.setSelectedPage("messages");
         const now = Date.parse("2026-09-10T10:05:00.000Z");
 
         assert.deepEqual(
-            selectTuiMessageSessions(store.getState(), now).map(
+            selectTuiMessageSessions(domains.reader, now).map(
                 (session) => session.ctxId,
             ),
             ["ctx-empty", "ctx-alpha"],
         );
         assert.deepEqual(
-            selectTuiMessageEntries(store.getState(), "alpha", "ctx-alpha").map(
+            selectTuiMessageEntries(domains.reader, "alpha", "ctx-alpha").map(
                 (entry) => [entry.kind, entry.text],
             ),
             [
@@ -743,6 +333,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.deepEqual(
             selectTuiMessagesSidebarEntries(
                 store.getState(),
+                domains.reader,
                 true,
                 { id: "messages:back", kind: "context" },
                 now,
@@ -753,7 +344,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 "History",
                 "Hidden",
                 "▾ empty",
-                "  ctx-empty",
+                "  empty",
                 "▾ project",
                 "  user comment",
             ],
@@ -761,112 +352,120 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
     });
 
     test("Messages applies server titles and hidden ctxId preferences", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
         const now = new Date().toISOString();
-        store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: now,
-                    ctxId: "ctx-visible",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/project" },
-                    ],
-                    expiresAt: "2099-01-01T00:00:00.000Z",
-                    lastAccessedAt: now,
-                    principal: "client",
-                    status: "active",
-                },
-                {
-                    createdAt: now,
-                    ctxId: "ctx-hidden",
-                    environments: [
-                        { instance: "beta", workspace: "/workspace/project" },
-                    ],
-                    expiresAt: "2099-01-01T00:00:00.000Z",
-                    lastAccessedAt: now,
-                    principal: "client",
-                    status: "active",
-                },
-            ],
-        });
-        store.setConversationPreferences({
-            ...store.getState().conversationPreferences,
+        domains.setContexts([
+            {
+                createdAt: now,
+                ctxId: "ctx-visible",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/project" },
+                ],
+                expiresAt: "2099-01-01T00:00:00.000Z",
+                lastAccessedAt: now,
+                principal: "client",
+                status: "active",
+            },
+            {
+                createdAt: now,
+                ctxId: "ctx-hidden",
+                environments: [
+                    { instance: "beta", workspace: "/workspace/hidden" },
+                ],
+                expiresAt: "2099-01-01T00:00:00.000Z",
+                lastAccessedAt: now,
+                principal: "client",
+                status: "active",
+            },
+        ]);
+        domains.setConversationPreferences({
+            ...domains.conversationPreferences.state.preferences,
             hiddenContexts: { "ctx-hidden": true },
             titles: { "alpha\u0000ctx-visible": "Pinned conversation" },
         });
         store.setSelectedPage("messages");
 
         assert.deepEqual(
-            selectTuiMessageSessions(store.getState()).map((session) => [
+            selectTuiMessageSessions(domains.reader).map((session) => [
                 session.ctxId,
                 session.title,
             ]),
             [["ctx-visible", "Pinned conversation"]],
         );
         assert.deepEqual(
-            selectTuiMessageHiddenSessions(store.getState()).map(
+            selectTuiMessageHiddenSessions(domains.reader).map(
                 (session) => session.ctxId,
             ),
             ["ctx-hidden"],
         );
         assert.equal(
-            selectTuiMessagesSidebarEntries(store.getState(), true, {
-                id: "messages:back",
-                kind: "context",
-            }).some((entry) => entry.label === "  Pinned conversation"),
+            selectTuiMessagesSidebarEntries(
+                store.getState(),
+                domains.reader,
+                true,
+                {
+                    id: "messages:back",
+                    kind: "context",
+                },
+            ).some((entry) => entry.label === "  Pinned conversation"),
             true,
         );
 
         store.setMessageScope("hidden");
         assert.equal(
-            selectTuiMessagesSidebarEntries(store.getState(), true, {
-                id: "messages:scope:hidden",
-                kind: "context",
-            }).some((entry) => entry.label === "  ctx-hidden"),
+            selectTuiMessagesSidebarEntries(
+                store.getState(),
+                domains.reader,
+                true,
+                {
+                    id: "messages:scope:hidden",
+                    kind: "context",
+                },
+            ).some((entry) => entry.label === "  hidden"),
             true,
         );
     });
 
     test("Messages hides sessions that were inactive for more than 30 minutes", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: "2026-09-10T10:00:00.000Z",
-                    ctxId: "ctx-recent",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/recent" },
-                    ],
-                    expiresAt: "2099-09-10T10:00:00.000Z",
-                    lastAccessedAt: "2026-09-10T10:02:00.000Z",
-                    principal: "client",
-                    status: "active",
-                },
-                {
-                    createdAt: "2026-09-10T09:00:00.000Z",
-                    ctxId: "ctx-stale",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/stale" },
-                    ],
-                    expiresAt: "2099-09-10T10:00:00.000Z",
-                    lastAccessedAt: "2026-09-10T09:20:00.000Z",
-                    principal: "client",
-                    status: "active",
-                },
-            ],
-        });
+        domains.setContexts([
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-recent",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/recent" },
+                ],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                lastAccessedAt: "2026-09-10T10:02:00.000Z",
+                principal: "client",
+                status: "active",
+            },
+            {
+                createdAt: "2026-09-10T09:00:00.000Z",
+                ctxId: "ctx-stale",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/stale" },
+                ],
+                expiresAt: "2099-09-10T10:00:00.000Z",
+                lastAccessedAt: "2026-09-10T09:20:00.000Z",
+                principal: "client",
+                status: "active",
+            },
+        ]);
         store.setSelectedInstance("alpha");
         store.setSelectedPage("messages");
         const now = Date.parse("2026-09-10T10:05:00.000Z");
 
         assert.deepEqual(
-            selectTuiMessageSessions(store.getState(), now).map(
+            selectTuiMessageSessions(domains.reader, now).map(
                 (session) => session.ctxId,
             ),
             ["ctx-recent"],
         );
         assert.deepEqual(
-            selectTuiMessageHistorySessions(store.getState(), now).map(
+            selectTuiMessageHistorySessions(domains.reader, now).map(
                 (session) => session.ctxId,
             ),
             ["ctx-stale"],
@@ -874,6 +473,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.deepEqual(
             selectTuiMessagesSidebarEntries(
                 store.getState(),
+                domains.reader,
                 true,
                 { id: "messages:back", kind: "context" },
                 now,
@@ -884,7 +484,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 "History",
                 "Hidden",
                 "▾ recent",
-                "  ctx-recent",
+                "  recent",
             ],
         );
 
@@ -892,6 +492,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.deepEqual(
             selectTuiMessagesSidebarEntries(
                 store.getState(),
+                domains.reader,
                 true,
                 { id: "messages:scope:history", kind: "context" },
                 now,
@@ -902,20 +503,22 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 "History",
                 "Hidden",
                 "▾ stale",
-                "  ctx-stale",
+                "  stale",
             ],
         );
     });
 
     test("Messages empty state explains the selected Conversation scope", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [{ enabled: true, mcpEnabled: true, name: "alpha" }],
-        });
+        domains.setInstances([
+            { enabled: true, mcpEnabled: true, name: "alpha" },
+        ]);
         store.setSelectedInstance("alpha");
         store.setSelectedPage("messages");
 
         let view = TuiMessagesView({
+            reader: domains.reader,
             state: store.getState(),
             viewportRows: 30,
             width: 80,
@@ -928,6 +531,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
 
         store.setMessageScope("history");
         view = TuiMessagesView({
+            reader: domains.reader,
             state: store.getState(),
             viewportRows: 30,
             width: 80,
@@ -939,6 +543,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
 
         store.setMessageScope("hidden");
         view = TuiMessagesView({
+            reader: domains.reader,
             state: store.getState(),
             viewportRows: 30,
             width: 80,
@@ -950,23 +555,18 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
     });
 
     test("Messages keeps a fixed history viewport so the frame and composer do not move", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-10T10:03:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "comment-1",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "short history",
-                        },
-                    ],
-                },
+        domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-10T10:03:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "comment-1",
+                kind: "comment",
+                status: "delivered",
+                text: "short history",
             },
-        });
+        ]);
         store.setSelectedInstance("alpha");
         store.setSelectedPage("messages");
         store.replaceRoute({
@@ -977,6 +577,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
 
         const view = TuiMessagesView({
+            reader: domains.reader,
             state: store.getState(),
             viewportRows: 30,
             width: 80,
@@ -1008,24 +609,19 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
     });
 
     test("Messages Ink frame reserves one physical separator row per conversation entry", async () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: Array.from(
-                        { length: 8 },
-                        (_, index) => ({
-                            createdAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
-                            ctxId: "ctx-alpha",
-                            id: `comment-${index}`,
-                            kind: "comment" as const,
-                            status: "delivered" as const,
-                            text: `frame comment ${index}`,
-                        }),
-                    ),
-                },
-            },
-        });
+        domains.setConversation(
+            "alpha",
+            Array.from({ length: 8 }, (_, index) => ({
+                createdAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+                ctxId: "ctx-alpha",
+                id: `comment-${index}`,
+                kind: "comment" as const,
+                status: "delivered" as const,
+                text: `frame comment ${index}`,
+            })),
+        );
         store.setSelectedInstance("alpha");
         store.setSelectedPage("messages");
         store.replaceRoute({
@@ -1049,6 +645,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         const ink = render(
             TuiMessagesView({
+                reader: domains.reader,
                 state: store.getState(),
                 viewportRows: 30,
                 width: 80,
@@ -1091,32 +688,27 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
     });
 
     test("Messages reuses wrapped history while only editor state changes", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-10T10:03:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "comment-1",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "history ".repeat(200),
-                        },
-                    ],
-                },
+        domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-10T10:03:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "comment-1",
+                kind: "comment",
+                status: "delivered",
+                text: "history ".repeat(200),
             },
-        });
+        ]);
         const first = renderTuiMessageHistoryLines(
-            store.getState(),
+            domains.reader,
             "alpha",
             "ctx-alpha",
             80,
         );
         store.setFormDraft("messages:alpha:ctx-alpha", "editing", true);
         const second = renderTuiMessageHistoryLines(
-            store.getState(),
+            domains.reader,
             "alpha",
             "ctx-alpha",
             80,

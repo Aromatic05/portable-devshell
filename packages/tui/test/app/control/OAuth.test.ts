@@ -19,7 +19,7 @@ import {
 } from "../../../../../test/TestHttpSupport.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.ts";
 import {
-    createTuiClients,
+    createTuiDomainSession,
     currentTuiRoute,
     selectMainScreenModel,
     topTuiOverlay,
@@ -106,7 +106,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
             {
-                clients: createTuiClients({ socketPath }),
+                domains: createTuiDomainSession({ socketPath }),
                 inkDebug: true,
             },
         );
@@ -273,21 +273,17 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     ): Promise<void> {
         await waitUntil(
             () =>
-                runtime.store
-                    .getState()
-                    .readModel.oauthApprovals.some(
-                        (approval) =>
-                            approval.kind === kind &&
-                            approval.status === "pending",
-                    ),
+                runtime.reader.mcp.approvals.some(
+                    (approval) =>
+                        approval.kind === kind &&
+                        approval.status === "pending",
+                ),
             15_000,
         );
-        const pending = runtime.store
-            .getState()
-            .readModel.oauthApprovals.find(
-                (approval) =>
-                    approval.kind === kind && approval.status === "pending",
-            );
+        const pending = runtime.reader.mcp.approvals.find(
+            (approval) =>
+                approval.kind === kind && approval.status === "pending",
+        );
         assert.ok(pending);
         const boxId = `oauth-approval-${pending.approvalId}`;
 
@@ -299,9 +295,10 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         terminal.write(" ");
         await waitUntil(
             () =>
-                selectMainScreenModel(runtime.store.getState()).boxes.find(
-                    (box) => box.id === boxId,
-                )?.expanded === true,
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.find((box) => box.id === boxId)?.expanded === true,
         );
         await focusWithDownArrow(
             runtime,

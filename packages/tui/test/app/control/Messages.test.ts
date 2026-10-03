@@ -11,6 +11,7 @@ import {
     CONTROL_PROTOCOL_VERSION,
     type ControlHostDefinition,
     type JsonValue,
+    type MessageStream,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";

@@ -11,7 +11,7 @@ import {
     InstanceRegistry,
 } from "@portable-devshell/control/testing";
 import {
-    createTuiClients,
+    createTuiDomainSession,
     currentTuiRoute,
     selectBreadcrumbSegments,
     selectMainScreenModel,
@@ -31,13 +31,12 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await rm(runtimeDir, { force: true, recursive: true });
         });
 
-        const clients = createTuiClients({ socketPath });
-        t.after(() => clients.close());
+        const domains = createTuiDomainSession({ socketPath });
 
         const terminal = createTerminal();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients, inkDebug: true },
+            { domains, inkDebug: true },
         );
         const running = runtime.run();
         t.after(async () => {
@@ -50,7 +49,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     runtime.store.getState().connection.status === "connected",
             );
             await waitUntil(
-                () => runtime.store.getState().instances.length === 1,
+                () => runtime.reader.instances.instances.length === 1,
             );
 
             await runtime.handleInput("6", {});
@@ -62,14 +61,16 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 () => runtime.store.getState().ui.selectedInstance === "alpha",
             );
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
-                    (box) => box.id === "todo-task:task-1",
-                ),
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.some((box) => box.id === "todo-task:task-1"),
             );
             assert.equal(server.todoReadTaskIds().includes("task-1"), false);
 
             const overviewBoxes = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes;
             assert.ok(
                 overviewBoxes.some((box) => box.id === "todo-task:task-1"),
@@ -126,14 +127,16 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 return route.page === "todo" && route.view === "detail";
             });
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
-                    (box) => box.id === "todo-item:inspect",
-                ),
+                selectMainScreenModel(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ).boxes.some((box) => box.id === "todo-item:inspect"),
             );
             assert.equal(server.todoReadTaskIds().includes("task-1"), true);
 
             const detailBoxes = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes;
             assert.ok(
                 detailBoxes.some((box) => box.id === "todo-summary:task-1"),
@@ -161,6 +164,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await waitUntil(() => {
                 const box = selectMainScreenModel(
                     runtime.store.getState(),
+                    runtime.reader,
                 ).boxes.find(
                     (candidate) => candidate.id === "todo-summary:task-1",
                 );
@@ -168,6 +172,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             });
             const summary = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "todo-summary:task-1");
             assert.ok(
                 summary?.expandedLines.some((line) =>
@@ -180,6 +185,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await waitUntil(() => {
                 const box = selectMainScreenModel(
                     runtime.store.getState(),
+                    runtime.reader,
                 ).boxes.find(
                     (candidate) => candidate.id === "todo-summary:task-1",
                 );
@@ -202,6 +208,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await waitUntil(() => {
                 const box = selectMainScreenModel(
                     runtime.store.getState(),
+                    runtime.reader,
                 ).boxes.find(
                     (candidate) => candidate.id === "todo-item:implement",
                 );
@@ -209,6 +216,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             });
             const implement = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "todo-item:implement");
             assert.ok(
                 implement?.expandedLines.some((line) =>
@@ -223,7 +231,10 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 "detail should render the sub-item hierarchy level",
             );
             assert.deepEqual(
-                selectBreadcrumbSegments(runtime.store.getState()),
+                selectBreadcrumbSegments(
+                    runtime.store.getState(),
+                    runtime.reader,
+                ),
                 ["todo", "Todo support"],
             );
 
@@ -253,6 +264,27 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const todoReadTaskIds: Array<string | undefined> = [];
         const instances = new InstanceRegistry([
             {
+                approval: {
+                    async cancel() {
+                        throw new Error("Approval cancellation is not used.");
+                    },
+                    close() {},
+                    async decideApproval() {
+                        throw new Error("Approval decisions are not used.");
+                    },
+                    async getApproval() {
+                        throw new Error("Approval lookup is not used.");
+                    },
+                    async listApprovals() {
+                        return [];
+                    },
+                    async listPendingApprovals() {
+                        return [];
+                    },
+                    async retire() {},
+                    setPolicy() {},
+                },
+                approvalReview: () => ({ decision: "continue" }),
                 enabled: true,
                 goal: {
                     async continuation() {

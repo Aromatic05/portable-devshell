@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { type JsonValue } from "@portable-devshell/shared";
 import { TuiRuntimeTmuxOperations } from "../../../src/app/operation/Tmux.ts";
-import { TuiAppStore } from "../../../src/state/store/App.ts";
+import { TuiControlSession } from "../../../src/testing.ts";
+import { TuiTestDomains } from "../../support/DomainHarness.ts";
 
 {
     interface RecordedCall {
@@ -14,17 +15,16 @@ import { TuiAppStore } from "../../../src/state/store/App.ts";
 
     function createHarness(responder: (call: RecordedCall) => JsonValue) {
         const calls: RecordedCall[] = [];
-        const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                {
-                    enabled: true,
-                    homeDirectory: "/home/alpha",
-                    mcpEnabled: true,
-                    name: "alpha",
-                },
-            ],
-        });
+        const domains = new TuiTestDomains();
+        domains.setInstances([
+            {
+                enabled: true,
+                homeDirectory: "/home/alpha",
+                mcpEnabled: true,
+                name: "alpha",
+            },
+        ]);
+        const session = new TuiControlSession({ domains: domains.domains });
         const operations = new TuiRuntimeTmuxOperations({
             clients: {
                 tool: {
@@ -46,9 +46,9 @@ import { TuiAppStore } from "../../../src/state/store/App.ts";
                 },
             } as never,
             operationTimeoutMs: 1000,
-            store,
+            session,
         });
-        return { calls, operations, store };
+        return { calls, domains, operations, session };
     }
 
     test("listPanes records a tmux_manage list call and preserves each task's actual status", async () => {
@@ -69,24 +69,18 @@ import { TuiAppStore } from "../../../src/state/store/App.ts";
                 },
             ],
         }));
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    toolCalls: [
-                        {
-                            callId: "call-home-tmux",
-                            inputSummary: '{"command":"list"}',
-                            instance: "alpha",
-                            source: "mcp",
-                            startedAt: "2026-08-29T08:00:00.000Z",
-                            status: "completed",
-                            toolName: "tmux_manage",
-                            workspace: "/home/alpha",
-                        } as never,
-                    ],
-                },
-            },
-        });
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "call-home-tmux",
+                inputSummary: '{"command":"list"}',
+                instance: "alpha",
+                source: "mcp",
+                startedAt: "2026-08-29T08:00:00.000Z",
+                status: "completed",
+                toolName: "tmux_manage",
+                workspace: "/home/alpha",
+            } as never,
+        ]);
 
         const panes = await harness.operations.listPanes("alpha");
 
@@ -136,24 +130,18 @@ import { TuiAppStore } from "../../../src/state/store/App.ts";
                       ]
                     : [{ id: "%0", name: "main", status: "idle" }],
         }));
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    toolCalls: [
-                        {
-                            callId: "call-tmux",
-                            inputSummary: "{}",
-                            instance: "alpha",
-                            source: "mcp",
-                            startedAt: "2026-08-29T08:00:00.000Z",
-                            status: "completed",
-                            toolName: "tmux_run",
-                            workspace: "/work/project",
-                        } as never,
-                    ],
-                },
-            },
-        });
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "call-tmux",
+                inputSummary: "{}",
+                instance: "alpha",
+                source: "mcp",
+                startedAt: "2026-08-29T08:00:00.000Z",
+                status: "completed",
+                toolName: "tmux_run",
+                workspace: "/work/project",
+            } as never,
+        ]);
 
         const panes = await harness.operations.listPanes("alpha");
 
@@ -169,23 +157,21 @@ import { TuiAppStore } from "../../../src/state/store/App.ts";
         const harness = createHarness((): JsonValue => ({
             panes: [{ id: "%0", name: "main", status: "idle" }],
         }));
-        harness.store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: "2026-08-29T08:00:00.000Z",
-                    ctxId: "ctx-ordinary",
-                    environments: [
-                        { instance: "alpha", workspace: "/work/ordinary" },
-                    ],
-                    expiresAt: "2026-08-31T08:00:00.000Z",
-                    instance: "alpha",
-                    lastAccessedAt: "2026-08-29T08:00:00.000Z",
-                    principal: "subject",
-                    status: "active",
-                    workspace: "/work/ordinary",
-                } as never,
-            ],
-        });
+        harness.domains.setContexts([
+            {
+                createdAt: "2026-08-29T08:00:00.000Z",
+                ctxId: "ctx-ordinary",
+                environments: [
+                    { instance: "alpha", workspace: "/work/ordinary" },
+                ],
+                expiresAt: "2026-08-31T08:00:00.000Z",
+                instance: "alpha",
+                lastAccessedAt: "2026-08-29T08:00:00.000Z",
+                principal: "subject",
+                status: "active",
+                workspace: "/work/ordinary",
+            } as never,
+        ]);
 
         const panes = await harness.operations.listPanes("alpha");
 

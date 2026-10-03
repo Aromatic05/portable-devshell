@@ -16,8 +16,8 @@ import {
     TuiCommandDispatcherNavigation,
     type TuiCommandDispatcherFocus,
     type TuiFocusManager,
-    tuiViewProjection,
 } from "../../../src/testing.ts";
+import { TuiTestDomains } from "../../support/DomainHarness.ts";
 
 {
     const overview: OperationalOverview = {
@@ -121,13 +121,17 @@ import {
     };
 
     test("overview projects system meters and an instance table without expandable boxes", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({ overview: overview });
+        domains.setOverview(overview);
         store.setSelectedPage("overview");
         store.setMainFocusId("overview-instance:alpha");
 
-        const screen = selectMainScreenModel(store.getState());
-        const presentation = selectTuiOverviewPresentation(store.getState());
+        const screen = selectMainScreenModel(store.getState(), domains.reader);
+        const presentation = selectTuiOverviewPresentation(
+            store.getState(),
+            domains.reader,
+        );
         assert.equal(screen.activePage.instance, undefined);
         assert.deepEqual(screen.boxes, []);
         assert.equal(screen.loadState.kind, "ready");
@@ -162,10 +166,10 @@ import {
         );
         assert.equal(presentation.alerts.length, 1);
         assert.equal(presentation.activity[0]?.toolName, "bash_run");
-        assert.deepEqual(selectMainBoxIds(store.getState()), [
+        assert.deepEqual(selectMainBoxIds(store.getState(), domains.reader), [
             "overview-instance:alpha",
         ]);
-        const flow = selectMainBoxFlowMetrics(store.getState());
+        const flow = selectMainBoxFlowMetrics(store.getState(), domains.reader);
         assert.deepEqual(flow.boxRanges, {
             "overview-instance:alpha": { end: 1, start: 0 },
         });
@@ -174,18 +178,17 @@ import {
     });
 
     test("overview Enter opens the selected instance row", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                {
-                    enabled: true,
-                    mcpEnabled: true,
-                    name: "alpha",
-                    provider: "local",
-                },
-            ],
-        });
-        store.patchControlReadModel({ overview: overview });
+        domains.setInstances([
+            {
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+                provider: "local",
+            },
+        ]);
+        domains.setOverview(overview);
         store.setSelectedPage("overview");
         store.setFocusScope("mainBoxes");
         store.setMainFocusId("overview-instance:alpha");
@@ -196,7 +199,7 @@ import {
             focusManager: {} as unknown as TuiFocusManager,
             async onPageReload() {},
             onRedraw() {},
-            projection: tuiViewProjection,
+            projection: domains.projection,
             store,
         });
 
@@ -207,11 +210,12 @@ import {
     });
 
     test("overview exposes mouse hit regions for visible instance rows", () => {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        store.patchControlReadModel({ overview: overview });
+        domains.setOverview(overview);
         store.setSelectedPage("overview");
 
-        const region = buildTuiHitRegions(store.getState(), {
+        const region = buildTuiHitRegions(store.getState(), domains.reader, {
             columns: 120,
             rows: 40,
         }).find((candidate) => candidate.target.kind === "overviewInstance");

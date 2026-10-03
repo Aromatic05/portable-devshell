@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
 import {
     asInstanceName,
-    CONTROL_PROTOCOL_VERSION,
     type ApprovalRequest,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
-import { type TuiClients } from "../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../src/app/Runtime.ts";
 import {
     currentTuiRoute,
@@ -21,22 +17,24 @@ import {
 import {
     buildTuiHitRegions,
     buildTuiTerminalViewportRegion,
-    hitTargetAt,
     tuiScreenSelectionColumnBounds,
 } from "../../src/view/projection/HitRegion.ts";
 import {
     selectMainScreenModel,
     selectMainScrollKey,
 } from "../../src/view/projection/View.ts";
-import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import {
+    TuiDomainHarness,
+    type TuiDomainHarnessOptions,
+} from "../support/DomainHarness.ts";
 
 {
     test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -107,7 +105,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.stop();
         }
 
-        assert.equal(clients.closed(), 1);
+        assert.equal(domains.closed(), 1);
         assert.equal(terminal.rawModes.at(-1), false);
         assert.equal(terminal.output.includes("\u001B[?1049h"), true);
         assert.equal(terminal.output.includes("\u001B[?1049l"), true);
@@ -115,10 +113,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime strips bracketed paste markers from app input", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -154,10 +152,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime preserves every key in a burst of escape sequences", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -185,7 +183,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime preserves every shortcut in a printable input burst", async () => {
         const terminal = createTerminal();
-        const clients = createClients({
+        const domains = createDomains({
             instanceList: [
                 { enabled: true, mcpEnabled: true, name: "alpha" },
                 { enabled: true, mcpEnabled: true, name: "beta" },
@@ -193,7 +191,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -218,7 +216,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("serializes rapid Audit Input navigation and activation", async () => {
         const terminal = createTerminal();
-        const clients = createClients({
+        const domains = createDomains({
             instanceList: [{ enabled: true, mcpEnabled: true, name: "alpha" }],
             toolCallRecords: [
                 {
@@ -237,7 +235,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -257,16 +255,17 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.session.refreshAudit("alpha");
             await waitUntil(
                 () =>
-                    runtime.store.getState().readModel.instanceState.alpha
-                        ?.toolCalls.length === 1,
+                    runtime.reader.toolCalls.instances.alpha?.calls.length ===
+                    1,
             );
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
+                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
                     (candidate) => candidate.id === "audit-call:rapid-input",
                 ),
             );
             const box = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find(
                 (candidate) => candidate.id === "audit-call:rapid-input",
             )!;
@@ -275,6 +274,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             runtime.store.setMainFocusId(box.id);
             const expandedBox = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((candidate) => candidate.id === box.id)!;
             const inputLineIndex = expandedBox.expandedLines.findIndex(
                 (line) => line.id?.endsWith(":input") === true,
@@ -306,7 +306,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime saves a restart-required Config edit through cross-box keyboard focus", async () => {
         const terminal = createTerminal();
-        const clients = createClients({
+        const domains = createDomains({
             configView: {
                 control: { logLevel: "info" },
                 instances: [
@@ -341,7 +341,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -355,17 +355,17 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             await waitUntil(
                 () =>
-                    runtime.store.getState().readModel.instanceState.alpha
-                        ?.snapshot?.ready === true,
+                    runtime.reader.runtime("alpha").snapshot?.ready === true,
             );
             runtime.store.setSelectedPage("config");
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
+                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
                     (box) => box.id === "logs",
                 ),
             );
             const logs = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "logs");
             assert.ok(logs);
             if (!logs.expanded) runtime.store.toggleExpanded(logs.expandedKey);
@@ -406,6 +406,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             const unchangedActions = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "configuration-actions");
             assert.equal(unchangedActions?.expanded, true);
 
@@ -442,6 +443,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             const actions = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "configuration-actions");
             assert.ok(actions);
             assert.equal(
@@ -452,10 +454,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
 
             terminal.write("\r");
-            await waitUntil(() => clients.configUpdates().length === 1);
+            await waitUntil(() => domains.configUpdates().length === 1);
             await waitUntil(
                 () =>
-                    clients.lifecycleActions().join(",") ===
+                    domains.lifecycleActions().join(",") ===
                     "stop:alpha,start:alpha",
             );
             await waitUntil(
@@ -463,18 +465,18 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     runtime.store.getState().ui.dirtyForms["config:alpha"] ===
                     false,
             );
-            assert.deepEqual(clients.lifecycleActions(), [
+            assert.deepEqual(domains.lifecycleActions(), [
                 "stop:alpha",
                 "start:alpha",
             ]);
             assert.equal(
-                JSON.stringify(clients.configUpdates()[0]).includes(
+                JSON.stringify(domains.configUpdates()[0]).includes(
                     "effectiveMode",
                 ),
                 false,
             );
             assert.equal(
-                JSON.stringify(clients.configUpdates()[0]).includes(
+                JSON.stringify(domains.configUpdates()[0]).includes(
                     "restartControlRequired",
                 ),
                 false,
@@ -494,10 +496,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime buffers split mouse input and enters then discards the create wizard", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -525,7 +527,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     ] === true,
             );
 
-            const createRegion = buildTuiHitRegions(runtime.store.getState(), {
+            const createRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             }).find((region) => {
@@ -618,14 +620,14 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.stop();
         }
 
-        assert.equal(clients.createSchemaCalls(), 1);
-        assert.equal(clients.closed(), 1);
+        assert.equal(domains.createSchemaCalls(), 1);
+        assert.equal(domains.closed(), 1);
         assert.equal(terminal.rawModes.at(-1), false);
     });
 
     test("real Ink runtime renders connection failure and remains interactive until quit", async () => {
         const terminal = createTerminal();
-        const clients = createClients({
+        const domains = createDomains({
             pingError: Object.assign(
                 new Error("control server is not running."),
                 {
@@ -635,15 +637,14 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
         try {
             await waitUntil(
                 () =>
-                    runtime.store.getState().connection.status ===
-                    "disconnected",
+                    runtime.store.getState().connection.status === "error",
             );
             await waitUntil(() =>
                 terminal.output.includes("control server is not running."),
@@ -659,16 +660,16 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.stop();
         }
 
-        assert.equal(clients.closed(), 1);
+        assert.equal(domains.closed(), 1);
         assert.equal(terminal.rawModes.at(-1), false);
     });
 
     test("real Ink runtime handles sidebar mouse buttons and viewport wheel scrolling", async () => {
         const terminal = createTerminal({ rows: 14 });
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -680,7 +681,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
             runtime.store.setSidebarCursor({ id: "help", kind: "context" });
             runtime.store.setFocusScope("sidebarContext");
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             }).find(
@@ -702,6 +703,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             runtime.store.setSidebarCursor({ id: "help", kind: "context" });
             const refreshedHelpRegion = buildTuiHitRegions(
                 runtime.store.getState(),
+                runtime.reader,
                 {
                     columns: runtime.columns,
                     rows: runtime.rows,
@@ -754,10 +756,11 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
             const navigationBox = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "help-navigation");
             assert.ok(navigationBox);
             runtime.store.toggleExpanded(navigationBox.expandedKey);
-            const helpRegions = buildTuiHitRegions(runtime.store.getState(), {
+            const helpRegions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             });
@@ -813,7 +816,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             toolName: toolCall.toolName,
             workspace: "/workspace/alpha",
         };
-        const clients = createClients({
+        const domains = createDomains({
             approvalRecords: [approval],
             instanceList: [
                 {
@@ -827,7 +830,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -843,7 +846,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 title: "Confirm navigation",
                 type: "overlay.openConfirm",
             });
-            let regions = buildTuiHitRegions(runtime.store.getState(), {
+            let regions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             });
@@ -872,7 +875,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 instance: "alpha",
                 type: "approval.open",
             });
-            regions = buildTuiHitRegions(runtime.store.getState(), {
+            regions = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             });
@@ -903,10 +906,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("production Ink scrolling does not clear and repaint the whole terminal", async () => {
         const terminal = createTerminal({ columns: 120, rows: 14 });
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value },
+            { domains: domains.session },
         );
         const running = runtime.run();
 
@@ -918,6 +921,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             runtime.store.setSelectedPage("help");
             const navigationBox = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "help-navigation");
             assert.ok(navigationBox);
             runtime.store.toggleExpanded(navigationBox.expandedKey);
@@ -949,10 +953,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("host terminal resize immediately reflows the live TUI", async () => {
         const terminal = createTerminal({ columns: 120, rows: 40 });
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -979,10 +983,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime moves mouse focus into an expanded main box from the sidebar", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -998,13 +1002,14 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
             const navigation = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "help-navigation");
             assert.ok(navigation);
             runtime.store.toggleExpanded(navigation.expandedKey);
             runtime.store.setSidebarCursor({ id: "config", kind: "context" });
             runtime.store.setFocusScope("sidebarContext");
 
-            const region = buildTuiHitRegions(runtime.store.getState(), {
+            const region = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             }).find(
@@ -1038,10 +1043,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime drag-selects ordinary TUI text and copies it without activating the row", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value },
+            { domains: domains.session },
         );
         const running = runtime.run();
 
@@ -1063,7 +1068,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             assert.notEqual(helpRow, undefined);
             runtime.selection.clearSelection();
 
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             }).find(
@@ -1149,10 +1154,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("screen selection updates only the selection layer, not the TUI root", async () => {
         const terminal = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const originalGetSnapshot = runtime.scheduler.getSnapshot.bind(
             runtime.scheduler,
@@ -1197,7 +1202,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             },
         ]) {
             const terminal = createTerminal(terminalOptions);
-            const clients = createClients({
+            const domains = createDomains({
                 instanceList: [
                     {
                         enabled: true,
@@ -1209,7 +1214,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             });
             const runtime = new TuiRuntime(
                 { stdin: terminal.stdin, stdout: terminal.stdout },
-                { clients: clients.value, inkDebug: true },
+                { domains: domains.session, inkDebug: true },
             );
             const running = runtime.run();
 
@@ -1275,7 +1280,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             status: "pending",
             toolName: "bash_run",
         };
-        const clients = createClients({
+        const domains = createDomains({
             approvalRecords: [approval],
             instanceList: [
                 {
@@ -1290,7 +1295,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: terminal.stdin, stdout: terminal.stdout },
-            { clients: clients.value, inkDebug: true },
+            { domains: domains.session, inkDebug: true },
         );
         const running = runtime.run();
 
@@ -1417,7 +1422,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime routes Open Terminal without suspending the TUI", async () => {
         const host = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         let detached = 0;
         const embedded = new TuiTerminalSession({
             ptyFactory: () => ({
@@ -1436,7 +1441,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: host.stdin, stdout: host.stdout },
-            { clients: clients.value, inkDebug: true, terminal: embedded },
+            { domains: domains.session, inkDebug: true, terminal: embedded },
         );
         const running = runtime.run();
 
@@ -1445,7 +1450,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 () =>
                     runtime.store.getState().connection.status === "connected",
             );
-            clients.setControlState(
+            domains.setControlState(
                 [
                     {
                         homeDirectory: process.cwd(),
@@ -1465,39 +1470,32 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     ],
                 },
             );
-            runtime.store.patchControlReadModel({
-                instances: [
-                    {
-                        homeDirectory: process.cwd(),
-                        enabled: true,
-                        mcpEnabled: false,
-                        name: "alpha",
-                        provider: "local",
-                    },
-                ],
-            });
-            runtime.store.patchControlSnapshot({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("alpha"),
-                ready: true,
-                status: "ready",
+            domains.runtime("alpha").patch({
+                snapshot: {
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("alpha"),
+                    ready: true,
+                    status: "ready",
+                },
             });
             runtime.store.setSelectedPage("instances");
 
             await waitUntil(() =>
-                selectMainScreenModel(runtime.store.getState()).boxes.some(
+                selectMainScreenModel(runtime.store.getState(), runtime.reader).boxes.some(
                     (box) => box.id === "instance:alpha",
                 ),
             );
             let instanceBox = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "instance:alpha");
             assert.ok(instanceBox?.expandedKey);
             runtime.store.toggleExpanded(instanceBox.expandedKey);
             instanceBox = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find((box) => box.id === "instance:alpha");
             const attachLine = instanceBox?.expandedLines.find(
                 (line) => line.id?.endsWith(":button:open-terminal") === true,
@@ -1543,7 +1541,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
     test("real Ink runtime routes terminal scrollback and mouse without trapping sidebar clicks", async () => {
         const host = createTerminal();
-        const clients = createClients();
+        const domains = createDomains();
         let dataListener: ((data: string) => void) | undefined;
         const writes: string[] = [];
         const pty: TuiTerminalPty = {
@@ -1564,7 +1562,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         const runtime = new TuiRuntime(
             { stdin: host.stdin, stdout: host.stdout },
             {
-                clients: clients.value,
+                domains: domains.session,
                 graphicsMode: "kitty",
                 inkDebug: true,
                 terminal: embedded,
@@ -1577,7 +1575,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 () =>
                     runtime.store.getState().connection.status === "connected",
             );
-            clients.setControlState(
+            domains.setControlState(
                 [
                     {
                         homeDirectory: process.cwd(),
@@ -1597,28 +1595,6 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     ],
                 },
             );
-            runtime.store.patchControlReadModel({
-                instances: [
-                    {
-                        homeDirectory: process.cwd(),
-                        enabled: true,
-                        mcpEnabled: true,
-                        name: "alpha",
-                        provider: "ssh",
-                    },
-                ],
-            });
-            runtime.store.patchControlReadModel({
-                configView: {
-                    instances: [
-                        {
-                            name: "alpha",
-                            provider: "ssh",
-                            ssh: { command: "ssh example.test" },
-                        },
-                    ],
-                } as never,
-            });
             runtime.store.setSelectedInstance("alpha");
             runtime.store.setSelectedPage("instances");
 
@@ -1748,7 +1724,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             await waitUntil(() => writes.includes("\u001B[<0;5;3M"));
 
-            const helpRegion = buildTuiHitRegions(runtime.store.getState(), {
+            const helpRegion = buildTuiHitRegions(runtime.store.getState(), runtime.reader, {
                 columns: runtime.columns,
                 rows: runtime.rows,
             }).find(
@@ -1775,7 +1751,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.stop();
         }
 
-        assert.equal(clients.closed(), 1);
+        assert.equal(domains.closed(), 1);
         assert.equal(host.rawModes.at(-1), false);
     });
 
@@ -1797,7 +1773,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 },
             }),
         });
-        const clients = createClients({
+        const domains = createDomains({
             configView: {
                 instances: [
                     {
@@ -1879,7 +1855,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: host.stdin, stdout: host.stdout },
-            { clients: clients.value, inkDebug: true, terminal: embedded },
+            { domains: domains.session, inkDebug: true, terminal: embedded },
         );
         const running = runtime.run();
 
@@ -1889,7 +1865,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     runtime.store.getState().connection.status === "connected",
             );
             await waitUntil(
-                () => runtime.store.getState().instances.length === 1,
+                () => runtime.reader.instances.instances.length === 1,
             );
             runtime.store.setSelectedInstance("alpha");
 
@@ -1947,6 +1923,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
             const fullScreenRegions = buildTuiHitRegions(
                 runtime.store.getState(),
+                runtime.reader,
                 {
                     columns: runtime.columns,
                     rows: runtime.rows,
@@ -2000,6 +1977,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
             const instancesLayoutRegions = buildTuiHitRegions(
                 runtime.store.getState(),
+                runtime.reader,
                 {
                     columns: runtime.columns,
                     rows: runtime.rows,
@@ -2030,7 +2008,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             host.write("echo hello\r");
             await waitUntil(() =>
-                clients
+                domains
                     .toolCalls()
                     .some((call) => call.toolName === "tmux_input"),
             );
@@ -2062,7 +2040,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             host.write("\t");
             await waitUntil(() => ptyWrites.includes("\t"));
             assert.equal(
-                clients
+                domains
                     .toolCalls()
                     .filter((call) => call.toolName === "tmux_input").length,
                 1,
@@ -2108,7 +2086,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             status: "completed",
             toolName: "artifact_viewImage",
         };
-        const clients = createClients({
+        const domains = createDomains({
             configView: {
                 instances: [
                     {
@@ -2154,7 +2132,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         });
         const runtime = new TuiRuntime(
             { stdin: host.stdin, stdout: host.stdout },
-            { clients: clients.value, graphicsMode: "kitty", inkDebug: true },
+            { domains: domains.session, graphicsMode: "kitty", inkDebug: true },
         );
         const running = runtime.run();
 
@@ -2167,11 +2145,9 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             runtime.store.setSelectedPage("audit");
             await waitUntil(
                 () =>
-                    runtime.store
-                        .getState()
-                        .readModel.instanceState.alpha?.toolCalls.some(
-                            (call) => call.callId === "image-call",
-                        ) === true,
+                    runtime.reader.toolCalls.instances.alpha?.calls.some(
+                        (call) => call.callId === "image-call",
+                    ) === true,
             );
             runtime.store.replaceRoute({
                 ctxId: "ctx-image",
@@ -2187,16 +2163,15 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 view: "context",
             });
             assert.deepEqual(
-                runtime.store
-                    .getState()
-                    .readModel.instanceState.alpha?.toolCalls.map(
-                        (call) => call.callId,
-                    ),
+                runtime.reader.toolCalls.instances.alpha?.calls.map(
+                    (call) => call.callId,
+                ),
                 ["image-call"],
             );
 
             const box = selectMainScreenModel(
                 runtime.store.getState(),
+                runtime.reader,
             ).boxes.find(
                 (candidate) => candidate.id === "audit-call:image-call",
             );
@@ -2238,316 +2213,13 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await runtime.stop();
         }
 
-        assert.deepEqual(clients.imageRefReads(), [`${blake3}.png`]);
-        assert.deepEqual(clients.imageReads(), []);
+        assert.deepEqual(domains.imageRefReads(), [`${blake3}.png`]);
+        assert.deepEqual(domains.imageReads(), []);
     });
 
-    function createClients(
-        options: {
-            configUpdate?: (request: unknown) => unknown;
-            configView?: Record<string, unknown>;
-            instanceList?: Array<{
-                homeDirectory?: string;
-                enabled: boolean;
-                mcpEnabled: boolean;
-                name: string;
-                provider?: string;
-            }>;
-            image?: {
-                blake3: string;
-                bytes: number;
-                content: string;
-                encoding: "base64";
-                imageRef: string;
-                mediaType:
-                    "image/gif" | "image/jpeg" | "image/png" | "image/webp";
-                name: string;
-                source: {
-                    handle?: string;
-                    instance: string;
-                    path?: string;
-                    type?: "artifact" | "directory" | "file";
-                };
-            };
-            approvalRecords?: ApprovalRequest[];
-            contextRecords?: import("@portable-devshell/shared").McpContextRecord[];
-            pingError?: Error;
-            toolCall?: (
-                instance: string,
-                toolName: string,
-                input: unknown,
-            ) => unknown;
-            toolCallRecords?: ToolCallRecord[];
-        } = {},
-    ) {
-        let closeCount = 0;
-        let configView = options.configView ?? { instances: [] };
-        let instanceList = options.instanceList ?? [];
-        const configUpdates: unknown[] = [];
-        const imageReads: Array<{ input: unknown; instance: string }> = [];
-        const imageRefReads: string[] = [];
-        const lifecycleActions: string[] = [];
-        let refreshCount = 0;
-        let schemaCalls = 0;
-        const toolCalls: Array<{
-            input: unknown;
-            instance: string;
-            toolName: string;
-        }> = [];
-        const value = {
-            artifact: {
-                async readImage(imageRef: string) {
-                    imageRefReads.push(imageRef);
-                    if (options.image === undefined) {
-                        throw new Error("No image fixture configured.");
-                    }
-                    const {
-                        name: _name,
-                        source: _source,
-                        ...stored
-                    } = options.image;
-                    return stored;
-                },
-                async viewImage(instance: string, input: unknown) {
-                    imageReads.push({ input, instance });
-                    if (options.image === undefined) {
-                        throw new Error("No image fixture configured.");
-                    }
-                    return options.image;
-                },
-                async listShares() {
-                    return [];
-                },
-                async listTransfers() {
-                    return [];
-                },
-            },
-            close() {
-                closeCount += 1;
-            },
-            onTransportClose() {
-                return () => undefined;
-            },
-            config: {
-                async get() {
-                    return configView;
-                },
-                async update(request: unknown) {
-                    configUpdates.push(request);
-                    return options.configUpdate?.(request) ?? {};
-                },
-                async validate(draft: unknown) {
-                    return draft;
-                },
-            },
-            instance: {
-                async createSchema() {
-                    schemaCalls += 1;
-                    return {
-                        container: {
-                            defaultMode: "preset",
-                            modes: [
-                                "preset",
-                                "dockerfile",
-                                "compose",
-                                "existingImage",
-                                "existingStoppedContainer",
-                            ],
-                            presets: [],
-                        },
-                        defaultEnabled: true,
-                        defaultMcpEnabled: true,
-                        defaultModelExtensions: ["instance"],
-                        defaultProvider: "local",
-                        defaultSecurityMode: "disabled",
-                        providers: ["local", "ssh", "docker", "podman"],
-                    };
-                },
-                async list() {
-                    return instanceList.map((instance) => ({
-                        ...instance,
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 2,
-                            name: instance.name,
-                            ready: true,
-                            status: "ready",
-                        },
-                    }));
-                },
-            },
-            mcp: {
-                async listApprovals() {
-                    return [];
-                },
-                async status() {
-                    return {};
-                },
-            },
-            overview: {
-                async get() {
-                    return {
-                        activity: [],
-                        alerts: [],
-                        controller: { pid: 1, uptimeSeconds: 10 },
-                        counts: {
-                            activeTodos: 0,
-                            failedCalls24h: 0,
-                            instancesAttention: 0,
-                            instancesCritical: 0,
-                            instancesReady: 0,
-                            instancesTotal: 0,
-                            pendingApprovals: 0,
-                        },
-                        generatedAt: "2026-07-31T00:00:00.000Z",
-                        health: "healthy",
-                        instances: [],
-                        todos: [],
-                    };
-                },
-            },
-            async reconnect() {},
-            reverse: {},
-            runtime: {
-                async readLogs() {
-                    return [];
-                },
-                async subscribe() {
-                    let closed = false;
-                    let resolveClosed:
-                        ((message: { kind: "closed" }) => void) | undefined;
-                    return {
-                        close() {
-                            closed = true;
-                            resolveClosed?.({ kind: "closed" });
-                        },
-                        async next() {
-                            if (closed) return { kind: "closed" as const };
-                            return await new Promise<{ kind: "closed" }>(
-                                (resolve) => {
-                                    resolveClosed = resolve;
-                                },
-                            );
-                        },
-                    };
-                },
-                async snapshot(instance: string) {
-                    return {
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 2,
-                            name: instance,
-                            ready: true,
-                            status: "ready",
-                        },
-                    };
-                },
-                async refresh(instance: string) {
-                    refreshCount += 1;
-                    return {
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 2,
-                            name: instance,
-                            ready: true,
-                            status: "ready",
-                        },
-                    };
-                },
-                async start(instance: string) {
-                    lifecycleActions.push(`start:${instance}`);
-                    return {
-                        connectionState: "connected",
-                        daemonState: "running",
-                        lastSeq: 4,
-                        name: instance,
-                        ready: true,
-                        status: "ready",
-                    };
-                },
-                async stop(instance: string) {
-                    lifecycleActions.push(`stop:${instance}`);
-                    return {
-                        connectionState: "disconnected",
-                        daemonState: "stopped",
-                        lastSeq: 3,
-                        name: instance,
-                        ready: false,
-                        status: "stopped",
-                    };
-                },
-            },
-            service: {
-                async hello() {
-                    return {
-                        capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: CONTROL_PROTOCOL_VERSION,
-                    };
-                },
-                async ping() {
-                    if (options.pingError !== undefined) {
-                        throw options.pingError;
-                    }
-                    return { pong: true };
-                },
-            },
-            todo: {
-                async get() {
-                    return {
-                        todo: {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                        },
-                    };
-                },
-            },
-            tool: {
-                async call(instance: string, toolName: string, input: unknown) {
-                    toolCalls.push({ input, instance, toolName });
-                    return options.toolCall?.(instance, toolName, input) ?? {};
-                },
-                async listApprovals() {
-                    return options.approvalRecords ?? [];
-                },
-                async listCalls() {
-                    return options.toolCallRecords ?? [];
-                },
-            },
-            context: {
-                async list() {
-                    return options.contextRecords ?? [];
-                },
-                async disable() {
-                    return { ctxId: "" } as never;
-                },
-                async renew() {
-                    return { ctxId: "" } as never;
-                },
-            },
-        } as unknown as TuiClients;
-
-        return {
-            closed: () => closeCount,
-            configUpdates: () => configUpdates,
-            createSchemaCalls: () => schemaCalls,
-            imageRefReads: () => imageRefReads,
-            imageReads: () => imageReads,
-            lifecycleActions: () => lifecycleActions,
-            refreshCalls: () => refreshCount,
-            toolCalls: () => toolCalls,
-            setControlState(
-                nextInstances: typeof instanceList,
-                nextConfigView: Record<string, unknown>,
-            ) {
-                instanceList = nextInstances;
-                configView = nextConfigView;
-            },
-            value,
-        };
+    function createDomains(options: TuiDomainHarnessOptions = {}) {
+        const domains = new TuiDomainHarness(options);
+        return Object.assign(domains, { session: domains.value });
     }
 
     function createTerminal(

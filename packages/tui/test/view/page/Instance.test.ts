@@ -1,46 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type JsonValue } from "@portable-devshell/shared";
+import { TuiTestDomains } from "../../support/DomainHarness.ts";
 import { TuiAppStore } from "../../../src/state/store/App.ts";
 import { buildConnectorPageBoxes } from "../../../src/view/page/instance/Connector.ts";
 
 {
     function expandedWebBox(webDraft: Record<string, JsonValue>) {
+        const domains = new TuiTestDomains();
         const store = new TuiAppStore();
         store.setSelectedPage("connections");
         store.setSelectedInstance("alpha");
-        store.patchControlReadModel({
-            configView: {
-                control: {},
-                instances: [
-                    {
-                        enabled: true,
-                        mcp: {
-                            auth: "none",
-                            enabled: true,
-                            path: "/alpha/mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
-                        security: {
-                            effectiveMode: "disabled",
-                            mode: "disabled",
-                        },
-                    },
-                ],
-                mcp: {
+        domains.setConfig({
+            control: {},
+            instances: [
+                {
                     enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                    publicBaseUrl: "http://127.0.0.1:3210",
+                    mcp: {
+                        auth: "none",
+                        enabled: true,
+                        path: "/alpha/mcp",
+                    },
+                    name: "alpha",
+                    provider: "local",
+                    security: {
+                        effectiveMode: "disabled",
+                        mode: "disabled",
+                    },
                 },
-                web: webDraft,
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "http://127.0.0.1:3210",
             },
+            web: webDraft,
         });
         store.setFormDraft("web", webDraft, true);
 
         const collapsed = buildConnectorPageBoxes(
             store.getState(),
+            domains.reader,
             "alpha",
         ).find((box) => box.id === "web");
         assert.ok(collapsed);
@@ -48,6 +49,7 @@ import { buildConnectorPageBoxes } from "../../../src/view/page/instance/Connect
 
         const expanded = buildConnectorPageBoxes(
             store.getState(),
+            domains.reader,
             "alpha",
         ).find((box) => box.id === "web");
         assert.ok(expanded?.expanded);

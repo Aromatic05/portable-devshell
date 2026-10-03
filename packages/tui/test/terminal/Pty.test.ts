@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-    ControlStreamMessage,
-    MessageStream,
+    TerminalAttachment,
     TerminalSessionDescriptor,
+    TerminalStreamCommandIdentity,
+    TerminalStreamMessage,
+    TerminalVersionedIdentity,
 } from "@portable-devshell/shared";
 import {
     TuiControlTerminalPtyFactory,
@@ -12,77 +14,83 @@ import {
 import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
 
 {
-    class FakeStream {
+    class FakeAttachment {
         readonly sent: Array<{ operation: string; payload: unknown }> = [];
         closed = false;
-        readonly #events: Array<
-            | { type: "data"; message: ControlStreamMessage; seq: number }
-            | { type: "close"; message?: unknown }
-        > = [];
-        readonly #waiters: Array<
-            (event:
-                | { type: "data"; message: ControlStreamMessage; seq: number }
-                | { type: "close"; message?: unknown }) => void
-        > = [];
-        #seq = 0;
+        readonly #messages: TerminalStreamMessage[] = [];
+        readonly #waiters: Array<(message: TerminalStreamMessage) => void> = [];
 
-        async close(message?: unknown): Promise<void> {
-            this.closed = true;
-            if (message !== undefined) this.#push({ type: "close", message });
-        }
-
-        async readMessage(): Promise<
-            | { type: "data"; message: ControlStreamMessage; seq: number }
-            | { type: "close"; message?: unknown }
-        > {
-            return (
-                this.#events.shift() ??
-                (await new Promise((resolve) => this.#waiters.push(resolve)))
-            );
-        }
-
-        async send(message: ControlStreamMessage): Promise<void> {
-            this.sent.push({ operation: message.name, payload: message.payload });
-        }
-
-        emit(name: string, payload?: unknown): void {
-            this.#push({
-                type: "data",
-                message: {
-                    name,
-                    ...(payload === undefined ? {} : { payload }),
-                } as ControlStreamMessage,
-                seq: ++this.#seq,
+        ack(
+            identity: TerminalVersionedIdentity,
+            throughSeq: number,
+        ): Promise<void> {
+            this.sent.push({
+                operation: "ack",
+                payload: {
+                    generation: identity.generation,
+                    terminalId: identity.terminalId,
+                    throughSeq,
+                    version: identity.version,
+                },
             });
+            return Promise.resolve();
         }
 
-        complete(message: unknown): void {
-            this.#push({ type: "close", message });
+        close(): void {
+            this.closed = true;
+            this.push({ kind: "closed" });
         }
 
-        asMessageStream(): MessageStream {
-            return this as unknown as MessageStream;
+        next(): Promise<TerminalStreamMessage> {
+            const message = this.#messages.shift();
+            if (message !== undefined) return Promise.resolve(message);
+            return new Promise((resolve) => this.#waiters.push(resolve));
         }
 
-        #push(event:
-            | { type: "data"; message: ControlStreamMessage; seq: number }
-            | { type: "close"; message?: unknown }): void {
+        sendInput(
+            data: string,
+            command: TerminalStreamCommandIdentity,
+        ): Promise<void> {
+            this.sent.push({
+                operation: "input",
+                payload: { ...command, data },
+            });
+            return Promise.resolve();
+        }
+
+        sendResize(
+            cols: number,
+            rows: number,
+            command: TerminalStreamCommandIdentity,
+        ): Promise<void> {
+            this.sent.push({
+                operation: "resize",
+                payload: { ...command, cols, rows },
+            });
+            return Promise.resolve();
+        }
+
+        push(message: TerminalStreamMessage): void {
             const waiter = this.#waiters.shift();
-            if (waiter === undefined) this.#events.push(event);
-            else waiter(event);
+            if (waiter === undefined) this.#messages.push(message);
+            else waiter(message);
+        }
+
+        asTerminalAttachment(): TerminalAttachment {
+            return this as unknown as TerminalAttachment;
         }
     }
 
-    function attachStream(
-        stream: FakeStream,
+    function attachAttachment(
+        attachment: FakeAttachment,
         session: TerminalSessionDescriptor,
-    ): MessageStream {
-        stream.emit("seed", { session });
-        return stream.asMessageStream();
+    ): TerminalAttachment {
+        attachment.push({ kind: "seed", session });
+        return attachment.asTerminalAttachment();
     }
 
     test("control terminal PTY waits for versioned acknowledgements and resumes by output sequence", async () => {
-        const stream = new FakeStream();
+        const stream = new FakeAttachment();
         const opened: TerminalSessionDescriptor = {
             cols: 80,
             createdAt: "2026-08-06T00:00:00.000Z",
@@ -99,7 +107,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const client: TuiControlTerminalClient = {
             async attach(_instance, input) {
                 attachCalls.push(input);
-                return attachStream(stream, {
+                return attachAttachment(stream, {
                     ...opened,
                     latestSeq: input.fromSeq,
                 });
@@ -126,7 +134,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
 
         await waitFor(() => attachCalls.length === 1);
         assert.equal(openCalls, 1);
-        stream.emit("output", { data: "hello", seq: 1 });
+        stream.push({ kind: "output", frame: { data: "hello", seq: 1 } });
         await waitFor(() => output.includes("hello"));
 
         await waitFor(() =>
@@ -149,11 +157,14 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
                 },
             },
         );
-        stream.emit("inputAccepted", {
+        stream.push({
+            kind: "inputAccepted",
             clientSeq: 1,
-            generation: 3,
-            terminalId: "terminal-1",
-            version: 1,
+            identity: {
+                generation: 3,
+                terminalId: "terminal-1",
+                version: 1,
+            },
         });
 
         pty.resize(100, 40);
@@ -174,21 +185,24 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
                 },
             },
         );
-        stream.emit("resized", {
+        stream.push({
+            kind: "resized",
             clientSeq: 2,
-            generation: 3,
-            terminalId: "terminal-1",
-            version: 2,
+            identity: {
+                generation: 3,
+                terminalId: "terminal-1",
+                version: 2,
+            },
         });
         await waitFor(() => factory.snapshot("alpha")?.version === 2);
 
         pty.kill();
         assert.equal(stream.closed, true);
 
-        const resumedStream = new FakeStream();
+        const resumedStream = new FakeAttachment();
         client.attach = async (_instance, input) => {
             attachCalls.push(input);
-            return attachStream(resumedStream, {
+            return attachAttachment(resumedStream, {
                 ...opened,
                 latestSeq: input.fromSeq,
                 version: 2,
@@ -208,7 +222,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             generation: 3,
             terminalId: "terminal-1",
         });
-        resumedStream.emit("output", { data: "hello", seq: 1 });
+        resumedStream.push({ kind: "output", frame: { data: "hello", seq: 1 } });
         await waitFor(() => resumedOutput.includes("hello"));
     });
 
@@ -222,10 +236,10 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
     }
 
     test("control terminal PTY reports result unknown instead of replaying unacknowledged input", async () => {
-        const stream = new FakeStream();
+        const stream = new FakeAttachment();
         const client: TuiControlTerminalClient = {
             async attach() {
-                return attachStream(stream, {
+                return attachAttachment(stream, {
                     cols: 80,
                     createdAt: "2026-08-06T00:00:00.000Z",
                     generation: 1,
@@ -281,7 +295,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
     });
 
     test("control terminal PTY keeps the authoritative completed session version", async () => {
-        const stream = new FakeStream();
+        const stream = new FakeAttachment();
         const opened: TerminalSessionDescriptor = {
             cols: 80,
             createdAt: "2026-08-06T00:00:00.000Z",
@@ -295,7 +309,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         };
         const client: TuiControlTerminalClient = {
             async attach() {
-                return attachStream(stream, { ...opened });
+                return attachAttachment(stream, { ...opened });
             },
             async kill() {
                 throw new Error("not used");
@@ -317,11 +331,14 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         pty.onExit((event) => exits.push(event.exitCode));
         await waitFor(() => factory.snapshot("alpha") !== undefined);
 
-        stream.emit("exit", { exitCode: 0, signal: 0 });
-        stream.complete({
-            ...opened,
-            state: "exited",
-            version: 7,
+        stream.push({ kind: "exit", event: { exitCode: 0, signal: 0 } });
+        stream.push({
+            kind: "closed",
+            session: {
+                ...opened,
+                state: "exited",
+                version: 7,
+            },
         });
 
         await waitFor(() => factory.snapshot("alpha")?.version === 7);
@@ -330,8 +347,8 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
     });
 
     test("control terminal kill uses versioned identity without overwriting a replacement session", async () => {
-        const oldStream = new FakeStream();
-        const newStream = new FakeStream();
+        const oldStream = new FakeAttachment();
+        const newStream = new FakeAttachment();
         const oldSession: TerminalSessionDescriptor = {
             cols: 80,
             createdAt: "2026-08-06T00:00:00.000Z",
@@ -358,7 +375,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const killInputs: unknown[] = [];
         const client: TuiControlTerminalClient = {
             async attach(_instance, input) {
-                return attachStream(currentStream, {
+                return attachAttachment(currentStream, {
                     ...currentOpen,
                     latestSeq: input.fromSeq,
                 });
@@ -385,11 +402,14 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         );
 
         const killing = factory.kill("alpha");
-        oldStream.emit("exit", { exitCode: 0, signal: 0 });
-        oldStream.complete({
-            ...oldSession,
-            state: "exited",
-            version: 2,
+        oldStream.push({ kind: "exit", event: { exitCode: 0, signal: 0 } });
+        oldStream.push({
+            kind: "closed",
+            session: {
+                ...oldSession,
+                state: "exited",
+                version: 2,
+            },
         });
         await waitFor(() => factory.snapshot("alpha")?.state === "exited");
         currentOpen = newSession;

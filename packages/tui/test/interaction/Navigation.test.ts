@@ -3,7 +3,7 @@ import test from "node:test";
 import {
     asInstanceName,
     type ConversationPreferencesPatch,
-    createError,
+    createRemoteError,
     type ContextMessageRecord,
     type InstanceCreateDraft,
     type InstanceCreateSummary,
@@ -15,7 +15,6 @@ import {
     currentTuiRoute,
     selectMainScreenModel,
     topTuiOverlay,
-    tuiViewProjection,
     TuiAppStore,
     TuiCommandDispatcherFocus,
     TuiCommandDispatcherNavigation,
@@ -40,63 +39,74 @@ import {
 import { choiceLine, fieldLine } from "../../src/view/component/Editor.ts";
 import { tuiMessagesHistoryRows } from "../../src/view/page/activity/messages/Projection.ts";
 import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.tsx";
+import { TuiTestDomains } from "../support/DomainHarness.js";
 
 {
     function createHarness() {
         const store = new TuiAppStore();
-        store.patchControlReadModel({
-            instances: [
-                {
-                    homeDirectory: "/workspace/alpha",
-                    enabled: true,
-                    mcpEnabled: false,
-                    name: "alpha",
-                    provider: "local",
-                },
-                {
-                    homeDirectory: "/workspace/beta",
-                    enabled: true,
-                    mcpEnabled: true,
-                    name: "beta",
-                    provider: "ssh",
-                },
-            ],
-        });
-        store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 1,
-            name: asInstanceName("alpha"),
-            ready: true,
-            status: "ready",
+        const domains = new TuiTestDomains();
+        const projection = domains.projection;
+        domains.setInstances([
+            {
+                homeDirectory: "/workspace/alpha",
+                enabled: true,
+                mcpEnabled: false,
+                name: "alpha",
+                provider: "local",
+            },
+            {
+                homeDirectory: "/workspace/beta",
+                enabled: true,
+                mcpEnabled: true,
+                name: "beta",
+                provider: "ssh",
+            },
+        ]);
+        store.setSelectedInstance("alpha");
+        domains.setRuntime("alpha", {
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 1,
+                name: asInstanceName("alpha"),
+                ready: true,
+                status: "ready",
+            },
         });
         const focusManager = new TuiFocusManager(store, {
             boxIdForLine: (lineId) =>
-                selectMainScreenModel(store.getState()).boxes.find((box) =>
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) =>
                     box.expandedLines.some((line) => line.id === lineId),
                 )?.id,
             currentPage: () => store.getState().ui.selectedPage,
             expandedKeyFor: (boxId) =>
-                selectMainScreenModel(store.getState()).boxes.find(
-                    (box) => box.id === boxId,
-                )?.expandedKey,
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) => box.id === boxId)?.expandedKey,
             graphFor: (page, mode) =>
-                buildFocusGraphForState({
-                    ...store.getState(),
-                    interaction: {
-                        ...store.getState().interaction,
-                        focusScope: mode,
+                buildFocusGraphForState(
+                    {
+                        ...store.getState(),
+                        interaction: {
+                            ...store.getState().interaction,
+                            focusScope: mode,
+                        },
+                        ui: {
+                            ...store.getState().ui,
+                            selectedPage: page,
+                        },
                     },
-                    ui: {
-                        ...store.getState().ui,
-                        selectedPage: page,
-                    },
-                }),
+                    domains.reader,
+                ),
             mode: () => store.getState().interaction.focusScope,
         });
         const focus = new TuiCommandDispatcherFocus({
             mainViewportRows: () => 30,
-            projection: tuiViewProjection,
+            projection,
             store,
         });
         const reloads: Array<{ instance?: string; page: string }> = [];
@@ -110,7 +120,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             onRedraw: () => {
                 redraws += 1;
             },
-            projection: tuiViewProjection,
+            projection,
             store,
         });
         focusManager.syncPanel(
@@ -118,9 +128,11 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             store.getState().interaction.focusScope,
         );
         return {
+            domains,
             focus,
             focusManager,
             navigation,
+            projection,
             redraws: () => redraws,
             reloads,
             store,
@@ -467,13 +479,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("Audit replaces upper Context navigation with workspace sessions while Instances stays fixed", async () => {
         const harness = createHarness();
-        const rootSidebar = selectSidebarModel(harness.store.getState());
+        const rootSidebar = selectSidebarModel(harness.store.getState(), harness.domains.reader);
         const rootInstances = rootSidebar.instances.map((entry) => entry.id);
 
         assert.equal(rootSidebar.context.kind, "pages");
         await harness.dispatch({ page: "audit", type: "page.select" });
 
-        const auditSidebar = selectSidebarModel(harness.store.getState());
+        const auditSidebar = selectSidebarModel(harness.store.getState(), harness.domains.reader);
         assert.equal(auditSidebar.context.kind, "audit");
         assert.equal(auditSidebar.context.items[0]?.id, "audit:back");
         assert.deepEqual(
@@ -511,7 +523,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
         await harness.dispatch({ type: "focus.activate" });
         assert.equal(
-            selectSidebarModel(harness.store.getState()).context.kind,
+            selectSidebarModel(harness.store.getState(), harness.domains.reader).context.kind,
             "pages",
         );
         assert.equal(harness.store.getState().ui.selectedPage, "audit");
@@ -522,7 +534,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
         await harness.dispatch({ type: "focus.activate" });
         assert.equal(
-            selectSidebarModel(harness.store.getState()).context.kind,
+            selectSidebarModel(harness.store.getState(), harness.domains.reader).context.kind,
             "audit",
         );
         assert.equal(harness.store.getState().ui.sidebarLevel, "section");
@@ -550,60 +562,58 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("Overview instance rows open the matching instance page", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            overview: {
-                activity: [
-                    {
-                        callId: "call-1",
-                        instance: asInstanceName("alpha"),
-                        source: "mcp",
-                        startedAt: "2026-07-31T00:00:00.000Z",
-                        status: "failed",
-                        toolName: "bash_run",
-                    },
-                ],
-                alerts: [],
-                controller: { pid: 1, uptimeSeconds: 60 },
-                counts: {
-                    activeTodos: 1,
-                    failedCalls24h: 1,
-                    instancesAttention: 0,
-                    instancesCritical: 0,
-                    instancesReady: 1,
-                    instancesTotal: 1,
-                    pendingApprovals: 0,
+        harness.domains.setOverview({
+            activity: [
+                {
+                    callId: "call-1",
+                    instance: asInstanceName("alpha"),
+                    source: "mcp",
+                    startedAt: "2026-07-31T00:00:00.000Z",
+                    status: "failed",
+                    toolName: "bash_run",
                 },
-                generatedAt: "2026-07-31T00:00:00.000Z",
-                health: "healthy",
-                instances: [
-                    {
-                        mcpEnabled: true,
-                        name: asInstanceName("alpha"),
-                        pendingApprovals: 0,
-                        provider: "local",
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 1,
-                            name: asInstanceName("alpha"),
-                            ready: true,
-                            status: "ready",
-                        },
-                    },
-                ],
-                todos: [
-                    {
-                        completed: 0,
-                        currentItem: "Investigate failure",
-                        instance: asInstanceName("alpha"),
-                        revision: 1,
-                        status: "in_progress",
-                        taskId: "task-1",
-                        title: "Recover worker",
-                        total: 1,
-                    },
-                ],
+            ],
+            alerts: [],
+            controller: { pid: 1, uptimeSeconds: 60 },
+            counts: {
+                activeTodos: 1,
+                failedCalls24h: 1,
+                instancesAttention: 0,
+                instancesCritical: 0,
+                instancesReady: 1,
+                instancesTotal: 1,
+                pendingApprovals: 0,
             },
+            generatedAt: "2026-07-31T00:00:00.000Z",
+            health: "healthy",
+            instances: [
+                {
+                    mcpEnabled: true,
+                    name: asInstanceName("alpha"),
+                    pendingApprovals: 0,
+                    provider: "local",
+                    snapshot: {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        lastSeq: 1,
+                        name: asInstanceName("alpha"),
+                        ready: true,
+                        status: "ready",
+                    },
+                },
+            ],
+            todos: [
+                {
+                    completed: 0,
+                    currentItem: "Investigate failure",
+                    instance: asInstanceName("alpha"),
+                    revision: 1,
+                    status: "in_progress",
+                    taskId: "task-1",
+                    title: "Recover worker",
+                    total: 1,
+                },
+            ],
         });
 
         await harness.dispatch({ page: "overview", type: "page.select" });
@@ -623,7 +633,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "search.open" });
         await harness.dispatch({ text: "alpha", type: "search.append" });
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["instances-filter-status", "instance:alpha"],
@@ -634,7 +644,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "search.open" });
         await harness.dispatch({ text: "local", type: "search.append" });
         assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.some(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.some(
                 (box) => box.id === "configuration",
             ),
             true,
@@ -642,24 +652,22 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "search.submit" });
 
         const now = new Date().toISOString();
-        harness.store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: now,
-                    ctxId: "ctx-message-search",
-                    environments: [
-                        {
-                            instance: "alpha",
-                            workspace: "/workspace/message-search",
-                        },
-                    ],
-                    expiresAt: "2099-01-01T00:00:00.000Z",
-                    lastAccessedAt: now,
-                    principal: "client",
-                    status: "active",
-                },
-            ],
-        });
+        harness.domains.setContexts([
+            {
+                createdAt: now,
+                ctxId: "ctx-message-search",
+                environments: [
+                    {
+                        instance: "alpha",
+                        workspace: "/workspace/message-search",
+                    },
+                ],
+                expiresAt: "2099-01-01T00:00:00.000Z",
+                lastAccessedAt: now,
+                principal: "client",
+                status: "active",
+            },
+        ]);
         harness.store.setSelectedPage("messages");
         harness.store.setSidebarLevel("section");
         await harness.dispatch({ type: "search.open" });
@@ -668,7 +676,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             type: "search.append",
         });
         assert.equal(
-            selectSidebarModel(harness.store.getState()).context.items.some(
+            selectSidebarModel(harness.store.getState(), harness.domains.reader).context.items.some(
                 (entry) =>
                     entry.target.kind === "messageConversation" &&
                     entry.target.route.ctxId === "ctx-message-search",
@@ -681,7 +689,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "search.open" });
         await harness.dispatch({ text: "bash_run", type: "search.append" });
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["audit-filter-status", "audit-context:ctx-alpha"],
@@ -709,14 +717,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "search.submit" });
 
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["audit-filter-status", "audit-context:ctx-alpha"],
         );
         harness.store.setSearchQuery("audit", "workspace:/projects/alpha");
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["audit-filter-status", "audit-context:ctx-alpha"],
@@ -731,7 +739,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.dispatch({ type: "focus.activate" });
         assert.equal(harness.store.getState().ui.searchQueries.audit, "");
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["audit-context:ctx-alpha"],
@@ -799,21 +807,19 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 disabled.push({ ctxId, instance });
             },
         });
-        harness.store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: "2026-08-02T00:00:00.000Z",
-                    ctxId: "ctx-alpha",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/alpha" },
-                    ],
-                    expiresAt: "2026-08-02T01:00:00.000Z",
-                    lastAccessedAt: "2026-08-02T00:05:00.000Z",
-                    principal: "client-alpha",
-                    status: "active",
-                },
-            ],
-        });
+        harness.domains.setContexts([
+            {
+                createdAt: "2026-08-02T00:00:00.000Z",
+                ctxId: "ctx-alpha",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/alpha" },
+                ],
+                expiresAt: "2026-08-02T01:00:00.000Z",
+                lastAccessedAt: "2026-08-02T00:05:00.000Z",
+                principal: "client-alpha",
+                status: "active",
+            },
+        ]);
         harness.store.setSelectedPage("audit");
         const context = expandBox(harness, "audit-context:ctx-alpha");
         assert.equal(context.title, "alpha");
@@ -870,17 +876,11 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                     status: "pending",
                     text,
                 };
-                harness.store.patchControlReadModel({
-                    instanceState: {
-                        [instance]: { contextMessages: [pending] },
-                    },
-                });
+                harness.domains.setMessages(instance, [pending]);
             },
         });
         enableContextMessageMcp(harness);
-        harness.store.patchControlReadModel({
-            contexts: [tuiContextRecord("ctx-alpha", "active")],
-        });
+        harness.domains.setContexts([tuiContextRecord("ctx-alpha", "active")]);
         const commentCall: ToolCallRecord = {
             callId: "call-comment",
             completedAt: "2026-08-02T00:01:30.000Z",
@@ -899,43 +899,43 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             status: "completed",
             toolName: "bash_run",
         };
-        harness.store.patchControlReadModel({
-            instanceState: { ["alpha"]: { toolCalls: [] } },
-        });
-        harness.store.patchControlReadModel({
-            instanceState: { ["alpha"]: { commentCalls: [commentCall] } },
-        });
-        assert.equal(
-            harness.store.getState().readModel.instanceState.alpha?.toolCalls
-                ?.length,
-            0,
-        );
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    contextMessages: [
-                        {
-                            createdAt: "2026-08-02T00:02:00.000Z",
-                            ctxId: "ctx-alpha",
-                            error: "delivery failed",
-                            failedAt: "2026-08-02T00:02:30.000Z",
-                            id: "message-failed",
-                            instance: "alpha",
-                            status: "failed",
-                            text: "second comment",
-                        },
-                        {
-                            createdAt: "2026-08-02T00:00:00.000Z",
-                            ctxId: "ctx-other",
-                            id: "message-other",
-                            instance: "alpha",
-                            status: "pending",
-                            text: "other context comment",
-                        },
-                    ],
-                },
+        harness.domains.setToolCalls("alpha", [commentCall]);
+        harness.domains.setConversation("alpha", [
+            {
+                callId: "call-comment",
+                createdAt: "2026-08-02T00:01:00.000Z",
+                ctxId: "ctx-alpha",
+                deliveredAt: "2026-08-02T00:01:30.000Z",
+                id: "comment-call-comment",
+                kind: "comment",
+                status: "delivered",
+                text: "first comment",
             },
-        });
+        ]);
+        assert.equal(
+            harness.domains.conversation.state.instances.alpha?.entries?.length,
+            1,
+        );
+        harness.domains.setMessages("alpha", [
+            {
+                createdAt: "2026-08-02T00:02:00.000Z",
+                ctxId: "ctx-alpha",
+                error: "delivery failed",
+                failedAt: "2026-08-02T00:02:30.000Z",
+                id: "message-failed",
+                instance: "alpha",
+                status: "failed",
+                text: "second comment",
+            },
+            {
+                createdAt: "2026-08-02T00:00:00.000Z",
+                ctxId: "ctx-other",
+                id: "message-other",
+                instance: "alpha",
+                status: "pending",
+                text: "other context comment",
+            },
+        ]);
         enterAuditContext(harness, "ctx-alpha");
         await harness.press("m");
 
@@ -975,9 +975,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     test("Comment editor moves and deletes whole grapheme clusters", async () => {
         const harness = createHarness();
         enableContextMessageMcp(harness);
-        harness.store.patchControlReadModel({
-            contexts: [tuiContextRecord("ctx-alpha", "active")],
-        });
+        harness.domains.setContexts([tuiContextRecord("ctx-alpha", "active")]);
         enterAuditContext(harness, "ctx-alpha");
         await harness.press("m");
         await harness.dispatch({ type: "contextConversation.edit" });
@@ -1007,37 +1005,31 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("Audit lists the newest Tool Calls first", () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    toolCalls: [
-                        {
-                            callId: "old-call",
-                            ctxId: "ctx-order",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            source: "mcp",
-                            startedAt: "2026-08-06T11:39:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                        },
-                        {
-                            callId: "new-call",
-                            ctxId: "ctx-order",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            source: "mcp",
-                            startedAt: "2026-08-06T11:52:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                        },
-                    ],
-                },
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "old-call",
+                ctxId: "ctx-order",
+                inputSummary: "{}",
+                instance: asInstanceName("alpha"),
+                source: "mcp",
+                startedAt: "2026-08-06T11:39:00.000Z",
+                status: "completed",
+                toolName: "file_read",
             },
-        });
+            {
+                callId: "new-call",
+                ctxId: "ctx-order",
+                inputSummary: "{}",
+                instance: asInstanceName("alpha"),
+                source: "mcp",
+                startedAt: "2026-08-06T11:52:00.000Z",
+                status: "completed",
+                toolName: "file_read",
+            },
+        ]);
         enterAuditContext(harness, "ctx-order");
 
-        const callBoxes = selectMainScreenModel(harness.store.getState())
+        const callBoxes = selectMainScreenModel(harness.store.getState(), harness.domains.reader)
             .boxes.filter((box) => box.id.startsWith("audit-call:"))
             .map((box) => box.id);
 
@@ -1055,46 +1047,38 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
         });
         enableContextMessageMcp(harness);
-        harness.store.patchControlReadModel({
-            contexts: [
-                tuiContextRecord("ctx-old", "active"),
-                tuiContextRecord("ctx-current", "active"),
-            ],
-        });
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "call-old",
-                            completedAt: "2026-08-06T11:40:00.000Z",
-                            ctxId: "ctx-old",
-                            input: { path: "./old" },
-                            inputSummary: '{"path":"./old"}',
-                            instance: asInstanceName("alpha"),
-                            output: {},
-                            source: "mcp",
-                            startedAt: "2026-08-06T11:39:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                        },
-                        {
-                            callId: "call-current",
-                            completedAt: "2026-08-06T11:53:00.000Z",
-                            ctxId: "ctx-current",
-                            input: { path: "./current" },
-                            inputSummary: '{"path":"./current"}',
-                            instance: asInstanceName("alpha"),
-                            output: {},
-                            source: "mcp",
-                            startedAt: "2026-08-06T11:52:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                        },
-                    ],
-                },
+        harness.domains.setContexts([
+            tuiContextRecord("ctx-old", "active"),
+            tuiContextRecord("ctx-current", "active"),
+        ]);
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "call-old",
+                completedAt: "2026-08-06T11:40:00.000Z",
+                ctxId: "ctx-old",
+                input: { path: "./old" },
+                inputSummary: '{"path":"./old"}',
+                instance: asInstanceName("alpha"),
+                output: {},
+                source: "mcp",
+                startedAt: "2026-08-06T11:39:00.000Z",
+                status: "completed",
+                toolName: "file_read",
             },
-        });
+            {
+                callId: "call-current",
+                completedAt: "2026-08-06T11:53:00.000Z",
+                ctxId: "ctx-current",
+                input: { path: "./current" },
+                inputSummary: '{"path":"./current"}',
+                instance: asInstanceName("alpha"),
+                output: {},
+                source: "mcp",
+                startedAt: "2026-08-06T11:52:00.000Z",
+                status: "completed",
+                toolName: "file_read",
+            },
+        ]);
         enterAuditContext(harness, "ctx-old");
         await harness.press("m");
         await harness.dispatch({ type: "contextConversation.edit" });
@@ -1117,7 +1101,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             "Comment queued.",
         );
         assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.find(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
                 (box) => box.id === "conversation-composer",
             )?.status,
             "normal",
@@ -1132,30 +1116,27 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
         });
         enableContextMessageMcp(harness);
-        harness.store.patchControlReadModel({
-            contexts: [tuiContextRecord("ctx-disabled", "disabled")],
-            instanceState: {
-                alpha: {
-                    toolCalls: [
-                        {
-                            callId: "call-disabled",
-                            ctxId: "ctx-disabled",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            source: "mcp",
-                            startedAt: "2026-08-06T12:00:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                        },
-                    ],
-                },
+        harness.domains.setContexts([
+            tuiContextRecord("ctx-disabled", "disabled"),
+        ]);
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "call-disabled",
+                ctxId: "ctx-disabled",
+                inputSummary: "{}",
+                instance: asInstanceName("alpha"),
+                source: "mcp",
+                startedAt: "2026-08-06T12:00:00.000Z",
+                status: "completed",
+                toolName: "file_read",
             },
-        });
+        ]);
         enterAuditContext(harness, "ctx-disabled");
         await harness.press("m");
 
         const composer = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "conversation-composer");
         assert.notEqual(composer?.status, "disabled");
         assert.doesNotMatch(
@@ -1182,23 +1163,17 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 sent.push({ ctxId, instance, text });
             },
         });
-        harness.store.patchControlReadModel({
-            contexts: [],
-            instanceState: {
-                alpha: {
-                    contextMessages: [
-                        {
-                            createdAt: "2026-08-06T12:00:00.000Z",
-                            ctxId: "ctx-history-only",
-                            id: "message-history",
-                            instance: "alpha",
-                            status: "delivered",
-                            text: "older message",
-                        },
-                    ],
-                },
+        harness.domains.setContexts([]);
+        harness.domains.setMessages("alpha", [
+            {
+                createdAt: "2026-08-06T12:00:00.000Z",
+                ctxId: "ctx-history-only",
+                id: "message-history",
+                instance: "alpha",
+                status: "delivered",
+                text: "older message",
             },
-        });
+        ]);
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-history-only",
@@ -1238,38 +1213,37 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
         });
         const now = new Date().toISOString();
-        harness.store.patchControlReadModel({
-            contexts: [
-                {
-                    createdAt: now,
-                    ctxId: "ctx-project-a",
-                    environments: [
-                        { instance: "alpha", workspace: "/workspace/project" },
-                    ],
-                    expiresAt: "2099-01-01T00:00:00.000Z",
-                    lastAccessedAt: now,
-                    principal: "client",
-                    status: "active",
-                },
-                {
-                    createdAt: now,
-                    ctxId: "ctx-project-b",
-                    environments: [
-                        { instance: "beta", workspace: "/workspace/project" },
-                    ],
-                    expiresAt: "2099-01-01T00:00:00.000Z",
-                    lastAccessedAt: now,
-                    principal: "client",
-                    status: "active",
-                },
-            ],
-        });
+        harness.domains.setContexts([
+            {
+                createdAt: now,
+                ctxId: "ctx-project-a",
+                environments: [
+                    { instance: "alpha", workspace: "/workspace/project" },
+                ],
+                expiresAt: "2099-01-01T00:00:00.000Z",
+                lastAccessedAt: now,
+                principal: "client",
+                status: "active",
+            },
+            {
+                createdAt: now,
+                ctxId: "ctx-project-b",
+                environments: [
+                    { instance: "beta", workspace: "/workspace/project" },
+                ],
+                expiresAt: "2099-01-01T00:00:00.000Z",
+                lastAccessedAt: now,
+                principal: "client",
+                status: "active",
+            },
+        ]);
         harness.store.setSelectedPage("messages");
         harness.store.setSidebarLevel("section");
         harness.store.setFocusScope("sidebarContext");
 
         const project = selectSidebarModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).context.items.find((entry) => entry.target.kind === "messageProject");
         assert.equal(project?.target.kind, "messageProject");
         if (project?.target.kind !== "messageProject") return;
@@ -1294,8 +1268,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
         ]);
 
-        harness.store.setConversationPreferences({
-            ...harness.store.getState().conversationPreferences,
+        harness.domains.setConversationPreferences({
+            ...harness.domains.conversationPreferences.state.preferences,
             hiddenContexts: {
                 "ctx-project-a": true,
                 "ctx-project-b": true,
@@ -1304,6 +1278,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setMessageScope("hidden");
         const hiddenProject = selectSidebarModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).context.items.find((entry) => entry.target.kind === "messageProject");
         assert.equal(hiddenProject?.target.kind, "messageProject");
         if (hiddenProject?.target.kind !== "messageProject") return;
@@ -1334,31 +1309,23 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
         });
         enableContextMessageMcp(harness);
-        harness.store.patchControlReadModel({
-            contexts: [tuiContextRecord("ctx-race", "active")],
-            instanceState: {
-                alpha: {
-                    contextMessages: [
-                        {
-                            createdAt: "2026-08-06T12:00:00.000Z",
-                            ctxId: "ctx-race",
-                            id: "message-race-history",
-                            instance: "alpha",
-                            status: "delivered",
-                            text: "existing conversation",
-                        },
-                    ],
-                },
+        harness.domains.setContexts([tuiContextRecord("ctx-race", "active")]);
+        harness.domains.setMessages("alpha", [
+            {
+                createdAt: "2026-08-06T12:00:00.000Z",
+                ctxId: "ctx-race",
+                id: "message-race-history",
+                instance: "alpha",
+                status: "delivered",
+                text: "existing conversation",
             },
-        });
+        ]);
         enterAuditContext(harness, "ctx-race");
         await harness.press("m");
         await harness.dispatch({ type: "contextConversation.edit" });
         await harness.press("send across lifecycle change");
 
-        harness.store.patchControlReadModel({
-            contexts: [tuiContextRecord("ctx-race", "disabled")],
-        });
+        harness.domains.setContexts([tuiContextRecord("ctx-race", "disabled")]);
         await harness.press("", { return: true });
 
         assert.deepEqual(sent, [
@@ -1380,43 +1347,37 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("Todo owns Goal presentation and does not leak it into Instances", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    goals: [
-                        {
-                            autoContinueExhausted: false,
-                            continuationCount: 1,
-                            continuationDue: false,
-                            continuationDueAt: "2026-08-31T10:00:00.000Z",
-                            continuationPending: false,
-                            continuationUncertain: false,
-                            createdAt: "2026-08-31T09:00:00.000Z",
-                            goalId: "goal-visible",
-                            lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
-                            lastProgressAt: "2026-08-31T09:30:00.000Z",
-                            maxContinuations: 10,
-                            objective: "Ship Workspace recovery",
-                            revision: 4,
-                            status: "active",
-                            steps: [
-                                {
-                                    id: "inspect",
-                                    status: "completed",
-                                    text: "Inspect",
-                                },
-                                { id: "fix", status: "active", text: "Fix" },
-                            ],
-                            updatedAt: "2026-08-31T09:30:00.000Z",
-                            workspace:
-                                "/home/aromatic/Applications/OwnProject/portable-devshell",
-                        },
-                    ],
-                },
+        harness.domains.setGoals("alpha", [
+            {
+                autoContinueExhausted: false,
+                continuationCount: 1,
+                continuationDue: false,
+                continuationDueAt: "2026-08-31T10:00:00.000Z",
+                continuationPending: false,
+                continuationUncertain: false,
+                createdAt: "2026-08-31T09:00:00.000Z",
+                goalId: "goal-visible",
+                lastAgentActivityAt: "2026-08-31T09:30:00.000Z",
+                lastProgressAt: "2026-08-31T09:30:00.000Z",
+                maxContinuations: 10,
+                objective: "Ship Workspace recovery",
+                revision: 4,
+                status: "active",
+                steps: [
+                    {
+                        id: "inspect",
+                        status: "completed",
+                        text: "Inspect",
+                    },
+                    { id: "fix", status: "active", text: "Fix" },
+                ],
+                updatedAt: "2026-08-31T09:30:00.000Z",
+                workspace:
+                    "/home/aromatic/Applications/OwnProject/portable-devshell",
             },
-        });
+        ]);
         assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.some((box) =>
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.some((box) =>
                 box.id.startsWith("todo-"),
             ),
             false,
@@ -1425,6 +1386,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setSelectedPage("todo");
         const overviewBoxes = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes;
         assert.deepEqual(
             overviewBoxes.map((box) => box.id),
@@ -1447,7 +1409,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             view: "detail",
         });
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             [
@@ -1557,7 +1519,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.press("", { tab: true });
         await harness.press("", { downArrow: true });
         await harness.press(" ");
-        let alpha = selectMainScreenModel(harness.store.getState()).boxes.find(
+        let alpha = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
             (box) => box.id === "instance:alpha",
         )!;
         assert.notEqual(
@@ -1581,7 +1543,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             targetInstance: "alpha",
             title: "Restart Worker: alpha",
         });
-        alpha = selectMainScreenModel(harness.store.getState()).boxes.find(
+        alpha = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
             (box) => box.id === "instance:alpha",
         )!;
         assert.equal(
@@ -1610,6 +1572,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         const viewport = { columns: 120, rows: 40 };
         const initialRegions = buildTuiHitRegions(
             harness.store.getState(),
+            harness.domains.reader,
             viewport,
         );
         const pageRegion = initialRegions.find(
@@ -1650,7 +1613,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
         harness.store.setPanelError(
             "instances:alpha",
-            createError({
+            createRemoteError({
                 code: "control.failed",
                 message: "rendered error",
                 retryable: false,
@@ -1658,6 +1621,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
         const erroredRegions = buildTuiHitRegions(
             harness.store.getState(),
+            harness.domains.reader,
             viewport,
         );
         const shiftedBoxRegion = erroredRegions.find(
@@ -1682,6 +1646,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
         const confirmationRegions = buildTuiHitRegions(
             harness.store.getState(),
+            harness.domains.reader,
             viewport,
         );
         assert.deepEqual(
@@ -1704,6 +1669,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
         const approvalRegions = buildTuiHitRegions(
             harness.store.getState(),
+            harness.domains.reader,
             viewport,
         );
         assert.deepEqual(
@@ -1728,10 +1694,12 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setSelectedPage("help");
         const navigation = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "help-navigation")!;
         harness.store.toggleExpanded(navigation.expandedKey);
         const expanded = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "help-navigation")!;
         assert.equal(expanded.expanded, true);
         assert.equal(
@@ -1741,10 +1709,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             true,
         );
 
-        const bodyTargets = buildTuiHitRegions(harness.store.getState(), {
-            columns: 70,
-            rows: 40,
-        })
+        const bodyTargets = buildTuiHitRegions(
+            harness.store.getState(),
+            harness.domains.reader,
+            {
+                columns: 70,
+                rows: 40,
+            },
+        )
             .filter(
                 (region) =>
                     region.target.kind === "boxBody" &&
@@ -1783,7 +1755,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
         await harness.press(" ");
         assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.find(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
                 (box) => box.id === "instance:alpha",
             )?.expanded,
             true,
@@ -2005,16 +1977,24 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
         const harness = createHarness();
         assert.deepEqual(
-            buildTuiHitRegions(harness.store.getState(), {
-                columns: 59,
-                rows: 20,
-            }),
+            buildTuiHitRegions(
+                harness.store.getState(),
+                harness.domains.reader,
+                {
+                    columns: 59,
+                    rows: 20,
+                },
+            ),
             [],
         );
-        const compactRegions = buildTuiHitRegions(harness.store.getState(), {
-            columns: 80,
-            rows: 20,
-        });
+        const compactRegions = buildTuiHitRegions(
+            harness.store.getState(),
+            harness.domains.reader,
+            {
+                columns: 80,
+                rows: 20,
+            },
+        );
         assert.ok(
             compactRegions.some(
                 (region) =>
@@ -2066,7 +2046,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
         assert.equal(harness.store.getState().interaction.focusScope, "wizard");
         assert.equal(harness.store.getState().ui.mainFocusId, "create-wizard");
-        const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
+        const wizard = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes[0];
         assert.equal(
             harness.store.getState().interaction.selectedDetailLineIds[
                 "instances:all:create-wizard"
@@ -2245,7 +2225,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             ).name,
             "zcd",
         );
-        const wizard = selectMainScreenModel(harness.store.getState()).boxes[0];
+        const wizard = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes[0];
         const selectedLine = renderExpandableBoxLines(wizard!, 80).find(
             (line) =>
                 line.key.includes(wizard?.selectedDetailLineId ?? "missing"),
@@ -2309,6 +2289,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
         const configuration = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "configuration");
         assert.equal(
             configuration?.expandedLines.some(
@@ -2436,29 +2417,27 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 return {};
             },
         });
-        const view = harness.store.getState().readModel.configView!;
-        harness.store.patchControlReadModel({
-            configView: {
-                ...view,
-                restartControlRequired: false,
-                instances: (view.instances as JsonValue[]).map((entry) => {
-                    const record = entry as Record<string, JsonValue>;
-                    return record.name === "alpha"
-                        ? {
-                              ...record,
-                              logs: {
-                                  eventBufferSize: 500,
-                                  maxBytes: 16_777_216,
-                                  retentionDays: 7,
-                              },
-                              security: {
-                                  effectiveMode: "workspace",
-                                  mode: "workspace",
-                              },
-                          }
-                        : entry;
-                }),
-            },
+        const view = harness.domains.config.state.view!;
+        harness.domains.setConfig({
+            ...view,
+            restartControlRequired: false,
+            instances: (view.instances as JsonValue[]).map((entry) => {
+                const record = entry as Record<string, JsonValue>;
+                return record.name === "alpha"
+                    ? {
+                          ...record,
+                          logs: {
+                              eventBufferSize: 500,
+                              maxBytes: 16_777_216,
+                              retentionDays: 7,
+                          },
+                          security: {
+                              effectiveMode: "workspace",
+                              mode: "workspace",
+                          },
+                      }
+                    : entry;
+            }),
         });
         harness.store.setSelectedPage("config");
         const logs = expandBox(harness, "logs");
@@ -2474,6 +2453,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.equal(harness.store.getState().interaction.focusScope, "form");
         const actions = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "configuration-actions");
         assert.equal(actions?.expanded, true);
 
@@ -2486,12 +2466,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
         const actionsView = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "configuration-actions");
 
         await harness.press("", { backspace: true });
         await harness.press("8");
         assert.equal(
-            selectMainScreenModel(harness.store.getState())
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader)
                 .boxes.find((box) => box.id === "configuration-actions")
                 ?.expandedLines.some((line) =>
                     line.text.includes("effectiveMode"),
@@ -2646,7 +2627,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             ...harness.store.getState().interaction.editor!,
             step: 3,
         });
-        const wizard = selectMainScreenModel(harness.store.getState())
+        const wizard = selectMainScreenModel(harness.store.getState(), harness.domains.reader)
             .boxes[0]!;
         const createMode = wizard.expandedLines.find((line) =>
             line.id?.includes(":field:mcp.contextMode"),
@@ -2697,38 +2678,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("self-managed reverse hides Control lifecycle actions and requires remote restart for rebuild changes", () => {
         const harness = createHarness();
-        const state = harness.store.getState();
-        harness.store.patchControlReadModel({
-            instances: [
-                {
-                    enabled: true,
-                    mcpEnabled: true,
-                    mcpPath: "/reverse-mac/mcp",
-                    name: "reverse-mac",
-                    provider: "reverse",
-                },
-            ],
-            configView: {
-                ...state.readModel.configView!,
-                instances: [
-                    ...((state.readModel.configView!
-                        .instances as JsonValue[]) ?? []),
-                    {
-                        enabled: true,
-                        extensions: { model: ["instance"] },
-                        logs: { retentionDays: 7 },
-                        mcp: {
-                            enabled: true,
-                            path: "/reverse-mac/mcp",
-                        },
-                        name: "reverse-mac",
-                        provider: "reverse",
-                        security: { mode: "disabled" },
-                    },
-                ],
-            },
-        });
-        harness.store.patchControlSnapshot({
+        const configView = harness.domains.config.state.view!;
+        const reverseSnapshot = {
             connectionState: "connected",
             daemonState: "running",
             lastSeq: 1,
@@ -2741,7 +2692,38 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 transport: "sse",
             },
             status: "ready",
-        } as never);
+        };
+        harness.domains.setInstances([
+            {
+                enabled: true,
+                homeDirectory: undefined,
+                mcpEnabled: true,
+                name: "reverse-mac",
+                snapshot: reverseSnapshot,
+            },
+        ]);
+        harness.domains.setConfig({
+            ...configView,
+            instances: [
+                ...((configView.instances as JsonValue[]) ?? []),
+                {
+                    enabled: true,
+                    extensions: { model: ["instance"] },
+                    logs: { retentionDays: 7 },
+                    mcp: {
+                        auth: "none",
+                        enabled: true,
+                        path: "/reverse-mac/mcp",
+                    },
+                    name: "reverse-mac",
+                    provider: "reverse",
+                    security: { mode: "disabled" },
+                },
+            ],
+        });
+        harness.domains.setRuntime("reverse-mac", {
+            snapshot: reverseSnapshot,
+        });
         harness.store.setSelectedInstance("reverse-mac");
 
         harness.store.setSelectedPage("instances");
@@ -2926,9 +2908,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             status: "completed",
             toolName: "file_edit",
         };
-        harness.store.patchControlReadModel({
-            instanceState: { ["alpha"]: { toolCalls: [record] } },
-        });
+        harness.domains.setToolCalls("alpha", [record]);
         enterAuditContext(harness, "ctx-live-patch");
         const audit = expandBox(harness, "audit-call:live-patch");
         assert.equal(audit.enterable, false);
@@ -2994,39 +2974,33 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 };
             },
         });
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "image-call",
-                            completedAt: "2026-07-18T00:00:01.000Z",
-                            ctxId: "ctx-image",
-                            input: { path: "./preview.png" },
-                            inputSummary: '{"path":"./preview.png"}',
-                            instance: "alpha" as never,
-                            output: {
-                                blake3,
-                                bytes: 68,
-                                imageRef: `${blake3}.png`,
-                                mediaType: "image/png",
-                                name: "preview.png",
-                                source: {
-                                    instance: "alpha",
-                                    path: "./preview.png",
-                                    type: "file",
-                                    workspace: "/projects/image",
-                                },
-                            },
-                            source: "mcp",
-                            startedAt: "2026-07-18T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "artifact_viewImage",
-                        },
-                    ],
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "image-call",
+                completedAt: "2026-07-18T00:00:01.000Z",
+                ctxId: "ctx-image",
+                input: { path: "./preview.png" },
+                inputSummary: '{"path":"./preview.png"}',
+                instance: "alpha" as never,
+                output: {
+                    blake3,
+                    bytes: 68,
+                    imageRef: `${blake3}.png`,
+                    mediaType: "image/png",
+                    name: "preview.png",
+                    source: {
+                        instance: "alpha",
+                        path: "./preview.png",
+                        type: "file",
+                        workspace: "/projects/image",
+                    },
                 },
+                source: "mcp",
+                startedAt: "2026-07-18T00:00:00.000Z",
+                status: "completed",
+                toolName: "artifact_viewImage",
             },
-        });
+        ]);
         enterAuditContext(harness, "ctx-image");
         const audit = expandBox(harness, "audit-call:image-call");
         harness.store.setFocusScope("boxDetail");
@@ -3076,40 +3050,30 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("audit renders legacy records without an input summary", () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "legacy-call",
-                            instance: "alpha",
-                            source: "mcp",
-                            startedAt: "2026-07-14T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "bash_run",
-                        } as never,
-                    ],
+        harness.domains.setToolCalls("alpha", [
+            {
+                callId: "legacy-call",
+                instance: "alpha",
+                source: "mcp",
+                startedAt: "2026-07-14T00:00:00.000Z",
+                status: "completed",
+                toolName: "bash_run",
+            } as never,
+        ]);
+        harness.domains.setRuntime("alpha", {
+            logs: [
+                {
+                    at: "2026-07-14T00:00:01.000Z",
+                    callId: "legacy-call",
+                    ctxId: "ctx-legacy",
+                    instanceName: "alpha",
+                    message: "legacy output\n",
+                    seq: 1,
+                    source: "mcp",
+                    stream: "stdout",
+                    toolName: "bash_run",
                 },
-            },
-        });
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-14T00:00:01.000Z",
-                            callId: "legacy-call",
-                            ctxId: "ctx-legacy",
-                            instanceName: "alpha",
-                            message: "legacy output\n",
-                            seq: 1,
-                            source: "mcp",
-                            stream: "stdout",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
-            },
+            ],
         });
         enterAuditUnscoped(harness);
         const audit = expandBox(harness, "audit-call:legacy-call");
@@ -3178,7 +3142,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
 
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.id,
             ),
             ["create-instance", "instance:alpha", "instance:beta"],
@@ -3188,7 +3152,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     test("connector editor presents only live endpoints and scopes unsaved feedback", () => {
         const harness = createHarness();
         enterConnectionsRoute(harness, "connector");
-        const connector = selectMainScreenModel(harness.store.getState());
+        const connector = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.deepEqual(
             connector.boxes.map((box) => box.title),
             [
@@ -3215,36 +3179,35 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             ["local=unavailable", "public=unavailable"],
         );
 
-        harness.store.patchControlReadModel({
-            configView: {
-                instances: [
-                    {
-                        mcp: {
-                            auth: "none",
-                            enabled: true,
-                            path: "/alpha/custom-mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
+        harness.domains.setConfig({
+            instances: [
+                {
+                    mcp: {
+                        auth: "none",
+                        enabled: true,
+                        path: "/alpha/custom-mcp",
                     },
-                ],
-                mcp: {
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                    publicBaseUrl: "https://example.test/tunnel",
+                    name: "alpha",
+                    provider: "local",
                 },
-                web: {
-                    auth: "none",
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3211,
-                    publicBaseUrl: "https://example.test/controller",
-                },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/tunnel",
+            },
+            web: {
+                auth: "none",
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3211,
+                publicBaseUrl: "https://example.test/controller",
             },
         });
         let configuredEndpoints = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "connection-endpoints");
         assert.deepEqual(
             configuredEndpoints?.collapsedLines.map((line) => line.text),
@@ -3259,11 +3222,12 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             true,
         );
 
-        harness.store.patchControlReadModel({
-            mcpStatus: { authMode: "none", running: true },
+        harness.domains.setMcp({
+            status: { authMode: "none", running: true },
         });
         configuredEndpoints = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "connection-endpoints");
         assert.deepEqual(
             configuredEndpoints?.collapsedLines.map((line) => line.text),
@@ -3284,7 +3248,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
             true,
         );
-        const dirtyConnector = selectMainScreenModel(harness.store.getState());
+        const dirtyConnector = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.equal(
             dirtyConnector.boxes
                 .find((box) => box.id === "connection-endpoints")
@@ -3319,7 +3283,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             },
             true,
         );
-        const dirtyInstance = selectMainScreenModel(harness.store.getState());
+        const dirtyInstance = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.equal(
             dirtyInstance.boxes
                 .find((box) => box.id === "connection-endpoints")
@@ -3343,6 +3307,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setControlRestartRequired(true);
         const restartPending = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "connection-endpoints");
         assert.equal(
             restartPending?.title,
@@ -3364,32 +3329,38 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("connections overview hides reverse-only navigation and shows the usable MCP endpoint", () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            configView: {
-                instances: [
-                    {
-                        enabled: true,
-                        mcp: {
-                            auth: "oauth2",
-                            enabled: true,
-                            path: "/alpha/mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
-                    },
-                ],
-                mcp: {
+        harness.domains.setConfig({
+            instances: [
+                {
                     enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                    publicBaseUrl: "https://example.test/tunnel",
+                    mcp: {
+                        auth: {
+                            mode: "oauth2",
+                            oauth2: {
+                                requiredScopes: [],
+                                resourceName: "alpha",
+                            },
+                        },
+                        enabled: true,
+                        path: "/alpha/mcp",
+                    },
+                    name: "alpha",
+                    provider: "local",
                 },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/tunnel",
             },
-            mcpStatus: { authMode: "oauth2", oauthReady: true, running: true },
+        });
+        harness.domains.setMcp({
+            status: { authMode: "oauth2", oauthReady: true, running: true },
         });
         harness.store.setSelectedPage("connections");
 
-        const overview = selectMainScreenModel(harness.store.getState());
+        const overview = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.deepEqual(
             overview.boxes.map((box) => box.title),
             ["Connector", "OAuth Provider"],
@@ -3413,10 +3384,10 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             true,
         );
 
-        harness.store.patchControlReadModel({
-            mcpStatus: { authMode: "oauth2", oauthReady: false, running: true },
+        harness.domains.setMcp({
+            status: { authMode: "oauth2", oauthReady: false, running: true },
         });
-        const blockedOverview = selectMainScreenModel(harness.store.getState());
+        const blockedOverview = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         const blockedConnector = blockedOverview.boxes.find(
             (box) => box.id === "connections:connector:mcp",
         );
@@ -3437,7 +3408,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
 
         harness.store.setControlRestartRequired(true);
-        const restartOverview = selectMainScreenModel(harness.store.getState());
+        const restartOverview = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         const restartConnector = restartOverview.boxes.find(
             (box) => box.id === "connections:connector:mcp",
         );
@@ -3472,31 +3443,31 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
         harness.store.setControlRestartRequired(false);
 
-        harness.store.patchControlReadModel({
-            configView: {
-                instances: [
-                    {
-                        enabled: true,
-                        mcp: {
-                            auth: "none",
-                            enabled: true,
-                            path: "/alpha/mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
-                    },
-                ],
-                mcp: {
+        harness.domains.setConfig({
+            instances: [
+                {
                     enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                    publicBaseUrl: "https://example.test/tunnel",
+                    mcp: {
+                        auth: { mode: "none" },
+                        enabled: true,
+                        path: "/alpha/mcp",
+                    },
+                    name: "alpha",
+                    provider: "local",
                 },
+            ],
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/tunnel",
             },
-            mcpStatus: { authMode: "none", oauthReady: false, running: true },
+        });
+        harness.domains.setMcp({
+            status: { authMode: "none", oauthReady: false, running: true },
         });
         assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.map(
                 (box) => box.title,
             ),
             ["Connector"],
@@ -3510,30 +3481,30 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 return {};
             },
         });
-        harness.store.patchControlReadModel({
-            configView: {
-                instances: [],
-                mcp: {
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                    publicBaseUrl: "https://example.test/mcp",
-                },
-                web: {
-                    auth: "none",
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3211,
-                    publicBaseUrl: "https://example.test/web",
-                },
-            },
+        harness.domains.setConfig({
             instances: [],
-            mcpStatus: { authMode: "oauth2", oauthReady: true, running: true },
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
+                publicBaseUrl: "https://example.test/mcp",
+            },
+            web: {
+                auth: "none",
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3211,
+                publicBaseUrl: "https://example.test/web",
+            },
+        });
+        harness.domains.setInstances([]);
+        harness.domains.setMcp({
+            status: { authMode: "oauth2", oauthReady: true, running: true },
         });
         harness.store.setSelectedInstance(undefined);
         harness.store.setSelectedPage("connections");
 
-        const overview = selectMainScreenModel(harness.store.getState());
+        const overview = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.equal(overview.emptyState, undefined);
         assert.deepEqual(
             overview.boxes.map((box) => box.title),
@@ -3541,7 +3512,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
 
         enterConnectionsRoute(harness, "connector");
-        const connector = selectMainScreenModel(harness.store.getState());
+        const connector = selectMainScreenModel(harness.store.getState(), harness.domains.reader);
         assert.equal(
             connector.boxes.some((box) => box.title.startsWith("[Instance]")),
             false,
@@ -3662,8 +3633,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("long detail lines open a wrapped full-text viewer", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            oauthApprovals: [
+        harness.domains.setMcp({
+            approvals: [
                 {
                     approvalId: "oauth-long",
                     clientId: "client-long",
@@ -3712,16 +3683,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 return {};
             },
         });
-        const current = harness.store.getState().readModel.configView!;
-        harness.store.patchControlReadModel({
-            configView: {
-                ...current,
-                mcp: {
-                    ...(current.mcp as Record<string, unknown>),
-                    oauth2: { approval: "tui" },
-                },
-            } as never,
-        });
+        const current = harness.domains.config.state.view!;
+        harness.domains.setConfig({
+            ...current,
+            mcp: {
+                ...(current.mcp as Record<string, unknown>),
+                oauth2: { approval: "tui" },
+            },
+        } as never);
         enterConnectionsRoute(harness, "oauth");
 
         let runtime = expandBox(harness, "oauth-runtime");
@@ -3751,15 +3720,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.match(overlay.body, /^ds_[0-9a-f]{64}/u);
         await harness.press("", { return: true });
 
-        harness.store.patchControlReadModel({
-            configView: {
-                ...current,
-                mcp: {
-                    ...(current.mcp as Record<string, unknown>),
-                    oauth2: { approval: "token", token: "********" },
-                },
-            } as never,
-        });
+        harness.domains.setConfig({
+            ...current,
+            mcp: {
+                ...(current.mcp as Record<string, unknown>),
+                oauth2: { approval: "token", token: "********" },
+            },
+        } as never);
         runtime = expandBox(harness, "oauth-runtime");
         harness.store.setMainFocusId(runtime.id);
         harness.store.setFocusScope("boxDetail");
@@ -3779,8 +3746,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("OAuth panel approves pending registration requests", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            oauthApprovals: [
+        harness.domains.setMcp({
+            approvals: [
                 {
                     approvalId: "oauth-1",
                     clientId: "chatgpt-client",
@@ -3823,8 +3790,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("OAuth denial requires the same reviewed request confirmation", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            oauthApprovals: [
+        harness.domains.setMcp({
+            approvals: [
                 {
                     approvalId: "oauth-deny",
                     clientId: "chatgpt-client",
@@ -3870,8 +3837,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("OAuth detail keeps static rows selectable after expanding a completed approval", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            oauthApprovals: [
+        harness.domains.setMcp({
+            approvals: [
                 {
                     approvalId: "oauth-completed",
                     clientId: "completed-client",
@@ -3892,6 +3859,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.press(" ");
         const approval = selectMainScreenModel(
             harness.store.getState(),
+            harness.domains.reader,
         ).boxes.find((box) => box.id === "oauth-approval-oauth-completed")!;
         assert.equal(
             approval.selectedDetailLineId,
@@ -3904,7 +3872,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
         assert.equal(harness.focusManager.move("down"), true);
         assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.find(
+            selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
                 (box) => box.id === approval.id,
             )?.selectedDetailLineId,
             "oauth-approval-oauth-completed:client",
@@ -3912,32 +3880,26 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("Messages scrolling measures wrapped history with the actual main viewport width", async () => {
         const harness = createHarness({ mainContentColumns: 20 });
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-10T10:00:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "long-message",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "wrapped message ".repeat(24),
-                        },
-                    ],
-                    contextMessages: [
-                        {
-                            createdAt: "2026-09-10T10:00:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "long-message",
-                            instance: "alpha",
-                            status: "delivered",
-                            text: "wrapped message ".repeat(24),
-                        },
-                    ],
-                },
+        harness.domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "long-message",
+                kind: "comment",
+                status: "delivered",
+                text: "wrapped message ".repeat(24),
             },
-        });
+        ]);
+        harness.domains.setMessages("alpha", [
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "long-message",
+                instance: "alpha",
+                status: "delivered",
+                text: "wrapped message ".repeat(24),
+            },
+        ]);
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-alpha",
@@ -3952,13 +3914,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         const state = harness.store.getState();
         const actualMax = Math.max(
             0,
-            tuiViewProjection.selectMainBoxFlowMetrics(state, 20).totalLines -
-                tuiMessagesHistoryRows(12),
+            harness.domains.projection.selectMainBoxFlowMetrics(state, 20)
+                .totalLines - tuiMessagesHistoryRows(12),
         );
         const legacyWidthMax = Math.max(
             0,
-            tuiViewProjection.selectMainBoxFlowMetrics(state, 80).totalLines -
-                tuiMessagesHistoryRows(12),
+            harness.domains.projection.selectMainBoxFlowMetrics(state, 80)
+                .totalLines - tuiMessagesHistoryRows(12),
         );
         assert.equal(
             state.ui.scrollOffsets[key],
@@ -3977,22 +3939,16 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("scrolling at main viewport boundaries is a true no-op", async () => {
         const harness = createHarness({ mainContentColumns: 20 });
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    conversationEntries: [
-                        {
-                            createdAt: "2026-09-10T10:00:00.000Z",
-                            ctxId: "ctx-alpha",
-                            id: "long-message",
-                            kind: "comment",
-                            status: "delivered",
-                            text: "wrapped message ".repeat(24),
-                        },
-                    ],
-                },
+        harness.domains.setConversation("alpha", [
+            {
+                createdAt: "2026-09-10T10:00:00.000Z",
+                ctxId: "ctx-alpha",
+                id: "long-message",
+                kind: "comment",
+                status: "delivered",
+                text: "wrapped message ".repeat(24),
             },
-        });
+        ]);
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-alpha",
@@ -4067,17 +4023,15 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
 
     test("Moving focus down advances the shared main viewport to keep the focused box visible", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instances: [
-                ...harness.store.getState().instances,
-                ...Array.from({ length: 8 }, (_, index) => ({
-                    enabled: true,
-                    mcpEnabled: false,
-                    name: `extra-${index}`,
-                    provider: "local",
-                })),
-            ],
-        });
+        harness.domains.setInstances([
+            ...harness.domains.instances.state.instances,
+            ...Array.from({ length: 8 }, (_, index) => ({
+                enabled: true,
+                mcpEnabled: false,
+                name: `extra-${index}`,
+                provider: "local",
+            })),
+        ]);
         harness.store.setSelectedPage("instances");
         harness.store.setFocusScope("mainBoxes");
         harness.store.setMainFocusId("instance:alpha");
@@ -4138,15 +4092,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             { enabled: false, instance: "alpha" },
         ]);
 
-        harness.store.patchControlReadModel({
-            instances: harness.store
-                .getState()
-                .instances.map((entry) =>
-                    entry.name === "alpha"
-                        ? { ...entry, enabled: false }
-                        : entry,
-                ),
-        });
+        harness.domains.setInstances(
+            harness.domains.instances.state.instances.map((entry) =>
+                entry.name === "alpha"
+                    ? { ...entry, enabled: false }
+                    : entry,
+            ),
+        );
         instance = expandBox(harness, "instance:alpha");
         harness.store.setMainFocusId(instance.id);
         harness.store.setFocusScope("boxDetail");
@@ -4269,15 +4221,13 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     });
     test("Open Terminal is invoked directly from the expanded instance box", async () => {
         const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instances: harness.store
-                .getState()
-                .instances.map((instance) =>
-                    instance.name === "alpha"
-                        ? { ...instance, provider: "ssh" }
-                        : instance,
-                ),
-        });
+        harness.domains.setInstances(
+            harness.domains.instances.state.instances.map((instance) =>
+                instance.name === "alpha"
+                    ? { ...instance, provider: "ssh" }
+                    : instance,
+            ),
+        );
         const instance = expandBox(harness, "instance:alpha");
         harness.store.setMainFocusId(instance.id);
         harness.store.setFocusScope("boxDetail");
@@ -4300,12 +4250,12 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     }
 
     function expandBox(harness: ReturnType<typeof createHarness>, id: string) {
-        let box = selectMainScreenModel(harness.store.getState()).boxes.find(
+        let box = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
             (candidate) => candidate.id === id,
         );
         assert.ok(box !== undefined, `missing box ${id}`);
         if (!box.expanded) harness.store.toggleExpanded(box.expandedKey);
-        box = selectMainScreenModel(harness.store.getState()).boxes.find(
+        box = selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
             (candidate) => candidate.id === id,
         );
         assert.ok(box?.expanded, `box ${id} did not expand`);
@@ -4341,43 +4291,41 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     function enableContextMessageMcp(
         harness: ReturnType<typeof createHarness>,
     ): void {
-        const view = harness.store.getState().readModel.configView!;
+        const view = harness.domains.config.state.view!;
         const instances = Array.isArray(view.instances) ? view.instances : [];
-        harness.store.patchControlReadModel({
-            configView: {
-                ...view,
-                instances: instances.map((value): JsonValue => {
-                    if (
-                        typeof value !== "object" ||
-                        value === null ||
-                        Array.isArray(value)
-                    ) {
-                        return value;
-                    }
-                    const instance = value as Record<string, JsonValue>;
-                    if (instance.name !== "alpha") return instance;
-                    const currentMcp =
-                        typeof instance.mcp === "object" &&
-                        instance.mcp !== null &&
-                        !Array.isArray(instance.mcp)
-                            ? (instance.mcp as Record<string, JsonValue>)
-                            : {};
-                    return {
-                        ...instance,
-                        mcp: {
-                            ...currentMcp,
-                            enabled: true,
-                        },
-                    };
-                }),
-            },
+        harness.domains.setConfig({
+            ...view,
+            instances: instances.map((value: JsonValue): JsonValue => {
+                if (
+                    typeof value !== "object" ||
+                    value === null ||
+                    Array.isArray(value)
+                ) {
+                    return value;
+                }
+                const instance = value as Record<string, JsonValue>;
+                if (instance.name !== "alpha") return instance;
+                const currentMcp =
+                    typeof instance.mcp === "object" &&
+                    instance.mcp !== null &&
+                    !Array.isArray(instance.mcp)
+                        ? (instance.mcp as Record<string, JsonValue>)
+                        : {};
+                return {
+                    ...instance,
+                    mcp: {
+                        ...currentMcp,
+                        enabled: true,
+                    },
+                };
+            }),
         });
     }
 
     function conversationScreenText(
         harness: ReturnType<typeof createHarness>,
     ): string {
-        return selectMainScreenModel(harness.store.getState())
+        return selectMainScreenModel(harness.store.getState(), harness.domains.reader)
             .boxes.flatMap((box) => [
                 box.title,
                 ...box.collapsedLines.map((line) => line.text),
@@ -4612,7 +4560,10 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         } = {},
     ) {
         const store = new TuiAppStore();
-        seedPrompt3State(store);
+        const domains = new TuiTestDomains();
+        const projection = domains.projection;
+        seedPrompt3State(domains);
+        store.setSelectedInstance("alpha");
         const approvalDecisions: Array<{
             approvalId: string;
             decision: string;
@@ -4632,26 +4583,33 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         }> = [];
         const focusManager = new TuiFocusManager(store, {
             boxIdForLine: (lineId) =>
-                selectMainScreenModel(store.getState()).boxes.find((box) =>
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) =>
                     box.expandedLines.some((line) => line.id === lineId),
                 )?.id,
             currentPage: () => store.getState().ui.selectedPage,
             expandedKeyFor: (boxId) =>
-                selectMainScreenModel(store.getState()).boxes.find(
-                    (box) => box.id === boxId,
-                )?.expandedKey,
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) => box.id === boxId)?.expandedKey,
             graphFor: (page, mode) =>
-                buildFocusGraphForState({
-                    ...store.getState(),
-                    interaction: {
-                        ...store.getState().interaction,
-                        focusScope: mode,
+                buildFocusGraphForState(
+                    {
+                        ...store.getState(),
+                        interaction: {
+                            ...store.getState().interaction,
+                            focusScope: mode,
+                        },
+                        ui: {
+                            ...store.getState().ui,
+                            selectedPage: page,
+                        },
                     },
-                    ui: {
-                        ...store.getState().ui,
-                        selectedPage: page,
-                    },
-                }),
+                    domains.reader,
+                ),
             mode: () => store.getState().interaction.focusScope,
         });
         const commandDispatcher = new TuiCommandDispatcher({
@@ -4659,7 +4617,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             mainBoxInnerColumns: () => options.mainBoxInnerColumns ?? 80,
             mainContentColumns: () => options.mainContentColumns ?? 84,
             mainViewportRows: () => 12,
-            projection: tuiViewProjection,
+            projection,
             onApprovalDecision: async (instance, approvalId, decision) => {
                 approvalDecisions.push({ approvalId, decision, instance });
             },
@@ -4744,6 +4702,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             approvalDecisions() {
                 return approvalDecisions;
             },
+            domains,
             enabledChanges() {
                 return enabledChanges;
             },
@@ -4757,6 +4716,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             pageReloads() {
                 return pageReloads;
             },
+            projection,
             shellAttaches() {
                 return shellAttaches;
             },
@@ -4764,188 +4724,158 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         };
     }
 
-    function seedPrompt3State(store: TuiAppStore) {
-        store.patchControlReadModel({
+    function seedPrompt3State(domains: TuiTestDomains) {
+        domains.setInstances([
+            {
+                homeDirectory: "/home/alpha",
+                enabled: true,
+                mcpEnabled: true,
+                name: "alpha",
+            },
+            {
+                homeDirectory: "/home/beta",
+                enabled: true,
+                mcpEnabled: false,
+                name: "beta",
+            },
+        ]);
+        domains.setConfig({
             instances: [
                 {
-                    homeDirectory: "/home/alpha",
                     enabled: true,
-                    mcpEnabled: true,
-                    mcpPath: "/alpha/mcp",
+                    extensions: { model: ["instance"] },
+                    mcp: {
+                        auth: "none",
+                        contextMode: "explicit",
+                        enabled: true,
+                        path: "/alpha/mcp",
+                    },
                     name: "alpha",
                     provider: "local",
+                    security: { mode: "disabled" },
                 },
                 {
-                    homeDirectory: "/home/beta",
                     enabled: true,
-                    mcpEnabled: false,
-                    mcpPath: "/beta/mcp",
+                    extensions: { model: ["instance"] },
+                    mcp: {
+                        auth: "none",
+                        contextMode: "explicit",
+                        enabled: false,
+                        path: "/beta/mcp",
+                    },
                     name: "beta",
                     provider: "ssh",
+                    security: { mode: "disabled" },
                 },
             ],
-        });
-        store.patchControlReadModel({
-            configView: {
-                instances: [
-                    {
-                        enabled: true,
-                        extensions: { model: ["instance"] },
-                        mcp: {
-                            auth: "none",
-                            contextMode: "explicit",
-                            enabled: true,
-                            path: "/alpha/mcp",
-                        },
-                        name: "alpha",
-                        provider: "local",
-                        security: { mode: "disabled" },
-                    },
-                    {
-                        enabled: true,
-                        extensions: { model: ["instance"] },
-                        mcp: {
-                            auth: "none",
-                            contextMode: "explicit",
-                            enabled: false,
-                            path: "/beta/mcp",
-                        },
-                        name: "beta",
-                        provider: "ssh",
-                        security: { mode: "disabled" },
-                    },
-                ],
-                mcp: {
-                    enabled: true,
-                    listenHost: "127.0.0.1",
-                    listenPort: 3210,
-                },
+            mcp: {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
             },
         });
-        store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "running",
-            lastSeq: 20,
-            name: "alpha",
-            ready: true,
-            status: "ready",
-        } as never);
-        store.patchControlSnapshot({
-            connectionState: "connected",
-            daemonState: "stopped",
-            lastSeq: 12,
-            name: "beta",
-            ready: false,
-            status: "stopped",
-        } as never);
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    todo: {
-                        items: [
-                            {
-                                content: "Inspect",
-                                id: "inspect",
-                                status: "completed",
-                            },
-                            {
-                                content: "Implement Todo",
-                                detail: "Adding dedicated TUI page",
-                                id: "implement",
-                                status: "in_progress",
-                            },
-                            {
-                                content: "Verify",
-                                id: "verify",
-                                status: "pending",
-                            },
-                        ],
-                        revision: 2,
-                        summary: {
-                            completed: 1,
-                            currentItemId: "implement",
-                            total: 3,
-                        },
-                        taskId: "task-1",
-                        title: "Todo support",
-                    },
-                },
+        domains.setRuntime("alpha", {
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 20,
+                name: "alpha",
+                ready: true,
+                status: "ready",
             },
         });
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    toolCalls: [
-                        {
-                            callId: "call-1",
-                            ctxId: "ctx-alpha",
-                            completedAt: "2026-07-09T00:00:01.000Z",
-                            inputSummary: '{"cmd":"pwd"}',
-                            instance: "alpha" as never,
-                            source: "tui",
-                            startedAt: "2026-07-09T00:00:00.000Z",
-                            status: "completed",
-                            termination: "exited",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
+        domains.setRuntime("beta", {
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "stopped",
+                lastSeq: 12,
+                name: "beta",
+                ready: false,
+                status: "stopped",
             },
         });
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    approvals: [
-                        {
-                            approvalId: "approval-1",
-                            callId: "call-1",
-                            ctxId: "ctx-alpha",
-                            createdAt: "2026-07-09T00:00:00.000Z",
-                            expiresAt: "2026-07-09T00:10:00.000Z",
-                            inputSummary: '{"cmd":"rm"}',
-                            instance: "alpha" as never,
-                            reason: "needs review",
-                            riskLevel: "high",
-                            source: "tui",
-                            status: "pending",
-                            toolName: "bash_run",
-                            workspace: "/projects/alpha",
-                        },
-                    ],
+        domains.setTodo("alpha", {
+            items: [
+                {
+                    content: "Inspect",
+                    id: "inspect",
+                    status: "completed",
                 },
+                {
+                    content: "Implement Todo",
+                    detail: "Adding dedicated TUI page",
+                    id: "implement",
+                    status: "in_progress",
+                },
+                {
+                    content: "Verify",
+                    id: "verify",
+                    status: "pending",
+                },
+            ],
+            revision: 2,
+            summary: {
+                completed: 1,
+                currentItemId: "implement",
+                total: 3,
             },
+            taskId: "task-1",
+            title: "Todo support",
         });
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        ...Array.from({ length: 20 }, (_, index) => ({
-                            at: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
-                            ctxId: "ctx-alpha",
-                            instanceName: "alpha",
-                            message: `alpha line ${index + 1}`,
-                            seq: index + 1,
-                            stream: "stdout" as const,
-                        })),
-                    ],
-                },
+        domains.setToolCalls("alpha", [
+            {
+                callId: "call-1",
+                ctxId: "ctx-alpha",
+                completedAt: "2026-07-09T00:00:01.000Z",
+                inputSummary: '{"cmd":"pwd"}',
+                instance: "alpha" as never,
+                source: "tui",
+                startedAt: "2026-07-09T00:00:00.000Z",
+                status: "completed",
+                termination: "exited",
+                toolName: "bash_run",
             },
+        ]);
+        domains.setApprovals("alpha", [
+            {
+                approvalId: "approval-1",
+                callId: "call-1",
+                ctxId: "ctx-alpha",
+                createdAt: "2026-07-09T00:00:00.000Z",
+                expiresAt: "2026-07-09T00:10:00.000Z",
+                inputSummary: '{"cmd":"rm"}',
+                instance: "alpha" as never,
+                reason: "needs review",
+                riskLevel: "high",
+                source: "tui",
+                status: "pending",
+                toolName: "bash_run",
+                workspace: "/projects/alpha",
+            },
+        ]);
+        domains.setRuntime("alpha", {
+            logs: [
+                ...Array.from({ length: 20 }, (_, index) => ({
+                    at: `2026-07-09T00:00:${String(index).padStart(2, "0")}.000Z`,
+                    ctxId: "ctx-alpha",
+                    instanceName: "alpha",
+                    message: `alpha line ${index + 1}`,
+                    seq: index + 1,
+                    stream: "stdout" as const,
+                })),
+            ],
         });
-        store.patchControlReadModel({
-            instanceState: {
-                ["beta"]: {
-                    logs: [
-                        {
-                            at: "2026-07-09T00:01:00.000Z",
-                            ctxId: "ctx-beta",
-                            instanceName: "beta",
-                            message: "beta line 1",
-                            seq: 1,
-                            stream: "stderr" as const,
-                        },
-                    ],
+        domains.setRuntime("beta", {
+            logs: [
+                {
+                    at: "2026-07-09T00:01:00.000Z",
+                    ctxId: "ctx-beta",
+                    instanceName: "beta",
+                    message: "beta line 1",
+                    seq: 1,
+                    stream: "stderr" as const,
                 },
-            },
+            ],
         });
     }
 }
