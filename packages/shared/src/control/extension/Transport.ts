@@ -1,4 +1,5 @@
 import { CONTROL_HOST } from "../../client/Control.js";
+import { EventStreamReader, readStreamGapPayload, type EventStreamPort } from "../../client/Stream.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import type {
@@ -6,6 +7,8 @@ import type {
     CliCommandWireResult,
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
+    ExtensionChangeEvent,
+    ExtensionSnapshot,
     TuiPageDescriptor,
     TuiPageSnapshot,
     WebApplicationDescriptor,
@@ -14,6 +17,8 @@ import type {
 } from "./Model.js";
 
 export interface ExtensionRuntimeTransport {
+    snapshot(): Promise<ExtensionSnapshot>;
+    subscribe(fromRevision: number): Promise<EventStreamPort<ExtensionChangeEvent>>;
     disable(extensionId: string): Promise<ExtensionRuntimeRecord>;
     enable(extensionId: string): Promise<ExtensionRuntimeRecord>;
     get(extensionId: string): Promise<ExtensionRuntimeRecord>;
@@ -61,6 +66,21 @@ export function createExtensionRuntimeTransport(
 ): ExtensionRuntimeTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "extension");
     return {
+        snapshot: () => port.request<ExtensionSnapshot>("snapshot"),
+        subscribe: async (fromRevision) => new EventStreamReader<ExtensionChangeEvent>(
+            await port.open("subscribe", { fromRevision }),
+            {
+                decodeEvent: (payload) => {
+                    if (typeof payload !== "object" || payload === null || Array.isArray(payload) ||
+                        !Number.isSafeInteger(payload.revision) || (payload.revision as number) < 1 ||
+                        !Array.isArray(payload.extensionIds) ||
+                        !payload.extensionIds.every((id) => typeof id === "string"))
+                        throw new TypeError("Invalid Extension change event.");
+                    return { extensionIds: payload.extensionIds as string[], revision: payload.revision as number };
+                },
+                readGap: readStreamGapPayload,
+            },
+        ),
         disable: (extensionId) =>
             port.request<ExtensionRuntimeRecord>("disable", { extensionId }),
         enable: (extensionId) =>

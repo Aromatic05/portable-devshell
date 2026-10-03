@@ -49,7 +49,7 @@ import type {
 } from "@portable-devshell/extension/toolcall";
 
 import { createControlExtensionSandboxPointRegistry } from "../../composition/Sandbox.js";
-import { projectExtensionCapabilities } from "../capability/Projection.js";
+import { projectExtensionCapabilities } from "../api/cap/Projection.js";
 import type {
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,

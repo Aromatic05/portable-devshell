@@ -29,6 +29,7 @@ export interface ExtensionGenerationLease {
 }
 
 export class ExtensionGeneration {
+    readonly #faultListeners = new Set<() => void>();
     readonly generation: string;
     readonly manifest: ExtensionManifest;
     readonly registrations: ExtensionRegistrationSet;
@@ -126,9 +127,16 @@ export class ExtensionGeneration {
         if (this.#state !== "ready" && this.#state !== "active") return;
         this.#faultError = error;
         this.#state = "faulted";
+        for (const listener of this.#faultListeners) listener();
+    }
+
+    onFault(listener: () => void): () => void {
+        this.#faultListeners.add(listener);
+        return () => this.#faultListeners.delete(listener);
     }
 
     retire(): Promise<void> {
+        this.#faultListeners.clear();
         if (
             this.#state === "ready" ||
             this.#state === "active" ||

@@ -14,12 +14,12 @@ import type {
     CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 
-import { CliExtensionCommandService } from "../../../../src/extension/cli/command/Service.ts";
-import { createCliRouteModule } from "../../../../src/extension/cli/Route.ts";
+import { CliExtensionCommandService } from "../../../../src/extension/api/point/cli/command/Service.ts";
+import { createCliRouteModule } from "../../../../src/extension/api/point/cli/Endpoint.ts";
 import {
     createTuiPageRouteModule,
     TuiExtensionPageService,
-} from "../../../../src/extension/tui/Route.ts";
+} from "../../../../src/extension/api/point/tui/Endpoint.ts";
 import type { ExtensionCatalogRegistration } from "../../../../src/extension/discovery/Catalog.ts";
 import { WebApplicationCatalog } from "../../../../src/server/web/extension/application/Catalog.ts";
 import { createWebApplicationRouteModule } from "../../../../src/server/web/extension/application/Route.ts";

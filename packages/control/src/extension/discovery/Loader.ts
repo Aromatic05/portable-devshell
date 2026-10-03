@@ -12,7 +12,7 @@ import type {
 import {
     ExtensionCapabilityAssembler,
     type ExtensionCapabilityAssemblerOptions,
-} from "../capability/Assembly.js";
+} from "../api/cap/Assembly.js";
 import type { ExtensionGeneration } from "../registration/Generation.js";
 import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";
@@ -31,7 +31,7 @@ import {
 export type {
     ExtensionProcessRuntime,
     ExtensionWorkerRuntime,
-} from "../capability/Assembly.js";
+} from "../api/cap/Assembly.js";
 
 export interface ExtensionLoaderOptions
     extends ExtensionCapabilityAssemblerOptions,

@@ -7,19 +7,22 @@ import {
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 
-import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
 import { ExtensionGeneration } from "../../../../../src/extension/registration/Generation.ts";
 import { ExtensionRegistrationSet } from "../../../../../src/extension/registration/Registration.ts";
+import { cliNativeCommandsExtensionPointDefinition } from "../../../../../src/extension/api/point/cli/Declaration.ts";
+import { ExtensionPointRegistry } from "../../../../../src/extension/registration/PointRegistry.ts";
 import {
     ExtensionHost,
     type ExtensionGenerationLoader,
-} from "../../../../../src/extension/Host.ts";
+} from "../../../../../src/extension/host/Host.ts";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistrySnapshot,
 } from "../../../../../src/extension/state/Model.ts";
 import type { ExtensionRegistryPort } from "../../../../../src/extension/state/Store.ts";
 import { createCoreConfigRegistry } from "../../../../../src/config/Registry.ts";
+import { ExtensionChangeHub } from "../../../../../src/extension/manager/Change.ts";
+import { readExtensionSnapshot } from "../../../../../src/extension/manager/Snapshot.ts";
 
 class MemoryRegistry implements ExtensionRegistryPort {
     beforeWrite?: (snapshot: ExtensionRegistrySnapshot) => Promise<void> | void;
@@ -90,7 +93,9 @@ function createLoader(
 ): ExtensionGenerationLoader {
     return {
         load,
-        points: createControlExtensionPointRegistry(),
+        points: new ExtensionPointRegistry([
+            cliNativeCommandsExtensionPointDefinition,
+        ]),
         readManifest,
     };
 }
@@ -1088,3 +1093,167 @@ function aggregateContains(error: unknown, pattern: RegExp): boolean {
         )
     );
 }
+
+test("Extension host snapshots public visibility atomically and ignores retirement chatter", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            example: {
+                enabled: true,
+                lastKnownGoodGeneration: "a",
+                selectedGeneration: "a",
+            },
+        },
+        schemaVersion: 1,
+    });
+    const changes = new ExtensionChangeHub();
+    const host = new ExtensionHost({
+        changeHub: changes,
+        loader: createLoader(
+            async (id, name) => unregisteredGeneration(id, name, async () => {}),
+            async (id, name) => unregisteredManifest(id, name),
+        ),
+        registry,
+    });
+    await host.start();
+
+    let disablePromise!: Promise<void>;
+    const beforeDisable = await readExtensionSnapshot(host, () => {
+        disablePromise = host.disable("example");
+        return { tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true };
+    });
+    await disablePromise;
+
+    assert.equal(beforeDisable.extensions[0]?.enabled, true);
+    assert.equal(beforeDisable.extensions[0]?.state, "installed");
+    assert.equal("retired" in (beforeDisable.extensions[0] ?? {}), false);
+    const afterDisable = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.equal(afterDisable.extensions[0]?.enabled, false);
+    assert.equal(afterDisable.revision, beforeDisable.revision + 1);
+
+    await host.enable("example");
+    await host.reload("example");
+    const revision = changes.revision;
+    await host.reload("example");
+    const afterRetirement = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.equal(afterRetirement.revision, revision);
+    assert.equal("retired" in (afterRetirement.extensions[0] ?? {}), false);
+    await host.stop();
+});
+
+test("Extension host publishes active runtime faults as public snapshot changes", async () => {
+    let activeGeneration: ExtensionGeneration | undefined;
+    const changes = new ExtensionChangeHub();
+    const host = new ExtensionHost({
+        changeHub: changes,
+        loader: createLoader(
+            async (id, name) => {
+                const loaded = unregisteredGeneration(id, name, async () => {});
+                activeGeneration = loaded;
+                return loaded;
+            },
+            async (id, name) => unregisteredManifest(id, name),
+        ),
+        registry: new MemoryRegistry({
+            extensions: {
+                example: {
+                    enabled: true,
+                    lastKnownGoodGeneration: "a",
+                    selectedGeneration: "a",
+                },
+            },
+            schemaVersion: 1,
+        }),
+    });
+    await host.start();
+    await host.reload("example");
+    const beforeFault = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.ok(activeGeneration);
+    activeGeneration.fault(new Error("runtime fault"));
+    const afterFault = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.equal(afterFault.extensions[0]?.state, "failed");
+    assert.deepEqual(afterFault.extensions[0]?.failure, {
+        generation: "a",
+        message: "runtime fault",
+    });
+    assert.equal(afterFault.revision, beforeFault.revision + 1);
+    await host.stop();
+});
+
+test("Extension retirement disposal failures stay out of public snapshot revisions", async () => {
+    const changes = new ExtensionChangeHub();
+    let disposeCount = 0;
+    const host = new ExtensionHost({
+        changeHub: changes,
+        loader: createLoader(
+            async (id, name) => unregisteredGeneration(id, name, async () => {
+                disposeCount += 1;
+                if (disposeCount === 1)
+                    throw new Error("retired generation dispose failure");
+            }),
+            async (id, name) => unregisteredManifest(id, name),
+        ),
+        registry: new MemoryRegistry({
+            extensions: {
+                example: {
+                    enabled: true,
+                    lastKnownGoodGeneration: "a",
+                    selectedGeneration: "a",
+                },
+            },
+            schemaVersion: 1,
+        }),
+    });
+    await host.start();
+    await host.reload("example");
+    const beforeRetirement = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    await host.reload("example");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const afterRetirement = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.equal(afterRetirement.revision, beforeRetirement.revision);
+    assert.equal(afterRetirement.extensions[0]?.state, "active");
+    await assert.rejects(
+        host.waitForDrain("example"),
+        (error: unknown) => aggregateContains(error, /retired generation dispose failure/u),
+    );
+    await host.stop();
+});
+
+test("Extension host stop publishes lazy catalog visibility removal", async () => {
+    const changes = new ExtensionChangeHub();
+    const host = new ExtensionHost({
+        changeHub: changes,
+        loader: createLoader(
+            async () => { throw new Error("lazy catalog must not load runtime code"); },
+        ),
+        registry: new MemoryRegistry({
+            extensions: {
+                example: {
+                    enabled: true,
+                    selectedGeneration: "a",
+                },
+            },
+            schemaVersion: 1,
+        }),
+    });
+    await host.start();
+    const snapshot = await readExtensionSnapshot(host, () => ({
+        tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
+    }));
+    assert.equal(snapshot.extensions[0]?.state, "installed");
+    assert.deepEqual(host.listDeclarations("cli.native-commands").map(({ extensionId }) => extensionId), ["example"]);
+    const revision = changes.revision;
+    await host.stop();
+    assert.equal(changes.revision, revision + 1);
+});

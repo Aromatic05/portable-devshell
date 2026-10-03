@@ -4,19 +4,12 @@
 // Extension mutations and page reads/actions update only this extension state;
 // the projection never reaches into another control domain.
 //
-// Catalog reads are explicit (refreshCatalogs) and page snapshots are updated
-// only by an explicit read or action, so there is no polling. Read and mutation
-// requests share one monotonic version per catalog and per page, so a slow
-// response can never overwrite a newer projection; close() bumps the epoch and
-// invalidates every in-flight request.
-//
-// A method-not-found `tui.pages`, `web.applications`, or `web.pages` means the
-// control server does not expose that optional catalog at all. That is modelled
-// explicitly as `tuiSupported`/`webSupported: false` with empty descriptors and
-// no snapshots, rather than as a permanent failure; any other error stays in
-// the catalog's domain-local failure.
+// Catalogs come from a revisioned authoritative snapshot, followed by a
+// resumable subscription. Page snapshots remain explicit reads/actions.
 
 import type {
+    ExtensionChangeEvent,
+    ExtensionPublicRuntimeRecord,
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
     TuiPageDescriptor,
@@ -30,9 +23,11 @@ import type {
     TuiPageTransport,
     WebPageTransport,
 } from "./Transport.js";
+import { EventSubscription, readStreamGap } from "../../client/Stream.js";
 
 interface ExtensionViewModelState {
-    extensions: ExtensionRuntimeRecord[];
+    extensions: ExtensionPublicRuntimeRecord[];
+    revision: number;
     extensionsFailure?: Error;
     /** Failure of the most recent TUI catalog read or page read/action. */
     tuiFailure?: Error;
@@ -58,6 +53,11 @@ export class ExtensionViewModel {
     readonly #versions = new Map<string, number>();
     readonly #web: WebPageTransport;
     #epoch = 0;
+    #subscription?: EventSubscription<ExtensionChangeEvent>;
+    #refresh?: Promise<number | undefined>;
+    #refreshDirty = false;
+    #pendingRevision = 0;
+    #refreshTimer?: ReturnType<typeof setTimeout>;
     #published: Readonly<ExtensionViewModelState> = emptyState();
     #state: ExtensionViewModelState = emptyState();
 
@@ -87,11 +87,8 @@ export class ExtensionViewModel {
     /** Reads the runtime, TUI, and Web catalogs once. */
     async refreshCatalogs(): Promise<void> {
         const epoch = this.#epoch;
-        await Promise.all([
-            this.#refreshExtensions(epoch),
-            this.#refreshTuiPages(epoch),
-            this.#refreshWebCatalog(epoch),
-        ]);
+        const revision = await this.#refreshSnapshot(epoch);
+        if (revision !== undefined) this.#startSubscription(epoch);
     }
 
     install(sourcePath: string): Promise<ExtensionRuntimeRecord> {
@@ -163,97 +160,97 @@ export class ExtensionViewModel {
 
     close(): void {
         this.#epoch += 1;
+        this.#subscription?.stop();
+        this.#subscription = undefined;
+        this.#refresh = undefined;
+        this.#refreshDirty = false;
+        this.#pendingRevision = 0;
+        if (this.#refreshTimer !== undefined) clearTimeout(this.#refreshTimer);
+        this.#refreshTimer = undefined;
         this.#versions.clear();
         this.#listeners.clear();
         this.#state = emptyState();
         this.#published = this.#state;
     }
 
-    async #refreshExtensions(epoch: number): Promise<void> {
-        const version = this.#nextVersion("extensions");
-        try {
-            const records = await this.#runtime.list();
-            if (!this.#valid("extensions", version, epoch)) return;
-            this.#state = {
-                ...this.#state,
-                extensions: orderExtensions(records),
-                extensionsFailure: undefined,
-            };
-            this.#emit();
-        } catch (error) {
-            if (!this.#valid("extensions", version, epoch)) return;
-            this.#state = {
-                ...this.#state,
-                extensionsFailure: toError(error),
-            };
-            this.#emit();
-        }
+    #startSubscription(epoch: number): void {
+        if (this.#subscription !== undefined || epoch !== this.#epoch) return;
+        this.#subscription = new EventSubscription<ExtensionChangeEvent>(this.#state.revision + 1, {
+            open: (revision) => this.#runtime.subscribe(revision),
+            eventSeq: (event) => event.revision,
+            readGapError: readStreamGap,
+            onEvent: (event) => {
+                if (epoch !== this.#epoch || event.revision <= this.#state.revision) return;
+                this.#pendingRevision = Math.max(this.#pendingRevision, event.revision);
+                this.#refreshDirty = true;
+                if (this.#refreshTimer !== undefined) return;
+                this.#refreshTimer = setTimeout(() => {
+                    this.#refreshTimer = undefined;
+                    if (epoch !== this.#epoch || this.#pendingRevision <= this.#state.revision) return;
+                    void this.refreshCatalogs();
+                }, 100);
+            },
+            onGap: async (gap) => {
+                this.#pendingRevision = Math.max(this.#pendingRevision, gap.lastSeq);
+                this.#refreshDirty = true;
+                const revision = await this.#refreshSnapshot(epoch);
+                return revision === undefined ? undefined : revision + 1;
+            },
+        });
+        this.#subscription.start();
     }
 
-    async #refreshTuiPages(epoch: number): Promise<void> {
-        const version = this.#nextVersion("tui");
-        try {
-            const pages = await this.#tui.pages();
-            if (!this.#valid("tui", version, epoch)) return;
-            const ordered = orderPages(pages);
-            this.#state = {
-                ...this.#state,
-                tuiFailure: undefined,
-                tuiPages: ordered,
-                tuiSnapshots: pruneSnapshots(this.#state.tuiSnapshots, ordered),
-                tuiSupported: true,
-            };
-            this.#emit();
-        } catch (error) {
-            if (!this.#valid("tui", version, epoch)) return;
-            this.#state = isMethodNotFound(error)
-                ? {
-                      ...this.#state,
-                      tuiFailure: undefined,
-                      tuiPages: [],
-                      tuiSnapshots: new Map(),
-                      tuiSupported: false,
-                  }
-                : { ...this.#state, tuiFailure: toError(error) };
-            this.#emit();
-        }
+    #refreshSnapshot(epoch: number): Promise<number | undefined> {
+        if (this.#refresh !== undefined) return this.#refresh;
+        this.#refreshDirty = true;
+        const refresh = this.#readSnapshots(epoch).finally(() => {
+            if (this.#refresh === refresh) this.#refresh = undefined;
+        });
+        this.#refresh = refresh;
+        return refresh;
     }
 
-    async #refreshWebCatalog(epoch: number): Promise<void> {
-        const version = this.#nextVersion("web");
-        try {
-            const [applications, pages] = await Promise.all([
-                this.#web.applications(),
-                this.#web.pages(),
-            ]);
-            if (!this.#valid("web", version, epoch)) return;
-            const orderedPages = orderPages(pages);
-            this.#state = {
-                ...this.#state,
-                webApplications: orderPages(applications),
-                webFailure: undefined,
-                webPages: orderedPages,
-                webSnapshots: pruneSnapshots(
-                    this.#state.webSnapshots,
-                    orderedPages,
-                ),
-                webSupported: true,
-            };
-            this.#emit();
-        } catch (error) {
-            if (!this.#valid("web", version, epoch)) return;
-            this.#state = isMethodNotFound(error)
-                ? {
-                      ...this.#state,
-                      webApplications: [],
-                      webFailure: undefined,
-                      webPages: [],
-                      webSnapshots: new Map(),
-                      webSupported: false,
-                  }
-                : { ...this.#state, webFailure: toError(error) };
-            this.#emit();
+    async #readSnapshots(epoch: number): Promise<number | undefined> {
+        while (this.#refreshDirty && epoch === this.#epoch) {
+            this.#refreshDirty = false;
+            const version = this.#nextVersion("snapshot");
+            try {
+                const snapshot = await this.#runtime.snapshot();
+                if (epoch !== this.#epoch) return undefined;
+                if (!this.#valid("snapshot", version, epoch)) {
+                    this.#refreshDirty = true;
+                    continue;
+                }
+                if (snapshot.revision < this.#state.revision) return undefined;
+                const tuiPages = orderPages(snapshot.tuiPages);
+                const webPages = orderPages(snapshot.webPages);
+                this.#invalidateRemovedPages("tui:page:", tuiPages);
+                this.#invalidateRemovedPages("web:page:", webPages);
+                this.#state = {
+                    ...this.#state,
+                    revision: snapshot.revision,
+                    extensions: orderExtensions(snapshot.extensions),
+                    extensionsFailure: undefined,
+                    tuiFailure: undefined,
+                    tuiPages,
+                    tuiSupported: snapshot.tuiSupported,
+                    tuiSnapshots: pruneSnapshots(this.#state.tuiSnapshots, tuiPages),
+                    webApplications: orderPages(snapshot.webApplications),
+                    webFailure: undefined,
+                    webPages,
+                    webSupported: snapshot.webSupported,
+                    webSnapshots: pruneSnapshots(this.#state.webSnapshots, webPages),
+                };
+                this.#refreshDirty = this.#pendingRevision > snapshot.revision;
+                this.#emit();
+            } catch (error) {
+                if (epoch !== this.#epoch) return undefined;
+                this.#state = { ...this.#state, extensionsFailure: toError(error) };
+                this.#emit();
+                return undefined;
+            }
         }
+        return epoch === this.#epoch ? this.#state.revision : undefined;
     }
 
     async #mutateExtensions<Result>(
@@ -261,12 +258,11 @@ export class ExtensionViewModel {
         apply: (result: Result) => void,
     ): Promise<Result> {
         const epoch = this.#epoch;
-        // Invalidate extension reads that started before this mutation so a
-        // slow catalog response cannot roll the mutation back.
-        this.#nextVersion("extensions");
+        this.#nextVersion("snapshot");
         try {
             const result = await operation();
             if (epoch !== this.#epoch) return result;
+            this.#nextVersion("snapshot");
             apply(result);
             this.#state = { ...this.#state, extensionsFailure: undefined };
             this.#emit();
@@ -345,7 +341,8 @@ export class ExtensionViewModel {
         const records = this.#state.extensions.filter(
             (current) => current.id !== record.id,
         );
-        records.push(record);
+        const { retired, ...publicRecord } = record;
+        records.push(publicRecord);
         this.#state = {
             ...this.#state,
             extensions: orderExtensions(records),
@@ -367,6 +364,14 @@ export class ExtensionViewModel {
         return version;
     }
 
+    #invalidateRemovedPages(prefix: string, pages: readonly { id: string }[]): void {
+        const ids = new Set(pages.map((page) => page.id));
+        for (const key of this.#versions.keys()) {
+            if (key.startsWith(prefix) && !ids.has(key.slice(prefix.length)))
+                this.#nextVersion(key);
+        }
+    }
+
     #valid(key: string, version: number, epoch: number): boolean {
         return this.#epoch === epoch && this.#versions.get(key) === version;
     }
@@ -380,6 +385,7 @@ export class ExtensionViewModel {
 
 function emptyState(): ExtensionViewModelState {
     return {
+        revision: 0,
         extensions: [],
         tuiPages: [],
         tuiSnapshots: new Map(),
@@ -392,8 +398,8 @@ function emptyState(): ExtensionViewModelState {
 }
 
 function orderExtensions(
-    records: readonly ExtensionRuntimeRecord[],
-): ExtensionRuntimeRecord[] {
+    records: readonly ExtensionPublicRuntimeRecord[],
+): ExtensionPublicRuntimeRecord[] {
     return [...records].sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -418,13 +424,6 @@ function pruneSnapshots<Snapshot>(
     return pruned;
 }
 
-function isMethodNotFound(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        (error as { code?: unknown }).code === "method_not_found"
-    );
-}
 
 function toError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));

@@ -5,8 +5,8 @@ import type { ExtensionModule } from "@portable-devshell/extension";
 import type {
     ExtensionProcessRuntime,
     ExtensionWorkerRuntime,
-} from "../capability/Assembly.js";
-import type { ExtensionConfigRuntime } from "../config/Control.js";
+} from "../api/cap/Assembly.js";
+import type { ExtensionConfigRuntime } from "../api/cap/config/Control.js";
 import type { ExtensionSandboxHost } from "../sandbox/bridge/Host.js";
 import { isDirectoryNotEmpty, isMissing } from "./Paths.js";
 

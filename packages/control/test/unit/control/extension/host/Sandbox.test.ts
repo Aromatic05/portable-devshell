@@ -40,9 +40,9 @@ import { toRemoteErrorBody } from "@portable-devshell/shared";
 import {
     createCliModelSandboxBinding,
     createCliNativeSandboxBinding,
-} from "../../../../../src/extension/cli/Sandbox.ts";
-import { createTuiPageSandboxBinding } from "../../../../../src/extension/tui/Sandbox.ts";
-import { createToolCallRewriteSandboxBinding } from "../../../../../src/extension/toolcall/Sandbox.ts";
+} from "../../../../../src/extension/api/point/cli/Sandbox.ts";
+import { createTuiPageSandboxBinding } from "../../../../../src/extension/api/point/tui/Sandbox.ts";
+import { createToolCallRewriteSandboxBinding } from "../../../../../src/extension/api/point/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,

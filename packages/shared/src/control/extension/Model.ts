@@ -35,6 +35,26 @@ export interface ExtensionRemoveResult {
     removed: true;
 }
 
+export type ExtensionPublicRuntimeRecord = Omit<ExtensionRuntimeRecord, "retired">;
+
+export interface ExtensionChangeEvent {
+    readonly extensionIds: readonly string[];
+    readonly revision: number;
+}
+
+export interface ExtensionCatalogSnapshot {
+    tuiPages: TuiPageDescriptor[];
+    tuiSupported: boolean;
+    webApplications: WebApplicationDescriptor[];
+    webPages: WebPageDescriptor[];
+    webSupported: boolean;
+}
+
+export interface ExtensionSnapshot extends ExtensionCatalogSnapshot {
+    extensions: ExtensionPublicRuntimeRecord[];
+    revision: number;
+}
+
 export interface CliCommandDescriptor {
     extensionId: string;
     id: string;
