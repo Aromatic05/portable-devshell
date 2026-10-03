@@ -1,6 +1,6 @@
 import type { WriteStream } from "node:tty";
 
-import type { TuiControlSession } from "../app/control/Session.js";
+import type { TuiDomainSession } from "../app/control/Client.js";
 import type { TuiAppStore } from "../state/store/App.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
 import { nextTuiTerminalTab } from "./tmux/Model.js";
@@ -29,7 +29,7 @@ export interface TuiTerminalControllerOptions {
     graphicsSupport: TuiTerminalGraphicsSupport;
     handleAppMouse(event: TuiTerminalMouseEvent): Promise<void>;
     rows(): number;
-    session: TuiControlSession;
+    domains: TuiDomainSession;
     stdout: WriteStream;
     store: TuiAppStore;
     terminal: TuiTerminalSession;
@@ -93,7 +93,7 @@ export class TuiTerminalController {
         }
 
         const entry =
-            this.#options.session.domains.instances.state.instances.find(
+            this.#options.domains.instances.state.instances.find(
                 (candidate) => candidate.name === instance,
             );
         if (entry === undefined) {
@@ -193,9 +193,7 @@ export class TuiTerminalController {
                         this.#tmuxPanesInstance !== instance
                     )
                         return;
-                    await this.#options.session.refreshToolCallsForInstance(
-                        instance,
-                    );
+                    await this.#options.domains.toolCalls.load(instance);
                     if (
                         !this.#tmuxPanesActive ||
                         this.#tmuxPanesInstance !== instance

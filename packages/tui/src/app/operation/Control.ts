@@ -15,20 +15,21 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import type {
-    TuiRuntimeOperationClients,
-    TuiRuntimeOperationSession,
-} from "../Operations.js";
+import type { TuiRuntimeOperationContext } from "../Operations.js";
+import {
+    refreshTuiAll,
+    refreshTuiAudit,
+    refreshTuiMessages,
+    refreshTuiTodo,
+} from "../control/Refresh.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiAppStore } from "../../state/store/App.js";
 
 export class TuiRuntimeControlOperations {
     constructor(
-        private readonly options: {
-            clients: TuiRuntimeOperationClients;
+        private readonly options: TuiRuntimeOperationContext & {
             operationTimeoutMs: number;
             reconnectDelayMs: number;
-            session: TuiRuntimeOperationSession;
             store: TuiAppStore;
         },
     ) {}
@@ -39,7 +40,7 @@ export class TuiRuntimeControlOperations {
             `artifact.revoke:${shareId}`,
         );
         await this.#refreshBestEffort(this.#panelKey("instances"), async () => {
-            await this.options.session.refreshArtifacts();
+            await this.options.domains.artifact.refresh();
         });
     }
 
@@ -48,27 +49,23 @@ export class TuiRuntimeControlOperations {
         ctxId: string,
         text: string,
     ): Promise<void> {
-        await this.options.session.commands.queueContextMessage(
-            instance,
-            ctxId,
-            text,
-        );
+        await this.options.domains.messages.queue(instance, ctxId, text);
         await this.#refreshBestEffort(`audit:${instance}`, async () => {
-            await this.options.session.refreshAudit(instance);
+            await refreshTuiAudit(this.options.domains, instance);
         });
     }
 
     async disableContext(instance: string, ctxId: string): Promise<void> {
-        await this.options.session.commands.disableContext(ctxId);
+        await this.options.domains.context.disable(ctxId);
         await this.#refreshBestEffort(`audit:${instance}`, async () => {
-            await this.options.session.refreshAudit(instance);
+            await refreshTuiAudit(this.options.domains, instance);
         });
     }
 
     async renewContext(instance: string, ctxId: string): Promise<void> {
-        await this.options.session.commands.renewContext(ctxId);
+        await this.options.domains.context.renew(ctxId);
         await this.#refreshBestEffort(`audit:${instance}`, async () => {
-            await this.options.session.refreshAudit(instance);
+            await refreshTuiAudit(this.options.domains, instance);
         });
     }
 
@@ -78,7 +75,7 @@ export class TuiRuntimeControlOperations {
             `artifact.cancel:${transferId}`,
         );
         await this.#refreshBestEffort(this.#panelKey("instances"), async () => {
-            await this.options.session.refreshArtifacts();
+            await this.options.domains.artifact.refresh();
         });
     }
 
@@ -100,7 +97,7 @@ export class TuiRuntimeControlOperations {
             try {
                 const remainingMs = Math.max(1, deadline - Date.now());
                 await withRequestTimeout(
-                    this.options.session.reconnect(),
+                    this.options.reconnect(),
                     remainingMs,
                     "control.reconnect",
                 );
@@ -159,7 +156,7 @@ export class TuiRuntimeControlOperations {
             }
         }
         await this.#refreshBestEffort(`instances:${result.name}`, async () => {
-            await this.options.session.refresh();
+            await refreshTuiAll(this.options.domains);
         });
         return status;
     }
@@ -177,7 +174,7 @@ export class TuiRuntimeControlOperations {
             "config.update",
         );
         await this.#refreshBestEffort(this.#panelKey("config"), async () => {
-            await this.options.session.refreshConfig();
+            await this.options.domains.config.refresh();
         });
         // The config projection owns the full view; the command layer only
         // consumes the restart signal through a JSON boundary.
@@ -200,7 +197,7 @@ export class TuiRuntimeControlOperations {
             `instance.delete:${instance}`,
         );
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
-            await this.options.session.refresh();
+            await refreshTuiAll(this.options.domains);
         });
     }
 
@@ -210,7 +207,7 @@ export class TuiRuntimeControlOperations {
             `todo.delete:${instance}:${taskId}`,
         );
         await this.#refreshBestEffort(`todo:${instance}`, async () => {
-            await this.options.session.refreshTodo(instance);
+            await refreshTuiTodo(this.options.domains, instance);
         });
     }
 
@@ -226,7 +223,7 @@ export class TuiRuntimeControlOperations {
             `config.instance.enabled:${instance}`,
         );
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
-            await this.options.session.refresh();
+            await refreshTuiAll(this.options.domains);
         });
     }
 
@@ -248,14 +245,11 @@ export class TuiRuntimeControlOperations {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<void> {
-        await this.options.session.commands.decideOAuthApproval(
-            approvalId,
-            decision,
-        );
+        await this.options.domains.mcp.decideApproval(approvalId, decision);
         await this.#refreshBestEffort(
             this.#panelKey("connections"),
             async () => {
-                await this.options.session.refreshOAuth();
+                await this.options.domains.mcp.refresh();
             },
         );
     }
@@ -282,31 +276,33 @@ export class TuiRuntimeControlOperations {
     ): Promise<void> {
         switch (page) {
             case "overview":
-                await this.options.session.refreshOverview();
+                await this.options.domains.overview.refresh();
                 return;
             case "instances":
             case "help":
-                await this.options.session.refresh();
+                await refreshTuiAll(this.options.domains);
                 return;
             case "terminal":
                 return;
             case "todo":
                 if (instance !== undefined)
-                    await this.options.session.refreshTodo(instance);
+                    await refreshTuiTodo(this.options.domains, instance);
                 return;
             case "config":
-                await this.options.session.refreshConfig();
+                await this.options.domains.config.refresh();
                 return;
             case "connections":
-                await this.options.session.refreshConfig();
-                await this.options.session.refreshOAuth();
+                await Promise.all([
+                    this.options.domains.config.refresh(),
+                    this.options.domains.mcp.refresh(),
+                ]);
                 return;
             case "messages":
-                await this.options.session.refreshMessages();
+                await refreshTuiMessages(this.options.domains);
                 return;
             case "audit":
                 if (instance !== undefined)
-                    await this.options.session.refreshAudit(instance);
+                    await refreshTuiAudit(this.options.domains, instance);
                 return;
         }
     }

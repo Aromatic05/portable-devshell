@@ -246,7 +246,8 @@ export class TuiRuntime {
         };
         this.#operations = new TuiRuntimeOperations({
             clients: operationClients,
-            session: this.session,
+            domains,
+            reconnect: async () => await this.session.reconnect(),
             store: this.store,
         });
         this.tmuxPanes = new TuiTmuxPaneTerminalSession({
@@ -256,7 +257,7 @@ export class TuiRuntime {
             columns: () => this.columns,
             graphicsSupport: terminalGraphicsSupport,
             rows: () => this.rows,
-            session: this.session,
+            domains,
             stdout: this.#stdout,
             store: this.store,
             terminal: this.terminal,
@@ -271,7 +272,7 @@ export class TuiRuntime {
             },
         });
         const routeDataLoader = new TuiRouteDataLoader({
-            session: this.session,
+            domains,
             store: this.store,
         });
         this.routeLifecycle = new TuiRouteLifecycleController({
@@ -356,7 +357,7 @@ export class TuiRuntime {
                 await this.#operations.renewContext(instance, ctxId);
             },
             onConversationPreferencesUpdate: async (patch) => {
-                await this.session.updateConversationPreferences(patch);
+                await domains.conversationPreferences.update(patch);
             },
             onOpenTerminal: async (instance) => {
                 this.store.setSelectedInstance(instance);
@@ -394,11 +395,7 @@ export class TuiRuntime {
                 await this.#operations.deleteTodo(instance, taskId);
             },
             onExtensionPageAction: async (pageId, actionId, itemId) => {
-                await this.session.invokeExtensionPageAction(
-                    pageId,
-                    actionId,
-                    itemId,
-                );
+                await domains.extension.tuiAction(pageId, actionId, itemId);
             },
             onInstanceEnabledChange: async (instance, enabled) => {
                 await this.#operations.setInstanceEnabled(instance, enabled);
@@ -418,8 +415,8 @@ export class TuiRuntime {
                 if (page === "extensions") {
                     const route = currentTuiRoute(this.store.getState());
                     if (route.page === "extensions" && route.view === "page")
-                        await this.session.refreshExtensionPage(route.pageId);
-                    else await this.session.refreshExtensionPages();
+                        await domains.extension.readTuiPage(route.pageId);
+                    else await domains.extension.refreshCatalogs();
                     return;
                 }
                 await this.#operations.reloadPage(page, instance);
@@ -438,7 +435,7 @@ export class TuiRuntime {
                 );
             },
             onToolCallDetail: async (instance, callId) => {
-                return await this.session.readToolCallDetail(instance, callId);
+                return (await domains.toolCalls.readDetail(instance, callId))[0];
             },
             onValidateConfigDraft: async (draft) => {
                 await this.#operations.validateConfigDraft(draft);
@@ -741,7 +738,9 @@ export class TuiRuntime {
     }
 
     #requireInstanceHome(instance: string): string {
-        const home = this.session.homeDirectory(instance);
+        const home = this.domains.instances.state.instances.find(
+            (entry) => entry.name === instance,
+        )?.homeDirectory;
         if (home !== undefined && home.length > 0) return home;
         throw new Error(
             `Worker home directory is unavailable for ${instance}.`,

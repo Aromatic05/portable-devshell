@@ -13,10 +13,15 @@ import {
     type ToolCallRecord,
     type ContextMessageRecord,
 } from "@portable-devshell/shared";
+import {
+    refreshTuiAudit,
+    refreshTuiInstance,
+} from "../../../src/app/control/Refresh.ts";
 import { type WorkerInstance } from "@portable-devshell/core/testing";
 import {
     ControlRouteComposition,
     ControlSocketServer,
+    ContextRegistry,
     InstanceRegistry,
 } from "@portable-devshell/control/testing";
 import {
@@ -71,7 +76,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             source: "mcp",
             toolName: "bash_run",
         });
-        await session.refreshOverview();
+        await session.domains.overview.refresh();
 
         await waitFor(
             () =>
@@ -146,7 +151,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await session.start();
-        await session.refreshAudit("alpha");
+        await refreshTuiAudit(session.domains, "alpha");
 
         assert.deepEqual(
             session.domains.conversation.state.instances.alpha?.entries,
@@ -194,7 +199,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         status = "disabled";
         const readsBefore = server.contextReads();
 
-        await session.refreshAudit("alpha");
+        await refreshTuiAudit(session.domains, "alpha");
 
         assert.equal(server.contextReads() > readsBefore, true);
         assert.equal(
@@ -230,7 +235,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await session.start();
-        const hydration = session.refreshInstance("alpha");
+        const hydration = refreshTuiInstance(session.domains, "alpha");
         await hydrationStarted.promise;
         let hydrated = false;
         void hydration.then(() => {
@@ -281,7 +286,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         worker.setHomeDirectory("/home/reconnected-alpha");
         worker.emit("worker.transportConnected");
-        await session.refreshInstances();
+        await session.domains.instances.refresh();
 
         await waitFor(
             () =>
@@ -292,7 +297,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         worker.setHomeDirectory(undefined);
         worker.emit("instance.readyChanged", { ready: false });
-        await session.refreshInstances();
+        await session.domains.instances.refresh();
         await waitFor(
             () =>
                 session.domains.instances.state.instances.find(
@@ -324,7 +329,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         );
         session.store.setSelectedInstance("alpha");
         session.store.setSelectedPage("audit");
-        await session.refreshAudit("alpha");
+        await refreshTuiAudit(session.domains, "alpha");
         worker.addMessage({
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
@@ -530,7 +535,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await waitFor(
             () => session.store.getState().connection.status === "connected",
         );
-        await session.refreshAudit("alpha");
+        await refreshTuiAudit(session.domains, "alpha");
         await waitFor(() => worker.subscribeFromSeqs.length >= 1);
         const rawEventCount = session.store.getState().rawEvents.length;
         const toolCallsBefore =
@@ -608,9 +613,10 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 task: domains.taskTransport,
                 tool: domains.toolTransport,
             },
+            domains,
             operationTimeoutMs: 2_000,
+            reconnect: async () => await session.reconnect(),
             reconnectDelayMs: 10,
-            session,
             store: session.store,
         });
 
@@ -821,6 +827,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         let contextReads = 0;
         let oauthApprovalReads = 0;
         let restartCount = 0;
+        const contextChanges = new ContextRegistry().changes;
         const routes = new ControlRouteComposition({
             extensionRoutes: {
                 modules(scope) {
@@ -882,9 +889,63 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     ? undefined
                     : () =>
                           ({
-                              async list() {
-                                  contextReads += 1;
-                                  return options.contextRecords!();
+                              registry: {
+                                  changes: contextChanges,
+                                  async snapshot() {
+                                      contextReads += 1;
+                                      return {
+                                          contexts:
+                                              options.contextRecords!(),
+                                          revision:
+                                              contextChanges.revision,
+                                      };
+                                  },
+                                  async list() {
+                                      contextReads += 1;
+                                      return options.contextRecords!();
+                                  },
+                                  async referenceInstance() {
+                                      return undefined;
+                                  },
+                                  async validateForInstance(
+                                      ctxId: string,
+                                      instance: string,
+                                  ) {
+                                      const record =
+                                          options
+                                              .contextRecords!()
+                                              .find(
+                                                  (candidate) =>
+                                                      candidate.ctxId ===
+                                                          ctxId &&
+                                                      candidate.environments.some(
+                                                          (environment) =>
+                                                              environment.instance ===
+                                                              instance,
+                                                      ),
+                                              );
+                                      if (record === undefined)
+                                          throw new Error(
+                                              "Context is unavailable.",
+                                          );
+                                      return record;
+                                  },
+                              },
+                              async disable(ctxId: string) {
+                                  return options
+                                      .contextRecords!()
+                                      .find(
+                                          (record) =>
+                                              record.ctxId === ctxId,
+                                      )!;
+                              },
+                              async renew(ctxId: string) {
+                                  return options
+                                      .contextRecords!()
+                                      .find(
+                                          (record) =>
+                                              record.ctxId === ctxId,
+                                      )!;
                               },
                           }) as never,
             config: {
@@ -1344,18 +1405,26 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const domains = createTuiDomainSession();
         const operations = new TuiRuntimeOperations({
             clients: {} as never,
-            operationTimeoutMs: 100,
-            session: {
-                commands: {
-                    async queueContextMessage() {
+            domains: {
+                approval: () => ({ async load() {} }),
+                context: {
+                    async refresh() {
+                        throw new Error("audit refresh failed");
+                    },
+                },
+                conversation: { async refreshInstance() {} },
+                messages: {
+                    async queue() {
                         domains.messages.mergeMessage("alpha", queued);
                         return queued;
                     },
+                    async refreshInstance() {},
                 },
-                async refreshAudit() {
-                    throw new Error("audit refresh failed");
-                },
+                runtime: () => ({ async load() {}, async readLogs() {} }),
+                toolCalls: { async load() {} },
             } as never,
+            operationTimeoutMs: 100,
+            reconnect: async () => undefined,
             store,
         });
 

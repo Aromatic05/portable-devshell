@@ -1,12 +1,21 @@
 import { type TuiAppStore } from "../../state/store/App.js";
-import { type TuiControlSession } from "./Session.js";
+import { type TuiDomainSession } from "./Client.js";
 import { tuiRouteIdentity, type TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRoute } from "../../state/route/State.js";
+import {
+    refreshTuiAudit,
+    refreshTuiMessages,
+    refreshTuiTodo,
+} from "./Refresh.js";
 
+/**
+ * Loads the data a route needs on entry. It coordinates the existing domain
+ * ViewModels directly; it holds no refresh API of its own.
+ */
 export class TuiRouteDataLoader {
     constructor(
         private readonly options: {
-            session: TuiControlSession;
+            domains: TuiDomainSession;
             store: TuiAppStore;
         },
     ) {}
@@ -15,52 +24,48 @@ export class TuiRouteDataLoader {
         context: TuiRouteLifecycleContext,
     ): Promise<void | (() => void)> {
         const { instance, route, signal } = context;
+        const domains = this.options.domains;
         switch (route.page) {
             case "overview":
-                await this.options.session.refreshOverview(undefined, signal);
+                if (signal.aborted) return;
+                await domains.overview.refresh();
                 return;
             case "instances":
             case "config":
-                await this.options.session.refreshConfig(undefined, signal);
+                if (signal.aborted) return;
+                await domains.config.refresh();
                 return;
             case "connections":
+                if (signal.aborted) return;
                 await Promise.all([
-                    this.options.session.refreshConfig(undefined, signal),
-                    this.options.session.refreshOAuth(undefined, signal),
+                    domains.config.refresh(),
+                    domains.mcp.refresh(),
                 ]);
                 return;
             case "audit":
-                if (instance !== undefined)
-                    await this.options.session.refreshAudit(
-                        instance,
-                        undefined,
-                        signal,
-                    );
+                if (instance !== undefined) {
+                    if (signal.aborted) return;
+                    await refreshTuiAudit(domains, instance);
+                }
                 return;
             case "messages":
-                await this.options.session.refreshMessages(undefined, signal);
+                if (signal.aborted) return;
+                await refreshTuiMessages(domains);
                 return;
             case "todo":
                 if (instance !== undefined) {
+                    if (signal.aborted) return;
                     const input =
                         route.view === "detail"
                             ? { taskId: route.todoId }
                             : undefined;
-                    await this.options.session.refreshTodo(
-                        instance,
-                        undefined,
-                        signal,
-                        input,
-                    );
+                    await refreshTuiTodo(domains, instance, input);
                 }
                 return;
             case "extensions":
                 if (route.view === "page") {
-                    await this.options.session.refreshExtensionPage(
-                        route.pageId,
-                        undefined,
-                        signal,
-                    );
+                    if (signal.aborted) return;
+                    await domains.extension.readTuiPage(route.pageId);
                 }
                 return;
             case "help":

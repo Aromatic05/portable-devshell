@@ -8,6 +8,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { TuiRuntime } from "../../src/app/Runtime.ts";
+import { refreshTuiAudit } from "../../src/app/control/Refresh.ts";
 import {
     currentTuiRoute,
     topTuiOverlay,
@@ -252,7 +253,7 @@ import {
                 scope: "context",
                 view: "context",
             });
-            await runtime.session.refreshAudit("alpha");
+            await refreshTuiAudit(runtime.domains, "alpha");
             await waitUntil(
                 () =>
                     runtime.reader.toolCalls.instances.alpha?.calls.length ===
@@ -871,7 +872,7 @@ import {
 
             runtime.store.setSelectedInstance("alpha");
             runtime.store.setSelectedPage("audit");
-            await runtime.session.refreshAudit("alpha");
+            await refreshTuiAudit(runtime.domains, "alpha");
             await runtime.commandDispatcher.dispatch({
                 approvalId: approval.approvalId,
                 instance: "alpha",

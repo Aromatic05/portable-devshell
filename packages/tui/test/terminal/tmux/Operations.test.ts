@@ -45,8 +45,9 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
                     },
                 },
             } as never,
+            domains: domains.domains,
             operationTimeoutMs: 1000,
-            session,
+            reconnect: async () => undefined,
         });
         return { calls, domains, operations, session };
     }

@@ -2,6 +2,7 @@ import { TuiRuntimeControlOperations } from "./operation/Control.js";
 import { TuiRuntimeExecutionOperations } from "./operation/Execution.js";
 import { TuiRuntimeTmuxOperations } from "./operation/Tmux.js";
 import { type TuiAppStore } from "../state/store/App.js";
+import type { TuiDomainSession } from "./control/Client.js";
 import type {
     ArtifactTransport,
     ConfigTransport,
@@ -9,15 +10,15 @@ import type {
     ProcessStartOptions,
     ServiceTransport,
     TaskTransport,
-    ToolCallRecord,
     ToolTransport,
 } from "@portable-devshell/shared";
 
 export interface TuiRuntimeOperationsOptions {
     clients: TuiRuntimeOperationClients;
+    domains: TuiDomainSession;
     operationTimeoutMs?: number;
+    reconnect: () => Promise<void>;
     reconnectDelayMs?: number;
-    session: TuiRuntimeOperationSession;
     store: TuiAppStore;
 }
 
@@ -50,19 +51,24 @@ export class TuiRuntimeOperations {
         const timeout = options.operationTimeoutMs ?? 30_000;
         const control = new TuiRuntimeControlOperations({
             clients: options.clients,
+            domains: options.domains,
             operationTimeoutMs: timeout,
+            reconnect: options.reconnect,
             reconnectDelayMs: options.reconnectDelayMs ?? 100,
-            session: options.session,
             store: options.store,
         });
         const execution = new TuiRuntimeExecutionOperations({
-            ...options,
+            clients: options.clients,
+            domains: options.domains,
             operationTimeoutMs: timeout,
+            reconnect: options.reconnect,
+            store: options.store,
         });
         this.tmuxOperations = new TuiRuntimeTmuxOperations({
             clients: options.clients,
+            domains: options.domains,
             operationTimeoutMs: timeout,
-            session: options.session,
+            reconnect: options.reconnect,
         });
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);
@@ -105,42 +111,8 @@ export interface TuiRuntimeOperationClients {
     tool: ToolTransport;
 }
 
-export interface TuiRuntimeOperationSession {
-    commands: {
-        decideOAuthApproval(
-            approvalId: string,
-            decision: "approve" | "deny",
-        ): Promise<unknown>;
-        decideToolApproval(
-            instance: string,
-            approvalId: string,
-            decision: "approve" | "deny",
-        ): Promise<unknown>;
-        disableContext(ctxId: string): Promise<unknown>;
-        queueContextMessage(
-            instance: string,
-            ctxId: string,
-            text: string,
-        ): Promise<unknown>;
-        refreshInstance(instance: string): Promise<unknown>;
-        renewContext(ctxId: string): Promise<unknown>;
-        startInstance(
-            instance: string,
-            options?: ProcessStartOptions,
-        ): Promise<unknown>;
-        stopInstance(instance: string): Promise<unknown>;
-    };
-    homeDirectory(instance: string): string | undefined;
-    reconnect(): Promise<unknown>;
-    refresh(): Promise<unknown>;
-    refreshArtifacts(): Promise<unknown>;
-    refreshAudit(instance: string): Promise<unknown>;
-    refreshConfig(): Promise<unknown>;
-    refreshInstance(instance: string): Promise<unknown>;
-    refreshInstances(): Promise<unknown>;
-    refreshMessages(): Promise<unknown>;
-    refreshOAuth(): Promise<unknown>;
-    refreshOverview(): Promise<unknown>;
-    refreshTodo(instance: string): Promise<unknown>;
-    toolCallsForInstance(instance: string): readonly ToolCallRecord[];
+export interface TuiRuntimeOperationContext {
+    clients: TuiRuntimeOperationClients;
+    domains: TuiDomainSession;
+    reconnect: () => Promise<void>;
 }

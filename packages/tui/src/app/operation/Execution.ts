@@ -6,10 +6,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import type {
-    TuiRuntimeOperationClients,
-    TuiRuntimeOperationSession,
-} from "../Operations.js";
+import type { TuiRuntimeOperationContext } from "../Operations.js";
+import { refreshTuiInstance } from "../control/Refresh.js";
 import type { TuiAppStore } from "../../state/store/App.js";
 import type { TuiCommandRecord } from "../../state/store/Model.js";
 
@@ -17,10 +15,8 @@ export class TuiRuntimeExecutionOperations {
     #commandCounter = 0;
 
     constructor(
-        private readonly options: {
-            clients: TuiRuntimeOperationClients;
+        private readonly options: TuiRuntimeOperationContext & {
             operationTimeoutMs: number;
-            session: TuiRuntimeOperationSession;
             store: TuiAppStore;
         },
     ) {}
@@ -35,9 +31,6 @@ export class TuiRuntimeExecutionOperations {
                     `Refresh Status: ${instance}`,
                     instance,
                     async () => {
-                        await this.options.session.commands.refreshInstance(
-                            instance,
-                        );
                         await this.#refreshInstanceBestEffort(instance);
                     },
                 );
@@ -50,9 +43,7 @@ export class TuiRuntimeExecutionOperations {
                     `Restart Worker: ${instance}`,
                     instance,
                     async (commandId) => {
-                        await this.options.session.commands.stopInstance(
-                            instance,
-                        );
+                        await this.#stopInstance(instance);
                         await this.#startInstanceWithinCommand(
                             instance,
                             commandId,
@@ -65,9 +56,7 @@ export class TuiRuntimeExecutionOperations {
                     `Stop Worker: ${instance}`,
                     instance,
                     async () => {
-                        await this.options.session.commands.stopInstance(
-                            instance,
-                        );
+                        await this.#stopInstance(instance);
                         await this.#refreshInstanceBestEffort(instance);
                     },
                 );
@@ -83,11 +72,9 @@ export class TuiRuntimeExecutionOperations {
             `${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`,
             instance,
             async () => {
-                await this.options.session.commands.decideToolApproval(
-                    instance,
-                    approvalId,
-                    decision,
-                );
+                const approval = this.options.domains.approval(instance);
+                await approval.load(instance);
+                await approval.decide(approvalId, decision);
                 await this.#refreshInstanceBestEffort(instance);
             },
         );
@@ -148,7 +135,9 @@ export class TuiRuntimeExecutionOperations {
         instance: string,
         commandId: string,
     ): Promise<void> {
-        await this.options.session.commands.startInstance(instance, {
+        const runtime = this.options.domains.runtime(instance);
+        await runtime.load(instance);
+        await runtime.start({
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
             onRequestId: (requestId) =>
@@ -158,8 +147,16 @@ export class TuiRuntimeExecutionOperations {
         await this.#refreshInstanceBestEffort(instance);
     }
 
+    async #stopInstance(instance: string): Promise<void> {
+        const runtime = this.options.domains.runtime(instance);
+        await runtime.load(instance);
+        await runtime.stop();
+    }
+
     #requireHomeDirectory(instance: string): string {
-        const home = this.options.session.homeDirectory(instance);
+        const home = this.options.domains.instances.state.instances.find(
+            (entry) => entry.name === instance,
+        )?.homeDirectory;
         if (home !== undefined && home.length > 0) return home;
         throw new Error(
             `Worker home directory is unavailable for ${instance}.`,
@@ -169,7 +166,7 @@ export class TuiRuntimeExecutionOperations {
     async #refreshInstanceMetadataBestEffort(instance: string): Promise<void> {
         const key = `${this.options.store.getState().ui.selectedPage}:${instance}:metadataRefresh`;
         try {
-            await this.options.session.refreshInstances();
+            await this.options.domains.instances.refresh();
             this.options.store.setPanelError(key, undefined);
         } catch (error) {
             this.options.store.setPanelError(key, toRemoteError(error));
@@ -179,7 +176,7 @@ export class TuiRuntimeExecutionOperations {
     async #refreshInstanceBestEffort(instance: string): Promise<void> {
         const key = `${this.options.store.getState().ui.selectedPage}:${instance}:operationRefresh`;
         try {
-            await this.options.session.refreshInstance(instance);
+            await refreshTuiInstance(this.options.domains, instance);
             this.options.store.setPanelError(key, undefined);
         } catch (error) {
             this.options.store.setPanelError(key, toRemoteError(error));

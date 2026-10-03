@@ -1,9 +1,6 @@
 import { withRequestTimeout, type JsonValue } from "@portable-devshell/shared";
 
-import type {
-    TuiRuntimeOperationClients,
-    TuiRuntimeOperationSession,
-} from "../Operations.js";
+import type { TuiRuntimeOperationContext } from "../Operations.js";
 import {
     TUI_TMUX_INSPECT_MAX_LINES,
     type TuiTmuxListPane,
@@ -30,10 +27,8 @@ export interface TuiTmuxInputResult {
 
 export class TuiRuntimeTmuxOperations {
     constructor(
-        private readonly options: {
-            clients: TuiRuntimeOperationClients;
+        private readonly options: TuiRuntimeOperationContext & {
             operationTimeoutMs: number;
-            session: TuiRuntimeOperationSession;
         },
     ) {}
 
@@ -161,7 +156,9 @@ export class TuiRuntimeTmuxOperations {
             workspaces.push(workspace);
         };
 
-        const toolCalls = this.options.session.toolCallsForInstance(instance);
+        const toolCalls = this.options.domains.toolCalls.state.instances[
+            instance
+        ]?.calls ?? [];
         for (const call of [...toolCalls].sort((left, right) =>
             right.startedAt.localeCompare(left.startedAt),
         )) {

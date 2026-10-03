@@ -5,9 +5,9 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import { TuiAppStore, TuiRuntimeOperations } from "../../src/testing.ts";
+import { type TuiDomainSession } from "../../src/app/control/Client.ts";
 import {
     type TuiRuntimeOperationClients,
-    type TuiRuntimeOperationSession,
 } from "../../src/app/Operations.ts";
 
 {
@@ -148,14 +148,19 @@ import {
                 calls.push(`runtime.refresh:${instance}`);
                 return { snapshot: { name: instance } };
             },
+            async readLogs() {
+                return [];
+            },
+            async load(_instance: string) {
+                calls.push("runtime.load");
+            },
             async start(
-                instance: string,
                 input: {
                     onOutput?(chunk: string): void;
                     onRequestId?(requestId: string): void;
                 } = {},
             ) {
-                calls.push(`runtime.start:${instance}`);
+                calls.push("runtime.start");
                 input.onRequestId?.("request-start");
                 input.onOutput?.("starting alpha\n");
                 if (options.failStart) {
@@ -163,54 +168,130 @@ import {
                     Object.assign(error, { code: "core.startFailed" });
                     throw error;
                 }
-                return { name: instance };
+                return { name: "alpha" };
             },
-            async stop(instance: string) {
-                calls.push(`runtime.stop:${instance}`);
-                return { name: instance };
+            async stop() {
+                calls.push("runtime.stop");
+                return { name: "alpha" };
             },
+            state: { lastSeq: 0 },
         };
-        const session: TuiRuntimeOperationSession = {
-            commands: {
-                async decideOAuthApproval(
+        const domains = {
+            approval: () => ({
+                async load() {
+                    calls.push("approval.load:alpha");
+                },
+                async decide(approvalId: string, decision: "approve" | "deny") {
+                    calls.push(`approval.${decision}:alpha:${approvalId}`);
+                },
+            }),
+            artifact: {
+                async refresh() {
+                    refreshed.push("artifacts");
+                },
+            },
+            config: {
+                async refresh() {
+                    refreshed.push("config");
+                },
+            },
+            context: {
+                async disable(ctxId: string) {
+                    calls.push(`context.disable:${ctxId}`);
+                },
+                async refresh() {
+                    refreshed.push("context");
+                },
+                async renew(ctxId: string) {
+                    calls.push(`context.renew:${ctxId}`);
+                },
+            },
+            conversation: {
+                async load() {
+                    refreshed.push("conversation");
+                },
+                async refreshInstance() {
+                    refreshed.push("conversation:instance");
+                },
+            },
+            conversationPreferences: {
+                async refresh() {
+                    refreshed.push("conversationPreferences");
+                },
+            },
+            extension: {
+                async refreshCatalogs() {
+                    refreshed.push("extension");
+                },
+            },
+            goals: {
+                async load(instance: string) {
+                    refreshed.push(`goals:${instance}`);
+                },
+            },
+            instances: {
+                get state() {
+                    return {
+                        instances: Object.keys(homeDirectories).map(
+                            (name) => ({
+                                homeDirectory: homeDirectories[name],
+                                name,
+                            }),
+                        ),
+                    };
+                },
+                async refresh() {
+                    refreshed.push("instances");
+                    if (options.startedHomeDirectory !== undefined) {
+                        homeDirectories.alpha =
+                            options.startedHomeDirectory;
+                    }
+                },
+            },
+            mcp: {
+                async decideApproval(
                     approvalId: string,
                     decision: "approve" | "deny",
                 ) {
                     calls.push(`oauth.${decision}:${approvalId}`);
                 },
-                async decideToolApproval(
-                    instance: string,
-                    approvalId: string,
-                    decision: string,
-                ) {
-                    calls.push(
-                        `approval.${decision}:${instance}:${approvalId}`,
-                    );
-                },
-                async queueContextMessage(
-                    instance: string,
-                    ctxId: string,
-                    text: string,
-                ) {
-                    calls.push(`comment.queue:${instance}:${ctxId}:${text}`);
-                },
-                async disableContext(ctxId: string) {
-                    calls.push(`context.disable:${ctxId}`);
-                },
-                async renewContext(ctxId: string) {
-                    calls.push(`context.renew:${ctxId}`);
-                },
-                async refreshInstance(instance: string) {
-                    return (await runtime.refresh(instance)).snapshot;
-                },
-                async startInstance(instance: string, input = {}) {
-                    return await runtime.start(instance, input);
-                },
-                async stopInstance(instance: string) {
-                    return await runtime.stop(instance);
+                async refresh() {
+                    refreshed.push("oauth");
                 },
             },
-            async reconnect() {
+            messages: {
+                async load() {
+                    refreshed.push("messages");
+                },
+                async queue(instance: string, ctxId: string, text: string) {
+                    calls.push(`comment.queue:${instance}:${ctxId}:${text}`);
+                },
+                async refreshInstance() {
+                    refreshed.push("messages:instance");
+                },
+            },
+            overview: {
+                async refresh() {
+                    refreshed.push("overview");
+                },
+            },
+            runtime: () => runtime,
+            toolCalls: {
+                async load() {
+                    refreshed.push("toolCalls");
+                },
+            },
+            todo: () => ({
+                async load(instance: string) {
+                    refreshed.push(`todo:${instance}`);
+                },
+            }),
+        } as unknown as TuiDomainSession;
+        const operations = new TuiRuntimeOperations({
+            clients,
+            domains,
+            operationTimeoutMs: options.operationTimeoutMs,
+            reconnect: async () => {
                 reconnectAttempts += 1;
                 refreshed.push("reconnect");
                 if (
@@ -219,51 +300,7 @@ import {
                     throw new Error("control server is not running.");
                 }
             },
-            async refresh() {
-                refreshed.push("all");
-            },
-            async refreshArtifacts() {
-                refreshed.push("artifacts");
-            },
-            async refreshAudit(instance: string) {
-                refreshed.push(`audit:${instance}`);
-            },
-            async refreshConfig() {
-                refreshed.push("config");
-            },
-            async refreshInstances() {
-                refreshed.push("instances");
-                if (options.startedHomeDirectory !== undefined) {
-                    homeDirectories.alpha = options.startedHomeDirectory;
-                }
-            },
-            async refreshInstance(instance: string) {
-                refreshed.push(`instance:${instance}`);
-            },
-            async refreshMessages() {
-                refreshed.push("messages");
-            },
-            async refreshOAuth() {
-                refreshed.push("oauth");
-            },
-            async refreshOverview() {
-                refreshed.push("overview");
-            },
-            async refreshTodo(instance: string) {
-                refreshed.push(`todo:${instance}`);
-            },
-            homeDirectory(instance: string) {
-                return homeDirectories[instance];
-            },
-            toolCallsForInstance() {
-                return [];
-            },
-        };
-        const operations = new TuiRuntimeOperations({
-            clients,
-            operationTimeoutMs: options.operationTimeoutMs,
             reconnectDelayMs: options.reconnectDelayMs ?? 0,
-            session,
             store,
         });
         return {
@@ -281,8 +318,17 @@ import {
 
         await harness.operations.runInstanceAction("start", "alpha");
 
-        assert.deepEqual(harness.calls, ["runtime.start:alpha"]);
-        assert.deepEqual(harness.refreshed, ["instances", "instance:alpha"]);
+        assert.deepEqual(harness.calls, [
+            "runtime.load",
+            "runtime.start",
+            "runtime.load",
+            "approval.load:alpha",
+        ]);
+        assert.deepEqual(harness.refreshed, [
+            "instances",
+            "todo:alpha",
+            "goals:alpha",
+        ]);
         const command = harness.store.getState().commandRecords[0];
         assert.equal(command?.status, "succeeded");
         assert.equal(command?.targetInstance, "alpha");
@@ -353,7 +399,16 @@ import {
             ]?.message,
             "device code unavailable",
         );
-        assert.deepEqual(harness.refreshed, ["all"]);
+        assert.deepEqual(harness.refreshed, [
+            "config",
+            "instances",
+            "context",
+            "artifacts",
+            "overview",
+            "oauth",
+            "extension",
+            "conversationPreferences",
+        ]);
     });
 
     test("failed disable delegates worker rollback to Control instead of duplicating lifecycle logic", async () => {
@@ -452,13 +507,26 @@ import {
             true,
         );
         assert.deepEqual(harness.refreshed, [
-            "all",
-            "reconnect",
-            "instance:alpha",
-            "instance:alpha",
             "config",
-            "audit:alpha",
+            "instances",
+            "context",
+            "artifacts",
+            "overview",
+            "oauth",
+            "extension",
+            "conversationPreferences",
+            "reconnect",
             "todo:alpha",
+            "goals:alpha",
+            "todo:alpha",
+            "goals:alpha",
+            "config",
+            "context",
+            "toolCalls",
+            "conversation:instance",
+            "messages:instance",
+            "todo:alpha",
+            "goals:alpha",
             "config",
             "oauth",
         ]);
