@@ -14,7 +14,7 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControlError, errorCodes } from "@portable-devshell/shared";
+import { RemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import {
     WorkerInstallerRemote,
@@ -183,8 +183,8 @@ function createInstaller(
             provider: "test-remote",
         }),
         createProviderError: (context, cause, options) =>
-            new ControlError({
-                code: options?.errorCode ?? errorCodes.coreProviderFailed,
+            new RemoteError({
+                code: options?.errorCode ?? runtimeErrorCodes.providerFailed,
                 cause,
                 details: {
                     command: context.commandDisplay,

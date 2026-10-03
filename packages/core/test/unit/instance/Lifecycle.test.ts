@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes } from "@portable-devshell/shared";
+import { runtimeErrorCodes } from "@portable-devshell/shared";
 
 import { WorkerInstanceLifecycle } from "../../../src/worker/instance/lifecycle/Lifecycle.ts";
 
@@ -26,7 +26,7 @@ test("self-managed workers reject Control start and stop without touching the re
         await assert.rejects(operation(), (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.reverseSelfManagedLifecycle,
+                runtimeErrorCodes.reverseSelfManagedLifecycle,
             );
             assert.match(
                 (error as Error).message,

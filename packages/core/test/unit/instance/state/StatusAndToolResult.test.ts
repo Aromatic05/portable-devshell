@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import {
     normalizeLifecycleStatus,
@@ -65,7 +65,7 @@ test("worker status parser returns structured diagnostics for malformed and unkn
         (error: unknown) => {
             assert.equal(
                 readField(error, "code"),
-                errorCodes.coreWorkerStatusFailed,
+                runtimeErrorCodes.workerStatusFailed,
             );
             const details = readField(error, "details") as Record<
                 string,
@@ -80,14 +80,14 @@ test("worker status parser returns structured diagnostics for malformed and unkn
     assert.throws(
         () => parseWorkerStatus("[]", "local-one"),
         (error: unknown) =>
-            readField(error, "code") === errorCodes.coreWorkerStatusFailed,
+            readField(error, "code") === runtimeErrorCodes.workerStatusFailed,
     );
     assert.throws(
         () => parseWorkerStatus('{"state":"paused"}', "local-one"),
         (error: unknown) => {
             assert.equal(
                 readField(error, "code"),
-                errorCodes.coreWorkerStatusFailed,
+                runtimeErrorCodes.workerStatusFailed,
             );
             const details = readField(error, "details") as Record<
                 string,
@@ -101,16 +101,16 @@ test("worker status parser returns structured diagnostics for malformed and unkn
 
 test("tool scheduler error classification covers queue timeout and both cancellation codes", () => {
     assert.equal(
-        readNonRunningSchedulerStatus(errorCodes.coreToolQueueTimeout),
+        readNonRunningSchedulerStatus(runtimeErrorCodes.toolQueueTimeout),
         "queueTimeout",
     );
     assert.equal(
-        readNonRunningSchedulerStatus(errorCodes.coreToolCallCancelled),
+        readNonRunningSchedulerStatus(runtimeErrorCodes.toolCallCancelled),
         "cancelled",
     );
     assert.equal(readNonRunningSchedulerStatus("tool.cancelled"), "cancelled");
     assert.equal(
-        readNonRunningSchedulerStatus(errorCodes.coreToolSchedulerFull),
+        readNonRunningSchedulerStatus(runtimeErrorCodes.toolSchedulerFull),
         undefined,
     );
 });
@@ -124,15 +124,15 @@ test("tool scheduler normalization canonicalizes retryable scheduler failures an
     assert.notEqual(normalized, cancelled);
     assert.equal(
         readField(normalized, "code"),
-        errorCodes.coreToolCallCancelled,
+        runtimeErrorCodes.toolCallCancelled,
     );
     assert.equal(readField(normalized, "retryable"), true);
     assert.deepEqual(readField(normalized, "details"), {
         operationId: "operation-1",
     });
 
-    const full = createError({
-        code: errorCodes.coreToolSchedulerFull,
+    const full = createRemoteError({
+        code: runtimeErrorCodes.toolSchedulerFull,
         details: { queueDepth: 4 },
         message: "full",
         retryable: false,
@@ -140,7 +140,7 @@ test("tool scheduler normalization canonicalizes retryable scheduler failures an
     const normalizedFull = normalizeToolSchedulerError(full);
     assert.equal(
         readField(normalizedFull, "code"),
-        errorCodes.coreToolSchedulerFull,
+        runtimeErrorCodes.toolSchedulerFull,
     );
     assert.equal(readField(normalizedFull, "retryable"), true);
 
@@ -160,7 +160,7 @@ test("tool cancellation guard ignores active signals and reports client cancella
         (error: unknown) => {
             assert.equal(
                 readField(error, "code"),
-                errorCodes.coreToolCallCancelled,
+                runtimeErrorCodes.toolCallCancelled,
             );
             assert.equal(readField(error, "retryable"), true);
             assert.deepEqual(readField(error, "details"), {

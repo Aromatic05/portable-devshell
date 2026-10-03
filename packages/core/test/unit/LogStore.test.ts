@@ -7,9 +7,9 @@ import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
-    errorCodes,
+    STREAM_GAP_CODE,
     asInstanceName,
-    type InstanceEvent,
+    type InstanceEventRecord,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import {
@@ -1092,7 +1092,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
             now: () => Date.parse("2026-07-07T00:00:10.000Z"),
             retentionDays: 30,
         });
-        const store = database.store<InstanceEvent>("events", {
+        const store = database.store<InstanceEventRecord>("events", {
             legacyFile: paths.legacyEventsFile,
             maxRecords: 2,
             sequence: (record) => record.seq,
@@ -1123,7 +1123,7 @@ test("InstanceEventBuffer replays from fromSeq and reports stream.gap", async ()
 
         const gap = buffer.readFrom(1);
         assert.equal(gap.kind, "gap");
-        assert.equal(gap.code, errorCodes.streamGap);
+        assert.equal(gap.code, STREAM_GAP_CODE);
         assert.equal(gap.nextSeq, 2);
         assert.deepEqual(
             (await store.readAll()).map((event) => event.seq),
@@ -1157,7 +1157,7 @@ test("AuditDatabase trims an existing event collection to the configured replay 
             now: () => Date.parse("2026-07-07T00:00:10.000Z"),
             retentionDays: 30,
         });
-        const originalStore = original.store<InstanceEvent>("events", {
+        const originalStore = original.store<InstanceEventRecord>("events", {
             sequence: (record) => record.seq,
             timestamp: (record) => record.at,
         });
@@ -1176,7 +1176,7 @@ test("AuditDatabase trims an existing event collection to the configured replay 
             now: () => Date.parse("2026-07-07T00:00:10.000Z"),
             retentionDays: 30,
         });
-        const boundedStore = reopened.store<InstanceEvent>("events", {
+        const boundedStore = reopened.store<InstanceEventRecord>("events", {
             maxRecords: 2,
             sequence: (record) => record.seq,
             timestamp: (record) => record.at,
@@ -1196,9 +1196,9 @@ test("AuditDatabase trims an existing event collection to the configured replay 
 test("InstanceEventBuffer does not advance memory state when durable append fails", async () => {
     const instanceName = asInstanceName("event-persist-failure");
     let failNext = true;
-    const persisted: InstanceEvent[] = [];
+    const persisted: InstanceEventRecord[] = [];
     const store = {
-        async append(record: InstanceEvent) {
+        async append(record: InstanceEventRecord) {
             if (failNext) {
                 failNext = false;
                 throw new Error("audit unavailable");
@@ -1242,7 +1242,7 @@ test("InstanceEventBuffer does not advance memory state when durable append fail
 
 test("InstanceEventBuffer restores only its bounded tail from durable storage", async () => {
     const instanceName = asInstanceName("event-tail-restore");
-    const persisted: InstanceEvent[] = Array.from(
+    const persisted: InstanceEventRecord[] = Array.from(
         { length: 20 },
         (_, index) => ({
             at: `2026-08-13T00:00:${String(index).padStart(2, "0")}.000Z`,
@@ -1253,7 +1253,7 @@ test("InstanceEventBuffer restores only its bounded tail from durable storage", 
     );
     let tailLimit = 0;
     const store = {
-        async append(record: InstanceEvent) {
+        async append(record: InstanceEventRecord) {
             persisted.push(record);
         },
         async readAll() {

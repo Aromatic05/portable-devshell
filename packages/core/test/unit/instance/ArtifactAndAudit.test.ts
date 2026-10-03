@@ -47,6 +47,7 @@ test("worker artifact facade checks readiness and delegates control lifecycle op
             readyChecks += 1;
         },
         protocolClient: protocolClient as never,
+        serviceClient: {} as never,
     });
 
     const openInput = {
@@ -88,16 +89,16 @@ test("worker artifact facade checks readiness and delegates control lifecycle op
     ]);
 });
 
-test("worker artifact facade delegates chunk reads and writes to the protocol client", async () => {
+test("worker artifact facade delegates chunk reads and writes to the service client", async () => {
     const calls: Array<[string, unknown]> = [];
     const artifact = new WorkerInstanceArtifact({
         assertReady() {},
-        protocolClient: {
+        protocolClient: {} as never,
+        serviceClient: {
             async readArtifactPayload(input: unknown) {
                 calls.push(["read", input]);
                 return {
-                    content: "ZXN0",
-                    encoding: "base64",
+                    bytes: new Uint8Array([0x65, 0x73, 0x74]),
                     eof: true,
                     offsetBytes: 1,
                     payloadId: "payload-1",
@@ -122,11 +123,14 @@ test("worker artifact facade delegates chunk reads and writes to the protocol cl
         payloadId: "payload-1",
     };
     const writeInput = {
-        content: "dGVzdA==",
+        bytes: new Uint8Array([0x74, 0x65, 0x73, 0x74]),
         offsetBytes: 4,
         receiveId: "receive-1",
     };
-    assert.equal((await artifact.readPayload(readInput)).content, "ZXN0");
+    assert.deepEqual(
+        (await artifact.readPayload(readInput)).bytes,
+        new Uint8Array([0x65, 0x73, 0x74]),
+    );
     assert.equal((await artifact.writeReceive(writeInput)).nextOffsetBytes, 8);
     assert.deepEqual(calls, [
         ["read", readInput],
@@ -147,6 +151,7 @@ test("worker artifact facade never calls the protocol client when readiness fail
                 return {};
             },
         } as never,
+        serviceClient: {} as never,
     });
 
     await assert.rejects(

@@ -26,7 +26,7 @@ import {
     getWorkerTargetByKey,
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
-import { Endpoint, Rpc, createError, errorCodes } from "@portable-devshell/shared";
+import { Endpoint, Rpc, createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
@@ -959,8 +959,8 @@ test("remote installer surfaces missing target-specific asset as structured erro
         probeTarget: async () => getWorkerTargetByKey("darwin-arm64"),
         resolver: {
             async resolve() {
-                throw createError({
-                    code: errorCodes.coreWorkerAssetUnavailable,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.workerAssetUnavailable,
                     details: {
                         searchedPaths: [],
                         targetKey: "darwin-arm64",

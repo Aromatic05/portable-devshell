@@ -1,7 +1,7 @@
 import type {
     ConnectionState,
     DaemonState,
-    RuntimeStatus,
+    ProcessStatus,
 } from "@portable-devshell/shared";
 
 export interface InstanceRuntimeState {
@@ -12,13 +12,13 @@ export interface InstanceRuntimeState {
     lastSeq: number;
     pid?: number;
     ready: boolean;
-    status: RuntimeStatus;
+    status: ProcessStatus;
 }
 
 export function deriveRuntimeStatus(
     daemonState: DaemonState,
     connectionState: ConnectionState,
-): RuntimeStatus {
+): ProcessStatus {
     if (daemonState === "failed" || connectionState === "failed") {
         return "failed";
     }

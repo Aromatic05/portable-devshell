@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes } from "@portable-devshell/shared";
+import { runtimeErrorCodes } from "@portable-devshell/shared";
 import { WorkerToolCatalog } from "@portable-devshell/core/testing";
 
 test("WorkerToolCatalog preserves the complete worker catalog and resets on clear", () => {
@@ -59,7 +59,7 @@ test("WorkerToolCatalog rejects invalid tool schema from tools.list", () => {
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolSchemaUnavailable,
+                runtimeErrorCodes.toolSchemaUnavailable,
             );
             return true;
         },
@@ -82,7 +82,7 @@ test("WorkerToolCatalog identifies an incompatible Worker catalog", () => {
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolSchemaUnavailable,
+                runtimeErrorCodes.toolSchemaUnavailable,
             );
             assert.equal(
                 (error as { details?: { reason?: string } }).details?.reason,

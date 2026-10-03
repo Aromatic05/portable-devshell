@@ -6,7 +6,11 @@ import {
     WorkerInstance,
     WORKER_PROTOCOL_VERSION,
 } from "@portable-devshell/core/testing";
-import { Endpoint, asInstanceName, createError } from "@portable-devshell/shared";
+import {
+    Endpoint,
+    asInstanceName,
+    createRemoteError,
+} from "@portable-devshell/shared";
 
 test("WorkerInstance wraps start stop and status command failures with diagnostic details", async () => {
     const startFailure = createInstance({
@@ -132,7 +136,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
 test("WorkerInstance preserves catalog failures during startup", async () => {
     const instance = createInstance({
         listTools: async () => {
-            throw createError({
+            throw createRemoteError({
                 code: "core.toolSchemaUnavailable",
                 details: { toolName: "bash_run" },
                 message: "catalog-error-fixture",
@@ -187,24 +191,6 @@ function createInstance(
         reconnect: async () => undefined,
     };
     return new WorkerInstance({
-        approvalManager: {
-            decideApproval: async () => {
-                throw createError({
-                    code: "core.approvalNotFound",
-                    message: "unused",
-                    retryable: false,
-                });
-            },
-            evaluate: async () => ({ decision: "allow" }),
-            getApproval: async () => {
-                throw createError({
-                    code: "core.approvalNotFound",
-                    message: "unused",
-                    retryable: false,
-                });
-            },
-            listApprovals: async () => [],
-        } as never,
         auditDatabase: {
             close: () => undefined,
         } as never,
@@ -268,7 +254,7 @@ function createInstance(
         } as never,
         toolInvoker: {
             invoke: async () => {
-                throw createError({
+                throw createRemoteError({
                     code: "core.providerFailed",
                     message: "unused",
                     retryable: false,

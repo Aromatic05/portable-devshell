@@ -21,7 +21,8 @@ import {
     Endpoint,
     Rpc,
     asInstanceName,
-    errorCodes,
+    controlErrorCodes,
+    runtimeErrorCodes,
     StreamChannel,
     toolCallOutput,
     type JsonValue,
@@ -315,7 +316,7 @@ test(
         assert.equal(chunk.returnedBytes, source.byteLength);
         assert.equal(chunk.totalBytes, source.byteLength);
         assert.equal(chunk.eof, true);
-        assert.deepEqual(Buffer.from(chunk.content, "base64"), source);
+        assert.deepEqual(Buffer.from(chunk.bytes), source);
 
         const receive = await instance.beginArtifactReceive({
             descriptor: opened.descriptor,
@@ -324,7 +325,7 @@ test(
             workspace: workspacePath,
         });
         const written = await instance.writeArtifactReceive({
-            content: chunk.content,
+            bytes: chunk.bytes,
             offsetBytes: receive.nextOffsetBytes,
             receiveId: receive.receiveId,
         });
@@ -768,7 +769,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
                 async () => {
                     const error = new Error("missing instance");
                     Object.assign(error, {
-                        code: errorCodes.instanceMissing,
+                        code: controlErrorCodes.instanceNotFound,
                         retryable: false,
                     });
                     throw error;
@@ -777,7 +778,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
             (error: unknown) => {
                 assert.equal(
                     (error as { code?: string }).code,
-                    errorCodes.instanceMissing,
+                    controlErrorCodes.instanceNotFound,
                 );
                 return true;
             },
@@ -792,7 +793,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
                 async () => {
                     const error = new Error("client cancelled");
                     Object.assign(error, {
-                        code: errorCodes.coreToolCallCancelled,
+                        code: runtimeErrorCodes.toolCallCancelled,
                         retryable: true,
                     });
                     throw error;
@@ -801,7 +802,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
             (error: unknown) => {
                 assert.equal(
                     (error as { code?: string }).code,
-                    errorCodes.coreToolCallCancelled,
+                    runtimeErrorCodes.toolCallCancelled,
                 );
                 return true;
             },
@@ -832,7 +833,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
                 },
                 {
                     ctxId: "ctx-control-audit",
-                    error: errorCodes.instanceMissing,
+                    error: controlErrorCodes.instanceNotFound,
                     input: { instance: "missing" },
                     output: undefined,
                     requestId: "request-control-audit",
@@ -842,7 +843,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
                 },
                 {
                     ctxId: "ctx-control-audit",
-                    error: errorCodes.coreToolCallCancelled,
+                    error: runtimeErrorCodes.toolCallCancelled,
                     input: { operation: "status", transferId: "transfer-1" },
                     output: undefined,
                     requestId: "request-control-audit",
@@ -949,7 +950,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             (error: unknown) => {
                 assert.equal(
                     (error as { code?: string }).code,
-                    errorCodes.coreInstanceNotReady,
+                    runtimeErrorCodes.instanceNotReady,
                 );
                 return true;
             },
@@ -1024,7 +1025,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             records.map((record) => record.status),
             ["failed", "completed", "completed", "failed"],
         );
-        assert.equal(records[0]?.error, errorCodes.coreInstanceNotReady);
+        assert.equal(records[0]?.error, runtimeErrorCodes.instanceNotReady);
         assert.equal(records[1]?.source, "cli");
         assert.equal(records[1]?.inputSummary, '{"command":"pwd"}');
         assert.deepEqual(records[1]?.output, { exitCode: 0 });
@@ -1182,7 +1183,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         await assert.rejects(instance.start(), (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreWorkerStartFailed,
+                runtimeErrorCodes.workerStartFailed,
             );
             return true;
         });
@@ -1191,7 +1192,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         assert.equal(snapshot.daemonState, "stopped");
         assert.equal(snapshot.connectionState, "disconnected");
         assert.equal(snapshot.ready, false);
-        assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStartFailed);
+        assert.equal(snapshot.lastErrorCode, runtimeErrorCodes.workerStartFailed);
         assert.equal(
             snapshot.lastErrorMessage,
             "Worker start failed for instance task-6-start-failure.",
@@ -1240,7 +1241,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         await assert.rejects(instance.stop(), (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreWorkerStopFailed,
+                runtimeErrorCodes.workerStopFailed,
             );
             return true;
         });
@@ -1249,7 +1250,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         assert.equal(snapshot.daemonState, "running");
         assert.equal(snapshot.connectionState, "connected");
         assert.equal(snapshot.ready, true);
-        assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStopFailed);
+        assert.equal(snapshot.lastErrorCode, runtimeErrorCodes.workerStopFailed);
         assert.equal(
             snapshot.lastErrorMessage,
             "Worker stop failed for instance task-6-stop-failure.",

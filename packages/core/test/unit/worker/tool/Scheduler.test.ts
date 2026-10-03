@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, errorCodes } from "@portable-devshell/shared";
+import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
 import { WorkerToolCallScheduler } from "@portable-devshell/core/testing";
 
 test("WorkerToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
@@ -83,7 +83,7 @@ test("WorkerToolCallScheduler rejects requests that exceed the bounded queue", (
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolSchedulerFull,
+                runtimeErrorCodes.toolSchedulerFull,
             );
             assert.deepEqual(
                 (error as { details?: { fullReasons?: string[] } }).details
@@ -142,7 +142,7 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
     await assert.rejects(queued, (error: unknown) => {
         assert.equal(
             (error as { code?: string }).code,
-            errorCodes.coreToolCallCancelled,
+            runtimeErrorCodes.toolCallCancelled,
         );
         return true;
     });

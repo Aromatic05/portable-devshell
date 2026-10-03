@@ -3,8 +3,8 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -177,7 +177,7 @@ test("ToolCallPipeline rejects during review before rewrite and target resolutio
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
+                runtimeErrorCodes.toolCallRejected,
             );
             return true;
         },
@@ -315,7 +315,7 @@ test("outbound error rewrite may replace error identity", async () => {
                     : input.value,
         ],
         async invoke() {
-            throw createError({
+            throw createRemoteError({
                 code: "tool.original",
                 message: "original",
                 retryable: false,
