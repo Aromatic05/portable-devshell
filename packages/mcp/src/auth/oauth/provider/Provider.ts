@@ -38,8 +38,10 @@ import {
 import { createMcpOAuthOidcFileAdapterFactory } from "./Adapter.js";
 import {
     createMcpOAuthStorageSecurity,
+    isMcpOAuthStorageMissing,
     type McpOAuthStorageSecurity,
-} from "./Storage.js";
+} from "../Storage.js";
+import { readOAuthClientName, readOAuthStringArray } from "../Input.js";
 
 export interface McpOAuthProviderRuntimeOptions {
     accountId?: string;
@@ -675,28 +677,9 @@ function toRegistrationApprovalInputFromPayload(
 ): OAuthApprovalInput {
     return {
         clientId,
-        clientName: readClientName(clientId, payload.client_name),
-        redirectUris: readStringArray(payload.redirect_uris),
+        clientName: readOAuthClientName(clientId, payload.client_name),
+        redirectUris: readOAuthStringArray(payload.redirect_uris),
     };
-}
-
-function readClientName(clientId: unknown, clientName: unknown): string {
-    if (typeof clientName === "string" && clientName.length > 0) {
-        return clientName;
-    }
-    if (typeof clientId === "string" && clientId.length > 0) {
-        return clientId;
-    }
-    return "unknown-client";
-}
-
-function readStringArray(value: unknown): string[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.filter((entry): entry is string => {
-        return typeof entry === "string";
-    });
 }
 
 async function readOrCreateJwks(
@@ -712,7 +695,7 @@ async function readOrCreateJwks(
         }
         return jwks;
     } catch (error) {
-        if (!isMissing(error)) {
+        if (!isMcpOAuthStorageMissing(error)) {
             throw error;
         }
     }
@@ -754,13 +737,4 @@ async function readOrCreateJwks(
         throw error;
     }
     return jwks;
-}
-
-function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "ENOENT"
-    );
 }

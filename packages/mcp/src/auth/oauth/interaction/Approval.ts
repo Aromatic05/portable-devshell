@@ -7,6 +7,7 @@ import {
     type OAuthApprovalKind,
     type OAuthApprovalRequest,
 } from "@portable-devshell/shared";
+import { isMcpOAuthStorageMissing } from "../Storage.js";
 
 const approvalTimeoutMs = 300_000;
 const defaultMaxEntries = 2048;
@@ -539,7 +540,7 @@ export class McpOAuthApprovalService {
         if (process.platform === "win32") return;
         await chmod(directory, 0o700);
         await chmod(this.#filePath, 0o600).catch((error: unknown) => {
-            if (!isMissing(error)) throw error;
+            if (!isMcpOAuthStorageMissing(error)) throw error;
         });
     }
 
@@ -548,7 +549,7 @@ export class McpOAuthApprovalService {
         try {
             contents = await readFile(this.#filePath, "utf8");
         } catch (error) {
-            if (isMissing(error)) {
+            if (isMcpOAuthStorageMissing(error)) {
                 return [];
             }
             throw error;
@@ -608,13 +609,4 @@ function positiveInteger(
         throw new Error(`${name} must be a positive integer.`);
     }
     return resolved;
-}
-
-function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "ENOENT"
-    );
 }

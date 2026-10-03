@@ -5,6 +5,7 @@ import Provider from "oidc-provider";
 import type { OAuthApprovalRequest } from "@portable-devshell/shared";
 
 import type { McpOAuthApprovalConfig } from "../../Config.js";
+import { readOAuthClientName, readOAuthStringArray } from "../Input.js";
 
 import {
     McpOAuthApprovalService,
@@ -360,11 +361,11 @@ export class McpOAuthInteraction {
         }
         if (details.missingOIDCScope) {
             grant.addOIDCScope(
-                readStringArray(details.missingOIDCScope).join(" "),
+                readOAuthStringArray(details.missingOIDCScope).join(" "),
             );
         }
         if (details.missingOIDCClaims) {
-            grant.addOIDCClaims(readStringArray(details.missingOIDCClaims));
+            grant.addOIDCClaims(readOAuthStringArray(details.missingOIDCClaims));
         }
         if (details.missingResourceScopes) {
             for (const [indicator, scopes] of Object.entries(
@@ -372,7 +373,7 @@ export class McpOAuthInteraction {
             )) {
                 grant.addResourceScope(
                     indicator,
-                    readStringArray(scopes).join(" "),
+                    readOAuthStringArray(scopes).join(" "),
                 );
             }
         }
@@ -401,13 +402,13 @@ export class McpOAuthInteraction {
             approvalTokenConfigured:
                 this.#approval.mode === "token" &&
                 this.#approval.token !== undefined,
-            clientName: readClientName(
+            clientName: readOAuthClientName(
                 details.params.client_id,
                 details.params.client_name,
             ),
             ...(error === undefined ? {} : { error }),
             promptName: details.prompt.name as "consent" | "login",
-            requiredScopes: readStringArray(
+            requiredScopes: readOAuthStringArray(
                 details.prompt.details.missingOIDCScope,
             ),
             requestedResources: readRequestedResources(
@@ -467,7 +468,7 @@ function toAuthorizationApprovalInput(
             typeof details.params.client_id === "string"
                 ? details.params.client_id
                 : "unknown-client",
-        clientName: readClientName(
+        clientName: readOAuthClientName(
             details.params.client_id,
             details.params.client_name,
         ),
@@ -488,16 +489,6 @@ function toAuthorizationApprovalInput(
     };
 }
 
-function readClientName(clientId: unknown, clientName: unknown): string {
-    if (typeof clientName === "string" && clientName.length > 0) {
-        return clientName;
-    }
-    if (typeof clientId === "string" && clientId.length > 0) {
-        return clientId;
-    }
-    return "unknown-client";
-}
-
 function readRequestedResources(
     resources: unknown,
 ): Array<{ indicator: string; scopes: string[] }> {
@@ -511,18 +502,9 @@ function readRequestedResources(
     return Object.entries(resources)
         .map(([indicator, scopes]) => ({
             indicator,
-            scopes: readStringArray(scopes),
+            scopes: readOAuthStringArray(scopes),
         }))
         .filter(({ scopes }) => scopes.length > 0);
-}
-
-function readStringArray(value: unknown): string[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.filter((entry): entry is string => {
-        return typeof entry === "string";
-    });
 }
 
 function readFormString(body: unknown, key: string): string {

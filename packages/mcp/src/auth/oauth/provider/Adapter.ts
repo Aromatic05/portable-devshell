@@ -3,6 +3,7 @@ import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
 import type { Adapter, AdapterFactory, AdapterPayload } from "oidc-provider";
+import { isMcpOAuthStorageMissing } from "../Storage.js";
 
 interface StoredRecord {
     consumed?: number;
@@ -213,7 +214,7 @@ class McpOidcFileAdapter implements Adapter {
             }
             return value;
         } catch (error) {
-            if (isMissing(error)) {
+            if (isMcpOAuthStorageMissing(error)) {
                 return {};
             }
             throw error;
@@ -297,15 +298,6 @@ function isExpired(record: StoredRecord): boolean {
     return (
         typeof record.expiresAt === "number" &&
         record.expiresAt <= Math.floor(Date.now() / 1000)
-    );
-}
-
-function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "ENOENT"
     );
 }
 
