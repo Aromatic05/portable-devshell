@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { InstanceEventType, JsonValue } from "@portable-devshell/shared";
+import type { JsonValue, MessageEventType } from "@portable-devshell/shared";
 
 import {
     CommentService,
@@ -30,12 +30,12 @@ function createCommentService(
 
 test("CommentService merges pending Comments into one call-bound delivery", async () => {
     const root = await createTestTempDirectory("context-message");
-    const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
+    const events: Array<{ data: JsonValue; type: MessageEventType }> = [];
     const createService = () =>
         createCommentService(
             root,
             async (
-                type: Extract<InstanceEventType, `context.message.${string}`>,
+                type: Extract<MessageEventType, `context.message.${string}`>,
                 data: JsonValue,
             ) => {
                 events.push({ data, type });
@@ -188,7 +188,7 @@ test("CommentService restores the previous push state when a later Comment fails
 
 test("CommentService fails undelivered Comments when their Context is retired", async () => {
     const root = await createTestTempDirectory("context-message-retired");
-    const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
+    const events: Array<{ data: JsonValue; type: MessageEventType }> = [];
     const service = createCommentService(root, async (type, data) => {
         events.push({ data, type });
     });

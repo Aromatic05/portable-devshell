@@ -1,8 +1,8 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
 export function artifactControlErrorHints(
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     switch (body.code) {
         case "artifact.imageUnsupported":

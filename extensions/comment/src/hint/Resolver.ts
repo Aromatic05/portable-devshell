@@ -1,4 +1,4 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
 import { crossToolErrorHints } from "./tool/Error.js";
@@ -27,7 +27,7 @@ type ResultResolver = (
 ) => ToolDiagnosticHint[];
 type ErrorResolver = (
     toolName: string,
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ) => ToolDiagnosticHint[];
 
 const resultResolvers: Record<string, ResultResolver> = {
@@ -84,7 +84,7 @@ export function resolveResultHints(
 
 export function resolveErrorHints(
     toolName: string,
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     const resolver = errorResolverFor(toolName);
     const hints: ToolDiagnosticHint[] = [
@@ -115,7 +115,7 @@ export function resolveToolCallHints(
         : resolveErrorHints(input.value.toolName, body);
 }
 
-function readErrorBody(value: JsonValue): ControlErrorBody | undefined {
+function readErrorBody(value: JsonValue): RemoteErrorBody | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return undefined;
     const error = value.error;
@@ -128,5 +128,5 @@ function readErrorBody(value: JsonValue): ControlErrorBody | undefined {
     ) {
         return undefined;
     }
-    return error as unknown as ControlErrorBody;
+    return error as unknown as RemoteErrorBody;
 }

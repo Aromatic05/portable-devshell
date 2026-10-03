@@ -100,7 +100,10 @@ test("Comment Extension activates from observe, event-publish, and history capab
 
     const binding = registrations[0]!.binding as (
         input: unknown,
-        context: { requestInterface(operation: string): Promise<unknown> },
+        context: {
+            signal: AbortSignal;
+            requestInterface(operation: string): Promise<unknown>;
+        },
     ) => Promise<unknown>;
     assert.deepEqual(
         await binding(

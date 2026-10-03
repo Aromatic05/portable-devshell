@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { toControlErrorBody } from "@portable-devshell/shared";
+import {
+    runtimeErrorCodes,
+    toRemoteErrorBody,
+    type RemoteErrorBody,
+} from "@portable-devshell/shared";
 
 import { CommentReportService } from "../../src/comment/report/Service.ts";
 
@@ -110,8 +114,8 @@ function createHarness() {
 
 async function assertUseOtherTools(operation: Promise<unknown>): Promise<void> {
     await assert.rejects(operation, (error: unknown) => {
-        const body = toControlErrorBody(error);
-        assert.equal(body?.code, "todo.invalid");
+        const body: RemoteErrorBody | undefined = toRemoteErrorBody(error);
+        assert.equal(body?.code, runtimeErrorCodes.todoInvalid);
         assert.equal(body?.retryable, false);
         assert.equal(
             body?.message,
@@ -158,10 +162,15 @@ test("Comment report policy rejects duplicate autonomous reports without spendin
 
     await harness.report("same");
     await assert.rejects(harness.report("same"), (error: unknown) => {
-        assert.equal(toControlErrorBody(error)?.code, "todo.invalid");
         assert.equal(
-            (toControlErrorBody(error)?.details as { reason?: string } | undefined)
-                ?.reason,
+            toRemoteErrorBody(error)?.code,
+            runtimeErrorCodes.todoInvalid,
+        );
+        assert.equal(
+            (
+                toRemoteErrorBody(error)?.details as
+                    { reason?: string } | undefined
+            )?.reason,
             "duplicate",
         );
         return true;
@@ -177,7 +186,9 @@ test("Comment report policy disables Todo after repeated invalid operations and 
     for (let index = 0; index < 3; index += 1) {
         await assert.rejects(
             harness.report("same"),
-            (error: unknown) => toControlErrorBody(error)?.code === "todo.invalid",
+            (error: unknown) =>
+                toRemoteErrorBody(error)?.code ===
+                runtimeErrorCodes.todoInvalid,
         );
     }
 
@@ -195,13 +206,16 @@ test("Comment report policy forgets invalid operations outside the rolling windo
     for (let index = 0; index < 2; index += 1) {
         await assert.rejects(
             harness.report("same"),
-            (error: unknown) => toControlErrorBody(error)?.code === "todo.invalid",
+            (error: unknown) =>
+                toRemoteErrorBody(error)?.code ===
+                runtimeErrorCodes.todoInvalid,
         );
     }
     harness.advance(120_000);
     await assert.rejects(
         harness.report("same"),
-        (error: unknown) => toControlErrorBody(error)?.code === "todo.invalid",
+        (error: unknown) =>
+            toRemoteErrorBody(error)?.code === runtimeErrorCodes.todoInvalid,
     );
     await harness.report("new information");
 });

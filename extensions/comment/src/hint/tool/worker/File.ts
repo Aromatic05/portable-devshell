@@ -1,4 +1,4 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import {
     asArray,
@@ -146,7 +146,7 @@ function failedCode(op: Record<string, JsonValue>): string {
 
 export function fileErrorHints(
     toolName: string,
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     switch (body.code) {
         case "file.invalidPath":

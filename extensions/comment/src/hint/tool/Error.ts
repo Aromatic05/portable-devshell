@@ -1,4 +1,4 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import { errorHint, type ToolDiagnosticHint } from "../Hint.js";
 
 const crossToolHints: Record<string, string> = {
@@ -78,10 +78,10 @@ const crossToolHints: Record<string, string> = {
 };
 
 export function crossToolErrorHints(
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     const hints: ToolDiagnosticHint[] = [];
-    let current: ControlErrorBody | undefined = body;
+    let current: RemoteErrorBody | undefined = body;
     while (current !== undefined) {
         const text = crossToolHints[current.code];
         if (text !== undefined) {
@@ -93,7 +93,7 @@ export function crossToolErrorHints(
 }
 
 export function workerErrorHints(
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     switch (body.code) {
         case "tool.invalidArguments":

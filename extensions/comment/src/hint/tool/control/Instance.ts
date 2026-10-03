@@ -1,9 +1,9 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import { asRecord, asString } from "../Value.js";
 import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
 export function instanceErrorHints(
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     switch (body.code) {
         case "control.instanceAlreadyExists":
@@ -43,7 +43,7 @@ export function instanceErrorHints(
     }
 }
 
-function configInvalidDetail(body: ControlErrorBody): string {
+function configInvalidDetail(body: RemoteErrorBody): string {
     const details = asRecord(body.details);
     const fieldPath = asString(details?.fieldPath);
     const issueCode = asString(details?.issueCode);

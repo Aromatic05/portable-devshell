@@ -1,4 +1,4 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import {
     asArray,
@@ -78,7 +78,7 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     return hints;
 }
 
-export function bashErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
+export function bashErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
     switch (body.code) {
         case "bash.invalidCommand":
             return [

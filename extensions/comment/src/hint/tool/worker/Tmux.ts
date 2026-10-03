@@ -1,4 +1,4 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 import {
     asArray,
@@ -184,7 +184,7 @@ export function tmuxListResultHints(result: JsonValue): ToolDiagnosticHint[] {
 
 export function tmuxErrorHints(
     toolName: string,
-    body: ControlErrorBody,
+    body: RemoteErrorBody,
 ): ToolDiagnosticHint[] {
     switch (body.code) {
         case "tmux.taskStartUnconfirmed":

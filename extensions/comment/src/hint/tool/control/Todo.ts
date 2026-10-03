@@ -1,7 +1,7 @@
-import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { RemoteErrorBody } from "@portable-devshell/shared";
 import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
-export function todoErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
+export function todoErrorHints(body: RemoteErrorBody): ToolDiagnosticHint[] {
     switch (body.code) {
         case "todo.revisionConflict":
             return [
@@ -24,7 +24,7 @@ export function todoErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
     }
 }
 
-function todoInvalidAction(body: ControlErrorBody): string | undefined {
+function todoInvalidAction(body: RemoteErrorBody): string | undefined {
     if (
         typeof body.details !== "object" ||
         body.details === null ||
