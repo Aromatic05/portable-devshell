@@ -181,7 +181,7 @@ workspace_goal
 
 其中 `workspace_open` 只是重新呈现/恢复入口；正常 bootstrap 已由 `environ_info` 完成。
 
-`workspace_snapshot`、`workspace_watch`、`workspace_reconnect`、`workspace_answer`、`workspace_interrupt`、`workspace_approval`、re-entry control 等属于 App-only wire 协议。它们可以存在于 endpoint 内部，但不应出现在模型工具列表或文档的 Agent 使用示例中。
+`workspace_snapshot`、`workspace_watch`、`workspace_reconnect` 是 direct Live Workspace transport 不可用时的 app-only 兼容 fallback；`workspace_action` 与 `workspace_reentry` 是 App 的常规 app-only 写路径，App 正常情况下经 live Workspace route 读取 snapshot/watch。App 消费 Workspace presentation，并用 `itemId + actionId` 发起操作，不解释 Todo、Approval、Wait 或 Goal 的领域 DTO。动作后的交付指令、模型上下文和调度时间由服务端提供；这些内部协议不应出现在模型工具列表或 Agent 使用示例中。
 
 详见 [Workspace](workspace.md)。
 

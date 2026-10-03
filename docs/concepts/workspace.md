@@ -19,6 +19,12 @@ Context
 
 Workspace snapshot 是服务端的 authoritative view。UI 只投影它，不自己维护第二套任务真相。
 
+App-facing snapshot 将三类输入分开：`presentation` 提供 `primary` / `work` / `background` 卡片、输入和按钮，`modelContext` 提供交给 Host 的模型上下文，`reentry` 提供交付指令与调度时间。领域解释集中在 Workspace contributors；App 不读取 Todo、Approval、Wait 或 Goal 的原始状态与 revision。
+
+用户操作统一调用 app-only `workspace_action`，提交 `itemId + actionId` 和可选输入。服务端重新验证当前 action 与领域原子约束，返回 `applied` 或 `stale`、最新 snapshot，以及必要的 re-entry effect。action 身份绑定 Context、instance 和领域 fence，普通刷新不使其失效。
+
+Workspace action receipt 保存未完成的交付，不取代领域 authoritative state。操作成功但响应丢失时，旧 action 重试不重复 mutation；未交付的同身份指令也由 snapshot 提供给 remount 后的 App。已尝试发送但结果不确定时不盲重发。`workspace_reentry` 继续独立负责 claim、validation 和 Host 交付仲裁。
+
 ## Bootstrap 与重新呈现
 
 正常 bootstrap 发生在 `environ_info`：
@@ -60,7 +66,7 @@ Workspace UI 使用官方 MCP Apps SDK，而不是自定义 postMessage bridge�
 
 - render resource 使用内容 hash 生成版本化 URI，避免 Host template cache 把旧 HTML 当成新版本；
 - stable reader alias 与已发布过的历史 URI 继续可读，保证旧会话升级后仍能 remount；
-- App 使用 `snapshot` / `watch` / `reconnect` 一类 app-only helper 获取状态；
+- App 通过 live Workspace route 直接读取 `snapshot` / `watch`，并用 app-only `workspace_action` / `workspace_reentry` 提交操作和交付；`workspace_snapshot` / `workspace_watch` / `workspace_reconnect` 只是 direct transport 不可用时的 fallback；
 - `watch` 基于 instance event sequence，只在当前 Context 的相关事件变化时返回新 snapshot，正常无变化时是 heartbeat，不做固定频率全量 polling；
 - 已建立 App bridge 后，单次 `tools/call`、model-context 或 Host message 请求超时只进入原 bridge 内的 `Reconnecting` / retry 路径，不能 `app.close()`、重新 `ui/initialize` 或重新申请 display mode；只有 SDK 报告真实 `app.onclose` 或初始握手失败时才执行 lifecycle reconnect；
 - app-only 写操作必须携带当前 Context 和隐藏 app capability。
@@ -104,6 +110,7 @@ Goal 用于描述一个有明确 ordered items 的连续工作目标。它与“
 ```text
 active
 blocked
+paused
 completed
 stopped
 ```
@@ -183,17 +190,16 @@ start managed task
 
 ## 自动模型 re-entry
 
-resolved Wait 不会简单地“发一条消息”。服务端需要完成一组 fencing：
+resolved Wait 或到期 Goal 都不会简单地“发一条消息”。它们先以 `reentry.directives`（以及 action 返回的 `effect`）暴露给 App，再由 app-only `workspace_reentry` 在每个 Context 内统一仲裁：
 
-1. claim 当前 Context 的 re-entry ownership；
-2. 重新验证 Wait 与关联 Goal/Todo 仍然有效；
-3. 确认没有新的 model execution 正在占用 Context；
-4. 生成 authoritative Workspace snapshot；
-5. 更新模型上下文；
-6. 发送带持久化 recovery identity 的恢复消息；
-7. 成功后 consume/complete Wait；失败则 release claim，允许之后重试。
+1. `claim` 当前 Context 的 re-entry ownership，并绑定 Wait 或 Goal/task 来源；
+2. `validate` 重新验证来源与关联 Goal/Todo 仍然有效；
+3. 确认没有新的 model execution 正在占用 Context，也没有 pending Approval；
+4. 返回带 authoritative `modelContext` 的 delivery；
+5. App 应用 model context 后 `attempt`，再 `report` `accepted` / `rejected` / `uncertain`；
+6. `accepted` 时 consume/complete 来源；失败或 `uncertain` 时 release 或保留 claim，允许之后按 ownership 重试。
 
-因此 remount、Control 重启、多 App 并发或消息发送失败不会把同一个 Wait 重复恢复多次。
+因此 remount、Control 重启、多 App 并发或消息发送失败不会把同一个来源重复恢复多次。
 
 ## 用户优先级
 
