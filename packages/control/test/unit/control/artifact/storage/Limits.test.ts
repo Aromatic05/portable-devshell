@@ -12,7 +12,6 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 function accessContext(): ArtifactHostAccessContext {
     return {
-        appendControlEvent: async () => undefined,
         authorityInstance: "demo-local",
         provider: "local",
         securityMode: "disabled",

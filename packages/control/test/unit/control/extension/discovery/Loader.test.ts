@@ -341,6 +341,65 @@ test("Extension loader validates declared Config and injects context.config", as
     assert.deepEqual(calls, ["validate", `get:${id}.enabled`, "close"]);
 });
 
+test("Extension loader projects scoped Core Config without owning a Config domain", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const declaration: ExtensionConfigDeclaration = {
+        coreAccess: { "mcp.listenPort": "read" },
+    };
+    const { id, generation } = await harness.writeGeneration({
+        capabilities: ["config.core"],
+        config: declaration,
+    });
+    const calls: string[] = [];
+    let seenContext: ExtensionContext | undefined;
+    const loader = new ExtensionLoader({
+        configFactory: (input) => {
+            assert.deepEqual(input.declaration, declaration);
+            return {
+                close() {
+                    calls.push("close");
+                },
+                core: {
+                    close() {},
+                    async get(path) {
+                        calls.push(`get:${path}`);
+                        return path === "mcp.listenPort" ? 8080 : undefined;
+                    },
+                    onChange() {
+                        return () => undefined;
+                    },
+                    async update() {},
+                    async validate() {},
+                },
+                async validate() {
+                    calls.push("validate");
+                },
+            };
+        },
+        importer: async () => ({
+            async activate(context: ExtensionContext) {
+                seenContext = context;
+                assert.equal(
+                    await context.capabilities.configCore?.get("mcp.listenPort"),
+                    8080,
+                );
+            },
+        }),
+        instances: { list: () => [] } as never,
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+    });
+
+    const candidate = await loader.load(id, generation);
+    assert.equal(candidate.state, "ready");
+    assert.equal(seenContext?.config, undefined);
+    assert.ok(seenContext?.capabilities.configCore);
+    assert.deepEqual(calls, ["validate", "get:mcp.listenPort"]);
+    await candidate.retire();
+    assert.deepEqual(calls, ["validate", "get:mcp.listenPort", "close"]);
+});
+
 test("Extension loader isolates runtime directories for overlapping loads of the same code generation", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);

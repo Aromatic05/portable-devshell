@@ -6,6 +6,7 @@ import { chromium, type Browser } from "playwright";
 
 import { workspaceAppHtml } from "@portable-devshell/mcp/testing";
 import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
+import { WORKSPACE_FIXTURE_PROTOCOL } from "./WorkspaceAppBrowserSupport.ts";
 
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
 const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
@@ -17,7 +18,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -32,15 +33,19 @@ test(
                 `<script>
             window.__liveFetchCalls = [];
             window.__liveWatchReplied = false;
+            window.__liveFixtureSnapshot = null;
             window.fetch = function (url, options) {
                 window.__liveFetchCalls.push({
                     authorization: options && options.headers && options.headers.Authorization,
                     url: String(url)
                 });
                 var snapshot = {
-                    approvals: [], background: [], ctxId: "ctx-live-direct", currentEvent: null,
-                    cursor: 7, goal: null, instance: "browser-instance", questions: [], tasks: []
+                    agentBusy: false, ctxId: "ctx-live-direct", cursor: 7,
+                    instance: "browser-instance", presentation: { work: [], background: [] },
+                    modelContext: { content: [], structuredContent: { portableDevshellWorkspace: { ctxId: "ctx-live-direct" } } },
+                    reentry: { pending: false, delivery: { status: "idle" } }
                 };
+                window.__liveFixtureSnapshot = snapshot;
                 if (String(url).indexOf("/snapshot") >= 0) {
                     return Promise.resolve(new Response(JSON.stringify(snapshot), {
                         headers: { "content-type": "application/json" }, status: 200
@@ -96,6 +101,18 @@ test(
                 call.url.includes("ctxId=ctx-live-direct"),
             ),
             true,
+        );
+        assert.deepEqual(
+            await frame.evaluate("window.__liveFixtureSnapshot.presentation"),
+            { work: [], background: [] },
+        );
+        assert.equal(
+            await frame.evaluate("typeof window.__liveFixtureSnapshot.modelContext"),
+            "object",
+        );
+        assert.equal(
+            await frame.evaluate("typeof window.__liveFixtureSnapshot.reentry"),
+            "object",
         );
         assert.equal(
             await page.evaluate(
@@ -158,7 +175,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -187,12 +204,7 @@ test(
                 privateContent: {},
                 imageIds: [],
             };
-            iframe.srcdoc = html
-                .replace(
-                    "var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;",
-                    "var DISPLAY_MODE_TRANSITION_LEASE_MS = 20;",
-                )
-                .replace(
+            iframe.srcdoc = html.replace(
                     "<script>",
                     `<script>
                 window.openai = {
@@ -206,7 +218,16 @@ test(
         await page.waitForFunction(
             "(window.__liveDisplayModeRequests || []).length === 1",
         );
-        await page.waitForTimeout(40);
+        await page.evaluate(() => {
+            const state = (window as unknown as {
+                __presentationWidgetState: {
+                    privateContent: {
+                        portableDevshellPresentation: { mode: string; expiresAt: number };
+                    };
+                };
+            }).__presentationWidgetState;
+            state.privateContent.portableDevshellPresentation = { mode: "pip", expiresAt: Date.now() - 1 };
+        });
         const frame = page
             .frames()
             .find((candidate) => candidate !== page.mainFrame());
@@ -230,7 +251,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -342,7 +363,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -401,7 +422,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -434,7 +455,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -488,7 +509,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -524,7 +545,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -563,7 +584,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -599,7 +620,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -621,20 +642,11 @@ test(
                 document.querySelector<HTMLIFrameElement>("#workspace");
             if (iframe === null)
                 throw new Error("Workspace iframe is missing.");
-            iframe.srcdoc = html
-                .replace(
-                    "var APP_TOOL_TIMEOUT_MS = 30000;",
-                    "var APP_TOOL_TIMEOUT_MS = 50;",
-                )
-                .replace(
-                    "var LIVE_START_RETRY_MS = 1000;",
-                    "var LIVE_START_RETRY_MS = 50;",
-                )
-                .replace("await sleep(1000);", "await sleep(50);");
+            iframe.srcdoc = html;
         }, workspaceAppHtml);
 
         await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 1");
-        await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2");
+        await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2", undefined, { timeout: 35_000 });
         assert.equal(await page.evaluate("window.__bridgeInitializeCount"), 1);
         assert.equal(
             await page.evaluate("window.__liveDisplayModeRequests.length"),
@@ -650,7 +662,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -703,7 +715,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -718,30 +730,32 @@ test(
 
         const app = page.frameLocator("#workspace");
         await app
-            .locator('[data-task-control="pause"][data-task-id="task-order-1"]')
+            .locator('[data-action="task-pause"][data-item="task-order-1"]')
             .waitFor({ state: "visible" });
         await app
-            .locator('[data-task-control="pause"][data-task-id="task-order-2"]')
+            .locator('[data-action="task-pause"][data-item="task-order-2"]')
             .waitFor({ state: "visible" });
+        await page.waitForFunction("typeof window.__orderingWatchReply === 'function'");
 
         await app
-            .locator('[data-task-control="pause"][data-task-id="task-order-1"]')
+            .locator('[data-action="task-pause"][data-item="task-order-1"]')
             .click();
         await page.waitForFunction(
-            "(window.__orderingSnapshotCount || 0) >= 2",
+            "window.__orderingActionCalls.length === 1",
         );
         await app
-            .locator('[data-task-control="pause"][data-task-id="task-order-2"]')
+            .locator('[data-action="task-pause"][data-item="task-order-2"]')
             .click();
         await page.waitForFunction(
-            "(window.__orderingSnapshotCount || 0) >= 3",
+            "window.__orderingActionCalls.length === 2",
         );
+        await page.evaluate("window.__orderingWatchReply()");
         await page.waitForTimeout(250);
 
         assert.equal(
             await app
                 .locator(
-                    '[data-task-control="pause"][data-task-id="task-order-1"]',
+                    '[data-action="task-pause"][data-item="task-order-1"]',
                 )
                 .count(),
             0,
@@ -749,7 +763,7 @@ test(
         assert.equal(
             await app
                 .locator(
-                    '[data-task-control="pause"][data-task-id="task-order-2"]',
+                    '[data-action="task-pause"][data-item="task-order-2"]',
                 )
                 .count(),
             0,
@@ -757,8 +771,9 @@ test(
     },
 );
 
-const ORDERING_BRIDGE_SCRIPT = String.raw`
-window.__orderingSnapshotCount = 0;
+const ORDERING_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+window.__orderingActionCalls = [];
+window.__orderingWatchReply = null;
 window.__orderingTasks = {
     "task-order-1": { revision: 1, status: "in_progress" },
     "task-order-2": { revision: 1, status: "in_progress" }
@@ -778,7 +793,7 @@ function orderingTask(id) {
     };
 }
 function orderingSnapshot() {
-    return {
+    var snapshot = window.projectWorkspaceFixture({
         agentBusy: false,
         activity: [],
         approvals: [],
@@ -786,12 +801,18 @@ function orderingSnapshot() {
         contextSelector: { requiresExplicitContextId: true },
         ctxId: "ctx-ordering",
         currentEvent: null,
-        cursor: 10,
+        cursor: 10 + window.__orderingActionCalls.length,
         goal: null,
         instance: "browser-instance",
         questions: [],
         tasks: [orderingTask("task-order-1"), orderingTask("task-order-2")]
-    };
+    });
+    snapshot.presentation.work.forEach(function (item) {
+        item.actions = item.actions.filter(function (action) {
+            return action.id !== "task-pause" || window.__orderingTasks[item.id].status === "in_progress";
+        });
+    });
+    return snapshot;
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -828,27 +849,25 @@ window.addEventListener("message", function (event) {
     if (message.method !== "tools/call") return;
     var call = message.params || {};
     if (call.name === "workspace_snapshot") {
-        window.__orderingSnapshotCount += 1;
-        var captured = orderingSnapshot();
-        if (window.__orderingSnapshotCount === 2) {
-            setTimeout(function () { reply({ structuredContent: captured }); }, 180);
-        } else {
-            reply({ structuredContent: captured });
-        }
+        reply({ structuredContent: orderingSnapshot() });
         return;
     }
-    if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_task") {
-        var taskId = String(call.arguments.taskId);
+    if (call.name === "workspace_watch") {
+        var captured = orderingSnapshot();
+        window.__orderingWatchReply = function () {
+            reply({ structuredContent: { changed: false, cursor: captured.cursor, snapshot: captured } });
+        };
+        return;
+    }
+    if (call.name === "workspace_action") {
+        window.__orderingActionCalls.push(call);
+        var taskId = String(call.arguments.itemId);
         var task = window.__orderingTasks[taskId];
-        task.status = call.arguments.action === "pause" ? "paused" : task.status;
+        task.status = call.arguments.actionId === "task-pause" ? "paused" : task.status;
         task.revision += 1;
         reply({ structuredContent: {
-            items: [],
-            revision: task.revision,
-            summary: { completed: 0, total: 1 },
-            taskId: taskId,
-            title: taskId
+            status: "applied",
+            snapshot: orderingSnapshot()
         } });
         return;
     }
@@ -856,7 +875,7 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
+const LIVE_TRANSPORT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__liveDisplayModeRequests = [];
 window.__liveToolCalls = [];
 window.addEventListener("message", function (event) {
@@ -901,6 +920,15 @@ window.addEventListener("message", function (event) {
     if (message.method === "ui/update-model-context") { reply({}); return; }
     if (message.method === "tools/call") {
         window.__liveToolCalls.push(message.params || {});
+        if (message.params.name === "workspace_snapshot" || message.params.name === "workspace_reconnect") {
+            if (message.params.arguments.token !== "live-direct-token") {
+                source.postMessage({ id: message.id, jsonrpc: "2.0", error: { code: -32001, message: "Workspace App authorization is invalid for the current Context." } }, "*");
+                return;
+            }
+            reply({ structuredContent: window.projectWorkspaceFixture({ ctxId: "ctx-live-direct", instance: "browser-instance", cursor: 1 }) });
+            return;
+        }
+        if (message.params.name === "workspace_watch") return;
         reply({ structuredContent: {} });
     }
 });
@@ -913,7 +941,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1039,7 +1067,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1116,7 +1144,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1165,14 +1193,14 @@ test(
     },
 );
 
-const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
+const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__stalledLiveToolCalls = [];
 window.__stalledLiveWatchReplied = false;
 function stalledLiveSnapshot() {
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-stalled-live", currentEvent: null,
         cursor: 3, goal: null, instance: "browser-instance", questions: [], tasks: []
-    };
+    });
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -1230,7 +1258,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1250,8 +1278,10 @@ test(
                     return new Promise(function (resolve, reject) {
                         window.__oldSnapshotResolve = function () {
                             resolve(new Response(JSON.stringify({
-                                approvals: [], background: [], ctxId: "ctx-old-direct", currentEvent: null,
-                                cursor: 1, goal: null, instance: "browser-instance", questions: [], tasks: []
+                                agentBusy: false, ctxId: "ctx-old-direct", cursor: 1,
+                                instance: "browser-instance", presentation: { work: [], background: [] },
+                                modelContext: { content: [], structuredContent: { portableDevshellWorkspace: { ctxId: "ctx-old-direct" } } },
+                                reentry: { pending: false, delivery: { status: "idle" } }
                             }), { headers: { "content-type": "application/json" }, status: 200 }));
                         };
                         if (options && options.signal) options.signal.addEventListener("abort", function () {
@@ -1260,8 +1290,10 @@ test(
                     });
                 }
                 var next = {
-                    approvals: [], background: [], ctxId: "ctx-new-direct", currentEvent: null,
-                    cursor: 2, goal: null, instance: "browser-instance", questions: [], tasks: []
+                    agentBusy: false, ctxId: "ctx-new-direct", cursor: 2,
+                    instance: "browser-instance", presentation: { work: [], background: [] },
+                    modelContext: { content: [], structuredContent: { portableDevshellWorkspace: { ctxId: "ctx-new-direct" } } },
+                    reentry: { pending: false, delivery: { status: "idle" } }
                 };
                 if (text.indexOf("/snapshot") >= 0) {
                     return Promise.resolve(new Response(JSON.stringify(next), {
@@ -1285,34 +1317,20 @@ test(
         await frame.waitForFunction(
             "typeof window.__oldSnapshotResolve === 'function'",
         );
-        await frame.evaluate(() => {
-            window.dispatchEvent(
-                new CustomEvent("openai:set_globals", {
-                    detail: {
-                        globals: {
-                            toolOutput: {
-                                ctxId: "ctx-new-direct",
-                                instance: "browser-instance",
-                            },
-                            toolResponseMetadata: {
-                                mcp_tool_result: {
-                                    _meta: {
-                                        "portable-devshell/workspace": {
-                                            liveBaseUrl:
-                                                "https://new.example/api/live/demo/workspace",
-                                            token: "new-direct-token",
-                                        },
-                                    },
-                                    structuredContent: {
-                                        ctxId: "ctx-new-direct",
-                                        instance: "browser-instance",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                }),
-            );
+        await page.evaluate(() => {
+            const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
+            if (!iframe?.contentWindow) throw new Error("Workspace frame is missing.");
+            iframe.contentWindow.postMessage({
+                jsonrpc: "2.0",
+                method: "ui/notifications/tool-result",
+                params: {
+                    _meta: { "portable-devshell/workspace": {
+                        liveBaseUrl: "https://new.example/api/live/demo/workspace",
+                        token: "new-direct-token",
+                    } },
+                    structuredContent: { ctxId: "ctx-new-direct", instance: "browser-instance" },
+                },
+            }, "*");
         });
         await page.waitForFunction(
             "(window.__switchedContextModelUpdates || []).some(update => update && update.portableDevshellWorkspace && update.portableDevshellWorkspace.ctxId === 'ctx-new-direct')",
@@ -1334,7 +1352,7 @@ test(
     },
 );
 
-const SWITCHED_CONTEXT_BRIDGE_SCRIPT = String.raw`
+const SWITCHED_CONTEXT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__switchedContextModelUpdates = [];
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -1368,10 +1386,9 @@ window.addEventListener("message", function (event) {
     if (call.name === "workspace_snapshot") {
         reply({ _meta: { "portable-devshell/workspace": {
             liveBaseUrl: "https://new.example/api/live/demo/workspace", token: "new-direct-token"
-        } }, structuredContent: {
-            approvals: [], background: [], ctxId: "ctx-new-direct", currentEvent: null,
-            cursor: 2, goal: null, instance: "browser-instance", questions: [], tasks: []
-        } });
+        } }, structuredContent: window.projectWorkspaceFixture({
+            ctxId: "ctx-new-direct", cursor: 2, instance: "browser-instance"
+        }) });
         return;
     }
     if (call.name === "workspace_watch") return;
@@ -1385,7 +1402,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1405,6 +1422,7 @@ test(
         await app
             .getByRole("button", { name: "Stop Goal", exact: true })
             .click();
+        await app.getByRole("button", { name: "Confirm", exact: true }).click();
         await app
             .getByText("Goal B", { exact: true })
             .waitFor({ state: "visible" });
@@ -1417,13 +1435,28 @@ test(
             arguments?: Record<string, unknown>;
             name?: string;
         }>;
-        const stop = calls.find((call) => call.name === "workspace_stop");
-        assert.equal(stop?.arguments?.goalId, "goal-A");
-        assert.equal(stop?.arguments?.revision, 1);
+        const stop = calls.find((call) => call.name === "workspace_action" && call.arguments?.actionId === "goal-stop");
+        assert.equal(stop?.arguments?.itemId, "goal-A");
+        assert.equal(stop?.arguments?.actionId, "goal-stop");
         assert.equal(stop?.arguments?.token, "stale-goal-token");
         assert.equal(
-            calls.filter((call) => call.name === "workspace_stop").length,
+            calls.filter((call) => call.name === "workspace_action" && call.arguments?.actionId === "goal-stop").length,
             1,
+        );
+        const projectedSnapshots = (await page.evaluate(
+            "window.__staleGoalSnapshots",
+        )) as Array<Record<string, unknown>>;
+        assert.equal(projectedSnapshots.length > 0, true);
+        assert.equal(
+            projectedSnapshots.every(
+                (snapshot) =>
+                    "presentation" in snapshot &&
+                    "modelContext" in snapshot &&
+                    "reentry" in snapshot &&
+                    !("goal" in snapshot) &&
+                    !("tasks" in snapshot),
+            ),
+            true,
         );
     },
 );
@@ -1435,7 +1468,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -1452,8 +1485,9 @@ test(
         await app
             .getByRole("button", { name: "Cancel task", exact: true })
             .click();
+        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-1"]').count(), 1);
         await app
-            .getByRole("button", { name: "Confirm cancel", exact: true })
+            .getByRole("button", { name: "Confirm", exact: true })
             .waitFor({ state: "visible" });
         assert.equal(
             await page.evaluate("window.__advanceTaskConfirmRevision()"),
@@ -1465,28 +1499,30 @@ test(
         await app
             .getByRole("button", { name: "Cancel task", exact: true })
             .waitFor({ state: "visible" });
+        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-1"]').count(), 0);
+        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-2"]').count(), 1);
         assert.equal(
             await app
-                .getByRole("button", { name: "Confirm cancel", exact: true })
+                .getByRole("button", { name: "Confirm", exact: true })
                 .count(),
             0,
         );
         assert.equal(
             await page.evaluate(
-                "(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task')",
+                "(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'task-stale-confirm')",
             ),
             false,
         );
     },
 );
 
-const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = String.raw`
+const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__staleTaskConfirmCalls = [];
 window.__staleTaskConfirmRevision = 1;
 window.__staleTaskConfirmWatch = null;
 function staleTaskConfirmSnapshot() {
     var updated = window.__staleTaskConfirmRevision === 2;
-    return {
+    var snapshot = window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-stale-task", currentEvent: null,
         cursor: window.__staleTaskConfirmRevision,
         goal: null,
@@ -1502,7 +1538,9 @@ function staleTaskConfirmSnapshot() {
             total: 1,
             updatedAt: updated ? "2026-08-30T00:01:00.000Z" : "2026-08-30T00:00:00.000Z"
         }]
-    };
+    });
+    snapshot.presentation.work[0].actions.find(function (action) { return action.id === "task-cancel"; }).id = "cancel-rev-" + window.__staleTaskConfirmRevision;
+    return snapshot;
 }
 window.__advanceTaskConfirmRevision = function () {
     var pending = window.__staleTaskConfirmWatch;
@@ -1545,18 +1583,19 @@ window.addEventListener("message", function (event) {
         window.__staleTaskConfirmWatch = { id: message.id, source: source };
         return;
     }
-    if (call.name === "workspace_task") {
-        reply({ structuredContent: { taskId: call.arguments.taskId } });
+    if (call.name === "workspace_action") {
+        reply({ structuredContent: { status: "applied", snapshot: staleTaskConfirmSnapshot() } });
     }
 });
 `;
 
-const STALE_GOAL_BRIDGE_SCRIPT = String.raw`
+const STALE_GOAL_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__staleGoalCalls = [];
+window.__staleGoalSnapshots = [];
 window.__staleGoalVersion = 1;
 function staleGoalSnapshot() {
     var second = window.__staleGoalVersion === 2;
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-stale-goal", currentEvent: null, cursor: second ? 2 : 1,
         goal: {
             autoContinueExhausted: false,
@@ -1576,7 +1615,7 @@ function staleGoalSnapshot() {
             updatedAt: "2026-08-29T12:00:00.000Z"
         },
         instance: "browser-instance", questions: [], tasks: []
-    };
+    });
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -1604,14 +1643,18 @@ window.addEventListener("message", function (event) {
     var call = message.params || {};
     window.__staleGoalCalls.push(call);
     if (call.name === "workspace_reconnect" || call.name === "workspace_snapshot") {
-        reply({ _meta: { "portable-devshell/workspace": { token: "stale-goal-token" } }, structuredContent: staleGoalSnapshot() });
+        var snapshot = staleGoalSnapshot();
+        window.__staleGoalSnapshots.push(snapshot);
+        reply({ _meta: { "portable-devshell/workspace": { token: "stale-goal-token" } }, structuredContent: snapshot });
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_stop") {
-        window.__staleGoalVersion = 2;
-        reject("Workspace Goal changed from goal-A to goal-B; refresh before retrying.");
-    }
+        if (call.name === "workspace_action" && call.arguments.actionId === "goal-stop") {
+            window.__staleGoalVersion = 2;
+            var snapshot = staleGoalSnapshot();
+            window.__staleGoalSnapshots.push(snapshot);
+            reply({ structuredContent: { status: "stale", snapshot: snapshot } });
+        }
 });
 `;
 
@@ -1622,7 +1665,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
         );
@@ -1659,7 +1702,7 @@ test(
         );
         assert.equal(
             await page.evaluate(
-                "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_recover').length",
+                "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_action' && call.arguments.actionId === 'dismiss').length",
             ),
             0,
         );
@@ -1686,7 +1729,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
         );
@@ -1716,7 +1759,7 @@ test(
             .getByText("Delivery uncertain", { exact: true })
             .waitFor({ state: "visible" });
         await app
-            .getByText("Continuation delivery uncertain", { exact: true })
+            .getByText("Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal.", { exact: false })
             .waitFor({ state: "visible" });
         const goalReportClaimId = (await page.evaluate(
             "window.__goalAmbiguousReports[0].claimId",
@@ -1741,9 +1784,9 @@ test(
         );
         assert.equal(
             await page.evaluate(
-                "(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').length",
+                "(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'automatic').length",
             ),
-            0,
+            1,
         );
 
         await mount();
@@ -1764,7 +1807,7 @@ test(
     },
 );
 
-const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
+const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__waitAmbiguousReentryClaimId = "";
 window.__waitAmbiguousCalls = [];
 window.__waitAmbiguousMessages = [];
@@ -1791,7 +1834,7 @@ function waitAmbiguousModelContext() {
     };
 }
 function waitAmbiguousSnapshot() {
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [],
         background: window.__waitAmbiguousConsumed ? [] : [{
             detachedAt: "2026-08-29T12:00:00.000Z",
@@ -1815,7 +1858,9 @@ function waitAmbiguousSnapshot() {
             epoch: 0,
             executionActive: false,
             executionEpoch: 0,
-            pending: !!window.__waitAmbiguousReentryClaimId,
+            pending: !window.__waitAmbiguousConsumed,
+            delivery: { status: window.__waitAmbiguousAttempted ? "uncertain" : "idle" },
+            directives: window.__waitAmbiguousConsumed ? [] : [{ kind: "reentry", intent: "automatic", sourceId: "wait-ambiguous" }],
             sourceId: window.__waitAmbiguousReentryClaimId ? "wait-ambiguous" : undefined,
             sourceKind: window.__waitAmbiguousReentryClaimId ? "wait" : undefined
         },
@@ -1829,7 +1874,7 @@ function waitAmbiguousSnapshot() {
             total: 2,
             updatedAt: "2026-08-29T12:00:00.000Z"
         }]
-    };
+    }, waitAmbiguousModelContext());
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -1917,7 +1962,7 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
+const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__goalAmbiguousReentryClaimId = "";
 window.__goalAmbiguousCalls = [];
 window.__goalAmbiguousMessages = [];
@@ -1962,19 +2007,24 @@ function goalAmbiguousModelContext() {
     };
 }
 function goalAmbiguousSnapshot() {
-    return {
+    var snapshot = window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-goal-ambiguous", currentEvent: null,
         cursor: 1, goal: goalAmbiguousGoal(), instance: "browser-instance", questions: [],
         reentry: {
             attempted: window.__goalAmbiguousAttempted,
             claimId: window.__goalAmbiguousReentryClaimId || undefined,
             epoch: 0, executionActive: false, executionEpoch: 0,
-            pending: !!window.__goalAmbiguousReentryClaimId,
+            pending: window.__goalAmbiguousAttempted,
+            delivery: { status: window.__goalAmbiguousAttempted ? "uncertain" : "idle" },
+            schedule: window.__goalAmbiguousAttempted ? undefined : { readyAt: "2000-01-01T00:00:00.000Z", intent: "automatic", sourceId: "goal-ambiguous" },
             sourceId: window.__goalAmbiguousReentryClaimId ? "goal-ambiguous" : undefined,
             sourceKind: window.__goalAmbiguousReentryClaimId ? "goal" : undefined
         },
         tasks: []
-    };
+    }, goalAmbiguousModelContext());
+    snapshot.presentation.work[0].badge = window.__goalAmbiguousAttempted ? "Delivery uncertain" : "Active";
+    snapshot.presentation.work[0].detail = window.__goalAmbiguousAttempted ? "Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal." : undefined;
+    return snapshot;
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2067,7 +2117,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         const pageFailures: string[] = [];
         page.on("pageerror", (error) => pageFailures.push(error.message));
         await page.setContent(
@@ -2086,9 +2136,7 @@ test(
         await app
             .getByText("Resume after answer?", { exact: true })
             .waitFor({ state: "visible" });
-        await app
-            .getByRole("button", { name: "Continue", exact: true })
-            .click();
+        await app.locator('[data-choice][data-value="Continue"]').click();
         await page.waitForFunction(
             "(window.__modelContextFailureActions || []).includes('release')",
         );
@@ -2145,7 +2193,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         const pageFailures: string[] = [];
         page.on("pageerror", (error) => pageFailures.push(error.message));
         await page.setContent(
@@ -2187,9 +2235,7 @@ test(
         await app
             .getByText("Resume after answer?", { exact: true })
             .waitFor({ state: "visible" });
-        await app
-            .getByRole("button", { name: "Continue", exact: true })
-            .click();
+        await app.locator('[data-choice][data-value="Continue"]').click();
         await page.waitForFunction(
             "(window.__modelContextFailureReports || []).length === 1",
         );
@@ -2239,7 +2285,7 @@ test(
     },
 );
 
-const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
+const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__modelContextFailureReentryClaimId = "";
 window.__modelContextFailureCalls = [];
 window.__modelContextFailureActions = [];
@@ -2277,7 +2323,7 @@ function modelContextFailureSnapshot() {
         updatedAt: "2026-08-30T00:00:01.000Z",
         waitId: "wait-model-context"
     };
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [],
         background: window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed ? [{
             detachedAt: question.detachedAt,
@@ -2298,12 +2344,14 @@ function modelContextFailureSnapshot() {
             attempted: window.__modelContextFailureAttempted,
             claimId: window.__modelContextFailureReentryClaimId || undefined,
             epoch: 0, executionActive: false, executionEpoch: 0,
-            pending: !!window.__modelContextFailureReentryClaimId,
+            pending: window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed,
+            delivery: { status: window.__modelContextFailureAttempted ? "uncertain" : "idle" },
+            directives: window.__modelContextFailureAnswered && !window.__modelContextFailureConsumed ? [{ kind: "reentry", intent: "automatic", sourceId: "wait-model-context" }] : [],
             sourceId: window.__modelContextFailureReentryClaimId ? "wait-model-context" : undefined,
             sourceKind: window.__modelContextFailureReentryClaimId ? "wait" : undefined
         },
         tasks: []
-    };
+    }, modelContextFailureModelContext());
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2395,13 +2443,12 @@ window.addEventListener("message", function (event) {
         reply({ structuredContent: modelContextFailureSnapshot().reentry });
         return;
     }
-    if (call.name === "workspace_answer") {
-        window.__modelContextFailureAnswered = true;
+    if (call.name === "workspace_action" && call.arguments.itemId === "wait-model-context" && call.arguments.actionId === "answer") {
+        window.__modelContextFailureAnswered = call.arguments.input === "Continue";
         reply({ structuredContent: {
-            answer: call.arguments.answer,
-            detached: true,
-            questionId: "question-model-context",
-            waitId: "wait-model-context"
+            status: "applied",
+            snapshot: modelContextFailureSnapshot(),
+            effect: { kind: "reentry", intent: "automatic", sourceId: "wait-model-context" }
         } });
         return;
     }
@@ -2415,7 +2462,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -2445,11 +2492,11 @@ test(
     },
 );
 
-const MISSED_EVENT_BRIDGE_SCRIPT = String.raw`
+const MISSED_EVENT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__missedEventCalls = [];
 window.__missedEventReconciled = false;
 function missedEventSnapshot(after) {
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-missed-event", currentEvent: null,
         cursor: after ? 2 : 1, goal: null, instance: "browser-instance", questions: [],
         tasks: [{
@@ -2462,7 +2509,7 @@ function missedEventSnapshot(after) {
             total: 3,
             updatedAt: after ? "2026-08-29T12:01:00.000Z" : "2026-08-29T12:00:00.000Z"
         }]
-    };
+    });
 }
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2503,7 +2550,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         const browserFailures: string[] = [];
         page.on("console", (message) => {
             if (message.type() === "error")
@@ -2597,7 +2644,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
         );
@@ -2682,12 +2729,12 @@ test(
     },
 );
 
-const TOKEN_RESTART_BRIDGE_SCRIPT = String.raw`
+const TOKEN_RESTART_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__tokenRestartCalls = [];
 window.__tokenRestartWatchReplied = false;
 
 function tokenRestartSnapshot() {
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [],
         background: [],
         ctxId: "ctx-token-restart",
@@ -2697,7 +2744,7 @@ function tokenRestartSnapshot() {
         instance: "browser-instance",
         questions: [],
         tasks: []
-    };
+    });
 }
 
 window.addEventListener("message", function (event) {
@@ -2765,7 +2812,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -2801,7 +2848,7 @@ test(
     },
 );
 
-const CHATGPT_METADATA_BRIDGE_SCRIPT = String.raw`
+const CHATGPT_METADATA_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__chatgptMetadataCalls = [];
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2829,10 +2876,9 @@ window.addEventListener("message", function (event) {
     if (call.name === "workspace_snapshot") {
         reply({
             _meta: { "portable-devshell/workspace": { token: "chatgpt-meta-token" } },
-            structuredContent: {
-                approvals: [], background: [], ctxId: "ctx-chatgpt-meta", currentEvent: null,
-                cursor: 1, goal: null, instance: "browser-instance", questions: [], tasks: []
-            }
+            structuredContent: window.projectWorkspaceFixture({
+                ctxId: "ctx-chatgpt-meta", cursor: 1, instance: "browser-instance"
+            })
         });
         return;
     }
@@ -2847,7 +2893,7 @@ test(
         const browser = await launchBrowser();
         t.after(async () => await browser.close());
 
-        const page = await browser.newPage();
+        const page = await newWorkspacePage(browser);
         await page.setContent(
             '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
@@ -2879,15 +2925,13 @@ test(
         await app
             .getByText("Continue after reconnect?", { exact: true })
             .waitFor({ state: "visible" });
-        await app
-            .getByRole("button", { name: "Continue", exact: true })
-            .click();
+        await app.locator('[data-choice][data-value="Continue"]').click();
         await page.waitForFunction(
-            "(window.__lateInitialCalls || []).some(call => call.name === 'workspace_answer')",
+            "(window.__lateInitialCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'wait-late-initial' && call.arguments.actionId === 'answer')",
         );
 
         const answerToken = await page.evaluate(
-            "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_answer')?.arguments?.token",
+            "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_action' && call.arguments.actionId === 'answer')?.arguments?.token",
         );
         assert.equal(answerToken, "token-initial");
         await app
@@ -2896,7 +2940,7 @@ test(
     },
 );
 
-const LATE_INITIAL_RESULT_BRIDGE_SCRIPT = String.raw`
+const LATE_INITIAL_RESULT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
 window.__lateInitialCalls = [];
 window.__lateInitialSource = null;
 window.__lateInitialAnswered = false;
@@ -2910,12 +2954,12 @@ function lateInitialSnapshot() {
         updatedAt: "2026-08-30T00:00:00.000Z",
         waitId: "wait-late-initial"
     };
-    return {
+    return window.projectWorkspaceFixture({
         approvals: [], background: [], ctxId: "ctx-late-initial",
         currentEvent: window.__lateInitialAnswered ? null : question,
         cursor: 1, goal: null, instance: "browser-instance",
         questions: window.__lateInitialAnswered ? [] : [question], tasks: []
-    };
+    });
 }
 window.__deliverLateInitialResult = function () {
     if (!window.__lateInitialSource) return false;
@@ -2965,16 +3009,25 @@ window.addEventListener("message", function (event) {
         return;
     }
     if (call.name === "workspace_watch") return;
-    if (call.name === "workspace_answer") {
+    if (call.name === "workspace_action" && call.arguments.itemId === "wait-late-initial" && call.arguments.actionId === "answer") {
         if (call.arguments.token !== "token-initial") {
             reject("Workspace App authorization is invalid for the current Context.");
             return;
         }
-        window.__lateInitialAnswered = true;
-        reply({ structuredContent: { answer: "Continue", detached: false, questionId: "question-late", waitId: "wait-late-initial" } });
+        window.__lateInitialAnswered = call.arguments.input === "Continue";
+        reply({ structuredContent: { status: "applied", snapshot: lateInitialSnapshot() } });
     }
 });
 `;
+
+async function newWorkspacePage(browser: Browser) {
+    const page = await browser.newPage();
+    await page.route("https://workspace.test/", async (route) => {
+        await route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body></body></html>" });
+    });
+    await page.goto("https://workspace.test/");
+    return page;
+}
 
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {

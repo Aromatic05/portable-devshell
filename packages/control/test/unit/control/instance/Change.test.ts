@@ -37,9 +37,10 @@ test("instance change hub reports a bounded replay gap", () => {
         },
         kind: "gap",
     });
+    const replay = hub.replay(2);
     assert.deepEqual(
-        hub.replay(2).kind === "replay"
-            ? hub.replay(2).changes.map((change) => change.revision)
+        replay.kind === "replay"
+            ? replay.changes.map((change) => change.revision)
             : [],
         [2, 3],
     );

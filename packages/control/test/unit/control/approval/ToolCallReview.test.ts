@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, errorCodes } from "@portable-devshell/shared";
+import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
 import type { ToolCallReviewInput } from "@portable-devshell/core";
 
 import {
@@ -99,7 +99,7 @@ for (const [direction, kind] of [
 for (const decision of ["allow", "deny"] as const) {
     test(`review maps policy ${decision}`, async (t) => {
         const { service, review } = fixture();
-        const error = new ApprovalError(errorCodes.coreApprovalDenied, "policy denied");
+        const error = new ApprovalError(runtimeErrorCodes.approvalDenied, "policy denied");
         t.mock.method(service, "evaluate", async () => ({ decision, error }));
         assert.deepEqual(await review.review(input, new AbortController().signal, "host"),
             decision === "allow" ? { decision: "continue" } : {
@@ -112,9 +112,9 @@ for (const status of ["denied", "cancelled", "expired"] as const) {
     test(`review maps ${status} resolution without reading persistence`, async (t) => {
         const { service, review } = fixture();
         const code = {
-            denied: errorCodes.coreApprovalDenied,
-            cancelled: errorCodes.coreToolCallCancelled,
-            expired: errorCodes.coreApprovalExpired,
+            denied: runtimeErrorCodes.approvalDenied,
+            cancelled: runtimeErrorCodes.toolCallCancelled,
+            expired: runtimeErrorCodes.approvalExpired,
         }[status];
         const error = new ApprovalError(code, `approval ${status}`);
         const decision = {

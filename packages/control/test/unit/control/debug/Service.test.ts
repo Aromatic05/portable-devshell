@@ -29,7 +29,7 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
             calls.push(`${callContext.ctxId}:${toolName}`);
             return { ctxId: callContext.ctxId, toolName };
         },
-    } as unknown as WorkerInstance;
+    };
     const registry = new InstanceRegistry([
         {
             name: "demo-local",

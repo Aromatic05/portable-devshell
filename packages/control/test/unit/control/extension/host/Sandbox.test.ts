@@ -11,6 +11,7 @@ import type {
     ExtensionLogger,
 } from "@portable-devshell/extension";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
@@ -364,6 +365,72 @@ export function activate(context) {
         "get:example.count",
         "update",
         "get:example.count",
+    ]);
+});
+
+test("Extension sandbox bridges scoped Core Config get, update, and change delivery", async (t) => {
+    const calls: string[] = [];
+    let current: Readonly<Record<string, ExtensionJsonValue>> = {
+        "mcp.listenPort": 8080,
+    };
+    const listeners = new Set<(change: { paths: readonly string[] }) => void>();
+    const configCore: ExtensionCoreConfigCapability = {
+        async get(path) {
+            calls.push(`get:${path}`);
+            return path === "mcp.listenPort"
+                ? current["mcp.listenPort"]
+                : undefined;
+        },
+        onChange(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        async update(patch) {
+            calls.push("update");
+            const port = patch["mcp.listenPort"];
+            if (typeof port !== "number")
+                throw new TypeError("mcp.listenPort must be a number");
+            current = { "mcp.listenPort": port };
+            for (const listener of [...listeners])
+                listener({ paths: ["mcp.listenPort"] });
+        },
+    };
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-core-config",
+        `
+export function activate(context) {
+    const config = context.capabilities.configCore;
+    if (config === undefined) throw new Error("Core Config missing");
+    let changed = false;
+    config.onChange((change) => {
+        if (change.paths.includes("mcp.listenPort")) changed = true;
+    });
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const current = await config.get("mcp.listenPort");
+        await config.update({ "mcp.listenPort": current + 1 });
+        return {
+            kind: "json",
+            value: {
+                changed,
+                port: await config.get("mcp.listenPort"),
+            },
+        };
+    });
+}
+`,
+        { capabilities: ["config.core"], configCore },
+    );
+    await sandbox.start();
+
+    assert.deepEqual(await cliJson(sandbox, [], "core-config"), {
+        changed: true,
+        port: 8081,
+    });
+    assert.deepEqual(calls, [
+        "get:mcp.listenPort",
+        "update",
+        "get:mcp.listenPort",
     ]);
 });
 
@@ -1508,6 +1575,7 @@ function createSandbox(options: {
     capabilities?: readonly ExtensionCapability[];
     codeDirectory: string;
     config?: ExtensionConfig;
+    configCore?: ExtensionCoreConfigCapability;
     contextObserve?: ExtensionContextObserveCapability;
     entryPath: string;
     externalMemoryLimitMb?: number;
@@ -1531,6 +1599,9 @@ function createSandbox(options: {
         capabilities: options.capabilities ?? [],
         codeDirectory: options.codeDirectory,
         ...(options.config === undefined ? {} : { config: options.config }),
+        ...(options.configCore === undefined
+            ? {}
+            : { configCore: options.configCore }),
         context: {
             config: options.config !== undefined,
             generation: "g1",

@@ -2,6 +2,7 @@ import type { WorkerInstance } from "@portable-devshell/core";
 import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type {
+    InstanceApprovalPort,
     InstanceDescriptor,
     InstanceGoalPort,
     InstanceTodoPort,
@@ -55,29 +56,48 @@ export function createTestTodoPort(): InstanceTodoPort {
     };
 }
 
+export function createTestApprovalPort(
+    overrides: Partial<InstanceApprovalPort> = {},
+): InstanceApprovalPort {
+    return {
+        async cancel() {
+            throw new Error("Approval cancellation is not configured.");
+        },
+        close() {},
+        async decideApproval() {
+            throw new Error("Approval decisions are not configured.");
+        },
+        async getApproval() {
+            throw new Error("Approval lookup is not configured.");
+        },
+        async listApprovals() {
+            return [];
+        },
+        async listPendingApprovals() {
+            return [];
+        },
+        async retire() {},
+        setPolicy() {},
+        ...overrides,
+    };
+}
+
 export function createTestInstanceDescriptor(
     worker: WorkerInstance,
     overrides: Partial<Omit<InstanceDescriptor, "worker">> = {},
 ): InstanceDescriptor {
     const workerWithDefaults = worker as WorkerInstance & {
-        listPendingApprovals?: (
-            ctxId?: string,
-        ) => ReturnType<WorkerInstance["listApprovals"]>;
         readToolCallFailureSummary?: (
             sinceMs: number,
             untilMs: number,
         ) => Promise<{ count: number }>;
     };
-    workerWithDefaults.listPendingApprovals ??= async (ctxId) =>
-        (await workerWithDefaults.listApprovals()).filter(
-            (approval) =>
-                approval.status === "pending" &&
-                (ctxId === undefined || approval.ctxId === ctxId),
-        );
     workerWithDefaults.readToolCallFailureSummary ??= async () => ({
         count: 0,
     });
     return {
+        approval: createTestApprovalPort(),
+        approvalReview: () => ({ decision: "continue" }),
         enabled: true,
         goal: createTestGoalPort(),
         mcpEnabled: false,

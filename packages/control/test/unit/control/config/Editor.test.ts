@@ -496,23 +496,35 @@ test("namespace auth updates apply runtime protection before exposing OAuth", as
 test("config editor reconfigures and disables a running instance without replacing it", async () => {
     let config = createConfig();
     const reconfigureCalls: Array<Record<string, unknown>> = [];
+    const approvalPolicies: unknown[] = [];
     let stopCalls = 0;
     const registry = new InstanceRegistry([
-        descriptor({
-            reconfigure(input: Record<string, unknown>) {
-                reconfigureCalls.push(input);
+        descriptor(
+            {
+                reconfigure(input: Record<string, unknown>) {
+                    reconfigureCalls.push(input);
+                },
+                snapshot: runningSnapshot,
+                async stop() {
+                    stopCalls += 1;
+                    return {
+                        ...runningSnapshot(),
+                        daemonState: "stopped",
+                        ready: false,
+                        status: "stopped",
+                    };
+                },
             },
-            snapshot: runningSnapshot,
-            async stop() {
-                stopCalls += 1;
-                return {
-                    ...runningSnapshot(),
-                    daemonState: "stopped",
-                    ready: false,
-                    status: "stopped",
-                };
+            {
+                approval: {
+                    close() {},
+                    async retire() {},
+                    setPolicy(policy: unknown) {
+                        approvalPolicies.push(policy);
+                    },
+                },
             },
-        }),
+        ),
     ]);
     const service = createService(
         () => config,
@@ -547,7 +559,7 @@ test("config editor reconfigures and disables a running instance without replaci
     };
     assert.equal(reconfigure.alerts?.intervalMs, 2_000);
     assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
-    assert.equal(reconfigure.approvalPolicy?.mode, "ask");
+    assert.deepEqual(approvalPolicies, [{ mode: "ask", rules: undefined }]);
     assert.equal(reconfigure.effectiveSecurityMode, "disabled");
     assert.equal(
         reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE,
@@ -1128,24 +1140,19 @@ test("Control disable does not stop self-managed reverse workers but retires loc
             {
                 managementMode: "selfManaged",
                 snapshot: runningSnapshot,
-                async listApprovals() {
-                    return [
-                        {
-                            approvalId: "approval-self-managed",
-                            status: "pending",
-                        },
-                    ];
-                },
-                async cancelApproval(approvalId: string) {
-                    cancelledApprovals.push(approvalId);
-                    return { approvalId, status: "cancelled" };
-                },
                 async stop() {
                     stopCalls += 1;
                     throw new Error("must not stop self-managed worker");
                 },
             },
             {
+                approval: {
+                    close() {},
+                    async retire() {
+                        cancelledApprovals.push("approval-self-managed");
+                    },
+                    setPolicy() {},
+                },
                 wait: {
                     async cancel(waitId: string) {
                         cancelledWaits.push(waitId);
@@ -1390,7 +1397,7 @@ test("failed rebuild persistence closes the uncommitted replacement descriptor",
     assert.equal(config.instances[0]?.tools, undefined);
 });
 
-test("instance delete terminalizes live state and detaches Context environments before descriptor removal", async () => {
+test("instance delete detaches Context before terminal resource cleanup", async () => {
     let config = createConfig();
     const actions: string[] = [];
     const waits = [
@@ -1402,13 +1409,6 @@ test("instance delete terminalizes live state and detaches Context environments 
         descriptor(
             {
                 snapshot: stoppedSnapshot,
-                async listApprovals() {
-                    return [{ approvalId: "approval-live", status: "pending" }];
-                },
-                async cancelApproval(approvalId: string) {
-                    actions.push(`approval.cancel:${approvalId}`);
-                    return { approvalId, status: "cancelled" };
-                },
                 async retireRuntime() {
                     actions.push("runtime.retire");
                 },
@@ -1420,6 +1420,13 @@ test("instance delete terminalizes live state and detaches Context environments 
                 },
             },
             {
+                approval: {
+                    close() {},
+                    async retire() {
+                        actions.push("approval.retire");
+                    },
+                    setPolicy() {},
+                },
                 goal: {
                     async continuation() {
                         return {};
@@ -1511,15 +1518,16 @@ test("instance delete terminalizes live state and detaches Context environments 
 
     assert.deepEqual(actions, [
         "mcp.unregister:demo-local",
-        "approval.cancel:approval-live",
+        "context.detach:demo-local",
+        "approval.retire",
         "wait.cancel:wait-live",
         "wait.consume:wait-result",
         "goals.stopAll",
         "todos.cancelAll",
         "runtime.retire",
         "provider.retire",
+        "approval.retire",
         "worker.close",
-        "context.detach:demo-local",
     ]);
     assert.equal(config.instances.length, 0);
     assert.equal(registry.get("demo-local"), undefined);
@@ -2709,6 +2717,11 @@ function descriptor(
     extra: Record<string, unknown> = {},
 ) {
     return {
+        approval: {
+            close() {},
+            async retire() {},
+            setPolicy() {},
+        },
         enabled: true,
         goal: {
             async continuation() {

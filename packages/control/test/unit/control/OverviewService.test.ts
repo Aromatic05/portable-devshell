@@ -10,6 +10,7 @@ import {
 
 import { OperationalOverviewService } from "../../../src/control/overview/Service.ts";
 import {
+    createTestApprovalPort,
     createTestInstanceDescriptor,
     createTestTodoPort,
 } from "../../support/ControlFixtures.ts";
@@ -74,7 +75,6 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                 homeDirectory: "/workspace",
             },
             listApprovals: async () => [],
-            listPendingApprovals: async () => [{ id: "approval-1" }],
             readToolCallFailureSummary: async () => ({
                 count: 1,
                 latest: failedCall,
@@ -90,6 +90,11 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
             }),
         } as never,
         {
+            approval: createTestApprovalPort({
+                listApprovals: async () => [],
+                listPendingApprovals: async () =>
+                    [{ id: "approval-1" }] as never,
+            }),
             mcpEnabled: true,
             name: "ready-one",
             provider: "local",
@@ -534,7 +539,14 @@ test("operational overview remains available when one collection source fails", 
                 status: "ready",
             }),
         } as never,
-        { name: "local-one" },
+        {
+            approval: createTestApprovalPort({
+                listPendingApprovals: async () => {
+                    throw new Error("approval store unavailable");
+                },
+            }),
+            name: "local-one",
+        },
     );
 
     const overview = await new OperationalOverviewService({

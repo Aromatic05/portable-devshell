@@ -26,6 +26,7 @@ import {
     ReverseCredentialStore,
     TodoService,
 } from "../../src/testing.ts";
+import { createTestApprovalPort } from "../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
@@ -49,6 +50,8 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
     });
     const registry = new InstanceRegistry([
         {
+            approval: createTestApprovalPort(),
+            approvalReview: () => ({ decision: "continue" }),
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/reverse-test/mcp",
@@ -179,6 +182,8 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
     });
     const registry = new InstanceRegistry([
         {
+            approval: createTestApprovalPort(),
+            approvalReview: () => ({ decision: "continue" }),
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/reverse-test/mcp",

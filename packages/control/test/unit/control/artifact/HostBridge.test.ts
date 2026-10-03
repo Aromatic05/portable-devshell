@@ -13,7 +13,6 @@ import test, { type TestContext } from "node:test";
 
 import type {
     ArtifactPayloadDescriptor,
-    JsonValue,
 } from "@portable-devshell/shared";
 import {
     ArtifactHostBridge,
@@ -25,8 +24,6 @@ function context(
     overrides?: Partial<ArtifactHostAccessContext>,
 ): ArtifactHostAccessContext {
     return {
-        appendControlEvent: async (_type: string, _data?: JsonValue) =>
-            undefined,
         authorityInstance: "demo-local",
         provider: "local",
         securityMode: "disabled",

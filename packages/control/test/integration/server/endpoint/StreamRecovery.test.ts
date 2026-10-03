@@ -52,7 +52,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     t.after(() => connection.close());
     const stream = await connection.open(
         asInstanceName("alpha"),
-        "runtime",
+        "process",
         "subscribe",
         { fromSeq: 1 },
     );
@@ -118,7 +118,7 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     t.after(() => connection.close());
     const stream = await connection.open(
         asInstanceName("alpha"),
-        "runtime",
+        "process",
         "subscribe",
         { fromSeq: 1 },
     );

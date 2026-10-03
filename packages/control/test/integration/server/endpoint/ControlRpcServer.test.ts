@@ -22,10 +22,9 @@ import {
     type ActiveTodoSummary,
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
-    createError,
-    errorCodes,
-    toControlErrorBody,
-    type ControlErrorBody,
+    controlErrorCodes,
+    toRemoteErrorBody,
+    type RemoteErrorBody,
     type ControlStreamMessage,
     type JsonValue,
     type MessageStream,
@@ -126,7 +125,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
     );
 
     const listed = (
-        await request(harness.socketPath, "@control", "instance.list")
+        await request(harness.socketPath, "@control", "config.listInstances")
     ).payload as Array<{
         name: string;
     }>;
@@ -143,21 +142,21 @@ test("ControlSocketServer routes canonical control and instance operations over 
     const snapshot = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.snapshot",
+        "process.snapshot",
     );
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
 
     const goals = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "goal.get",
+        "task.getGoals",
     );
     assert.deepEqual(goals.payload, { goals: [], lastSeq: 0 });
 
     await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.readLogs",
+        "process.readLogs",
         { limit: 1_000 },
     );
     assert.deepEqual(harness.worker.lastReadLogsQuery, {
@@ -206,7 +205,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "tool.listCalls",
         { callIds: ["oversized-call"], limit: 1 },
     );
-    assert.equal(oversizedToolCall.error?.code, errorCodes.targetInvalid);
+    assert.equal(oversizedToolCall.error?.code, controlErrorCodes.invalidTarget);
     assert.match(oversizedToolCall.error?.message ?? "", /safe response size/u);
 
     const toolReply = await request(
@@ -243,15 +242,15 @@ test("ControlSocketServer routes canonical control and instance operations over 
         request(
             harness.socketPath,
             asInstanceName("missing"),
-            "runtime.snapshot",
+            "process.snapshot",
         ),
-        /No route for missing:runtime/u,
+        /No route for missing:process/u,
     );
 
     const missingOperation = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.missing",
+        "process.missing",
     );
     assert.equal(missingOperation.error?.code, "method_not_found");
 });
@@ -465,7 +464,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
     const initialPreferences = await request(
         socketPath,
         "@control",
-        "conversation.preferences",
+        "config.getConversationPreferences",
         undefined,
         "tui",
     );
@@ -486,7 +485,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         await request(
             socketPath,
             "@control",
-            "conversation.updatePreferences",
+            "config.updateConversationPreferences",
             {
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -514,7 +513,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "conversation.preferences",
+                "config.getConversationPreferences",
                 undefined,
                 "tui",
             )
@@ -526,12 +525,12 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "conversation.updatePreferences",
+                "config.updateConversationPreferences",
                 { unknown: true },
                 "tui",
             )
         ).error?.code,
-        errorCodes.targetInvalid,
+        controlErrorCodes.invalidTarget,
     );
 });
 
@@ -557,9 +556,9 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
         request(
             socketPath,
             asInstanceName("alpha"),
-            "runtime.snapshot",
+            "process.snapshot",
         ),
-        /No route for alpha:runtime/u,
+        /No route for alpha:process/u,
     );
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
@@ -567,7 +566,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     const after = await request(
         socketPath,
         asInstanceName("alpha"),
-        "runtime.snapshot",
+        "process.snapshot",
     );
     assert.equal(after.error, undefined);
     assert.equal(
@@ -594,7 +593,7 @@ test("interactive runtime receives stream input while the root handler is still 
     await negotiateClient(client, "cli");
     const stream = await client.open(
         asInstanceName("alpha"),
-        "runtime",
+        "process",
         "start",
         {},
     );
@@ -620,7 +619,7 @@ test("interactive runtime receives stream input while the root handler is still 
     const stopped = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.stop",
+        "process.stop",
     );
     assert.deepEqual(
         (stopped.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
@@ -876,6 +875,15 @@ async function createHarness(
     const routes = new ControlRouteComposition({
         instances: registry,
         shutdown() {},
+        toolCalls: {
+            async call(_instance, toolName, input, context) {
+                return await worker.callTool(toolName, input, {
+                    ctxId: context.ctxId,
+                    requestId: context.requestId,
+                    source: context.source,
+                });
+            },
+        },
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -986,7 +994,7 @@ function readToolCallId(value: JsonValue): string {
 }
 
 interface RequestResult {
-    error?: ControlErrorBody;
+    error?: RemoteErrorBody;
     payload?: JsonValue;
 }
 
@@ -1010,7 +1018,7 @@ async function request(
             )) as JsonValue,
         };
     } catch (error) {
-        const body = toControlErrorBody(error);
+        const body = toRemoteErrorBody(error);
         if (body === undefined || body.code === "error.unknown") throw error;
         return { error: body };
     } finally {

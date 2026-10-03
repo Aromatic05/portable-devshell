@@ -1,4 +1,8 @@
-import type { Channel } from "@portable-devshell/shared";
+import {
+    controlWebSocketProtocols,
+    CONTROL_REMOTE_RPC_SUBPROTOCOL,
+    type Channel,
+} from "@portable-devshell/shared";
 import WebSocket, { type RawData } from "ws";
 
 export class NodeWebSocketChannel implements Channel {
@@ -27,9 +31,21 @@ export class NodeWebSocketChannel implements Channel {
         url: string,
         cookie: string,
     ): Promise<NodeWebSocketChannel> {
-        const socket = new WebSocket(url, "devshell-control-rpc.v1", {
+        const socket = new WebSocket(url, CONTROL_REMOTE_RPC_SUBPROTOCOL, {
             headers: { cookie },
         });
+        await new Promise<void>((resolve, reject) => {
+            socket.once("open", resolve);
+            socket.once("error", reject);
+        });
+        return new NodeWebSocketChannel(socket);
+    }
+
+    static async connectWithToken(
+        url: string,
+        token: string,
+    ): Promise<NodeWebSocketChannel> {
+        const socket = new WebSocket(url, controlWebSocketProtocols(token));
         await new Promise<void>((resolve, reject) => {
             socket.once("open", resolve);
             socket.once("error", reject);

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
     asInstanceName,
-    errorCodes,
+    runtimeErrorCodes,
     type ApprovalRequest,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -165,7 +165,7 @@ for (const decision of ["approve", "deny"] as const) {
         await service.cancel("approval-1", "late cancellation");
         await assert.rejects(service.decideApproval("approval-1", {
             decision, decidedBy: "cli",
-        }), { code: errorCodes.coreApprovalAlreadyDecided });
+        }), { code: runtimeErrorCodes.approvalAlreadyDecided });
         assert.equal(events.records.length, 2);
         assert.deepEqual(await service.listPendingApprovals(), []);
     });
@@ -255,7 +255,7 @@ test("queued abort wins a concurrent decision without duplicate events", async (
     controller.abort("racing abort");
     await assert.rejects(service.decideApproval("approval-1", {
         decision: "deny", decidedBy: "cli",
-    }), { code: errorCodes.coreApprovalAlreadyDecided });
+    }), { code: runtimeErrorCodes.approvalAlreadyDecided });
     assert.equal((await result.awaitDecision).status, "cancelled");
     assert.deepEqual(events.records.map(({ type }) => type), [
         "approval.requested", "approval.cancelled",

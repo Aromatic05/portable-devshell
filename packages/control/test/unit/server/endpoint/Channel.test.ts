@@ -6,7 +6,7 @@ import {
     CONTROL_PROTOCOL_VERSION,
     Endpoint,
     Rpc,
-    errorCodes,
+    controlErrorCodes,
     type Channel,
     type JsonValue,
     type ControlHostDefinition,
@@ -374,7 +374,8 @@ test("ControlChannelServer rejects unsafe semantic protocol components as invali
             },
         }),
         (error: unknown) =>
-            (error as { code?: string }).code === errorCodes.targetInvalid,
+            (error as { code?: string }).code ===
+                controlErrorCodes.invalidTarget,
     );
 });
 

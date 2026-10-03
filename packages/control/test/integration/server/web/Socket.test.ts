@@ -12,7 +12,6 @@ import {
     CONTROL_REMOTE_RPC_PATH,
     Endpoint,
     Rpc,
-    WebChannel,
     controlWebBasePath,
     type Channel,
     type ControlHostDefinition,
@@ -187,11 +186,11 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
 
     const origin = httpOrigin(host.server);
     await assert.rejects(
-        WebChannel.connect({
-            token: "anonymous-native-is-not-enabled",
-            url: `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
-        }),
-        /failed|rejected|Unauthorized/iu,
+        NodeWebSocketChannel.connectWithToken(
+            `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
+            "anonymous-native-is-not-enabled",
+        ),
+        /failed|rejected|Unauthorized|Unexpected server response/iu,
     );
     const mcp = await fetch(`${origin}/demo/mcp`, { method: "POST" });
     assert.equal(mcp.status, 401);
@@ -588,20 +587,20 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     const origin = httpOrigin(http);
     const url = `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`;
     await assert.rejects(
-        WebChannel.connect({ token: "wrong-token", url }),
-        /failed|rejected|Unauthorized/iu,
+        NodeWebSocketChannel.connectWithToken(url, "wrong-token"),
+        /failed|rejected|Unauthorized|Unexpected server response/iu,
     );
     await assert.rejects(
-        WebChannel.connect({
-            token: remoteToken,
-            url: `${origin.replace("http", "ws")}/web/rpc`,
-        }),
-        /failed|rejected|Unauthorized/iu,
+        NodeWebSocketChannel.connectWithToken(
+            `${origin.replace("http", "ws")}/web/rpc`,
+            remoteToken,
+        ),
+        /failed|rejected|Unauthorized|Unexpected server response/iu,
     );
 
     for (const peer of ["tui", "cli"] as const) {
-        const connection = createClient((signal) =>
-            WebChannel.connect({ token: remoteToken, url }, signal),
+        const connection = createClient(
+            async () => await NodeWebSocketChannel.connectWithToken(url, remoteToken),
         );
         t.after(() => connection.close());
         await negotiate(connection, peer);
@@ -610,8 +609,8 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
             { pong: true },
         );
     }
-    const forgedWeb = createClient((signal) =>
-        WebChannel.connect({ token: remoteToken, url }, signal),
+    const forgedWeb = createClient(
+        async () => await NodeWebSocketChannel.connectWithToken(url, remoteToken),
     );
     t.after(() => forgedWeb.close());
     await assert.rejects(
@@ -656,10 +655,10 @@ test("native OAuth bearer expiry closes an active Control WebSocket", async (t) 
         );
     });
 
-    const channel = await WebChannel.connect({
-        token: "expiring-oauth-token",
-        url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
-    });
+    const channel = await NodeWebSocketChannel.connectWithToken(
+        `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
+        "expiring-oauth-token",
+    );
     t.after(() => channel.close());
 
     await waitUntil(() => channel.closed);
@@ -706,10 +705,10 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
         );
     });
 
-    const channel = await WebChannel.connect({
-        token: "revocable-oauth-token",
-        url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
-    });
+    const channel = await NodeWebSocketChannel.connectWithToken(
+        `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
+        "revocable-oauth-token",
+    );
     t.after(() => channel.close());
     assert.equal(channel.closed, false);
 

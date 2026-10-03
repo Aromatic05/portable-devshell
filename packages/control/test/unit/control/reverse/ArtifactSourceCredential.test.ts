@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes } from "@portable-devshell/shared";
+import {
+    controlErrorCodes,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import {
     readSharePayloadSourceInput,
@@ -171,7 +174,7 @@ test("reverse credential service validates instance existence and provider befor
     await assert.rejects(
         service.createDeviceCode("missing-one"),
         (error: unknown) => {
-            assert.equal(readField(error, "code"), errorCodes.instanceMissing);
+            assert.equal(readField(error, "code"), controlErrorCodes.instanceNotFound);
             assert.deepEqual(readField(error, "details"), {
                 instance: "missing-one",
             });
@@ -183,7 +186,7 @@ test("reverse credential service validates instance existence and provider befor
         (error: unknown) => {
             assert.equal(
                 readField(error, "code"),
-                errorCodes.reverseInstanceNotReverse,
+                runtimeErrorCodes.reverseInstanceNotReverse,
             );
             assert.deepEqual(readField(error, "details"), {
                 instance: "local-one",
@@ -271,7 +274,7 @@ function credentialStore(calls: string[]) {
 
 function assertTargetInvalid(action: () => unknown): void {
     assert.throws(action, (error: unknown) => {
-        assert.equal(readField(error, "code"), errorCodes.targetInvalid);
+        assert.equal(readField(error, "code"), controlErrorCodes.invalidTarget);
         assert.equal(readField(error, "retryable"), false);
         return true;
     });
