@@ -43,3 +43,34 @@ test("Extension domain modules never depend on the composed ExtensionApi layer",
         );
     }
 });
+
+test("Extension package publishes every domain as one leaf subpath without root aggregation", async () => {
+    const domainDirectory = new URL("../../src/domain/", import.meta.url);
+    const domains = (await readdir(domainDirectory))
+        .filter((file) => file.endsWith(".ts"))
+        .map((file) => file.slice(0, -3))
+        .sort();
+    const packageJson = JSON.parse(
+        await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as {
+        exports: Record<string, { default: string; types: string }>;
+    };
+    const exportedDomains = Object.keys(packageJson.exports)
+        .filter((key) => key !== "." && key.startsWith("./"))
+        .map((key) => key.slice(2))
+        .sort();
+
+    assert.deepEqual(exportedDomains, domains);
+    for (const domain of domains) {
+        assert.deepEqual(packageJson.exports["./" + domain], {
+            default: "./dist/domain/" + domain + ".js",
+            types: "./dist/domain/" + domain + ".d.ts",
+        });
+    }
+
+    const rootSource = await readFile(
+        new URL("../../src/index.ts", import.meta.url),
+        "utf8",
+    );
+    assert.doesNotMatch(rootSource, /\.\/domain\//u);
+});

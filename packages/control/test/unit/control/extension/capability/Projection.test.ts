@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EXTENSION_CAPABILITY_IDS } from "@portable-devshell/extension";
+import {
+    EXTENSION_CAPABILITY_IDS,
+    type ExtensionCapabilities,
+    type ExtensionCapability,
+} from "@portable-devshell/extension";
 
 import {
     EXTENSION_CAPABILITY_CONTEXT_KEYS,
@@ -22,6 +26,13 @@ function factories(calls: string[]): ExtensionCapabilityRuntimeFactories {
 }
 
 test("Extension capability projection maps every canonical grant to one runtime field", () => {
+    const uncovered: Record<
+        Exclude<
+            keyof ExtensionCapabilities,
+            (typeof EXTENSION_CAPABILITY_CONTEXT_KEYS)[ExtensionCapability]
+        >,
+        never
+    > = {};
     const calls: string[] = [];
     const projected = projectExtensionCapabilities(
         EXTENSION_CAPABILITY_IDS,
@@ -29,6 +40,7 @@ test("Extension capability projection maps every canonical grant to one runtime 
     );
     const runtimeKeys = Object.values(EXTENSION_CAPABILITY_CONTEXT_KEYS);
 
+    assert.deepEqual(uncovered, {});
     assert.equal(new Set(runtimeKeys).size, EXTENSION_CAPABILITY_IDS.length);
     assert.deepEqual(Object.keys(projected).sort(), [...runtimeKeys].sort());
     assert.deepEqual(calls.sort(), [...runtimeKeys].sort());
