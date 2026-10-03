@@ -4,11 +4,13 @@ import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
 import { type TodoReadResult } from "@portable-devshell/shared";
-import { type WorkerInstance } from "@portable-devshell/core/testing";
+import {
+    InstanceRegistry,
+    type WorkerInstance,
+} from "@portable-devshell/core/testing";
 import {
     ControlRouteComposition,
     ControlSocketServer,
-    InstanceRegistry,
 } from "@portable-devshell/control/testing";
 import {
     createTuiDomainSession,

@@ -6,10 +6,10 @@ import type {
 
 import { createInstanceSnapshot, type InstanceSnapshot } from "./Snapshot.js";
 import {
-    type InstanceRuntimeState,
-    deriveRuntimeStatus,
+    type InstanceProcessState,
+    deriveProcessStatus,
     isReadyState,
-} from "./Runtime.js";
+} from "./Status.js";
 
 export interface InstanceStateUpdate {
     connectionState?: ConnectionState;
@@ -22,7 +22,7 @@ export interface InstanceStateUpdate {
 
 export class InstanceStateMachine {
     readonly #name: InstanceName;
-    #state: InstanceRuntimeState;
+    #state: InstanceProcessState;
 
     constructor(name: InstanceName) {
         this.#name = name;
@@ -64,7 +64,7 @@ export class InstanceStateMachine {
             lastSeq,
             pid,
             ready: isReadyState(daemonState, connectionState),
-            status: deriveRuntimeStatus(daemonState, connectionState),
+            status: deriveProcessStatus(daemonState, connectionState),
         };
 
         return this.snapshot();
@@ -82,7 +82,7 @@ export class InstanceStateMachine {
         });
     }
 
-    state(): InstanceRuntimeState {
+    state(): InstanceProcessState {
         return { ...this.#state };
     }
 }

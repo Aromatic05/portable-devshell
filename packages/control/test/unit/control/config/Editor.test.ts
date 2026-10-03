@@ -10,8 +10,8 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-import { ConfigChangeHub } from "../../../../src/control/config/Change.ts";
-import { ControlRuntimeContext } from "../../../../src/composition/control/subsystem/Context.ts";
+import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ContextModule } from "../../../../src/context/Module.ts";
 import {
     MASKED_CONFIG_TOKEN,
     normalizeConfigInstanceDraft,
@@ -714,8 +714,7 @@ test("instance cleanup debt survives coordinator restart and gates the next gene
     });
 
     const warnings = await captureWarnings(
-        async () =>
-            await first.disableInstance({ instanceName: "demo-local" }),
+        async () => await first.disableInstance({ instanceName: "demo-local" }),
     );
 
     assert.equal(config.instances[0]?.enabled, false);
@@ -752,7 +751,9 @@ test("instance cleanup debt survives coordinator restart and gates the next gene
 });
 
 test("failed cleanup debt persistence does not leave a phantom in-memory debt", async () => {
-    const root = await createTestTempDirectory("instance-cleanup-debt-write-failure");
+    const root = await createTestTempDirectory(
+        "instance-cleanup-debt-write-failure",
+    );
     const cleanupDebtFile = join(root, "lifecycle-cleanup.json");
     await writeFile(cleanupDebtFile, "[]\n", "utf8");
     let config = createConfig();
@@ -1121,7 +1122,8 @@ test("disable committed-listener failure is cleanup degradation, not transaction
     });
 
     const warnings = await captureWarnings(
-        async () => await service.disableInstance({ instanceName: "demo-local" }),
+        async () =>
+            await service.disableInstance({ instanceName: "demo-local" }),
     );
 
     assert.equal(config.instances[0]?.enabled, false);
@@ -1534,14 +1536,18 @@ test("instance delete detaches Context before terminal resource cleanup", async 
 });
 
 test("deleting a disabled MCP instance preserves and reattaches its Context", async (t) => {
-    const contextHome = await createTestTempDirectory("config-delete-context-isolated");
-    t.after(async () => await rm(contextHome, { force: true, recursive: true }));
+    const contextHome = await createTestTempDirectory(
+        "config-delete-context-isolated",
+    );
+    t.after(
+        async () => await rm(contextHome, { force: true, recursive: true }),
+    );
     const contextPath = join(contextHome, "contexts.json");
     let config = createConfig();
     config.mcp.enabled = false;
     config.instances[0]!.enabled = false;
     const instances = new InstanceRegistry([]);
-    const contexts = new ControlRuntimeContext({
+    const contexts = new ContextModule({
         contextFile: contextPath,
         instances,
     });
@@ -1577,15 +1583,17 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
     assert.deepEqual(detached.environments, []);
     assert.equal((await contexts.renew(context.ctxId)).status, "active");
 
-    const restoredContexts = new ControlRuntimeContext({
+    const restoredContexts = new ContextModule({
         contextFile: contextPath,
         instances,
     });
     await restoredContexts.initialize();
     assert.deepEqual(
-        (await restoredContexts.registry.lookup(context.ctxId, {
-            principal: "local",
-        })).environments,
+        (
+            await restoredContexts.registry.lookup(context.ctxId, {
+                principal: "local",
+            })
+        ).environments,
         [],
     );
     await restoredContexts.registry.attachEnvironment(context.ctxId, {
@@ -1593,16 +1601,22 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
         workspace: "/replacement",
     });
     assert.deepEqual(
-        (await restoredContexts.registry.lookup(context.ctxId, {
-            principal: "local",
-        })).environments,
+        (
+            await restoredContexts.registry.lookup(context.ctxId, {
+                principal: "local",
+            })
+        ).environments,
         [{ instance: "replacement", workspace: "/replacement" }],
     );
 });
 
 test("instance deletion starts cleanup-only worker before releasing pending Context alerts", async (t) => {
-    const contextHome = await createTestTempDirectory("config-delete-context-alerts");
-    t.after(async () => await rm(contextHome, { force: true, recursive: true }));
+    const contextHome = await createTestTempDirectory(
+        "config-delete-context-alerts",
+    );
+    t.after(
+        async () => await rm(contextHome, { force: true, recursive: true }),
+    );
     const instanceName = "demo-local";
     const events: string[] = [];
     let ready = false;
@@ -1644,7 +1658,7 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
     let config = createConfig();
     config.mcp.enabled = false;
     config.instances[0]!.enabled = false;
-    const contexts = new ControlRuntimeContext({
+    const contexts = new ContextModule({
         contextFile: join(contextHome, "contexts.json"),
         instances,
     });
@@ -1679,7 +1693,10 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
         detachContextInstance: async (instance) => {
             await contexts.detachInstance(instance);
         },
-        reconcileContextInstanceCleanup: async (instance, cleanupDescriptor) => {
+        reconcileContextInstanceCleanup: async (
+            instance,
+            cleanupDescriptor,
+        ) => {
             await contexts.cleanup.reconcileInstance(instance, {
                 releaseAlerts: async (workspace) => {
                     assert.ok(cleanupDescriptor);
@@ -1714,7 +1731,9 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
 });
 
 test("failed Context cleanup keeps both debts and cleanup capability through retry and replay", async (t) => {
-    const root = await createTestTempDirectory("config-delete-context-alerts-retry");
+    const root = await createTestTempDirectory(
+        "config-delete-context-alerts-retry",
+    );
     t.after(async () => await rm(root, { force: true, recursive: true }));
 
     const exercise = async (mode: "retry" | "replay") => {
@@ -1740,7 +1759,8 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
             async releaseAlerts(workspace: string) {
                 assert.equal(ready, true);
                 events.push(`alerts.release:${workspace}`);
-                if (!allowRelease) throw new Error("alerts release unavailable");
+                if (!allowRelease)
+                    throw new Error("alerts release unavailable");
             },
             async retireRuntime() {
                 events.push("worker.retire");
@@ -1766,11 +1786,16 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         config.instances[0]!.mcp.path = `/${instanceName}/mcp`;
         config.instances[0]!.enabled = false;
         config.mcp.enabled = false;
-        const contexts = new ControlRuntimeContext({ contextFile: contextPath, instances });
+        const contexts = new ContextModule({
+            contextFile: contextPath,
+            instances,
+        });
         await contexts.initialize();
         const context = await contexts.registry.create({
             principal: "local",
-            environments: [{ instance: instanceName, workspace: "/historical" }],
+            environments: [
+                { instance: instanceName, workspace: "/historical" },
+            ],
         });
         await contexts.registry.recordEnvironmentCleanup(context.ctxId, {
             instance: instanceName,
@@ -1778,30 +1803,50 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
             workspace: "/historical",
         });
 
-        const makeService = (registry: InstanceRegistry, mapDescriptor?: ReturnType<typeof descriptor>) =>
+        const makeService = (
+            registry: InstanceRegistry,
+            mapDescriptor?: ReturnType<typeof descriptor>,
+        ) =>
             new ConfigEditorCoordinator({
                 cleanupDebtFile,
-                configStore: { async write(nextConfig: ControlConfig) { config = nextConfig; } },
-                detachContextInstance: async (instance) => { await contexts.detachInstance(instance); },
-                reconcileContextInstanceCleanup: async (instance, cleanupDescriptor) => {
+                configStore: {
+                    async write(nextConfig: ControlConfig) {
+                        config = nextConfig;
+                    },
+                },
+                detachContextInstance: async (instance) => {
+                    await contexts.detachInstance(instance);
+                },
+                reconcileContextInstanceCleanup: async (
+                    instance,
+                    cleanupDescriptor,
+                ) => {
                     await contexts.cleanup.reconcileInstance(instance, {
                         releaseAlerts: async (workspace) => {
                             assert.ok(cleanupDescriptor);
                             if (!cleanupDescriptor.worker.snapshot().ready)
                                 await cleanupDescriptor.worker.start();
-                            await cleanupDescriptor.worker.releaseAlerts(workspace);
+                            await cleanupDescriptor.worker.releaseAlerts(
+                                workspace,
+                            );
                         },
                         releaseInstanceReference: async (ctxId) => {
-                            registry.releaseConnectionReference(instance, ctxId);
+                            registry.releaseConnectionReference(
+                                instance,
+                                ctxId,
+                            );
                         },
                     });
                 },
                 getConfig: () => config,
-                instanceConfigMapper: mapDescriptor === undefined
-                    ? undefined
-                    : ({ map: () => mapDescriptor } as never),
+                instanceConfigMapper:
+                    mapDescriptor === undefined
+                        ? undefined
+                        : ({ map: () => mapDescriptor } as never),
                 instanceRegistry: registry,
-                setConfig: (nextConfig) => { config = nextConfig; },
+                setConfig: (nextConfig) => {
+                    config = nextConfig;
+                },
             });
 
         const service = makeService(instances);
@@ -1811,9 +1856,18 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         assert.equal(warnings.length, 1);
         assert.equal(instances.get(instanceName), undefined);
         assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), [
-            { ctxId: context.ctxId, cleanup: { instance: instanceName, kind: "alerts", workspace: "/historical" } },
+            {
+                ctxId: context.ctxId,
+                cleanup: {
+                    instance: instanceName,
+                    kind: "alerts",
+                    workspace: "/historical",
+                },
+            },
         ]);
-        const persistedDebt = JSON.parse(await readFile(cleanupDebtFile, "utf8")) as Array<{ instance: { name: string }; operation: string }>;
+        const persistedDebt = JSON.parse(
+            await readFile(cleanupDebtFile, "utf8"),
+        ) as Array<{ instance: { name: string }; operation: string }>;
         assert.equal(persistedDebt[0]?.instance.name, instanceName);
         assert.equal(persistedDebt[0]?.operation, "delete");
         assert.equal(events.includes("worker.close"), false);
@@ -1825,36 +1879,51 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         } else {
             const replayRegistry = new InstanceRegistry([]);
             let replayReady = false;
-            const replayDescriptor = descriptor({
-                ...worker,
-                snapshot: () => ({
-                    daemonState: replayReady ? "running" : "stopped",
-                    ready: replayReady,
-                }),
-                async start() {
-                    assert.equal(replayRegistry.get(instanceName), undefined);
-                    events.push("replay.start");
-                    replayReady = true;
+            const replayDescriptor = descriptor(
+                {
+                    ...worker,
+                    snapshot: () => ({
+                        daemonState: replayReady ? "running" : "stopped",
+                        ready: replayReady,
+                    }),
+                    async start() {
+                        assert.equal(
+                            replayRegistry.get(instanceName),
+                            undefined,
+                        );
+                        events.push("replay.start");
+                        replayReady = true;
+                    },
+                    async releaseAlerts(workspace: string) {
+                        assert.equal(replayReady, true);
+                        events.push(`alerts.release:${workspace}`);
+                        if (!allowRelease)
+                            throw new Error("alerts release unavailable");
+                    },
                 },
-                async releaseAlerts(workspace: string) {
-                    assert.equal(replayReady, true);
-                    events.push(`alerts.release:${workspace}`);
-                    if (!allowRelease)
-                        throw new Error("alerts release unavailable");
+                {
+                    name: instanceName,
+                    mcpPath: `/${instanceName}/mcp`,
+                    approval: { async retire() {}, close() {} },
                 },
-            }, {
-                name: instanceName,
-                mcpPath: `/${instanceName}/mcp`,
-                approval: { async retire() {}, close() {} },
-            });
-            await makeService(replayRegistry, replayDescriptor).reconcileCleanupDebt();
+            );
+            await makeService(
+                replayRegistry,
+                replayDescriptor,
+            ).reconcileCleanupDebt();
             assert.equal(replayRegistry.get(instanceName), undefined);
             assert.ok(events.includes("replay.start"));
         }
         assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), []);
-        assert.equal(JSON.parse(await readFile(cleanupDebtFile, "utf8")).length, 0);
+        assert.equal(
+            JSON.parse(await readFile(cleanupDebtFile, "utf8")).length,
+            0,
+        );
         assert.equal(events.at(-1), "worker.close");
-        assert.ok(events.indexOf("alerts.release:/historical") < events.indexOf("worker.close"));
+        assert.ok(
+            events.indexOf("alerts.release:/historical") <
+                events.indexOf("worker.close"),
+        );
     };
 
     await exercise("retry");
@@ -2051,7 +2120,8 @@ test("instance delete remains committed when generation retirement fails", async
     });
 
     const warnings = await captureWarnings(
-        async () => await service.deleteInstance({ instanceName: "demo-local" }),
+        async () =>
+            await service.deleteInstance({ instanceName: "demo-local" }),
     );
     assert.deepEqual(writes, [0]);
     assert.equal(config.instances.length, 0);
@@ -2101,7 +2171,8 @@ test("instance delete remains committed when live-state retirement fails", async
     });
 
     const warnings = await captureWarnings(
-        async () => await service.deleteInstance({ instanceName: "demo-local" }),
+        async () =>
+            await service.deleteInstance({ instanceName: "demo-local" }),
     );
     assert.deepEqual(writes, [0]);
     assert.equal(config.instances.length, 0);
@@ -2126,7 +2197,8 @@ test("instance delete committed-listener failure does not reverse the delete", a
     });
 
     const warnings = await captureWarnings(
-        async () => await service.deleteInstance({ instanceName: "demo-local" }),
+        async () =>
+            await service.deleteInstance({ instanceName: "demo-local" }),
     );
 
     assert.equal(config.instances.length, 0);
@@ -2611,10 +2683,7 @@ test("config editor applies Core path updates transactionally and restores on ru
     await service.updateCorePaths({
         "mcp.publicBaseUrl": "https://public.example.test/mcp",
     });
-    assert.equal(
-        config.mcp.publicBaseUrl,
-        "https://public.example.test/mcp",
-    );
+    assert.equal(config.mcp.publicBaseUrl, "https://public.example.test/mcp");
     assert.deepEqual(runtimeChanges, [{ mcp: true, web: false }]);
     assert.deepEqual(committed, [["mcp.publicBaseUrl"]]);
 
@@ -2806,7 +2875,9 @@ function runningSnapshot() {
     };
 }
 
-async function captureWarnings(operation: () => Promise<unknown>): Promise<unknown[]> {
+async function captureWarnings(
+    operation: () => Promise<unknown>,
+): Promise<unknown[]> {
     const warnings: unknown[] = [];
     const originalWarn = console.warn;
     console.warn = (value?: unknown) => {

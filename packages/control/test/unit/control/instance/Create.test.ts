@@ -5,7 +5,7 @@ import {
     InstanceRegistry,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-import { InstanceCreateCoordinator } from "../../../../src/control/instance/create/Coordinator.ts";
+import { InstanceCreateCoordinator } from "../../../../src/config/instance/create/Coordinator.ts";
 import {
     normalizeConfigInstanceDraft,
     type ControlConfig,

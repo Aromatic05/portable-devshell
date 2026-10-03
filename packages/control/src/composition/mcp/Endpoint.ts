@@ -5,7 +5,7 @@ import type {
 } from "@portable-devshell/mcp";
 import type { ControlMcpAuthConfig } from "@portable-devshell/shared";
 
-import type { InstanceDescriptor } from "../../control/instance/Descriptor.js";
+import type { InstanceDescriptor } from "@portable-devshell/core";
 
 export class McpEndpointFactory {
     map(

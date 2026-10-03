@@ -12,24 +12,24 @@ import {
     McpOAuthProtectedResource,
     type HttpHost,
 } from "@portable-devshell/mcp";
-import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
-import type { ConfigChangeHub } from "../../control/config/Change.js";
-import { DebugPatchService } from "../../control/debug/Service.js";
-import { CliExtensionCommandService } from "../../control/extension/cli/command/Service.js";
-import { TuiExtensionPageService } from "../../control/extension/tui/Route.js";
-import { ModelDevshellBroker } from "../../control/extension/cli/command/ModelBroker.js";
-import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
-import { ExtensionControlService } from "../../control/extension/Service.js";
-import { ControlExtensionRouteService } from "../../control/extension/Route.js";
+import type { InstanceRegistry } from "@portable-devshell/core";
+import type { ConfigChangeHub } from "../../config/Change.js";
+import { DebugPatchService } from "../../debug/Service.js";
+import { CliExtensionCommandService } from "../../extension/cli/command/Service.js";
+import { TuiExtensionPageService } from "../../extension/tui/Route.js";
+import { ModelDevshellBroker } from "../../extension/cli/command/ModelBroker.js";
+import { ProcessSubscriptionManager } from "@portable-devshell/core";
+import { ExtensionControlService } from "../../extension/Service.js";
+import { ControlExtensionRouteService } from "../../extension/Route.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../../server/web/extension/page/Service.js";
-import type { ExtensionHost } from "../../control/extension/Host.js";
-import { ExtensionInstallService } from "../../control/extension/install/Service.js";
-import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
-import { ToolCallSecretRewrite } from "../../control/extension/toolcall/interface/index.js";
-import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
-import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
-import { OperationalOverviewService } from "../../control/overview/Service.js";
+import type { ExtensionHost } from "../../extension/Host.js";
+import { ExtensionInstallService } from "../../extension/install/Service.js";
+import { ToolCallExtensionBinding } from "../../extension/toolcall/Binding.js";
+import { ToolCallSecretRewrite } from "../../extension/toolcall/interface/index.js";
+import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
+import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
+import { OperationalOverviewService } from "../../overview/Service.js";
 import {
     ControlChannelServer,
     type ControlChannelListener,
@@ -42,26 +42,26 @@ import { ControlWebSocketAccessService } from "../../server/web/auth/Access.js";
 import { ControlWebSocketListener } from "../../server/web/Socket.js";
 import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
 import { ControlRouteComposition } from "../Route.js";
-import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
-import type { ContextService } from "../../control/context/Service.js";
-import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
-import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
+import type { ArtifactModule } from "../../artifact/Module.js";
+import type { ContextService } from "../../context/Service.js";
+import type { McpControlModule } from "../mcp/Control.js";
+import type { ConnectionModule } from "../../connection/Module.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import { McpExtensionService } from "../mcp/extension/Service.js";
 
 export interface ControlRuntimeOptions {
     contexts: ContextService;
-    artifact: ControlRuntimeArtifact;
+    artifact: ArtifactModule;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
-    mcp: ControlRuntimeMcp;
+    mcp: McpControlModule;
     restart: () => Promise<void>;
-    reverse: ControlRuntimeReverse;
-    runtimeSubscriptions?: RuntimeSubscriptionManager;
+    reverse: ConnectionModule;
+    processSubscriptions?: ProcessSubscriptionManager;
     shutdown: () => Promise<void>;
     socketPath: string;
 }
@@ -74,7 +74,7 @@ interface ControlWebRuntime {
 
 export class ControlRuntime {
     readonly #contexts: ContextService;
-    readonly #artifact: ControlRuntimeArtifact;
+    readonly #artifact: ArtifactModule;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #channels: ControlChannelServer;
     readonly #debug: DebugPatchService;
@@ -82,9 +82,9 @@ export class ControlRuntime {
     readonly #extensionPaths: ExtensionPathLayout;
     readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
-    readonly #mcp: ControlRuntimeMcp;
+    readonly #mcp: McpControlModule;
     readonly #modelDevshell: ModelDevshellBroker;
-    readonly #reverse: ControlRuntimeReverse;
+    readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
     readonly #toolCallBinding: ToolCallExtensionBinding;
@@ -156,8 +156,8 @@ export class ControlRuntime {
         );
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
-        const runtimeSubscriptions =
-            options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
+        const processSubscriptions =
+            options.processSubscriptions ?? new ProcessSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(
             this.#extensions,
             {
@@ -207,7 +207,7 @@ export class ControlRuntime {
             }),
             restart: options.restart,
             reverse: options.reverse.service,
-            runtimeSubscriptions,
+            processSubscriptions,
             shutdown: options.shutdown,
             toolCalls: this.#toolCalls,
             toolProvenance: options.mcp.toolProvenance,

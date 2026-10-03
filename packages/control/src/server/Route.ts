@@ -20,10 +20,12 @@ export function routeModule(
         ...(Object.keys(streams).length === 0
             ? {}
             : {
-                  streams: Object.entries(streams).map(([operation, handle]) => ({
-                      name: operation,
-                      handle,
-                  })),
+                  streams: Object.entries(streams).map(
+                      ([operation, handle]) => ({
+                          name: operation,
+                          handle,
+                      }),
+                  ),
               }),
     };
 }

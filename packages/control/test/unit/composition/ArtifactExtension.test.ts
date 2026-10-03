@@ -10,7 +10,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ControlRuntimeArtifact } from "../../../src/composition/control/subsystem/Artifact.ts";
+import { ArtifactModule } from "../../../src/artifact/Module.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 class MemoryArtifactReceiver {
@@ -79,7 +79,7 @@ async function harness(t: test.TestContext) {
     await writeFile(join(source, "SKILL.md"), "# Review\n", "utf8");
     const target = new MemoryArtifactReceiver();
     const config = createDefaultControlConfig();
-    const runtime = new ControlRuntimeArtifact({
+    const runtime = new ArtifactModule({
         config: () => config,
         controlPaths: new ControlPathHome(home),
         homeDirectory: home,
@@ -139,17 +139,23 @@ test("Artifact callers cannot forge the private Extension host authority", async
 });
 
 test("Artifact startup can be retried after initialization is repaired", async (t) => {
-    const root = await createTestTempDirectory("control-runtime-artifact-retry");
+    const root = await createTestTempDirectory(
+        "control-runtime-artifact-retry",
+    );
     const home = join(root, "home");
     const artifacts = join(home, ".devshell", "control", "artifacts");
     await mkdir(join(artifacts, "shares"), { recursive: true });
     await writeFile(join(artifacts, "transfers"), "blocked", "utf8");
     const config = createDefaultControlConfig();
-    const runtime = new ControlRuntimeArtifact({
+    const runtime = new ArtifactModule({
         config: () => config,
         controlPaths: new ControlPathHome(home),
         homeDirectory: home,
-        instances: { get() { return undefined; } } as never,
+        instances: {
+            get() {
+                return undefined;
+            },
+        } as never,
     });
     t.after(async () => {
         await runtime.stop().catch(() => undefined);

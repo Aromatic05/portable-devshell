@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createToolCallScope } from "../../../../src/toolcall/Context.ts";
+import { createToolCallScope } from "../../../../src/tool/Context.ts";
 
 test("tool-call live event metadata excludes full input and bounds its summary", () => {
     const input = {

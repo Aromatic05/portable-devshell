@@ -10,9 +10,9 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ReverseConnectionService } from "../../../../src/control/reverse/connection/Service.ts";
-import { ReverseCredentialService } from "../../../../src/control/reverse/credential/Service.ts";
-import { ReverseCredentialStore } from "../../../../src/control/reverse/credential/Store.ts";
+import { ReverseConnectionService } from "../../../../src/connection/Service.ts";
+import { ReverseCredentialService } from "../../../../src/connection/credential/Service.ts";
+import { ReverseCredentialStore } from "../../../../src/connection/credential/Store.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryRpcChannel implements Channel {

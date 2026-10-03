@@ -16,12 +16,12 @@ import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import { executeInstanceCommand } from "@portable-devshell/instance-extension";
 import type { CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
 
-import { CliExtensionCommandService } from "../../../src/control/extension/cli/command/Service.ts";
-import { ModelDevshellBroker } from "../../../src/control/extension/cli/command/ModelBroker.ts";
-import { ExtensionInstanceObserveCapabilityControl } from "../../../src/control/extension/generation/capability/Instance.ts";
-import type { InstanceDescriptor } from "../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
-import { RuntimeSubscriptionManager } from "../../../src/instance/execution/runtime/Subscription.ts";
+import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
+import { ModelDevshellBroker } from "../../../src/extension/cli/command/ModelBroker.ts";
+import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/generation/capability/Instance.ts";
+import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
+import { ProcessSubscriptionManager } from "@portable-devshell/core";
 import {
     commandAvailable,
     realWorkerTestOptions,
@@ -96,8 +96,10 @@ test(
                             () => worker.listTools(),
                         ),
                         environment: () => worker.handshake,
-                        readAlerts: async (_instance, workspace) => await worker.readAlerts(workspace),
-                        releaseAlerts: async (_instance, workspace) => await worker.releaseAlerts(workspace),
+                        readAlerts: async (_instance, workspace) =>
+                            await worker.readAlerts(workspace),
+                        releaseAlerts: async (_instance, workspace) =>
+                            await worker.releaseAlerts(workspace),
                     },
                     name: instanceName,
                     worker,
@@ -352,7 +354,7 @@ function instanceModelExtensionHost(
                 provider: "local",
             },
         ],
-        subscriptions: new RuntimeSubscriptionManager(),
+        subscriptions: new ProcessSubscriptionManager(),
     });
     const declaration = {
         id: "instance",

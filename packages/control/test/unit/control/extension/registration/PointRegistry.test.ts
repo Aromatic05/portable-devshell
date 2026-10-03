@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionPointRegistry } from "../../../../../src/control/extension/generation/registration/PointRegistry.ts";
+import { ExtensionPointRegistry } from "../../../../../src/extension/generation/registration/PointRegistry.ts";
 
 test("Extension Point registry rejects invalid and duplicate point identities", () => {
     assert.throws(

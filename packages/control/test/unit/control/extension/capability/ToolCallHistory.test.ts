@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../src/control/extension/generation/capability/ToolCallHistory.ts";
-import type { InstanceDescriptor } from "../../../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../../../src/control/instance/registry/Registry.ts";
+import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../src/extension/generation/capability/ToolCallHistory.ts";
+import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
 
 test("ToolCall history capability is read-only, typed, bounded, and provenance-decorated", async () => {
     const queries: unknown[] = [];

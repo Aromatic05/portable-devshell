@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    InstanceRegistry,
     InstanceRegistryFactory,
+} from "@portable-devshell/core";
+import {
     McpEndpointFactory,
     McpRuntimeFactory,
-    createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+import {
+    createDefaultControlConfig,
+    normalizeConfigInstanceDraft,
+} from "@portable-devshell/shared";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
 
 test("disabled instances are skipped and registry does not auto start workers", () => {
@@ -100,9 +105,7 @@ test("MCP runtime is absent while global MCP remains disabled", () => {
 
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
-    const registry = new (
-        await import("../../../../src/control/instance/registry/Registry.js")
-    ).InstanceRegistry([
+    const registry = new InstanceRegistry([
         createTestInstanceDescriptor(
             {
                 async stop() {

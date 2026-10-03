@@ -11,8 +11,8 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 
-import { ControlRuntimeMcp } from "../../../src/composition/control/subsystem/Mcp.ts";
-import { ControlRuntimeContext } from "../../../src/composition/control/subsystem/Context.ts";
+import { McpControlModule } from "../../../src/composition/mcp/Control.ts";
+import { ContextModule } from "../../../src/context/Module.ts";
 import { ControlRuntimeState } from "../../../src/composition/control/State.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
@@ -177,8 +177,11 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -224,8 +227,11 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -284,8 +290,11 @@ test("MCP migration starts a different listener before retiring the previous lis
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -347,8 +356,11 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -419,8 +431,11 @@ test("MCP restore attempts every host transition and reports rollback failures",
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -478,8 +493,11 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -531,8 +549,11 @@ test("shared listener Web auth changes require an explicit control restart witho
         homeDirectory,
     });
     await state.load();
-    const runtime = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const runtime = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: {
             service: {},
             installHttpRoute() {},
@@ -568,7 +589,7 @@ test("shared listener Web auth changes require an explicit control restart witho
 async function createRuntime(
     config: ControlConfig,
     homeDirectory: string,
-): Promise<ControlRuntimeMcp> {
+): Promise<McpControlModule> {
     const state = new ControlRuntimeState({
         configStore: {
             async readOrCreate() {
@@ -578,12 +599,12 @@ async function createRuntime(
         homeDirectory,
     });
     await state.load();
-    const contexts = new ControlRuntimeContext({
+    const contexts = new ContextModule({
         contextFile: new ControlPathHome(homeDirectory).contextsFile,
         instances: state.instances,
     });
     await contexts.initialize();
-    return new ControlRuntimeMcp({
+    return new McpControlModule({
         contexts,
         artifact: {
             service: {},

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DebugPatchManager } from "../../../../src/control/debug/Patch.ts";
+import { DebugPatchManager } from "../../../../src/debug/Patch.ts";
 
 class DemoTarget {
     async run(value: string, signal?: AbortSignal): Promise<string> {

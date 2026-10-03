@@ -1,7 +1,4 @@
-import {
-    Endpoint,
-    type InstanceEventRecord,
-} from "@portable-devshell/shared";
+import { Endpoint, type InstanceEventRecord } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 
 import { AuditDatabase } from "../../storage/audit/database/Database.js";
@@ -101,5 +98,4 @@ export class WorkerInstanceFactory {
             instanceName: config.name,
         });
     }
-
 }

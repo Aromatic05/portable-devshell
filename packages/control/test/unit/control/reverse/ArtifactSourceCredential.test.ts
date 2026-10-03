@@ -13,8 +13,8 @@ import {
     sourceDescriptor,
     sourceTypeFromPayload,
     validateTransferStart,
-} from "../../../../src/control/artifact/Source.ts";
-import { ReverseCredentialService } from "../../../../src/control/reverse/credential/Service.ts";
+} from "../../../../src/artifact/Source.ts";
+import { ReverseCredentialService } from "../../../../src/connection/credential/Service.ts";
 
 test("artifact source helpers preserve handle and path variants", () => {
     assert.deepEqual(
@@ -174,7 +174,10 @@ test("reverse credential service validates instance existence and provider befor
     await assert.rejects(
         service.createDeviceCode("missing-one"),
         (error: unknown) => {
-            assert.equal(readField(error, "code"), controlErrorCodes.instanceNotFound);
+            assert.equal(
+                readField(error, "code"),
+                controlErrorCodes.instanceNotFound,
+            );
             assert.deepEqual(readField(error, "details"), {
                 instance: "missing-one",
             });

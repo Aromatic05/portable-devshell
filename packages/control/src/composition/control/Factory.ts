@@ -1,33 +1,33 @@
 import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ExtensionHost } from "../../control/extension/Host.js";
-import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Artifact.js";
-import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Asset.js";
+import { ExtensionHost } from "../../extension/Host.js";
+import { ExtensionArtifactCapabilityControl } from "../../extension/generation/capability/Artifact.js";
+import { ExtensionAssetCapabilityControl } from "../../extension/generation/capability/Asset.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../control/extension/generation/capability/Instance.js";
-import { ExtensionContextObserveCapabilityControl } from "../../control/extension/generation/capability/Context.js";
-import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Worker.js";
+} from "../../extension/generation/capability/Instance.js";
+import { ExtensionContextObserveCapabilityControl } from "../../extension/generation/capability/Context.js";
+import { ExtensionWorkerCapabilityControl } from "../../extension/generation/capability/Worker.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
-} from "../../control/extension/install/BuiltinSource.js";
-import type { ExtensionInstallLimits } from "../../control/extension/install/Policy.js";
-import { ExtensionLoader } from "../../control/extension/generation/discovery/Loader.js";
-import { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
-import { ExtensionRegistryStore } from "../../control/extension/state/Store.js";
-import { ExtensionConfigControl } from "../../control/extension/config/Control.js";
+} from "../../extension/install/BuiltinSource.js";
+import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
+import { ExtensionLoader } from "../../extension/generation/discovery/Loader.js";
+import { ExtensionPathLayout } from "../../extension/state/Layout.js";
+import { ExtensionRegistryStore } from "../../extension/state/Store.js";
+import { ExtensionConfigControl } from "../../extension/config/Control.js";
 import { createControlExtensionPointRegistry } from "../Extension.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
-import { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
+import { ArtifactModule } from "../../artifact/Module.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
-import { ControlRuntimeContext } from "./subsystem/Context.js";
-import { ControlRuntimeMcp } from "./subsystem/Mcp.js";
-import { ControlRuntimeReverse } from "./subsystem/Reverse.js";
-import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
+import { ContextModule } from "../../context/Module.js";
+import { McpControlModule } from "../mcp/Control.js";
+import { ConnectionModule } from "../../connection/Module.js";
+import { ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -55,7 +55,7 @@ export class ControlRuntimeFactory {
         const controlPaths = new ControlPathHome(
             options.state.homeDirectory ?? homedir(),
         );
-        const artifact = new ControlRuntimeArtifact({
+        const artifact = new ArtifactModule({
             config: () => options.state.requireConfig(),
             controlPaths,
             homeDirectory: options.state.homeDirectory,
@@ -67,12 +67,12 @@ export class ControlRuntimeFactory {
                 homeDirectory: options.state.homeDirectory,
             });
             const extensionPoints = createControlExtensionPointRegistry();
-            const runtimeSubscriptions = new RuntimeSubscriptionManager();
-            const contexts = new ControlRuntimeContext({
+            const processSubscriptions = new ProcessSubscriptionManager();
+            const contexts = new ContextModule({
                 contextFile: controlPaths.contextsFile,
                 instances: options.state.instances,
             });
-            const mcp = new ControlRuntimeMcp({
+            const mcp = new McpControlModule({
                 contexts,
                 artifact,
                 controlPaths,
@@ -152,7 +152,7 @@ export class ControlRuntimeFactory {
                                         name: instance.name,
                                         provider: instance.provider,
                                     })),
-                            subscriptions: runtimeSubscriptions,
+                            subscriptions: processSubscriptions,
                         }),
                     }),
                     instances: options.state.instances,
@@ -178,7 +178,7 @@ export class ControlRuntimeFactory {
                     extensionPaths.registryFile,
                 ),
             });
-            const reverse = new ControlRuntimeReverse({
+            const reverse = new ConnectionModule({
                 mcp,
                 state: options.state,
             });
@@ -199,7 +199,7 @@ export class ControlRuntimeFactory {
                 mcp,
                 restart: options.restart,
                 reverse,
-                runtimeSubscriptions,
+                processSubscriptions,
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
             });

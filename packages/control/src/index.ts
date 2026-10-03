@@ -1,4 +1,4 @@
-export { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "./control/extension/install/BuiltinSource.js";
+export { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "./extension/install/BuiltinSource.js";
 export {
     migrateControlState,
     preflightControlUpdate,

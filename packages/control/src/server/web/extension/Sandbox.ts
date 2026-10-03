@@ -12,8 +12,8 @@ import type {
     ExtensionPointSandboxBridge,
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
-} from "../../../control/extension/generation/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodec } from "../../../control/extension/generation/sandbox/bridge/PointCodec.js";
+} from "../../../extension/generation/registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodec } from "../../../extension/generation/sandbox/bridge/PointCodec.js";
 
 export const webApplicationsSandboxCodec: ExtensionSandboxPointCodec =
     Object.freeze({
@@ -76,7 +76,10 @@ export const webPagesSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
         validateWebPageBinding(binding, context);
         const value = readRecord(input, "Web page invocation");
         const request = readWebPageRequest(value.request);
-        const invocation = readRecord(value.context, "Web page invocation context");
+        const invocation = readRecord(
+            value.context,
+            "Web page invocation context",
+        );
         return await binding(request, {
             requestId: readString(invocation.requestId, "requestId"),
             signal,
@@ -246,7 +249,9 @@ function validateWebApplicationSourceBinding(
     );
 }
 
-function readWebPageRequest(value: ExtensionJsonValue | undefined): WebPageRequest {
+function readWebPageRequest(
+    value: ExtensionJsonValue | undefined,
+): WebPageRequest {
     const record = readRecord(value, "Web page request");
     if (
         record.kind === "read" &&
@@ -256,7 +261,9 @@ function readWebPageRequest(value: ExtensionJsonValue | undefined): WebPageReque
     if (record.kind === "action") {
         const allowed = new Set(["actionId", "kind", "rowId"]);
         if (Object.keys(record).some((key) => !allowed.has(key)))
-            throw new TypeError("Web page action request contains unknown fields.");
+            throw new TypeError(
+                "Web page action request contains unknown fields.",
+            );
         return {
             actionId: readString(record.actionId, "actionId"),
             kind: "action",
@@ -268,7 +275,10 @@ function readWebPageRequest(value: ExtensionJsonValue | undefined): WebPageReque
     throw new TypeError("Web page request kind is invalid.");
 }
 
-function readString(value: ExtensionJsonValue | undefined, label: string): string {
+function readString(
+    value: ExtensionJsonValue | undefined,
+    label: string,
+): string {
     if (typeof value === "string" && value.length > 0) return value;
     throw new TypeError(`${label} must be a non-empty string.`);
 }

@@ -4,7 +4,7 @@ import {
 } from "@portable-devshell/extension/web";
 import type { WebPageDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../control/extension/Host.js";
+import type { ExtensionHost } from "../../../../extension/Host.js";
 
 export class WebExtensionPageCatalog {
     readonly #extensions: Pick<ExtensionHost, "listDeclarations">;
@@ -17,7 +17,8 @@ export class WebExtensionPageCatalog {
         return this.#extensions
             .listDeclarations(pages.id)
             .map((registration) => {
-                const declaration = registration.declaration as WebPageDeclaration;
+                const declaration =
+                    registration.declaration as WebPageDeclaration;
                 return Object.freeze({
                     extensionId: registration.extensionId,
                     id: declaration.id,

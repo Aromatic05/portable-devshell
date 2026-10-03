@@ -10,7 +10,7 @@ import type {
 import type {
     TerminalProcess,
     TerminalProcessExit,
-} from "../../../../src/instance/execution/terminal/Backend.ts";
+} from "@portable-devshell/core";
 import {
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
@@ -33,12 +33,12 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
-import { ConfigEditorCoordinator } from "../../../../src/control/config/editor/Coordinator.ts";
+import { ConfigEditorCoordinator } from "../../../../src/config/editor/Coordinator.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
-import { ControlConfigStore } from "../../../../src/control/config/storage/Store.ts";
-import { DebugPatchService } from "../../../../src/control/debug/Service.ts";
-import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
-import { InstanceRegistryFactory } from "../../../../src/control/instance/registry/Factory.ts";
+import { ControlConfigStore } from "../../../../src/config/storage/Store.ts";
+import { DebugPatchService } from "../../../../src/debug/Service.ts";
+import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistryFactory } from "@portable-devshell/core";
 import { ControlSocketServer } from "../../../../src/server/endpoint/Socket.ts";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
@@ -205,7 +205,10 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "tool.listCalls",
         { callIds: ["oversized-call"], limit: 1 },
     );
-    assert.equal(oversizedToolCall.error?.code, controlErrorCodes.invalidTarget);
+    assert.equal(
+        oversizedToolCall.error?.code,
+        controlErrorCodes.invalidTarget,
+    );
     assert.match(oversizedToolCall.error?.message ?? "", /safe response size/u);
 
     const toolReply = await request(
@@ -553,11 +556,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     });
 
     await assert.rejects(
-        request(
-            socketPath,
-            asInstanceName("alpha"),
-            "process.snapshot",
-        ),
+        request(socketPath, asInstanceName("alpha"), "process.snapshot"),
         /No route for alpha:process/u,
     );
 
@@ -612,7 +611,8 @@ test("interactive runtime receives stream input while the root handler is still 
     assert.equal(completed.type, "close");
     assert.equal((completed.message as { ready: boolean }).ready, true);
     assert.deepEqual(
-        (completed.message as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
+        (completed.message as { activeTodos?: ActiveTodoSummary[] })
+            .activeTodos,
         activeTodos,
     );
 
@@ -678,20 +678,24 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     const seed = await readStreamData(attached);
     assert.equal(seed.name, "seed");
     assert.equal(
-        ((seed.payload as { session: { terminalId: string } }).session).terminalId,
+        (seed.payload as { session: { terminalId: string } }).session
+            .terminalId,
         opened.terminalId,
     );
     const replay = await readStreamData(attached);
     assert.equal(replay.name, "output");
     assert.deepEqual(replay.payload, { data: "before-attach", seq: 1 });
 
-    await attached.send({ name: "input", payload: {
-        clientSeq: 1,
-        data: "printf ok\r",
-        generation: opened.generation,
-        terminalId: opened.terminalId,
-        version: 1,
-    } });
+    await attached.send({
+        name: "input",
+        payload: {
+            clientSeq: 1,
+            data: "printf ok\r",
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: 1,
+        },
+    });
     const inputAccepted = await readStreamData(attached);
     assert.equal(inputAccepted.name, "inputAccepted");
     assert.deepEqual(inputAccepted.payload, {
@@ -702,14 +706,17 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         version: 1,
     });
 
-    await attached.send({ name: "resize", payload: {
-        clientSeq: 2,
-        cols: 120,
-        generation: opened.generation,
-        rows: 40,
-        terminalId: opened.terminalId,
-        version: 1,
-    } });
+    await attached.send({
+        name: "resize",
+        payload: {
+            clientSeq: 2,
+            cols: 120,
+            generation: opened.generation,
+            rows: 40,
+            terminalId: opened.terminalId,
+            version: 1,
+        },
+    });
     const resized = await readStreamData(attached);
     assert.equal(resized.name, "resized");
     assert.deepEqual(resized.payload, {
@@ -727,12 +734,15 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         data: "live",
         seq: 2,
     });
-    await attached.send({ name: "ack", payload: {
-        generation: opened.generation,
-        terminalId: opened.terminalId,
-        throughSeq: 2,
-        version: 2,
-    } });
+    await attached.send({
+        name: "ack",
+        payload: {
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            throughSeq: 2,
+            version: 2,
+        },
+    });
     await attached.close();
     process.emit("detached");
     assert.equal(process.killed, false);
@@ -943,7 +953,8 @@ function createClient(
     _peer: "cli" | "tui" | "web",
 ): TestClient {
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     const protocols: Array<Rpc | Stream> = [];
     const rpcs = new Map<string, Rpc>();
@@ -1026,7 +1037,9 @@ async function request(
     }
 }
 
-async function readStreamData(stream: MessageStream): Promise<ControlStreamMessage> {
+async function readStreamData(
+    stream: MessageStream,
+): Promise<ControlStreamMessage> {
     const next = await stream.readMessage();
     assert.equal(next.type, "data");
     return next.message as ControlStreamMessage;

@@ -8,18 +8,18 @@ import {
 } from "@portable-devshell/extension";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
-import { ExtensionGeneration } from "../../../../../src/control/extension/generation/registration/Generation.ts";
-import { ExtensionRegistrationSet } from "../../../../../src/control/extension/generation/registration/Registration.ts";
+import { ExtensionGeneration } from "../../../../../src/extension/generation/registration/Generation.ts";
+import { ExtensionRegistrationSet } from "../../../../../src/extension/generation/registration/Registration.ts";
 import {
     ExtensionHost,
     type ExtensionGenerationLoader,
-} from "../../../../../src/control/extension/Host.ts";
+} from "../../../../../src/extension/Host.ts";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistrySnapshot,
-} from "../../../../../src/control/extension/state/Model.ts";
-import type { ExtensionRegistryPort } from "../../../../../src/control/extension/state/Store.ts";
-import { createCoreConfigRegistry } from "../../../../../src/control/config/Registry.ts";
+} from "../../../../../src/extension/state/Model.ts";
+import type { ExtensionRegistryPort } from "../../../../../src/extension/state/Store.ts";
+import { createCoreConfigRegistry } from "../../../../../src/config/Registry.ts";
 
 class MemoryRegistry implements ExtensionRegistryPort {
     beforeWrite?: (snapshot: ExtensionRegistrySnapshot) => Promise<void> | void;
@@ -60,10 +60,7 @@ function manifest(
     };
 }
 
-function configuredManifest(
-    id: string,
-    generation: string,
-): ExtensionManifest {
+function configuredManifest(id: string, generation: string): ExtensionManifest {
     return {
         ...manifest(id, generation),
         config: {
@@ -780,7 +777,10 @@ test("Extension enable immediately activates an eager generation", async () => {
     assert.deepEqual(loaded, ["a"]);
     assert.equal(registry.value.extensions.example?.enabled, true);
     assert.equal((await host.list())[0]?.state, "active");
-    assert.equal(await commandText(host, "example", "already-active"), "enabled");
+    assert.equal(
+        await commandText(host, "example", "already-active"),
+        "enabled",
+    );
     assert.deepEqual(loaded, ["a"]);
     await host.stop();
 });
@@ -933,7 +933,9 @@ test("Extension host waits for every instance resource retirement even when anot
         result.error.errors.some(
             (error) =>
                 error instanceof Error &&
-                /failed to retire host-managed resources/u.test(error.message) &&
+                /failed to retire host-managed resources/u.test(
+                    error.message,
+                ) &&
                 error.cause instanceof Error &&
                 /resource retirement failed/u.test(error.cause.message),
         ),

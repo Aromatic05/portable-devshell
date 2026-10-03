@@ -66,7 +66,11 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     const uninstall = flow.install(http);
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
-        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
+        routes: {
+            connectionClosed() {},
+            hosts: createRouteHosts,
+            onChange: () => () => undefined,
+        },
     });
     http.installOAuth(protectedResource);
     await flow.warmup();

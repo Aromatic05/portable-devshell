@@ -25,10 +25,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../../../src/testing.ts";
-import { ConfigChangeHub } from "../../../../src/control/config/Change.ts";
-import { ExtensionPathLayout } from "../../../../src/control/extension/state/Layout.ts";
-import { ControlRuntimeMcp } from "../../../../src/composition/control/subsystem/Mcp.ts";
-import { ControlRuntimeContext } from "../../../../src/composition/control/subsystem/Context.ts";
+import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ExtensionPathLayout } from "../../../../src/extension/state/Layout.ts";
+import { McpControlModule } from "../../../../src/composition/mcp/Control.ts";
+import { ContextModule } from "../../../../src/context/Module.ts";
 import { ControlRuntimeState } from "../../../../src/composition/control/State.ts";
 import {
     createTestIpcPath,
@@ -182,8 +182,11 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
         homeDirectory,
     });
     await state.load();
-    const mcp = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
+    const mcp = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: new ControlPathHome(homeDirectory).contextsFile,
+            instances: state.instances,
+        }),
         artifact: {
             installHttpRoute() {},
             service: undefined,
@@ -224,8 +227,13 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
 });
 
 test("runtime registers one Extension generation retirement handler", async (t) => {
-    const runtimeDir = await createTestTempDirectory("runtime-extension-lifecycle");
-    const socketPath = createTestIpcPath("control-runtime-extension", runtimeDir);
+    const runtimeDir = await createTestTempDirectory(
+        "runtime-extension-lifecycle",
+    );
+    const socketPath = createTestIpcPath(
+        "control-runtime-extension",
+        runtimeDir,
+    );
     const lifecycle: string[] = [];
     let disableRetirements = 0;
     let deleteRetirements = 0;
@@ -259,9 +267,9 @@ test("runtime registers one Extension generation retirement handler", async (t) 
                     deleteRetirements += 1;
                     return () => undefined;
                 },
-                registerInstanceGenerationRetirement(listener: (
-                    instance: { name: string },
-                ) => Promise<void>) {
+                registerInstanceGenerationRetirement(
+                    listener: (instance: { name: string }) => Promise<void>,
+                ) {
                     generationRetirements.push(listener);
                     return () => undefined;
                 },
@@ -324,7 +332,7 @@ function testConfigEditor() {
 }
 
 function testContexts(contextFile: string) {
-    return new ControlRuntimeContext({
+    return new ContextModule({
         contextFile,
         instances: { get: () => undefined } as never,
     });
@@ -544,7 +552,9 @@ test("Web hot replacement preserves the original failure when host rollback also
         async stop() {},
     };
     new ControlRuntime({
-        contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
+        contexts: testContexts(
+            join("/tmp", `runtime-context-${Date.now()}.json`),
+        ),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
@@ -762,14 +772,20 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         service: undefined,
         async stop() {},
     } as never;
-    const mcp = new ControlRuntimeMcp({
-        contexts: new ControlRuntimeContext({ contextFile: controlPaths.contextsFile, instances: state.instances }),
+    const mcp = new McpControlModule({
+        contexts: new ContextModule({
+            contextFile: controlPaths.contextsFile,
+            instances: state.instances,
+        }),
         artifact,
         controlPaths,
         state,
     });
     const runtime = new ControlRuntime({
-        contexts: new ControlRuntimeContext({ contextFile: controlPaths.contextsFile, instances: state.instances }),
+        contexts: new ContextModule({
+            contextFile: controlPaths.contextsFile,
+            instances: state.instances,
+        }),
         configChanges: state.configChanges,
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
@@ -1063,7 +1079,9 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         toolCallTarget() {
             events.push(`target:${name}`);
             return {
-                async dispatch(request: { value: { context: { instance: string } } }) {
+                async dispatch(request: {
+                    value: { context: { instance: string } };
+                }) {
                     assert.equal(request.value.context.instance, name);
                     events.push(`dispatch:${name}`);
                     await Promise.resolve();
@@ -1089,23 +1107,36 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     const extensions = {
         ...testExtensionSurface(),
         listDeclarations(pointId: string) {
-            return [{
-                declaration: { hook: "500-guard", id: "guard" },
-                id: pointId === "toolcall.review" ? "guard" : "rewrite",
-            }];
+            return [
+                {
+                    declaration: { hook: "500-guard", id: "guard" },
+                    id: pointId === "toolcall.review" ? "guard" : "rewrite",
+                },
+            ];
         },
         async acquireRegistration(pointId: string) {
             return {
                 extensionId: "test",
                 lease: { release() {} },
                 registration: {
-                    binding: async (input: { value: { context: { instance: string } }; direction: string }) => {
+                    binding: async (input: {
+                        value: { context: { instance: string } };
+                        direction: string;
+                    }) => {
                         if (pointId === "toolcall.review") {
-                            events.push(`review:${input.value.context.instance}`);
+                            events.push(
+                                `review:${input.value.context.instance}`,
+                            );
                             return { decision: reviewDecision };
                         }
                         events.push(`rewrite:${input.value.context.instance}`);
-                        return { ...input.value, context: { ...input.value.context, instance: targetInstance } };
+                        return {
+                            ...input.value,
+                            context: {
+                                ...input.value.context,
+                                instance: targetInstance,
+                            },
+                        };
                     },
                 },
             };
@@ -1120,7 +1151,12 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
             events.push(`acquire:${name}`);
             const descriptor = descriptors.find((entry) => entry.name === name);
             assert.ok(descriptor);
-            return { descriptor, release() { events.push(`release:${name}`); } };
+            return {
+                descriptor,
+                release() {
+                    events.push(`release:${name}`);
+                },
+            };
         },
         list() {
             return descriptors;
@@ -1132,7 +1168,9 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         async stopOwned() {},
     };
     const runtime = new ControlRuntime({
-        contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
+        contexts: testContexts(
+            join("/tmp", `runtime-context-${Date.now()}.json`),
+        ),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
@@ -1161,7 +1199,8 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
 
     await runtime.start();
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     const service = new ServiceSession(
         endpoint,
@@ -1170,12 +1209,27 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     const tools = createToolTransport(endpoint);
     t.after(() => service.close());
     await service.connect();
-    assert.deepEqual(await tools.call("nonexistent", "file_read", {}, "/workspace"), { instance: "existing" });
-    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:existing", "target:existing", "dispatch:existing", "release:existing"]);
+    assert.deepEqual(
+        await tools.call("nonexistent", "file_read", {}, "/workspace"),
+        { instance: "existing" },
+    );
+    assert.deepEqual(events, [
+        "review:nonexistent",
+        "rewrite:nonexistent",
+        "acquire:existing",
+        "target:existing",
+        "dispatch:existing",
+        "release:existing",
+    ]);
 
     events.length = 0;
     reviewDecision = "reject";
-    const rejected = await tools.call("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    const rejected = (await tools.call(
+        "nonexistent",
+        "file_read",
+        {},
+        "/workspace",
+    )) as Record<string, JsonValue>;
     assert.equal(rejected.result, null);
     assert.deepEqual(events, ["review:nonexistent"]);
 
@@ -1188,14 +1242,39 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     for (const listener of [...listeners]) listener();
     targetInstance = "added";
     events.length = 0;
-    assert.deepEqual(await tools.call("nonexistent", "file_read", {}, "/workspace"), { instance: "added" });
-    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
+    assert.deepEqual(
+        await tools.call("nonexistent", "file_read", {}, "/workspace"),
+        { instance: "added" },
+    );
+    assert.deepEqual(events, [
+        "review:nonexistent",
+        "rewrite:nonexistent",
+        "acquire:added",
+        "target:added",
+        "dispatch:added",
+        "release:added",
+    ]);
 
     dispatchFailure = true;
     events.length = 0;
-    const failed = await tools.callStreaming("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    const failed = (await tools.callStreaming(
+        "nonexistent",
+        "file_read",
+        {},
+        "/workspace",
+    )) as Record<string, JsonValue>;
     assert.equal(failed.result, null);
-    assert.equal((failed.error as Record<string, JsonValue>).message, "dispatch failed");
-    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
+    assert.equal(
+        (failed.error as Record<string, JsonValue>).message,
+        "dispatch failed",
+    );
+    assert.deepEqual(events, [
+        "review:nonexistent",
+        "rewrite:nonexistent",
+        "acquire:added",
+        "target:added",
+        "dispatch:added",
+        "release:added",
+    ]);
     service.close();
 });

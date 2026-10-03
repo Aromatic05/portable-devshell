@@ -5,19 +5,22 @@ import type {
     ControlPortContext,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
-import { controlErrorCodes, toRemoteErrorBody } from "@portable-devshell/shared";
+import {
+    controlErrorCodes,
+    toRemoteErrorBody,
+} from "@portable-devshell/shared";
 import type {
     CliModelCommandInvocationContext,
     CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 
-import { CliExtensionCommandService } from "../../../../src/control/extension/cli/command/Service.ts";
-import { createCliRouteModule } from "../../../../src/control/extension/cli/Route.ts";
+import { CliExtensionCommandService } from "../../../../src/extension/cli/command/Service.ts";
+import { createCliRouteModule } from "../../../../src/extension/cli/Route.ts";
 import {
     createTuiPageRouteModule,
     TuiExtensionPageService,
-} from "../../../../src/control/extension/tui/Route.ts";
-import type { ExtensionCatalogRegistration } from "../../../../src/control/extension/generation/discovery/Catalog.ts";
+} from "../../../../src/extension/tui/Route.ts";
+import type { ExtensionCatalogRegistration } from "../../../../src/extension/generation/discovery/Catalog.ts";
 import { WebApplicationCatalog } from "../../../../src/server/web/extension/application/Catalog.ts";
 import { createWebApplicationRouteModule } from "../../../../src/server/web/extension/application/Route.ts";
 import { WebExtensionPageService } from "../../../../src/server/web/extension/page/Service.ts";
@@ -261,23 +264,32 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     const extensions = {
         async acquireRegistration(pointId: string, id: string) {
             const entry = entries.find(
-                (candidate) => candidate.pointId === pointId && candidate.id === id,
+                (candidate) =>
+                    candidate.pointId === pointId && candidate.id === id,
             );
-            if (entry === undefined) throw new Error(`missing ${pointId}/${id}`);
+            if (entry === undefined)
+                throw new Error(`missing ${pointId}/${id}`);
             const binding =
                 pointId === "web.pages"
-                    ? async (request: { kind: string }, invocation: { requestId: string }) => {
+                    ? async (
+                          request: { kind: string },
+                          invocation: { requestId: string },
+                      ) => {
                           events.push(
                               `web:${request.kind}:${invocation.requestId}`,
                           );
                           return {
                               tables: [
                                   {
-                                      columns: [{ id: "state", label: "State" }],
+                                      columns: [
+                                          { id: "state", label: "State" },
+                                      ],
                                       id: "endpoints",
                                       rows: [
                                           {
-                                              cells: { state: { text: "running" } },
+                                              cells: {
+                                                  state: { text: "running" },
+                                              },
                                               id: "endpoint",
                                           },
                                       ],
@@ -287,7 +299,10 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
                       }
                     : async (
                           request: { kind: string },
-                          invocation: { localOwner: boolean; requestId: string },
+                          invocation: {
+                              localOwner: boolean;
+                              requestId: string;
+                          },
                       ) => {
                           events.push(
                               `tui:${request.kind}:${invocation.requestId}:${invocation.localOwner}`,
@@ -319,10 +334,7 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     };
     const webPages = new WebExtensionPageService(extensions as never);
     const tuiPages = new TuiExtensionPageService(extensions as never);
-    const web = createWebApplicationRouteModule(
-        { list: () => [] },
-        webPages,
-    );
+    const web = createWebApplicationRouteModule({ list: () => [] }, webPages);
     const tui = createTuiPageRouteModule(tuiPages);
 
     assert.deepEqual(
@@ -341,7 +353,11 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     );
     assert.deepEqual(
         await operation(web, "webPage").handle(
-            { id: "3", name: "page", payload: { kind: "read", pageId: "access" } },
+            {
+                id: "3",
+                name: "page",
+                payload: { kind: "read", pageId: "access" },
+            },
             context("web"),
         ),
         {
@@ -350,7 +366,10 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
                     columns: [{ id: "state", label: "State" }],
                     id: "endpoints",
                     rows: [
-                        { cells: { state: { text: "running" } }, id: "endpoint" },
+                        {
+                            cells: { state: { text: "running" } },
+                            id: "endpoint",
+                        },
                     ],
                 },
             ],
@@ -358,7 +377,11 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     );
     assert.deepEqual(
         await operation(tui, "tuiPage").handle(
-            { id: "4", name: "page", payload: { kind: "read", pageId: "access" } },
+            {
+                id: "4",
+                name: "page",
+                payload: { kind: "read", pageId: "access" },
+            },
             context("tui", "local-owner"),
         ),
         {
@@ -374,7 +397,11 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     await assert.rejects(
         async () =>
             await operation(web, "webPage").handle(
-                { id: "5", name: "page", payload: { kind: "read", pageId: "access" } },
+                {
+                    id: "5",
+                    name: "page",
+                    payload: { kind: "read", pageId: "access" },
+                },
                 context("tui", "local-owner"),
             ),
         /only to Web clients/u,
@@ -382,7 +409,11 @@ test("Web and TUI Extension pages keep separate discovery, invocation, and clien
     await assert.rejects(
         async () =>
             await operation(tui, "tuiPage").handle(
-                { id: "6", name: "page", payload: { kind: "read", pageId: "access" } },
+                {
+                    id: "6",
+                    name: "page",
+                    payload: { kind: "read", pageId: "access" },
+                },
                 context("web"),
             ),
         /only to TUI clients/u,

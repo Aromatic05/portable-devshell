@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import {
     normalizeLifecycleStatus,

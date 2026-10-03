@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ToolCallPipeline } from "../../../../../core/src/toolcall/Pipeline.ts";
-import { ToolCallHookSequence } from "../../../../../core/src/toolcall/hook/Sequence.ts";
+import { ToolCallPipeline } from "@portable-devshell/core";
+import { ToolCallHookSequence } from "@portable-devshell/core";
 
 import {
     InstanceRegistry,
@@ -103,7 +103,11 @@ test("MCP approval adapter delegates through the descriptor approval port", asyn
         [pending],
     );
     assert.deepEqual(
-        await gateway.approval.decideApproval?.("alpha", "approval-1", "approve"),
+        await gateway.approval.decideApproval?.(
+            "alpha",
+            "approval-1",
+            "approve",
+        ),
         decided,
     );
 });
@@ -115,43 +119,93 @@ test("MCP gateway binds once and routes unknown original targets through host in
         hooks: () => ({
             release() {},
             sequence: new ToolCallHookSequence({
-                rewrites: [({ value, direction }) => direction === "inbound"
-                    ? { ...value, context: { ...value.context, instance: "remote-server" as never }, toolName: "final_tool", payload: { rewritten: true } }
-                    : value],
+                rewrites: [
+                    ({ value, direction }) =>
+                        direction === "inbound"
+                            ? {
+                                  ...value,
+                                  context: {
+                                      ...value.context,
+                                      instance: "remote-server" as never,
+                                  },
+                                  toolName: "final_tool",
+                                  payload: { rewritten: true },
+                              }
+                            : value,
+                ],
             }),
         }),
         resolveTarget(instance) {
             assert.equal(instance, "remote-server");
-            return { async dispatch(request) {
-                dispatched.push(request.value);
-                const input = await request.invocationInput?.(request.value.payload, request.callId, request.value) ?? request.value.payload;
-                const result = request.operation === undefined
-                    ? input
-                    : await request.operation(request.callId, input, request.value);
-                request.onProgress?.({ progress: true });
-                return await request.transformResult?.(result, request.callId) ?? result;
-            } };
+            return {
+                async dispatch(request) {
+                    dispatched.push(request.value);
+                    const input =
+                        (await request.invocationInput?.(
+                            request.value.payload,
+                            request.callId,
+                            request.value,
+                        )) ?? request.value.payload;
+                    const result =
+                        request.operation === undefined
+                            ? input
+                            : await request.operation(
+                                  request.callId,
+                                  input,
+                                  request.value,
+                              );
+                    request.onProgress?.({ progress: true });
+                    return (
+                        (await request.transformResult?.(
+                            result,
+                            request.callId,
+                        )) ?? result
+                    );
+                },
+            };
         },
     });
     gateway.bindToolCalls(pipeline);
     assert.throws(() => gateway.bindToolCalls(pipeline), /already bound/);
     const progress: unknown[] = [];
     const signal = new AbortController().signal;
-    assert.deepEqual(await gateway.callTool(
-        "unknown", "original", {}, { source: "mcp" }, signal,
-        async (result) => ({ result }),
-        (input, callId, value) => {
-            assert.equal(typeof callId, "string");
-            assert.equal(value.context.instance, "remote-server");
-            return input;
-        },
-        (value) => progress.push(value), "caller",
-    ), { result: { rewritten: true } });
+    assert.deepEqual(
+        await gateway.callTool(
+            "unknown",
+            "original",
+            {},
+            { source: "mcp" },
+            signal,
+            async (result) => ({ result }),
+            (input, callId, value) => {
+                assert.equal(typeof callId, "string");
+                assert.equal(value.context.instance, "remote-server");
+                return input;
+            },
+            (value) => progress.push(value),
+            "caller",
+        ),
+        { result: { rewritten: true } },
+    );
     assert.deepEqual(progress, [{ progress: true }]);
-    assert.deepEqual(await gateway.callToolOperation(
-        "unknown", "original", {}, { source: "mcp" },
-        async (_callId, input, value) => ({ input, instance: value.context.instance, toolName: value.toolName }),
-    ), { input: { rewritten: true }, instance: "remote-server", toolName: "final_tool" });
+    assert.deepEqual(
+        await gateway.callToolOperation(
+            "unknown",
+            "original",
+            {},
+            { source: "mcp" },
+            async (_callId, input, value) => ({
+                input,
+                instance: value.context.instance,
+                toolName: value.toolName,
+            }),
+        ),
+        {
+            input: { rewritten: true },
+            instance: "remote-server",
+            toolName: "final_tool",
+        },
+    );
     assert.equal(dispatched.length, 2);
 });
 
@@ -372,7 +426,10 @@ test("MCP Extension tools hold their generation lease through invocation", async
                     },
                 },
                 registration: {
-                    binding: async (input: unknown, context: { ctxId?: string }) => {
+                    binding: async (
+                        input: unknown,
+                        context: { ctxId?: string },
+                    ) => {
                         assert.deepEqual(input, { message: "done" });
                         assert.equal(context.ctxId, "ctx-one");
                         return {

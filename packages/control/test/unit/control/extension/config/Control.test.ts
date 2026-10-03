@@ -5,13 +5,13 @@ import test from "node:test";
 import type { ExtensionConfigDeclaration } from "@portable-devshell/extension";
 import { createDefaultControlConfig } from "@portable-devshell/shared";
 
-import { ConfigChangeHub } from "../../../../../src/control/config/Change.ts";
-import { ControlConfigMutationLock } from "../../../../../src/control/config/editor/Lock.ts";
-import { createCoreConfigRegistry } from "../../../../../src/control/config/Registry.ts";
+import { ConfigChangeHub } from "../../../../../src/config/Change.ts";
+import { ControlConfigMutationLock } from "../../../../../src/config/editor/Lock.ts";
+import { createCoreConfigRegistry } from "../../../../../src/config/Registry.ts";
 import {
     ExtensionConfigControl,
     extensionConfigDomainDefinition,
-} from "../../../../../src/control/extension/config/Control.ts";
+} from "../../../../../src/extension/config/Control.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 const ownedDeclaration: ExtensionConfigDeclaration = {
@@ -38,7 +38,9 @@ const ownedDeclaration: ExtensionConfigDeclaration = {
 const noopCoreUpdate = async (): Promise<void> => undefined;
 
 test("Extension Config owns one schema-backed domain, emits committed paths, and fences stale generation writes", async () => {
-    const stateDirectory = await createTestTempDirectory("extension-config-owned");
+    const stateDirectory = await createTestTempDirectory(
+        "extension-config-owned",
+    );
     const registry = createCoreConfigRegistry();
     const firstDefinition = extensionConfigDomainDefinition(
         "example",
@@ -126,7 +128,9 @@ test("Extension Config owns one schema-backed domain, emits committed paths, and
 });
 
 test("Extension Config reads only explicitly requested Core exports and filters change delivery", async () => {
-    const stateDirectory = await createTestTempDirectory("extension-config-access");
+    const stateDirectory = await createTestTempDirectory(
+        "extension-config-access",
+    );
     const registry = createCoreConfigRegistry();
     const changeHub = new ConfigChangeHub();
     const coreConfig = createDefaultControlConfig();
@@ -152,7 +156,10 @@ test("Extension Config reads only explicitly requested Core exports and filters 
 
     try {
         await config.validate();
-        assert.equal(await core.get("mcp.listenPort"), coreConfig.mcp.listenPort);
+        assert.equal(
+            await core.get("mcp.listenPort"),
+            coreConfig.mcp.listenPort,
+        );
         await assert.rejects(
             async () => await core.get("mcp.listenHost"),
             /not authorized/u,
@@ -209,7 +216,6 @@ test("Extension Config reads only explicitly requested Core exports and filters 
         await rm(stateDirectory, { force: true, recursive: true });
     }
 });
-
 
 test("Extension Config writes only explicitly requested read-write Core exports", async () => {
     const stateDirectory = await createTestTempDirectory(

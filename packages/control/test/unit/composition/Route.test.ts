@@ -3,8 +3,8 @@ import test from "node:test";
 
 import type { ControlPortContext } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../../../src/control/artifact/Service.ts";
-import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
+import type { ArtifactService } from "../../../src/artifact/Service.ts";
+import { InstanceRegistry } from "@portable-devshell/core";
 import { ControlRouteComposition } from "../../../src/composition/Route.ts";
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {
@@ -102,13 +102,29 @@ test("native control tool.call admits a nonexistent original instance to host in
     const dynamic = routes.hosts().find((host) => host.host === "*")!;
     const tool = dynamic.ports.filter((port) => port.name === "tool");
     assert.equal(tool.length, 1);
-    assert.deepEqual(tool[0]!.operations.map((entry) => entry.name), ["call"]);
-    assert.deepEqual(tool[0]!.streams!.map((entry) => entry.name), ["callStream"]);
-    assert.deepEqual(await tool[0]!.operations[0]!.handle({
-        id: "call-unknown",
-        name: "call",
-        payload: { toolName: "file_read", input: { path: "file.txt" }, workspace: "/workspace" },
-    }, createContext("nonexistent")), { content: "read" });
+    assert.deepEqual(
+        tool[0]!.operations.map((entry) => entry.name),
+        ["call"],
+    );
+    assert.deepEqual(
+        tool[0]!.streams!.map((entry) => entry.name),
+        ["callStream"],
+    );
+    assert.deepEqual(
+        await tool[0]!.operations[0]!.handle(
+            {
+                id: "call-unknown",
+                name: "call",
+                payload: {
+                    toolName: "file_read",
+                    input: { path: "file.txt" },
+                    workspace: "/workspace",
+                },
+            },
+            createContext("nonexistent"),
+        ),
+        { content: "read" },
+    );
     assert.deepEqual(calls, ["nonexistent"]);
     routes.dispose();
 });

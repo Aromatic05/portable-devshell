@@ -1,6 +1,6 @@
 import type { ControlConfig } from "@portable-devshell/shared";
-import type { ControlConfigStore } from "../control/config/storage/Store.js";
-import type { InstanceRegistryFactory } from "../control/instance/registry/Factory.js";
+import type { ControlConfigStore } from "../config/storage/Store.js";
+import type { InstanceRegistryFactory } from "@portable-devshell/core";
 import type { McpRuntimeFactory } from "../composition/mcp/Runtime.js";
 import { ControlRuntimeFactory } from "../composition/control/Factory.js";
 import type { ControlRuntime } from "../composition/control/Runtime.js";

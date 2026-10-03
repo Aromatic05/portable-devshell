@@ -14,8 +14,8 @@ import {
 } from "@portable-devshell/extension";
 
 import { preflightControlUpdate } from "../../../../../src/migration/Control.ts";
-import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
-import { ExtensionRegistryStore } from "../../../../../src/control/extension/state/Store.ts";
+import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
+import { ExtensionRegistryStore } from "../../../../../src/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 test("Extension state follows PORTABLE_DEVSHELL_HOME", () => {
@@ -23,10 +23,7 @@ test("Extension state follows PORTABLE_DEVSHELL_HOME", () => {
     const paths = new ExtensionPathLayout({
         environment: { PORTABLE_DEVSHELL_HOME: devshellHome },
     });
-    assert.equal(
-        paths.stateRoot,
-        join(devshellHome, "control", "extensions"),
-    );
+    assert.equal(paths.stateRoot, join(devshellHome, "control", "extensions"));
 });
 
 test("Extension registry persists selected and last-known-good generations atomically", async (t) => {
@@ -290,7 +287,12 @@ async function writeCurrentProtocolModules(
         "core",
         "dist",
     );
-    const controlModule = join(shared, "protocol", "control", "ControlProtocol.js");
+    const controlModule = join(
+        shared,
+        "protocol",
+        "control",
+        "ControlProtocol.js",
+    );
     const frameModule = join(shared, "transport", "frame", "Codec.js");
     const workerModule = join(core, "worker", "protocol", "Client.js");
     await mkdir(dirname(controlModule), { recursive: true });

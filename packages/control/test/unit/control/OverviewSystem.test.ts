@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { OperationalOverviewSystemCollector } from "../../../src/control/overview/collector/System.ts";
+import { OperationalOverviewSystemCollector } from "../../../src/overview/collector/System.ts";
 
 test("controller system collector samples CPU deltas and reports resource pressure", async () => {
     const cpuSamples = [

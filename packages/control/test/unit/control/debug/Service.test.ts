@@ -4,8 +4,8 @@ import test from "node:test";
 import type { WorkerInstance } from "@portable-devshell/core";
 import type { ToolCallContext } from "@portable-devshell/shared";
 
-import { DebugPatchService } from "../../../../src/control/debug/Service.ts";
-import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
+import { DebugPatchService } from "../../../../src/debug/Service.ts";
+import { InstanceRegistry } from "@portable-devshell/core";
 
 function context(ctxId: string): ToolCallContext {
     return {

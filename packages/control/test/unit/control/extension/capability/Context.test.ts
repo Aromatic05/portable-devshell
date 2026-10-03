@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionContextObserveCapabilityControl } from "../../../../../src/control/extension/generation/capability/Context.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../../../src/extension/generation/capability/Context.ts";
 
 const contexts = [
     {
@@ -48,7 +48,10 @@ test("Context observe capability exposes a narrow read-only projection with filt
         listContexts: async (query) => {
             forwarded.push(query);
             return contexts.filter((record) => {
-                if (query.status !== undefined && record.status !== query.status)
+                if (
+                    query.status !== undefined &&
+                    record.status !== query.status
+                )
                     return false;
                 return record.environments.some(
                     (environment) =>

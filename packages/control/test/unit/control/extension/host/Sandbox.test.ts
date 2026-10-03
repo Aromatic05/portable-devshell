@@ -40,17 +40,17 @@ import { toRemoteErrorBody } from "@portable-devshell/shared";
 import {
     createCliModelSandboxBinding,
     createCliNativeSandboxBinding,
-} from "../../../../../src/control/extension/cli/Sandbox.ts";
-import { createTuiPageSandboxBinding } from "../../../../../src/control/extension/tui/Sandbox.ts";
-import { createToolCallRewriteSandboxBinding } from "../../../../../src/control/extension/toolcall/Sandbox.ts";
+} from "../../../../../src/extension/cli/Sandbox.ts";
+import { createTuiPageSandboxBinding } from "../../../../../src/extension/tui/Sandbox.ts";
+import { createToolCallRewriteSandboxBinding } from "../../../../../src/extension/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
-} from "../../../../../src/control/extension/generation/sandbox/bridge/Host.ts";
+} from "../../../../../src/extension/generation/sandbox/bridge/Host.ts";
 import {
     EXTENSION_SANDBOX_MAX_MESSAGE_BYTES,
     type ExtensionSandboxRegistrationDescriptor,
-} from "../../../../../src/control/extension/generation/sandbox/bridge/Protocol.ts";
+} from "../../../../../src/extension/generation/sandbox/bridge/Protocol.ts";
 import {
     createWebApplicationSandboxBinding,
     createWebPageSandboxBinding,

@@ -7,7 +7,7 @@ import {
     ExtensionWorkerCapabilityControl,
     resolveExtensionWorkerInstance,
     type ExtensionWorkerToolCallPort,
-} from "../../../../src/control/extension/generation/capability/Worker.ts";
+} from "../../../../src/extension/generation/capability/Worker.ts";
 
 test("Extension worker instance selection prefers one enabled local instance", () => {
     assert.equal(
@@ -45,7 +45,8 @@ test("Extension worker instance selection prefers one enabled local instance", (
 });
 
 test("Extension worker session enters host ingress and keeps cleanup on its original instance", async () => {
-    const calls: Array<Parameters<ExtensionWorkerToolCallPort["callTool"]>> = [];
+    const calls: Array<Parameters<ExtensionWorkerToolCallPort["callTool"]>> =
+        [];
     const released: Array<{ instance: string; reference: string }> = [];
     const closedToolSessions: string[] = [];
     const worker = {
@@ -164,28 +165,32 @@ test("Extension worker session enters host ingress and keeps cleanup on its orig
     assert.equal(closedToolSessions.length, 1);
     const sessionId = closedToolSessions[0];
     assert.match(sessionId!, /^ext-/u);
-    assert.deepEqual(calls, [[
-        "local",
-        "file_read",
-        { path: "./README.md" },
-        {
-            ctxId: sessionId,
-            operationId: "operation-1",
-            requestId: "operation-1",
-            source: "extension",
-            workspace: "/canonical",
-        },
-        controller.signal,
-        undefined,
-        undefined,
-        onProgress,
-        "host",
-    ]]);
+    assert.deepEqual(calls, [
+        [
+            "local",
+            "file_read",
+            { path: "./README.md" },
+            {
+                ctxId: sessionId,
+                operationId: "operation-1",
+                requestId: "operation-1",
+                source: "extension",
+                workspace: "/canonical",
+            },
+            controller.signal,
+            undefined,
+            undefined,
+            onProgress,
+            "host",
+        ],
+    ]);
     assert.equal(session.instance, "local");
-    assert.deepEqual(released, [{
-        instance: "local",
-        reference: `extension-worker:example:g1:${sessionId}`,
-    }]);
+    assert.deepEqual(released, [
+        {
+            instance: "local",
+            reference: `extension-worker:example:g1:${sessionId}`,
+        },
+    ]);
 });
 
 test("delegated Worker capability fixes caller-owned recording at the host boundary", async () => {
@@ -240,7 +245,11 @@ test("Extension worker capability refuses undeclared access before acquiring an 
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: false,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire() {
                 acquired = true;
@@ -313,7 +322,11 @@ test("Extension worker instance retirement closes only matching sessions", async
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire(instance) {
                 return {
@@ -370,7 +383,11 @@ test("Extension worker closeAll cleans an openSession that finishes after close 
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire(instance) {
                 markAcquireStarted();
@@ -416,7 +433,11 @@ test("Extension worker openSession preserves primary and cleanup failures", asyn
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire() {
                 return {
@@ -460,7 +481,11 @@ test("Extension worker closeAll retries fault cleanup failures during retirement
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire() {
                 return {
@@ -511,7 +536,11 @@ test("Extension worker instance retirement fences an older openSession but permi
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
         authority: "worker.execute",
-        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
+        toolCalls: {
+            async callTool() {
+                throw new Error("unexpected ToolCall");
+            },
+        },
         connections: {
             async acquire(instance) {
                 acquireCount += 1;

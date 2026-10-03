@@ -18,7 +18,7 @@ import {
     type ControlChannelAdmission,
     type ControlChannelListener,
 } from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/server/endpoint/Channel.ts";
+import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
 
 class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -375,7 +375,7 @@ test("ControlChannelServer rejects unsafe semantic protocol components as invali
         }),
         (error: unknown) =>
             (error as { code?: string }).code ===
-                controlErrorCodes.invalidTarget,
+            controlErrorCodes.invalidTarget,
     );
 });
 
@@ -458,7 +458,7 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
 
@@ -473,7 +473,7 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
     t.after(async () => await server.close());
@@ -496,7 +496,7 @@ test("ControlChannelServer waits for an active start before closing providers", 
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
 
@@ -519,7 +519,7 @@ test("ControlChannelServer retries providers that failed to close", async () => 
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
 
@@ -538,7 +538,7 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
 
@@ -562,7 +562,7 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
         routes: {
             connectionClosed() {},
             hosts: createRouteHosts,
-        onChange: () => () => undefined,
+            onChange: () => () => undefined,
         },
     });
 
@@ -707,7 +707,10 @@ function createRouteHosts(): readonly ControlHostDefinition[] {
                                 pong: true,
                                 ...(context.protocolVersion === undefined
                                     ? {}
-                                    : { protocolVersion: context.protocolVersion }),
+                                    : {
+                                          protocolVersion:
+                                              context.protocolVersion,
+                                      }),
                                 ...(context.subject === undefined
                                     ? {}
                                     : {

@@ -107,7 +107,9 @@ test(
             { work: [], background: [] },
         );
         assert.equal(
-            await frame.evaluate("typeof window.__liveFixtureSnapshot.modelContext"),
+            await frame.evaluate(
+                "typeof window.__liveFixtureSnapshot.modelContext",
+            ),
             "object",
         );
         assert.equal(
@@ -205,28 +207,36 @@ test(
                 imageIds: [],
             };
             iframe.srcdoc = html.replace(
-                    "<script>",
-                    `<script>
+                "<script>",
+                `<script>
                 window.openai = {
                     get widgetState() { return window.parent.__presentationWidgetState; },
                     setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
                 };
             <\/script><script>`,
-                );
+            );
         }, workspaceAppHtml);
 
         await page.waitForFunction(
             "(window.__liveDisplayModeRequests || []).length === 1",
         );
         await page.evaluate(() => {
-            const state = (window as unknown as {
-                __presentationWidgetState: {
-                    privateContent: {
-                        portableDevshellPresentation: { mode: string; expiresAt: number };
+            const state = (
+                window as unknown as {
+                    __presentationWidgetState: {
+                        privateContent: {
+                            portableDevshellPresentation: {
+                                mode: string;
+                                expiresAt: number;
+                            };
+                        };
                     };
-                };
-            }).__presentationWidgetState;
-            state.privateContent.portableDevshellPresentation = { mode: "pip", expiresAt: Date.now() - 1 };
+                }
+            ).__presentationWidgetState;
+            state.privateContent.portableDevshellPresentation = {
+                mode: "pip",
+                expiresAt: Date.now() - 1,
+            };
         });
         const frame = page
             .frames()
@@ -646,7 +656,11 @@ test(
         }, workspaceAppHtml);
 
         await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 1");
-        await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2", undefined, { timeout: 35_000 });
+        await page.waitForFunction(
+            "(window.__bridgeWatchCount || 0) >= 2",
+            undefined,
+            { timeout: 35_000 },
+        );
         assert.equal(await page.evaluate("window.__bridgeInitializeCount"), 1);
         assert.equal(
             await page.evaluate("window.__liveDisplayModeRequests.length"),
@@ -735,43 +749,39 @@ test(
         await app
             .locator('[data-action="task-pause"][data-item="task-order-2"]')
             .waitFor({ state: "visible" });
-        await page.waitForFunction("typeof window.__orderingWatchReply === 'function'");
+        await page.waitForFunction(
+            "typeof window.__orderingWatchReply === 'function'",
+        );
 
         await app
             .locator('[data-action="task-pause"][data-item="task-order-1"]')
             .click();
-        await page.waitForFunction(
-            "window.__orderingActionCalls.length === 1",
-        );
+        await page.waitForFunction("window.__orderingActionCalls.length === 1");
         await app
             .locator('[data-action="task-pause"][data-item="task-order-2"]')
             .click();
-        await page.waitForFunction(
-            "window.__orderingActionCalls.length === 2",
-        );
+        await page.waitForFunction("window.__orderingActionCalls.length === 2");
         await page.evaluate("window.__orderingWatchReply()");
         await page.waitForTimeout(250);
 
         assert.equal(
             await app
-                .locator(
-                    '[data-action="task-pause"][data-item="task-order-1"]',
-                )
+                .locator('[data-action="task-pause"][data-item="task-order-1"]')
                 .count(),
             0,
         );
         assert.equal(
             await app
-                .locator(
-                    '[data-action="task-pause"][data-item="task-order-2"]',
-                )
+                .locator('[data-action="task-pause"][data-item="task-order-2"]')
                 .count(),
             0,
         );
     },
 );
 
-const ORDERING_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const ORDERING_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__orderingActionCalls = [];
 window.__orderingWatchReply = null;
 window.__orderingTasks = {
@@ -875,7 +885,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const LIVE_TRANSPORT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const LIVE_TRANSPORT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__liveDisplayModeRequests = [];
 window.__liveToolCalls = [];
 window.addEventListener("message", function (event) {
@@ -1193,7 +1205,9 @@ test(
     },
 );
 
-const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__stalledLiveToolCalls = [];
 window.__stalledLiveWatchReplied = false;
 function stalledLiveSnapshot() {
@@ -1318,19 +1332,30 @@ test(
             "typeof window.__oldSnapshotResolve === 'function'",
         );
         await page.evaluate(() => {
-            const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-            if (!iframe?.contentWindow) throw new Error("Workspace frame is missing.");
-            iframe.contentWindow.postMessage({
-                jsonrpc: "2.0",
-                method: "ui/notifications/tool-result",
-                params: {
-                    _meta: { "portable-devshell/workspace": {
-                        liveBaseUrl: "https://new.example/api/live/demo/workspace",
-                        token: "new-direct-token",
-                    } },
-                    structuredContent: { ctxId: "ctx-new-direct", instance: "browser-instance" },
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (!iframe?.contentWindow)
+                throw new Error("Workspace frame is missing.");
+            iframe.contentWindow.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: {
+                        _meta: {
+                            "portable-devshell/workspace": {
+                                liveBaseUrl:
+                                    "https://new.example/api/live/demo/workspace",
+                                token: "new-direct-token",
+                            },
+                        },
+                        structuredContent: {
+                            ctxId: "ctx-new-direct",
+                            instance: "browser-instance",
+                        },
+                    },
                 },
-            }, "*");
+                "*",
+            );
         });
         await page.waitForFunction(
             "(window.__switchedContextModelUpdates || []).some(update => update && update.portableDevshellWorkspace && update.portableDevshellWorkspace.ctxId === 'ctx-new-direct')",
@@ -1352,7 +1377,9 @@ test(
     },
 );
 
-const SWITCHED_CONTEXT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const SWITCHED_CONTEXT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__switchedContextModelUpdates = [];
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -1435,12 +1462,20 @@ test(
             arguments?: Record<string, unknown>;
             name?: string;
         }>;
-        const stop = calls.find((call) => call.name === "workspace_action" && call.arguments?.actionId === "goal-stop");
+        const stop = calls.find(
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "goal-stop",
+        );
         assert.equal(stop?.arguments?.itemId, "goal-A");
         assert.equal(stop?.arguments?.actionId, "goal-stop");
         assert.equal(stop?.arguments?.token, "stale-goal-token");
         assert.equal(
-            calls.filter((call) => call.name === "workspace_action" && call.arguments?.actionId === "goal-stop").length,
+            calls.filter(
+                (call) =>
+                    call.name === "workspace_action" &&
+                    call.arguments?.actionId === "goal-stop",
+            ).length,
             1,
         );
         const projectedSnapshots = (await page.evaluate(
@@ -1485,7 +1520,14 @@ test(
         await app
             .getByRole("button", { name: "Cancel task", exact: true })
             .click();
-        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-1"]').count(), 1);
+        assert.equal(
+            await app
+                .locator(
+                    '[data-item="task-stale-confirm"][data-action="cancel-rev-1"]',
+                )
+                .count(),
+            1,
+        );
         await app
             .getByRole("button", { name: "Confirm", exact: true })
             .waitFor({ state: "visible" });
@@ -1499,8 +1541,22 @@ test(
         await app
             .getByRole("button", { name: "Cancel task", exact: true })
             .waitFor({ state: "visible" });
-        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-1"]').count(), 0);
-        assert.equal(await app.locator('[data-item="task-stale-confirm"][data-action="cancel-rev-2"]').count(), 1);
+        assert.equal(
+            await app
+                .locator(
+                    '[data-item="task-stale-confirm"][data-action="cancel-rev-1"]',
+                )
+                .count(),
+            0,
+        );
+        assert.equal(
+            await app
+                .locator(
+                    '[data-item="task-stale-confirm"][data-action="cancel-rev-2"]',
+                )
+                .count(),
+            1,
+        );
         assert.equal(
             await app
                 .getByRole("button", { name: "Confirm", exact: true })
@@ -1516,7 +1572,9 @@ test(
     },
 );
 
-const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const STALE_TASK_CONFIRM_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__staleTaskConfirmCalls = [];
 window.__staleTaskConfirmRevision = 1;
 window.__staleTaskConfirmWatch = null;
@@ -1589,7 +1647,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const STALE_GOAL_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const STALE_GOAL_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__staleGoalCalls = [];
 window.__staleGoalSnapshots = [];
 window.__staleGoalVersion = 1;
@@ -1759,7 +1819,10 @@ test(
             .getByText("Delivery uncertain", { exact: true })
             .waitFor({ state: "visible" });
         await app
-            .getByText("Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal.", { exact: false })
+            .getByText(
+                "Automatic retry stopped to avoid duplicate agent execution. Continue manually in chat or stop this Goal.",
+                { exact: false },
+            )
             .waitFor({ state: "visible" });
         const goalReportClaimId = (await page.evaluate(
             "window.__goalAmbiguousReports[0].claimId",
@@ -1807,7 +1870,9 @@ test(
     },
 );
 
-const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const WAIT_AMBIGUOUS_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__waitAmbiguousReentryClaimId = "";
 window.__waitAmbiguousCalls = [];
 window.__waitAmbiguousMessages = [];
@@ -1962,7 +2027,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const GOAL_AMBIGUOUS_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const GOAL_AMBIGUOUS_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__goalAmbiguousReentryClaimId = "";
 window.__goalAmbiguousCalls = [];
 window.__goalAmbiguousMessages = [];
@@ -2285,7 +2352,9 @@ test(
     },
 );
 
-const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__modelContextFailureReentryClaimId = "";
 window.__modelContextFailureCalls = [];
 window.__modelContextFailureActions = [];
@@ -2492,7 +2561,9 @@ test(
     },
 );
 
-const MISSED_EVENT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const MISSED_EVENT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__missedEventCalls = [];
 window.__missedEventReconciled = false;
 function missedEventSnapshot(after) {
@@ -2729,7 +2800,9 @@ test(
     },
 );
 
-const TOKEN_RESTART_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const TOKEN_RESTART_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__tokenRestartCalls = [];
 window.__tokenRestartWatchReplied = false;
 
@@ -2848,7 +2921,9 @@ test(
     },
 );
 
-const CHATGPT_METADATA_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const CHATGPT_METADATA_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__chatgptMetadataCalls = [];
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2940,7 +3015,9 @@ test(
     },
 );
 
-const LATE_INITIAL_RESULT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const LATE_INITIAL_RESULT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__lateInitialCalls = [];
 window.__lateInitialSource = null;
 window.__lateInitialAnswered = false;
@@ -3023,7 +3100,10 @@ window.addEventListener("message", function (event) {
 async function newWorkspacePage(browser: Browser) {
     const page = await browser.newPage();
     await page.route("https://workspace.test/", async (route) => {
-        await route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body></body></html>" });
+        await route.fulfill({
+            contentType: "text/html",
+            body: "<!doctype html><html><body></body></html>",
+        });
     });
     await page.goto("https://workspace.test/");
     return page;

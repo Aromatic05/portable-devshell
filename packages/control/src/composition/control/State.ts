@@ -4,15 +4,15 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 
-import { ControlConfigStore } from "../../control/config/storage/Store.js";
-import { ControlConfigMutationLock } from "../../control/config/editor/Lock.js";
+import { ControlConfigStore } from "../../config/storage/Store.js";
+import { ControlConfigMutationLock } from "../../config/editor/Lock.js";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
-} from "../../control/config/Registry.js";
-import { ConfigChangeHub } from "../../control/config/Change.js";
-import { InstanceRegistry } from "../../control/instance/registry/Registry.js";
-import { InstanceRegistryFactory } from "../../control/instance/registry/Factory.js";
+} from "../../config/Registry.js";
+import { ConfigChangeHub } from "../../config/Change.js";
+import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistryFactory } from "@portable-devshell/core";
 
 export interface ControlRuntimeStateOptions {
     configRegistry?: ConfigRegistry;

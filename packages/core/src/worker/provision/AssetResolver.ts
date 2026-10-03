@@ -11,7 +11,10 @@ import {
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import { resolveWorkerDevshellHomeDirectory } from "./HomeDirectory.js";
 
 import type { WorkerTarget } from "./target/Target.js";

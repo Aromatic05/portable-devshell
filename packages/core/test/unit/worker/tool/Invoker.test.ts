@@ -25,8 +25,12 @@ function channelPair(): { client: Channel; server: Channel } {
         left.close(error);
         right.close(error);
     };
-    left = new StreamChannel(rightToLeft, leftToRight, { closeTransport: close });
-    right = new StreamChannel(leftToRight, rightToLeft, { closeTransport: close });
+    left = new StreamChannel(rightToLeft, leftToRight, {
+        closeTransport: close,
+    });
+    right = new StreamChannel(leftToRight, rightToLeft, {
+        closeTransport: close,
+    });
     return { client: left, server: right };
 }
 

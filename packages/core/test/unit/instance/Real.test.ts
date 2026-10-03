@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
-import {
-    execFile,
-    spawn as nodeSpawn,
-    spawnSync,
-} from "node:child_process";
+import { execFile, spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
@@ -42,8 +38,8 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { ToolCallPipeline } from "../../../src/toolcall/Pipeline.ts";
-import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
+import { ToolCallPipeline } from "../../../src/tool/Pipeline.ts";
+import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -52,7 +48,6 @@ const rsyncAvailable =
     spawnSync("rsync", ["--version"], { stdio: "ignore" }).status === 0;
 
 const cliToolCallContext = { source: "cli" } as const;
-
 
 async function readServiceStream(stream: MessageStream): Promise<Buffer> {
     const chunks: Buffer[] = [];
@@ -127,7 +122,11 @@ async function bridgeRsyncRemoteShell(
             throw new Error("invalid rsync remote shell handshake");
         }
         const [executable, ...args] = parsed.command as string[];
-        stream = await instance.execProcess({ executable: executable!, args, cwd });
+        stream = await instance.execProcess({
+            executable: executable!,
+            args,
+            cwd,
+        });
         if (handshake.remainder.byteLength > 0) {
             await stream.write(handshake.remainder);
         }
@@ -156,11 +155,14 @@ async function bridgeRsyncRemoteShell(
         if (stream !== undefined) {
             await stream
                 .cancel({
-                    message: error instanceof Error ? error.message : String(error),
+                    message:
+                        error instanceof Error ? error.message : String(error),
                 })
                 .catch(() => undefined);
         }
-        socket.destroy(error instanceof Error ? error : new Error(String(error)));
+        socket.destroy(
+            error instanceof Error ? error : new Error(String(error)),
+        );
         throw error;
     }
 }
@@ -270,9 +272,12 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         const workspacePath = await createTestTempDirectory("artifact-frame");
-        const homeDirectory = await createTestTempDirectory("artifact-frame-home");
-        const runtimeDirectory =
-            await createTestTempDirectory("artifact-frame-runtime");
+        const homeDirectory = await createTestTempDirectory(
+            "artifact-frame-home",
+        );
+        const runtimeDirectory = await createTestTempDirectory(
+            "artifact-frame-runtime",
+        );
         const instanceName = asInstanceName(`artifact-frame-${process.pid}`);
         const source = Buffer.alloc(700 * 1024);
         for (let index = 0; index < source.length; index += 1) {
@@ -330,7 +335,9 @@ test(
             receiveId: receive.receiveId,
         });
         assert.equal(written.receivedBytes, source.byteLength);
-        const finished = await instance.finishArtifactReceive(receive.receiveId);
+        const finished = await instance.finishArtifactReceive(
+            receive.receiveId,
+        );
         assert.equal(finished.bytes, source.byteLength);
         assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
         await instance.closeArtifactPayload(opened.payloadId);
@@ -342,9 +349,12 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         const workspacePath = await createTestTempDirectory("service-consumer");
-        const homeDirectory = await createTestTempDirectory("service-consumer-home");
-        const runtimeDirectory =
-            await createTestTempDirectory("service-consumer-runtime");
+        const homeDirectory = await createTestTempDirectory(
+            "service-consumer-home",
+        );
+        const runtimeDirectory = await createTestTempDirectory(
+            "service-consumer-runtime",
+        );
         const instanceName = asInstanceName(`service-consumer-${process.pid}`);
         const httpBody = "http-over-devshell";
         const server = createHttpServer((request, response) => {
@@ -424,10 +434,7 @@ test(
                         const methodCount = buffered[1]!;
                         if (buffered.byteLength < 2 + methodCount) return;
                         const methods = buffered.subarray(2, 2 + methodCount);
-                        if (
-                            buffered[0] !== 0x05 ||
-                            !methods.includes(0x00)
-                        ) {
+                        if (buffered[0] !== 0x05 || !methods.includes(0x00)) {
                             fail("unsupported SOCKS5 greeting");
                             return;
                         }
@@ -435,8 +442,7 @@ test(
                         client.write(Buffer.from([0x05, 0x00]));
                         stage = "request";
                     }
-                    if (stage !== "request" || buffered.byteLength < 4)
-                        return;
+                    if (stage !== "request" || buffered.byteLength < 4) return;
                     if (
                         buffered[0] !== 0x05 ||
                         buffered[1] !== 0x01 ||
@@ -457,16 +463,8 @@ test(
                         stage = "tunnel";
                         client.write(
                             Buffer.from([
-                                0x05,
-                                0x00,
-                                0x00,
-                                0x01,
-                                0x00,
-                                0x00,
-                                0x00,
-                                0x00,
-                                0x00,
-                                0x00,
+                                0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00,
                             ]),
                         );
                         flush();
@@ -570,9 +568,11 @@ test(
     async (t) => {
         const workspacePath = await createTestTempDirectory("rsync-worker");
         const sourcePath = await createTestTempDirectory("rsync-source");
-        const homeDirectory = await createTestTempDirectory("rsync-worker-home");
-        const runtimeDirectory =
-            await createTestTempDirectory("rsync-worker-runtime");
+        const homeDirectory =
+            await createTestTempDirectory("rsync-worker-home");
+        const runtimeDirectory = await createTestTempDirectory(
+            "rsync-worker-runtime",
+        );
         const targetPath = join(workspacePath, "target");
         const nestedSource = join(sourcePath, "nested");
         await mkdir(targetPath, { recursive: true });
@@ -582,7 +582,10 @@ test(
             payload[index] = index % 251;
         }
         await writeFile(join(sourcePath, "payload.bin"), payload);
-        await writeFile(join(nestedSource, "note.txt"), "rsync-over-devshell\n");
+        await writeFile(
+            join(nestedSource, "note.txt"),
+            "rsync-over-devshell\n",
+        );
 
         const remoteShellPath = join(workspacePath, "rsync-remote-shell.mjs");
         await writeFile(
@@ -631,10 +634,11 @@ socket.on("error", (error) => {
         const bridgeCompleted = new Promise<void>((resolve, reject) => {
             bridgeServer.once("connection", (socket) => {
                 bridgeServer.close();
-                void bridgeRsyncRemoteShell(instance, socket, workspacePath).then(
-                    resolve,
-                    reject,
-                );
+                void bridgeRsyncRemoteShell(
+                    instance,
+                    socket,
+                    workspacePath,
+                ).then(resolve, reject);
             });
             bridgeServer.once("error", reject);
         });
@@ -675,7 +679,10 @@ socket.on("error", (error) => {
             bridgeCompleted,
         ]);
 
-        assert.deepEqual(await readFile(join(targetPath, "payload.bin")), payload);
+        assert.deepEqual(
+            await readFile(join(targetPath, "payload.bin")),
+            payload,
+        );
         assert.equal(
             await readFile(join(targetPath, "nested", "note.txt"), "utf8"),
             "rsync-over-devshell\n",
@@ -752,7 +759,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
             source: "mcp",
         } as const;
         const completed = await ingress.callOperation(
-                asInstanceName("control-audit"),
+            asInstanceName("control-audit"),
             "todo_read",
             {},
             context,
@@ -910,10 +917,7 @@ test("WorkerInstance trusted internal tool invocation does not record ingress au
             stdout: "/tmp/workspace\n",
         });
 
-        assert.equal(
-            jsonRecord(await internal)?.stdout,
-            "/tmp/workspace\n",
-        );
+        assert.equal(jsonRecord(await internal)?.stdout, "/tmp/workspace\n");
         assert.deepEqual(await instance.readToolCalls(), []);
     } finally {
         await instance.stop();
@@ -960,13 +964,13 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(started.ready, true);
 
         const firstCall = ingress.call(
-                asInstanceName("task-6-harness"),
+            asInstanceName("task-6-harness"),
             "bash_run",
             { command: "pwd" },
             cliToolCallContext,
         );
         const secondCall = ingress.call(
-                asInstanceName("task-6-harness"),
+            asInstanceName("task-6-harness"),
             "bash_run",
             { command: "ls" },
             cliToolCallContext,
@@ -1005,7 +1009,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
         const invalidCall = ingress.call(
-                asInstanceName("task-6-harness"),
+            asInstanceName("task-6-harness"),
             "bash_run",
             { bad: true } as JsonValue,
             cliToolCallContext,
@@ -1154,14 +1158,15 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
     }
 });
 
-
 test("WorkerInstance restores a stopped disconnected snapshot when start fails", async () => {
     const homeDirectory = await createTestTempDirectory(
         "instance-start-failure",
     );
     const transport: WorkerTransport = {
         async connectWorkerChannel() {
-            throw new Error("channel must not be connected after a failed start");
+            throw new Error(
+                "channel must not be connected after a failed start",
+            );
         },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             assert.equal(command, "start");
@@ -1192,7 +1197,10 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         assert.equal(snapshot.daemonState, "stopped");
         assert.equal(snapshot.connectionState, "disconnected");
         assert.equal(snapshot.ready, false);
-        assert.equal(snapshot.lastErrorCode, runtimeErrorCodes.workerStartFailed);
+        assert.equal(
+            snapshot.lastErrorCode,
+            runtimeErrorCodes.workerStartFailed,
+        );
         assert.equal(
             snapshot.lastErrorMessage,
             "Worker start failed for instance task-6-start-failure.",
@@ -1250,7 +1258,10 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         assert.equal(snapshot.daemonState, "running");
         assert.equal(snapshot.connectionState, "connected");
         assert.equal(snapshot.ready, true);
-        assert.equal(snapshot.lastErrorCode, runtimeErrorCodes.workerStopFailed);
+        assert.equal(
+            snapshot.lastErrorCode,
+            runtimeErrorCodes.workerStopFailed,
+        );
         assert.equal(
             snapshot.lastErrorMessage,
             "Worker stop failed for instance task-6-stop-failure.",
@@ -1622,7 +1633,8 @@ function createWorkerInstanceHarness(): {
     const takePending = (method: string): PendingCall => {
         const calls = pending.get(method);
         const call = calls?.shift();
-        if (call === undefined) throw new Error(`No pending request for ${method}.`);
+        if (call === undefined)
+            throw new Error(`No pending request for ${method}.`);
         if (calls?.length === 0) pending.delete(method);
         return call;
     };
@@ -1664,13 +1676,16 @@ function createWorkerInstanceHarness(): {
             });
         },
         waitForMethodCount(method, count) {
-            if (requestMethods.filter((value) => value === method).length >= count)
+            if (
+                requestMethods.filter((value) => value === method).length >=
+                count
+            )
                 return Promise.resolve();
             return new Promise<void>((resolve) => {
                 const observeCount = () => {
                     if (
-                        requestMethods.filter((value) => value === method).length >=
-                        count
+                        requestMethods.filter((value) => value === method)
+                            .length >= count
                     ) {
                         resolve();
                         return;

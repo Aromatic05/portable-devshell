@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
+import type { InstanceRegistry } from "@portable-devshell/core";
 import { McpEndpointFactory } from "./Endpoint.js";
 
 export class McpRuntimeFactory {
@@ -59,7 +59,8 @@ export class McpRuntimeFactory {
                   })
             : [];
 
-        if (options?.runtimeState === undefined) throw new Error("MCP requires the Control-owned Context runtime.");
+        if (options?.runtimeState === undefined)
+            throw new Error("MCP requires the Control-owned Context runtime.");
         return new McpHost(
             {
                 instances: endpoints,
@@ -79,8 +80,7 @@ export class McpRuntimeFactory {
                 ...(options?.workspaceAppLeaseFile === undefined
                     ? {}
                     : {
-                          workspaceAppLeaseFile:
-                              options.workspaceAppLeaseFile,
+                          workspaceAppLeaseFile: options.workspaceAppLeaseFile,
                       }),
             },
             options.runtimeState,

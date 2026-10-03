@@ -19,13 +19,13 @@ import {
 import { controlErrorCodes } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
-import { createArtifactDirectoryArchive } from "../../../../../src/control/artifact/host/storage/Archive.ts";
-import { ExtensionHost } from "../../../../../src/control/extension/Host.ts";
-import { ExtensionControlService } from "../../../../../src/control/extension/Service.ts";
-import { ExtensionInstallService } from "../../../../../src/control/extension/install/Service.ts";
-import { ExtensionLoader } from "../../../../../src/control/extension/generation/discovery/Loader.ts";
-import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
-import { ExtensionRegistryStore } from "../../../../../src/control/extension/state/Store.ts";
+import { createArtifactDirectoryArchive } from "../../../../../src/artifact/host/storage/Archive.ts";
+import { ExtensionHost } from "../../../../../src/extension/Host.ts";
+import { ExtensionControlService } from "../../../../../src/extension/Service.ts";
+import { ExtensionInstallService } from "../../../../../src/extension/install/Service.ts";
+import { ExtensionLoader } from "../../../../../src/extension/generation/discovery/Loader.ts";
+import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
+import { ExtensionRegistryStore } from "../../../../../src/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 interface Harness {
@@ -409,7 +409,9 @@ test("updating a disabled Extension selects the new generation without enabling 
 
 test("reinstalling required Comment heals a legacy disabled registry entry", async (t) => {
     const h = await harness(t);
-    const source = await h.source("builtin-comment-required", { id: "comment" });
+    const source = await h.source("builtin-comment-required", {
+        id: "comment",
+    });
     await h.service.installBuiltin("comment", source);
     await h.host.disable("comment");
     assert.equal((await h.host.list())[0]?.state, "disabled");

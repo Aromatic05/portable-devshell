@@ -5,7 +5,7 @@ import { secretRewriteInterfaceOperation } from "@portable-devshell/extension/se
 import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
+import { ToolCallSecretRewrite } from "../../../../src/extension/toolcall/interface/Secret.ts";
 
 const signal = new AbortController().signal;
 const tokenReference = "$" + "{SECRET:TOKEN}";
@@ -34,7 +34,9 @@ const outbound: ToolCallRewriteInvocation = {
     },
 };
 
-function config(instances: Array<{ env?: Record<string, string>; name: string }>): ControlConfig {
+function config(
+    instances: Array<{ env?: Record<string, string>; name: string }>,
+): ControlConfig {
     return { instances } as unknown as ControlConfig;
 }
 

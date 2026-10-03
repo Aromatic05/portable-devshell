@@ -19,8 +19,8 @@ import { createControlExtensionPointRegistry } from "../../../../../src/composit
 import {
     ExtensionLoader,
     type ExtensionWorkerRuntime,
-} from "../../../../../src/control/extension/generation/discovery/Loader.ts";
-import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
+} from "../../../../../src/extension/generation/discovery/Loader.ts";
+import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 interface LoaderHarness {
@@ -381,7 +381,9 @@ test("Extension loader projects scoped Core Config without owning a Config domai
             async activate(context: ExtensionContext) {
                 seenContext = context;
                 assert.equal(
-                    await context.capabilities.configCore?.get("mcp.listenPort"),
+                    await context.capabilities.configCore?.get(
+                        "mcp.listenPort",
+                    ),
                     8080,
                 );
             },

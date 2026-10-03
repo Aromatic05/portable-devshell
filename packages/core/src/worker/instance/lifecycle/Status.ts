@@ -1,4 +1,7 @@
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 

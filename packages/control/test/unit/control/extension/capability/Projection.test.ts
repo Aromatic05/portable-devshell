@@ -11,7 +11,7 @@ import {
     EXTENSION_CAPABILITY_CONTEXT_KEYS,
     projectExtensionCapabilities,
     type ExtensionCapabilityRuntimeFactories,
-} from "../../../../../src/control/extension/generation/capability/Projection.ts";
+} from "../../../../../src/extension/generation/capability/Projection.ts";
 
 function factories(calls: string[]): ExtensionCapabilityRuntimeFactories {
     return Object.fromEntries(

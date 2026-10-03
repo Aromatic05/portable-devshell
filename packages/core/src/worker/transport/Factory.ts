@@ -1,6 +1,4 @@
-import type {
-    SpawnFunction,
-} from "./command/Transport.js";
+import type { SpawnFunction } from "./command/Transport.js";
 import type { WorkerTransport } from "./Transport.js";
 import { WorkerBinary } from "./Binary.js";
 import {
@@ -59,9 +57,7 @@ export type WorkerTransportFactoryOptions =
     | WorkerTransportFactoryPodmanOptions;
 
 export class WorkerTransportFactory {
-    static create(
-        options: WorkerTransportFactoryOptions,
-    ): WorkerTransport {
+    static create(options: WorkerTransportFactoryOptions): WorkerTransport {
         const workerBinary = new WorkerBinary();
 
         switch (options.type) {

@@ -9,7 +9,7 @@ import type {
 import {
     createDebugRouteModule,
     type DebugPatchPort,
-} from "../../../../src/control/debug/Route.ts";
+} from "../../../../src/debug/Route.ts";
 
 function context(
     peer: "cli" | "tui" | "web",

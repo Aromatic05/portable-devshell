@@ -79,7 +79,11 @@ test("failed stop preserves the runtime owner until a retry succeeds", async (t)
                 return { marker: "loaded" };
             },
         } as never,
-        instanceRegistryBuilder: { build() { return {}; } } as never,
+        instanceRegistryBuilder: {
+            build() {
+                return {};
+            },
+        } as never,
         runtimeFactory: {
             async create() {
                 creates += 1;

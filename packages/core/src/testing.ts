@@ -3,7 +3,7 @@ export * from "./storage/audit/RecordStore.js";
 export * from "./storage/audit/database/Limits.js";
 export * from "./instance/Paths.js";
 export * from "./instance/state/Machine.js";
-export * from "./instance/state/Runtime.js";
+export * from "./instance/state/Status.js";
 export * from "./instance/state/Snapshot.js";
 export * from "./instance/EventBuffer.js";
 export * from "./storage/log/Query.js";

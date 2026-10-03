@@ -21,7 +21,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
-import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/control/extension/install/BuiltinSource.ts";
+import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/extension/install/BuiltinSource.ts";
 import {
     createTestIpcPath,
     installUniqueWindowsTestIdentity,
@@ -681,7 +681,9 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
             rpc.close();
             endpoint.close();
         });
-        void endpoint.accept(LocalChannel.accept(socket)).catch(() => undefined);
+        void endpoint
+            .accept(LocalChannel.accept(socket))
+            .catch(() => undefined);
     });
 
     await mkdir(runtimeRoot, { recursive: true });
@@ -895,7 +897,8 @@ async function request(
 ): Promise<InstanceListEntry[]> {
     const [port, method] = operation.split(".");
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     try {
         const service = new Rpc(await endpoint.connect("@control", "service"));

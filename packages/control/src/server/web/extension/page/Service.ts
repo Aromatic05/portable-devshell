@@ -8,7 +8,7 @@ import type {
     WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../control/extension/Host.js";
+import type { ExtensionHost } from "../../../../extension/Host.js";
 import { WebExtensionPageCatalog } from "./Catalog.js";
 import { validateWebPageSnapshot } from "./Snapshot.js";
 
@@ -35,11 +35,16 @@ export class WebExtensionPageService {
         request: WebPageRequest,
         context: { requestId: string; signal: AbortSignal },
     ): Promise<WebPageSnapshot> {
-        const acquired = await this.#extensions.acquireRegistration(pages.id, pageId);
+        const acquired = await this.#extensions.acquireRegistration(
+            pages.id,
+            pageId,
+        );
         const { lease, registration } = acquired;
         try {
             if (typeof registration.binding !== "function")
-                throw new TypeError(`Web page ${pageId} has an invalid binding.`);
+                throw new TypeError(
+                    `Web page ${pageId} has an invalid binding.`,
+                );
             const snapshot = await (registration.binding as WebPageBinding)(
                 request,
                 Object.freeze(context),

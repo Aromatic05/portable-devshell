@@ -7,10 +7,10 @@ import { parseExtensionManifest } from "@portable-devshell/extension";
 import { CONTROL_PROTOCOL_RANGE } from "@portable-devshell/shared";
 import { FRAME_PROTOCOL_RANGE } from "@portable-devshell/shared/transport/frame";
 
-import { ControlConfigStore } from "../control/config/storage/Store.js";
-import { ExtensionHostModuleResolver } from "../control/extension/generation/discovery/ModuleResolver.js";
-import { ExtensionPathLayout } from "../control/extension/state/Layout.js";
-import { ExtensionRegistryStore } from "../control/extension/state/Store.js";
+import { ControlConfigStore } from "../config/storage/Store.js";
+import { ExtensionHostModuleResolver } from "../extension/generation/discovery/ModuleResolver.js";
+import { ExtensionPathLayout } from "../extension/state/Layout.js";
+import { ExtensionRegistryStore } from "../extension/state/Store.js";
 
 export interface ControlMigrationResult {
     changed: boolean;
@@ -61,7 +61,9 @@ export interface ControlUpdatePreflightResult {
 export async function migrateControlState(
     options: ControlMigrationOptions = {},
 ): Promise<ControlMigrationResult> {
-    const config = await new ControlConfigStore().migrate(options.homeDirectory);
+    const config = await new ControlConfigStore().migrate(
+        options.homeDirectory,
+    );
     return {
         changed: config.changed,
         domains: config.changed ? ["config"] : [],
@@ -81,20 +83,26 @@ export async function preflightControlUpdate(
         environment: options.environment,
         homeDirectory: options.homeDirectory,
     });
-    const registry = await new ExtensionRegistryStore(paths.registryFile).read();
+    const registry = await new ExtensionRegistryStore(
+        paths.registryFile,
+    ).read();
     const resolver = new ExtensionHostModuleResolver(import.meta.url);
     let checkedGenerations = 0;
     try {
         for (const [id, entry] of Object.entries(registry.extensions)) {
             const generations = new Set(
-                [entry.selectedGeneration, entry.lastKnownGoodGeneration].filter(
-                    (value): value is string => value !== undefined,
-                ),
+                [
+                    entry.selectedGeneration,
+                    entry.lastKnownGoodGeneration,
+                ].filter((value): value is string => value !== undefined),
             );
             for (const generation of generations) {
                 const manifest = parseExtensionManifest(
                     JSON.parse(
-                        await readFile(paths.manifestFile(id, generation), "utf8"),
+                        await readFile(
+                            paths.manifestFile(id, generation),
+                            "utf8",
+                        ),
                     ) as unknown,
                 );
                 if (manifest.id !== id) {
@@ -142,7 +150,10 @@ const candidateProtocolRanges = {
  * @compat update-preflight-legacy-protocol-generations
  * @removeAt 0.7.10
  */
-const legacyProtocolVersions: Record<ProtocolSurface, ReadonlyMap<number, string>> = {
+const legacyProtocolVersions: Record<
+    ProtocolSurface,
+    ReadonlyMap<number, string>
+> = {
     control: new Map([[1, "1.0.0"]]),
     frame: new Map([[1, "1.0.0"]]),
     worker: new Map([[7, "1.0.0"]]),
@@ -179,7 +190,10 @@ function protocolCompatibility(
     candidate: ControlUpdateProtocolRange,
     current: ControlUpdateProtocolRange | undefined,
 ): ControlUpdateProtocolCompatibility {
-    const normalizedCandidate = validateProtocolRange(candidate, `${surface} candidate`);
+    const normalizedCandidate = validateProtocolRange(
+        candidate,
+        `${surface} candidate`,
+    );
     if (current === undefined) {
         return {
             candidate: normalizedCandidate,
@@ -187,7 +201,10 @@ function protocolCompatibility(
             current: null,
         };
     }
-    const normalizedCurrent = validateProtocolRange(current, `${surface} current`);
+    const normalizedCurrent = validateProtocolRange(
+        current,
+        `${surface} current`,
+    );
     if (!protocolRangesOverlap(normalizedCandidate, normalizedCurrent)) {
         throw new Error(
             `Current ${surface} protocol range ${normalizedCurrent.min}..${normalizedCurrent.max} is incompatible with candidate range ${normalizedCandidate.min}..${normalizedCandidate.max}.`,
@@ -322,7 +339,9 @@ function compareProtocolVersionParts(
     return 0;
 }
 
-function parseProtocolVersion(value: string): readonly [number, number, number] {
+function parseProtocolVersion(
+    value: string,
+): readonly [number, number, number] {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
     if (match === null) throw new Error(`Invalid protocol version ${value}.`);
     const version = [

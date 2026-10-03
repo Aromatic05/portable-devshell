@@ -3,9 +3,9 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ArtifactHostPayloadStore } from "../../../../../src/control/artifact/host/storage/PayloadStore.ts";
-import { ArtifactHostReceiveStore } from "../../../../../src/control/artifact/host/storage/ReceiveStore.ts";
-import type { ArtifactHostAccessContext } from "../../../../../src/control/artifact/host/Model.ts";
+import { ArtifactHostPayloadStore } from "../../../../../src/artifact/host/storage/PayloadStore.ts";
+import { ArtifactHostReceiveStore } from "../../../../../src/artifact/host/storage/ReceiveStore.ts";
+import type { ArtifactHostAccessContext } from "../../../../../src/artifact/host/Model.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -126,7 +126,9 @@ test("host receive active-count bound releases capacity on abort", async (t) => 
 });
 
 test("host file receive never clobbers a competing no-overwrite commit", async (t) => {
-    const root = await createTestTempDirectory("artifact-host-receive-no-clobber-");
+    const root = await createTestTempDirectory(
+        "artifact-host-receive-no-clobber-",
+    );
     const downloadDirectory = join(root, "Download");
     const store = new ArtifactHostReceiveStore({
         downloadDirectory,
@@ -190,7 +192,9 @@ test("host receive abort is idempotent only when metadata is absent", async (t) 
 });
 
 test("host receive recovery preserves metadata and backup when restoration fails", async (t) => {
-    const root = await createTestTempDirectory("artifact-host-receive-recovery-io-");
+    const root = await createTestTempDirectory(
+        "artifact-host-receive-recovery-io-",
+    );
     const downloadDirectory = join(root, "Download");
     const receiveRoot = join(root, "receives");
     const temporaryDirectory = join(downloadDirectory, ".devshell-receive");
@@ -228,6 +232,8 @@ test("host receive recovery preserves metadata and backup when restoration fails
     });
     await assert.rejects(store.initialize());
     assert.deepEqual(await readdir(receiveRoot), [`${receiveId}.json`]);
-    assert.deepEqual(await readdir(temporaryDirectory), [`${receiveId}.backup`]);
+    assert.deepEqual(await readdir(temporaryDirectory), [
+        `${receiveId}.backup`,
+    ]);
     t.after(() => rm(root, { force: true, recursive: true }));
 });

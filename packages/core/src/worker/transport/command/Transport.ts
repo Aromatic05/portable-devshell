@@ -1,6 +1,9 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 
-import type { CommandDiagnostic, CommandResult } from "@portable-devshell/shared";
+import type {
+    CommandDiagnostic,
+    CommandResult,
+} from "@portable-devshell/shared";
 
 export type WorkerCommandResult = CommandResult;
 

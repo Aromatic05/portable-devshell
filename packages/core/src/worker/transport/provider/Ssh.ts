@@ -187,7 +187,9 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
         const commandLine = [workerCommand.command, ...workerCommand.args]
             .map(shellEscape)
             .join(" ");
-        const environmentFile = await this.#prepareRemoteEnvironment(options.env);
+        const environmentFile = await this.#prepareRemoteEnvironment(
+            options.env,
+        );
         const remoteCommandLine = this.#withRemoteEnvironment(
             commandLine,
             environmentFile,

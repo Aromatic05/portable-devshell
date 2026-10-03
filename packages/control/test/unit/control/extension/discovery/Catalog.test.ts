@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/extension";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
-import { ExtensionCatalog } from "../../../../../src/control/extension/generation/discovery/Catalog.ts";
+import { ExtensionCatalog } from "../../../../../src/extension/generation/discovery/Catalog.ts";
 
 function manifest(
     id: string,

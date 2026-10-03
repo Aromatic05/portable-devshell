@@ -12,23 +12,20 @@ import {
 } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/Extension.ts";
-import { CliExtensionCommandService } from "../../../src/control/extension/cli/command/Service.ts";
-import { ExtensionContextObserveCapabilityControl } from "../../../src/control/extension/generation/capability/Context.ts";
-import { ExtensionLoader } from "../../../src/control/extension/generation/discovery/Loader.ts";
-import { ExtensionHost } from "../../../src/control/extension/Host.ts";
-import { ExtensionInstallService } from "../../../src/control/extension/install/Service.ts";
-import { ExtensionPathLayout } from "../../../src/control/extension/state/Layout.ts";
-import { ExtensionRegistryStore } from "../../../src/control/extension/state/Store.ts";
-import type { InstanceDescriptor } from "../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
-import { ToolCallProvenanceStore } from "../../../src/instance/execution/tool/Provenance.ts";
+import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/generation/capability/Context.ts";
+import { ExtensionLoader } from "../../../src/extension/generation/discovery/Loader.ts";
+import { ExtensionHost } from "../../../src/extension/Host.ts";
+import { ExtensionInstallService } from "../../../src/extension/install/Service.ts";
+import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
+import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
+import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
+import { ToolCallProvenanceStore } from "@portable-devshell/core";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const RECALL_SOURCE = fileURLToPath(
-    new URL(
-        "../../../../../extensions/recall/src/builtin/",
-        import.meta.url,
-    ),
+    new URL("../../../../../extensions/recall/src/builtin/", import.meta.url),
 );
 
 test("builtin Recall reads real SQLite ToolCall audit with Control provenance through the sandbox", async (t) => {

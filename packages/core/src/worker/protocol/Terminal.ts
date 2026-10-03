@@ -1,4 +1,9 @@
-import { Endpoint, Event, Rpc, type JsonValue } from "@portable-devshell/shared";
+import {
+    Endpoint,
+    Event,
+    Rpc,
+    type JsonValue,
+} from "@portable-devshell/shared";
 
 export interface WorkerTerminalDescriptor {
     cols: number;

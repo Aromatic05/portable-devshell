@@ -5,10 +5,10 @@ import {
     ExtensionInstanceEventPublishCapabilityControl,
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../../../../src/control/extension/generation/capability/Instance.ts";
-import type { InstanceDescriptor } from "../../../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../../../src/control/instance/registry/Registry.ts";
-import { RuntimeSubscriptionManager } from "../../../../../src/instance/execution/runtime/Subscription.ts";
+} from "../../../../../src/extension/generation/capability/Instance.ts";
+import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
+import { ProcessSubscriptionManager } from "@portable-devshell/core";
 
 const readySnapshot = {
     connectionState: "connected" as const,
@@ -74,7 +74,7 @@ test("Instance observe capability watchEvents filters authoritative runtime even
                 provider: "local",
             },
         ],
-        subscriptions: new RuntimeSubscriptionManager(1),
+        subscriptions: new ProcessSubscriptionManager(1),
     });
     const controller = new AbortController();
     const events: string[] = [];
@@ -99,7 +99,7 @@ test("Instance observe capability never exposes lifecycle mutation", async () =>
         extensionId: "instance",
         instances: new InstanceRegistry([]),
         listConfigured: () => [],
-        subscriptions: new RuntimeSubscriptionManager(1),
+        subscriptions: new ProcessSubscriptionManager(1),
     });
 
     assert.deepEqual(
@@ -158,7 +158,7 @@ test("Instance observe capability lists configured instances with authoritative 
                 provider: "ssh",
             },
         ],
-        subscriptions: new RuntimeSubscriptionManager(1),
+        subscriptions: new ProcessSubscriptionManager(1),
     });
 
     assert.deepEqual(await capability.list(), [
@@ -376,7 +376,7 @@ test("Instance capabilities reject undeclared access independently", async () =>
         extensionId: "example",
         instances,
         listConfigured: () => [],
-        subscriptions: new RuntimeSubscriptionManager(1),
+        subscriptions: new ProcessSubscriptionManager(1),
     });
     const manage = new ExtensionInstanceManageCapabilityControl({
         allowed: false,

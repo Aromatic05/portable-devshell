@@ -18,7 +18,7 @@ import {
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
 import { ControlSocketServer } from "../../../../src/server/endpoint/Socket.ts";
-import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
+import { InstanceRegistry } from "@portable-devshell/core";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
@@ -68,7 +68,10 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const normal = await readMessage(stream);
     assert.equal(normal.name, "event");
     assert.equal(normal.seq, 2);
-    assert.equal((normal.payload as { type?: string }).type, "instance.started");
+    assert.equal(
+        (normal.payload as { type?: string }).type,
+        "instance.started",
+    );
 
     worker.emit("instance.started");
     worker.dropBefore(4);
@@ -85,7 +88,10 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const recovered = await readMessage(stream);
     assert.equal(recovered.name, "event");
     assert.equal(recovered.seq, 4);
-    assert.equal((recovered.payload as { type?: string }).type, "instance.started");
+    assert.equal(
+        (recovered.payload as { type?: string }).type,
+        "instance.started",
+    );
 });
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
@@ -152,7 +158,8 @@ interface TestConnection {
 
 async function connect(socketPath: string): Promise<TestConnection> {
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     const protocols: Array<Rpc | Stream> = [];
     const service = new Rpc(await endpoint.connect("@control", "service"));
@@ -174,7 +181,9 @@ async function connect(socketPath: string): Promise<TestConnection> {
     };
 }
 
-async function readMessage(stream: MessageStream): Promise<ControlStreamMessage> {
+async function readMessage(
+    stream: MessageStream,
+): Promise<ControlStreamMessage> {
     const next = await stream.readMessage();
     assert.equal(next.type, "data");
     return next.message as ControlStreamMessage;

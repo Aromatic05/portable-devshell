@@ -10,10 +10,10 @@ import {
 } from "@portable-devshell/shared";
 import type { HttpHost } from "@portable-devshell/mcp";
 import {
-    ControlRuntimeReverse,
+    ConnectionModule,
     InstanceRegistryFactory,
 } from "../../../../src/testing.ts";
-import type { ControlRuntimeMcp } from "../../../../src/composition/control/subsystem/Mcp.ts";
+import type { McpControlModule } from "../../../../src/composition/mcp/Control.ts";
 import type { ControlRuntimeState } from "../../../../src/composition/control/State.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -73,9 +73,9 @@ test("reverse runtime is ready before the first reverse instance is created", as
             },
         },
         host: { server: host as unknown as HttpHost },
-    } as unknown as ControlRuntimeMcp;
+    } as unknown as McpControlModule;
 
-    const reverse = new ControlRuntimeReverse({ mcp, state });
+    const reverse = new ConnectionModule({ mcp, state });
 
     assert.notEqual(reverse.service, undefined);
     assert.notEqual(disableRetirement, undefined);
@@ -103,8 +103,8 @@ test("reverse runtime adopts a changed MCP public URL on the replacement host", 
             registerInstanceDisableRetirement() {},
         },
         host: { server: firstHost as unknown as HttpHost },
-    } as unknown as ControlRuntimeMcp;
-    const reverse = new ControlRuntimeReverse({ mcp, state });
+    } as unknown as McpControlModule;
+    const reverse = new ConnectionModule({ mcp, state });
 
     assert.equal(firstHost.rawPaths.includes("/old/reverse/v1/enroll"), true);
     const nextHost = new RecordingHttpHost();

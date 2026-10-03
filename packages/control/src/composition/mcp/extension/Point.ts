@@ -11,7 +11,7 @@ import {
 import type {
     ExtensionPointDefinition,
     ExtensionPointValidationContext,
-} from "../../../control/extension/generation/registration/PointRegistry.js";
+} from "../../../extension/generation/registration/PointRegistry.js";
 import {
     createMcpToolSandboxBinding,
     validateMcpToolBinding,
@@ -102,10 +102,7 @@ function optionalString(
 function optionalBoolean(
     record: Record<string, ExtensionJsonValue | undefined>,
     field:
-        | "destructiveHint"
-        | "idempotentHint"
-        | "openWorldHint"
-        | "readOnlyHint",
+        "destructiveHint" | "idempotentHint" | "openWorldHint" | "readOnlyHint",
 ): Partial<Record<typeof field, boolean>> {
     const value = record[field];
     if (value === undefined) return {};

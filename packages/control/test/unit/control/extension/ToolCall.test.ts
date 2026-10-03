@@ -11,11 +11,11 @@ import type {
 } from "@portable-devshell/extension/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { ToolCallExtensionBinding } from "../../../../src/control/extension/toolcall/Binding.ts";
+import { ToolCallExtensionBinding } from "../../../../src/extension/toolcall/Binding.ts";
 import {
     toolCallReviewSandboxCodec,
     toolCallRewriteSandboxCodec,
-} from "../../../../src/control/extension/toolcall/Sandbox.ts";
+} from "../../../../src/extension/toolcall/Sandbox.ts";
 
 const context = {
     instance: asInstanceName("instance-a"),
@@ -96,14 +96,16 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
             ],
         }) as never,
         undefined,
-        [{
-            hook: "510-builtin",
-            id: "middle",
-            review: async () => {
-                calls.push("builtin");
-                return { decision: "continue" };
+        [
+            {
+                hook: "510-builtin",
+                id: "middle",
+                review: async () => {
+                    calls.push("builtin");
+                    return { decision: "continue" };
+                },
             },
-        }],
+        ],
     );
     const lease = await binding.acquire(
         context,
@@ -147,14 +149,16 @@ test("builtin review rejection short-circuits later reviews", async () => {
             ],
         }) as never,
         undefined,
-        [{
-            hook: "510-builtin",
-            id: "middle",
-            review: async () => {
-                calls.push("builtin");
-                return { decision: "reject", reason: "denied" };
+        [
+            {
+                hook: "510-builtin",
+                id: "middle",
+                review: async () => {
+                    calls.push("builtin");
+                    return { decision: "reject", reason: "denied" };
+                },
             },
-        }],
+        ],
     );
     const lease = await binding.acquire(
         context,
@@ -177,18 +181,21 @@ test("builtin review rejection short-circuits later reviews", async () => {
 test("review and rewrite ordering are independent", async () => {
     const reviewCalls: string[] = [];
     const rewriteCalls: string[] = [];
-    const rewrite = (name: string): ToolCallRewriteBinding => async (input) => {
-        rewriteCalls.push(name);
-        return {
-            ...input.value,
-            payload: {
-                trace: [
-                    ...((input.value.payload as { trace?: string[] }).trace ?? []),
-                    name,
-                ],
-            },
+    const rewrite =
+        (name: string): ToolCallRewriteBinding =>
+        async (input) => {
+            rewriteCalls.push(name);
+            return {
+                ...input.value,
+                payload: {
+                    trace: [
+                        ...((input.value.payload as { trace?: string[] })
+                            .trace ?? []),
+                        name,
+                    ],
+                },
+            };
         };
-    };
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -210,8 +217,16 @@ test("review and rewrite ordering are independent", async () => {
                 },
             ],
             rewrites: [
-                { hook: "900-rewrite", id: "rewrite-late", binding: rewrite("900") },
-                { hook: "500-rewrite", id: "rewrite-early", binding: rewrite("500") },
+                {
+                    hook: "900-rewrite",
+                    id: "rewrite-late",
+                    binding: rewrite("900"),
+                },
+                {
+                    hook: "500-rewrite",
+                    id: "rewrite-early",
+                    binding: rewrite("500"),
+                },
             ],
         }) as never,
     );

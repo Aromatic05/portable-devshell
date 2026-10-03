@@ -310,7 +310,9 @@ export class WorkerProtocolClient {
     }
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
-        await this.#request("artifact", "artifact.payload.close", { payloadId });
+        await this.#request("artifact", "artifact.payload.close", {
+            payloadId,
+        });
     }
 
     async beginArtifactReceive(
@@ -338,7 +340,9 @@ export class WorkerProtocolClient {
     }
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
-        await this.#request("artifact", "artifact.receive.abort", { receiveId });
+        await this.#request("artifact", "artifact.receive.abort", {
+            receiveId,
+        });
     }
 
     async openArtifactDirectReceive(
@@ -385,9 +389,12 @@ export class WorkerProtocolClient {
         message?: JsonValue,
         signal?: AbortSignal,
     ): Promise<JsonValue> {
-        const rpc = new Rpc(await this.#endpoint.connect(this.#workerHost, port, signal));
+        const rpc = new Rpc(
+            await this.#endpoint.connect(this.#workerHost, port, signal),
+        );
         try {
-            return ((await rpc.request(method, message, signal)) ?? null) as JsonValue;
+            return ((await rpc.request(method, message, signal)) ??
+                null) as JsonValue;
         } finally {
             rpc.close();
         }
@@ -427,8 +434,7 @@ function assertNegotiatedWorkerProtocolVersion(
 }
 
 function parseWorkerProtocolSemVer(value: string): WorkerProtocolSemVer {
-    const match =
-        /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
     if (match === null)
         throw new TypeError(`Invalid Worker protocol version ${value}.`);
     const major = Number(match[1]);

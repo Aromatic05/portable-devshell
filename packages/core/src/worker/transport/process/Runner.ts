@@ -54,7 +54,9 @@ export class WorkerTransportProcessRunner {
             }
             throw this.createError(
                 context,
-                new Error("Worker transport process must expose stdin, stdout, and stderr."),
+                new Error(
+                    "Worker transport process must expose stdin, stdout, and stderr.",
+                ),
             );
         }
 

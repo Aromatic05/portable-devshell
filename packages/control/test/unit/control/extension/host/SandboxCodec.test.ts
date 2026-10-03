@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionSandboxPointCodecRegistry } from "../../../../../src/control/extension/generation/sandbox/bridge/PointCodec.ts";
+import { ExtensionSandboxPointCodecRegistry } from "../../../../../src/extension/generation/sandbox/bridge/PointCodec.ts";
 
 const context = Object.freeze({
     codeDirectory: "/extension/code",

@@ -1,7 +1,7 @@
 import type { WebApplicationDeclaration } from "@portable-devshell/extension/web";
 import type { WebApplicationDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../control/extension/Host.js";
+import type { ExtensionHost } from "../../../../extension/Host.js";
 
 export class WebApplicationCatalog {
     readonly #extensions: Pick<ExtensionHost, "listDeclarations">;

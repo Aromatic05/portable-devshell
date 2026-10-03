@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     CONTROL_BUILTIN_EXTENSION_SOURCES_ENV,
     readBuiltinExtensionSources,
-} from "../../../../../src/control/extension/install/BuiltinSource.ts";
+} from "../../../../../src/extension/install/BuiltinSource.ts";
 
 test("builtin Extension source parser accepts unique id-bound absolute paths", () => {
     const key = CONTROL_BUILTIN_EXTENSION_SOURCES_ENV;

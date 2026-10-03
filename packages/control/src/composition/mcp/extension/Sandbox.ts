@@ -10,8 +10,8 @@ import type {
     ExtensionPointSandboxBridge,
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
-} from "../../../control/extension/generation/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodec } from "../../../control/extension/generation/sandbox/bridge/PointCodec.js";
+} from "../../../extension/generation/registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodec } from "../../../extension/generation/sandbox/bridge/PointCodec.js";
 
 export const mcpToolsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
     describeBinding(
@@ -124,10 +124,7 @@ function assertDescriptor(
             context.id +
             " sandbox descriptor",
     );
-    if (
-        value.kind !== kind ||
-        Object.keys(value).some((key) => key !== "kind")
-    )
+    if (value.kind !== kind || Object.keys(value).some((key) => key !== "kind"))
         throw new TypeError(
             "Extension " +
                 context.extensionId +

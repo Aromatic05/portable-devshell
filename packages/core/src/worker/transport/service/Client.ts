@@ -52,17 +52,29 @@ export class WorkerTransportServiceClient {
             const next = await stream.readMessage();
             if (next.type === "data") {
                 if (next.bytes === undefined)
-                    throw new Error("Artifact payload stream returned a message chunk.");
+                    throw new Error(
+                        "Artifact payload stream returned a message chunk.",
+                    );
                 chunks.push(next.bytes);
                 byteLength += next.bytes.byteLength;
                 continue;
             }
             if (next.type !== "close")
-                throw new Error("Artifact payload stream closed without metadata.");
-            const result = readObject(next.message, "Artifact payload stream metadata");
-            const returnedBytes = readInteger(result.returnedBytes, "returnedBytes");
+                throw new Error(
+                    "Artifact payload stream closed without metadata.",
+                );
+            const result = readObject(
+                next.message,
+                "Artifact payload stream metadata",
+            );
+            const returnedBytes = readInteger(
+                result.returnedBytes,
+                "returnedBytes",
+            );
             if (returnedBytes !== byteLength)
-                throw new Error("Artifact payload stream byte count is invalid.");
+                throw new Error(
+                    "Artifact payload stream byte count is invalid.",
+                );
             return {
                 bytes: concat(chunks, byteLength),
                 eof: readBoolean(result.eof, "eof"),
@@ -101,8 +113,13 @@ export class WorkerTransportServiceClient {
             const next = await stream.readMessage();
             if (next.type === "data") continue;
             if (next.type !== "close")
-                throw new Error("Artifact receive stream closed without metadata.");
-            const result = readObject(next.message, "Artifact receive stream metadata");
+                throw new Error(
+                    "Artifact receive stream closed without metadata.",
+                );
+            const result = readObject(
+                next.message,
+                "Artifact receive stream metadata",
+            );
             return {
                 nextOffsetBytes: readInteger(
                     result.nextOffsetBytes,

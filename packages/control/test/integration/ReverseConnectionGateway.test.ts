@@ -293,11 +293,13 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             },
             () => undefined,
         );
-        void serveWorkerEndpoint(sseChannel, methods).catch((error: unknown) => {
-            sseChannel.finish(
-                error instanceof Error ? error : new Error(String(error)),
-            );
-        });
+        void serveWorkerEndpoint(sseChannel, methods).catch(
+            (error: unknown) => {
+                sseChannel.finish(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            },
+        );
 
         while (methods.length < 3) {
             const chunk = await reader.read();
@@ -432,7 +434,8 @@ class TestWorkerChannel implements Channel {
     }
 
     write(data: Uint8Array): Promise<void> {
-        if (this.#closed) return Promise.reject(new Error("worker channel is closed"));
+        if (this.#closed)
+            return Promise.reject(new Error("worker channel is closed"));
         const copy = Uint8Array.from(data);
         const write = this.#writeTail.then(() => this.#send(copy));
         this.#writeTail = write.catch(() => undefined);
@@ -457,7 +460,8 @@ class TestWorkerChannel implements Channel {
 
     emit(data: Uint8Array): void {
         if (this.#closed) return;
-        for (const listener of [...this.#dataListeners]) listener(Uint8Array.from(data));
+        for (const listener of [...this.#dataListeners])
+            listener(Uint8Array.from(data));
     }
 
     finish(error?: Error): void {
@@ -494,7 +498,9 @@ async function serveWorkerEndpoint(
             return responseFor("tools.list");
         },
     });
-    const closed = new Promise<void>((resolve) => channel.onClose(() => resolve()));
+    const closed = new Promise<void>((resolve) =>
+        channel.onClose(() => resolve()),
+    );
     const detach = await endpoint.accept(channel);
     try {
         await closed;

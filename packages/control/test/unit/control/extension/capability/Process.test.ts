@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 
-import { ExtensionProcessCapabilityControl } from "../../../../../src/control/extension/generation/capability/Process.ts";
+import { ExtensionProcessCapabilityControl } from "../../../../../src/extension/generation/capability/Process.ts";
 
 test("Extension processes capability refuses undeclared access before spawning", async () => {
     let spawns = 0;

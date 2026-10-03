@@ -7,11 +7,11 @@ import type {
 } from "@portable-devshell/shared";
 import type { CliModelCommandBinding } from "@portable-devshell/extension/cli";
 
-import { CliExtensionCommandService } from "../../../../../src/control/extension/cli/command/Service.ts";
-import { ModelDevshellBroker } from "../../../../../src/control/extension/cli/command/ModelBroker.ts";
-import type { InstanceDescriptor } from "../../../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../../../src/control/instance/registry/Registry.ts";
-import type { ContextAdminPort } from "../../../../../src/control/context/Route.ts";
+import { CliExtensionCommandService } from "../../../../../src/extension/cli/command/Service.ts";
+import { ModelDevshellBroker } from "../../../../../src/extension/cli/command/ModelBroker.ts";
+import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
+import type { ContextAdminPort } from "../../../../../src/context/Route.ts";
 import type {
     WorkerCommandSessionClose,
     WorkerCommandSessionOpen,
@@ -188,7 +188,9 @@ test("model devshell executes an allowed command only under matching active bash
 test("model devshell binds the requested workspace to that instance environment", async (t) => {
     const allowed = harness({ contextWorkspace: "/b", instance: "beta" });
     t.after(() => allowed.broker.dispose());
-    allowed.setRecord(toolRecord({ instance: "beta" as never, workspace: "/b" }));
+    allowed.setRecord(
+        toolRecord({ instance: "beta" as never, workspace: "/b" }),
+    );
     allowed.open(openRequest({ workspace: "/b" }));
     await waitFor(() => allowed.completions.length === 1);
     assert.deepEqual(allowed.completions, [
@@ -198,11 +200,16 @@ test("model devshell binds the requested workspace to that instance environment"
 
     const rejected = harness({ contextWorkspace: "/b", instance: "beta" });
     t.after(() => rejected.broker.dispose());
-    rejected.setRecord(toolRecord({ instance: "beta" as never, workspace: "/a" }));
+    rejected.setRecord(
+        toolRecord({ instance: "beta" as never, workspace: "/a" }),
+    );
     rejected.open(openRequest({ workspace: "/a" }));
     await waitFor(() => rejected.completions.length === 1);
     assert.equal(rejected.completions[0]?.exitCode, 1);
-    assert.match(rejected.outputs[0]?.data ?? "", /context binding does not match/u);
+    assert.match(
+        rejected.outputs[0]?.data ?? "",
+        /context binding does not match/u,
+    );
     assert.equal(rejected.faults.length, 1);
 });
 

@@ -13,23 +13,23 @@ import {
     readDefaultInstance,
     readShareId,
     readTransferId,
-} from "../../../../src/control/artifact/route/Input.ts";
+} from "../../../../src/artifact/route/Input.ts";
 import {
     readMcpApprovalDecision,
     readMcpApprovalId,
-} from "../../../../src/composition/mcp/route/Input.ts";
-import { readReverseInstanceName } from "../../../../src/control/reverse/Input.ts";
+} from "../../../../src/auth/Input.ts";
+import { readReverseInstanceName } from "../../../../src/connection/Input.ts";
 import {
     limitProcessLogResponse,
     readProcessLogQuery,
     readProcessSubscriptionFromSeq,
-} from "../../../../src/instance/execution/runtime/Route.ts";
-import { readTodoSubscriptionFromSeq } from "../../../../src/instance/workflow/todo/Route.ts";
+} from "@portable-devshell/core";
+import { readTodoSubscriptionFromSeq } from "@portable-devshell/core";
 import {
     limitToolCallResponse,
     readToolCall,
     readToolCallQuery,
-} from "../../../../src/instance/execution/tool/Input.ts";
+} from "@portable-devshell/core";
 
 test("artifact route inputs preserve the two supported source forms", () => {
     assert.deepEqual(

@@ -1,4 +1,7 @@
-import type { ToolCallHookValue, ToolCallPipeline } from "@portable-devshell/core";
+import type {
+    ToolCallHookValue,
+    ToolCallPipeline,
+} from "@portable-devshell/core";
 import type {
     McpApprovalPort,
     McpInstanceGateway,
@@ -17,10 +20,10 @@ import type {
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
-import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
-import { InstanceConnectionService } from "../../control/instance/registry/Connection.js";
-import type { ToolCallProvenanceStore } from "../../instance/execution/tool/Provenance.js";
-import type { ArtifactService } from "../../control/artifact/Service.js";
+import type { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceConnectionService } from "@portable-devshell/core";
+import type { ToolCallProvenanceStore } from "@portable-devshell/core";
+import type { ArtifactService } from "../../artifact/Service.js";
 import type { McpExtensionService } from "./extension/Service.js";
 
 export interface McpInstanceGatewayControlOptions {
@@ -47,7 +50,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 },
             ),
         cancelApproval: async (instance, approvalId, reason) =>
-            await this.#requireDescriptor(instance).approval.cancel(approvalId, reason),
+            await this.#requireDescriptor(instance).approval.cancel(
+                approvalId,
+                reason,
+            ),
     };
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
@@ -89,7 +95,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }
     }
 
-    bindToolCalls(ingress: Pick<ToolCallPipeline, "call" | "callOperation">): void {
+    bindToolCalls(
+        ingress: Pick<ToolCallPipeline, "call" | "callOperation">,
+    ): void {
         if (this.#toolCalls !== undefined)
             throw new Error("MCP tool call ingress is already bound.");
         this.#toolCalls = ingress;
@@ -100,11 +108,20 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+        operation: (
+            callId: string,
+            input: JsonValue,
+            finalValue: ToolCallHookValue,
+        ) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T> {
         return await this.#requireToolCalls().callOperation(
-            instance, toolName, input, context, operation, signal,
+            instance,
+            toolName,
+            input,
+            context,
+            operation,
+            signal,
         );
     }
 
@@ -182,7 +199,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             {
                 callId,
                 instance,
-                ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
+                ...(context.ctxId === undefined
+                    ? {}
+                    : { ctxId: context.ctxId }),
                 ...(context.requestId === undefined
                     ? {}
                     : { requestId: context.requestId }),

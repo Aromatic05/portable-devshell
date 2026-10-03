@@ -18,7 +18,7 @@ import { WorkerInstanceToolAudit } from "./record/Audit.js";
 import {
     ToolCallExecutionTarget,
     type ToolCallTarget,
-} from "../../../toolcall/Pipeline.js";
+} from "../../../tool/Pipeline.js";
 import { WorkerInstanceToolLog } from "./record/Log.js";
 
 interface WorkerToolOptions {

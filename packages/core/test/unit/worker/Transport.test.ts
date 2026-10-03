@@ -26,7 +26,12 @@ import {
     getWorkerTargetByKey,
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
-import { Endpoint, Rpc, createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    Endpoint,
+    Rpc,
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
@@ -177,7 +182,10 @@ test(
         assert.equal(await processStream.read(), undefined);
 
         const artifactBytes = Buffer.alloc(256 * 1024, 0x5a);
-        await writeFile(join(homeDirectory, "artifact-source.bin"), artifactBytes);
+        await writeFile(
+            join(homeDirectory, "artifact-source.bin"),
+            artifactBytes,
+        );
         const payload = await protocol.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
             path: "./artifact-source.bin",
@@ -202,7 +210,9 @@ test(
             receiveId: receive.receiveId,
         });
         assert.equal(written.nextOffsetBytes, artifactBytes.byteLength);
-        const finished = await protocol.finishArtifactReceive(receive.receiveId);
+        const finished = await protocol.finishArtifactReceive(
+            receive.receiveId,
+        );
         assert.equal(finished.bytes, artifactBytes.byteLength);
         assert.deepEqual(
             await readFile(join(homeDirectory, "artifact-copy.bin")),

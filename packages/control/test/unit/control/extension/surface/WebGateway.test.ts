@@ -11,7 +11,7 @@ import test from "node:test";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
+import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { ControlWebSessionService } from "../../../../../src/server/web/auth/Session.ts";
 import { ExtensionWebGateway } from "../../../../../src/server/web/extension/application/Gateway.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";

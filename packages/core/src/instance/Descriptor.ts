@@ -1,0 +1,129 @@
+import type {
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+} from "../tool/hook/Review.js";
+import type { TerminalBackend } from "../terminal/Backend.js";
+import type { WorkerInstance } from "../worker/instance/Instance.js";
+import type { WorkerTransportConnection } from "../worker/transport/Transport.js";
+import type {
+    ActiveTodoSummary,
+    ApprovalDecisionBy,
+    ApprovalPolicy,
+    ApprovalRequest,
+    ControlMcpContextMode,
+    GoalActivityKind,
+    GoalContinuationInput,
+    GoalManageInput,
+    GoalSnapshot,
+    JsonValue,
+    TodoReadInput,
+    TodoReadResult,
+    TodoTaskControlAction,
+    TodoWriteInput,
+    WaitCreateInput,
+    WaitRecord,
+} from "@portable-devshell/shared";
+
+export interface InstanceTodoPort {
+    cancelAll(): Promise<void>;
+    control(
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string,
+        expectedRevision?: number,
+    ): Promise<TodoReadResult>;
+    delete(taskId: string): Promise<void>;
+    read(input?: TodoReadInput): Promise<TodoReadResult>;
+    summaries(): ActiveTodoSummary[];
+    write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
+}
+
+export interface InstanceGoalPort {
+    continuation(
+        ctxId: string,
+        input: GoalContinuationInput,
+    ): Promise<JsonValue>;
+    list(): Promise<GoalSnapshot[]>;
+    stopAll(): Promise<GoalSnapshot[]>;
+    manage(
+        ctxId: string,
+        input: GoalManageInput,
+    ): Promise<GoalSnapshot | undefined>;
+    read(ctxId: string): Promise<GoalSnapshot | undefined>;
+    recordReentry(ctxId: string, progressEpoch?: number): Promise<void>;
+    touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
+}
+
+export interface InstanceWaitPort {
+    cancel(waitId: string): Promise<WaitRecord>;
+    claimRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    completeRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    consume(waitId: string): Promise<WaitRecord>;
+    create(input: WaitCreateInput): Promise<WaitRecord>;
+    detach(waitId: string): Promise<WaitRecord>;
+    disableRecovery(waitId: string): Promise<WaitRecord>;
+    dismissRecovery(
+        waitId: string,
+        recoveryMessageId: string,
+    ): Promise<WaitRecord>;
+    get(waitId: string): Promise<WaitRecord | undefined>;
+    list(taskId?: string): Promise<WaitRecord[]>;
+    markRecoveryAttempted(
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ): Promise<WaitRecord>;
+    reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    resolve(
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ): Promise<WaitRecord>;
+    waitForResolution(waitId: string): Promise<WaitRecord>;
+}
+
+export interface InstanceApprovalPort {
+    cancel(approvalId: string, reason?: string): Promise<ApprovalRequest>;
+    close(): void;
+    decideApproval(
+        approvalId: string,
+        input: {
+            decision: "approve" | "deny";
+            decidedBy: ApprovalDecisionBy;
+            policyPatch?: JsonValue;
+            reason?: string;
+            remember?: boolean;
+        },
+    ): Promise<ApprovalRequest>;
+    getApproval(approvalId: string): Promise<ApprovalRequest>;
+    listApprovals(): Promise<ApprovalRequest[]>;
+    listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]>;
+    retire(reason?: string): Promise<void>;
+    setPolicy(policy: ApprovalPolicy | undefined): void;
+}
+
+export type InstanceApprovalReview = (
+    input: ToolCallReviewInput,
+    signal: AbortSignal,
+    recording: "caller" | "host",
+) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
+
+export interface InstanceDescriptor {
+    approval: InstanceApprovalPort;
+    approvalReview: InstanceApprovalReview;
+    enabled: boolean;
+    goal: InstanceGoalPort;
+    mcpContextMode?: ControlMcpContextMode;
+    mcpEnabled: boolean;
+    mcpPath: string;
+    modelExtensions: readonly string[];
+    name: string;
+    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
+    reverseConnection?: WorkerTransportConnection;
+    terminal?: TerminalBackend;
+    todo: InstanceTodoPort;
+    wait?: InstanceWaitPort;
+    worker: WorkerInstance;
+}

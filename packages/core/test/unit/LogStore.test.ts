@@ -419,7 +419,10 @@ test("StateStore supports namespaced durable put, get, upsert, list and delete",
         await store.put("b", { value: "latest" });
         await other.put("a", { value: "isolated" });
         assert.deepEqual(await store.get("b"), { value: "latest" });
-        assert.deepEqual(await store.list(), [{ value: "first" }, { value: "latest" }]);
+        assert.deepEqual(await store.list(), [
+            { value: "first" },
+            { value: "latest" },
+        ]);
         await store.delete("a");
         await store.delete("missing");
         assert.equal(await store.get("a"), undefined);
@@ -428,8 +431,12 @@ test("StateStore supports namespaced durable put, get, upsert, list and delete",
         database.close();
         const reopened = new AuditDatabase(file, options);
         try {
-            assert.deepEqual(await reopened.stateStore("settings").list(), [{ value: "latest" }]);
-            assert.deepEqual(await reopened.stateStore("other").get("a"), { value: "isolated" });
+            assert.deepEqual(await reopened.stateStore("settings").list(), [
+                { value: "latest" },
+            ]);
+            assert.deepEqual(await reopened.stateStore("other").get("a"), {
+                value: "isolated",
+            });
         } finally {
             reopened.close();
         }
@@ -452,7 +459,9 @@ test("StateStore survives audit retention cleanup and max-record trimming", asyn
         retentionDays: 1,
     });
     try {
-        const store = database.stateStore<{ at: string; value: string }>("current");
+        const store = database.stateStore<{ at: string; value: string }>(
+            "current",
+        );
         const current = { at: "2020-01-01T00:00:00.000Z", value: "durable" };
         await store.put("item", current);
         const audit = database.store<typeof current>("events", {
@@ -511,42 +520,64 @@ test("StateStore migrates JSONL before expired audit snapshots and is idempotent
     ];
     const seed = new AuditDatabase(file, options);
     try {
-        const audit = seed.store<typeof snapshots[number]>("events", { timestamp: (record) => record.at });
+        const audit = seed.store<(typeof snapshots)[number]>("events", {
+            timestamp: (record) => record.at,
+        });
         for (const record of snapshots) await audit.append(record);
     } finally {
         seed.close();
     }
     renameLegacyAuditCollection(file);
-    await writeFile(legacyFile, [
-        { id: "a", value: "file", at: 0 },
-        { id: "c", value: "file-old", at: 0 },
-        { id: "c", value: "file-latest", at: 0 },
-    ].map((record) => JSON.stringify(record)).join("\n") + "\n");
+    await writeFile(
+        legacyFile,
+        [
+            { id: "a", value: "file", at: 0 },
+            { id: "c", value: "file-old", at: 0 },
+            { id: "c", value: "file-latest", at: 0 },
+        ]
+            .map((record) => JSON.stringify(record))
+            .join("\n") + "\n",
+    );
     const migration = {
         legacyCollection: "legacy-state",
         legacyFile,
-        key: (record: typeof snapshots[number]) => record.id,
+        key: (record: (typeof snapshots)[number]) => record.id,
     };
     const database = new AuditDatabase(file, options);
     try {
         database.migrateState("current", migration);
-        const store = database.stateStore<typeof snapshots[number]>("current");
-        assert.deepEqual(await store.list(), [snapshots[1], snapshots[2], { id: "c", value: "file-latest", at: 0 }]);
+        const store =
+            database.stateStore<(typeof snapshots)[number]>("current");
+        assert.deepEqual(await store.list(), [
+            snapshots[1],
+            snapshots[2],
+            { id: "c", value: "file-latest", at: 0 },
+        ]);
         assert.equal(readAuditRecordCount(file), 0);
         assert.equal(readAuditMetadataValue(file, "payloadBytes:v1"), "0");
-        assert.equal(readAuditMetadataValue(file, "migration:state-v1:current"), "complete");
+        assert.equal(
+            readAuditMetadataValue(file, "migration:state-v1:current"),
+            "complete",
+        );
         await assert.rejects(access(legacyFile), { code: "ENOENT" });
         database.cleanup();
         assert.deepEqual(await store.get("b"), snapshots[2]);
         await store.put("a", { id: "a", value: "current", at: 3 });
         await store.delete("c");
         database.close();
-        await writeFile(legacyFile, JSON.stringify({ id: "a", value: "stale", at: 0 }) + "\n");
+        await writeFile(
+            legacyFile,
+            JSON.stringify({ id: "a", value: "stale", at: 0 }) + "\n",
+        );
         const reopened = new AuditDatabase(file, options);
         try {
             reopened.migrateState("current", migration);
-            const migrated = reopened.stateStore<typeof snapshots[number]>("current");
-            assert.deepEqual(await migrated.list(), [{ id: "a", value: "current", at: 3 }, snapshots[2]]);
+            const migrated =
+                reopened.stateStore<(typeof snapshots)[number]>("current");
+            assert.deepEqual(await migrated.list(), [
+                { id: "a", value: "current", at: 3 },
+                snapshots[2],
+            ]);
             await assert.rejects(access(legacyFile), { code: "ENOENT" });
         } finally {
             reopened.close();
@@ -561,17 +592,27 @@ test("StateStore rolls back a failed migration and retries without losing legacy
     const root = await createTestTempDirectory("sqlite-state-rollback");
     const file = join(root, "audit.sqlite3");
     const legacyFile = join(root, "state.jsonl");
-    const database = new AuditDatabase(file, { maxBytes: 16 * MIB, retentionDays: 30 });
+    const database = new AuditDatabase(file, {
+        maxBytes: 16 * MIB,
+        retentionDays: 30,
+    });
     try {
         const store = database.stateStore<{ id: string }>("current");
         await store.put("keep", { id: "keep" });
         await writeFile(legacyFile, '{"id":"first"}\n{"id":null}\n');
-        assert.throws(() => database.migrateState("current", {
-            legacyFile,
-            key: (record: { id: string }) => record.id.toUpperCase(),
-        }), TypeError);
+        assert.throws(
+            () =>
+                database.migrateState("current", {
+                    legacyFile,
+                    key: (record: { id: string }) => record.id.toUpperCase(),
+                }),
+            TypeError,
+        );
         assert.deepEqual(await store.list(), [{ id: "keep" }]);
-        assert.equal(readAuditMetadataValue(file, "migration:state-v1:current"), undefined);
+        assert.equal(
+            readAuditMetadataValue(file, "migration:state-v1:current"),
+            undefined,
+        );
         await access(legacyFile);
         await writeFile(legacyFile, '{"id":"first"}\n{"id":"second"}\n');
         database.migrateState("current", {
@@ -579,7 +620,11 @@ test("StateStore rolls back a failed migration and retries without losing legacy
             key: (record: { id: string }) => record.id,
         });
         const migrated = database.stateStore<{ id: string }>("current");
-        assert.deepEqual(await migrated.list(), [{ id: "first" }, { id: "keep" }, { id: "second" }]);
+        assert.deepEqual(await migrated.list(), [
+            { id: "first" },
+            { id: "keep" },
+            { id: "second" },
+        ]);
         await assert.rejects(access(legacyFile), { code: "ENOENT" });
     } finally {
         database.close();
@@ -589,10 +634,13 @@ test("StateStore rolls back a failed migration and retries without losing legacy
 
 function renameLegacyAuditCollection(file: string): void {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     const database = new DatabaseSync(file);
     try {
-        database.exec("UPDATE audit_records SET collection = 'legacy-state' WHERE collection = 'events'");
+        database.exec(
+            "UPDATE audit_records SET collection = 'legacy-state' WHERE collection = 'events'",
+        );
     } finally {
         database.close();
     }

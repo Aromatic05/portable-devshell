@@ -9,7 +9,7 @@ import {
     ConfigRegistry,
     ControlConfigMutationLock,
 } from "../../../../src/testing.ts";
-import { setConfigPathValue } from "../../../../src/control/config/Path.ts";
+import { setConfigPathValue } from "../../../../src/config/Path.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const schema = {

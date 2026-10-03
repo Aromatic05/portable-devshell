@@ -1,7 +1,4 @@
-import type {
-    WorkerExecProcessInput,
-    WorkerTcpConnectInput,
-} from "./Model.js";
+import type { WorkerExecProcessInput, WorkerTcpConnectInput } from "./Model.js";
 
 const encoder = new TextEncoder();
 

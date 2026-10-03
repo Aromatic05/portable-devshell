@@ -7,8 +7,8 @@ import {
 } from "@portable-devshell/extension";
 import type { ExtensionManifest } from "@portable-devshell/extension";
 
-import { ExtensionGeneration } from "../../../../../src/control/extension/generation/registration/Generation.ts";
-import { ExtensionRegistrationSet } from "../../../../../src/control/extension/generation/registration/Registration.ts";
+import { ExtensionGeneration } from "../../../../../src/extension/generation/registration/Generation.ts";
+import { ExtensionRegistrationSet } from "../../../../../src/extension/generation/registration/Registration.ts";
 
 const manifest: ExtensionManifest = {
     activation: "lazy",

@@ -22,7 +22,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
-import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/control/extension/install/BuiltinSource.ts";
+import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/extension/install/BuiltinSource.ts";
 import {
     createTestWindowsIdentity,
     realWorkerTestOptions,
@@ -378,11 +378,16 @@ async function exerciseWorkerTerminal(
                 let responseCount = 0;
                 while (responseCount === 0) {
                     if (Date.now() >= bootstrapDeadline)
-                        throw new Error("terminal bootstrap cursor query timeout");
+                        throw new Error(
+                            "terminal bootstrap cursor query timeout",
+                        );
                     const event = await readStreamData(attached);
                     if (event.name === "output") {
-                        const payload = event.payload as { data?: string } | undefined;
-                        responseCount += await cursorResponder.consume(payload?.data ?? "");
+                        const payload = event.payload as
+                            { data?: string } | undefined;
+                        responseCount += await cursorResponder.consume(
+                            payload?.data ?? "",
+                        );
                     }
                 }
             }
@@ -405,8 +410,7 @@ async function exerciseWorkerTerminal(
                 const event = await readStreamData(attached);
                 if (event.name === "output") {
                     const payload = event.payload as
-                        | { data?: string; seq?: number }
-                        | undefined;
+                        { data?: string; seq?: number } | undefined;
                     const data = payload?.data ?? "";
                     output += data;
                     latestSeq = Math.max(latestSeq, payload?.seq ?? 0);
@@ -456,7 +460,8 @@ interface TestClient {
 
 function createClient(socketPath: string): TestClient {
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     const protocols: Array<Rpc | Stream> = [];
     const rpcs = new Map<string, Rpc>();
@@ -488,7 +493,9 @@ function createClient(socketPath: string): TestClient {
     };
 }
 
-async function readStreamData(stream: MessageStream): Promise<ControlStreamMessage> {
+async function readStreamData(
+    stream: MessageStream,
+): Promise<ControlStreamMessage> {
     const next = await stream.readMessage();
     assert.equal(next.type, "data");
     return next.message as ControlStreamMessage;
@@ -510,7 +517,12 @@ async function request(
             protocolRange: CONTROL_PROTOCOL_RANGE,
         });
         if (operation === "runtime.start") {
-            const stream = await client.open(destination, port!, method!, params);
+            const stream = await client.open(
+                destination,
+                port!,
+                method!,
+                params,
+            );
             try {
                 while (true) {
                     const next = await stream.readMessage();

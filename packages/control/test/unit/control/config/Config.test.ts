@@ -145,14 +145,20 @@ test("version 1 global MCP auth normalizes on read and migrates explicitly to ve
             mode: "token",
             token,
         });
-        assert.match(await readFile(paths.configFile, "utf8"), /^version = 1$/mu);
+        assert.match(
+            await readFile(paths.configFile, "utf8"),
+            /^version = 1$/mu,
+        );
         assert.deepEqual(
             await new ControlConfigStore().inspectMigration(homeDirectory),
             { changed: true },
         );
-        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
-            changed: true,
-        });
+        assert.deepEqual(
+            await new ControlConfigStore().migrate(homeDirectory),
+            {
+                changed: true,
+            },
+        );
         const global = await readFile(paths.configFile, "utf8");
         const instance = await readFile(
             paths.instanceConfigFile("demo-local"),
@@ -161,9 +167,12 @@ test("version 1 global MCP auth normalizes on read and migrates explicitly to ve
         assert.match(global, /^version = 2$/mu);
         assert.doesNotMatch(global, /\[mcp\.auth\]/u);
         assert.match(instance, /auth = "token"/u);
-        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
-            changed: false,
-        });
+        assert.deepEqual(
+            await new ControlConfigStore().migrate(homeDirectory),
+            {
+                changed: false,
+            },
+        );
         assert.deepEqual(
             await new ControlConfigStore().inspectMigration(homeDirectory),
             { changed: false },
@@ -297,9 +306,12 @@ test("version 2 instance documents normalize on read and migrate explicitly to v
             await readFile(paths.instanceConfigFile("legacy-default"), "utf8"),
             /^version = 2$/mu,
         );
-        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
-            changed: true,
-        });
+        assert.deepEqual(
+            await new ControlConfigStore().migrate(homeDirectory),
+            {
+                changed: true,
+            },
+        );
         const migratedDefault = await readFile(
             paths.instanceConfigFile("legacy-default"),
             "utf8",
@@ -375,12 +387,18 @@ test("version 3 MCP tool policy normalizes on read and migrates explicitly to ve
         assert.equal(config.instances[0]?.mcp.contextMode, "explicit");
 
         assert.match(
-            await readFile(paths.instanceConfigFile("canonical-groups"), "utf8"),
+            await readFile(
+                paths.instanceConfigFile("canonical-groups"),
+                "utf8",
+            ),
             /^version = 3$/mu,
         );
-        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
-            changed: true,
-        });
+        assert.deepEqual(
+            await new ControlConfigStore().migrate(homeDirectory),
+            {
+                changed: true,
+            },
+        );
 
         const source = await readFile(
             paths.instanceConfigFile("canonical-groups"),

@@ -27,10 +27,10 @@ import {
 
 import { ControlServer } from "../../../src/server/Server.ts";
 import { ControlRuntimeFactory } from "../../../src/composition/control/Factory.ts";
-import { InstanceRegistryFactory } from "../../../src/control/instance/registry/Factory.ts";
-import type { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
+import { InstanceRegistryFactory } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core";
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "../../../src/control/reverse/credential/Store.ts";
+import { ReverseCredentialStore } from "../../../src/connection/credential/Store.ts";
 import {
     encodeGlobalConfig,
     encodeInstanceConfig,
@@ -249,9 +249,8 @@ test(
         assert.equal(result.exitCode, 0);
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
-        const workerInstance = instanceRegistryBuilder.registry?.get(
-            "reverse-test",
-        )?.worker;
+        const workerInstance =
+            instanceRegistryBuilder.registry?.get("reverse-test")?.worker;
         assert.ok(workerInstance);
         const httpBody = "reverse-http-over-devshell";
         const httpServer = createHttpServer((request, response) => {
@@ -363,22 +362,21 @@ test(
         let terminalClientSeq = 1;
         let cursorResponseCount = 0;
         const cursorResponder = createCursorPositionResponder(async (data) => {
-            await terminalStream.send({ name: "input", payload: {
-                clientSeq: terminalClientSeq++,
-                data,
-                generation: opened.generation,
-                terminalId: opened.terminalId,
-                version: terminalVersion,
-            } });
+            await terminalStream.send({
+                name: "input",
+                payload: {
+                    clientSeq: terminalClientSeq++,
+                    data,
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                    version: terminalVersion,
+                },
+            });
         });
         const observeTerminalProtocol = async (
             event: ControlStreamMessage,
         ): Promise<void> => {
-            if (
-                process.platform !== "win32" ||
-                event.name !== "output"
-            )
-                return;
+            if (process.platform !== "win32" || event.name !== "output") return;
             const payload = event.payload as { data?: string } | undefined;
             cursorResponseCount += await cursorResponder.consume(
                 payload?.data ?? "",
@@ -395,13 +393,16 @@ test(
             );
         }
         const readyInputSeq = terminalClientSeq++;
-        await attached.send({ name: "input", payload: {
-            clientSeq: readyInputSeq,
-            data: terminalPrintCommand("reverse-pty-ready"),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await attached.send({
+            name: "input",
+            payload: {
+                clientSeq: readyInputSeq,
+                data: terminalPrintCommand("reverse-pty-ready"),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         let inputAccepted = false;
         const ready = await waitForTerminal(
             attached,
@@ -423,14 +424,17 @@ test(
         outputSeq = Math.max(outputSeq, ready.lastOutputSeq);
 
         const resizeClientSeq = terminalClientSeq++;
-        await attached.send({ name: "resize", payload: {
-            clientSeq: resizeClientSeq,
-            cols: 100,
-            generation: opened.generation,
-            rows: 40,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await attached.send({
+            name: "resize",
+            payload: {
+                clientSeq: resizeClientSeq,
+                cols: 100,
+                generation: opened.generation,
+                rows: 40,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         const resized = await waitForTerminal(
             attached,
             (event) =>
@@ -448,13 +452,16 @@ test(
             );
         }
         const sizedInputSeq = terminalClientSeq++;
-        await attached.send({ name: "input", payload: {
-            clientSeq: sizedInputSeq,
-            data: terminalSizeProbeCommand(),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await attached.send({
+            name: "input",
+            payload: {
+                clientSeq: sizedInputSeq,
+                data: terminalSizeProbeCommand(),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         const sized = await waitForTerminal(
             attached,
             (event, output) => {
@@ -481,13 +488,16 @@ test(
         );
         terminalStream = resumed;
         const resumedInputSeq = terminalClientSeq++;
-        await terminalStream.send({ name: "input", payload: {
-            clientSeq: resumedInputSeq,
-            data: terminalPrintCommand("reverse-pty-resumed"),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await terminalStream.send({
+            name: "input",
+            payload: {
+                clientSeq: resumedInputSeq,
+                data: terminalPrintCommand("reverse-pty-resumed"),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         const resumedOutput = await waitForTerminal(
             terminalStream,
             (_event, output) => output.includes("reverse-pty-resumed"),
@@ -499,16 +509,19 @@ test(
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
         const restartStartedMarker = "reverse-control-restart-started";
-        await terminalStream.send({ name: "input", payload: {
-            clientSeq: restartInputSeq,
-            data: terminalInputGatedPrintCommand(
-                restartStartedMarker,
-                "reverse-after-control-restart",
-            ),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await terminalStream.send({
+            name: "input",
+            payload: {
+                clientSeq: restartInputSeq,
+                data: terminalInputGatedPrintCommand(
+                    restartStartedMarker,
+                    "reverse-after-control-restart",
+                ),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         let restartInputAccepted = false;
         const restartStarted = await waitForTerminal(
             terminalStream,
@@ -567,13 +580,16 @@ test(
         );
         terminalStream = recovered;
         const restartReleaseInputSeq = terminalClientSeq++;
-        await terminalStream.send({ name: "input", payload: {
-            clientSeq: restartReleaseInputSeq,
-            data: "release\r",
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version: terminalVersion,
-        } });
+        await terminalStream.send({
+            name: "input",
+            payload: {
+                clientSeq: restartReleaseInputSeq,
+                data: "release\r",
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version: terminalVersion,
+            },
+        });
         let restartReleaseAccepted = false;
         await waitForTerminal(
             terminalStream,
@@ -953,7 +969,8 @@ async function request(
 
 function createClient(socketPath: string): TestClient {
     const endpoint = new Endpoint({
-        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
     });
     const protocols: Array<Rpc | Stream> = [];
     const rpcs = new Map<string, Rpc>();
@@ -1001,7 +1018,11 @@ async function waitForTerminal(
     diagnostic: () => string,
     timeoutMs = 10_000,
     observe?: (event: ControlStreamMessage) => Promise<void>,
-): Promise<{ event: ControlStreamMessage; lastOutputSeq: number; output: string }> {
+): Promise<{
+    event: ControlStreamMessage;
+    lastOutputSeq: number;
+    output: string;
+}> {
     const deadline = Date.now() + timeoutMs;
     let output = "";
     let lastOutputSeq = 0;
@@ -1032,8 +1053,7 @@ async function waitForTerminal(
         lastEvent = event;
         if (event.name === "output") {
             const payload = event.payload as
-                | { data?: string; seq?: number }
-                | undefined;
+                { data?: string; seq?: number } | undefined;
             output += payload?.data ?? "";
             lastOutputSeq = Math.max(lastOutputSeq, payload?.seq ?? 0);
         }
@@ -1045,7 +1065,9 @@ async function waitForTerminal(
     );
 }
 
-async function readStreamData(stream: MessageStream): Promise<ControlStreamMessage> {
+async function readStreamData(
+    stream: MessageStream,
+): Promise<ControlStreamMessage> {
     const next = await stream.readMessage();
     assert.equal(next.type, "data");
     return next.message as ControlStreamMessage;

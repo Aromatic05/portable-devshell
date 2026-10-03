@@ -3,7 +3,7 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ArtifactHostPayloadStore } from "../../../../../src/control/artifact/host/storage/PayloadStore.ts";
+import { ArtifactHostPayloadStore } from "../../../../../src/artifact/host/storage/PayloadStore.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 test("host payload startup defers expired maintenance without weakening lease enforcement", async (t) => {

@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+
+import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { GoalState } from "../../../../src/task/goal/storage/State.ts";
+import { GoalStore } from "../../../../src/task/goal/storage/Store.ts";
+import { TodoState } from "../../../../src/task/todo/Store.ts";
+import { TodoStore } from "../../../../src/task/todo/Store.ts";
+import { WaitState } from "../../../../src/task/wait/State.ts";
+import { WaitStore } from "../../../../src/task/wait/Store.ts";
+
+test("interaction state stores defer persisted state loading until first access", async () => {
+    const root = await createTestTempDirectory("lazy-interaction-state-");
+    const files = {
+        goal: join(root, "goals.json"),
+        todo: join(root, "todo.json"),
+        wait: join(root, "waits.json"),
+    };
+    await Promise.all(
+        Object.values(files).map(
+            async (path) => await writeFile(path, "not-json\n", "utf8"),
+        ),
+    );
+
+    const goal = new GoalStore({
+        filePath: files.goal,
+        instanceName: "alpha",
+        state: new GoalState(),
+    });
+    const todo = new TodoStore({
+        filePath: files.todo,
+        instanceName: "alpha",
+        state: new TodoState("alpha"),
+    });
+    const wait = new WaitStore({
+        filePath: files.wait,
+        instanceName: "alpha",
+        state: new WaitState(),
+    });
+
+    assert.throws(() => goal.read(), /Goal state for alpha is invalid/u);
+    assert.throws(() => todo.read(), /Todo state for alpha is invalid/u);
+    assert.throws(() => wait.read(), /Wait state for alpha is invalid/u);
+});

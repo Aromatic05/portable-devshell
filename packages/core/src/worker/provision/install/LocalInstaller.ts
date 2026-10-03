@@ -2,7 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import type { WorkerAsset } from "../AssetResolver.js";
 import type { WorkerTarget } from "../target/Target.js";

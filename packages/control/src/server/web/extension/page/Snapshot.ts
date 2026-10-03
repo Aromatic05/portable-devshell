@@ -13,7 +13,9 @@ export function validateWebPageSnapshot(
             !Array.isArray(table.columns) ||
             !Array.isArray(table.rows)
         )
-            throw new TypeError(`Web page ${pageId} returned an invalid table.`);
+            throw new TypeError(
+                `Web page ${pageId} returned an invalid table.`,
+            );
         const tableId = readText(table.id, pageId, "table id");
         assertUnique(tableIds, tableId, pageId, "table id");
         if (table.title !== undefined)
@@ -82,11 +84,7 @@ function validateCell(value: unknown, pageId: string): void {
 }
 
 function readText(value: unknown, pageId: string, label: string): string {
-    if (
-        typeof value === "string" &&
-        value.length > 0 &&
-        value.trim() === value
-    )
+    if (typeof value === "string" && value.length > 0 && value.trim() === value)
         return value;
     return invalid(pageId, label);
 }

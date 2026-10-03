@@ -5,7 +5,7 @@ import type {
     InstanceSnapshot as SharedInstanceSnapshot,
 } from "@portable-devshell/shared";
 
-import { deriveRuntimeStatus, isReadyState } from "./Runtime.js";
+import { deriveProcessStatus, isReadyState } from "./Status.js";
 
 export type InstanceSnapshot = SharedInstanceSnapshot;
 
@@ -22,7 +22,7 @@ export interface InstanceSnapshotInput {
 export function createInstanceSnapshot(
     input: InstanceSnapshotInput,
 ): InstanceSnapshot {
-    const status = deriveRuntimeStatus(
+    const status = deriveProcessStatus(
         input.daemonState,
         input.connectionState,
     );

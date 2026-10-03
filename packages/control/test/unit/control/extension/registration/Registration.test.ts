@@ -13,7 +13,7 @@ import { tools as mcpTools } from "@portable-devshell/extension/mcp";
 import { applications } from "@portable-devshell/extension/web";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
-import { ExtensionRegistrationBuilder } from "../../../../../src/control/extension/generation/registration/Registration.ts";
+import { ExtensionRegistrationBuilder } from "../../../../../src/extension/generation/registration/Registration.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 function manifest(): ExtensionManifest {

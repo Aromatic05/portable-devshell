@@ -6,13 +6,16 @@ import type {
     ControlPortContext,
 } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
-import { routes, type ControlRouteBinding } from "@portable-devshell/extension/control";
+import {
+    routes,
+    type ControlRouteBinding,
+} from "@portable-devshell/extension/control";
 
 import {
     ControlExtensionRouteService,
     createExtensionRouteModule,
     type ExtensionControlPort,
-} from "../../../../../src/control/extension/Route.ts";
+} from "../../../../../src/extension/Route.ts";
 
 function context(
     peer: "cli" | "tui" | "web",
@@ -270,7 +273,10 @@ test("Extension route contributions preserve scope, request context, and generat
         ["conversationPreferences"],
     );
     const modules = service.modules("instance");
-    assert.deepEqual(modules.map((module) => module.name), ["contextMessage"]);
+    assert.deepEqual(
+        modules.map((module) => module.name),
+        ["contextMessage"],
+    );
     const list = modules[0]!.operations[0]!;
     assert.deepEqual(
         await list.handle(

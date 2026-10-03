@@ -1,10 +1,8 @@
 import {
-    CONTROL_PROTOCOL_VERSION,
     Endpoint,
     Rpc,
     Stream,
     createRemoteError,
-    TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE,
     toRemoteErrorBody,
     type Channel,
     type ControlClientKind,
@@ -12,14 +10,16 @@ import {
     type ControlPeerSubject,
     type ControlPortContext,
     type ControlPortDefinition,
-    type ControlProtocolHelloResponse,
     type JsonValue,
     type MessageStream,
     type Port,
     type RpcContext,
     controlErrorCodes,
 } from "@portable-devshell/shared";
-import { routeModule } from "../Route.js";
+import {
+    negotiateControlProtocol,
+    readControlHelloRequest,
+} from "../../service/Protocol.js";
 
 export interface ControlChannelRouteProvider {
     connectionClosed(connectionId: string): void;
@@ -97,7 +97,9 @@ export class ControlChannelServer {
         this.#listeners = [...options.listeners];
         this.#routes = options.routes;
         this.#syncPorts();
-        this.#unsubscribeRoutes = options.routes.onChange(() => this.#syncPorts());
+        this.#unsubscribeRoutes = options.routes.onChange(() =>
+            this.#syncPorts(),
+        );
     }
 
     async start(): Promise<void> {
@@ -172,7 +174,9 @@ export class ControlChannelServer {
         this.#stopping = false;
         try {
             for (const listener of this.#listeners) {
-                await listener.start((connection) => void this.#accept(connection));
+                await listener.start(
+                    (connection) => void this.#accept(connection),
+                );
                 this.#startedListeners.push(listener);
             }
             this.#started = true;
@@ -232,7 +236,10 @@ export class ControlChannelServer {
             );
     }
 
-    async #accept({ admission, channel }: ControlAcceptedChannel): Promise<void> {
+    async #accept({
+        admission,
+        channel,
+    }: ControlAcceptedChannel): Promise<void> {
         if (this.#stopping) {
             channel.close(new Error("Control channel server is stopping."));
             return;
@@ -249,14 +256,19 @@ export class ControlChannelServer {
             });
         } catch (error) {
             this.#connections.delete(active);
-            channel.close(error instanceof Error ? error : new Error(String(error)));
+            channel.close(
+                error instanceof Error ? error : new Error(String(error)),
+            );
             return;
         }
         channel.onClose(() => this.#connections.delete(active));
     }
 
     #syncPorts(): void {
-        const definitions = new Map<string, { host: string; port: ControlPortDefinition }>();
+        const definitions = new Map<
+            string,
+            { host: string; port: ControlPortDefinition }
+        >();
         for (const host of this.#routes.hosts())
             for (const port of host.ports)
                 definitions.set(`${host.host}\u0000${port.name}`, {
@@ -275,7 +287,10 @@ export class ControlChannelServer {
 
         for (const [key, definition] of definitions) {
             if (this.#ports.has(key)) continue;
-            const port = this.#endpoint.bind(definition.port.name, definition.host);
+            const port = this.#endpoint.bind(
+                definition.port.name,
+                definition.host,
+            );
             const handlers = Object.fromEntries(
                 definition.port.operations.map((operation) => [
                     operation.name,
@@ -375,11 +390,16 @@ export class ControlChannelServer {
         rpc: RpcContext,
     ): PreparedContext {
         const session = this.#sessions.get(rpc.peer.host)!;
-        if (host === "@control" && port === "service" && operation === "hello") {
+        if (
+            host === "@control" &&
+            port === "service" &&
+            operation === "hello"
+        ) {
             if (session.peer !== undefined)
                 throw createRemoteError({
                     code: controlErrorCodes.clientIdentityInvalid,
-                    message: "Control connection identity is already negotiated.",
+                    message:
+                        "Control connection identity is already negotiated.",
                     retryable: false,
                 });
             if (session.pending !== undefined)
@@ -389,14 +409,17 @@ export class ControlChannelServer {
                         "Control connection identity negotiation is already in progress.",
                     retryable: false,
                 });
-            const request = readHelloRequest(payload);
+            const request = readControlHelloRequest(payload);
             if (!session.admission.allowedPeers.includes(request.clientKind))
                 throw createRemoteError({
                     code: controlErrorCodes.clientIdentityInvalid,
                     message: `Control transport subject ${session.admission.subject.id} cannot connect as ${request.clientKind}.`,
                     retryable: false,
                 });
-            const negotiated = negotiateControlProtocol(payload, request.clientKind);
+            const negotiated = negotiateControlProtocol(
+                payload,
+                request.clientKind,
+            );
             const pending = {
                 peer: request.clientKind,
                 protocolVersion: String(negotiated.protocolVersion),
@@ -427,7 +450,8 @@ export class ControlChannelServer {
         if (session.peer === undefined) {
             throw createRemoteError({
                 code: controlErrorCodes.clientIdentityRequired,
-                message: "service.hello must be the first request on a Control connection.",
+                message:
+                    "service.hello must be the first request on a Control connection.",
                 retryable: false,
             });
         }
@@ -458,7 +482,8 @@ export class ControlChannelServer {
         if (session.peer === undefined)
             throw createRemoteError({
                 code: controlErrorCodes.clientIdentityRequired,
-                message: "service.hello must be the first request on a Control connection.",
+                message:
+                    "service.hello must be the first request on a Control connection.",
                 retryable: false,
             });
         return {
@@ -474,178 +499,4 @@ export class ControlChannelServer {
             subject: session.admission.subject,
         };
     }
-}
-
-export interface ServiceRouteModuleOptions {
-    instanceCount(): number;
-    restart?: () => Promise<void> | void;
-    shutdown(): Promise<void> | void;
-}
-
-export function createServiceRouteModule(
-    options: ServiceRouteModuleOptions,
-): ControlPortDefinition {
-    return routeModule("service", {
-        hello: (request, context) =>
-            negotiateControlProtocol(
-                request.payload,
-                context.peer,
-            ) as unknown as JsonValue,
-        ping: () => ({ pong: true }),
-        status: () => ({
-            instanceCount: options.instanceCount(),
-            ok: true,
-            pid: process.pid,
-        }),
-        shutdown: (_request, context) => {
-            context.afterReply(options.shutdown);
-            return { accepted: true };
-        },
-        restart: (_request, context) => {
-            if (options.restart !== undefined) {
-                context.afterReply(options.restart);
-            }
-            return { accepted: true };
-        },
-    });
-}
-
-export function negotiateControlProtocol(
-    payload: JsonValue | undefined,
-    peer: ControlClientKind,
-): ControlProtocolHelloResponse {
-    const request = readHelloRequest(payload);
-    if (request.clientKind !== peer) {
-        throw createRemoteError({
-            code: controlErrorCodes.clientIdentityInvalid,
-            message: `service.hello clientKind ${request.clientKind} does not match ${peer}.`,
-            retryable: false,
-        });
-    }
-    if (
-        compareProtocolVersion(request.protocolRange.min, CONTROL_PROTOCOL_VERSION) > 0 ||
-        compareProtocolVersion(request.protocolRange.max, CONTROL_PROTOCOL_VERSION) < 0
-    ) {
-        throw createRemoteError({
-            code: TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE,
-            details: {
-                clientMaxProtocolVersion: request.protocolRange.max,
-                clientMinProtocolVersion: request.protocolRange.min,
-                serverProtocolVersion: CONTROL_PROTOCOL_VERSION,
-            },
-            message: "Control RPC protocol version is not supported.",
-            retryable: false,
-        });
-    }
-    return {
-        capabilities: ["request", "stream", "streamResume"],
-        protocolVersion: CONTROL_PROTOCOL_VERSION,
-    };
-}
-
-interface ParsedControlHelloRequest {
-    clientKind: ControlClientKind;
-    clientVersion?: string;
-    protocolRange: {
-        max: string;
-        min: string;
-    };
-}
-
-function readHelloRequest(
-    payload: JsonValue | undefined,
-): ParsedControlHelloRequest {
-    if (
-        typeof payload !== "object" ||
-        payload === null ||
-        Array.isArray(payload)
-    ) {
-        throw invalidHello("service.hello requires an object payload.");
-    }
-    const clientKind = payload.clientKind;
-    if (clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web") {
-        throw invalidHello(
-            "service.hello clientKind must be cli, tui, or web.",
-        );
-    }
-    if (
-        payload.clientVersion !== undefined &&
-        typeof payload.clientVersion !== "string"
-    ) {
-        throw invalidHello("service.hello clientVersion must be a string.");
-    }
-    const base: {
-        clientKind: ControlClientKind;
-        clientVersion?: string;
-    } = {
-        clientKind,
-        ...(payload.clientVersion === undefined
-            ? {}
-            : { clientVersion: payload.clientVersion }),
-    };
-    if (payload.protocolRange === undefined)
-        throw invalidHello(
-            "service.hello requires protocolRange with semantic versions.",
-        );
-    return {
-        ...base,
-        protocolRange: readProtocolRange(payload.protocolRange),
-    };
-}
-
-function readProtocolRange(value: JsonValue): { max: string; min: string } {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw invalidHello("service.hello protocolRange must be an object.");
-    }
-    const min = value.min;
-    const max = value.max;
-    if (typeof min !== "string" || typeof max !== "string") {
-        throw invalidHello(
-            "service.hello protocolRange min and max must be semantic versions.",
-        );
-    }
-    parseProtocolVersion(min);
-    parseProtocolVersion(max);
-    if (compareProtocolVersion(min, max) > 0) {
-        throw invalidHello(
-            "service.hello protocolRange min must not exceed max.",
-        );
-    }
-    return { max, min };
-}
-
-function compareProtocolVersion(left: string, right: string): number {
-    const leftVersion = parseProtocolVersion(left);
-    const rightVersion = parseProtocolVersion(right);
-    if (leftVersion.major !== rightVersion.major)
-        return leftVersion.major - rightVersion.major;
-    if (leftVersion.minor !== rightVersion.minor)
-        return leftVersion.minor - rightVersion.minor;
-    return leftVersion.patch - rightVersion.patch;
-}
-
-function parseProtocolVersion(value: string): {
-    major: number;
-    minor: number;
-    patch: number;
-} {
-    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
-    if (match === null) {
-        throw invalidHello(`Invalid Control protocol version ${value}.`);
-    }
-    const major = Number(match[1]);
-    const minor = Number(match[2]);
-    const patch = Number(match[3]);
-    if (![major, minor, patch].every(Number.isSafeInteger)) {
-        throw invalidHello(`Invalid Control protocol version ${value}.`);
-    }
-    return { major, minor, patch };
-}
-
-function invalidHello(message: string): Error {
-    return createRemoteError({
-        code: controlErrorCodes.invalidTarget,
-        message,
-        retryable: false,
-    });
 }

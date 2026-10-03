@@ -11,9 +11,7 @@ import {
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import type {
-    ArtifactPayloadDescriptor,
-} from "@portable-devshell/shared";
+import type { ArtifactPayloadDescriptor } from "@portable-devshell/shared";
 import {
     ArtifactHostBridge,
     type ArtifactHostAccessContext,

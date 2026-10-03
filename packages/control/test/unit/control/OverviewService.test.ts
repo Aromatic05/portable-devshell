@@ -8,7 +8,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { OperationalOverviewService } from "../../../src/control/overview/Service.ts";
+import { OperationalOverviewService } from "../../../src/overview/Service.ts";
 import {
     createTestApprovalPort,
     createTestInstanceDescriptor,

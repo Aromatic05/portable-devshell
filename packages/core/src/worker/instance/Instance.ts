@@ -73,9 +73,7 @@ import type { InstanceEventBuffer } from "../../instance/EventBuffer.js";
 import type { LogStoreInstance } from "../../storage/log/Store.js";
 import type { ResolvedWorkerInstanceConfig } from "./Config.js";
 import { WorkerInstanceTool } from "./tool/Tool.js";
-import type {
-    ToolCallTarget,
-} from "../../toolcall/Pipeline.js";
+import type { ToolCallTarget } from "../../tool/Pipeline.js";
 import { WorkerInstanceConnection } from "./lifecycle/Connection.js";
 import { WorkerInstanceLifecycle } from "./lifecycle/Lifecycle.js";
 import { WorkerInstanceArtifact } from "./capability/Artifact.js";

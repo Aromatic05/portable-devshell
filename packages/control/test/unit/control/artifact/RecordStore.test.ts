@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ArtifactRecordStore } from "../../../../src/control/artifact/RecordStore.ts";
+import { ArtifactRecordStore } from "../../../../src/artifact/RecordStore.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test("artifact record loading skips deliberate JSON corruption but surfaces I/O errors", async (t) => {

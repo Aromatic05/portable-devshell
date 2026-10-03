@@ -146,7 +146,9 @@ test(
                 .count(),
             1,
         );
-        const choice = app.locator('[data-item="wait-question"][data-action="answer"]');
+        const choice = app.locator(
+            '[data-item="wait-question"][data-action="answer"]',
+        );
         await choice.first().waitFor({ state: "visible" });
         assert.equal(await choice.count(), 3);
         const choiceListSize = await app
@@ -272,7 +274,9 @@ test(
             .getByRole("button", { name: "Stop Goal", exact: true })
             .click();
         assert.equal(
-            await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'goal-browser' && call.arguments.actionId === 'goal-stop')"),
+            await page.evaluate(
+                "(window.__workspaceCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'goal-browser' && call.arguments.actionId === 'goal-stop')",
+            ),
             false,
         );
         await app.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -326,9 +330,7 @@ test(
             ),
             false,
         );
-        await app
-            .getByRole("button", { name: "Confirm", exact: true })
-            .click();
+        await app.getByRole("button", { name: "Confirm", exact: true }).click();
         await page.waitForFunction(
             "(window.__workspaceCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'task-plan' && call.arguments.actionId === 'task-cancel')",
         );
@@ -393,16 +395,24 @@ test(
         );
         const watchCall = calls.find((call) => call.name === "workspace_watch");
         const answerCall = calls.find(
-            (call) => call.name === "workspace_action" && call.arguments?.actionId === "answer",
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "answer",
         );
         const approvalCall = calls.find(
-            (call) => call.name === "workspace_action" && call.arguments?.actionId === "approve",
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "approve",
         );
         const goalStopCall = calls.find(
-            (call) => call.name === "workspace_action" && call.arguments?.actionId === "goal-stop",
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "goal-stop",
         );
         const interruptCall = calls.find(
-            (call) => call.name === "workspace_action" && call.arguments?.actionId === "interrupt",
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "interrupt",
         );
         const taskPauseCall = calls.find(
             (call) =>
@@ -510,7 +520,9 @@ test(
             .getByText("Blocked", { exact: true })
             .waitFor({ state: "visible" });
         assert.equal(
-            await page.evaluate("window.__workspaceProjectedSnapshots.at(-1).presentation.work.find(item => item.id === 'goal-browser').note"),
+            await page.evaluate(
+                "window.__workspaceProjectedSnapshots.at(-1).presentation.work.find(item => item.id === 'goal-browser').note",
+            ),
             "Waiting for user decision",
         );
         assert.match(
@@ -532,9 +544,9 @@ test(
         assert.equal(resumeCall?.arguments?.itemId, "goal-browser");
         assert.equal(resumeCall?.arguments?.actionId, "goal-resume");
         assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
-        const resumeEffect = await page.evaluate(
+        const resumeEffect = (await page.evaluate(
             "window.__workspaceActionResults[0].effect",
-        ) as { id?: string; intent?: string; sourceId?: string };
+        )) as { id?: string; intent?: string; sourceId?: string };
         assert.deepEqual(resumeEffect, {
             kind: "reentry",
             intent: "goal-resume",
@@ -1261,7 +1273,9 @@ test(
             .getByRole("button", { name: "Stop Goal", exact: true })
             .click();
         assert.equal(
-            await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_action' && call.arguments.actionId === 'goal-stop')"),
+            await page.evaluate(
+                "(window.__workspaceCalls || []).some(call => call.name === 'workspace_action' && call.arguments.actionId === 'goal-stop')",
+            ),
             false,
         );
         await app.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -1379,7 +1393,9 @@ test(
             .getByText("Session mode question?", { exact: true })
             .waitFor({ state: "visible" });
         await app
-            .locator('[data-item="wait-session-question"][data-action="answer"]')
+            .locator(
+                '[data-item="wait-session-question"][data-action="answer"]',
+            )
             .click();
         await page.waitForFunction(
             "(window.__sessionModeCalls || []).some(call => call.name === 'workspace_action' && call.arguments.itemId === 'wait-session-question' && call.arguments.actionId === 'answer')",
@@ -1396,7 +1412,11 @@ test(
             calls.every((call) => call.arguments?.ctxId === "ctx-session-mode"),
             true,
         );
-        const answer = calls.find((call) => call.name === "workspace_action" && call.arguments?.actionId === "answer");
+        const answer = calls.find(
+            (call) =>
+                call.name === "workspace_action" &&
+                call.arguments?.actionId === "answer",
+        );
         assert.equal(answer?.arguments?.token, "session-mode-token");
         assert.equal(answer?.arguments?.itemId, "wait-session-question");
         assert.equal(answer?.arguments?.actionId, "answer");
@@ -2085,7 +2105,9 @@ test(
 
         const app = page.frameLocator("#workspace");
         await app
-            .locator('[data-item="wait-question-detached"][data-action="answer"]')
+            .locator(
+                '[data-item="wait-question-detached"][data-action="answer"]',
+            )
             .click();
         await page.waitForFunction(
             "(window.__modelMessages || []).length === 1",
@@ -2195,10 +2217,7 @@ test(
             .getByText("Ready", { exact: true })
             .waitFor({ state: "visible" });
         await currentApp
-            .getByText(
-                "Nothing needs attention right now.",
-                { exact: true },
-            )
+            .getByText("Nothing needs attention right now.", { exact: true })
             .waitFor({ state: "visible" });
         assert.equal(
             await currentFrame?.evaluate(
@@ -2277,7 +2296,10 @@ test(
 async function newWorkspacePage(browser: Browser) {
     const page = await browser.newPage();
     await page.route("https://workspace.test/", async (route) => {
-        await route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body></body></html>" });
+        await route.fulfill({
+            contentType: "text/html",
+            body: "<!doctype html><html><body></body></html>",
+        });
     });
     await page.goto("https://workspace.test/");
     return page;
@@ -2312,7 +2334,9 @@ function resolveChromiumExecutable(): string | undefined {
     return candidates.find((candidate) => existsSync(candidate));
 }
 
-const WORKSPACE_DISABLED_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const WORKSPACE_DISABLED_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__disabledWorkspaceCalls = [];
 window.__disabledWorkspacePolicy = false;
 window.__disabledWorkspacePendingWatch = null;
@@ -2402,7 +2426,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const REMOUNT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const REMOUNT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__remountCalls = [];
 window.addEventListener("message", function (event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -2444,7 +2470,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__workspaceCalls = [];
 window.__workspaceCancelledRequests = [];
 window.__workspaceQuestionAnswered = false;
@@ -2986,7 +3014,9 @@ window.__emitWorkspaceSnapshotAfterCancellation = function () {
 };
 `;
 
-const SESSION_MODE_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const SESSION_MODE_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__sessionModeCalls = [];
 window.__sessionModeContexts = [];
 window.__sessionModeAnswered = false;
@@ -3071,7 +3101,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const DELAYED_CONTEXT_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const DELAYED_CONTEXT_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__delayedContextCalls = [];
 window.__delayedContextSource = null;
 
@@ -3148,7 +3180,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const RECOVERY_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const RECOVERY_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__recoveryModelContextUpdates = [];
@@ -3416,7 +3450,9 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-const RESUME_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const RESUME_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__workspaceCalls = [];
 window.__modelMessages = [];
 window.__taskStatus = "in_progress";
@@ -3654,7 +3690,9 @@ window.addEventListener("message", function (event) {
     }
 });
 `;
-const DETACHED_INTERACTION_BRIDGE_SCRIPT = WORKSPACE_FIXTURE_PROTOCOL + String.raw`
+const DETACHED_INTERACTION_BRIDGE_SCRIPT =
+    WORKSPACE_FIXTURE_PROTOCOL +
+    String.raw`
 window.__modelMessages = [];
 window.__detachedModelContextUpdates = [];
 window.__questionAnswered = false;

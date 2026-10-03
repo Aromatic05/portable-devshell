@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { ExtensionHostModuleResolver } from "../../../../../src/control/extension/generation/discovery/ModuleResolver.ts";
+import { ExtensionHostModuleResolver } from "../../../../../src/extension/generation/discovery/ModuleResolver.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 test("Extension host module resolver falls back to shared application dependencies only for a live generation", async (t) => {

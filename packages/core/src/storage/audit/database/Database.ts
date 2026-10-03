@@ -9,10 +9,7 @@ import {
     zstdDecompressSync,
 } from "node:zlib";
 
-import type {
-    ToolCallQuery,
-    ToolCallRecord,
-} from "@portable-devshell/shared";
+import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 import {
     startAuditPayloadBackfill,
@@ -26,8 +23,7 @@ import {
     readSqlitePragmaNumber,
 } from "../../SqliteSchema.js";
 
-export type AuditRecordCollection =
-    "events" | "logs" | "toolCalls";
+export type AuditRecordCollection = "events" | "logs" | "toolCalls";
 
 export interface AuditDatabaseOptions {
     maxBytes: number;
@@ -140,20 +136,28 @@ export class AuditDatabase {
             get: async (key) => {
                 validateStateIdentifier("key", key);
                 const row = this.#database
-                    .prepare("SELECT payload FROM state_records WHERE namespace = ? AND key = ?")
+                    .prepare(
+                        "SELECT payload FROM state_records WHERE namespace = ? AND key = ?",
+                    )
                     .get(namespace, key) as { payload: string } | undefined;
-                return row === undefined ? undefined : JSON.parse(row.payload) as TValue;
+                return row === undefined
+                    ? undefined
+                    : (JSON.parse(row.payload) as TValue);
             },
             list: async () => {
                 const rows = this.#database
-                    .prepare("SELECT payload FROM state_records WHERE namespace = ? ORDER BY key ASC")
+                    .prepare(
+                        "SELECT payload FROM state_records WHERE namespace = ? ORDER BY key ASC",
+                    )
                     .all(namespace) as Array<{ payload: string }>;
                 return rows.map((row) => JSON.parse(row.payload) as TValue);
             },
             delete: async (key) => {
                 validateStateIdentifier("key", key);
                 const removed = this.#database
-                    .prepare("DELETE FROM state_records WHERE namespace = ? AND key = ?")
+                    .prepare(
+                        "DELETE FROM state_records WHERE namespace = ? AND key = ?",
+                    )
                     .run(namespace, key);
                 if (removed.changes > 0) {
                     this.#walPendingBytes += WAL_MINIMUM_WRITE_BYTES;
@@ -177,14 +181,24 @@ export class AuditDatabase {
                 "INSERT INTO state_records(namespace, key, payload, payload_bytes) VALUES (?, ?, ?, ?) ON CONFLICT(namespace, key) DO UPDATE SET payload = excluded.payload, payload_bytes = excluded.payload_bytes",
             )
             .run(namespace, key, payload, payloadBytes);
-        this.#walPendingBytes += Math.max(payloadBytes, WAL_MINIMUM_WRITE_BYTES);
+        this.#walPendingBytes += Math.max(
+            payloadBytes,
+            WAL_MINIMUM_WRITE_BYTES,
+        );
     }
 
-    migrateState<TValue>(namespace: string, options: StateMigrationOptions<TValue>): void {
+    migrateState<TValue>(
+        namespace: string,
+        options: StateMigrationOptions<TValue>,
+    ): void {
         this.#assertOpen();
         validateStateIdentifier("namespace", namespace);
         validateStateMigrationOptions(options);
-        if (options.legacyCollection === undefined && options.legacyFile === undefined) return;
+        if (
+            options.legacyCollection === undefined &&
+            options.legacyFile === undefined
+        )
+            return;
         const migrationKey = `migration:state-v1:${namespace}`;
         if (this.#readMetadata(migrationKey) !== "complete") {
             const records = readLegacyRecords<TValue>(options.legacyFile);
@@ -198,15 +212,26 @@ export class AuditDatabase {
                 }
                 if (options.legacyCollection !== undefined) {
                     const rows = this.#database
-                        .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id ASC")
-                        .all(options.legacyCollection) as unknown as AuditStoredRow[];
+                        .prepare(
+                            "SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id ASC",
+                        )
+                        .all(
+                            options.legacyCollection,
+                        ) as unknown as AuditStoredRow[];
                     for (const row of rows) {
-                        const record = decodeStoredRecord<TValue>(options.legacyCollection, row);
+                        const record = decodeStoredRecord<TValue>(
+                            options.legacyCollection,
+                            row,
+                        );
                         this.#putState(namespace, options.key(record), record);
                     }
-                    this.#database.prepare("DELETE FROM audit_records WHERE collection = ?")
+                    this.#database
+                        .prepare(
+                            "DELETE FROM audit_records WHERE collection = ?",
+                        )
                         .run(options.legacyCollection);
-                    if (this.#payloadBytes !== undefined) this.#setPayloadBytes(this.#readPayloadBytes());
+                    if (this.#payloadBytes !== undefined)
+                        this.#setPayloadBytes(this.#readPayloadBytes());
                 }
                 this.#writeMetadata(migrationKey, "complete");
                 this.#database.exec("COMMIT");
@@ -223,7 +248,8 @@ export class AuditDatabase {
             try {
                 unlinkSync(options.legacyFile);
             } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                    throw error;
             }
         }
     }
@@ -1466,13 +1492,18 @@ function validateStoreOptions<TRecord>(
     }
 }
 
-function validateStateIdentifier(kind: "key" | "namespace", value: string): void {
+function validateStateIdentifier(
+    kind: "key" | "namespace",
+    value: string,
+): void {
     if (typeof value !== "string" || value.length === 0) {
         throw new TypeError(`State ${kind} must be a non-empty string.`);
     }
 }
 
-function validateStateMigrationOptions<TValue>(options: StateMigrationOptions<TValue>): void {
+function validateStateMigrationOptions<TValue>(
+    options: StateMigrationOptions<TValue>,
+): void {
     if (typeof options.key !== "function") {
         throw new TypeError("State migration key must be a function.");
     }

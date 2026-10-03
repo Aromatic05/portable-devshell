@@ -6,7 +6,7 @@ import type {
     InstanceDescriptor,
     InstanceGoalPort,
     InstanceTodoPort,
-} from "../../src/control/instance/Descriptor.ts";
+} from "@portable-devshell/core";
 
 export function createTestGoalPort(): InstanceGoalPort {
     return {

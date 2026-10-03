@@ -1,4 +1,7 @@
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import { WorkerCommandClient } from "../../transport/command/Client.js";
 import type { WorkerCommandInteractiveSession } from "../../transport/command/Transport.js";

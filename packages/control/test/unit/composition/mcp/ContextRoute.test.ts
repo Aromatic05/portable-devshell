@@ -9,7 +9,7 @@ import type {
 import {
     createContextRouteModule,
     type ContextAdminPort,
-} from "../../../../src/control/context/Route.ts";
+} from "../../../../src/context/Route.ts";
 
 function record(ctxId: string): McpContextRecord {
     return {

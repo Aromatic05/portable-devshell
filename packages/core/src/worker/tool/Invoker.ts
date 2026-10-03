@@ -16,7 +16,11 @@ export class WorkerToolInvoker {
     readonly #endpoint: Endpoint;
     readonly #workerHost: string;
 
-    constructor(endpoint: Endpoint, workerHost: string, catalog: WorkerToolCatalog) {
+    constructor(
+        endpoint: Endpoint,
+        workerHost: string,
+        catalog: WorkerToolCatalog,
+    ) {
         this.#endpoint = endpoint;
         this.#workerHost = workerHost;
         this.#catalog = catalog;

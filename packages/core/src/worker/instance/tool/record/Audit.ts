@@ -15,7 +15,7 @@ import { toEventData } from "../../state/Event.js";
 import {
     createToolCallScope,
     type ToolCallScope,
-} from "../../../../toolcall/Context.js";
+} from "../../../../tool/Context.js";
 import type { WorkerInstanceBashToolResult } from "./Result.js";
 import {
     commandResultOutput,
@@ -226,10 +226,7 @@ export class WorkerInstanceToolAudit {
         );
     }
 
-    async failActive(
-        scope: ToolCallScope,
-        error: unknown,
-    ): Promise<void> {
+    async failActive(scope: ToolCallScope, error: unknown): Promise<void> {
         if (!this.#toolCallHistory.hasActive(scope.callId)) {
             return;
         }

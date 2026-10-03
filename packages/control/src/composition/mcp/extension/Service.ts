@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/extension/mcp";
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../control/extension/Host.js";
+import type { ExtensionHost } from "../../../extension/Host.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<
@@ -19,19 +19,23 @@ export class McpExtensionService {
     constructor(
         extensions: Pick<
             ExtensionHost,
-            "acquireRegistration" | "contextEnvironmentRetired" | "listDeclarations"
+            | "acquireRegistration"
+            | "contextEnvironmentRetired"
+            | "listDeclarations"
         >,
     ) {
         this.#extensions = extensions;
     }
 
     listTools(): readonly ToolDefinition[] {
-        return this.#extensions.listDeclarations(tools.id).map((registration) =>
-            toolDefinition(
-                registration.extensionId,
-                registration.declaration as McpToolDeclaration,
-            ),
-        );
+        return this.#extensions
+            .listDeclarations(tools.id)
+            .map((registration) =>
+                toolDefinition(
+                    registration.extensionId,
+                    registration.declaration as McpToolDeclaration,
+                ),
+            );
     }
 
     async callTool(
@@ -121,9 +125,7 @@ function validateToolResult(value: unknown, toolName: string): McpToolResult {
     const result = value as Partial<McpToolResult>;
     if (!("structuredContent" in result))
         throw new TypeError(
-            "MCP tool " +
-                toolName +
-                " result must include structuredContent.",
+            "MCP tool " + toolName + " result must include structuredContent.",
         );
     if (result.isError !== undefined && typeof result.isError !== "boolean")
         throw new TypeError(

@@ -20,12 +20,12 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
+import { createToolCallScope } from "@portable-devshell/core";
 import {
     ToolCallPipeline,
     ToolCallExecutionTarget,
-} from "../../../../../packages/core/src/toolcall/Pipeline.ts";
-import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
+} from "@portable-devshell/core";
+import { ToolCallExtensionBinding } from "../../../src/extension/toolcall/Binding.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
