@@ -18,6 +18,15 @@ test("Extension root re-exports core primitives without wrapping them", () => {
     assert.equal(defineRootExtensionPoint, defineCoreExtensionPoint);
 });
 
+test("Extension manifest contract does not depend on the composed runtime API", async () => {
+    const source = await readFile(
+        new URL("../../src/ExtensionManifest.ts", import.meta.url),
+        "utf8",
+    );
+
+    assert.doesNotMatch(source, /ExtensionApi\.js/u);
+});
+
 test("Extension domain modules never depend on the composed ExtensionApi layer", async () => {
     const domainDirectory = new URL("../../src/domain/", import.meta.url);
     const files = (await readdir(domainDirectory))

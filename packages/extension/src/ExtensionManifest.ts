@@ -1,7 +1,3 @@
-import type {
-    ExtensionConfigAccess,
-    ExtensionManifest,
-} from "./ExtensionApi.js";
 import {
     EXTENSION_CAPABILITY_IDS,
     type ExtensionCapability,
@@ -13,6 +9,34 @@ import type {
 
 export const EXTENSION_API_VERSION = "5.0.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
+
+export type ExtensionConfigAccess = "read" | "read-write";
+
+export interface ExtensionConfigDeclaration {
+    readonly access?: Readonly<Record<string, ExtensionConfigAccess>>;
+    readonly default?: Readonly<Record<string, ExtensionJsonValue>>;
+    readonly schema?:
+        | boolean
+        | Readonly<Record<string, ExtensionJsonValue>>;
+}
+
+export type ExtensionActivationPolicy = "eager" | "lazy";
+
+export interface ExtensionManifest {
+    activation: ExtensionActivationPolicy;
+    apiVersion: string;
+    capabilities: readonly ExtensionCapability[];
+    config?: ExtensionConfigDeclaration;
+    entry: string;
+    /** Static declarations keyed by stable domain-owned Extension Point id. */
+    extensions: Readonly<Record<string, readonly ExtensionPointDeclaration[]>>;
+    /** Bare package roots and compatible versions accepted from the host's shared dependency tree. */
+    hostDependencies: Readonly<Record<string, string>>;
+    id: string;
+    name: string;
+    schemaVersion: string;
+    version: string;
+}
 
 const capabilities = new Set<ExtensionCapability>(EXTENSION_CAPABILITY_IDS);
 

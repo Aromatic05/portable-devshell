@@ -1,4 +1,3 @@
-import type { ExtensionCapability } from "./ExtensionCapability.js";
 import type {
     ExtensionJsonValue,
     ExtensionPoint,
@@ -45,16 +44,6 @@ export class ExtensionError extends Error {
     }
 }
 
-export type ExtensionConfigAccess = "read" | "read-write";
-
-export interface ExtensionConfigDeclaration {
-    readonly access?: Readonly<Record<string, ExtensionConfigAccess>>;
-    readonly default?: Readonly<Record<string, ExtensionJsonValue>>;
-    readonly schema?:
-        | boolean
-        | Readonly<Record<string, ExtensionJsonValue>>;
-}
-
 export interface ExtensionConfigChange {
     readonly paths: readonly string[];
 }
@@ -65,24 +54,6 @@ export interface ExtensionConfig {
     update(
         patch: Readonly<Record<string, ExtensionJsonValue>>,
     ): Promise<void>;
-}
-
-export type ExtensionActivationPolicy = "eager" | "lazy";
-
-export interface ExtensionManifest {
-    activation: ExtensionActivationPolicy;
-    apiVersion: string;
-    capabilities: readonly ExtensionCapability[];
-    config?: ExtensionConfigDeclaration;
-    entry: string;
-    /** Static declarations keyed by stable domain-owned Extension Point id. */
-    extensions: Readonly<Record<string, readonly ExtensionPointDeclaration[]>>;
-    /** Bare package roots and compatible versions accepted from the host's shared dependency tree. */
-    hostDependencies: Readonly<Record<string, string>>;
-    id: string;
-    name: string;
-    schemaVersion: string;
-    version: string;
 }
 
 export interface ExtensionPaths {
