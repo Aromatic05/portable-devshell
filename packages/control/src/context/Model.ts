@@ -8,6 +8,9 @@ import type {
     McpContextEnvironment,
     McpContextRecord,
 } from "@portable-devshell/shared";
+import type { ContextSnapshot } from "../../../shared/src/workspace/context/Revision.js";
+
+export type { ContextSnapshot };
 
 export type {
     McpContextAutomaticReentryMode,

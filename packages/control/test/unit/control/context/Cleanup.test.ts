@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ContextCleanupService } from "../../../../src/context/Cleanup.js";
-import { ContextRegistry } from "../../../../src/context/Registry.js";
+import { ContextCleanupService } from "../../../../src/context/Service/Cleanup.js";
+import { ContextRegistry } from "../../../../src/context/Registry/index.js";
 
 test("retirement drains only the removed instance through its retained cleanup capability", async () => {
     const registry = new ContextRegistry({ idFactory: () => "ctx-retirement" });

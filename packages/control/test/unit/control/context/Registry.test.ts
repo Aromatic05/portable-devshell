@@ -6,7 +6,7 @@ import test from "node:test";
 
 import type { McpContextBinding } from "@portable-devshell/shared";
 
-import { ContextRegistry } from "../../../../src/context/Registry.js";
+import { ContextRegistry } from "../../../../src/context/Registry/index.js";
 
 test("creates an active Context without environment attachments", async () => {
     const registry = new ContextRegistry({ idFactory: () => "ctx-empty" });

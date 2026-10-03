@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { McpInstanceGateway } from "@portable-devshell/mcp";
-import { ContextCleanupService } from "../../../../src/context/Cleanup.js";
-import { ContextEnvironmentService } from "../../../../src/context/Environment.js";
-import { ContextRegistry } from "../../../../src/context/Registry.js";
-import { ContextService } from "../../../../src/context/Service.js";
+import { ContextCleanupService } from "../../../../src/context/Service/Cleanup.js";
+import { ContextEnvironmentService } from "../../../../src/context/Service/Scope.js";
+import { ContextRegistry } from "../../../../src/context/Registry/index.js";
+import { ContextService } from "../../../../src/context/Service/index.js";
 
 test("terminal Context cleanup retains shared alerts until the final active association ends", async () => {
     let sequence = 0;

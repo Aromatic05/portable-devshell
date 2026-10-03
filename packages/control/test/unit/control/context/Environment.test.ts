@@ -7,9 +7,9 @@ import type {
     McpEndpointWorkerPort,
     McpInstanceGateway,
 } from "../../../../../mcp/src/endpoint/Port.js";
-import { ContextCleanupService } from "../../../../src/context/Cleanup.js";
-import { ContextEnvironmentService } from "../../../../src/context/Environment.js";
-import { ContextRegistry } from "../../../../src/context/Registry.js";
+import { ContextCleanupService } from "../../../../src/context/Service/Cleanup.js";
+import { ContextEnvironmentService } from "../../../../src/context/Service/Scope.js";
+import { ContextRegistry } from "../../../../src/context/Registry/index.js";
 
 function worker() {
     return {

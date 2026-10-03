@@ -7,27 +7,30 @@ import {
     type McpContextEnvironmentCleanup,
     type McpContextExternalBinding,
 } from "@portable-devshell/shared";
-import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type {
+    ContextCleanupLedgerPort,
+    ContextRecordPort,
+} from "@portable-devshell/shared";
 import type {
     ContextEnvironmentPort,
     PreparedEnvironmentFacts,
-} from "../../../mcp/src/context/Port.js";
+} from "../../../../mcp/src/context/Port.js";
 import {
     isMcpGoalGateway,
     type McpInstanceGateway,
     type McpEndpointWorkerPort,
-} from "../../../mcp/src/endpoint/Port.js";
+} from "../../../../mcp/src/endpoint/Port.js";
 import { ContextCleanupService } from "./Cleanup.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
-    readonly #registry: ContextRegistryPort;
+    readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
     readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
     readonly #worker: (instance: string) => McpEndpointWorkerPort | undefined;
     readonly #cleanup: ContextCleanupService;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
-        contextRegistry: ContextRegistryPort;
+        contextRegistry: ContextRecordPort & ContextCleanupLedgerPort;
         gateway(instance: string): McpInstanceGateway | undefined;
         worker(instance: string): McpEndpointWorkerPort | undefined;
         cleanup: ContextCleanupService;

@@ -1,8 +1,8 @@
 import type { McpInstanceGateway } from "@portable-devshell/mcp";
-import { ContextService } from "./Service.js";
-import { ContextRegistry } from "./Registry.js";
-import { ContextEnvironmentService } from "./Environment.js";
-import { ContextCleanupService } from "./Cleanup.js";
+import { ContextService } from "./Service/index.js";
+import { ContextRegistry } from "./Registry/index.js";
+import { ContextEnvironmentService } from "./Service/Scope.js";
+import { ContextCleanupService } from "./Service/Cleanup.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextModule extends ContextService {
