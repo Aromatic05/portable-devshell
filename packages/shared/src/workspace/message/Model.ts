@@ -150,7 +150,7 @@ export function humanConversationTitle(
  * keeping the newest identity while preserving messages that are still in
  * flight (`pending`/`sent`) when a server list no longer reports them.
  */
-export function mergeConversationEntry(
+function mergeConversationEntry(
     current: readonly ConversationEntry[],
     incoming: ConversationEntry,
 ): ConversationEntry[] {

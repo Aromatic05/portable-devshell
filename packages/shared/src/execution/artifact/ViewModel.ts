@@ -21,7 +21,7 @@ import type {
 } from "./Model.js";
 import type { ArtifactTransport } from "./Transport.js";
 
-export interface ArtifactViewModelState {
+interface ArtifactViewModelState {
     failure?: Error;
     /** Global artifact event cursor captured with the last authoritative read. */
     lastSeq: number;
@@ -30,7 +30,7 @@ export interface ArtifactViewModelState {
     transfers: ArtifactTransferRecord[];
 }
 
-export interface ArtifactViewModelOptions {
+interface ArtifactViewModelOptions {
     refreshDelayMs?: number;
     retryBaseMs?: number;
     retryMaxMs?: number;

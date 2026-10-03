@@ -10,16 +10,15 @@
 import type { OperationalOverview } from "./Model.js";
 import type { OverviewTransport } from "./Transport.js";
 
-type OverviewViewModelStatus =
-    "idle" | "ready" | "unsupported" | "failed";
+type OverviewViewModelStatus = "idle" | "ready" | "unsupported" | "failed";
 
-export interface OverviewViewModelState {
+interface OverviewViewModelState {
     failure?: Error;
     overview?: OperationalOverview;
     status: OverviewViewModelStatus;
 }
 
-export interface OverviewViewModelOptions {
+interface OverviewViewModelOptions {
     /**
      * Periodic auto-refresh cadence. Defaults to the historical 5s; 0 disables
      * the interval.

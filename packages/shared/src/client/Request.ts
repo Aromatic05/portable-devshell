@@ -24,7 +24,7 @@ export function attachRequestCanceller<T>(
     return request;
 }
 
-export function getRequestCanceller(
+function getRequestCanceller(
     request: Promise<unknown>,
 ): RequestCanceller | undefined {
     return requestCancellers.get(request);

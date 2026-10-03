@@ -34,7 +34,7 @@ import {
 import type { ConfigTransport } from "./Transport.js";
 
 const REFRESH_COALESCE_MS = 100;
-export interface ConfigViewModelState {
+interface ConfigViewModelState {
     failure?: Error;
     /** True while a read runs with no projection to show yet. */
     loading: boolean;
@@ -273,7 +273,7 @@ function sameConfigView(left: ConfigView, right: ConfigView): boolean {
 function toError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
-export interface InstanceConfigViewModelState {
+interface InstanceConfigViewModelState {
     /** Live state of the change subscription feeding the list. */
     connection: SubscriptionStatus;
     failure?: Error;
@@ -540,7 +540,7 @@ function toInstanceError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
 
-export interface ConversationPreferenceViewModelState {
+interface ConversationPreferenceViewModelState {
     failure?: Error;
     loading: boolean;
     preferences: ConversationPreferencesSnapshot;

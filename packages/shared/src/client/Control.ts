@@ -30,8 +30,8 @@ export function controlWebBasePath(publicBaseUrl?: string): string {
     return `${prefix}${CONTROL_WEB_BASE_PATH}`;
 }
 
-export const CONTROL_URL_ENV = "PORTABLE_DEVSHELL_CONTROL_URL";
-export const CONTROL_TOKEN_ENV = "PORTABLE_DEVSHELL_CONTROL_TOKEN";
+const CONTROL_URL_ENV = "PORTABLE_DEVSHELL_CONTROL_URL";
+const CONTROL_TOKEN_ENV = "PORTABLE_DEVSHELL_CONTROL_TOKEN";
 
 export interface ControlChannelOptions {
     connectChannel?(signal?: AbortSignal): Promise<Channel>;
@@ -87,7 +87,7 @@ export async function connectControlChannel(
     }
 }
 
-export function normalizeControlWebSocketUrl(value: string): string {
+function normalizeControlWebSocketUrl(value: string): string {
     const url = new URL(value);
     if (url.username.length > 0 || url.password.length > 0)
         throw new Error("Control URL must not contain embedded credentials.");

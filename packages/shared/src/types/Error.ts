@@ -33,9 +33,6 @@ export const controlErrorCodes = {
     webAccessDenied: "control.webAccessDenied",
 } as const;
 
-export type ControlErrorCode =
-    (typeof controlErrorCodes)[keyof typeof controlErrorCodes];
-
 export const runtimeErrorCodes = {
     approvalAlreadyDecided: "core.approvalAlreadyDecided",
     approvalDenied: "core.approvalDenied",
@@ -77,4 +74,3 @@ export const runtimeErrorCodes = {
     workerTargetUnsupported: "core.workerTargetUnsupported",
     workerTransportDisconnected: "core.workerTransportDisconnected",
 } as const;
-

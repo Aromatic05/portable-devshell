@@ -15,7 +15,7 @@ import {
 } from "./Model.js";
 import type { MessageTransport } from "./Transport.js";
 
-export interface MessageInstanceState {
+interface MessageInstanceState {
     lastSeq: number;
     messages: ContextMessageRecord[];
     status: InstanceEventSubscriptionStatus;
@@ -24,7 +24,7 @@ export interface MessageViewModelState {
     failures: Record<string, Error>;
     instances: Record<string, MessageInstanceState>;
 }
-export interface MessageViewModelOptions {
+interface MessageViewModelOptions {
     onEvent?(event: InstanceEvent): void;
     transport: MessageTransport;
 }
@@ -305,7 +305,7 @@ export class MessageViewModel {
         for (const listener of this.#listeners) listener();
     }
 }
-export function createInitialMessageViewModelState(): MessageViewModelState {
+function createInitialMessageViewModelState(): MessageViewModelState {
     return {
         failures: {},
         instances: {},
@@ -318,7 +318,7 @@ function createInitialMessageInstanceState(): MessageInstanceState {
         status: "stopped",
     };
 }
-export interface ConversationInstanceState {
+interface ConversationInstanceState {
     entries: ConversationEntry[];
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
@@ -327,7 +327,7 @@ export interface ConversationViewModelState {
     failures: Record<string, Error>;
     instances: Record<string, ConversationInstanceState>;
 }
-export interface ConversationViewModelOptions {
+interface ConversationViewModelOptions {
     transport: MessageTransport;
     onEvent?(event: InstanceEvent): void;
 }
@@ -553,7 +553,7 @@ export class ConversationViewModel {
         for (const listener of this.#listeners) listener();
     }
 }
-export function createInitialConversationViewModelState(): ConversationViewModelState {
+function createInitialConversationViewModelState(): ConversationViewModelState {
     return {
         failures: {},
         instances: {},

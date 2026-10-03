@@ -105,7 +105,7 @@ export interface InstanceEventSource {
 }
 const readInstanceStreamGap = readStreamGap;
 const readInstanceStreamGapPayload = readStreamGapPayload;
-export function readInstanceEvent(value: JsonValue | undefined): InstanceEvent {
+function readInstanceEvent(value: JsonValue | undefined): InstanceEvent {
     const event = record(value);
     if (
         event === undefined ||

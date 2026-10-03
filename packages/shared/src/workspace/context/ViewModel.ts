@@ -5,7 +5,7 @@
 import type { McpContextRecord } from "./Model.js";
 import type { ContextTransport } from "./Transport.js";
 
-export interface ContextViewModelState {
+interface ContextViewModelState {
     contexts: McpContextRecord[];
     failure?: Error;
 }

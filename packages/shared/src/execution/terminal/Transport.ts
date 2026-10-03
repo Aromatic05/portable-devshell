@@ -23,7 +23,7 @@ import type {
     TerminalVersionedIdentity,
 } from "./Model.js";
 
-export const TERMINAL_PORT = "terminal";
+const TERMINAL_PORT = "terminal";
 
 export interface TerminalAttachment {
     ack(identity: TerminalVersionedIdentity, throughSeq: number): Promise<void>;

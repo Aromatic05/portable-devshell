@@ -15,7 +15,7 @@ import {
 } from "../../execution/process/Event.js";
 import type { ApprovalTransport } from "./Transport.js";
 
-export interface ApprovalViewModelState {
+interface ApprovalViewModelState {
     approvals: ApprovalRequest[];
     failure?: Error;
     lastSeq: number;

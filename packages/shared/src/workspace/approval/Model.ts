@@ -73,7 +73,3 @@ export interface ApprovalListResult {
     /** Instance event sequence at read time. Subscribe from lastSeq + 1. */
     lastSeq: number;
 }
-
-export function isApprovalEvent(type: string): boolean {
-    return type.startsWith("approval.");
-}

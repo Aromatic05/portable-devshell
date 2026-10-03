@@ -28,14 +28,14 @@ import {
 import type { ToolCallOptions, ToolTransport } from "./Transport.js";
 
 /** Base ledger read: newest 200 records, bounded to ~512 KiB. */
-export const TOOL_CALL_LIST_LIMIT = 200;
-export const TOOL_CALL_LIST_MAX_BYTES = 512 * 1024;
+const TOOL_CALL_LIST_LIMIT = 200;
+const TOOL_CALL_LIST_MAX_BYTES = 512 * 1024;
 /** Detail reads carry full input/output, so the byte budget is much larger. */
-export const TOOL_CALL_DETAIL_MAX_BYTES = 8 * 1024 * 1024;
+const TOOL_CALL_DETAIL_MAX_BYTES = 8 * 1024 * 1024;
 
 const DEFAULT_REFRESH_DELAY_MS = 100;
 
-export interface ToolCallInstanceState {
+interface ToolCallInstanceState {
     calls: ToolCallRecord[];
     failure?: Error;
     /** Last observed event sequence; informational, the engine owns the cursor. */
@@ -43,11 +43,11 @@ export interface ToolCallInstanceState {
     status: InstanceEventSubscriptionStatus;
 }
 
-export interface ToolCallViewModelState {
+interface ToolCallViewModelState {
     instances: Record<string, ToolCallInstanceState>;
 }
 
-export interface ToolCallViewModelOptions {
+interface ToolCallViewModelOptions {
     /**
      * Authoritative instance event sequence at call time. Required because
      * `ToolTransport.listCalls` has no `lastSeq`; composition supplies it from

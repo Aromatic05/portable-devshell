@@ -14,7 +14,7 @@ import type {
 } from "./Model.js";
 import type { AuthTransport } from "./Transport.js";
 
-export interface AuthViewModelState {
+interface AuthViewModelState {
     /** Failure of the most recent approval read or decision, if any. */
     approvalFailure?: Error;
     approvals: OAuthApprovalRequest[];
@@ -23,7 +23,7 @@ export interface AuthViewModelState {
     status?: AuthStatus;
 }
 
-export interface AuthViewModelOptions {
+interface AuthViewModelOptions {
     /** Poll cadence in milliseconds; values <= 0 disable polling. */
     pollIntervalMs?: number;
 }
@@ -42,10 +42,7 @@ export class AuthViewModel {
     #state: AuthViewModelState = emptyState();
     #statusVersion = 0;
 
-    constructor(
-        transport: AuthTransport,
-        options: AuthViewModelOptions = {},
-    ) {
+    constructor(transport: AuthTransport, options: AuthViewModelOptions = {}) {
         this.#transport = transport;
         this.#pollIntervalMs = options.pollIntervalMs ?? 1_000;
     }

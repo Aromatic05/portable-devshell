@@ -15,17 +15,6 @@ export type ControlClientKind = "cli" | "tui" | "web";
 /** Optional behaviors a control peer can negotiate during the handshake. */
 export type ControlProtocolCapability = "request" | "stream" | "streamResume";
 
-export interface ControlProtocolRange {
-    max: string;
-    min: string;
-}
-
-export interface ControlProtocolHelloRequest {
-    clientKind: ControlClientKind;
-    clientVersion?: string;
-    protocolRange: ControlProtocolRange;
-}
-
 export interface ControlProtocolHelloResponse {
     capabilities: ControlProtocolCapability[];
     protocolVersion: string;

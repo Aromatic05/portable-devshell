@@ -1,5 +1,8 @@
 import { type InstanceEvent } from "../../execution/process/Event.js";
-import { InstanceEventSubscription, type InstanceEventSubscriptionStatus } from "../../execution/process/Event.js";
+import {
+    InstanceEventSubscription,
+    type InstanceEventSubscriptionStatus,
+} from "../../execution/process/Event.js";
 import {
     type GoalSnapshot,
     isGoalEvent,
@@ -10,16 +13,16 @@ import {
 import type { TaskTransport } from "./Transport.js";
 
 const DEFAULT_REFRESH_DELAY_MS = 100;
-export interface GoalInstanceState {
+interface GoalInstanceState {
     failure?: Error;
     goals: GoalSnapshot[];
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
 }
-export interface GoalViewModelState {
+interface GoalViewModelState {
     instances: Record<string, GoalInstanceState>;
 }
-export interface GoalViewModelOptions {
+interface GoalViewModelOptions {
     onEvent?(event: InstanceEvent): void;
     refreshDelayMs?: number;
     retryBaseMs?: number;
@@ -252,7 +255,7 @@ function instanceKey(instance: string): string {
 function toError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
-export interface TodoViewModelState {
+interface TodoViewModelState {
     failure?: Error;
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
@@ -350,7 +353,10 @@ export class TodoViewModel {
     async #recover(): Promise<number | undefined> {
         try {
             const instance = this.#requireInstance();
-            const envelope = await this.#transport.getTodo(instance, this.#input);
+            const envelope = await this.#transport.getTodo(
+                instance,
+                this.#input,
+            );
             this.#apply(envelope.todo, envelope.lastSeq);
             return envelope.lastSeq + 1;
         } catch {

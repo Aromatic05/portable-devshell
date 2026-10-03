@@ -31,7 +31,7 @@ import type {
     WebPageTransport,
 } from "./Transport.js";
 
-export interface ExtensionViewModelState {
+interface ExtensionViewModelState {
     extensions: ExtensionRuntimeRecord[];
     extensionsFailure?: Error;
     /** Failure of the most recent TUI catalog read or page read/action. */

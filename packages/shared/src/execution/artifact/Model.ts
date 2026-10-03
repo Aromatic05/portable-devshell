@@ -35,7 +35,7 @@ export interface ArtifactViewImageResult extends ArtifactImageContent {
     source: ArtifactSourceDescriptor;
 }
 
-export const artifactShareStates = [
+const artifactShareStates = [
     "active",
     "exhausted",
     "expired",
@@ -79,7 +79,7 @@ export interface ArtifactShareRevokeResult {
     shareId: string;
 }
 
-export const artifactTransferStatuses = [
+const artifactTransferStatuses = [
     "queued",
     "preparing",
     "transferring",
@@ -220,7 +220,7 @@ export interface ArtifactSnapshot {
     transfers: ArtifactTransferRecord[];
 }
 
-export const artifactEventTypes = [
+const artifactEventTypes = [
     "artifact.shareCreated",
     "artifact.shareDownloaded",
     "artifact.shareExhausted",
@@ -267,6 +267,3 @@ export const artifactErrorCodes = {
     transferNotFound: "artifact.transferNotFound",
     transferStateConflict: "artifact.transferStateConflict",
 } as const;
-
-export type ArtifactErrorCode =
-    (typeof artifactErrorCodes)[keyof typeof artifactErrorCodes];

@@ -39,12 +39,6 @@ export interface TerminalOutputFrame {
     seq: number;
 }
 
-export interface TerminalAttachResult {
-    exit?: { exitCode: number; signal: number };
-    replay: TerminalOutputFrame[];
-    session: TerminalSessionDescriptor;
-}
-
 export interface TerminalVersionedIdentity {
     generation: number;
     terminalId: string;

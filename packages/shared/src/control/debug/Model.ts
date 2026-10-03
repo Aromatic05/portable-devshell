@@ -26,10 +26,6 @@ export interface DebugPatchScope {
     toolName?: string;
 }
 
-export interface DebugPatchReleaseRequest {
-    patchId: string;
-}
-
 export interface DebugPatchSummary {
     fault?: string;
     invocationCount: number;
@@ -41,10 +37,6 @@ export interface DebugPatchSummary {
     state: "active" | "faulted" | "unloaded";
     target: string;
     unloadedAt?: string;
-}
-
-export interface DebugPatchUnloadRequest {
-    patchId: string;
 }
 
 export interface DebugTargetSummary {

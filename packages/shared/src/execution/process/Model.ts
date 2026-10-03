@@ -56,11 +56,3 @@ export interface InstanceListEntry {
     name: string;
     snapshot: InstanceSnapshot;
 }
-
-export function isProcessEvent(type: string): boolean {
-    return (
-        type.startsWith("instance.") ||
-        type.startsWith("worker.") ||
-        type.startsWith("reverse.")
-    );
-}

@@ -102,6 +102,3 @@ export const contextErrorCodes = {
     invalid: "mcp.contextInvalid",
     workspaceRequired: "mcp.contextWorkspaceRequired",
 } as const;
-
-export type ContextErrorCode =
-    (typeof contextErrorCodes)[keyof typeof contextErrorCodes];
