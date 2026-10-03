@@ -9,7 +9,7 @@ import {
     toolCallReviewSandboxCodec,
     toolCallRewriteSandboxCodec,
 } from "../extension/toolcall/Sandbox.js";
-import { ExtensionSandboxPointCodecRegistry } from "../extension/generation/sandbox/bridge/PointCodec.js";
+import { ExtensionSandboxPointCodecRegistry } from "../extension/sandbox/bridge/PointCodec.js";
 import {
     webApplicationsSandboxCodec,
     webPagesSandboxCodec,

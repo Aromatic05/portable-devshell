@@ -20,7 +20,7 @@ import {
     createTuiPageRouteModule,
     TuiExtensionPageService,
 } from "../../../../src/extension/tui/Route.ts";
-import type { ExtensionCatalogRegistration } from "../../../../src/extension/generation/discovery/Catalog.ts";
+import type { ExtensionCatalogRegistration } from "../../../../src/extension/discovery/Catalog.ts";
 import { WebApplicationCatalog } from "../../../../src/server/web/extension/application/Catalog.ts";
 import { createWebApplicationRouteModule } from "../../../../src/server/web/extension/application/Route.ts";
 import { WebExtensionPageService } from "../../../../src/server/web/extension/page/Service.ts";

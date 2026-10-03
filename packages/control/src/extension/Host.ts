@@ -9,12 +9,12 @@ import {
 import {
     ExtensionGeneration,
     type ExtensionGenerationLease,
-} from "./generation/registration/Generation.js";
+} from "./registration/Generation.js";
 import {
     ExtensionCatalog,
     type ExtensionCatalogRegistration,
-} from "./generation/discovery/Catalog.js";
-import type { ExtensionPointRegistry } from "./generation/registration/PointRegistry.js";
+} from "./discovery/Catalog.js";
+import type { ExtensionPointRegistry } from "./registration/PointRegistry.js";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,

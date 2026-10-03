@@ -46,11 +46,11 @@ import { createToolCallRewriteSandboxBinding } from "../../../../../src/extensio
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
-} from "../../../../../src/extension/generation/sandbox/bridge/Host.ts";
+} from "../../../../../src/extension/sandbox/bridge/Host.ts";
 import {
     EXTENSION_SANDBOX_MAX_MESSAGE_BYTES,
     type ExtensionSandboxRegistrationDescriptor,
-} from "../../../../../src/extension/generation/sandbox/bridge/Protocol.ts";
+} from "../../../../../src/extension/sandbox/bridge/Protocol.ts";
 import {
     createWebApplicationSandboxBinding,
     createWebPageSandboxBinding,

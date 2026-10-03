@@ -18,7 +18,7 @@ import type { CliModelCommandInvocationContext } from "@portable-devshell/extens
 
 import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
 import { ModelDevshellBroker } from "../../../src/extension/cli/command/ModelBroker.ts";
-import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/generation/capability/Instance.ts";
+import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/capability/Instance.ts";
 import type { InstanceDescriptor } from "@portable-devshell/core";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";

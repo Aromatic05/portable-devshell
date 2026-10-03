@@ -19,7 +19,7 @@ import { createControlExtensionPointRegistry } from "../../../../../src/composit
 import {
     ExtensionLoader,
     type ExtensionWorkerRuntime,
-} from "../../../../../src/extension/generation/discovery/Loader.ts";
+} from "../../../../../src/extension/discovery/Loader.ts";
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 

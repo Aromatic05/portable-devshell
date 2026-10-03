@@ -13,11 +13,11 @@ import type {
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive,
-} from "../../../artifact/host/storage/Archive.js";
+} from "../../artifact/host/storage/Archive.js";
 import {
     resolveExtensionInstallLimits,
     type ExtensionInstallLimits,
-} from "../../install/Policy.js";
+} from "../install/Policy.js";
 
 export interface ExtensionAssetProjectionPortInput {
     overwrite?: boolean;

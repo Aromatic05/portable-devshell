@@ -12,8 +12,8 @@ import type {
     ExtensionPointSandboxBridge,
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
-} from "../../../extension/generation/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodec } from "../../../extension/generation/sandbox/bridge/PointCodec.js";
+} from "../../../extension/registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodec } from "../../../extension/sandbox/bridge/PointCodec.js";
 
 export const webApplicationsSandboxCodec: ExtensionSandboxPointCodec =
     Object.freeze({

@@ -35,7 +35,7 @@ import {
     sharedExtensionHostModuleResolver,
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
-import { ExtensionPathLayout } from "../../state/Layout.js";
+import { ExtensionPathLayout } from "../state/Layout.js";
 import { ExtensionInstanceEventPublishCapabilityControl } from "../capability/Instance.js";
 import {
     ExtensionToolCallHistoryCapabilityControl,
@@ -47,7 +47,7 @@ import {
     type ExtensionSandboxHostOptions,
 } from "../sandbox/bridge/Host.js";
 import type { ExtensionSandboxReadyDescriptor } from "../sandbox/bridge/Protocol.js";
-import type { ExtensionConfigRuntime } from "../../config/Control.js";
+import type { ExtensionConfigRuntime } from "../config/Control.js";
 
 export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
     closeAll(): Promise<void>;

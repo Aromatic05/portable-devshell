@@ -5,7 +5,7 @@ import {
     ExtensionInstanceEventPublishCapabilityControl,
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../../../../src/extension/generation/capability/Instance.ts";
+} from "../../../../../src/extension/capability/Instance.ts";
 import type { InstanceDescriptor } from "@portable-devshell/core";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";

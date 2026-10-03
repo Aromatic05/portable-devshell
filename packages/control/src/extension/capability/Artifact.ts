@@ -19,7 +19,7 @@ import type {
     ArtifactTransferStartInput,
 } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../../../artifact/Service.js";
+import type { ArtifactService } from "../../artifact/Service.js";
 
 export interface ExtensionArtifactCapabilityControlOptions {
     allowed: boolean;

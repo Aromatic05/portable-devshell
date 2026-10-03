@@ -11,7 +11,7 @@ import type {
 import type {
     ExtensionPointDefinition,
     ExtensionPointValidationContext,
-} from "../generation/registration/PointRegistry.js";
+} from "../registration/PointRegistry.js";
 import {
     createCliModelSandboxBinding,
     createCliNativeSandboxBinding,

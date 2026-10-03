@@ -7,7 +7,7 @@ import {
     ExtensionWorkerCapabilityControl,
     resolveExtensionWorkerInstance,
     type ExtensionWorkerToolCallPort,
-} from "../../../../src/extension/generation/capability/Worker.ts";
+} from "../../../../src/extension/capability/Worker.ts";
 
 test("Extension worker instance selection prefers one enabled local instance", () => {
     assert.equal(

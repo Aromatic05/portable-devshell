@@ -27,8 +27,8 @@ import type {
     ExtensionPointSandboxBridge,
     ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
-} from "./generation/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodec } from "./generation/sandbox/bridge/PointCodec.js";
+} from "./registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodec } from "./sandbox/bridge/PointCodec.js";
 
 export interface ExtensionControlPort {
     disable(id: string): Promise<void>;

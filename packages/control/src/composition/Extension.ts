@@ -9,8 +9,8 @@ import {
     toolCallReviewExtensionPointDefinition,
     toolCallRewriteExtensionPointDefinition,
 } from "../extension/toolcall/Point.js";
-import { ExtensionPointRegistry } from "../extension/generation/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodecRegistry } from "../extension/generation/sandbox/bridge/PointCodec.js";
+import { ExtensionPointRegistry } from "../extension/registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodecRegistry } from "../extension/sandbox/bridge/PointCodec.js";
 import {
     webApplicationsExtensionPointDefinition,
     webPagesExtensionPointDefinition,

@@ -49,7 +49,7 @@ import type {
     ToolCallHistoryQuery,
 } from "@portable-devshell/extension/toolcall";
 
-import { createControlExtensionSandboxPointRegistry } from "../../../composition/Sandbox.js";
+import { createControlExtensionSandboxPointRegistry } from "../../composition/Sandbox.js";
 import { projectExtensionCapabilities } from "../capability/Projection.js";
 import type {
     ExtensionPointSandboxInvocationContext,

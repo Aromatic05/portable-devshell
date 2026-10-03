@@ -23,7 +23,7 @@ import { createArtifactDirectoryArchive } from "../../../../../src/artifact/host
 import { ExtensionHost } from "../../../../../src/extension/Host.ts";
 import { ExtensionControlService } from "../../../../../src/extension/Service.ts";
 import { ExtensionInstallService } from "../../../../../src/extension/install/Service.ts";
-import { ExtensionLoader } from "../../../../../src/extension/generation/discovery/Loader.ts";
+import { ExtensionLoader } from "../../../../../src/extension/discovery/Loader.ts";
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../../../src/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";

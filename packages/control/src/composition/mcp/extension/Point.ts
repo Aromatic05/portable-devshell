@@ -11,7 +11,7 @@ import {
 import type {
     ExtensionPointDefinition,
     ExtensionPointValidationContext,
-} from "../../../extension/generation/registration/PointRegistry.js";
+} from "../../../extension/registration/PointRegistry.js";
 import {
     createMcpToolSandboxBinding,
     validateMcpToolBinding,

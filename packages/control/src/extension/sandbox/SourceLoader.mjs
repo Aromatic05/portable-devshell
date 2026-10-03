@@ -4,66 +4,66 @@ import { registerHooks, stripTypeScriptTypes } from "node:module";
 const workspacePackages = new Map([
     [
         "@portable-devshell/extension",
-        new URL("../../../../../extension/src/index.ts", import.meta.url)
+        new URL("../../../../extension/src/index.ts", import.meta.url)
             .href,
     ],
     [
         "@portable-devshell/extension/artifact",
         new URL(
-            "../../../../../extension/src/domain/artifact.ts",
+            "../../../../extension/src/domain/artifact.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/cli",
         new URL(
-            "../../../../../extension/src/domain/cli.ts",
+            "../../../../extension/src/domain/cli.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/control",
         new URL(
-            "../../../../../extension/src/domain/control.ts",
+            "../../../../extension/src/domain/control.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/instance",
         new URL(
-            "../../../../../extension/src/domain/instance.ts",
+            "../../../../extension/src/domain/instance.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/mcp",
         new URL(
-            "../../../../../extension/src/domain/mcp.ts",
+            "../../../../extension/src/domain/mcp.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/tui",
         new URL(
-            "../../../../../extension/src/domain/tui.ts",
+            "../../../../extension/src/domain/tui.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/extension/web",
         new URL(
-            "../../../../../extension/src/domain/web.ts",
+            "../../../../extension/src/domain/web.ts",
             import.meta.url,
         ).href,
     ],
     [
         "@portable-devshell/shared",
-        new URL("../../../../../shared/src/index.ts", import.meta.url).href,
+        new URL("../../../../shared/src/index.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/shared/transport/frame",
         new URL(
-            "../../../../../shared/src/transport/frame/Protocol.ts",
+            "../../../../shared/src/transport/frame/Protocol.ts",
             import.meta.url,
         ).href,
     ],

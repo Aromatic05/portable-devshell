@@ -13,8 +13,8 @@ import {
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/Extension.ts";
 import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
-import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/generation/capability/Context.ts";
-import { ExtensionLoader } from "../../../src/extension/generation/discovery/Loader.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/capability/Context.ts";
+import { ExtensionLoader } from "../../../src/extension/discovery/Loader.ts";
 import { ExtensionHost } from "../../../src/extension/Host.ts";
 import { ExtensionInstallService } from "../../../src/extension/install/Service.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";

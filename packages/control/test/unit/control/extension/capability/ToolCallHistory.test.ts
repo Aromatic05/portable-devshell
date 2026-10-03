@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../src/extension/generation/capability/ToolCallHistory.ts";
+import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../src/extension/capability/ToolCallHistory.ts";
 import type { InstanceDescriptor } from "@portable-devshell/core";
 import { InstanceRegistry } from "@portable-devshell/core";
 

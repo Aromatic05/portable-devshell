@@ -2,20 +2,20 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../extension/Host.js";
-import { ExtensionArtifactCapabilityControl } from "../../extension/generation/capability/Artifact.js";
-import { ExtensionAssetCapabilityControl } from "../../extension/generation/capability/Asset.js";
+import { ExtensionArtifactCapabilityControl } from "../../extension/capability/Artifact.js";
+import { ExtensionAssetCapabilityControl } from "../../extension/capability/Asset.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../extension/generation/capability/Instance.js";
-import { ExtensionContextObserveCapabilityControl } from "../../extension/generation/capability/Context.js";
-import { ExtensionWorkerCapabilityControl } from "../../extension/generation/capability/Worker.js";
+} from "../../extension/capability/Instance.js";
+import { ExtensionContextObserveCapabilityControl } from "../../extension/capability/Context.js";
+import { ExtensionWorkerCapabilityControl } from "../../extension/capability/Worker.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
 } from "../../extension/install/BuiltinSource.js";
 import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
-import { ExtensionLoader } from "../../extension/generation/discovery/Loader.js";
+import { ExtensionLoader } from "../../extension/discovery/Loader.js";
 import { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../../extension/state/Store.js";
 import { ExtensionConfigControl } from "../../extension/config/Control.js";

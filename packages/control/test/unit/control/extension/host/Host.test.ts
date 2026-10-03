@@ -8,8 +8,8 @@ import {
 } from "@portable-devshell/extension";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
-import { ExtensionGeneration } from "../../../../../src/extension/generation/registration/Generation.ts";
-import { ExtensionRegistrationSet } from "../../../../../src/extension/generation/registration/Registration.ts";
+import { ExtensionGeneration } from "../../../../../src/extension/registration/Generation.ts";
+import { ExtensionRegistrationSet } from "../../../../../src/extension/registration/Registration.ts";
 import {
     ExtensionHost,
     type ExtensionGenerationLoader,
