@@ -1,7 +1,7 @@
 import {
     ConfigInputError,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     formatConfigPath,
     validateConfigSemantics,
     type ControlConfig,
@@ -14,8 +14,8 @@ export class ControlConfigValidator {
         } catch (error) {
             if (isStructuredConfigError(error)) throw error;
             if (error instanceof ConfigInputError) {
-                throw createError({
-                    code: errorCodes.controlConfigValidationFailed,
+                throw createRemoteError({
+                    code: controlErrorCodes.configValidationFailed,
                     cause: error,
                     details: {
                         fieldPath: formatConfigPath(error.issue.path),
@@ -26,8 +26,8 @@ export class ControlConfigValidator {
                     retryable: false,
                 });
             }
-            throw createError({
-                code: errorCodes.controlConfigValidationFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.configValidationFailed,
                 cause: error,
                 details: { phase: "semantic" },
                 message: error instanceof Error ? error.message : String(error),

@@ -4,6 +4,7 @@ import { isTuiTerminalSupported } from "../../../terminal/control/Capability.js"
 import { buildArtifactActivityView } from "../../component/content/Artifact.js";
 import { createDefaultInstanceDraft } from "../../../state/editor/Instance.js";
 import type { BoxModel } from "../../component/content/Box.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import {
     compactSummary,
@@ -11,7 +12,11 @@ import {
     makeBox,
     runtimeStatus,
 } from "../Support.js";
-import { editorDraft, readPath } from "../../../state/editor/Draft.js";
+import {
+    asRecord,
+    editorDraft,
+    readPath,
+} from "../../../state/editor/Draft.js";
 import {
     buttonLine,
     choiceLine,
@@ -20,7 +25,10 @@ import {
     secretRecordFieldLine,
 } from "../../component/Editor.js";
 
-export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
+export function buildInstancesPageBoxes(
+    state: TuiAppState,
+    reader: TuiDomainReader,
+): BoxModel[] {
     if (state.interaction.editor?.kind === "create") {
         return [buildCreateWizard(state)];
     }
@@ -48,23 +56,23 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
             ],
             title: "Create Instance",
         }),
-        ...state.instances.map((entry) => {
-            const snapshot =
-                state.readModel.instanceState[entry.name]?.snapshot;
+        ...reader.instances.instances.map((entry) => {
+            const snapshot = reader.runtime(entry.name).snapshot;
             const approvals = (
-                state.readModel.instanceState[entry.name]?.approvals ?? []
+                reader.approval(entry.name).approvals ?? []
             ).filter((approval) => approval.status === "pending");
+            const provider = configuredProvider(reader, entry.name);
             const lifecycle = lifecycleAvailability(
                 state,
                 entry.name,
                 entry.enabled,
-                entry.provider,
+                provider,
                 snapshot,
             );
             const artifactActivity = buildArtifactActivityView(
                 entry.name,
-                state.readModel.artifactShares,
-                state.readModel.artifactTransfers,
+                reader.artifact.shares,
+                reader.artifact.transfers,
             );
 
             return makeBox(state, "instances", entry.name, {
@@ -74,7 +82,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                         text: `enabled       [ ${entry.enabled ? "yes" : "no"} ]`,
                         tone: "accent",
                     },
-                    formatField("provider", entry.provider ?? "unknown"),
+                    formatField("provider", provider ?? "unknown"),
                     formatField("home", entry.homeDirectory ?? "-"),
                     formatField("runtime", instanceRuntimeSummary(snapshot)),
                     formatField("approvals", String(approvals.length)),
@@ -145,7 +153,7 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
                 status: entry.enabled ? runtimeStatus(snapshot) : "disabled",
                 summaryLines: [
                     compactSummary(
-                        ["provider", entry.provider ?? "unknown"],
+                        ["provider", provider ?? "unknown"],
                         ["home", entry.homeDirectory ?? "-"],
                         ["approvals", String(approvals.length)],
                     ),
@@ -155,6 +163,20 @@ export function buildInstancesPageBoxes(state: TuiAppState): BoxModel[] {
             });
         }),
     ];
+}
+
+function configuredProvider(
+    reader: TuiDomainReader,
+    name: string,
+): string | undefined {
+    const entries = reader.config.view?.instances;
+    if (!Array.isArray(entries)) return undefined;
+    const configured = entries
+        .map((value) => asRecord(value))
+        .find((value) => value?.name === name);
+    return typeof configured?.provider === "string"
+        ? configured.provider
+        : undefined;
 }
 
 function instanceRuntimeSummary(

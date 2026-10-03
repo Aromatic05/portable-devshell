@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ArtifactViewImageInput,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -50,8 +50,8 @@ function optionalString(
 }
 
 function invalidArguments(message: string) {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

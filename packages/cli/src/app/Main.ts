@@ -17,7 +17,7 @@ import { renderCliUsage } from "../command/Usage.js";
 import type { CliLifecycleManagerLike } from "../command/control/service/Lifecycle.js";
 import { cliBuiltinExtensionSources } from "../command/extension/Builtin.js";
 import {
-    createCliClients as createControlClients,
+    createCliClients,
     negotiateCliControl,
     type CliClients,
 } from "../transport/Client.js";
@@ -75,7 +75,7 @@ export class CliMain {
         this.#xdgRuntimeDir = options.xdgRuntimeDir;
         this.#clients =
             options.createCliClients?.() ??
-            createControlClients({
+            createCliClients({
                 ...(options.controlToken === undefined
                     ? {}
                     : { controlToken: options.controlToken }),

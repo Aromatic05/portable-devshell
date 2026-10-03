@@ -2,13 +2,12 @@ import type {
     ApprovalRequest,
     ToolCallRecord,
 } from "@portable-devshell/shared";
-import { workspaceFolderName } from "@portable-devshell/shared";
+
+import { workspaceFolderName } from "../../../presentation/Workspace.js";
 
 import type { BoxModel } from "../../../component/content/Box.js";
-import {
-    selectTuiLogs,
-    type TuiAppState,
-} from "../../../../state/store/Model.js";
+import { type TuiAppState } from "../../../../state/store/Model.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import {
     auditInputSummary,
     auditOutputSummary,
@@ -27,16 +26,17 @@ import {
 
 export function buildAuditContextBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     key: TuiAuditContextKey,
 ): BoxModel[] {
-    const context = findAuditContext(state, instance, key);
+    const context = findAuditContext(reader, instance, key);
     if (context === undefined) return [];
 
     return [
         ...context.calls.map((call) => ({
             at: call.startedAt,
-            box: callBox(state, instance, key, call),
+            box: callBox(state, reader, instance, key, call),
         })),
         ...context.approvals.map((approval) => ({
             at: approval.createdAt,
@@ -49,13 +49,14 @@ export function buildAuditContextBoxes(
 
 function callBox(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     key: TuiAuditContextKey,
     call: ToolCallRecord,
 ): BoxModel {
     const output = resolveAuditOutput(
         call.output,
-        selectTuiLogs(state, instance),
+        reader.runtime(instance).logs,
         call.callId,
     );
     return makeBox(state, "audit", instance, {

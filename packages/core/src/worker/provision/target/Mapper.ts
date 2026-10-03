@@ -1,4 +1,4 @@
-import { createError, errorCodes, type ControlError } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes, type RemoteError } from "@portable-devshell/shared";
 
 import {
     supportedWorkerTargetKeys,
@@ -84,9 +84,9 @@ export function createWorkerTargetUnsupportedError(input: {
     rawArch: string;
     normalizedOs?: WorkerTargetOs;
     normalizedArch?: WorkerTargetArch;
-}): ControlError {
-    return createError({
-        code: errorCodes.coreWorkerTargetUnsupported,
+}): RemoteError {
+    return createRemoteError({
+        code: runtimeErrorCodes.workerTargetUnsupported,
         details: {
             operation: input.operation,
             provider: input.provider,

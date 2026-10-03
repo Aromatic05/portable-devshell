@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { resolve } from "node:path";
 
-import { ControlError, errorCodes } from "@portable-devshell/shared";
+import { RemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import { WorkerAssetResolver } from "../../provision/AssetResolver.js";
 import { WorkerBinary } from "../Binary.js";
@@ -66,7 +66,7 @@ export class WorkerTransportDriverLocal implements WorkerTransport {
                         "worker install check failed",
                 ),
                 {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    errorCode: runtimeErrorCodes.workerProvisionFailed,
                     result,
                 },
             );
@@ -137,7 +137,7 @@ export class WorkerTransportDriverLocal implements WorkerTransport {
                                 "existing worker could not be stopped",
                         ),
                         {
-                            errorCode: errorCodes.coreWorkerProvisionFailed,
+                            errorCode: runtimeErrorCodes.workerProvisionFailed,
                             result: stopResult,
                         },
                     );
@@ -173,7 +173,7 @@ export class WorkerTransportDriverLocal implements WorkerTransport {
                     env: this.#mergeEnv(options.env),
                     stdio: ["pipe", "pipe", "pipe"],
                 },
-                errorCodes.coreProviderFailed,
+                runtimeErrorCodes.providerFailed,
             ),
             context,
         );
@@ -224,7 +224,7 @@ export class WorkerTransportDriverLocal implements WorkerTransport {
         const asset = await this.#resolver
             .resolve(target, environment)
             .catch((error) => {
-                if (error instanceof ControlError) {
+                if (error instanceof RemoteError) {
                     throw error;
                 }
 
@@ -245,7 +245,7 @@ export class WorkerTransportDriverLocal implements WorkerTransport {
                     ]),
                     error,
                     {
-                        errorCode: errorCodes.coreWorkerProvisionFailed,
+                        errorCode: runtimeErrorCodes.workerProvisionFailed,
                     },
                 );
             });

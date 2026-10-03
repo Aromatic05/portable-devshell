@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import type { TuiAppState } from "../../../state/store/Model.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import type {
     TuiOverviewActivityRowModel,
     TuiOverviewInstanceRowModel,
@@ -15,6 +16,7 @@ import {
 } from "./Presentation.js";
 
 interface TuiOverviewViewProps {
+    readonly reader: TuiDomainReader;
     readonly state: TuiAppState;
     readonly viewportRows: number;
     readonly width: number;
@@ -23,7 +25,7 @@ interface TuiOverviewViewProps {
 type InkColor = "blue" | "cyan" | "gray" | "green" | "red" | "yellow";
 
 export function TuiOverviewView(props: TuiOverviewViewProps) {
-    const model = selectTuiOverviewPresentation(props.state);
+    const model = selectTuiOverviewPresentation(props.state, props.reader);
     if (!model.available) {
         return (
             <Box flexDirection="column">
@@ -36,6 +38,7 @@ export function TuiOverviewView(props: TuiOverviewViewProps) {
 
     const instanceViewport = selectTuiOverviewInstanceViewport(
         props.state,
+        props.reader,
         props.viewportRows,
     );
     const offset = instanceViewport.offset;

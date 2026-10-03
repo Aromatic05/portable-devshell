@@ -1,12 +1,8 @@
 import type {
-    ControlError,
-    ControlInstanceReadState,
-    ControlReadModelState,
-    ConversationPreferencesSnapshot,
+    RemoteError,
     InstanceEvent,
     InstanceLogEntry,
     JsonValue,
-    TuiPageSnapshot,
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState } from "../Interaction.js";
@@ -24,15 +20,6 @@ import type {
 export type TuiConnectionStatus =
     "connecting" | "connected" | "disconnected" | "error";
 
-export interface TuiInstanceListEntry {
-    enabled: boolean;
-    homeDirectory?: string;
-    mcpEnabled: boolean;
-    mcpPath?: string;
-    name: string;
-    provider?: string;
-}
-
 export type TuiLogEntry = InstanceLogEntry;
 
 export interface TuiConnectionState {
@@ -48,16 +35,10 @@ export interface TuiRawEventRecord {
     seq: number;
 }
 
-export interface TuiGlobalDerivedState {
-    connectedInstanceCount: number;
-    pendingApprovalCount: number;
-    totalEventCount: number;
-}
-
 export interface TuiCommandRecord {
     commandId: string;
     completedAt?: string;
-    error?: ControlError;
+    error?: RemoteError;
     sourcePanel: string;
     startedAt: string;
     status: "running" | "succeeded" | "failed";
@@ -72,46 +53,25 @@ export interface TuiRelayRecord {
     requestId?: string;
 }
 
+/**
+ * UI-local state only. Remote domain snapshots live in their view models and
+ * never get copied here; the store only carries local interaction state plus
+ * local diagnostics (connection indicator, command records, panel errors, and
+ * the raw event log).
+ */
 export interface TuiAppState {
     commandRecords: TuiCommandRecord[];
     connection: TuiConnectionState;
-    conversationPreferences: ConversationPreferencesSnapshot;
-    extensionPageSnapshots: Record<string, TuiPageSnapshot>;
-    globalDerived: TuiGlobalDerivedState;
     interaction: TuiInteractionState;
-    instances: TuiInstanceListEntry[];
-    lastStatusChangeAtByInstance: Record<string, string>;
-    panelErrors: Record<string, ControlError>;
+    panelErrors: Record<string, RemoteError>;
     rawEvents: TuiRawEventRecord[];
-    readModel: ControlReadModelState;
     relayByCommand: Record<string, TuiRelayRecord>;
     ui: TuiUiState;
 }
 
-export type TuiControlReadModelPatch = Partial<
-    Omit<ControlReadModelState, "instanceState" | "instances">
-> & {
-    instanceState?: Record<string, Partial<ControlInstanceReadState>>;
-    instances?: TuiInstanceListEntry[];
-};
-
 export type TuiAppAction =
-    | {
-          instances: TuiInstanceListEntry[];
-          readModel: ControlReadModelState;
-          type: "control.readModel.replace";
-      }
-    | {
-          preferences: ConversationPreferencesSnapshot;
-          type: "conversationPreferences.replace";
-      }
-    | {
-          pageId: string;
-          snapshot: TuiPageSnapshot;
-          type: "extensionPage.replace";
-      }
     | { command: TuiCommandRecord; type: "command.upsert" }
-    | { error?: ControlError; key: string; type: "panelError.set" }
+    | { error?: RemoteError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
     | {
           commandId: string;
@@ -160,11 +120,4 @@ export function toRawEventRecord(event: InstanceEvent): TuiRawEventRecord {
         payload: event as unknown as JsonValue,
         seq: event.seq,
     };
-}
-
-export function selectTuiLogs(
-    state: TuiAppState,
-    instance: string,
-): InstanceLogEntry[] {
-    return state.readModel.instanceState[instance]?.logs ?? [];
 }

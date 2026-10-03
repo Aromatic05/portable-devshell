@@ -16,7 +16,6 @@ import type { TuiAppStore } from "../../state/store/App.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import { currentTuiRoute } from "../../state/route/State.js";
-import { selectSidebarModel } from "../../view/projection/View.js";
 import type { TuiInteractionProjection } from "../Projection.js";
 import {
     TuiCommandDispatcherAudit,
@@ -103,11 +102,13 @@ export class TuiCommandDispatcher {
     readonly #focusManager: TuiFocusManager;
     readonly #navigation: TuiCommandDispatcherNavigation;
     readonly #options: TuiCommandDispatcherOptions;
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: TuiCommandDispatcherOptions) {
         this.#focusManager = options.focusManager;
         this.#options = options;
+        this.#projection = options.projection;
         this.#store = options.store;
         this.#focus = new TuiCommandDispatcherFocus({
             mainBoxInnerColumns: options.mainBoxInnerColumns,
@@ -121,6 +122,7 @@ export class TuiCommandDispatcher {
             focusManager: this.#focusManager,
             onArtifactViewImage: options.onArtifactViewImage,
             onToolCallDetail: options.onToolCallDetail,
+            projection: options.projection,
             store: this.#store,
         });
         this.#editor = new TuiCommandDispatcherEditor({
@@ -510,9 +512,9 @@ export class TuiCommandDispatcher {
         }
         const cursor = state.interaction.sidebarCursor;
         if (cursor?.kind !== "context") return false;
-        const entry = selectSidebarModel(state).context.items.find(
-            (candidate) => candidate.id === cursor.id,
-        );
+        const entry = this.#projection
+            .selectSidebarModel(state)
+            .context.items.find((candidate) => candidate.id === cursor.id);
         if (entry === undefined) return false;
         const ctxIds =
             entry.target.kind === "messageConversation"

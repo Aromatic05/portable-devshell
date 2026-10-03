@@ -1,4 +1,4 @@
-import { createError, type CommandResult, errorCodes, type ControlError } from "@portable-devshell/shared";
+import { createRemoteError, type CommandResult, runtimeErrorCodes, type RemoteError } from "@portable-devshell/shared";
 
 import type { ProviderCommandContext } from "../../transport/command/Transport.js";
 import type { WorkerTarget } from "./Target.js";
@@ -40,9 +40,9 @@ export function createWorkerTargetProbeFailedError(
         cause?: unknown;
         result?: Partial<CommandResult>;
     } = {}
-): ControlError {
-    return createError({
-        code: errorCodes.coreWorkerTargetProbeFailed,
+): RemoteError {
+    return createRemoteError({
+        code: runtimeErrorCodes.workerTargetProbeFailed,
         cause: input.cause,
         details: {
             commandDisplay: context.commandDisplay,

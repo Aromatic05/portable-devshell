@@ -5,11 +5,11 @@ import {
 } from "node:child_process";
 
 import {
-    errorCodes,
+    runtimeErrorCodes,
     StreamChannel,
     type Channel,
     type CommandResult,
-    type ControlError,
+    type RemoteError,
 } from "@portable-devshell/shared";
 
 import {
@@ -30,7 +30,7 @@ export class WorkerTransportProcessRunner {
     spawn(
         context: ProviderCommandContext,
         options: SpawnOptions,
-        errorCode: string = errorCodes.coreProviderFailed,
+        errorCode: string = runtimeErrorCodes.providerFailed,
     ): ChildProcess {
         const [command, ...args] = context.command;
 
@@ -90,7 +90,7 @@ export class WorkerTransportProcessRunner {
     async run(
         context: ProviderCommandContext,
         options: SpawnOptions,
-        errorCode: string = errorCodes.coreProviderFailed,
+        errorCode: string = runtimeErrorCodes.providerFailed,
     ): Promise<WorkerCommandResult> {
         return await this.wait(
             this.spawn(context, options, errorCode),
@@ -109,5 +109,5 @@ export class WorkerTransportProcessRunner {
         context: ProviderCommandContext,
         cause: unknown,
         options?: { errorCode?: string; result?: Partial<CommandResult> },
-    ): ControlError => createProviderError(context, cause, options);
+    ): RemoteError => createProviderError(context, cause, options);
 }

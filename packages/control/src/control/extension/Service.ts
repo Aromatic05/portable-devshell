@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ExtensionRemoveResult,
     type ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
@@ -59,8 +59,8 @@ export class ExtensionControlService implements ExtensionControlPort {
 }
 
 function requiredBuiltinDisableError(id: string): Error {
-    return createError({
-        code: errorCodes.controlExtensionAccessDenied,
+    return createRemoteError({
+        code: controlErrorCodes.extensionAccessDenied,
         details: { extensionId: id, operation: "disable" },
         message: `Extension ${id} is a required builtin and cannot be disabled.`,
         retryable: false,

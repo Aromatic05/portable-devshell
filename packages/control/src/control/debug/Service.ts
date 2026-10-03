@@ -1,7 +1,7 @@
 import type { WorkerInstance } from "@portable-devshell/core";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type DebugPatchLoadRequest,
     type DebugPatchSummary,
     type DebugTargetSummary,
@@ -43,8 +43,8 @@ export class DebugPatchService {
             request.target.startsWith("worker:") &&
             request.scope?.ctxId === undefined
         ) {
-            throw createError({
-                code: errorCodes.controlDebugPatchInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.debugPatchInvalid,
                 message: "Worker debug patches require a ctxId scope.",
                 retryable: false,
             });

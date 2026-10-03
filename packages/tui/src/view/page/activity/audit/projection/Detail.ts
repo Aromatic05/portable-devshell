@@ -1,10 +1,13 @@
 import {
-    formatJsonSummary,
-    formatJsonValue,
-    parseJsonFallback,
     resolveToolOutput,
     type JsonValue,
 } from "@portable-devshell/shared";
+
+import {
+    formatJsonSummary,
+    formatJsonValue,
+    parseJsonFallback,
+} from "../../../../presentation/Json.js";
 
 interface AuditLinkedLog {
     callId?: string;

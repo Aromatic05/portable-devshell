@@ -4,8 +4,8 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type GoalRecord,
 } from "@portable-devshell/shared";
 
@@ -168,9 +168,9 @@ export class GoalStore {
                 JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown,
             );
         } catch (error) {
-            throw createError({
+            throw createRemoteError({
                 cause: error,
-                code: errorCodes.targetInvalid,
+                code: controlErrorCodes.invalidTarget,
                 details: { filePath: this.#filePath },
                 message: `Goal state for ${this.#instanceName} is invalid.`,
                 retryable: false,

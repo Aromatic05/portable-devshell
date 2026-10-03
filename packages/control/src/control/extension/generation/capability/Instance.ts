@@ -12,14 +12,15 @@ import type {
 } from "@portable-devshell/extension/instance";
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type InstanceCreateResult,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
     type InstanceEventType,
     type InstanceLogEntry,
     type JsonValue,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -219,8 +220,8 @@ export class ExtensionInstanceManageCapabilityControl
         this.#assertAllowed();
         const descriptor = this.#require(name);
         if (!descriptor.enabled) {
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: { instance: descriptor.name, operation: "start" },
                 message: `Instance ${descriptor.name} is disabled.`,
                 retryable: false,
@@ -294,8 +295,8 @@ function requireInstance(instances: InstanceRegistry, name: string) {
     const instance = requireName(name);
     const descriptor = instances.get(instance);
     if (descriptor !== undefined) return descriptor;
-    throw createError({
-        code: errorCodes.instanceMissing,
+    throw createRemoteError({
+        code: controlErrorCodes.instanceNotFound,
         details: { instance },
         message: `Instance ${instance} was not found or is disabled.`,
         retryable: false,

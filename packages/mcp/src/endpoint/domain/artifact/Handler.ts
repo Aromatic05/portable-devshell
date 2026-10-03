@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    contextErrorCodes,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -77,8 +77,8 @@ export class McpEndpointHandlerArtifact {
 function requireContextWorkspace(context: ToolCallContext): string {
     if (context.workspace !== undefined && context.workspace.length > 0)
         return context.workspace;
-    throw createError({
-        code: errorCodes.mcpContextWorkspaceRequired,
+    throw createRemoteError({
+        code: contextErrorCodes.workspaceRequired,
         details:
             context.ctxId === undefined ? undefined : { ctxId: context.ctxId },
         message:

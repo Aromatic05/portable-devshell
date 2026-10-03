@@ -1,5 +1,5 @@
 import {
-    errorCodes,
+    runtimeErrorCodes,
     type CommandResult,
     type JsonValue,
     type ToolCallContext,
@@ -237,7 +237,7 @@ export class WorkerInstanceToolAudit {
         await this.#toolCallHistory
             .failed(
                 scope.callId,
-                getErrorCode(error, errorCodes.coreProviderFailed),
+                getErrorCode(error, runtimeErrorCodes.providerFailed),
                 new Date().toISOString(),
             )
             .catch(() => undefined);

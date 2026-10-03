@@ -943,12 +943,8 @@ function snapshot(record: GoalRecord, now: string): GoalSnapshot {
             : { lastExecutionAt: record.lastExecutionAt }),
         ...(record.lastReentryAt === undefined
             ? {}
-            : {
-                  lastReentryAt: record.lastReentryAt,
-                  lastContinuationAt: record.lastReentryAt,
-              }),
+            : { lastReentryAt: record.lastReentryAt }),
         lastProgressAt: record.lastProgressAt,
-        maxContinuations: GOAL_MAX_CONTINUATIONS,
         noActionStreak: record.noActionStreak,
         progressEpoch,
         stagnationStreak: record.stagnationStreak,

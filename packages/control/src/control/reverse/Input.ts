@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -10,8 +10,8 @@ export function readReverseInstanceName(params?: JsonValue): string {
         typeof params.instance !== "string" ||
         params.instance.length === 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "Reverse connection operation requires instance.",
             retryable: false,
         });

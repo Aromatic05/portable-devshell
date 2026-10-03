@@ -1,9 +1,9 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type CommandDiagnostic,
     type CommandResult,
-    type ControlError,
+    type RemoteError,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -15,11 +15,11 @@ export function createProviderError(
     context: ProviderCommandContext,
     cause: unknown,
     options: { errorCode?: string; result?: Partial<CommandResult> } = {},
-): ControlError {
+): RemoteError {
     const details = buildCommandDiagnostic(context, options.result, cause);
 
-    return createError({
-        code: options.errorCode ?? errorCodes.coreProviderFailed,
+    return createRemoteError({
+        code: options.errorCode ?? runtimeErrorCodes.providerFailed,
         cause,
         details: toJsonDetails(details),
         message: `${context.provider} provider failed to ${context.operation}.`,

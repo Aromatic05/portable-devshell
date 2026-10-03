@@ -3,7 +3,12 @@ import type {
     McpApprovalPort,
     McpInstanceGateway,
 } from "@portable-devshell/mcp";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    contextErrorCodes,
+    controlErrorCodes,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
@@ -75,8 +80,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     assertReady(instance: string): void {
         const descriptor = this.#requireDescriptor(instance);
         if (!descriptor.worker.snapshot().ready) {
-            throw createError({
-                code: errorCodes.coreInstanceNotReady,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceNotReady,
                 details: { instance },
                 message: `Instance ${instance} is not ready.`,
                 retryable: false,
@@ -524,8 +529,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     #requireWait(instance: string) {
         const wait = this.#requireDescriptor(instance).wait;
         if (wait === undefined) {
-            throw createError({
-                code: errorCodes.envelopeInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.methodNotFound,
                 message: `Wait service is unavailable for ${instance}.`,
                 retryable: false,
             });
@@ -538,8 +543,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         if (descriptor !== undefined) {
             return descriptor;
         }
-        throw createError({
-            code: errorCodes.instanceMissing,
+        throw createRemoteError({
+            code: controlErrorCodes.instanceNotFound,
             details: { instance },
             message: `Instance ${instance} was not found.`,
             retryable: false,
@@ -563,8 +568,8 @@ function requireCtxId(context: ToolCallContext): string {
     if (context.ctxId !== undefined && context.ctxId.length > 0) {
         return context.ctxId;
     }
-    throw createError({
-        code: errorCodes.mcpContextInvalid,
+    throw createRemoteError({
+        code: contextErrorCodes.invalid,
         message: "todo_write requires a validated ctxId.",
         retryable: false,
     });

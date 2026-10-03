@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type InstanceContainerConfig,
 } from "@portable-devshell/shared";
 
@@ -132,8 +132,8 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
     }
 
     #missingContainerError() {
-        return createError({
-            code: errorCodes.coreProviderFailed,
+        return createRemoteError({
+            code: runtimeErrorCodes.providerFailed,
             details: {
                 containerName: this.#config.containerName,
                 mode: "existingStoppedContainer",
@@ -145,8 +145,8 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
     }
 
     #runningContainerUnsupportedError() {
-        return createError({
-            code: errorCodes.coreProviderFailed,
+        return createRemoteError({
+            code: runtimeErrorCodes.providerFailed,
             details: {
                 containerName: this.#config.containerName,
                 mode: "existingStoppedContainer",

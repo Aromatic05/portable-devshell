@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -9,12 +9,12 @@ import { getErrorCode } from "../state/Error.js";
 export function readNonRunningSchedulerStatus(
     errorCode: string,
 ): "queueTimeout" | "cancelled" | undefined {
-    if (errorCode === errorCodes.coreToolQueueTimeout) {
+    if (errorCode === runtimeErrorCodes.toolQueueTimeout) {
         return "queueTimeout";
     }
 
     if (
-        errorCode === errorCodes.coreToolCallCancelled ||
+        errorCode === runtimeErrorCodes.toolCallCancelled ||
         errorCode === "tool.cancelled"
     ) {
         return "cancelled";
@@ -24,21 +24,21 @@ export function readNonRunningSchedulerStatus(
 }
 
 export function normalizeToolSchedulerError(error: unknown): unknown {
-    const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
+    const errorCode = getErrorCode(error, runtimeErrorCodes.providerFailed);
 
     if (
-        errorCode !== errorCodes.coreToolSchedulerFull &&
-        errorCode !== errorCodes.coreToolQueueTimeout &&
-        errorCode !== errorCodes.coreToolCallCancelled &&
+        errorCode !== runtimeErrorCodes.toolSchedulerFull &&
+        errorCode !== runtimeErrorCodes.toolQueueTimeout &&
+        errorCode !== runtimeErrorCodes.toolCallCancelled &&
         errorCode !== "tool.cancelled"
     ) {
         return error;
     }
 
-    return createError({
+    return createRemoteError({
         code:
             errorCode === "tool.cancelled"
-                ? errorCodes.coreToolCallCancelled
+                ? runtimeErrorCodes.toolCallCancelled
                 : errorCode,
         cause: error,
         message:
@@ -55,8 +55,8 @@ export function throwIfToolCallAborted(signal: AbortSignal | undefined): void {
         return;
     }
 
-    throw createError({
-        code: errorCodes.coreToolCallCancelled,
+    throw createRemoteError({
+        code: runtimeErrorCodes.toolCallCancelled,
         cause: signal.reason,
         message: "Tool call was cancelled by the client.",
         retryable: true,

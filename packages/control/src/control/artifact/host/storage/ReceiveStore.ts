@@ -21,7 +21,7 @@ import type {
     WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/core";
 import {
-    createError,
+    createRemoteError,
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
@@ -542,7 +542,7 @@ function isStoredReceive(
 }
 
 function artifactError(code: string, message: string) {
-    return createError({ code, message, retryable: false });
+    return createRemoteError({ code, message, retryable: false });
 }
 
 function isNotFound(error: unknown): error is NodeJS.ErrnoException {

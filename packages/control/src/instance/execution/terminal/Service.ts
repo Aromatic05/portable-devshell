@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    STREAM_GAP_CODE,
     type TerminalSessionDescriptor,
     type TerminalSessionState,
     type TerminalOutputFrame,
+    controlErrorCodes,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import type {
@@ -181,8 +183,8 @@ export class TerminalSessionService {
         const oldestAvailableSeq =
             session.replay[0]?.seq ?? session.latestSeq + 1;
         if (request.fromSeq < oldestAvailableSeq - 1) {
-            throw createError({
-                code: errorCodes.streamGap,
+            throw createRemoteError({
+                code: STREAM_GAP_CODE,
                 details: {
                     latestSeq: session.latestSeq,
                     oldestAvailableSeq,
@@ -342,8 +344,8 @@ export class TerminalSessionService {
         const terminalId =
             backendSession?.identity.terminalId ?? this.#uniqueId();
         if (this.#sessions.has(terminalId)) {
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: { terminalId },
                 message: `Terminal ${terminalId} is already registered.`,
                 retryable: true,
@@ -558,8 +560,8 @@ export class TerminalSessionService {
 
     #assertVersion(session: TerminalSessionRecord, version: number): void {
         if (session.version !== version) {
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: {
                     actualVersion: session.version,
                     requestedVersion: version,
@@ -573,8 +575,8 @@ export class TerminalSessionService {
 
     #assertActive(session: TerminalSessionRecord): void {
         if (session.state !== "running") {
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: {
                     state: session.state,
                     terminalId: session.terminalId,
@@ -588,8 +590,8 @@ export class TerminalSessionService {
     #require(terminalId: string, generation: number): TerminalSessionRecord {
         const session = this.#requireById(terminalId);
         if (session.generation !== generation) {
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: {
                     actualGeneration: session.generation,
                     requestedGeneration: generation,
@@ -605,8 +607,8 @@ export class TerminalSessionService {
     #requireById(terminalId: string): TerminalSessionRecord {
         const session = this.#sessions.get(terminalId);
         if (session === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceNotFound,
                 details: { terminalId },
                 message: `Terminal ${terminalId} was not found.`,
                 retryable: false,
@@ -648,16 +650,16 @@ async function disposeUnregistered(
 }
 
 function serviceClosedError(): Error {
-    return createError({
-        code: errorCodes.instanceConflict,
+    return createRemoteError({
+        code: runtimeErrorCodes.instanceConflict,
         message: "Terminal session service is closed.",
         retryable: false,
     });
 }
 
 function instanceBackendReplacedError(instance: string): Error {
-    return createError({
-        code: errorCodes.instanceConflict,
+    return createRemoteError({
+        code: runtimeErrorCodes.instanceConflict,
         details: { instance },
         message: `Terminal backend for ${instance} was replaced while opening.`,
         retryable: true,
@@ -687,8 +689,8 @@ function assertDimensions(cols: number, rows: number): void {
         cols > 4096 ||
         rows > 4096
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "Terminal dimensions are invalid.",
             retryable: false,
         });
@@ -697,8 +699,8 @@ function assertDimensions(cols: number, rows: number): void {
 
 function assertSequence(value: number): void {
     if (!Number.isSafeInteger(value) || value < 0) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "Terminal fromSeq must be a non-negative safe integer.",
             retryable: false,
         });

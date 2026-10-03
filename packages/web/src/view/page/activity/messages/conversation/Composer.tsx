@@ -1,11 +1,16 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+    type FormEvent,
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import {
     parseContextMessageDirective,
     type ContextMessageDirective,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import type { WebRoute } from "../../../../../app/Route.js";
-import type { WebState } from "../../../../../state/Model.js";
 import type { WebStore } from "../../../../../state/Store.js";
 import {
     buildConversationMarkdown,
@@ -18,17 +23,20 @@ export function ConversationComposer({
     entries,
     onActivity,
     route,
-    state,
     store,
     title,
 }: {
     entries: readonly WebMessageEntry[];
     onActivity(): void;
     route: Extract<WebRoute, { page: "messages"; view: "thread" }>;
-    state: WebState;
     store: WebStore;
     title: string;
 }) {
+    const operations = useSyncExternalStore(
+        store.subscribe,
+        () => store.state.operations,
+        () => store.state.operations,
+    );
     const [draft, setDraft] = useState("");
     const [messageDirective, setMessageDirective] =
         useState<ContextMessageDirective>();
@@ -198,11 +206,11 @@ export function ConversationComposer({
                 disabled={
                     (draft.trim().length === 0 &&
                         messageDirective === undefined) ||
-                    state.operations[operation] !== undefined
+                    operations[operation] !== undefined
                 }
                 type="submit"
             >
-                {state.operations[operation] !== undefined ? "…" : "➤"}
+                {operations[operation] !== undefined ? "…" : "➤"}
             </button>
             {draft.length > composerLengthHintThreshold ? (
                 <p aria-live="off" className="messages-composer-length">

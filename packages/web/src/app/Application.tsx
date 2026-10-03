@@ -1,12 +1,14 @@
 import { useEffect, useSyncExternalStore } from "react";
 
+import {
+    WebDomainProvider,
+    useDomainSnapshot,
+    useWebDomains,
+} from "./domain/Context.js";
 import { PageSwitcher } from "../view/component/Navigation.js";
 import { PartialFailures } from "../view/component/Feedback.js";
 import { useHashRoute, type WebRoute } from "./Route.js";
-import { openTodos } from "../view/ReadModel.js";
-import { selectWebMessageSession } from "../view/page/activity/messages/Model.js";
-import type { WebState, WebStore } from "../state/Store.js";
-import { webFailures } from "../state/Model.js";
+import type { WebStore } from "../state/Store.js";
 import type { ApplicationBusy } from "./session/Hook.js";
 import { Audit } from "../view/page/activity/audit/Page.js";
 import { Instances } from "../view/page/Instances.js";
@@ -28,40 +30,88 @@ export function Application({
     onLogout(): Promise<void>;
     onReconnect(): Promise<void>;
 }) {
+    return (
+        <WebDomainProvider domains={store.domains}>
+            <ApplicationBody
+                busy={busy}
+                error={error}
+                onLogout={onLogout}
+                onReconnect={onReconnect}
+                store={store}
+            />
+        </WebDomainProvider>
+    );
+}
+
+function ApplicationBody({
+    busy,
+    error,
+    store,
+    onLogout,
+    onReconnect,
+}: {
+    busy?: ApplicationBusy;
+    error?: string;
+    store: WebStore;
+    onLogout(): Promise<void>;
+    onReconnect(): Promise<void>;
+}) {
     const state = useSyncExternalStore(
         store.subscribe,
         () => store.state,
         () => store.state,
     );
+    const domains = useWebDomains();
+    const service = useDomainSnapshot(domains.service);
+    const overviewState = useDomainSnapshot(domains.overview);
+    const extension = useDomainSnapshot(domains.extension);
+    const config = useDomainSnapshot(domains.config);
+    const mcp = useDomainSnapshot(domains.mcp);
+    const artifact = useDomainSnapshot(domains.artifact);
+    const context = useDomainSnapshot(domains.context);
     const [route, navigate] = useHashRoute();
     const interactionDisabled = busy !== undefined;
+
     useEffect(() => {
         store.setOverviewActive(route.page === "overview");
         return () => store.setOverviewActive(false);
     }, [route.page, store]);
+
     useEffect(() => {
-        if (state.connection !== "online") return;
+        if (service.status !== "online") return;
         if (route.page === "audit") void store.refreshAudit();
         else if (route.page === "messages") void store.refreshMessages();
-    }, [route.page, state.connection, store]);
+    }, [route.page, service.status, store]);
+
     useEffect(() => {
         if (state.notice === undefined) return;
         const timer = setTimeout(() => store.dismissFeedback("notice"), 5_000);
         return () => clearTimeout(timer);
     }, [state.notice, store]);
-    const routeContext = routeSubtitle(state, route);
+
+    const routeContext = routeSubtitle(extension.webPages, route);
     useEffect(() => {
         document.title = pageTitle(route, routeContext);
     }, [route, routeContext]);
-    const overview = state.readModel.overview;
+
+    const overview = overviewState.overview;
     const counts = {
         instances:
             overview === undefined
                 ? 0
                 : overview.counts.instancesAttention +
                   overview.counts.instancesCritical,
-        todos: openTodos(state),
+        todos: overview?.counts.activeTodos ?? 0,
     };
+    const failures: Record<string, string> = {};
+    if (config.failure !== undefined) failures.config = config.failure.message;
+    if (overviewState.failure !== undefined)
+        failures.overview = overviewState.failure.message;
+    if (mcp.failure !== undefined) failures.mcp = mcp.failure.message;
+    if (artifact.failure !== undefined)
+        failures.artifact = artifact.failure.message;
+    if (context.failure !== undefined)
+        failures.context = context.failure.message;
 
     return (
         <div className="app">
@@ -69,14 +119,14 @@ export function Application({
                 <strong className="app-name">portable-devshell</strong>
                 <PageSwitcher
                     active={route}
-                    applications={state.readModel.webApplications}
-                    extensionPages={state.readModel.webPages}
+                    applications={extension.webApplications}
+                    extensionPages={extension.webPages}
                     counts={counts}
                     navigate={navigate}
                 />
-                <div className={`connection ${state.connection}`}>
-                    <span>{connectionLabel(state.connection)}</span>
-                    {state.connection === "online" ? null : (
+                <div className={`connection ${service.status}`}>
+                    <span>{connectionLabel(service.status)}</span>
+                    {service.status === "online" ? null : (
                         <button
                             disabled={busy !== undefined}
                             onClick={() => void onReconnect()}
@@ -96,7 +146,7 @@ export function Application({
                 </button>
             </header>
             <main className={`page page-${route.page}`}>
-                <PartialFailures failures={webFailures(state.readModel)} />
+                <PartialFailures failures={failures} />
                 <div aria-live="polite" className="global-feedback">
                     {state.notice === undefined ? null : (
                         <div className="feedback-row notice">
@@ -128,10 +178,10 @@ export function Application({
                         </p>
                     )}
                 </div>
-                {route.page === "overview" ? <Overview state={state} /> : null}
+                {route.page === "overview" ? <Overview /> : null}
                 {route.page === "extension" ? (
                     <ExtensionPage
-                        descriptor={state.readModel.webPages.find(
+                        descriptor={extension.webPages.find(
                             (page) => page.id === route.id,
                         )}
                         store={store}
@@ -150,7 +200,6 @@ export function Application({
                         disabled={interactionDisabled}
                         navigate={navigate}
                         route={route}
-                        state={state}
                         store={store}
                     />
                 ) : null}
@@ -158,14 +207,12 @@ export function Application({
                     <Messages
                         navigate={navigate}
                         route={route}
-                        state={state}
                         store={store}
                     />
                 ) : null}
                 {route.page === "todos" ? (
                     <Todos
                         disabled={interactionDisabled}
-                        state={state}
                         store={store}
                     />
                 ) : null}
@@ -191,15 +238,14 @@ const pageLabels: Record<WebRoute["page"], string> = {
     todos: "Todos",
 };
 
-function routeSubtitle(state: WebState, route: WebRoute): string | undefined {
+function routeSubtitle(
+    webPages: readonly { id: string; title: string }[],
+    route: WebRoute,
+): string | undefined {
     if (route.page === "messages" && route.view === "thread")
-        return (
-            selectWebMessageSession(state, route.instance, route.ctxId)
-                ?.title ?? route.instance
-        );
+        return route.instance;
     if (route.page === "extension")
-        return state.readModel.webPages.find((page) => page.id === route.id)
-            ?.title;
+        return webPages.find((page) => page.id === route.id)?.title;
     if (route.page === "instances") return route.instance;
     return undefined;
 }

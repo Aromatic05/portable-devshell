@@ -98,54 +98,15 @@ export function workspaceModelContext(
     continuation?: JsonValue,
 ): JsonValue {
     const snapshot = record(snapshotValue);
-    const tasks = Array.isArray(snapshot?.tasks) ? snapshot.tasks : [];
-    const background = Array.isArray(snapshot?.background)
-        ? snapshot.background
-        : [];
-    const state = compact({
-        background: background.flatMap((value) => {
-            const item = record(value);
-            return item === undefined
-                ? []
-                : [
-                      compact({
-                          detachedAt: item.detachedAt,
-                          goalId: item.goalId,
-                          kind: item.kind,
-                          result: item.result,
-                          status: item.status,
-                          taskId: item.taskId,
-                          tmuxTaskId: item.tmuxTaskId,
-                      }),
-                  ];
-        }),
-        continuation,
-        ctxId: snapshot?.ctxId,
-        goal: snapshot?.goal ?? undefined,
-        instance: snapshot?.instance,
-        tasks: tasks.flatMap((value) => {
-            const task = record(value);
-            return task === undefined
-                ? []
-                : [
-                      compact({
-                          checkpoint: task.checkpoint,
-                          currentItem: task.currentItem,
-                          status: task.status,
-                          taskId: task.taskId,
-                          title: task.title,
-                      }),
-                  ];
-        }),
-    });
+    const modelContext = record(snapshot?.modelContext);
+    const structured = record(modelContext?.structuredContent);
+    const state = record(structured?.portableDevshellWorkspace);
+    if (!Array.isArray(modelContext?.content) || state === undefined)
+        throw new Error("Workspace snapshot is missing its projected model context");
+    const projected = compact({ ...state, continuation });
     return {
-        content: [
-            {
-                text: `portable-devshell durable Workspace state:\n${JSON.stringify(state, null, 2)}`,
-                type: "text",
-            },
-        ],
-        structuredContent: { portableDevshellWorkspace: state },
+        content: [{ type: "text", text: `portable-devshell durable Workspace state:\n${JSON.stringify(projected, null, 2)}` }],
+        structuredContent: { portableDevshellWorkspace: projected },
     } as JsonValue;
 }
 

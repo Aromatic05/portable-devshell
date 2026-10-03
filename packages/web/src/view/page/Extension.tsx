@@ -4,7 +4,7 @@ import type {
     WebPageAction,
     WebPageDescriptor,
     WebPageSnapshot,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import type { WebStore } from "../../state/Store.js";
 import { ConfirmationDialog } from "../component/Confirm.js";

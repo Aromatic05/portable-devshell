@@ -3,12 +3,13 @@ import type { Duplex } from "node:stream";
 
 import type { HttpHost } from "@portable-devshell/mcp";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     WebServerChannel,
     type JsonValue,
     type ReverseEnrollmentRequest,
     type ReverseUpstreamBatch,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import { WebSocketServer } from "ws";
 
@@ -109,8 +110,8 @@ export class ReverseConnectionGateway {
         try {
             const identity = await this.#authenticateRequest(request);
             if (!hasWebSocketProtocol(request, "devshell-worker-transport.v1")) {
-                throw createError({
-                    code: errorCodes.reverseTransportUnavailable,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.reverseTransportUnavailable,
                     message:
                         "Sec-WebSocket-Protocol devshell-worker-transport.v1 is required.",
                     retryable: false,
@@ -262,8 +263,8 @@ function readRequiredHeader(request: IncomingMessage, name: string): string {
 function readBearerToken(authorization: string | undefined): string {
     const match = /^Bearer\s+(.+)$/iu.exec(authorization ?? "");
     if (match?.[1] === undefined) {
-        throw createError({
-            code: errorCodes.reverseDeviceTokenInvalid,
+        throw createRemoteError({
+            code: runtimeErrorCodes.reverseDeviceTokenInvalid,
             message: "Bearer device token is required.",
             retryable: false,
         });
@@ -274,8 +275,8 @@ function readBearerToken(authorization: string | undefined): string {
 function parseGeneration(value: string): number {
     const generation = Number(value);
     if (!Number.isSafeInteger(generation) || generation <= 0) {
-        throw createError({
-            code: errorCodes.reverseGenerationInvalid,
+        throw createRemoteError({
+            code: runtimeErrorCodes.reverseGenerationInvalid,
             message: "Connection generation must be a positive integer.",
             retryable: false,
         });
@@ -316,13 +317,13 @@ function sendJson(
 function sendGatewayError(response: ServerResponse, error: unknown): void {
     const code = readErrorCode(error);
     const status =
-        code === errorCodes.instanceMissing
+        code === controlErrorCodes.instanceNotFound
             ? 404
-            : code === errorCodes.reverseDeviceTokenInvalid ||
-                code === errorCodes.reverseDeviceTokenRevoked
+            : code === runtimeErrorCodes.reverseDeviceTokenInvalid ||
+                code === runtimeErrorCodes.reverseDeviceTokenRevoked
               ? 401
-              : code === errorCodes.reverseConnectionSuperseded ||
-                  code === errorCodes.reverseGenerationInvalid
+              : code === runtimeErrorCodes.reverseConnectionSuperseded ||
+                  code === runtimeErrorCodes.reverseGenerationInvalid
                 ? 409
                 : 400;
     sendJson(response, status, {
@@ -336,7 +337,7 @@ function sendGatewayError(response: ServerResponse, error: unknown): void {
 function writeUpgradeError(socket: Duplex, error: unknown): void {
     const code = readErrorCode(error);
     const status =
-        code === errorCodes.reverseDeviceTokenInvalid
+        code === runtimeErrorCodes.reverseDeviceTokenInvalid
             ? "401 Unauthorized"
             : "409 Conflict";
     socket.end(
@@ -358,7 +359,7 @@ function readErrorCode(error: unknown): string {
         "code" in error &&
         typeof error.code === "string"
         ? error.code
-        : errorCodes.reverseFrameInvalid;
+        : runtimeErrorCodes.reverseFrameInvalid;
 }
 
 export function reverseRoute(publicBaseUrl: string, suffix: string): string {

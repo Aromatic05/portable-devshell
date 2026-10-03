@@ -1,9 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
 
-import {
-    selectInstanceAfterListReplace,
-    withDerivedState,
-} from "../Support.js";
 import type { TuiAppAction, TuiAppState } from "../../Model.js";
 
 export function reduceTuiStoreReducerControl(
@@ -11,38 +7,6 @@ export function reduceTuiStoreReducerControl(
     action: TuiAppAction,
 ): TuiAppState | undefined {
     switch (action.type) {
-        case "conversationPreferences.replace":
-            return isDeepStrictEqual(
-                state.conversationPreferences,
-                action.preferences,
-            )
-                ? state
-                : { ...state, conversationPreferences: action.preferences };
-        case "extensionPage.replace": {
-            const current = state.extensionPageSnapshots[action.pageId];
-            if (isDeepStrictEqual(current, action.snapshot)) return state;
-            return {
-                ...state,
-                extensionPageSnapshots: {
-                    ...state.extensionPageSnapshots,
-                    [action.pageId]: action.snapshot,
-                },
-            };
-        }
-        case "control.readModel.replace": {
-            if (
-                isDeepStrictEqual(state.instances, action.instances) &&
-                isDeepStrictEqual(state.readModel, action.readModel)
-            )
-                return state;
-            return withDerivedState(
-                selectInstanceAfterListReplace({
-                    ...state,
-                    instances: action.instances,
-                    readModel: action.readModel,
-                }),
-            );
-        }
         case "command.upsert": {
             const without = state.commandRecords.filter(
                 (command) => command.commandId !== action.command.commandId,

@@ -23,9 +23,9 @@ import type { ExtensionContextQuery } from "@portable-devshell/extension/context
 import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
 import type { ToolCallHistoryQuery } from "@portable-devshell/extension/toolcall";
 import {
-    createError,
-    toControlErrorBody,
-    type ControlErrorBody,
+    createRemoteError,
+    toRemoteErrorBody,
+    type RemoteErrorBody,
 } from "@portable-devshell/shared";
 export const EXTENSION_SANDBOX_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 const EXTENSION_SANDBOX_MAX_MESSAGE_DEPTH = 128;
@@ -154,7 +154,7 @@ export interface ExtensionSandboxProcessDescriptor {
 }
 
 export interface ExtensionSandboxError {
-    body: ControlErrorBody;
+    body: RemoteErrorBody;
     errors?: readonly ExtensionSandboxError[];
     name: string;
 }
@@ -517,13 +517,13 @@ export function serializeSandboxError(error: unknown): ExtensionSandboxError {
                   message: error.message,
                   retryable: error.retryable,
               }
-            : (toControlErrorBody(error) ?? {
+            : (toRemoteErrorBody(error) ?? {
                   code: "error.unknown",
                   message:
                       error instanceof Error ? error.message : String(error),
                   retryable: false,
               });
-    const body: ControlErrorBody = {
+    const body: RemoteErrorBody = {
         code: sourceBody.code,
         ...(sourceBody.details === undefined
             ? {}
@@ -555,7 +555,7 @@ export function deserializeSandboxError(
             serialized.body.message,
         );
     } else if (serialized.body.code !== "error.unknown") {
-        error = createError({
+        error = createRemoteError({
             code: serialized.body.code,
             ...(serialized.body.details === undefined
                 ? {}

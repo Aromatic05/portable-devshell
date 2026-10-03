@@ -4,9 +4,9 @@ import type {
     ArtifactStoredImageResult,
     InstanceLogEntry,
     ToolCallRecord,
-} from "@portable-devshell/shared/browser";
-import { workspaceFolderName } from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
+import { workspaceFolderName } from "../../../../Presentation.js";
 import {
     formatRelativeTime,
     formatToolValue,

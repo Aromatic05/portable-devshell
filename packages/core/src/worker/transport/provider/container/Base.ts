@@ -1,7 +1,7 @@
 import {
-    ControlError,
-    createError,
-    errorCodes,
+    RemoteError,
+    createRemoteError,
+    runtimeErrorCodes,
     type InstanceContainerConfig,
 } from "@portable-devshell/shared";
 
@@ -95,7 +95,7 @@ export class WorkerTransportDriverContainerBase implements WorkerTransport {
                         result.stdout ||
                         "worker install check failed",
                 ),
-                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+                { errorCode: runtimeErrorCodes.workerProvisionFailed, result },
             );
         }
     }
@@ -184,7 +184,7 @@ export class WorkerTransportDriverContainerBase implements WorkerTransport {
                     env: environment.processEnv,
                     stdio: ["pipe", "pipe", "pipe"],
                 },
-                errorCodes.coreProviderFailed,
+                runtimeErrorCodes.providerFailed,
             ),
             invocation.context,
         );
@@ -270,7 +270,7 @@ export class WorkerTransportDriverContainerBase implements WorkerTransport {
             }
             return parseWorkerTargetProbeOutput(context, result.stdout);
         } catch (error) {
-            if (error instanceof ControlError) {
+            if (error instanceof RemoteError) {
                 throw error;
             }
             throw createWorkerTargetProbeFailedError(context, { cause: error });
@@ -464,8 +464,8 @@ export function createContainerWorkerEnvironment(options: {
         ),
     ].sort();
     if (conflicts.length > 0) {
-        throw createError({
-            code: errorCodes.coreProviderFailed,
+        throw createRemoteError({
+            code: runtimeErrorCodes.providerFailed,
             details: {
                 environmentKeys: conflicts,
                 provider: options.provider,

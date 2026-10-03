@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 
-import type { McpContextRecord } from "@portable-devshell/shared/browser";
+import type { McpContextRecord } from "@portable-devshell/shared";
 
-import type { WebState, WebStore } from "../../../../state/Store.js";
+import {
+    useDomainSnapshot,
+    useWebDomains,
+} from "../../../../app/domain/Context.js";
+import type { WebStore } from "../../../../state/Store.js";
 import { ConfirmationDialog } from "../../../component/Confirm.js";
 
 type InactivityPreset = "20" | "60" | "360" | "1440" | "custom";
@@ -389,19 +399,25 @@ export function ContextIntervention({
     disabled = false,
     ctxId,
     instance,
-    state,
     store,
 }: {
     disabled?: boolean;
     ctxId: string;
     instance: string;
-    state: WebState;
     store: WebStore;
 }) {
+    const domains = useWebDomains();
+    const service = useDomainSnapshot(domains.service);
+    const contextState = useDomainSnapshot(domains.context);
+    const storeState = useSyncExternalStore(
+        store.subscribe,
+        () => store.state,
+        () => store.state,
+    );
     const [disableConfirmation, setDisableConfirmation] = useState(false);
     const [failure, setFailure] = useState<string>();
     const [disableFailure, setDisableFailure] = useState<string>();
-    const context = state.readModel.contexts.find(
+    const context = contextState.contexts.find(
         (record) => record.ctxId === ctxId,
     );
     const environment =
@@ -410,7 +426,7 @@ export function ContextIntervention({
             : (
                   context.environments
               ).find((candidate) => candidate.instance === instance);
-    const interactive = state.connection === "online" && !disabled;
+    const interactive = service.status === "online" && !disabled;
     const renewOperation = `context-renew:${ctxId}`;
     const disableOperation = `context-disable:${ctxId}`;
 
@@ -438,7 +454,8 @@ export function ContextIntervention({
                         <button
                             disabled={
                                 !interactive ||
-                                state.operations[renewOperation] !== undefined
+                                storeState.operations[renewOperation] !==
+                                    undefined
                             }
                             onClick={() => {
                                 setFailure(undefined);
@@ -447,14 +464,14 @@ export function ContextIntervention({
                                     .then((succeeded) => {
                                         if (!succeeded)
                                             setFailure(
-                                                store.state.error ??
+                                                storeState.error ??
                                                     "Context could not be renewed.",
                                             );
                                     });
                             }}
                             type="button"
                         >
-                            {state.operations[renewOperation] !== undefined
+                            {storeState.operations[renewOperation] !== undefined
                                 ? "Renewing…"
                                 : "Renew Context"}
                         </button>
@@ -491,7 +508,7 @@ export function ContextIntervention({
             {disableConfirmation ? (
                 <ConfirmationDialog
                     actionLabel="Disable"
-                    busy={state.operations[disableOperation] !== undefined}
+                    busy={storeState.operations[disableOperation] !== undefined}
                     description={`Disable Context ${ctxId}${environment?.workspace === undefined ? "" : ` from workspace ${environment.workspace}`} across all attached instances? This cannot be renewed; the client must establish a new Context.`}
                     disabled={!interactive}
                     error={disableFailure}
@@ -507,7 +524,7 @@ export function ContextIntervention({
                                 setDisableConfirmation(false);
                             } else {
                                 setDisableFailure(
-                                    store.state.error ??
+                                    storeState.error ??
                                         "Context could not be disabled.",
                                 );
                             }

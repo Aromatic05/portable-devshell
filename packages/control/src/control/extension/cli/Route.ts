@@ -6,9 +6,9 @@ import type {
     CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 import {
-    createError,
-    errorCodes,
-    toControlErrorBody,
+    createRemoteError,
+    controlErrorCodes,
+    toRemoteErrorBody,
     type CliCommandDescriptor,
     type CliCommandWireResult,
     type JsonValue,
@@ -74,9 +74,9 @@ export function createCliRouteModule(
                 await stream.close(result as unknown as JsonValue);
             } catch (error) {
                 const body =
-                    toControlErrorBody(error) ??
-                    createError({
-                        code: errorCodes.controlCliCommandFailed,
+                    toRemoteErrorBody(error) ??
+                    createRemoteError({
+                        code: controlErrorCodes.cliCommandFailed,
                         details: { commandId: input.commandId },
                         message: `CLI command ${input.commandId} failed.`,
                         retryable: false,
@@ -99,8 +99,8 @@ function readAuthorizedCommand(
     const input = readCommand(payload);
     const localOwner = isLocalOwnerCli(context);
     if (input.workingDirectory !== undefined && !localOwner) {
-        throw createError({
-            code: errorCodes.controlCliAccessDenied,
+        throw createRemoteError({
+            code: controlErrorCodes.cliAccessDenied,
             message:
                 "CLI command workingDirectory is restricted to the local owner CLI.",
             retryable: false,
@@ -131,8 +131,8 @@ function invocationContext(
 
 function requireCli(context: ControlPortContext): void {
     if (context.peer === "cli") return;
-    throw createError({
-        code: errorCodes.controlCliAccessDenied,
+    throw createRemoteError({
+        code: controlErrorCodes.cliAccessDenied,
         message: "CLI command access is available only to CLI clients.",
         retryable: false,
     });
@@ -214,8 +214,8 @@ function assertCommandResult(
     }
     if (value.kind === "json") {
         if (value.text !== undefined && typeof value.text !== "string") {
-            throw createError({
-                code: errorCodes.controlCliCommandFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.cliCommandFailed,
                 details: { commandId },
                 message: `CLI command ${commandId} returned an invalid text rendering.`,
                 retryable: false,
@@ -230,8 +230,8 @@ function assertCommandResult(
             ),
         };
     }
-    throw createError({
-        code: errorCodes.controlCliCommandFailed,
+    throw createRemoteError({
+        code: controlErrorCodes.cliCommandFailed,
         details: { commandId },
         message: `CLI command ${commandId} returned an invalid result.`,
         retryable: false,
@@ -252,8 +252,8 @@ function assertJsonValue(value: unknown, label: string): JsonValue {
         const result: Record<string, JsonValue> = {};
         for (const [key, candidate] of Object.entries(value)) {
             if (candidate === undefined) {
-                throw createError({
-                    code: errorCodes.controlCliCommandFailed,
+                throw createRemoteError({
+                    code: controlErrorCodes.cliCommandFailed,
                     message: `${label} is not JSON serializable.`,
                     retryable: false,
                 });
@@ -262,16 +262,16 @@ function assertJsonValue(value: unknown, label: string): JsonValue {
         }
         return result;
     }
-    throw createError({
-        code: errorCodes.controlCliCommandFailed,
+    throw createRemoteError({
+        code: controlErrorCodes.cliCommandFailed,
         message: `${label} is not JSON serializable.`,
         retryable: false,
     });
 }
 
 function invalid(message: string): Error {
-    return createError({
-        code: errorCodes.controlCliCommandInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.cliCommandInvalid,
         message,
         retryable: false,
     });

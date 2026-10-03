@@ -9,8 +9,8 @@ import type {
 } from "@portable-devshell/shared";
 import {
     asInstanceName,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
@@ -181,8 +181,8 @@ function readSubscribeFromRevision(payload?: JsonValue): number {
         !Number.isSafeInteger(payload.fromRevision) ||
         payload.fromRevision < 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "instance.subscribe requires a non-negative integer fromRevision.",
             retryable: false,

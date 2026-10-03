@@ -53,7 +53,6 @@ export class TuiRenderScheduler {
     readonly #listeners = new Set<() => void>();
     readonly #unsubscribeStore: () => void;
     readonly #flushDelayMs: number;
-    #lastObservedState: TuiAppState;
     #scheduled = false;
     #timer?: NodeJS.Timeout;
 
@@ -62,15 +61,7 @@ export class TuiRenderScheduler {
         flushDelayMs = 0,
     ) {
         this.#flushDelayMs = flushDelayMs;
-        this.#lastObservedState = store.getState();
-        this.#unsubscribeStore = store.subscribe(() => {
-            const nextState = store.getState();
-            const previousState = this.#lastObservedState;
-            this.#lastObservedState = nextState;
-            if (isRenderRelevantChange(previousState, nextState)) {
-                this.#schedule();
-            }
-        });
+        this.#unsubscribeStore = store.subscribe(() => this.schedule());
     }
 
     getSnapshot(): TuiAppState {
@@ -82,6 +73,15 @@ export class TuiRenderScheduler {
         return () => {
             this.#listeners.delete(listener);
         };
+    }
+
+    /**
+     * Subscribes one domain view model as a render source. The returned
+     * detacher releases the source, so lazily created per-instance view models
+     * can attach on creation and detach on release.
+     */
+    attach(source: TuiRenderSource): () => void {
+        return source.subscribe(() => this.schedule());
     }
 
     dispose(): void {
@@ -96,7 +96,7 @@ export class TuiRenderScheduler {
         this.#scheduled = false;
     }
 
-    #schedule(): void {
+    schedule(): void {
         if (this.#scheduled) {
             return;
         }
@@ -113,104 +113,6 @@ export class TuiRenderScheduler {
     }
 }
 
-export function isRenderRelevantChange(
-    previous: TuiAppState,
-    next: TuiAppState,
-): boolean {
-    if (previous === next) return false;
-    if (
-        previous.connection !== next.connection ||
-        previous.instances !== next.instances ||
-        previous.interaction !== next.interaction ||
-        previous.ui !== next.ui ||
-        previous.panelErrors !== next.panelErrors ||
-        previous.commandRecords !== next.commandRecords ||
-        previous.relayByCommand !== next.relayByCommand ||
-        previous.globalDerived.connectedInstanceCount !==
-            next.globalDerived.connectedInstanceCount ||
-        previous.globalDerived.pendingApprovalCount !==
-            next.globalDerived.pendingApprovalCount
-    )
-        return true;
-
-    const before = selectedInstanceState(previous);
-    const after = selectedInstanceState(next);
-    switch (next.ui.selectedPage) {
-        case "overview":
-            return previous.readModel.overview !== next.readModel.overview;
-        case "instances":
-            return (
-                anyInstanceFieldChanged(previous, next, "snapshot") ||
-                anyInstanceFieldChanged(previous, next, "approvals") ||
-                previous.readModel.artifactShares !==
-                    next.readModel.artifactShares ||
-                previous.readModel.artifactTransfers !==
-                    next.readModel.artifactTransfers ||
-                previous.readModel.configView !== next.readModel.configView
-            );
-        case "connections":
-            return (
-                previous.readModel.oauthApprovals !==
-                    next.readModel.oauthApprovals ||
-                previous.readModel.configView !== next.readModel.configView ||
-                previous.readModel.mcpStatus !== next.readModel.mcpStatus ||
-                before?.snapshot !== after?.snapshot
-            );
-        case "config":
-            return (
-                previous.readModel.configView !== next.readModel.configView ||
-                before?.snapshot !== after?.snapshot
-            );
-        case "messages":
-            return (
-                previous.readModel.contexts !== next.readModel.contexts ||
-                before?.conversationEntries !== after?.conversationEntries ||
-                before?.snapshot !== after?.snapshot
-            );
-        case "audit":
-            return (
-                previous.readModel.contexts !== next.readModel.contexts ||
-                before?.commentCalls !== after?.commentCalls ||
-                before?.approvals !== after?.approvals ||
-                before?.logs !== after?.logs ||
-                before?.toolCalls !== after?.toolCalls ||
-                before?.contextMessages !== after?.contextMessages ||
-                before?.snapshot !== after?.snapshot
-            );
-        case "todo":
-            return (
-                before?.todo !== after?.todo ||
-                before?.goals !== after?.goals ||
-                before?.snapshot !== after?.snapshot
-            );
-        default:
-            return false;
-    }
-}
-
-function selectedInstanceState(state: TuiAppState) {
-    const instance = state.ui.selectedInstance;
-    return instance === undefined
-        ? undefined
-        : state.readModel.instanceState[instance];
-}
-
-function anyInstanceFieldChanged(
-    previous: TuiAppState,
-    next: TuiAppState,
-    field: "approvals" | "snapshot",
-): boolean {
-    const names = new Set([
-        ...Object.keys(previous.readModel.instanceState),
-        ...Object.keys(next.readModel.instanceState),
-    ]);
-    for (const name of names) {
-        if (
-            previous.readModel.instanceState[name]?.[field] !==
-            next.readModel.instanceState[name]?.[field]
-        ) {
-            return true;
-        }
-    }
-    return false;
+export interface TuiRenderSource {
+    subscribe(listener: () => void): () => void;
 }

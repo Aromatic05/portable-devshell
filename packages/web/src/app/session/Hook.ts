@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { WebClients } from "../transport/Client.js";
+import type { WebDomainSession } from "../domain/Session.js";
 import { WebStore } from "../../state/Store.js";
 import type { WebSession } from "./Session.js";
 
@@ -19,12 +19,12 @@ export interface WebApplicationSession {
 
 export function useWebApplicationSession(
     activeSession: WebSession,
-    createClients: () => WebClients,
+    createDomains: () => WebDomainSession,
 ): WebApplicationSession {
     const [sessionState, setSessionState] = useState<SessionState>("checking");
     const [store, setStore] = useState<WebStore>();
     const [storeContext, setStoreContext] = useState<{
-        clients: () => WebClients;
+        domains: () => WebDomainSession;
         session: WebSession;
     }>();
     const storeRef = useRef<WebStore>();
@@ -83,7 +83,7 @@ export function useWebApplicationSession(
                 }
             }
         }
-    }, [activeSession, createClients]);
+    }, [activeSession, createDomains]);
 
     function discardStore(): void {
         storeRef.current?.close();
@@ -93,10 +93,10 @@ export function useWebApplicationSession(
     function activateStore(generation: number): void {
         if (lifecycle.current !== generation) return;
         discardStore();
-        const nextStore = new WebStore(createClients());
+        const nextStore = new WebStore(createDomains());
         storeRef.current = nextStore;
         setStore(nextStore);
-        setStoreContext({ clients: createClients, session: activeSession });
+        setStoreContext({ domains: createDomains, session: activeSession });
         setSessionState("ready");
         void nextStore.load();
     }
@@ -222,7 +222,7 @@ export function useWebApplicationSession(
 
     const contextChanged =
         store !== undefined &&
-        (storeContext?.clients !== createClients ||
+        (storeContext?.domains !== createDomains ||
             storeContext?.session !== activeSession);
 
     return {

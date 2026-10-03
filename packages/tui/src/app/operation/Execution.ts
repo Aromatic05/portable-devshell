@@ -1,7 +1,7 @@
 import {
-    ControlError,
-    createError,
-    toControlError,
+    RemoteError,
+    createRemoteError,
+    toRemoteError,
     withRequestTimeout,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -121,7 +121,7 @@ export class TuiRuntimeExecutionOperations {
                     };
                 };
                 if (feedback?.error !== undefined) {
-                    throw createError(feedback.error);
+                    throw createRemoteError(feedback.error);
                 }
                 if ((feedback?.comment?.length ?? 0) > 0) {
                     this.options.store.setScreenStatus(
@@ -148,12 +148,6 @@ export class TuiRuntimeExecutionOperations {
         instance: string,
         commandId: string,
     ): Promise<void> {
-        const entry = this.options.store
-            .getState()
-            .instances.find((candidate) => candidate.name === instance);
-        this.options.store.setRelayMetadata(commandId, {
-            provider: entry?.provider,
-        });
         await this.options.session.commands.startInstance(instance, {
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
@@ -165,11 +159,7 @@ export class TuiRuntimeExecutionOperations {
     }
 
     #requireHomeDirectory(instance: string): string {
-        const home = this.options.store
-            .getState()
-            .instances.find(
-                (candidate) => candidate.name === instance,
-            )?.homeDirectory;
+        const home = this.options.session.homeDirectory(instance);
         if (home !== undefined && home.length > 0) return home;
         throw new Error(
             `Worker home directory is unavailable for ${instance}.`,
@@ -182,7 +172,7 @@ export class TuiRuntimeExecutionOperations {
             await this.options.session.refreshInstances();
             this.options.store.setPanelError(key, undefined);
         } catch (error) {
-            this.options.store.setPanelError(key, toControlError(error));
+            this.options.store.setPanelError(key, toRemoteError(error));
         }
     }
 
@@ -192,7 +182,7 @@ export class TuiRuntimeExecutionOperations {
             await this.options.session.refreshInstance(instance);
             this.options.store.setPanelError(key, undefined);
         } catch (error) {
-            this.options.store.setPanelError(key, toControlError(error));
+            this.options.store.setPanelError(key, toRemoteError(error));
         }
     }
 
@@ -232,7 +222,7 @@ export class TuiRuntimeExecutionOperations {
             );
             return true;
         } catch (error) {
-            const failure = toControlError(error);
+            const failure = toRemoteError(error);
             this.#completeCommand(command, "failed", failure);
             this.options.store.setPanelError(panelKey, failure);
             return false;
@@ -242,7 +232,7 @@ export class TuiRuntimeExecutionOperations {
     #completeCommand(
         command: Omit<TuiCommandRecord, "completedAt" | "error" | "status">,
         status: "succeeded" | "failed",
-        error?: ControlError,
+        error?: RemoteError,
     ): void {
         this.options.store.upsertCommand({
             ...command,

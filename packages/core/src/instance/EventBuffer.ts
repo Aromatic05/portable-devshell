@@ -1,5 +1,5 @@
 import {
-    errorCodes,
+    STREAM_GAP_CODE,
     type InstanceEvent,
     type InstanceName,
     type JsonValue,
@@ -14,7 +14,7 @@ export interface InstanceEventInput {
 }
 
 export interface InstanceEventStreamGap {
-    code: typeof errorCodes.streamGap;
+    code: typeof STREAM_GAP_CODE;
     fromSeq: number;
     kind: "gap";
     lastSeq: number;
@@ -81,7 +81,7 @@ export class InstanceEventBuffer {
 
         if (fromSeq < nextSeq) {
             return {
-                code: errorCodes.streamGap,
+                code: STREAM_GAP_CODE,
                 fromSeq,
                 kind: "gap",
                 lastSeq: this.#lastSeq,

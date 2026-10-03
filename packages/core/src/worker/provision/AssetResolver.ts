@@ -11,7 +11,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 import { resolveWorkerDevshellHomeDirectory } from "./HomeDirectory.js";
 
 import type { WorkerTarget } from "./target/Target.js";
@@ -78,8 +78,8 @@ export class WorkerAssetResolver {
             return releaseAsset;
         }
 
-        throw createError({
-            code: errorCodes.coreWorkerAssetUnavailable,
+        throw createRemoteError({
+            code: runtimeErrorCodes.workerAssetUnavailable,
             details: {
                 envVarNames: this.#supportedEnvVarNames(target),
                 releaseBaseUrlEnvVar,
@@ -249,8 +249,8 @@ export class WorkerAssetResolver {
                     .digest("hex");
 
                 if (actualSha !== expectedSha) {
-                    throw createError({
-                        code: errorCodes.coreWorkerAssetUnavailable,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.workerAssetUnavailable,
                         details: {
                             actualSha256: actualSha,
                             downloadUrl: binaryUrl,
@@ -314,8 +314,8 @@ export class WorkerAssetResolver {
                 signal: AbortSignal.timeout(120_000),
             });
         } catch (error) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
                 cause: error,
                 details: {
                     downloadUrl: url,
@@ -328,8 +328,8 @@ export class WorkerAssetResolver {
         }
 
         if (!response.ok) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
                 details: {
                     downloadUrl: url,
                     httpStatus: response.status,
@@ -344,8 +344,8 @@ export class WorkerAssetResolver {
         const text = await response.text();
         const sha256 = text.trim().split(/\s+/u)[0] ?? "";
         if (!/^[a-f0-9]{64}$/u.test(sha256)) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
                 details: {
                     downloadUrl: url,
                     searchedPaths,
@@ -370,8 +370,8 @@ export class WorkerAssetResolver {
                 signal: AbortSignal.timeout(120_000),
             });
         } catch (error) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
                 cause: error,
                 details: {
                     downloadUrl: url,
@@ -384,8 +384,8 @@ export class WorkerAssetResolver {
         }
 
         if (!response.ok) {
-            throw createError({
-                code: errorCodes.coreWorkerAssetUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerAssetUnavailable,
                 details: {
                     downloadUrl: url,
                     httpStatus: response.status,

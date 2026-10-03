@@ -5,8 +5,8 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type { TuiAppState } from "../../../../../state/store/Model.js";
 import type { TuiExpandableBoxStatus } from "../../../../../state/Ui.js";
+import type { TuiDomainReader } from "../../../../domain/Reader.js";
 
 export type TuiAuditContextKey =
     | { readonly kind: "unscoped" }
@@ -34,8 +34,7 @@ interface MutableAuditContext {
 let auditProjectionCache:
     | {
           approvals: readonly ApprovalRequest[];
-          commentCalls: readonly ToolCallRecord[];
-          contexts: TuiAppState["readModel"]["contexts"];
+          contexts: TuiDomainReader["context"]["contexts"];
           instance: string;
           result: TuiAuditContextSummary[];
           toolCalls: readonly ToolCallRecord[];
@@ -43,22 +42,20 @@ let auditProjectionCache:
     | undefined;
 
 export function projectAuditContexts(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
 ): TuiAuditContextSummary[] {
-    const instanceState = state.readModel.instanceState[instance];
-    const toolCalls = instanceState?.toolCalls ?? [];
-    const commentCalls = instanceState?.commentCalls ?? [];
-    const approvals = instanceState?.approvals ?? [];
+    const toolCalls = reader.toolCalls.instances[instance]?.calls ?? [];
+    const approvals = reader.approval(instance).approvals;
+    const contexts = reader.context.contexts;
     if (
         auditProjectionCache?.instance === instance &&
-        auditProjectionCache.contexts === state.readModel.contexts &&
+        auditProjectionCache.contexts === contexts &&
         auditProjectionCache.toolCalls === toolCalls &&
-        auditProjectionCache.commentCalls === commentCalls &&
         auditProjectionCache.approvals === approvals
     )
         return auditProjectionCache.result;
-    const contexts = new Map<string, MutableAuditContext>();
+    const contextMap = new Map<string, MutableAuditContext>();
     const resolve = (ctxId: string | undefined): MutableAuditContext => {
         const key: TuiAuditContextKey =
             ctxId === undefined || ctxId.length === 0
@@ -66,7 +63,7 @@ export function projectAuditContexts(
                 : { ctxId, kind: "context" };
         const mapKey =
             key.kind === "unscoped" ? "unscoped:" : `context:${key.ctxId}`;
-        const existing = contexts.get(mapKey);
+        const existing = contextMap.get(mapKey);
         if (existing !== undefined) return existing;
         const created: MutableAuditContext = {
             approvals: [],
@@ -74,32 +71,25 @@ export function projectAuditContexts(
             key,
             label: key.kind === "unscoped" ? "unscoped" : key.ctxId,
         };
-        contexts.set(mapKey, created);
+        contextMap.set(mapKey, created);
         return created;
     };
 
-    const callsById = new Map(
-        toolCalls.map((call) => [call.callId, call] as const),
-    );
-    for (const call of commentCalls) {
-        callsById.set(call.callId, call);
-    }
-    for (const call of callsById.values()) {
+    for (const call of toolCalls) {
         resolve(call.ctxId).calls.push(call);
     }
     for (const approval of approvals) {
         if (approval.recording === "caller") continue;
         resolve(approval.ctxId).approvals.push(approval);
     }
-    const result = [...contexts.values()]
-        .map((context) => toSummary(context, state, instance))
+    const result = [...contextMap.values()]
+        .map((context) => toSummary(context, reader, instance))
         .sort((left, right) =>
             right.latestActivityAt.localeCompare(left.latestActivityAt),
         );
     auditProjectionCache = {
         approvals,
-        commentCalls,
-        contexts: state.readModel.contexts,
+        contexts,
         instance,
         result,
         toolCalls,
@@ -108,11 +98,11 @@ export function projectAuditContexts(
 }
 
 export function findAuditContext(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     key: TuiAuditContextKey,
 ): TuiAuditContextSummary | undefined {
-    return projectAuditContexts(state, instance).find((context) =>
+    return projectAuditContexts(reader, instance).find((context) =>
         key.kind === "unscoped"
             ? context.key.kind === "unscoped"
             : context.key.kind === "context" && context.key.ctxId === key.ctxId,
@@ -121,7 +111,7 @@ export function findAuditContext(
 
 function toSummary(
     context: MutableAuditContext,
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
 ): TuiAuditContextSummary {
     const sortedCalls = [...context.calls].sort((left, right) =>
@@ -140,7 +130,7 @@ function toSummary(
     const registryRecord =
         ctxId === undefined
             ? undefined
-            : state.readModel.contexts.find((record) => record.ctxId === ctxId);
+            : reader.context.contexts.find((record) => record.ctxId === ctxId);
     const environment =
         registryRecord === undefined
             ? undefined

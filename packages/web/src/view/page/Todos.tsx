@@ -1,28 +1,44 @@
-import { workspaceFolderName } from "@portable-devshell/shared/browser";
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
+import type { TodoItem } from "@portable-devshell/shared";
+
+import { workspaceFolderName } from "../Presentation.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
-import { todoSummaries } from "../ReadModel.js";
+import { todoSummaries, type TodoSummary } from "../ReadModel.js";
+import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
-import type { WebState } from "../../state/Store.js";
 
 export function Todos({
     disabled = false,
-    state,
     store,
 }: {
     disabled?: boolean;
-    state: WebState;
     store: WebStore;
 }) {
-    const goals = Object.entries(state.readModel.instanceState).flatMap(
-        ([instance, value]) =>
-            (value.goals ?? []).map((goal) => ({ goal, instance })),
+    const domains = useWebDomains();
+    const instances = useDomainSnapshot(domains.instances).instances;
+    const goalsState = useDomainSnapshot(domains.goals);
+    const service = useDomainSnapshot(domains.service);
+    const state = useSyncExternalStore(
+        store.subscribe,
+        () => store.state,
+        () => store.state,
     );
-    const todos = todoSummaries(state);
-    const [selected, setSelected] = useState<(typeof todos)[number]>();
+    const [selected, setSelected] = useState<TodoSummary>();
     const [failure, setFailure] = useState<string>();
-    const interactive = state.connection === "online" && !disabled;
+    const interactive = service.status === "online" && !disabled;
+
+    useEffect(() => {
+        for (const instance of instances)
+            void domains.goals.load(instance.name);
+    }, [domains, instances]);
+
+    const goalRows = instances.flatMap(({ name }) =>
+        (goalsState.instances[name]?.goals ?? []).map((goal) => ({
+            goal,
+            instance: name,
+        })),
+    );
     return (
         <section>
             <h2>Todos</h2>
@@ -31,11 +47,11 @@ export function Todos({
                 instance.
             </p>
             <h3>Goals</h3>
-            {goals.length === 0 ? (
+            {goalRows.length === 0 ? (
                 <p className="empty">No active Workspace Goals.</p>
             ) : (
                 <div className="todo-list">
-                    {goals.map(({ goal, instance }) => {
+                    {goalRows.map(({ goal, instance }) => {
                         const completed = goal.steps.filter(
                             (step) =>
                                 step.status === "completed" ||
@@ -64,20 +80,19 @@ export function Todos({
                 </div>
             )}
             <h3>Tasks</h3>
-            {todos.length === 0 ? (
+            {instances.length === 0 ? (
                 <p className="empty">No active todos are available.</p>
             ) : (
                 <div className="todo-list">
-                    {todos.map((todo) => (
-                        <TodoCard
+                    {instances.map(({ name }) => (
+                        <InstanceTodos
+                            instance={name}
                             interactive={interactive}
-                            key={`${todo.instance}-${todo.taskId}-${todo.revision}`}
-                            onDelete={() => {
+                            key={name}
+                            onDelete={(todo) => {
                                 setFailure(undefined);
                                 setSelected(todo);
                             }}
-                            state={state}
-                            todo={todo}
                         />
                     ))}
                 </div>
@@ -106,8 +121,7 @@ export function Todos({
                                 if (succeeded) setSelected(undefined);
                                 else
                                     setFailure(
-                                        store.state?.error ??
-                                            state.error ??
+                                        store.state.error ??
                                             "Todo project could not be deleted.",
                                     );
                             });
@@ -118,24 +132,55 @@ export function Todos({
     );
 }
 
-function TodoCard({
+function InstanceTodos({
+    instance,
     interactive,
     onDelete,
-    state,
+}: {
+    instance: string;
+    interactive: boolean;
+    onDelete(todo: TodoSummary): void;
+}) {
+    const domains = useWebDomains();
+    const todo = domains.todo(instance);
+    const todoState = useDomainSnapshot(todo);
+
+    useEffect(() => {
+        void todo.load(instance);
+    }, [todo, instance]);
+
+    return (
+        <>
+            {todoSummaries(instance, todoState.todo).map((summary) => (
+                <TodoCard
+                    interactive={interactive}
+                    items={
+                        todoState.todo?.taskId === summary.taskId
+                            ? todoState.todo.items
+                            : []
+                    }
+                    key={`${summary.instance}-${summary.taskId}-${summary.revision}`}
+                    onDelete={() => onDelete(summary)}
+                    todo={summary}
+                />
+            ))}
+        </>
+    );
+}
+
+function TodoCard({
+    interactive,
+    items,
+    onDelete,
     todo,
 }: {
     interactive: boolean;
+    items: readonly TodoItem[];
     onDelete(): void;
-    state: WebState;
-    todo: ReturnType<typeof todoSummaries>[number];
+    todo: TodoSummary;
 }) {
-    const raw = state.readModel.instanceState[todo.instance]?.todo;
-    const items = raw?.taskId === todo.taskId ? raw.items : [];
     return (
-        <article
-            className="card"
-            key={`${todo.instance}-${todo.taskId}-${todo.revision}`}
-        >
+        <article className="card">
             <h3>{todo.title}</h3>
             <p>
                 {todo.instance} · revision {todo.revision}

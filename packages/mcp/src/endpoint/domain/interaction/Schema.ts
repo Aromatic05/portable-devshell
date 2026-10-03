@@ -3,7 +3,6 @@ import type { JsonValue } from "@portable-devshell/shared";
 const anyValue: JsonValue = {};
 const booleanValue: JsonValue = { type: "boolean" };
 const nonNegativeInteger: JsonValue = { minimum: 0, type: "integer" };
-const positiveInteger: JsonValue = { minimum: 1, type: "integer" };
 const stringValue: JsonValue = { type: "string" };
 const nonEmptyString: JsonValue = { minLength: 1, type: "string" };
 
@@ -294,104 +293,6 @@ export const approvalRequestOutputSchema = objectSchema(
     ],
 );
 
-const workspaceBackgroundSchema = objectSchema(
-    {
-        automaticRecovery: booleanValue,
-        detachedAt: stringValue,
-        goalId: nonEmptyString,
-        goalProgressAt: nonEmptyString,
-        goalRevision: positiveInteger,
-        goalStepId: nonEmptyString,
-        kind: { enum: ["question", "tmux"], type: "string" },
-        recoveryDisabledAt: stringValue,
-        recoveryMessageAttemptedAt: stringValue,
-        recoveryMessageId: nonEmptyString,
-        result: anyValue,
-        status: { enum: ["detached", "resolved", "waiting"], type: "string" },
-        targetInstance: nonEmptyString,
-        taskId: nonEmptyString,
-        tmuxTaskId: stringValue,
-        todoItemId: nonEmptyString,
-        updatedAt: stringValue,
-        waitId: nonEmptyString,
-    },
-    ["kind", "status", "updatedAt", "waitId"],
-);
-
-const workspaceApprovalEventSchema = objectSchema(
-    {
-        approvalId: nonEmptyString,
-        eventName: { const: "approval.decision", type: "string" },
-        inputSummary: stringValue,
-        kind: { const: "approval", type: "string" },
-        name: nonEmptyString,
-        reason: stringValue,
-        riskLevel: { enum: ["low", "medium", "high"], type: "string" },
-        status: { const: "waiting", type: "string" },
-        toolName: nonEmptyString,
-        updatedAt: stringValue,
-    },
-    [
-        "approvalId",
-        "eventName",
-        "inputSummary",
-        "kind",
-        "name",
-        "riskLevel",
-        "status",
-        "toolName",
-        "updatedAt",
-    ],
-);
-
-const workspaceQuestionPayloadSchema = objectSchema(
-    {
-        allowText: booleanValue,
-        choices: arraySchema(nonEmptyString),
-        question: nonEmptyString,
-    },
-    ["allowText", "choices", "question"],
-);
-
-const workspaceQuestionEventSchema = objectSchema(
-    {
-        eventName: { const: "user.answer", type: "string" },
-        goalId: nonEmptyString,
-        kind: { const: "question", type: "string" },
-        name: { const: "workspace_ask", type: "string" },
-        payload: workspaceQuestionPayloadSchema,
-        status: { enum: ["waiting", "detached"], type: "string" },
-        taskId: nonEmptyString,
-        updatedAt: stringValue,
-        waitId: nonEmptyString,
-    },
-    ["eventName", "kind", "name", "status", "updatedAt", "waitId"],
-);
-
-const workspaceCurrentEventSchema: JsonValue = {
-    anyOf: [
-        { type: "null" },
-        workspaceApprovalEventSchema,
-        workspaceQuestionEventSchema,
-    ],
-};
-
-const workspaceTodoTaskSummaryOutputSchema = objectSchema(
-    {
-        ...activeTodoSummaryProperties,
-        updatedAt: stringValue,
-    },
-    [
-        "completed",
-        "revision",
-        "status",
-        "taskId",
-        "title",
-        "total",
-        "updatedAt",
-    ],
-);
-
 const workspaceGoalStepOutputSchema = objectSchema(
     {
         id: nonEmptyString,
@@ -495,30 +396,6 @@ export const workspaceReentryOutputSchema = objectSchema(
     ["epoch", "pending"],
 );
 
-const workspaceQuestionWaitOutputSchema = objectSchema(
-    {
-        automaticRecovery: booleanValue,
-        createdAt: stringValue,
-        detachedAt: stringValue,
-        goalId: nonEmptyString,
-        goalRevision: positiveInteger,
-        goalStepId: nonEmptyString,
-        kind: { const: "question", type: "string" },
-        payload: workspaceQuestionPayloadSchema,
-        recoveryDisabledAt: stringValue,
-        status: { enum: ["detached", "waiting"], type: "string" },
-        targetInstance: nonEmptyString,
-        targetId: nonEmptyString,
-        taskId: nonEmptyString,
-        taskRevision: positiveInteger,
-        todoItemId: nonEmptyString,
-        updatedAt: stringValue,
-        waitId: nonEmptyString,
-        workspace: stringValue,
-    },
-    ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"],
-);
-
 export const workspaceApprovalRequestOutputSchema = objectSchema(
     {
         approvalId: nonEmptyString,
@@ -554,33 +431,207 @@ export const workspaceApprovalRequestOutputSchema = objectSchema(
     ],
 );
 
-export const workspaceSnapshotOutputSchema: JsonValue = objectSchema(
+const workspaceActionSchema = objectSchema(
     {
-        agentBusy: booleanValue,
-        approvals: arraySchema(workspaceApprovalRequestOutputSchema),
-        background: arraySchema(workspaceBackgroundSchema),
+        id: nonEmptyString,
+        label: nonEmptyString,
+        tone: { enum: ["default", "primary", "danger"], type: "string" },
+        confirmation: objectSchema({ message: nonEmptyString }, ["message"]),
+        input: {
+            anyOf: [
+                objectSchema({ kind: { const: "none", type: "string" } }, [
+                    "kind",
+                ]),
+                objectSchema(
+                    {
+                        kind: { const: "text", type: "string" },
+                        placeholder: stringValue,
+                    },
+                    ["kind"],
+                ),
+                objectSchema(
+                    {
+                        kind: { const: "choice", type: "string" },
+                        choices: arraySchema(
+                            objectSchema(
+                                { id: nonEmptyString, label: nonEmptyString },
+                                ["id", "label"],
+                            ),
+                        ),
+                    },
+                    ["kind", "choices"],
+                ),
+            ],
+        },
+    },
+    ["id", "label"],
+);
+const workspaceChoiceSchema = objectSchema(
+    { id: nonEmptyString, label: nonEmptyString },
+    ["id", "label"],
+);
+const workspaceDecisionSchema = objectSchema(
+    {
+        kind: { const: "decision", type: "string" },
+        id: nonEmptyString,
+        title: nonEmptyString,
+        badge: stringValue,
+        summary: stringValue,
+        detail: stringValue,
+        actions: arraySchema(workspaceActionSchema),
+    },
+    ["kind", "id", "title", "actions"],
+);
+const workspaceQuestionSchema = objectSchema(
+    {
+        kind: { const: "question", type: "string" },
+        id: nonEmptyString,
+        title: nonEmptyString,
+        prompt: stringValue,
+        input: {
+            anyOf: [
+                objectSchema(
+                    {
+                        kind: { const: "text", type: "string" },
+                        placeholder: stringValue,
+                    },
+                    ["kind"],
+                ),
+                objectSchema(
+                    {
+                        kind: { const: "choice", type: "string" },
+                        choices: arraySchema(workspaceChoiceSchema),
+                        allowText: booleanValue,
+                    },
+                    ["kind", "choices"],
+                ),
+            ],
+        },
+        actions: arraySchema(workspaceActionSchema),
+    },
+    ["kind", "id", "title", "prompt", "input", "actions"],
+);
+const workspaceWorkSchema = objectSchema(
+    {
+        kind: { const: "work", type: "string" },
+        id: nonEmptyString,
+        title: nonEmptyString,
+        state: { enum: ["running", "paused", "blocked"], type: "string" },
+        badge: stringValue,
+        detail: stringValue,
+        current: stringValue,
+        note: stringValue,
+        progress: objectSchema(
+            { current: nonNegativeInteger, total: nonNegativeInteger },
+            ["current", "total"],
+        ),
+        actions: arraySchema(workspaceActionSchema),
+    },
+    ["kind", "id", "title", "state", "actions"],
+);
+const workspaceBackgroundItemSchema = objectSchema(
+    {
+        kind: { const: "background", type: "string" },
+        id: nonEmptyString,
+        title: nonEmptyString,
+        badge: stringValue,
+        summary: stringValue,
+        detail: stringValue,
+        actions: arraySchema(workspaceActionSchema),
+    },
+    ["kind", "id", "title", "actions"],
+);
+const workspaceDirectiveSchema = objectSchema(
+    {
+        kind: { const: "reentry", type: "string" },
+        id: nonEmptyString,
+        intent: {
+            enum: ["automatic", "goal-resume", "goal-retry", "task-resume"],
+            type: "string",
+        },
+        sourceId: nonEmptyString,
+    },
+    ["kind", "id", "intent"],
+);
+const workspaceSnapshotSchema = objectSchema(
+    {
         ctxId: nonEmptyString,
-        currentEvent: workspaceCurrentEventSchema,
-        cursor: nonNegativeInteger,
-        goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
         instance: nonEmptyString,
-        questions: arraySchema(workspaceQuestionWaitOutputSchema),
-        reentry: workspaceReentryOutputSchema,
-        tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
+        cursor: nonNegativeInteger,
+        agentBusy: booleanValue,
+        presentation: objectSchema(
+            {
+                primary: {
+                    anyOf: [workspaceDecisionSchema, workspaceQuestionSchema],
+                },
+                work: arraySchema(workspaceWorkSchema),
+                background: arraySchema(workspaceBackgroundItemSchema),
+            },
+            ["work", "background"],
+        ),
+        modelContext: objectSchema(
+            {
+                content: arraySchema(
+                    objectSchema(
+                        {
+                            type: { const: "text", type: "string" },
+                            text: stringValue,
+                        },
+                        ["type", "text"],
+                    ),
+                ),
+                structuredContent: objectSchema(
+                    { portableDevshellWorkspace: anyValue },
+                    ["portableDevshellWorkspace"],
+                ),
+            },
+            ["content", "structuredContent"],
+        ),
+        reentry: objectSchema(
+            {
+                pending: booleanValue,
+                executionActive: booleanValue,
+                schedule: objectSchema(
+                    {
+                        readyAt: nonEmptyString,
+                        intent: { const: "automatic", type: "string" },
+                        sourceId: nonEmptyString,
+                    },
+                    ["readyAt", "intent"],
+                ),
+                delivery: objectSchema(
+                    {
+                        status: {
+                            enum: ["idle", "uncertain", "paused"],
+                            type: "string",
+                        },
+                    },
+                    ["status"],
+                ),
+                directives: arraySchema(workspaceDirectiveSchema),
+            },
+            ["pending"],
+        ),
     },
     [
-        "agentBusy",
-        "approvals",
-        "background",
         "ctxId",
-        "currentEvent",
-        "cursor",
-        "goal",
         "instance",
-        "questions",
+        "cursor",
+        "agentBusy",
+        "presentation",
+        "modelContext",
         "reentry",
-        "tasks",
     ],
+);
+
+export const workspaceSnapshotOutputSchema: JsonValue = workspaceSnapshotSchema;
+export const workspaceActionOutputSchema: JsonValue = objectSchema(
+    {
+        status: { enum: ["applied", "stale"], type: "string" },
+        snapshot: workspaceSnapshotSchema,
+        effect: workspaceDirectiveSchema,
+    },
+    ["status", "snapshot"],
 );
 
 export const workspaceOpenOutputSchema: JsonValue = objectSchema(

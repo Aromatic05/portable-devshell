@@ -1,7 +1,9 @@
 import { withRequestTimeout, type JsonValue } from "@portable-devshell/shared";
 
-import type { TuiRuntimeOperationClients } from "../Operations.js";
-import type { TuiAppStore } from "../../state/store/App.js";
+import type {
+    TuiRuntimeOperationClients,
+    TuiRuntimeOperationSession,
+} from "../Operations.js";
 import {
     TUI_TMUX_INSPECT_MAX_LINES,
     type TuiTmuxListPane,
@@ -31,7 +33,7 @@ export class TuiRuntimeTmuxOperations {
         private readonly options: {
             clients: TuiRuntimeOperationClients;
             operationTimeoutMs: number;
-            store: TuiAppStore;
+            session: TuiRuntimeOperationSession;
         },
     ) {}
 
@@ -146,7 +148,6 @@ export class TuiRuntimeTmuxOperations {
     }
 
     #candidateWorkspaces(instance: string): string[] {
-        const state = this.options.store.getState();
         const workspaces: string[] = [];
         const seen = new Set<string>();
         const add = (workspace: string | undefined) => {
@@ -160,8 +161,7 @@ export class TuiRuntimeTmuxOperations {
             workspaces.push(workspace);
         };
 
-        const toolCalls =
-            state.readModel.instanceState[instance]?.toolCalls ?? [];
+        const toolCalls = this.options.session.toolCallsForInstance(instance);
         for (const call of [...toolCalls].sort((left, right) =>
             right.startedAt.localeCompare(left.startedAt),
         )) {

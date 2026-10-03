@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ExtensionRemoveResult,
     type ExtensionRuntimeRecord,
     type JsonValue,
@@ -319,8 +319,8 @@ async function requireRecord(
 ): Promise<ExtensionRuntimeRecord> {
     const record = (await port.list()).find((candidate) => candidate.id === id);
     if (record !== undefined) return record;
-    throw createError({
-        code: errorCodes.controlExtensionNotFound,
+    throw createRemoteError({
+        code: controlErrorCodes.extensionNotFound,
         details: { extensionId: id },
         message: `Extension ${id} is not installed.`,
         retryable: false,
@@ -329,8 +329,8 @@ async function requireRecord(
 
 function requireLocalManagement(context: ControlPortContext): void {
     if (isLocalOwnerCli(context)) return;
-    throw createError({
-        code: errorCodes.controlExtensionAccessDenied,
+    throw createRemoteError({
+        code: controlErrorCodes.extensionAccessDenied,
         message:
             "Extension lifecycle mutations are restricted to the local owner CLI.",
         retryable: false,
@@ -401,8 +401,8 @@ function assertOnlyKeys(
 }
 
 function invalid(message: string): Error {
-    return createError({
-        code: errorCodes.controlExtensionInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.extensionInvalid,
         message,
         retryable: false,
     });

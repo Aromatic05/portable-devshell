@@ -16,8 +16,8 @@ import {
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ExtensionRemoveResult,
     type ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
@@ -277,8 +277,8 @@ export class ExtensionInstallService {
 }
 
 function builtinRemoveError(id: string): Error {
-    return createError({
-        code: errorCodes.controlExtensionAccessDenied,
+    return createRemoteError({
+        code: controlErrorCodes.extensionAccessDenied,
         details: { extensionId: id, operation: "remove" },
         message: `Extension ${id} is a builtin and cannot be removed; disable it instead.`,
         retryable: false,
@@ -476,8 +476,8 @@ function isMissing(error: unknown): boolean {
 }
 
 function extensionInstallError(message: string, cause?: unknown): Error {
-    return createError({
-        code: errorCodes.controlExtensionInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.extensionInvalid,
         cause,
         message:
             cause instanceof Error ? `${message} ${cause.message}` : message,

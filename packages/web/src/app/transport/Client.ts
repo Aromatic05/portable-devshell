@@ -1,23 +1,16 @@
 import {
-    createPersistentControlClients,
     type Channel,
-    type InstanceEventStream,
-    type McpRuntimeStatus,
-    type PersistentControlClients,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
+import { WebDomainSession } from "../domain/Session.js";
 import { connectBrowserWebChannel } from "./Socket.js";
 
-export type WebClients = PersistentControlClients;
-export type WebRuntimeStream = InstanceEventStream;
-export type McpStatus = McpRuntimeStatus;
 export type WebChannelConnector = (signal?: AbortSignal) => Promise<Channel>;
 
-export function createWebClients(
+export function createWebDomainSession(
     connectChannel: WebChannelConnector = connectBrowserWebChannel,
-): WebClients {
-    return createPersistentControlClients({
-        clientKind: "web",
+): WebDomainSession {
+    return new WebDomainSession({
         connectChannel,
     });
 }

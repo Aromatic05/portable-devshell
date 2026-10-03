@@ -1,14 +1,15 @@
 import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     applyConfigInstancePatch,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     normalizeConfigInstanceDraft,
     parseConfigInstanceTargetRequest,
     parseConfigUpdateInstanceRequest,
     type ConfigUpdateInstanceRequest,
     type ControlConfig,
     type JsonValue,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import { InstanceFactory } from "../../instance/create/Factory.js";
@@ -145,8 +146,8 @@ export class InstanceConfigCoordinator {
             await this.reconcileCleanupDebt(instance);
         }
         if ((await this.#cleanupDebts.get(instance)) === undefined) return;
-        throw createError({
-            code: errorCodes.instanceConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
             details: { instance, operation: "cleanup" },
             message: `Instance ${instance} still has incomplete lifecycle cleanup.`,
             retryable: true,
@@ -1198,8 +1199,8 @@ export class InstanceConfigCoordinator {
             snapshot.daemonState === "stale"
         )
             return true;
-        throw createError({
-            code: errorCodes.instanceConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
             details: {
                 instance: instanceName,
                 operation: "delete",
@@ -1218,8 +1219,8 @@ export class InstanceConfigCoordinator {
         if (descriptor === undefined) return;
         const snapshot = descriptor.worker.snapshot();
         if (snapshot.daemonState === "stopped") return;
-        throw createError({
-            code: errorCodes.instanceConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
             details: {
                 instance: instanceName,
                 operation,
@@ -1282,8 +1283,8 @@ async function closeDescriptorResourcesBestEffort(
 }
 
 function missingInstance(instanceName: string): Error {
-    return createError({
-        code: errorCodes.instanceMissing,
+    return createRemoteError({
+        code: controlErrorCodes.instanceNotFound,
         details: { instance: instanceName },
         message: `Instance ${instanceName} was not found.`,
         retryable: false,

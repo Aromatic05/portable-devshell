@@ -1,7 +1,8 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ReverseDeviceCodeResult,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import type {
@@ -77,16 +78,16 @@ export class ReverseCredentialService {
     #requireReverseInstance(instance: string): ReverseInstancePort {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceNotFound,
                 details: { instance },
                 message: `Instance ${instance} was not found.`,
                 retryable: false,
             });
         }
         if (descriptor.provider !== "reverse") {
-            throw createError({
-                code: errorCodes.reverseInstanceNotReverse,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseInstanceNotReverse,
                 details: { instance },
                 message: `Instance ${instance} is not a reverse instance.`,
                 retryable: false,

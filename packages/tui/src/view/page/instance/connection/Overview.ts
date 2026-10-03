@@ -1,5 +1,6 @@
 import { type JsonValue } from "@portable-devshell/shared";
 import { type BoxModel } from "../../../component/content/Box.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import { type TuiAppState } from "../../../../state/store/Model.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
@@ -9,32 +10,39 @@ import { buildOAuthPageBoxes } from "./OAuth.js";
 
 export function buildConnectionsOverviewBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string | undefined,
 ): BoxModel[] {
-    const entry = state.instances.find(
+    const entry = reader.instances.instances.find(
         (candidate) => candidate.name === instance,
     );
-    const mcp = asRecord(state.readModel.configView?.mcp);
+    const mcp = asRecord(reader.config.view?.mcp);
     const instanceConfig =
         instance !== undefined &&
-        Array.isArray(state.readModel.configView?.instances)
-            ? state.readModel.configView.instances.find(
+        Array.isArray(reader.config.view?.instances)
+            ? reader.config.view.instances.find(
                   (candidate) => asRecord(candidate)?.name === instance,
               )
             : undefined;
-    const instanceMcp = asRecord(asRecord(instanceConfig)?.mcp);
+    const instanceRecord = asRecord(instanceConfig);
+    const instanceMcp = asRecord(instanceRecord?.mcp);
+    const instanceAuth = asRecord(instanceMcp?.auth);
+    const provider =
+        typeof instanceRecord?.provider === "string"
+            ? instanceRecord.provider
+            : undefined;
     const authMode =
-        typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
+        typeof instanceAuth?.mode === "string" ? instanceAuth.mode : "none";
     const oauthMode =
-        state.readModel.mcpStatus?.authMode === "oauth2" ? "oauth2" : authMode;
-    const running = state.readModel.mcpStatus?.running === true;
-    const pendingOAuth = state.readModel.oauthApprovals.filter(
+        reader.mcp.status?.authMode === "oauth2" ? "oauth2" : authMode;
+    const running = reader.mcp.status?.running === true;
+    const pendingOAuth = reader.mcp.approvals.filter(
         (approval) => approval.status === "pending",
     ).length;
     const snapshot =
         instance === undefined
             ? undefined
-            : state.readModel.instanceState[instance]?.snapshot;
+            : reader.runtime(instance).snapshot;
     const enabled =
         instance === undefined
             ? mcp?.enabled === true
@@ -50,9 +58,12 @@ export function buildConnectionsOverviewBoxes(
     const path =
         instance === undefined
             ? undefined
-            : (entry?.mcpPath ?? `/${instance}/mcp`);
+            : typeof instanceMcp?.path === "string" &&
+                instanceMcp.path.length > 0
+              ? instanceMcp.path
+              : `/${instance}/mcp`;
     const oauthBlocked =
-        authMode === "oauth2" && state.readModel.mcpStatus?.oauthReady !== true;
+        authMode === "oauth2" && reader.mcp.status?.oauthReady !== true;
     const usable = !restartPending && running && enabled && !oauthBlocked;
     const publicEndpoint = restartPending
         ? "pending Control restart"
@@ -108,8 +119,7 @@ export function buildConnectionsOverviewBoxes(
                               restartPending
                                   ? "pending Control restart"
                                   : String(
-                                        state.readModel.mcpStatus
-                                            ?.oauthReady === true,
+                                        reader.mcp.status?.oauthReady === true,
                                     ),
                           ),
                           formatField("Pending", String(pendingOAuth)),
@@ -122,7 +132,7 @@ export function buildConnectionsOverviewBoxes(
                       },
                       status: restartPending
                           ? "warning"
-                          : state.readModel.mcpStatus?.oauthReady === true
+                          : reader.mcp.status?.oauthReady === true
                             ? "ready"
                             : "failed",
                       summaryLines: [
@@ -135,11 +145,11 @@ export function buildConnectionsOverviewBoxes(
                   }),
               ]
             : []),
-        ...(entry?.provider === "reverse" && instance !== undefined
+        ...(provider === "reverse" && instance !== undefined
             ? [
                   makeBox(state, "connections", instance, {
                       detailLines: [
-                          formatField("Provider", entry.provider),
+                          formatField("Provider", provider),
                           formatField(
                               "Connection",
                               snapshot?.connectionState ?? "unknown",
@@ -165,7 +175,7 @@ export function buildConnectionsOverviewBoxes(
                                   "connection",
                                   snapshot?.connectionState ?? "unknown",
                               ],
-                              ["provider", entry.provider],
+                              ["provider", provider],
                           ),
                       ],
                       title: "Reverse Connection",
@@ -195,29 +205,31 @@ function publicMcpEndpoint(
 }
 
 function asRecord(
-    value: JsonValue | undefined,
+    value: unknown,
 ): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value
+        ? (value as Record<string, JsonValue>)
         : undefined;
 }
 
 export function buildConnectionsPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string | undefined,
 ): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "connections") return [];
     switch (route.view) {
         case "overview":
-            return buildConnectionsOverviewBoxes(state, instanceName);
+            return buildConnectionsOverviewBoxes(state, reader, instanceName);
         case "connector":
-            return buildConnectorPageBoxes(state, instanceName);
+            return buildConnectorPageBoxes(state, reader, instanceName);
         case "oauth":
-            return buildOAuthPageBoxes(state, instanceName);
+            return buildOAuthPageBoxes(state, reader, instanceName);
         case "reverse":
             return buildReverseConnectionBoxes(
                 state,
+                reader,
                 instanceName ?? route.instanceId,
                 route.instanceId,
             );

@@ -4,9 +4,6 @@ import {
     type Channel,
 } from "./Channel.js";
 
-const CONTROL_REMOTE_RPC_SUBPROTOCOL = "devshell-control-rpc.v1";
-const CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX = "devshell-bearer.";
-
 export interface WebSocketClientLike {
     binaryType: string;
     close(code?: number, reason?: string): void;
@@ -38,8 +35,7 @@ export interface WebSocketClientLike {
 }
 
 export interface WebChannelConnectOptions {
-    subprotocol?: string;
-    token?: string;
+    protocols?: readonly string[];
     url: string;
     webSocketFactory?: (
         url: string,
@@ -64,16 +60,7 @@ export class WebChannel implements Channel {
         signal?: AbortSignal,
     ): Promise<WebChannel> {
         if (signal?.aborted === true) throw abortError(signal);
-        const protocols = [
-            options.subprotocol ?? CONTROL_REMOTE_RPC_SUBPROTOCOL,
-        ];
-        if (options.token !== undefined) {
-            protocols.push(
-                `${CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX}${encodeBase64Url(
-                    options.token,
-                )}`,
-            );
-        }
+        const protocols = [...(options.protocols ?? [])];
         const socket = (options.webSocketFactory ?? defaultWebSocketFactory)(
             options.url,
             protocols,
@@ -103,13 +90,13 @@ export class WebChannel implements Channel {
             const failed = () =>
                 finishFailure(
                     new Error(
-                        "Control WebSocket connection failed or was rejected.",
+                        "WebSocket connection failed or was rejected.",
                     ),
                 );
             const closed = (event: { code?: number; reason?: string }) =>
                 finishFailure(
                     new Error(
-                        `Control WebSocket closed during connect: ${event.code ?? 1006} ${event.reason ?? ""}`.trim(),
+                        `WebSocket closed during connect: ${event.code ?? 1006} ${event.reason ?? ""}`.trim(),
                     ),
                 );
             const aborted = () => finishFailure(abortError(signal!));
@@ -140,7 +127,7 @@ export class WebChannel implements Channel {
             if (this.#closed || this.#socket.readyState !== OPEN) {
                 throw (
                     this.#closeError ??
-                    new Error("Control WebSocket channel is closed.")
+                    new Error("WebSocket channel is closed.")
                 );
             }
             this.#socket.send(copy);
@@ -207,7 +194,7 @@ export class WebChannel implements Channel {
     };
 
     readonly #error = (): void => {
-        this.#finish(new Error("Control WebSocket connection failed."));
+        this.#finish(new Error("WebSocket connection failed."));
     };
 
     readonly #close = (event: { code?: number; reason?: string }): void => {
@@ -216,7 +203,7 @@ export class WebChannel implements Channel {
             code === 1000
                 ? undefined
                 : new Error(
-                      `Control WebSocket closed: ${code} ${event.reason ?? ""}`.trim(),
+                      `WebSocket closed: ${code} ${event.reason ?? ""}`.trim(),
                   ),
         );
     };
@@ -272,7 +259,7 @@ async function toBytes(value: unknown): Promise<Uint8Array> {
     ) {
         return new Uint8Array(await value.arrayBuffer());
     }
-    throw new Error("Control WebSocket requires binary frames.");
+    throw new Error("WebSocket channel requires binary frames.");
 }
 
 function closeReason(error: Error | undefined): string {
@@ -282,33 +269,11 @@ function closeReason(error: Error | undefined): string {
 function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
-        : new Error("Control WebSocket connection was aborted.");
+        : new Error("WebSocket connection was aborted.");
 }
 
 function asError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
-}
-
-function encodeBase64Url(value: string): string {
-    const bytes = new TextEncoder().encode(value);
-    const alphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let result = "";
-    for (let index = 0; index < bytes.length; index += 3) {
-        const first = bytes[index]!;
-        const second = bytes[index + 1];
-        const third = bytes[index + 2];
-        const bits = (first << 16) | ((second ?? 0) << 8) | (third ?? 0);
-        result += alphabet[(bits >>> 18) & 0x3f];
-        result += alphabet[(bits >>> 12) & 0x3f];
-        if (second !== undefined) {
-            result += alphabet[(bits >>> 6) & 0x3f];
-        }
-        if (third !== undefined) {
-            result += alphabet[bits & 0x3f];
-        }
-    }
-    return result;
 }
 
 const SERVER_HEARTBEAT_INTERVAL_MS = 20_000;

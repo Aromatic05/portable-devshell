@@ -33,8 +33,8 @@ import {
     renderTuiMessageHistoryLines,
     selectTuiMessagesSidebarEntries,
 } from "../page/activity/messages/Projection.js";
-
-const mainScreenModelCache = new WeakMap<TuiAppState, TuiMainScreenModel>();
+import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiInteractionProjection } from "../../interaction/Projection.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
@@ -62,18 +62,30 @@ export function selectHeaderTitle(): string {
     return "portable-devshell tui";
 }
 
-export function selectHeaderSummary(state: TuiAppState): string {
-    return `instances ${state.instances.length} | live ${state.globalDerived.connectedInstanceCount} | approvals ${state.globalDerived.pendingApprovalCount}`;
+export function selectHeaderSummary(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): string {
+    const overview = domains.overview.overview;
+    const instances = domains.instances.instances;
+    const live =
+        overview?.counts.instancesReady ??
+        instances.filter((instance) => instance.snapshot.ready).length;
+    const approvals = overview?.counts.pendingApprovals ?? 0;
+    return `instances ${instances.length} | live ${live} | approvals ${approvals}`;
 }
 
-export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
+export function selectSidebarModel(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): TuiSidebarModel {
     const cursor = state.interaction.sidebarCursor;
     const contextFocused = state.interaction.focusScope === "sidebarContext";
     const instanceFocused = state.interaction.focusScope === "sidebarInstances";
 
     return {
-        context: selectSidebarContext(state, contextFocused, cursor),
-        instances: state.instances.map((instance) => ({
+        context: selectSidebarContext(state, domains, contextFocused, cursor),
+        instances: domains.instances.instances.map((instance) => ({
             focused:
                 instanceFocused &&
                 cursor?.kind === "instance" &&
@@ -87,6 +99,7 @@ export function selectSidebarModel(state: TuiAppState): TuiSidebarModel {
 
 function selectSidebarContext(
     state: TuiAppState,
+    domains: TuiDomainReader,
     focused: boolean,
     cursor: TuiAppState["interaction"]["sidebarCursor"],
 ): TuiSidebarModel["context"] {
@@ -95,7 +108,12 @@ function selectSidebarContext(
         state.ui.selectedPage === "audit"
     ) {
         return {
-            items: selectTuiAuditSidebarEntries(state, focused, cursor),
+            items: selectTuiAuditSidebarEntries(
+                state,
+                domains,
+                focused,
+                cursor,
+            ),
             kind: "audit",
         };
     }
@@ -104,7 +122,12 @@ function selectSidebarContext(
         state.ui.selectedPage === "messages"
     ) {
         return {
-            items: selectTuiMessagesSidebarEntries(state, focused, cursor),
+            items: selectTuiMessagesSidebarEntries(
+                state,
+                domains,
+                focused,
+                cursor,
+            ),
             kind: "messages",
         };
     }
@@ -122,15 +145,17 @@ function selectSidebarContext(
     };
 }
 
-export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
-    const cached = mainScreenModelCache.get(state);
-    if (cached !== undefined) return cached;
-    const model = projectMainScreenModel(state);
-    mainScreenModelCache.set(state, model);
-    return model;
+export function selectMainScreenModel(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): TuiMainScreenModel {
+    return projectMainScreenModel(state, domains);
 }
 
-function projectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
+function projectMainScreenModel(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): TuiMainScreenModel {
     const activePage = selectActivePage(state);
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
     const panelKey = `${activePage.page}:${activePage.instance ?? "-"}`;
@@ -148,8 +173,8 @@ function projectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
             activePage,
             boxes: [],
             errorLines,
-            loadState: overviewLoadState(state, panelError?.message),
-            pageTitle: pageTitle(state),
+            loadState: overviewLoadState(state, domains, panelError?.message),
+            pageTitle: pageTitle(state, domains),
             statusLine,
         };
     }
@@ -165,13 +190,14 @@ function projectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
                 "No instance selected. Select one from the lower sidebar list.",
             errorLines,
             loadState: { kind: "empty" },
-            pageTitle: pageTitle(state),
+            pageTitle: pageTitle(state, domains),
             statusLine,
         };
     }
 
     const boxes = buildBoxesForPage(
         state,
+        domains,
         activePage.page,
         activePage.instance,
     );
@@ -188,21 +214,25 @@ function projectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
         boxes,
         ...(emptyState === undefined ? {} : { emptyState }),
         errorLines,
-        loadState: pageLoadState(state, boxes, panelError?.message),
-        pageTitle: pageTitle(state),
+        loadState: pageLoadState(state, domains, boxes, panelError?.message),
+        pageTitle: pageTitle(state, domains),
         statusLine,
     };
 }
 
-export function selectMainBoxIds(state: TuiAppState): string[] {
+export function selectMainBoxIds(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): string[] {
     if (state.ui.selectedPage === "overview") {
-        return selectTuiOverviewFocusIds(state);
+        return selectTuiOverviewFocusIds(state, domains);
     }
-    return selectMainScreenModel(state).boxes.map((box) => box.id);
+    return selectMainScreenModel(state, domains).boxes.map((box) => box.id);
 }
 
 export function selectMainBoxFlowMetrics(
     state: TuiAppState,
+    domains: TuiDomainReader,
     boxInnerWidth = 80,
 ): TuiMainBoxFlowMetrics {
     const route = currentTuiRoute(state);
@@ -215,7 +245,7 @@ export function selectMainBoxFlowMetrics(
             boxRanges: {},
             scrollKey: selectMainScrollKey(state),
             totalLines: renderTuiMessageHistoryLines(
-                state,
+                domains,
                 state.ui.selectedInstance,
                 route.ctxId,
                 boxInnerWidth,
@@ -224,7 +254,7 @@ export function selectMainBoxFlowMetrics(
     }
     if (state.ui.selectedPage === "overview") {
         const scrollKey = selectMainScrollKey(state);
-        const ids = selectTuiOverviewFocusIds(state);
+        const ids = selectTuiOverviewFocusIds(state, domains);
         return {
             boxRanges: Object.fromEntries(
                 ids.map((id, index) => [id, { end: index + 1, start: index }]),
@@ -233,7 +263,7 @@ export function selectMainBoxFlowMetrics(
             totalLines: ids.length,
         };
     }
-    const model = selectMainScreenModel(state);
+    const model = selectMainScreenModel(state, domains);
     return measureMainBoxFlowMetrics(
         model.boxes,
         selectMainScrollKey(state),
@@ -260,18 +290,24 @@ export function selectMainScrollKey(state: TuiAppState): string {
     return currentTuiRouteScrollKey(state);
 }
 
-export function selectFooterModel(state: TuiAppState): {
+export function selectFooterModel(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): {
     mode: TuiMode;
     text: string;
 } {
     return {
         mode: state.interaction.focusScope,
-        text: selectFooterText(state),
+        text: selectFooterText(state, domains),
     };
 }
 
-export function selectFooterText(state: TuiAppState): string {
-    const breadcrumb = selectBreadcrumbSegments(state).join(" / ");
+export function selectFooterText(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): string {
+    const breadcrumb = selectBreadcrumbSegments(state, domains).join(" / ");
     const shortcuts = selectFooterShortcuts(state).join(" · ");
     return shortcuts.length === 0
         ? breadcrumb
@@ -469,6 +505,7 @@ function requiresInstance(page: TuiActivePage["page"]): boolean {
 
 function pageLoadState(
     state: TuiAppState,
+    domains: TuiDomainReader,
     boxes: readonly TuiBoxModel[],
     error: string | undefined,
 ): TuiPageLoadState {
@@ -476,7 +513,7 @@ function pageLoadState(
     if (
         route.page === "extensions" &&
         route.view === "page" &&
-        state.extensionPageSnapshots[route.pageId] === undefined &&
+        domains.extension.tuiSnapshots.get(route.pageId) === undefined &&
         error === undefined
     ) {
         return { kind: "loading" };
@@ -493,9 +530,10 @@ function pageLoadState(
 
 function overviewLoadState(
     state: TuiAppState,
+    domains: TuiDomainReader,
     error: string | undefined,
 ): TuiPageLoadState {
-    const available = state.readModel.overview !== undefined;
+    const available = domains.overview.overview !== undefined;
     if (error !== undefined)
         return available
             ? { kind: "stale", reason: error }
@@ -505,17 +543,25 @@ function overviewLoadState(
     return available ? { kind: "ready" } : { kind: "empty" };
 }
 
-function pageTitle(state: TuiAppState): string {
-    const segments = selectBreadcrumbSegments(state);
+function pageTitle(state: TuiAppState, domains: TuiDomainReader): string {
+    const segments = selectBreadcrumbSegments(state, domains);
     return segments.length === 0
         ? (tuiPageEntries.find((entry) => entry.id === state.ui.selectedPage)
               ?.label ?? state.ui.selectedPage)
         : segments.join(" / ");
 }
 
-export const tuiViewProjection = {
-    selectMainBoxFlowMetrics,
-    selectMainBoxIds,
-    selectMainScreenModel,
-    selectMainScrollKey,
-};
+export function createTuiViewProjection(
+    domains: TuiDomainReader,
+): TuiInteractionProjection {
+    return {
+        domains,
+        selectMainBoxFlowMetrics: (state, boxInnerWidth) =>
+            selectMainBoxFlowMetrics(state, domains, boxInnerWidth),
+        selectMainBoxIds: (state) => selectMainBoxIds(state, domains),
+        selectMainScreenModel: (state) =>
+            selectMainScreenModel(state, domains),
+        selectMainScrollKey,
+        selectSidebarModel: (state) => selectSidebarModel(state, domains),
+    };
+}

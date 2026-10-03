@@ -3,7 +3,7 @@ import type {
     JsonValue,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
 
@@ -48,8 +48,8 @@ function readCtxId(value: JsonValue | undefined): string {
             ? (value as Record<string, JsonValue>).ctxId
             : undefined;
     if (typeof ctxId !== "string" || ctxId.trim().length === 0) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "context operation requires a ctxId string.",
             retryable: false,
         });

@@ -4,9 +4,9 @@ import {
     type WorkerInstance,
 } from "@portable-devshell/core";
 import {
-    ControlError,
-    createError,
-    errorCodes,
+    RemoteError,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
@@ -61,10 +61,10 @@ export function createControlToolRouteModule(
                 return result;
             } catch (error) {
                 const failure =
-                    error instanceof ControlError
+                    error instanceof RemoteError
                         ? error
-                        : createError({
-                              code: errorCodes.targetInvalid,
+                        : createRemoteError({
+                              code: controlErrorCodes.invalidTarget,
                               message:
                                   error instanceof Error
                                       ? error.message
@@ -113,10 +113,10 @@ export function createControlToolRouteModule(
                 );
             } catch (error) {
                 const failure =
-                    error instanceof ControlError
+                    error instanceof RemoteError
                         ? error
-                        : createError({
-                              code: errorCodes.targetInvalid,
+                        : createRemoteError({
+                              code: controlErrorCodes.invalidTarget,
                               message:
                                   error instanceof Error
                                       ? error.message

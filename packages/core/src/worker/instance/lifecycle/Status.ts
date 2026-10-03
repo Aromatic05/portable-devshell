@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 
@@ -21,8 +21,8 @@ export function parseWorkerStatus(
     try {
         parsed = JSON.parse(stdout) as unknown;
     } catch (error) {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
+        throw createRemoteError({
+            code: runtimeErrorCodes.workerStatusFailed,
             cause: error,
             message: `Worker status returned an invalid payload for instance ${instanceName}.`,
             retryable: false,
@@ -39,8 +39,8 @@ export function parseWorkerStatus(
         parsed === null ||
         Array.isArray(parsed)
     ) {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
+        throw createRemoteError({
+            code: runtimeErrorCodes.workerStatusFailed,
             message: `Worker status returned an invalid payload for instance ${instanceName}.`,
             retryable: false,
             details: {
@@ -55,8 +55,8 @@ export function parseWorkerStatus(
     const state = candidate.state;
 
     if (state !== "running" && state !== "stale" && state !== "stopped") {
-        throw createError({
-            code: errorCodes.coreWorkerStatusFailed,
+        throw createRemoteError({
+            code: runtimeErrorCodes.workerStatusFailed,
             message: `Worker status returned an unknown state for instance ${instanceName}.`,
             retryable: false,
             details: {

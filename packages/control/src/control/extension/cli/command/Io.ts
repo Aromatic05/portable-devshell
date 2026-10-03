@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
     type ControlStreamMessage,
     type MessageStream,
@@ -30,16 +30,16 @@ export class CliCommandStreamIo implements CliCommandIo {
             return;
         }
         if (event.name !== "input") {
-            throw createError({
-                code: errorCodes.envelopeInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.methodNotFound,
                 message: `CLI command stream does not accept ${event.name}.`,
                 retryable: false,
             });
         }
         const payload = record(event.payload);
         if (typeof payload?.data !== "string") {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message: "cli.input requires base64 data.",
                 retryable: false,
             });

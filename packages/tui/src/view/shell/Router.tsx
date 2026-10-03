@@ -22,19 +22,22 @@ import {
 import { TuiMessagesView } from "../page/activity/messages/View.js";
 import { TuiOverviewView } from "../page/overview/View.js";
 import { tuiBlockHeight } from "./Layout.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;
     contentWidth: number;
+    reader: TuiDomainReader;
     state: TuiAppState;
     viewportRows: number;
 }
 
 export function TuiScreenRouter(props: TuiScreenRouterProps) {
-    const model = selectMainScreenModel(props.state);
+    const model = selectMainScreenModel(props.state, props.reader);
     if (props.state.ui.selectedPage === "messages") {
         return (
             <TuiMessagesView
+                reader={props.reader}
                 state={props.state}
                 viewportRows={props.viewportRows}
                 width={props.contentWidth}
@@ -61,6 +64,7 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
                 <PageLoadState state={model.loadState} />
                 {showOverview ? (
                     <TuiOverviewView
+                        reader={props.reader}
                         state={props.state}
                         viewportRows={overviewRows}
                         width={props.contentWidth}
@@ -191,7 +195,10 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
-export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
+export function buildFocusGraphForState(
+    state: TuiAppState,
+    reader: TuiDomainReader,
+): TuiFocusGraph {
     switch (state.interaction.focusScope) {
         case "terminal":
         case "textDetail":
@@ -222,7 +229,7 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
                 { item: { id: "toolForm.input", kind: "field" } },
             ]);
         case "form": {
-            const boxes = selectMainScreenModel(state).boxes.filter(
+            const boxes = selectMainScreenModel(state, reader).boxes.filter(
                 (candidate) => candidate.expanded,
             );
             return buildLinearGraph(
@@ -244,7 +251,7 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
             );
         }
         case "wizard": {
-            const box = selectMainScreenModel(state).boxes.find(
+            const box = selectMainScreenModel(state, reader).boxes.find(
                 (candidate) => candidate.id === state.ui.mainFocusId,
             );
             return buildLinearGraph(
@@ -258,13 +265,13 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
         }
         case "sidebarContext":
         case "sidebarInstances": {
-            const sidebar = selectSidebarModel(state);
+            const sidebar = selectSidebarModel(state, reader);
             return buildLinearGraph([
                 ...sidebar.context.items.map((entry) => ({
                     id: entry.id,
                     kind: "context" as const,
                 })),
-                ...state.instances.map((instance) => ({
+                ...reader.instances.instances.map((instance) => ({
                     id: instance.name,
                     kind: "instance" as const,
                 })),
@@ -274,14 +281,14 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
         case "contextConversation":
             if (state.ui.selectedPage === "overview") {
                 return buildLinearGraph(
-                    selectMainBoxIds(state).map((id) => ({
+                    selectMainBoxIds(state, reader).map((id) => ({
                         id,
                         kind: "box" as const,
                     })),
                 );
             }
             return buildLinearGraph(
-                selectMainScreenModel(state).boxes.flatMap<TuiFocusItem>(
+                selectMainScreenModel(state, reader).boxes.flatMap<TuiFocusItem>(
                     (box) =>
                         box.expanded
                             ? box.expandedLines.map((line) => ({
@@ -293,7 +300,7 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
                 ),
             );
         case "boxDetail": {
-            const box = selectMainScreenModel(state).boxes.find(
+            const box = selectMainScreenModel(state, reader).boxes.find(
                 (candidate) => candidate.id === state.ui.mainFocusId,
             );
             return buildLinearGraph(

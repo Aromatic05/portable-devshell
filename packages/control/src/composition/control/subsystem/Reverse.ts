@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 
 import { ReverseConnectionGateway } from "../../../control/reverse/connection/Gateway.js";
 import { ReverseCredentialService } from "../../../control/reverse/credential/Service.js";
@@ -25,8 +25,8 @@ export class ControlRuntimeReverse {
             config.mcp.publicBaseUrl === undefined
         ) {
             if (!hasReverseInstance) return;
-            throw createError({
-                code: errorCodes.controlConfigValidationFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.configValidationFailed,
                 message:
                     "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",
                 retryable: false,

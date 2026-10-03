@@ -6,6 +6,7 @@ import { Box, Text } from "ink";
 
 import type { TuiAppState } from "../../state/store/Model.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 import { TuiComponentConfirmDialog } from "./Confirm.js";
 import { TuiComponentTextDetail } from "../component/content/Detail.js";
 import {
@@ -17,6 +18,7 @@ import {
 
 export interface TuiOverlayViewProps {
     onTextDetailImageVisibility?(visible: boolean): void;
+    reader: TuiDomainReader;
     state: TuiAppState;
     viewportRows: number;
     width: number;
@@ -55,17 +57,17 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
                 />
             );
         case "approval": {
-            const approval = (
-                props.state.readModel.instanceState[overlay.instance]
-                    ?.approvals ?? []
-            ).find((candidate) => candidate.approvalId === overlay.approvalId);
+            const approval = props.reader
+                .approval(overlay.instance)
+                .approvals.find(
+                    (candidate) => candidate.approvalId === overlay.approvalId,
+                );
             const toolCall =
                 approval === undefined
                     ? undefined
-                    : (
-                          props.state.readModel.instanceState[overlay.instance]
-                              ?.toolCalls ?? []
-                      ).find(
+                    : props.reader.toolCalls.instances[
+                          overlay.instance
+                      ]?.calls.find(
                           (candidate) => candidate.callId === approval.callId,
                       );
             return (

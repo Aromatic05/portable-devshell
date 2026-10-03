@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
     WebApplicationDescriptor,
     WebPageDescriptor,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import { pageRoute, type WebPage, type WebRoute } from "../../app/Route.js";
 

@@ -1,7 +1,7 @@
 import {
     Endpoint,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
@@ -127,7 +127,7 @@ export class WorkerInstanceConnection {
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
                 error,
-                errorCodes.coreWorkerHandshakeFailed,
+                runtimeErrorCodes.workerHandshakeFailed,
                 `Worker handshake failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
@@ -138,14 +138,14 @@ export class WorkerInstanceConnection {
                 daemonState: "running",
                 lastErrorCode: getErrorCode(
                     wrappedError,
-                    errorCodes.coreWorkerHandshakeFailed,
+                    runtimeErrorCodes.workerHandshakeFailed,
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
             });
             if (wrappedError !== error) throw wrappedError;
             if (isKnownErrorCode(error)) throw error;
-            throw createError({
-                code: errorCodes.coreWorkerHandshakeFailed,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerHandshakeFailed,
                 cause: error,
                 message: `Worker handshake failed for instance ${this.#config.name}.`,
                 retryable: false,
@@ -201,8 +201,8 @@ export class WorkerInstanceConnection {
             input.generation <= previousGeneration
         ) {
             channel.close();
-            throw createError({
-                code: errorCodes.reverseGenerationInvalid,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseGenerationInvalid,
                 details: {
                     generation: input.generation,
                     instance: this.#config.name,
@@ -247,8 +247,8 @@ export class WorkerInstanceConnection {
             this.#config.managementMode === "selfManaged" &&
             !this.#endpoint.connected
         ) {
-            throw createError({
-                code: errorCodes.reverseTransportUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseTransportUnavailable,
                 details: { instance: this.#config.name },
                 message: `Reverse instance ${this.#config.name} is offline.`,
                 retryable: true,
@@ -323,7 +323,7 @@ export class WorkerInstanceConnection {
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
                 error,
-                errorCodes.coreWorkerHandshakeFailed,
+                runtimeErrorCodes.workerHandshakeFailed,
                 `Worker handshake failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
@@ -337,7 +337,7 @@ export class WorkerInstanceConnection {
                 daemonState: "running",
                 lastErrorCode: getErrorCode(
                     wrappedError,
-                    errorCodes.coreWorkerHandshakeFailed,
+                    runtimeErrorCodes.workerHandshakeFailed,
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
                 pid,
@@ -351,8 +351,8 @@ export class WorkerInstanceConnection {
                 throw error;
             }
 
-            throw createError({
-                code: errorCodes.coreWorkerHandshakeFailed,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerHandshakeFailed,
                 cause: error,
                 message: `Worker handshake failed for instance ${this.#config.name}.`,
                 retryable: false,
@@ -364,8 +364,8 @@ export class WorkerInstanceConnection {
     async stopSelfManaged(): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();
         if (!this.#endpoint.connected) {
-            throw createError({
-                code: errorCodes.reverseSelfManagedOffline,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseSelfManagedOffline,
                 details: { instance: this.#config.name },
                 message: `Reverse instance ${this.#config.name} is offline.`,
                 retryable: true,
@@ -387,7 +387,7 @@ export class WorkerInstanceConnection {
                 daemonState: "failed",
                 lastErrorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerStopFailed,
+                    runtimeErrorCodes.workerStopFailed,
                 ),
                 lastErrorMessage: readErrorMessage(error),
             });
@@ -421,7 +421,7 @@ export class WorkerInstanceConnection {
                 : {
                       lastErrorCode: getErrorCode(
                           error,
-                          errorCodes.coreWorkerTransportDisconnected,
+                          runtimeErrorCodes.workerTransportDisconnected,
                       ),
                       lastErrorMessage: readErrorMessage(error),
                   }),
@@ -435,8 +435,8 @@ export class WorkerInstanceConnection {
             return;
         }
 
-        throw createError({
-            code: errorCodes.reverseInstanceNotReverse,
+        throw createRemoteError({
+            code: runtimeErrorCodes.reverseInstanceNotReverse,
             details: { instance: this.#config.name },
             message: `Instance ${this.#config.name} is not a reverse instance.`,
             retryable: false,
@@ -455,7 +455,7 @@ export class WorkerInstanceConnection {
                 toEventData({
                     errorCode: getErrorCode(
                         error,
-                        errorCodes.coreWorkerTransportDisconnected,
+                        runtimeErrorCodes.workerTransportDisconnected,
                     ),
                 }),
             );
@@ -464,7 +464,7 @@ export class WorkerInstanceConnection {
                 toEventData({
                     errorCode: getErrorCode(
                         error,
-                        errorCodes.coreWorkerTransportDisconnected,
+                        runtimeErrorCodes.workerTransportDisconnected,
                     ),
                 }),
             );
@@ -473,7 +473,7 @@ export class WorkerInstanceConnection {
                 daemonState: "stopped",
                 lastErrorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerTransportDisconnected,
+                    runtimeErrorCodes.workerTransportDisconnected,
                 ),
                 lastErrorMessage: readErrorMessage(error),
                 pid: undefined,
@@ -487,7 +487,7 @@ export class WorkerInstanceConnection {
             toEventData({
                 errorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerTransportDisconnected,
+                    runtimeErrorCodes.workerTransportDisconnected,
                 ),
             }),
         );
@@ -499,7 +499,7 @@ export class WorkerInstanceConnection {
             daemonState,
             lastErrorCode: getErrorCode(
                 error,
-                errorCodes.coreWorkerTransportDisconnected,
+                runtimeErrorCodes.workerTransportDisconnected,
             ),
             lastErrorMessage: readErrorMessage(error),
         });

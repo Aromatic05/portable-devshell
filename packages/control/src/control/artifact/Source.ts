@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ArtifactPayloadDescriptor,
     type ArtifactShareInput,
     type ArtifactSourceDescriptor,
@@ -41,8 +41,8 @@ export function readTransferPayloadSourceInput(
             typeof input.sourceWorkspace !== "string" ||
             input.sourceWorkspace.length === 0
         ) {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message:
                     "Artifact transfer sourcePath requires sourceWorkspace.",
                 retryable: false,
@@ -50,8 +50,8 @@ export function readTransferPayloadSourceInput(
         }
         return { path: input.sourcePath, workspace: input.sourceWorkspace };
     }
-    throw createError({
-        code: errorCodes.targetInvalid,
+    throw createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message: "Exactly one of handle or sourcePath is required.",
         retryable: false,
     });
@@ -63,8 +63,8 @@ export function readSourceInstance(
 ): string {
     const resolved = instance ?? defaultInstance;
     if (resolved.length === 0) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "Artifact source instance is required.",
             retryable: false,
         });
@@ -74,8 +74,8 @@ export function readSourceInstance(
 
 export function validateTransferStart(input: ArtifactTransferStartInput): void {
     if (input.operation !== "start") {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "Artifact transfer start requires operation=start.",
             retryable: false,
         });
@@ -86,8 +86,8 @@ export function validateTransferStart(input: ArtifactTransferStartInput): void {
         input.targetPath.length === 0 ||
         input.targetWorkspace.length === 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "Artifact transfer requires targetInstance, targetPath, and targetWorkspace.",
             retryable: false,
@@ -142,16 +142,16 @@ function readPathOrHandle(
             typeof input.workspace !== "string" ||
             input.workspace.length === 0
         ) {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message: `${toolName} path requires workspace.`,
                 retryable: false,
             });
         }
         return { path, workspace: input.workspace };
     }
-    throw createError({
-        code: errorCodes.targetInvalid,
+    throw createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message: `${toolName} requires exactly one of handle or path.`,
         retryable: false,
     });

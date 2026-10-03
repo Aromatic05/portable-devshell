@@ -1,14 +1,9 @@
 import { type ReactNode } from "react";
 
-import {
-    formatBytes,
-    formatDuration,
-    formatPercent,
-    type OperationalOverviewSystem,
-} from "@portable-devshell/shared/browser";
+import type { OperationalOverviewSystem } from "@portable-devshell/shared";
 
-import type { WebState } from "../../state/Store.js";
-import { webFailures } from "../../state/Model.js";
+import { formatBytes, formatDuration, formatPercent } from "../Presentation.js";
+import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import { webRouteHref } from "../../app/Route.js";
 import {
     overviewAlertRoute,
@@ -16,16 +11,19 @@ import {
     overviewToolCalls,
 } from "../ReadModel.js";
 
-export function Overview({ state }: { state: WebState }) {
-    const overview = state.readModel.overview;
+export function Overview() {
+    const domains = useWebDomains();
+    const overviewState = useDomainSnapshot(domains.overview);
+    const service = useDomainSnapshot(domains.service);
+    const overview = overviewState.overview;
     if (overview === undefined) {
-        const failure = webFailures(state.readModel).overview;
+        const failure = overviewState.failure;
         const message =
-            state.connection === "offline"
+            service.status === "offline"
                 ? "Overview is unavailable while offline."
                 : failure === undefined
                   ? "Loading operational overview…"
-                  : `Overview could not be refreshed: ${failure}`;
+                  : `Overview could not be refreshed: ${failure.message}`;
         return (
             <section>
                 <h2>Overview</h2>

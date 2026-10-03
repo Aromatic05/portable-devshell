@@ -1,11 +1,4 @@
-import {
-    type ControlError,
-    type ControlInstanceReadState,
-    type ControlReadModelState,
-    type ConversationPreferencesSnapshot,
-    type InstanceEvent,
-    type TuiPageSnapshot,
-} from "@portable-devshell/shared";
+import { type RemoteError } from "@portable-devshell/shared";
 
 import type { TuiEditorState } from "../Interaction.js";
 import type { TuiOverlay } from "../Overlay.js";
@@ -22,13 +15,10 @@ import type {
 import { createInitialTuiAppState } from "./Initial.js";
 import { tuiAppReducer } from "./reducer/Reducer.js";
 import {
-    toRawEventRecord,
     type TuiAppAction,
     type TuiAppState,
     type TuiCommandRecord,
     type TuiConnectionStatus,
-    type TuiControlReadModelPatch,
-    type TuiInstanceListEntry,
 } from "./Model.js";
 
 export interface TuiAppStoreOptions {
@@ -74,69 +64,6 @@ export class TuiAppStore {
         for (const listener of this.#listeners) {
             listener();
         }
-    }
-
-    replaceControlReadModel(
-        readModel: ControlReadModelState,
-        instances: TuiInstanceListEntry[] = this.#state.instances,
-    ): void {
-        this.dispatch({
-            instances,
-            readModel,
-            type: "control.readModel.replace",
-        });
-    }
-
-    setConversationPreferences(
-        preferences: ConversationPreferencesSnapshot,
-    ): void {
-        this.dispatch({
-            preferences,
-            type: "conversationPreferences.replace",
-        });
-    }
-
-    setExtensionPageSnapshot(pageId: string, snapshot: TuiPageSnapshot): void {
-        this.dispatch({ pageId, snapshot, type: "extensionPage.replace" });
-    }
-
-    patchControlReadModel(patch: TuiControlReadModelPatch): void {
-        const { instanceState, instances, ...global } = patch;
-        const current = this.#state.readModel;
-        const nextInstanceState =
-            instanceState === undefined
-                ? current.instanceState
-                : { ...current.instanceState };
-        if (instanceState !== undefined) {
-            for (const [name, value] of Object.entries(instanceState)) {
-                nextInstanceState[name] = {
-                    ...emptyInstanceReadState(),
-                    ...current.instanceState[name],
-                    ...value,
-                };
-            }
-        }
-        this.replaceControlReadModel(
-            {
-                ...current,
-                ...global,
-                instanceState: nextInstanceState,
-            },
-            instances ?? this.#state.instances,
-        );
-    }
-
-    patchControlSnapshot(
-        snapshot: NonNullable<ControlInstanceReadState["snapshot"]>,
-    ): void {
-        this.patchControlReadModel({
-            instanceState: {
-                [snapshot.name]: {
-                    sequence: snapshot.lastSeq,
-                    snapshot,
-                },
-            },
-        });
     }
 
     setControlRestartRequired(required: boolean): void {
@@ -267,7 +194,7 @@ export class TuiAppStore {
         });
     }
 
-    setPanelError(key: string, error?: ControlError): void {
+    setPanelError(key: string, error?: RemoteError): void {
         this.dispatch({
             error,
             key,
@@ -333,29 +260,4 @@ export class TuiAppStore {
             type: "relay.setMetadata",
         });
     }
-
-    applyInstanceEvent(event: InstanceEvent): void {
-        const lastSeq =
-            this.#state.readModel.instanceState[event.instanceName]?.sequence ??
-            0;
-        if (event.seq <= lastSeq) return;
-        this.dispatch({
-            rawEvent: toRawEventRecord(event),
-            type: "event.append",
-        });
-    }
-}
-
-function emptyInstanceReadState(): ControlInstanceReadState {
-    return {
-        approvals: [],
-        commentCalls: [],
-        conversationEntries: [],
-        contextMessages: [],
-        goals: [],
-        logs: [],
-        reportCalls: [],
-        sequence: 0,
-        toolCalls: [],
-    };
 }

@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { generateOAuth2ApprovalToken } from "@portable-devshell/shared/browser";
+import { generateOAuth2ApprovalToken } from "@portable-devshell/shared";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
     ConfigMcpPatch,
+    ConfigView,
     ConfigWebPatch,
     JsonValue,
+    McpRuntimeStatus,
     OAuthApprovalRequest,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
-import type { WebState } from "../../state/Model.js";
+import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 
@@ -22,17 +24,21 @@ interface ConnectionDrafts {
 export function Connections({
     disabled,
     instance,
-    state,
     store,
 }: {
     disabled: boolean;
     instance?: string;
-    state: WebState;
     store: WebStore;
 }) {
+    const domains = useWebDomains();
+    const config = useDomainSnapshot(domains.config);
+    const instancesState = useDomainSnapshot(domains.instances);
+    const mcp = useDomainSnapshot(domains.mcp);
+    const service = useDomainSnapshot(domains.service);
+    const configView = config.view;
     const instances = useMemo(
-        () => configInstances(state),
-        [state.readModel.configView],
+        () => configInstances(configView),
+        [configView],
     );
     const selectedName =
         instance !== undefined &&
@@ -42,8 +48,8 @@ export function Connections({
     const missingInstance =
         instance !== undefined && selectedName === undefined;
     const base = useMemo(
-        () => connectionDrafts(state.readModel.configView, selectedName),
-        [state.readModel.configView, selectedName],
+        () => connectionDrafts(configView, selectedName),
+        [configView, selectedName],
     );
     const [drafts, setDrafts] = useState<ConnectionDrafts>(base);
     const [feedback, setFeedback] = useState<{
@@ -67,14 +73,15 @@ export function Connections({
     const snapshot =
         selectedName === undefined
             ? undefined
-            : state.readModel.instanceState[selectedName]?.snapshot;
+            : instancesState.instances.find(
+                  (entry) => entry.name === selectedName,
+              )?.snapshot;
     const dirty = JSON.stringify(drafts) !== JSON.stringify(base);
-    const pending = state.operations["config:update"] !== undefined;
-    const interactive = state.connection === "online" && !disabled && !pending;
-    const mcpStatus = state.readModel.mcpStatus;
-    const oauthApproval = globalOAuthApproval(state.readModel.configView);
-    const controlRestartRequired =
-        state.readModel.configView?.restartControlRequired === true;
+    const pending = store.state.operations["config:update"] !== undefined;
+    const interactive = service.status === "online" && !disabled && !pending;
+    const mcpStatus = mcp.status;
+    const oauthApproval = globalOAuthApproval(configView);
+    const controlRestartRequired = configView?.restartControlRequired === true;
 
     if (missingInstance) {
         return (
@@ -129,11 +136,7 @@ export function Connections({
     }
 
     async function validate(): Promise<boolean> {
-        const draft = fullValidationDraft(
-            state.readModel.configView,
-            selectedName,
-            drafts,
-        );
+        const draft = fullValidationDraft(configView, selectedName, drafts);
         const succeeded = await store.validateConfig(draft);
         setFeedback(
             succeeded
@@ -173,14 +176,12 @@ export function Connections({
             });
             return;
         }
-        setDrafts(
-            connectionDrafts(store.state.readModel.configView, selectedName),
-        );
+        const savedView = domains.config.state.view;
+        setDrafts(connectionDrafts(savedView, selectedName));
         setFeedback({
             kind: "success",
             text:
-                store.state.readModel.configView?.restartControlRequired ===
-                true
+                savedView?.restartControlRequired === true
                     ? "Saved. Restart Control to apply endpoint changes."
                     : "Connection configuration saved.",
         });
@@ -496,7 +497,7 @@ export function Connections({
 
             <OAuthSection
                 approval={oauthApproval}
-                approvals={state.readModel.oauthApprovals}
+                approvals={mcp.approvals}
                 interactive={interactive}
                 newToken={approvalToken}
                 onRotate={() => void updateOAuthApproval("token", true)}
@@ -556,7 +557,7 @@ export function Connections({
                 <ConfirmationDialog
                     actionLabel={confirm === "rotate" ? "Rotate" : "Revoke"}
                     busy={
-                        state.operations[
+                        store.state.operations[
                             confirm === "rotate"
                                 ? `reverse:rotate:${selectedEntry.name}`
                                 : `reverse:revoke:${selectedEntry.name}`
@@ -601,7 +602,7 @@ function OAuthSection({
     onRotate(): void;
     onUseToken(): void;
     onUseTui(): void;
-    status: WebState["readModel"]["mcpStatus"];
+    status: McpRuntimeStatus | undefined;
 }) {
     const pending = approvals.filter(
         (approval) => approval.status === "pending",
@@ -778,12 +779,12 @@ function Check({
 }
 
 function connectionDrafts(
-    configView: Record<string, JsonValue> | undefined,
+    configView: ConfigView | undefined,
     instance: string | undefined,
 ): ConnectionDrafts {
-    const entry = configInstances({
-        readModel: { configView },
-    } as WebState).find((candidate) => candidate.name === instance);
+    const entry = configInstances(configView).find(
+        (candidate) => candidate.name === instance,
+    );
     const mcp = asRecord(entry?.mcp);
     return {
         instanceMcp: {
@@ -810,7 +811,7 @@ function connectionDrafts(
 }
 
 function globalOAuthApproval(
-    configView: Record<string, JsonValue> | undefined,
+    configView: ConfigView | undefined,
 ): { mode: "token" | "tui"; tokenConfigured: boolean } {
     const mcp = asRecord(configView?.mcp);
     const oauth2 = asRecord(mcp?.oauth2);
@@ -821,7 +822,7 @@ function globalOAuthApproval(
     };
 }
 
-function configMcpPatch(value: JsonValue | undefined): ConfigMcpPatch {
+function configMcpPatch(value: unknown): ConfigMcpPatch {
     const record = asRecord(value);
     return {
         enabled: record?.enabled !== false,
@@ -838,7 +839,7 @@ function configMcpPatch(value: JsonValue | undefined): ConfigMcpPatch {
     };
 }
 
-function configWebPatch(value: JsonValue | undefined): ConfigWebPatch {
+function configWebPatch(value: unknown): ConfigWebPatch {
     const record = asRecord(value);
     return {
         auth: authMode(record?.auth),
@@ -859,7 +860,7 @@ function configWebPatch(value: JsonValue | undefined): ConfigWebPatch {
 }
 
 function fullValidationDraft(
-    configView: Record<string, JsonValue> | undefined,
+    configView: ConfigView | undefined,
     selected: string | undefined,
     drafts: ConnectionDrafts,
 ): ConfigDraft {
@@ -891,9 +892,9 @@ function fullValidationDraft(
 }
 
 function configInstances(
-    state: Pick<WebState, "readModel">,
+    view: ConfigView | undefined,
 ): Array<Record<string, JsonValue> & { name: string }> {
-    const values = state.readModel.configView?.instances;
+    const values = view?.instances;
     if (!Array.isArray(values)) return [];
     return values.flatMap((value) => {
         const record = asRecord(value);
@@ -903,19 +904,17 @@ function configInstances(
     });
 }
 
-function asRecord(
-    value: JsonValue | undefined,
-): Record<string, JsonValue> | undefined {
+function asRecord(value: unknown): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value
+        ? (value as Record<string, JsonValue>)
         : undefined;
 }
 
-function authMode(value: JsonValue | undefined): "none" | "oauth2" | "token" {
+function authMode(value: unknown): "none" | "oauth2" | "token" {
     return value === "token" || value === "oauth2" ? value : "none";
 }
 
-function oauthDraft(value: JsonValue | undefined):
+function oauthDraft(value: unknown):
     | {
           documentationUrl?: string;
           requiredScopes?: string[];

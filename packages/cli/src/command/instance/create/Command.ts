@@ -1,12 +1,12 @@
 import type {
     InstanceCreateResult,
+    InstanceManagementTransport,
+    ReverseConnectionTransport,
     ReverseDeviceCodeResult,
 } from "@portable-devshell/shared";
 
-import type { ControlClients } from "@portable-devshell/shared";
-
-type CliClientInstance = ControlClients["instance"];
-type CliClientReverse = ControlClients["reverse"];
+type CliClientInstance = InstanceManagementTransport;
+type CliClientReverse = ReverseConnectionTransport;
 import { CliWizardInstanceCreate } from "./Wizard.js";
 
 export interface CliInstanceCreateResult extends InstanceCreateResult {

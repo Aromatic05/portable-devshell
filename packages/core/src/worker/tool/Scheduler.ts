@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type InstanceName,
     type JsonValue,
     type ToolCallContext,
@@ -87,7 +87,7 @@ export const defaultWorkerToolSchedulerLimits: WorkerToolSchedulerLimits = {
 };
 
 export class WorkerToolSchedulerFullError extends Error {
-    readonly code = errorCodes.coreToolSchedulerFull;
+    readonly code = runtimeErrorCodes.toolSchedulerFull;
     readonly details: SchedulerDetails;
 
     constructor(details: SchedulerDetails) {
@@ -97,7 +97,7 @@ export class WorkerToolSchedulerFullError extends Error {
 }
 
 export class WorkerToolQueueTimeoutError extends Error {
-    readonly code = errorCodes.coreToolQueueTimeout;
+    readonly code = runtimeErrorCodes.toolQueueTimeout;
     readonly details: SchedulerDetails;
 
     constructor(details: SchedulerDetails) {
@@ -360,8 +360,8 @@ export class WorkerToolCallScheduler {
         request: WorkerToolSchedulerRequest,
         reason: unknown,
     ) {
-        return createError({
-            code: errorCodes.coreToolCallCancelled,
+        return createRemoteError({
+            code: runtimeErrorCodes.toolCallCancelled,
             message: "Tool call was cancelled before it started.",
             retryable: true,
             details: {

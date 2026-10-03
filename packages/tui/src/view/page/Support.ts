@@ -1,21 +1,17 @@
 import type {
+    InstanceListEntry,
     InstanceSnapshot,
     ApprovalRequest,
-    JsonValue,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { BoxLine, BoxModel } from "../component/content/Box.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 import type { TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRouteItemKey } from "../../state/route/State.js";
 import { resolveSelectedDetailLineId } from "../../interaction/selection/Detail.js";
 import type { TuiExpandableBoxStatus, TuiPageId } from "../../state/Ui.js";
-import {
-    selectTuiLogs,
-    type TuiAppState,
-    type TuiLogEntry,
-    type TuiInstanceListEntry,
-} from "../../state/store/Model.js";
+import { type TuiAppState, type TuiLogEntry } from "../../state/store/Model.js";
 
 export interface SelectedInstancePageContext {
     approvals: ApprovalRequest[];
@@ -25,25 +21,28 @@ export interface SelectedInstancePageContext {
               publicBaseUrl?: string;
           }
         | undefined;
-    instance: TuiInstanceListEntry | undefined;
+    instance: InstanceListEntry | undefined;
     logs: TuiLogEntry[];
     snapshot: InstanceSnapshot | undefined;
     toolCalls: ToolCallRecord[];
 }
 
 export function buildSelectedInstancePageContext(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): SelectedInstancePageContext {
+    const runtime = reader.runtime(instanceName);
     return {
-        approvals: (
-            state.readModel.instanceState[instanceName]?.approvals ?? []
-        ).filter((approval) => approval.status === "pending"),
-        config: readConfigInstance(state, instanceName),
-        instance: state.instances.find((entry) => entry.name === instanceName),
-        logs: selectTuiLogs(state, instanceName),
-        snapshot: state.readModel.instanceState[instanceName]?.snapshot,
-        toolCalls: state.readModel.instanceState[instanceName]?.toolCalls ?? [],
+        approvals: (reader.approval(instanceName).approvals ?? []).filter(
+            (approval) => approval.status === "pending",
+        ),
+        config: readConfigInstance(reader, instanceName),
+        instance: reader.instances.instances.find(
+            (entry) => entry.name === instanceName,
+        ),
+        logs: runtime.logs,
+        snapshot: runtime.snapshot,
+        toolCalls: reader.toolCalls.instances[instanceName]?.calls ?? [],
     };
 }
 
@@ -150,7 +149,7 @@ export function compactSummary(...entries: Array<[string, string]>): string {
 }
 
 export function readConfigInstance(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ):
     | {
@@ -158,35 +157,14 @@ export function readConfigInstance(
           publicBaseUrl?: string;
       }
     | undefined {
-    const instances = state.readModel.configView?.instances;
-    const mcp = asRecord(state.readModel.configView?.mcp);
-    const auth = asRecord(mcp?.auth);
-
-    if (!Array.isArray(instances)) {
-        return {
-            authMode: typeof auth?.mode === "string" ? auth.mode : undefined,
-            publicBaseUrl:
-                typeof mcp?.publicBaseUrl === "string"
-                    ? mcp.publicBaseUrl
-                    : undefined,
-        };
-    }
-
-    const configEntry = instances.find(
-        (entry) =>
-            typeof entry === "object" &&
-            entry !== null &&
-            !Array.isArray(entry) &&
-            (entry as Record<string, JsonValue>).name === instanceName,
-    ) as Record<string, JsonValue> | undefined;
+    const configView = reader.config.view;
+    const configEntry = configView?.instances.find(
+        (entry) => entry.name === instanceName,
+    );
 
     return {
-        authMode: typeof auth?.mode === "string" ? auth.mode : undefined,
-        publicBaseUrl:
-            typeof mcp?.publicBaseUrl === "string"
-                ? mcp.publicBaseUrl
-                : undefined,
-        ...(configEntry === undefined ? {} : {}),
+        authMode: configEntry?.mcp.auth.mode,
+        publicBaseUrl: configView?.mcp.publicBaseUrl,
     };
 }
 
@@ -315,12 +293,4 @@ function collapsedToneFor(line: string, index: number): BoxLine["tone"] {
     }
 
     return "muted";
-}
-
-function asRecord(
-    value: JsonValue | undefined,
-): Record<string, JsonValue> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value
-        : undefined;
 }

@@ -15,8 +15,8 @@ import {
     ConfigInputError,
     ControlPathHome,
     createDefaultControlConfig,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     formatConfigPath,
     normalizeConfigGlobalDraft,
     type ControlConfig,
@@ -185,8 +185,8 @@ export class ControlConfigStore {
         } catch (error) {
             if (isFileMissingError(error))
                 return { instances: [], migrated: false };
-            throw createError({
-                code: errorCodes.controlConfigLoadFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.configLoadFailed,
                 cause: error,
                 details: { configFile: paths.instancesDir, phase: "read" },
                 message: `Failed to load instance configs from ${paths.instancesDir}.`,
@@ -295,8 +295,8 @@ async function recoverConfigTransaction(paths: ControlPathHome): Promise<void> {
     }
     const id = marker.trim();
     if (!/^[0-9a-f-]{36}$/u.test(id)) {
-        throw createError({
-            code: errorCodes.controlConfigLoadFailed,
+        throw createRemoteError({
+            code: controlErrorCodes.configLoadFailed,
             details: { configFile: markerFile, phase: "recover" },
             message: "Control configuration transaction marker is invalid.",
             retryable: false,
@@ -311,8 +311,8 @@ async function recoverConfigTransaction(paths: ControlPathHome): Promise<void> {
             ) as unknown,
         );
     } catch (error) {
-        throw createError({
-            code: errorCodes.controlConfigLoadFailed,
+        throw createRemoteError({
+            code: controlErrorCodes.configLoadFailed,
             cause: error,
             details: { configFile: markerFile, phase: "recover" },
             message:
@@ -480,8 +480,8 @@ async function atomicWriteFile(
     } catch (error) {
         await file.close().catch(() => undefined);
         await rm(temporaryPath, { force: true }).catch(() => undefined);
-        throw createError({
-            code: errorCodes.controlConfigLoadFailed,
+        throw createRemoteError({
+            code: controlErrorCodes.configLoadFailed,
             cause: error,
             details: { configFile: filePath, phase: "write" },
             message: `Failed to write control config to ${filePath}.`,
@@ -505,11 +505,11 @@ async function secureFile(path: string): Promise<void> {
 
 function attachConfigFile(error: unknown, configFile: string): Error {
     if (error instanceof ConfigInputError) {
-        return createError({
+        return createRemoteError({
             code:
                 error.issue.phase === "semantic"
-                    ? errorCodes.controlConfigValidationFailed
-                    : errorCodes.controlConfigParseFailed,
+                    ? controlErrorCodes.configValidationFailed
+                    : controlErrorCodes.configParseFailed,
             cause: error,
             details: {
                 configFile,
@@ -522,7 +522,7 @@ function attachConfigFile(error: unknown, configFile: string): Error {
         });
     }
     if (isStructuredConfigError(error)) {
-        return createError({
+        return createRemoteError({
             code: error.code,
             cause: error,
             details: { configFile, ...(error.details ?? {}) },
@@ -530,8 +530,8 @@ function attachConfigFile(error: unknown, configFile: string): Error {
             retryable: false,
         });
     }
-    return createError({
-        code: errorCodes.controlConfigLoadFailed,
+    return createRemoteError({
+        code: controlErrorCodes.configLoadFailed,
         cause: error,
         details: { configFile, phase: "read" },
         message: `Failed to load control config from ${configFile}.`,

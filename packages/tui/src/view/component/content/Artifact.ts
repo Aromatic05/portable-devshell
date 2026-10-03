@@ -1,9 +1,10 @@
-import { formatBytes, formatDuration } from "@portable-devshell/shared";
 import {
     isArtifactTransferTerminal,
     type ArtifactShareResult,
     type ArtifactTransferRecord,
 } from "@portable-devshell/shared";
+
+import { formatBytes, formatDuration } from "../../presentation/Format.js";
 
 export interface TuiComponentArtifactActivityDetailLine {
     disabled?: boolean;

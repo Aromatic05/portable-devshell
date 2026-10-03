@@ -14,6 +14,7 @@ import {
 import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "./Snapshot.js";
 import { WorkspaceAppLeaseStore } from "./app/Lease.js";
 import { WorkspaceAppPresenceStore } from "./app/Presence.js";
+import { WorkspaceActionStore } from "./ActionStore.js";
 
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_POLL_MS = 250;
@@ -25,6 +26,7 @@ export interface McpWorkspaceLiveRouteOptions {
     host: HttpHost;
     instanceName: string;
     leases: WorkspaceAppLeaseStore;
+    actions: WorkspaceActionStore;
     pollMs?: number;
     presence: WorkspaceAppPresenceStore;
     publicBaseUrl?: string;
@@ -119,6 +121,7 @@ function registerLiveRouteBase(
                             {
                                 instances: authorized.instances,
                                 reentry: authorized.reentry,
+                                directives: await options.actions.pendingDirectives(ctxId, options.instanceName),
                             },
                         ),
                     );
@@ -182,6 +185,7 @@ function registerLiveRouteBase(
                                                 ctxId,
                                                 options.instanceName,
                                             )) as unknown as JsonValue,
+                                        directives: await options.actions.pendingDirectives(ctxId, options.instanceName),
                                     },
                                 ),
                             });

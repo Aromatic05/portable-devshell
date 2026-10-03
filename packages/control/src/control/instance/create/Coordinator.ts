@@ -2,9 +2,9 @@ import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     ConfigInputError,
     configInputError,
-    createError,
+    createRemoteError,
     defaultConfigNormalizeContext,
-    errorCodes,
+    controlErrorCodes,
     formatConfigPath,
     normalizeConfigInstanceDraft,
     parseConfigInstanceDraft,
@@ -225,8 +225,8 @@ export class InstanceCreateCoordinator {
                 (entry) => entry.name === instance.name,
             )
         ) {
-            throw createError({
-                code: errorCodes.instanceAlreadyExists,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceAlreadyExists,
                 details: { instance: instance.name },
                 message: `Instance ${instance.name} already exists.`,
                 retryable: false,
@@ -281,8 +281,8 @@ export class InstanceCreateCoordinator {
             return read();
         } catch (error) {
             if (!(error instanceof ConfigInputError)) throw error;
-            throw createError({
-                code: errorCodes.controlConfigInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.configInvalid,
                 cause: error,
                 details: {
                     fieldPath: formatConfigPath(error.issue.path),
@@ -298,16 +298,16 @@ export class InstanceCreateCoordinator {
 
 function toConfigInvalidError(error: unknown): Error {
     if (isStructuredError(error)) {
-        return createError({
-            code: errorCodes.controlConfigInvalid,
+        return createRemoteError({
+            code: controlErrorCodes.configInvalid,
             cause: error,
             details: error.details,
             message: error.message,
             retryable: false,
         });
     }
-    return createError({
-        code: errorCodes.controlConfigInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.configInvalid,
         cause: error,
         message: error instanceof Error ? error.message : String(error),
         retryable: false,

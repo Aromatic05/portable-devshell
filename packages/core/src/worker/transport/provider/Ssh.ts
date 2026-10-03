@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-    ControlError,
-    createError,
-    errorCodes,
+    RemoteError,
+    createRemoteError,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import { parseArgsStringToArgv } from "string-argv";
 
@@ -104,7 +104,7 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
                         "worker install check failed",
                 ),
                 {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    errorCode: runtimeErrorCodes.workerProvisionFailed,
                     result,
                 },
             );
@@ -254,7 +254,7 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
 
             return parseWorkerTargetProbeOutput(context, result.stdout);
         } catch (error) {
-            if (error instanceof ControlError) {
+            if (error instanceof RemoteError) {
                 throw error;
             }
 
@@ -270,7 +270,7 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
         return this.#process.spawn(
             context,
             { stdio },
-            errorCodes.coreProviderFailed,
+            runtimeErrorCodes.providerFailed,
         );
     }
 
@@ -292,8 +292,8 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
                 !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ||
                 value.includes("\0")
             ) {
-                throw createError({
-                    code: errorCodes.coreProviderFailed,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.providerFailed,
                     details: { environmentKey: key, provider: "ssh" },
                     message: `SSH instance environment key ${key} cannot be represented safely.`,
                     retryable: false,

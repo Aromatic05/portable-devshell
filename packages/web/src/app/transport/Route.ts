@@ -1,4 +1,4 @@
-import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared/browser";
+import { CONTROL_WEB_BASE_PATH } from "@portable-devshell/shared";
 
 const webSegment = CONTROL_WEB_BASE_PATH.slice(1);
 

@@ -4,7 +4,10 @@ import type { ReadStream, WriteStream } from "node:tty";
 import React from "react";
 import { render, type Instance as InkInstance } from "ink";
 
-import { createTuiClients, type TuiClients } from "./control/Client.js";
+import {
+    createTuiDomainSession,
+    type TuiDomainSession,
+} from "./control/Client.js";
 import { TuiCommandDispatcher } from "../interaction/command/Dispatch.js";
 import { TuiControlSession } from "./control/Session.js";
 import { TuiFocusManager } from "../interaction/focus/Manager.js";
@@ -14,10 +17,11 @@ import { buildFocusGraphForState } from "../view/shell/Router.js";
 import { TuiAppStore } from "../state/store/App.js";
 import { topTuiOverlay } from "../state/Overlay.js";
 import {
+    createTuiViewProjection,
     selectErrorMessage,
-    selectMainScreenModel,
-    tuiViewProjection,
 } from "../view/projection/View.js";
+import { TuiDomainReader } from "../view/domain/Reader.js";
+import type { TuiInteractionProjection } from "../interaction/Projection.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
 import { currentTuiRoute } from "../state/route/State.js";
 import { TuiApp } from "../view/shell/App.js";
@@ -69,7 +73,7 @@ export interface TuiRuntimeOptions {
 }
 
 export interface TuiRuntimeDependencies {
-    clients?: TuiClients;
+    domains?: TuiDomainSession;
     graphicsMode?: TuiTerminalGraphicsMode;
     inkDebug?: boolean;
     terminal?: TuiTerminalSession;
@@ -83,6 +87,9 @@ export class TuiRuntime {
     readonly scheduler: TuiRenderScheduler;
     readonly selection: TuiScreenTextSelection;
     readonly session: TuiControlSession;
+    readonly domains: TuiDomainSession;
+    readonly reader: TuiDomainReader;
+    readonly projection: TuiInteractionProjection;
     readonly store: TuiAppStore;
     readonly terminal: TuiTerminalSession;
     readonly tmuxPanes: TuiTmuxPaneTerminalSession;
@@ -141,35 +148,10 @@ export class TuiRuntime {
         this.#alternateScreen = new AlternateScreen(this.#stdout);
         this.store = new TuiAppStore();
         this.scheduler = new TuiRenderScheduler(this.store);
-        this.focusManager = new TuiFocusManager(this.store, {
-            boxIdForLine: (lineId) =>
-                selectMainScreenModel(this.store.getState()).boxes.find((box) =>
-                    box.expandedLines.some((line) => line.id === lineId),
-                )?.id,
-            currentPage: () => this.store.getState().ui.selectedPage,
-            expandedKeyFor: (boxId) =>
-                selectMainScreenModel(this.store.getState()).boxes.find(
-                    (box) => box.id === boxId,
-                )?.expandedKey,
-            graphFor: (page, mode) =>
-                buildFocusGraphForState({
-                    ...this.store.getState(),
-                    interaction: {
-                        ...this.store.getState().interaction,
-                        focusScope: mode,
-                    },
-                    ui: {
-                        ...this.store.getState().ui,
-                        selectedPage: page,
-                    },
-                }),
-            mode: () => this.store.getState().interaction.focusScope,
-        });
-        this.keyDispatcher = new TuiKeyDispatcher();
 
-        const clients =
-            dependencies.clients ??
-            createTuiClients({
+        const domains =
+            dependencies.domains ??
+            createTuiDomainSession({
                 ...(options.controlToken === undefined
                     ? {}
                     : { controlToken: options.controlToken }),
@@ -181,9 +163,44 @@ export class TuiRuntime {
                     : { environment: options.environment }),
                 xdgRuntimeDir: options.xdgRuntimeDir,
             });
+        this.domains = domains;
+        this.reader = new TuiDomainReader(domains, (source) =>
+            this.scheduler.attach(source),
+        );
+        this.projection = createTuiViewProjection(this.reader);
+        this.focusManager = new TuiFocusManager(this.store, {
+            boxIdForLine: (lineId) =>
+                this.projection
+                    .selectMainScreenModel(this.store.getState())
+                    .boxes.find((box) =>
+                        box.expandedLines.some((line) => line.id === lineId),
+                    )?.id,
+            currentPage: () => this.store.getState().ui.selectedPage,
+            expandedKeyFor: (boxId) =>
+                this.projection
+                    .selectMainScreenModel(this.store.getState())
+                    .boxes.find((box) => box.id === boxId)?.expandedKey,
+            graphFor: (page, mode) =>
+                buildFocusGraphForState(
+                    {
+                        ...this.store.getState(),
+                        interaction: {
+                            ...this.store.getState().interaction,
+                            focusScope: mode,
+                        },
+                        ui: {
+                            ...this.store.getState().ui,
+                            selectedPage: page,
+                        },
+                    },
+                    this.reader,
+                ),
+            mode: () => this.store.getState().interaction.focusScope,
+        });
+        this.keyDispatcher = new TuiKeyDispatcher();
         if (dependencies.terminal === undefined) {
             this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
-                client: clients.terminal,
+                client: domains.terminalTransport,
                 workspaceForInstance: (instance) =>
                     this.#requireInstanceHome(instance),
             });
@@ -194,11 +211,20 @@ export class TuiRuntime {
             this.terminal = dependencies.terminal;
         }
         this.session = new TuiControlSession({
-            clients,
+            domains,
             store: this.store,
         });
+        const operationClients = {
+            artifact: domains.artifactTransport,
+            config: domains.configTransport,
+            instance: domains.instanceTransport,
+            reverse: domains.reverse,
+            service: domains.serviceTransport,
+            todo: domains.todoTransport,
+            tool: domains.toolTransport,
+        };
         this.#operations = new TuiRuntimeOperations({
-            clients,
+            clients: operationClients,
             session: this.session,
             store: this.store,
         });
@@ -268,7 +294,7 @@ export class TuiRuntime {
             },
             onArtifactViewImage: async (instance, input) => {
                 if ("imageRef" in input) {
-                    const stored = await clients.artifact.readImage(
+                    const stored = await domains.artifactTransport.readImage(
                         input.imageRef,
                     );
                     return {
@@ -278,7 +304,7 @@ export class TuiRuntime {
                     };
                 }
                 if ("path" in input) {
-                    return await clients.artifact.viewImage(instance, {
+                    return await domains.artifactTransport.viewImage(instance, {
                         ...(input.instance === undefined
                             ? {}
                             : { instance: input.instance }),
@@ -290,7 +316,10 @@ export class TuiRuntime {
                             ),
                     });
                 }
-                return await clients.artifact.viewImage(instance, input);
+                return await domains.artifactTransport.viewImage(
+                    instance,
+                    input,
+                );
             },
             onContextMessage: async (instance, ctxId, text) => {
                 await this.#operations.queueContextMessage(
@@ -393,7 +422,7 @@ export class TuiRuntime {
             onValidateConfigDraft: async (draft) => {
                 await this.#operations.validateConfigDraft(draft);
             },
-            projection: tuiViewProjection,
+            projection: this.projection,
             onValidateInstanceCreateDraft: async (draft) => {
                 return await this.#operations.validateInstanceCreateDraft(
                     draft,
@@ -498,6 +527,7 @@ export class TuiRuntime {
         this.routeLifecycle.stop();
         this.terminal.dispose();
         this.tmuxPanes.dispose();
+        this.reader.dispose();
         await this.session.stop();
         this.scheduler.dispose();
         this.#ink?.unmount();
@@ -690,11 +720,7 @@ export class TuiRuntime {
     }
 
     #requireInstanceHome(instance: string): string {
-        const home = this.store
-            .getState()
-            .instances.find(
-                (candidate) => candidate.name === instance,
-            )?.homeDirectory;
+        const home = this.session.homeDirectory(instance);
         if (home !== undefined && home.length > 0) return home;
         throw new Error(
             `Worker home directory is unavailable for ${instance}.`,
@@ -715,10 +741,14 @@ export class TuiRuntime {
         x: number;
         y: number;
     }): Promise<void> {
-        const regions = buildTuiHitRegions(this.store.getState(), {
-            columns: this.columns,
-            rows: this.rows,
-        });
+        const regions = buildTuiHitRegions(
+            this.store.getState(),
+            this.reader,
+            {
+                columns: this.columns,
+                rows: this.rows,
+            },
+        );
         if ((event.button & 64) !== 0) {
             if (event.kind !== "press") return;
             const delta = (event.button & 1) === 0 ? -3 : 3;
@@ -883,9 +913,9 @@ export class TuiRuntime {
         }
 
         const state = this.store.getState();
-        const box = selectMainScreenModel(state).boxes.find((candidate) => {
-            return candidate.id === target.boxId;
-        });
+        const box = this.projection
+            .selectMainScreenModel(state)
+            .boxes.find((candidate) => candidate.id === target.boxId);
         if (box === undefined) {
             return;
         }

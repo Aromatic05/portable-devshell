@@ -3,9 +3,9 @@ import {
     Endpoint,
     Rpc,
     Stream,
-    createError,
-    errorCodes,
-    toControlErrorBody,
+    createRemoteError,
+    TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE,
+    toRemoteErrorBody,
     type Channel,
     type ControlClientKind,
     type ControlHostDefinition,
@@ -17,6 +17,7 @@ import {
     type MessageStream,
     type Port,
     type RpcContext,
+    controlErrorCodes,
 } from "@portable-devshell/shared";
 import { routeModule } from "../Route.js";
 
@@ -346,7 +347,7 @@ export class ControlChannelServer {
                             context,
                         );
                     } catch (error) {
-                        const body = toControlErrorBody(error);
+                        const body = toRemoteErrorBody(error);
                         await messageStream.cancel(
                             body === undefined
                                 ? { message: String(error) }
@@ -376,22 +377,22 @@ export class ControlChannelServer {
         const session = this.#sessions.get(rpc.peer.host)!;
         if (host === "@control" && port === "service" && operation === "hello") {
             if (session.peer !== undefined)
-                throw createError({
-                    code: errorCodes.controlClientIdentityInvalid,
+                throw createRemoteError({
+                    code: controlErrorCodes.clientIdentityInvalid,
                     message: "Control connection identity is already negotiated.",
                     retryable: false,
                 });
             if (session.pending !== undefined)
-                throw createError({
-                    code: errorCodes.controlClientIdentityInvalid,
+                throw createRemoteError({
+                    code: controlErrorCodes.clientIdentityInvalid,
                     message:
                         "Control connection identity negotiation is already in progress.",
                     retryable: false,
                 });
             const request = readHelloRequest(payload);
             if (!session.admission.allowedPeers.includes(request.clientKind))
-                throw createError({
-                    code: errorCodes.controlClientIdentityInvalid,
+                throw createRemoteError({
+                    code: controlErrorCodes.clientIdentityInvalid,
                     message: `Control transport subject ${session.admission.subject.id} cannot connect as ${request.clientKind}.`,
                     retryable: false,
                 });
@@ -424,8 +425,8 @@ export class ControlChannelServer {
             };
         }
         if (session.peer === undefined) {
-            throw createError({
-                code: errorCodes.controlClientIdentityRequired,
+            throw createRemoteError({
+                code: controlErrorCodes.clientIdentityRequired,
                 message: "service.hello must be the first request on a Control connection.",
                 retryable: false,
             });
@@ -455,8 +456,8 @@ export class ControlChannelServer {
     ): ControlPortContext {
         const session = this.#sessions.get(peerHost)!;
         if (session.peer === undefined)
-            throw createError({
-                code: errorCodes.controlClientIdentityRequired,
+            throw createRemoteError({
+                code: controlErrorCodes.clientIdentityRequired,
                 message: "service.hello must be the first request on a Control connection.",
                 retryable: false,
             });
@@ -515,8 +516,8 @@ export function negotiateControlProtocol(
 ): ControlProtocolHelloResponse {
     const request = readHelloRequest(payload);
     if (request.clientKind !== peer) {
-        throw createError({
-            code: errorCodes.controlClientIdentityInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.clientIdentityInvalid,
             message: `service.hello clientKind ${request.clientKind} does not match ${peer}.`,
             retryable: false,
         });
@@ -525,8 +526,8 @@ export function negotiateControlProtocol(
         compareProtocolVersion(request.protocolRange.min, CONTROL_PROTOCOL_VERSION) > 0 ||
         compareProtocolVersion(request.protocolRange.max, CONTROL_PROTOCOL_VERSION) < 0
     ) {
-        throw createError({
-            code: errorCodes.protocolVersionUnsupported,
+        throw createRemoteError({
+            code: TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE,
             details: {
                 clientMaxProtocolVersion: request.protocolRange.max,
                 clientMinProtocolVersion: request.protocolRange.min,
@@ -642,8 +643,8 @@ function parseProtocolVersion(value: string): {
 }
 
 function invalidHello(message: string): Error {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

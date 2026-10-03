@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import { WorkerCommandClient } from "../../transport/command/Client.js";
 import type { WorkerCommandInteractiveSession } from "../../transport/command/Transport.js";
@@ -56,8 +56,8 @@ export class WorkerInstanceLifecycle {
         interactiveSession?: WorkerCommandInteractiveSession,
     ): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
-            throw createError({
-                code: errorCodes.reverseSelfManagedLifecycle,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseSelfManagedLifecycle,
                 details: { instance: this.#config.name, operation: "start" },
                 message: `Instance ${this.#config.name} is self-managed; start it on the remote machine.`,
                 retryable: false,
@@ -75,8 +75,8 @@ export class WorkerInstanceLifecycle {
             const startResult =
                 await this.#requireCommandClient().start(interactiveSession);
             if (startResult.exitCode !== 0) {
-                throw createError({
-                    code: errorCodes.coreWorkerStartFailed,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.workerStartFailed,
                     message: `Worker start failed for instance ${this.#config.name}.`,
                     retryable: false,
                     details: toJsonDetails(
@@ -90,7 +90,7 @@ export class WorkerInstanceLifecycle {
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
                 error,
-                errorCodes.coreWorkerStartFailed,
+                runtimeErrorCodes.workerStartFailed,
                 `Worker start failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
@@ -99,7 +99,7 @@ export class WorkerInstanceLifecycle {
                 daemonState: "stopped",
                 lastErrorCode: getErrorCode(
                     wrappedError,
-                    errorCodes.coreWorkerStartFailed,
+                    runtimeErrorCodes.workerStartFailed,
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
             });
@@ -116,8 +116,8 @@ export class WorkerInstanceLifecycle {
 
     async #stop(): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
-            throw createError({
-                code: errorCodes.reverseSelfManagedLifecycle,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseSelfManagedLifecycle,
                 details: { instance: this.#config.name, operation: "stop" },
                 message: `Instance ${this.#config.name} is self-managed; stop it on the remote machine.`,
                 retryable: false,
@@ -135,8 +135,8 @@ export class WorkerInstanceLifecycle {
         try {
             const result = await this.#requireCommandClient().stop();
             if (result.exitCode !== 0) {
-                throw createError({
-                    code: errorCodes.coreWorkerStopFailed,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.workerStopFailed,
                     message: `Worker stop failed for instance ${this.#config.name}.`,
                     retryable: false,
                     details: toJsonDetails(
@@ -147,7 +147,7 @@ export class WorkerInstanceLifecycle {
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
                 error,
-                errorCodes.coreWorkerStopFailed,
+                runtimeErrorCodes.workerStopFailed,
                 `Worker stop failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
@@ -155,7 +155,7 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 lastErrorCode: getErrorCode(
                     wrappedError,
-                    errorCodes.coreWorkerStopFailed,
+                    runtimeErrorCodes.workerStopFailed,
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
             });
@@ -192,8 +192,8 @@ export class WorkerInstanceLifecycle {
             if (this.#commandClient === undefined) return;
             const result = await this.#commandClient.retireRuntime();
             if (result.exitCode !== 0) {
-                throw createError({
-                    code: errorCodes.coreProviderFailed,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.providerFailed,
                     message: `Worker runtime retirement failed for instance ${this.#config.name}.`,
                     retryable: false,
                     details: toJsonDetails(
@@ -247,7 +247,7 @@ export class WorkerInstanceLifecycle {
                 return await this.#applyStateUpdate({
                     connectionState: "failed",
                     daemonState: "failed",
-                    lastErrorCode: errorCodes.coreWorkerStatusFailed,
+                    lastErrorCode: runtimeErrorCodes.workerStatusFailed,
                     lastErrorMessage: `Worker returned an unsupported status for instance ${this.#config.name}.`,
                     pid: status.pid,
                 });
@@ -259,8 +259,8 @@ export class WorkerInstanceLifecycle {
             return this.#commandClient;
         }
 
-        throw createError({
-            code: errorCodes.coreProviderFailed,
+        throw createRemoteError({
+            code: runtimeErrorCodes.providerFailed,
             details: { instance: this.#config.name },
             message: `Instance ${this.#config.name} does not have a controller-managed command transport.`,
             retryable: false,
@@ -287,7 +287,7 @@ export class WorkerInstanceLifecycle {
         } catch (error) {
             const wrappedError = wrapWorkerCommandError(
                 error,
-                errorCodes.coreWorkerStatusFailed,
+                runtimeErrorCodes.workerStatusFailed,
                 `Worker status failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
@@ -296,7 +296,7 @@ export class WorkerInstanceLifecycle {
                 daemonState: "failed",
                 lastErrorCode: getErrorCode(
                     wrappedError,
-                    errorCodes.coreWorkerStatusFailed,
+                    runtimeErrorCodes.workerStatusFailed,
                 ),
                 lastErrorMessage: readErrorMessage(wrappedError),
             });
@@ -304,8 +304,8 @@ export class WorkerInstanceLifecycle {
         }
 
         if (result.exitCode !== 0) {
-            const error = createError({
-                code: errorCodes.coreWorkerStatusFailed,
+            const error = createRemoteError({
+                code: runtimeErrorCodes.workerStatusFailed,
                 message: `Worker status failed for instance ${this.#config.name}.`,
                 retryable: false,
                 details: toJsonDetails(
@@ -329,7 +329,7 @@ export class WorkerInstanceLifecycle {
                 daemonState: "failed",
                 lastErrorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerStatusFailed,
+                    runtimeErrorCodes.workerStatusFailed,
                 ),
                 lastErrorMessage: readErrorMessage(error),
             });

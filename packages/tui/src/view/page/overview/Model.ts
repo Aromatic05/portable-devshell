@@ -2,7 +2,7 @@ import {
     formatBytes,
     formatDuration,
     formatPercent,
-} from "@portable-devshell/shared";
+} from "../../presentation/Format.js";
 
 export type TuiOverviewTone =
     "normal" | "muted" | "accent" | "success" | "warning" | "danger";

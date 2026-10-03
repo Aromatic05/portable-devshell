@@ -2,13 +2,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    artifactErrorCodes,
     type ArtifactEventType,
     type ArtifactShareInput,
     type ArtifactShareResult,
     type ArtifactShareRevokeResult,
     type JsonValue,
+    controlErrorCodes,
 } from "@portable-devshell/shared";
 
 import { ArtifactRecordStore } from "../RecordStore.js";
@@ -123,8 +124,8 @@ export class ArtifactShareService {
             (!Number.isSafeInteger(input.maxDownloads) ||
                 input.maxDownloads < 1)
         ) {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message: "maxDownloads must be a positive safe integer.",
                 retryable: false,
             });
@@ -135,8 +136,8 @@ export class ArtifactShareService {
             expiresInSeconds < 60 ||
             expiresInSeconds > MAX_ARTIFACT_SHARE_TTL_SECONDS
         ) {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message: `expiresInSeconds must be between 60 and ${MAX_ARTIFACT_SHARE_TTL_SECONDS}.`,
                 retryable: false,
             });
@@ -191,7 +192,6 @@ export class ArtifactShareService {
         this.#shares.set(shareId, stored);
         this.#shareIdsByToken.set(token, shareId);
         this.#record("artifact.shareCreated", stored.authorityInstance, result);
-        await this.#emitToEndpoint(endpoint, "artifact.shareCreated", result);
         return structuredClone(result);
     }
 
@@ -221,8 +221,8 @@ export class ArtifactShareService {
         this.#assertInitialized();
         const share = this.#shares.get(shareId);
         if (share === undefined) {
-            throw createError({
-                code: errorCodes.artifactShareNotFound,
+            throw createRemoteError({
+                code: artifactErrorCodes.shareNotFound,
                 message: "Artifact share was not found.",
                 retryable: false,
                 details: { shareId },
@@ -247,17 +247,6 @@ export class ArtifactShareService {
                 share.authorityInstance,
                 share.result,
             );
-            const endpoint = this.#resolveEndpoint(
-                share.sourceInstance,
-                share.authorityInstance,
-            );
-            if (endpoint !== undefined) {
-                await this.#emitToEndpoint(
-                    endpoint,
-                    "artifact.shareRevoked",
-                    share.result,
-                );
-            }
             await this.#compactTerminalHistory();
         }
 
@@ -271,15 +260,15 @@ export class ArtifactShareService {
             shareId === undefined ? undefined : this.#shares.get(shareId);
 
         if (share === undefined) {
-            throw createError({
-                code: errorCodes.artifactShareNotFound,
+            throw createRemoteError({
+                code: artifactErrorCodes.shareNotFound,
                 message: "Artifact share was not found.",
                 retryable: false,
             });
         }
         if (share.result.state === "revoked") {
-            throw createError({
-                code: errorCodes.artifactShareRevoked,
+            throw createRemoteError({
+                code: artifactErrorCodes.shareRevoked,
                 message: "Artifact share has been revoked.",
                 retryable: false,
                 details: { shareId: share.result.shareId },
@@ -293,8 +282,8 @@ export class ArtifactShareService {
             share.result.expiresAtMs <= Date.now()
         ) {
             await this.#expireShare(share);
-            throw createError({
-                code: errorCodes.artifactShareExpired,
+            throw createRemoteError({
+                code: artifactErrorCodes.shareExpired,
                 message: "Artifact share has expired.",
                 retryable: false,
                 details: { shareId: share.result.shareId },
@@ -398,17 +387,6 @@ export class ArtifactShareService {
             share.authorityInstance,
             downloadData,
         );
-        const endpoint = this.#resolveEndpoint(
-            share.sourceInstance,
-            share.authorityInstance,
-        );
-        if (endpoint !== undefined) {
-            await this.#emitToEndpoint(
-                endpoint,
-                "artifact.shareDownloaded",
-                downloadData,
-            );
-        }
         if (exhausted) {
             await this.#closeSharePayload(share);
             this.#record(
@@ -416,13 +394,6 @@ export class ArtifactShareService {
                 share.authorityInstance,
                 share.result,
             );
-            if (endpoint !== undefined) {
-                await this.#emitToEndpoint(
-                    endpoint,
-                    "artifact.shareExhausted",
-                    share.result,
-                );
-            }
             await this.#compactTerminalHistory();
         }
     }
@@ -453,17 +424,6 @@ export class ArtifactShareService {
             share.authorityInstance,
             share.result,
         );
-        const endpoint = this.#resolveEndpoint(
-            share.sourceInstance,
-            share.authorityInstance,
-        );
-        if (endpoint !== undefined) {
-            await this.#emitToEndpoint(
-                endpoint,
-                "artifact.shareExhausted",
-                share.result,
-            );
-        }
         await this.#compactTerminalHistory();
     }
 
@@ -487,17 +447,6 @@ export class ArtifactShareService {
             share.authorityInstance,
             share.result,
         );
-        const endpoint = this.#resolveEndpoint(
-            share.sourceInstance,
-            share.authorityInstance,
-        );
-        if (endpoint !== undefined) {
-            await this.#emitToEndpoint(
-                endpoint,
-                "artifact.shareExpired",
-                share.result,
-            );
-        }
         await this.#compactTerminalHistory();
     }
 
@@ -557,19 +506,6 @@ export class ArtifactShareService {
         );
     }
 
-    async #emitToEndpoint(
-        endpoint: ArtifactServiceEndpoint,
-        type: ArtifactEventType,
-        data?: unknown,
-    ): Promise<void> {
-        await endpoint
-            .appendControlEvent(
-                type,
-                data === undefined ? undefined : toJsonValue(data),
-            )
-            .catch(() => undefined);
-    }
-
     #assertInitialized(): void {
         if (!this.#initialized) {
             throw new Error("ArtifactService is not initialized.");
@@ -588,8 +524,8 @@ function isJsonRecord(
 }
 
 function exhaustedShare(shareId: string) {
-    return createError({
-        code: errorCodes.artifactShareExhausted,
+    return createRemoteError({
+        code: artifactErrorCodes.shareExhausted,
         message: "Artifact share has reached its download limit.",
         retryable: false,
         details: { shareId },

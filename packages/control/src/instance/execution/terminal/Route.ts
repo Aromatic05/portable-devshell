@@ -1,12 +1,14 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    STREAM_GAP_CODE,
     type JsonValue,
     type ControlPortDefinition,
     type ControlStreamMessage,
     type TerminalAttachInput,
     type TerminalOpenInput,
     type TerminalOutputFrame,
+    controlErrorCodes,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../server/Route.js";
@@ -212,8 +214,8 @@ export function createTerminalRouteModule(
                 const bytes = Buffer.byteLength(frame.data, "utf8");
                 if (pendingBytes + bytes > maxUnackedBytes) {
                     terminal = true;
-                    const error = createError({
-                        code: errorCodes.streamGap,
+                    const error = createRemoteError({
+                        code: STREAM_GAP_CODE,
                         details: {
                             lastAckedSeq,
                             maxUnackedBytes,
@@ -378,8 +380,8 @@ function readIntegerField(
 
 function assertInstance(actual: string, expected: string): void {
     if (actual !== expected) {
-        throw createError({
-            code: errorCodes.instanceConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
             details: { actual, expected },
             message: "Terminal belongs to another instance.",
             retryable: false,
@@ -393,8 +395,8 @@ function assertGeneration(
     terminalId: string,
 ): void {
     if (actual !== expected) {
-        throw createError({
-            code: errorCodes.instanceConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
             details: {
                 actualGeneration: actual,
                 requestedGeneration: expected,
@@ -407,16 +409,16 @@ function assertGeneration(
 }
 
 function invalidInput(message: string): Error {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });
 }
 
 function toStreamError(error: unknown) {
-    return createError({
-        code: errorCodes.streamGap,
+    return createRemoteError({
+        code: STREAM_GAP_CODE,
         cause: error,
         message: "Terminal stream could not keep up with output.",
         retryable: true,

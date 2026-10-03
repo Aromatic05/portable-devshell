@@ -3,8 +3,8 @@ import type {
     WorkerCommandSessionOpen,
 } from "@portable-devshell/core";
 import {
-    errorCodes,
-    toControlErrorBody,
+    controlErrorCodes,
+    toRemoteErrorBody,
     type CliCommandDescriptor,
     type JsonValue,
     type McpContextRecord,
@@ -421,14 +421,14 @@ export class ModelDevshellBroker {
         sessionId: string,
         error: unknown,
     ): Promise<void> {
-        const body = toControlErrorBody(error);
+        const body = toRemoteErrorBody(error);
         const message =
             body?.message ??
             (error instanceof Error ? error.message : String(error));
         const exitCode =
             body?.code === "cli.usage"
                 ? 2
-                : body?.code === errorCodes.controlCliCommandFailed
+                : body?.code === controlErrorCodes.cliCommandFailed
                   ? 127
                   : 1;
         await this.#write(

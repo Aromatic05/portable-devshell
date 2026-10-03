@@ -1,7 +1,7 @@
 import {
     bootstrapToolNamespace,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     toolNamespace,
     type JsonValue,
     type ToolDefinition,
@@ -332,8 +332,8 @@ export class McpToolCatalogEndpoint {
             for (const definition of source.tools) {
                 const namespace = toolNamespace(definition.name);
                 if (namespace === undefined || definition.group !== namespace) {
-                    throw createError({
-                        code: errorCodes.coreToolSchemaUnavailable,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.toolSchemaUnavailable,
                         details: {
                             group: definition.group,
                             namespace: namespace ?? null,
@@ -348,8 +348,8 @@ export class McpToolCatalogEndpoint {
                     namespace === bootstrapToolNamespace &&
                     source.owner !== "environment"
                 ) {
-                    throw createError({
-                        code: errorCodes.coreToolSchemaUnavailable,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.toolSchemaUnavailable,
                         details: {
                             owner: source.owner,
                             toolName: definition.name,
@@ -362,8 +362,8 @@ export class McpToolCatalogEndpoint {
                     source.owner === "environment" &&
                     namespace !== bootstrapToolNamespace
                 ) {
-                    throw createError({
-                        code: errorCodes.coreToolSchemaUnavailable,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.toolSchemaUnavailable,
                         details: {
                             namespace,
                             toolName: definition.name,
@@ -374,8 +374,8 @@ export class McpToolCatalogEndpoint {
                 }
                 const previous = merged.get(definition.name);
                 if (previous !== undefined) {
-                    throw createError({
-                        code: errorCodes.coreToolSchemaUnavailable,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.toolSchemaUnavailable,
                         details: {
                             firstOwner: previous.owner,
                             secondOwner: source.owner,

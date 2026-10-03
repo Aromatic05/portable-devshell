@@ -6,6 +6,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/content/Box.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import { compactSummary, makeBox } from "../Support.js";
 import {
@@ -23,14 +24,15 @@ import {
 
 export function buildConnectorPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string | undefined,
 ): BoxModel[] {
     const instanceConfig =
         instanceName === undefined
             ? undefined
-            : selectedInstanceDraft(state, instanceName);
-    const mcpConfig = globalMcpDraft(state);
-    const webConfig = globalWebDraft(state);
+            : selectedInstanceDraft(reader, instanceName);
+    const mcpConfig = globalMcpDraft(reader);
+    const webConfig = globalWebDraft(reader);
     const instanceDraft =
         instanceName === undefined || instanceConfig === undefined
             ? undefined
@@ -70,10 +72,10 @@ export function buildConnectorPageBoxes(
                   instanceName,
               );
     const webEndpoint = webUiEndpoint(webConfig);
-    const runtime = runtimeStatus(state, instanceConfig, mcpConfig, endpoint);
+    const runtime = runtimeStatus(reader, instanceConfig, mcpConfig, endpoint);
+    const mcpStatus = reader.mcp.status;
     const oauthBlocked =
-        state.readModel.mcpStatus?.authMode === "oauth2" &&
-        state.readModel.mcpStatus.oauthReady !== true;
+        mcpStatus?.authMode === "oauth2" && mcpStatus.oauthReady !== true;
     const localValue =
         runtime.runtime === "running" && !oauthBlocked
             ? localEndpoint.value
@@ -517,13 +519,12 @@ function webUiEndpoint(web: Record<string, JsonValue>): {
 }
 
 function selectedInstanceDraft(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): Record<string, JsonValue> {
-    const entry = Array.isArray(state.readModel.configView?.instances)
-        ? state.readModel.configView.instances.find(
-              (value) => asRecord(value)?.name === instanceName,
-          )
+    const entries = reader.config.view?.instances;
+    const entry = Array.isArray(entries)
+        ? entries.find((value) => asRecord(value)?.name === instanceName)
         : undefined;
     return (
         asRecord(entry) ?? {
@@ -544,9 +545,9 @@ function selectedInstanceDraft(
     );
 }
 
-function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
+function globalMcpDraft(reader: TuiDomainReader): Record<string, JsonValue> {
     return (
-        asRecord(state.readModel.configView?.mcp) ?? {
+        asRecord(reader.config.view?.mcp) ?? {
             enabled: false,
             listenHost: "127.0.0.1",
             listenPort: 0,
@@ -554,9 +555,9 @@ function globalMcpDraft(state: TuiAppState): Record<string, JsonValue> {
     );
 }
 
-function globalWebDraft(state: TuiAppState): Record<string, JsonValue> {
+function globalWebDraft(reader: TuiDomainReader): Record<string, JsonValue> {
     return (
-        asRecord(state.readModel.configView?.web) ?? {
+        asRecord(reader.config.view?.web) ?? {
             auth: "none",
             enabled: false,
             listenHost: "127.0.0.1",
@@ -600,7 +601,7 @@ function endpointPreview(
 }
 
 function runtimeStatus(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: Record<string, JsonValue> | undefined,
     mcp: Record<string, JsonValue>,
     endpoint: { reason?: string; value: string },
@@ -612,7 +613,7 @@ function runtimeStatus(
     ) {
         return { reason: "MCP is disabled", runtime: "disabled" };
     }
-    const status = state.readModel.mcpStatus;
+    const status = reader.mcp.status;
     if (status?.running !== true) {
         return {
             reason:

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
-import { createWebClients, type WebClients } from "./transport/Client.js";
+import { createWebDomainSession } from "./transport/Client.js";
+import type { WebDomainSession } from "./domain/Session.js";
 import { Login } from "./session/Login.js";
 import { BrowserWebSession, type WebSession } from "./session/Session.js";
 import { useWebApplicationSession } from "./session/Hook.js";
@@ -11,13 +12,13 @@ function createBrowserSession(): WebSession {
 }
 
 export interface AppProps {
-    createClients?(): WebClients;
+    createDomains?(): WebDomainSession;
     createSession?(): WebSession;
     session?: WebSession;
 }
 
 export function App({
-    createClients = createWebClients,
+    createDomains = createWebDomainSession,
     createSession = createBrowserSession,
     session,
 }: AppProps) {
@@ -25,7 +26,7 @@ export function App({
         () => session ?? createSession(),
         [createSession, session],
     );
-    const application = useWebApplicationSession(activeSession, createClients);
+    const application = useWebApplicationSession(activeSession, createDomains);
 
     if (application.sessionState === "checking") {
         return (

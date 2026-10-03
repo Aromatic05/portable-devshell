@@ -1,9 +1,12 @@
 import {
+    RUNTIME_PORT,
+    Stream,
     readInstanceSnapshot,
-    type ControlClients,
     type ControlStreamMessage,
+    type Endpoint,
     type InstanceSnapshot,
     type MessageStream,
+    type RuntimeTransport,
 } from "@portable-devshell/shared";
 
 import { CliClientEventStream } from "./Client.js";
@@ -14,7 +17,7 @@ export interface CliClientRuntimeTerminalRelay {
 }
 
 export type CliClientRuntime = Omit<
-    ControlClients["runtime"],
+    RuntimeTransport,
     "start" | "subscribe"
 > & {
     start(
@@ -25,12 +28,13 @@ export type CliClientRuntime = Omit<
 };
 
 export function createCliRuntimeAdapter(
-    runtime: ControlClients["runtime"],
+    endpoint: Endpoint,
+    runtime: RuntimeTransport,
 ): CliClientRuntime {
     return {
         ...runtime,
         start: async (instance, relay) =>
-            await startInteractive(runtime, instance, relay),
+            await startInteractive(endpoint, instance, relay),
         subscribe: async (instance, fromSeq) =>
             new CliClientEventStream(
                 await runtime.subscribe(instance, fromSeq),
@@ -39,11 +43,12 @@ export function createCliRuntimeAdapter(
 }
 
 async function startInteractive(
-    runtime: ControlClients["runtime"],
+    endpoint: Endpoint,
     instance: string,
     relay?: CliClientRuntimeTerminalRelay,
 ): Promise<InstanceSnapshot> {
-    const stream = await runtime.openStart(instance);
+    const protocol = new Stream(await endpoint.connect(instance, RUNTIME_PORT));
+    const stream = await protocol.open("start");
     const restoreTerminal =
         relay === undefined ? () => undefined : enableRawRelayMode(relay.input);
     const input = relay === undefined ? undefined : attachRelayInput(relay.input, stream);
@@ -70,6 +75,7 @@ async function startInteractive(
         offData();
         input?.cleanup();
         restoreTerminal();
+        protocol.close();
     }
 }
 

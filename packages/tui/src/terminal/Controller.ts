@@ -92,9 +92,10 @@ export class TuiTerminalController {
             return;
         }
 
-        const entry = this.#options.store
-            .getState()
-            .instances.find((candidate) => candidate.name === instance);
+        const entry =
+            this.#options.session.domains.instances.state.instances.find(
+                (candidate) => candidate.name === instance,
+            );
         if (entry === undefined) {
             this.#instance = instance;
             this.#options.terminal.setError(

@@ -1,21 +1,31 @@
 import type { BoxModel } from "../../../component/content/Box.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import { formatField, makeBox } from "../../Support.js";
+import { asRecord } from "../../../../state/editor/Draft.js";
 
 export function buildReverseConnectionBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     selectedInstance: string,
     routeInstance: string,
 ): BoxModel[] {
-    const entry = state.instances.find(
-        (candidate) => candidate.name === routeInstance,
-    );
-    const snapshot = state.readModel.instanceState[routeInstance]?.snapshot;
+    const configEntries = reader.config.view?.instances;
+    const instanceConfig = Array.isArray(configEntries)
+        ? configEntries
+              .map((value) => asRecord(value))
+              .find((value) => value?.name === routeInstance)
+        : undefined;
+    const provider =
+        typeof instanceConfig?.provider === "string"
+            ? instanceConfig.provider
+            : "unknown";
+    const snapshot = reader.runtime(routeInstance).snapshot;
     return [
         makeBox(state, "connections", selectedInstance, {
             detailLines: [
                 formatField("Instance", routeInstance),
-                formatField("Provider", entry?.provider ?? "unknown"),
+                formatField("Provider", provider),
                 formatField(
                     "Connection",
                     snapshot?.connectionState ?? "unknown",

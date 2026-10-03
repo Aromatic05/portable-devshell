@@ -1,5 +1,5 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes, runtimeErrorCodes } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
     JsonValue,
@@ -78,8 +78,8 @@ export function createRuntimeRouteModule(
     }, {
         start: async (stream) => {
             if (!instance.enabled)
-                throw createError({
-                    code: errorCodes.instanceConflict,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.instanceConflict,
                     details: { instance: instance.name, operation: "start" },
                     message: `Instance ${instance.name} is disabled.`,
                     retryable: false,
@@ -254,8 +254,8 @@ function isRecord(
 }
 
 function invalid(message: string) {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

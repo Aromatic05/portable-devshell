@@ -1,9 +1,10 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    contextErrorCodes,
     type JsonValue,
     type ToolCallProvenance,
     type ToolDefinition,
+    controlErrorCodes,
 } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "../tool/Schema.js";
@@ -85,8 +86,8 @@ export function readMcpContextInput(input: JsonValue): {
 } {
     const context = readOptionalMcpContextInput(input);
     if (context.ctxId === undefined) {
-        throw createError({
-            code: errorCodes.mcpContextInvalid,
+        throw createRemoteError({
+            code: contextErrorCodes.invalid,
             message:
                 "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
             retryable: false,
@@ -101,8 +102,8 @@ export function readOptionalMcpContextInput(input: JsonValue): {
 } {
     if (!isRecord(input) || input.ctxId === undefined) return { input };
     if (typeof input.ctxId !== "string" || input.ctxId.trim().length === 0) {
-        throw createError({
-            code: errorCodes.mcpContextInvalid,
+        throw createRemoteError({
+            code: contextErrorCodes.invalid,
             message: "ctxId must be a non-empty Context ID.",
             retryable: false,
         });
@@ -278,8 +279,8 @@ function optionalBoundedString(
 }
 
 function invalidArguments(message: string) {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

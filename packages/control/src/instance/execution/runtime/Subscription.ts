@@ -1,5 +1,5 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type {
     InstanceEvent,
     JsonValue,
@@ -54,8 +54,8 @@ export class RuntimeSubscriptionManager {
     ): Promise<void> {
         const slice = instance.subscribe(fromSeq);
         if (slice.kind === "gap") {
-            throw createError({
-                code: errorCodes.streamGap,
+            throw createRemoteError({
+                code: STREAM_GAP_CODE,
                 message:
                     "Requested event sequence is no longer available. Pull a fresh snapshot.",
                 retryable: true,

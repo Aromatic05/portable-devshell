@@ -1,4 +1,5 @@
 import type { BoxModel } from "../component/content/Box.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiAppState } from "../../state/store/Model.js";
 import { buildAuditPageBoxes } from "./activity/audit/List.js";
@@ -13,10 +14,11 @@ import { currentTuiRoute } from "../../state/route/State.js";
 
 export function buildBoxesForPage(
     state: TuiAppState,
+    reader: TuiDomainReader,
     page: TuiPageId,
     instanceName: string | undefined,
 ): BoxModel[] {
-    const boxes = buildUnfilteredBoxes(state, page, instanceName);
+    const boxes = buildUnfilteredBoxes(state, reader, page, instanceName);
     if (
         page !== "instances" &&
         page !== "todo" &&
@@ -48,6 +50,7 @@ export function buildBoxesForPage(
 
 function buildUnfilteredBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     page: TuiPageId,
     instanceName: string | undefined,
 ): BoxModel[] {
@@ -57,35 +60,38 @@ function buildUnfilteredBoxes(
         case "help":
             return buildHelpPageBoxes(state);
         case "instances":
-            return buildInstancesPageBoxes(state);
+            return buildInstancesPageBoxes(state, reader);
         case "todo":
             return instanceName === undefined
                 ? []
-                : buildTodoPageBoxes(state, instanceName);
+                : buildTodoPageBoxes(state, reader, instanceName);
         case "config":
             return instanceName === undefined
                 ? []
-                : buildConfigPageBoxes(state, instanceName);
+                : buildConfigPageBoxes(state, reader, instanceName);
         case "connections":
-            return buildConnectionsPageBoxes(state, instanceName);
+            return buildConnectionsPageBoxes(state, reader, instanceName);
         case "messages":
             return [];
         case "audit":
             return instanceName === undefined
                 ? []
-                : buildAuditPageBoxes(state, instanceName);
+                : buildAuditPageBoxes(state, reader, instanceName);
         case "extensions":
-            return buildExtensionPageBoxes(state);
+            return buildExtensionPageBoxes(state, reader);
         case "terminal":
             return [];
     }
 }
 
-function buildExtensionPageBoxes(state: TuiAppState): BoxModel[] {
+function buildExtensionPageBoxes(
+    state: TuiAppState,
+    reader: TuiDomainReader,
+): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "extensions") return [];
     if (route.view === "list") {
-        return state.readModel.tuiPages.map((page) =>
+        return reader.extension.tuiPages.map((page) =>
             makeBox(state, "extensions", undefined, {
                 detailLines: [],
                 id: `extension:${page.id}`,
@@ -100,7 +106,7 @@ function buildExtensionPageBoxes(state: TuiAppState): BoxModel[] {
             }),
         );
     }
-    const snapshot = state.extensionPageSnapshots[route.pageId];
+    const snapshot = reader.extension.tuiSnapshots.get(route.pageId);
     if (snapshot === undefined) return [];
     return snapshot.items.map((item) =>
         makeBox(state, "extensions", undefined, {

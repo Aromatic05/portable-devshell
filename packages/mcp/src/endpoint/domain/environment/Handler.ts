@@ -1,6 +1,8 @@
 import {
-    createError,
-    errorCodes,
+    controlErrorCodes,
+    createRemoteError,
+    contextErrorCodes,
+    runtimeErrorCodes,
     type JsonValue,
     type McpContextRecord,
     type ToolCallContext,
@@ -199,8 +201,8 @@ export class McpEndpointHandlerEnvironment {
                         };
                     }
                     default:
-                        throw createError({
-                            code: errorCodes.targetInvalid,
+                        throw createRemoteError({
+                            code: controlErrorCodes.invalidTarget,
                             message: `Unknown environ_remote command ${JSON.stringify(commandInput.command)}. Use command='help' for the current command catalog.`,
                             retryable: false,
                         });
@@ -383,8 +385,8 @@ export class McpEndpointHandlerEnvironment {
     }> {
         if (input.ctxId !== undefined) {
             if (!this.#contextSelector.requiresExplicitContextId) {
-                throw createError({
-                    code: errorCodes.mcpContextInvalid,
+                throw createRemoteError({
+                    code: contextErrorCodes.invalid,
                     message:
                         "ctxId is internal when Context authority is externally bound.",
                     retryable: false,
@@ -561,8 +563,8 @@ function contextWorkspace(
 }
 
 function contextWorkspaceRequired(ctxId: string, instance: string) {
-    return createError({
-        code: errorCodes.mcpContextWorkspaceRequired,
+    return createRemoteError({
+        code: contextErrorCodes.workspaceRequired,
         details: { ctxId, instance },
         message: `No workspace is attached to ${instance} for ${ctxId}. Use environ_remote command='attach' with its handle and an absolute workspace.`,
         retryable: false,
@@ -570,8 +572,8 @@ function contextWorkspaceRequired(ctxId: string, instance: string) {
 }
 
 function conflictingExternalBindings() {
-    return createError({
-        code: errorCodes.mcpContextInvalid,
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
         message:
             "Stable external identities on this request resolve to different Contexts.",
         retryable: false,
@@ -579,8 +581,8 @@ function conflictingExternalBindings() {
 }
 
 function unboundContext(requireExplicitContextId: boolean) {
-    return createError({
-        code: errorCodes.mcpContextInvalid,
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
         message: requireExplicitContextId
             ? "No Context is bound to this request. Call environ_info with workspace or provide ctxId."
             : "No Context is bound to this request. Call environ_info with workspace.",
@@ -589,8 +591,8 @@ function unboundContext(requireExplicitContextId: boolean) {
 }
 
 function extensionResourcePreparationUnavailable(instance: string) {
-    return createError({
-        code: errorCodes.coreWorkerHandshakeFailed,
+    return createRemoteError({
+        code: runtimeErrorCodes.workerHandshakeFailed,
         details: { instance },
         message: `Extension resource preparation is unavailable for ${instance}.`,
         retryable: true,
@@ -637,24 +639,24 @@ function assertRemoteArguments(
     expected: { handle: boolean; workspace: boolean | "optional" },
 ): void {
     if (expected.handle && input.handle === undefined) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "This environ_remote command requires handle. Use command='help' for the current command catalog.",
             retryable: false,
         });
     }
     if (!expected.handle && input.handle !== undefined) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "handle is not valid for this environ_remote command. Use command='help' for the current command catalog.",
             retryable: false,
         });
     }
     if (expected.workspace === false && input.workspace !== undefined) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "workspace is not valid for this environ_remote command. Use command='help' for the current command catalog.",
             retryable: false,

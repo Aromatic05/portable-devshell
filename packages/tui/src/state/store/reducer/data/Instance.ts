@@ -1,5 +1,3 @@
-import { applyEventRecord } from "./Event.js";
-import { withDerivedState } from "../Support.js";
 import type { TuiAppAction, TuiAppState } from "../../Model.js";
 
 export function reduceTuiStoreReducerInstance(
@@ -10,15 +8,12 @@ export function reduceTuiStoreReducerInstance(
         case "event.append": {
             const rawEvents = [...state.rawEvents, action.rawEvent];
             const maxEvents = action.maxEvents ?? 100;
-            const nextState = {
+            return {
                 ...state,
                 rawEvents: rawEvents.slice(
                     Math.max(0, rawEvents.length - maxEvents),
                 ),
             };
-            return withDerivedState(
-                applyEventRecord(nextState, action.rawEvent),
-            );
         }
     }
 }

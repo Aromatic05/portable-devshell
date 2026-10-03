@@ -1,7 +1,7 @@
 import type { WebPageRequest } from "@portable-devshell/extension/web";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
     type ControlPortContext,
     type ControlPortDefinition,
@@ -75,8 +75,8 @@ function readPageRequest(payload: JsonValue | undefined): {
 
 function requireWeb(context: ControlPortContext): void {
     if (context.peer === "web") return;
-    throw createError({
-        code: errorCodes.controlWebAccessDenied,
+    throw createRemoteError({
+        code: controlErrorCodes.webAccessDenied,
         message: "Web application access is available only to Web clients.",
         retryable: false,
     });
@@ -88,16 +88,16 @@ function readText(value: JsonValue | undefined, label: string): string {
 }
 
 function invalid(message: string): Error {
-    return createError({
-        code: errorCodes.controlWebAccessDenied,
+    return createRemoteError({
+        code: controlErrorCodes.webAccessDenied,
         message,
         retryable: false,
     });
 }
 
 function unavailable(): Error {
-    return createError({
-        code: errorCodes.controlWebAccessDenied,
+    return createRemoteError({
+        code: controlErrorCodes.webAccessDenied,
         message: "Web Extension pages are not available.",
         retryable: false,
     });

@@ -9,8 +9,8 @@ import {
     TODO_MAX_ITEMS,
     TODO_MAX_TEXT_LENGTH,
     TODO_MAX_TITLE_LENGTH,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
@@ -123,9 +123,9 @@ export class TodoStore {
             ) as unknown;
             return this.#state.normalizeDocument(value);
         } catch (error) {
-            throw createError({
+            throw createRemoteError({
                 cause: error,
-                code: errorCodes.todoInvalid,
+                code: runtimeErrorCodes.todoInvalid,
                 details: { filePath: this.#filePath },
                 message: `Todo state for ${this.#instanceName} is invalid.`,
                 retryable: false,
@@ -811,8 +811,8 @@ function todoEvent(
 
 function requireRevision(actual: number, expected: number): void {
     if (actual !== expected) {
-        throw createError({
-            code: errorCodes.todoRevisionConflict,
+        throw createRemoteError({
+            code: runtimeErrorCodes.todoRevisionConflict,
             details: { actualRevision: actual, expectedRevision: expected },
             message: `Todo revision conflict: expected ${expected}, received ${actual}.`,
             retryable: true,
@@ -871,8 +871,8 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function invalidTodo(message: string) {
-    return createError({
-        code: errorCodes.todoInvalid,
+    return createRemoteError({
+        code: runtimeErrorCodes.todoInvalid,
         message,
         retryable: false,
     });

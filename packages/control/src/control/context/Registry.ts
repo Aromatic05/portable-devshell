@@ -3,8 +3,8 @@ import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    contextErrorCodes,
     type ContextRegistryPort,
     type GoalActivityKind,
     type McpContextEnvironment,
@@ -1614,8 +1614,8 @@ export class ContextRegistry implements ContextRegistryPort {
 }
 
 function invalidContext(ctxId: string) {
-    return createError({
-        code: errorCodes.mcpContextInvalid,
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
         details: { ctxId },
         message: "ctxId is invalid for the current environment.",
         retryable: false,
@@ -1623,8 +1623,8 @@ function invalidContext(ctxId: string) {
 }
 
 function invalidRemoteHandle(ctxId: string) {
-    return createError({
-        code: errorCodes.mcpContextInvalid,
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
         details: { ctxId },
         message:
             "Remote instance handle is invalid for the current Context. Obtain a current handle with devshell instance list or status.",
@@ -1633,8 +1633,8 @@ function invalidRemoteHandle(ctxId: string) {
 }
 
 function maskedInstance(ctxId: string, instance: string) {
-    return createError({
-        code: errorCodes.mcpContextInstanceMasked,
+    return createRemoteError({
+        code: contextErrorCodes.instanceMasked,
         details: { ctxId, instance },
         message:
             "This remote instance is permanently masked for the lifetime of the current Context.",
@@ -1643,16 +1643,16 @@ function maskedInstance(ctxId: string, instance: string) {
 }
 
 function invalidExternalBinding() {
-    return createError({
-        code: errorCodes.mcpContextInvalid,
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
         message: "No valid Context is bound to the current external identity.",
         retryable: false,
     });
 }
 
 function expiredContext(ctxId: string, expiresAt: string) {
-    return createError({
-        code: errorCodes.mcpContextExpired,
+    return createRemoteError({
+        code: contextErrorCodes.expired,
         details: { ctxId, expiresAt },
         message:
             "ctxId lease has expired. Call environ_info to reactivate the same Context.",
@@ -1661,8 +1661,8 @@ function expiredContext(ctxId: string, expiresAt: string) {
 }
 
 function disabledContext(ctxId: string) {
-    return createError({
-        code: errorCodes.mcpContextDisabled,
+    return createRemoteError({
+        code: contextErrorCodes.disabled,
         details: { ctxId },
         message:
             "ctxId is disabled and cannot be reactivated. Call environ_info with workspace to establish a new active Context.",

@@ -27,7 +27,7 @@ import type {
     WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/core";
 import {
-    createError,
+    createRemoteError,
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
@@ -596,7 +596,7 @@ async function clearDirectory(path: string): Promise<void> {
 }
 
 function artifactError(code: string, message: string, cause?: unknown) {
-    return createError({
+    return createRemoteError({
         code,
         message:
             cause instanceof Error ? `${message} ${cause.message}` : message,

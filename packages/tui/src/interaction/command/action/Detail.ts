@@ -97,7 +97,7 @@ export class TuiCommandDispatcherDetail {
             actionId?.startsWith("oauth.approve:")
         ) {
             const approvalId = actionId.slice("oauth.approve:".length);
-            const approval = state.readModel.oauthApprovals.find(
+            const approval = this.#projection.domains.mcp.approvals.find(
                 (candidate) => candidate.approvalId === approvalId,
             );
             const requestSummary =
@@ -122,7 +122,7 @@ export class TuiCommandDispatcherDetail {
             actionId?.startsWith("oauth.deny:")
         ) {
             const approvalId = actionId.slice("oauth.deny:".length);
-            const approval = state.readModel.oauthApprovals.find(
+            const approval = this.#projection.domains.mcp.approvals.find(
                 (candidate) => candidate.approvalId === approvalId,
             );
             const requestSummary =
@@ -147,7 +147,7 @@ export class TuiCommandDispatcherDetail {
             actionId?.startsWith("instance.toggleEnabled:")
         ) {
             const instance = actionId.slice("instance.toggleEnabled:".length);
-            const entry = state.instances.find(
+            const entry = this.#projection.domains.instances.instances.find(
                 (candidate) => candidate.name === instance,
             );
             if (entry === undefined) {
@@ -155,7 +155,7 @@ export class TuiCommandDispatcherDetail {
             }
             if (entry.enabled) {
                 const running =
-                    state.readModel.instanceState[instance]?.snapshot
+                    this.#projection.domains.runtime(instance).snapshot
                         ?.daemonState !== "stopped";
                 return await this.#dispatch({
                     body: running
@@ -190,8 +190,9 @@ export class TuiCommandDispatcherDetail {
             const route = currentTuiRoute(state);
             if (route.page !== "extensions" || route.view !== "page") return false;
             const extensionActionId = button.slice("extension.action:".length);
-            const action = state.extensionPageSnapshots[route.pageId]?.items
-                .find((item) => item.id === boxId)
+            const action = this.#projection.domains.extension.tuiSnapshots
+                .get(route.pageId)
+                ?.items.find((item) => item.id === boxId)
                 ?.actions?.find((candidate) => candidate.id === extensionActionId);
             if (action === undefined) return false;
             const intent = {
@@ -220,7 +221,7 @@ export class TuiCommandDispatcherDetail {
             const taskId = todoTaskIdFromBox(boxId);
             if (taskId === undefined) return false;
             const instance = state.ui.selectedInstance;
-            const todo = state.readModel.instanceState[instance]?.todo;
+            const todo = this.#projection.domains.todo(instance).todo;
             const title =
                 todo?.taskId === taskId
                     ? todo.title
@@ -295,7 +296,7 @@ export class TuiCommandDispatcherDetail {
             const ctxId = ctxIdFromBox(boxId);
             if (ctxId === undefined) return false;
             if (actionId === "context.disable") {
-                const context = state.readModel.contexts.find(
+                const context = this.#projection.domains.context.contexts.find(
                     (candidate) => candidate.ctxId === ctxId,
                 );
                 const workspace =

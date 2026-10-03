@@ -1,39 +1,39 @@
 import type {
     ContextMessageRecord,
-    JsonValue,
-    ToolCallRecord,
+    ConversationEntry,
 } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../../component/content/Box.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import { readContextConversationDraft } from "../messages/Draft.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
 
 export function buildAuditConversationBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     ctxId: string,
 ): BoxModel[] {
-    const messages = (
-        state.readModel.instanceState[instance]?.contextMessages ?? []
-    )
+    const messages = (reader.messages.instances[instance]?.messages ?? [])
         .filter((message) => message.ctxId === ctxId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    const deliveredCalls = (
-        state.readModel.instanceState[instance]?.commentCalls ?? []
-    )
+    const delivered = (reader.conversation.instances[instance]?.entries ?? [])
         .filter(
-            (call) => call.ctxId === ctxId && readCallComments(call).length > 0,
+            (entry) =>
+                entry.ctxId === ctxId &&
+                entry.kind === "comment" &&
+                entry.status === "delivered",
         )
-        .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     const pending = messages.filter(
         (message) => message.status === "pending" || message.status === "sent",
     );
     const failed = messages.filter((message) => message.status === "failed");
 
     return [
-        ...deliveredCalls.map((call) =>
-            deliveredCommentBox(state, instance, call),
+        ...delivered.map((entry) =>
+            deliveredCommentBox(state, reader, instance, entry),
         ),
         ...(failed.length === 0
             ? []
@@ -47,30 +47,37 @@ export function buildAuditConversationBoxes(
 
 function deliveredCommentBox(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
-    call: ToolCallRecord,
+    entry: ConversationEntry,
 ): BoxModel {
-    const comments = readCallComments(call);
-    const comment = comments.join("\n\n");
+    const call = reader.toolCalls.instances[instance]?.calls.find(
+        (candidate) => candidate.callId === entry.callId,
+    );
+    const callId = entry.callId ?? entry.id;
+    const toolName = call?.toolName ?? "-";
+    const completedAt =
+        call?.completedAt ?? entry.deliveredAt ?? entry.createdAt;
+    const comment = entry.text;
     return makeBox(state, "audit", instance, {
         detailLines: [
-            formatField("Call ID", call.callId),
-            formatField("Tool", call.toolName),
-            formatField("Completed", call.completedAt ?? "-"),
+            formatField("Call ID", callId),
+            formatField("Tool", toolName),
+            formatField("Completed", completedAt),
             formatField("Comment", comment),
         ],
-        id: `conversation-call:${call.callId}`,
-        searchText: `${call.callId} ${call.toolName} ${comment}`,
+        id: `conversation-call:${callId}`,
+        searchText: `${callId} ${toolName} ${comment}`,
         status: "ready",
         summaryLines: [
             compactSummary(
-                ["call", call.callId],
-                ["tool", call.toolName],
-                ["completed", call.completedAt ?? call.startedAt],
+                ["call", callId],
+                ["tool", toolName],
+                ["completed", completedAt],
             ),
             comment,
         ],
-        title: `Comment · ${call.toolName}`,
+        title: `Comment · ${toolName}`,
     });
 }
 
@@ -174,18 +181,4 @@ function composerBox(
 
 function mergeCommentText(messages: readonly ContextMessageRecord[]): string {
     return messages.map((message) => message.text).join("\n\n");
-}
-
-function readCallComments(call: ToolCallRecord): string[] {
-    return readComments(call.output);
-}
-
-function readComments(value: JsonValue | undefined): string[] {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return [];
-    const comment = (value as Record<string, JsonValue>).comment;
-    return Array.isArray(comment) &&
-        comment.every((entry) => typeof entry === "string")
-        ? comment
-        : [];
 }

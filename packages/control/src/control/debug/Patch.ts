@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 import type {
     DebugInvocationSummary,
     DebugPatchLoadRequest,
@@ -114,8 +114,8 @@ export class DebugPatchManager {
     async load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary> {
         const target = this.#targets.get(request.target);
         if (target === undefined) {
-            throw createError({
-                code: errorCodes.controlDebugTargetNotFound,
+            throw createRemoteError({
+                code: controlErrorCodes.debugTargetNotFound,
                 message: `Debug target ${request.target} is not registered.`,
                 retryable: false,
             });
@@ -468,16 +468,16 @@ function cloneJsonValue(value: unknown): JsonValue {
 }
 
 function invalidPatch(message: string) {
-    return createError({
-        code: errorCodes.controlDebugPatchInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.debugPatchInvalid,
         message,
         retryable: false,
     });
 }
 
 function patchNotFound(patchId: string) {
-    return createError({
-        code: errorCodes.controlDebugPatchNotFound,
+    return createRemoteError({
+        code: controlErrorCodes.debugPatchNotFound,
         message: `Debug patch ${patchId} was not found.`,
         retryable: false,
     });

@@ -1,11 +1,20 @@
-import { useMemo, useState } from "react";
+import {
+    useEffect,
+    useMemo,
+    useState,
+    useSyncExternalStore,
+} from "react";
 
 import {
     compactContextId,
-    workspaceFolderName,
+    type ApprovalRequest,
+    type ArtifactStoredImageResult,
+    type InstanceListEntry,
     type McpContextRecord,
-} from "@portable-devshell/shared/browser";
+    type ToolCallRecord,
+} from "@portable-devshell/shared";
 
+import { workspaceFolderName } from "../../../Presentation.js";
 import { ContextBatchDisableDialog, ContextIntervention } from "./Context.js";
 import {
     AuditFilters,
@@ -15,12 +24,17 @@ import {
 import { ToolCallEntry } from "./tool/Entry.js";
 import type { AuditScope, WebRoute } from "../../../../app/Route.js";
 import {
+    useDomainSnapshot,
+    useWebDomains,
+} from "../../../../app/domain/Context.js";
+import type { WebDomainSession } from "../../../../app/domain/Session.js";
+import {
     emptyToolCallFilters,
     hasActiveToolCallFilters,
     selectToolCalls,
     type ToolCallFilters as Filters,
 } from "./tool/Model.js";
-import type { WebState, WebStore } from "../../../../state/Store.js";
+import type { WebStore } from "../../../../state/Store.js";
 import { useNow } from "../../../Clock.js";
 
 const toolCallPageSize = 20;
@@ -30,50 +44,47 @@ export function Audit({
     disabled = false,
     navigate,
     route,
-    state,
     store,
 }: {
     disabled?: boolean;
     navigate(route: WebRoute): void;
     route: Extract<WebRoute, { page: "audit" }>;
-    state: WebState;
     store: WebStore;
 }) {
+    const domains = useWebDomains();
     const now = useNow();
+    const service = useDomainSnapshot(domains.service);
+    const instancesState = useDomainSnapshot(domains.instances);
+    const contextState = useDomainSnapshot(domains.context);
+    const toolCallsState = useDomainSnapshot(domains.toolCalls);
+    const storeState = useSyncExternalStore(
+        store.subscribe,
+        () => store.state,
+        () => store.state,
+    );
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [contextStatus, setContextStatus] =
         useState<AuditContextStatusFilter>("active");
     const [toolCallPage, setToolCallPage] = useState(0);
     const [batchDisableOpen, setBatchDisableOpen] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
-    const instanceState = state.readModel.instanceState;
     const allCalls = useMemo(
-        () => Object.values(instanceState).flatMap((value) => value.toolCalls),
-        [instanceState],
-    );
-    const approvalsByCall = useMemo(
         () =>
-            new Map(
-                Object.values(instanceState)
-                    .flatMap((value) => value.approvals)
-                    .filter((approval) => approval.status === "pending")
-                    .map((approval) => [
-                        `${approval.instance}\u0000${approval.callId}`,
-                        approval,
-                    ]),
+            Object.values(toolCallsState.instances).flatMap(
+                (value) => value.calls,
             ),
-        [instanceState],
+        [toolCallsState],
     );
     const scope = auditScope(route);
     const contextRecords = useMemo(
         () =>
             new Map(
-                state.readModel.contexts.map((context) => [
+                contextState.contexts.map((context) => [
                     context.ctxId,
                     context,
                 ]),
             ),
-        [state.readModel.contexts],
+        [contextState.contexts],
     );
     const calls = useMemo(
         () =>
@@ -89,8 +100,23 @@ export function Audit({
         [allCalls, contextRecords, contextStatus, now, scope],
     );
     const scopes = useMemo(
-        () => auditScopeOptions(state, allCalls, contextStatus, now, scope),
-        [allCalls, contextStatus, now, scope, state],
+        () =>
+            auditScopeOptions(
+                instancesState.instances,
+                contextState.contexts,
+                allCalls,
+                contextStatus,
+                now,
+                scope,
+            ),
+        [
+            allCalls,
+            contextState.contexts,
+            contextStatus,
+            instancesState.instances,
+            now,
+            scope,
+        ],
     );
     const scopedCalls = useMemo(
         () => calls.filter((call) => callMatchesScope(call, scope)),
@@ -119,7 +145,7 @@ export function Audit({
         );
     }, [filters, now, route, scopedCalls, toolCallPage]);
     const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
-    const interactive = state.connection === "online" && !disabled;
+    const interactive = service.status === "online" && !disabled;
     const countText =
         route.view === "call"
             ? selection.total === 0
@@ -128,6 +154,11 @@ export function Audit({
             : selection.total === 0
               ? `0 of ${scopedCalls.length} tool calls${active ? " match active filters." : "."}`
               : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
+
+    useEffect(() => {
+        if (service.status !== "online") return;
+        void store.refreshAudit();
+    }, [service.status, store]);
 
     function changeFilters(next: Filters): void {
         setToolCallPage(0);
@@ -204,7 +235,6 @@ export function Audit({
                     ctxId={scope.ctxId}
                     disabled={disabled}
                     instance={scope.instance}
-                    state={state}
                     store={store}
                 />
             ) : null}
@@ -214,9 +244,10 @@ export function Audit({
             {batchDisableOpen ? (
                 <ContextBatchDisableDialog
                     busy={
-                        state.operations["context-disable-batch"] !== undefined
+                        storeState.operations["context-disable-batch"] !==
+                        undefined
                     }
-                    contexts={state.readModel.contexts}
+                    contexts={contextState.contexts}
                     disabled={!interactive}
                     now={now}
                     onClose={() => setBatchDisableOpen(false)}
@@ -225,11 +256,11 @@ export function Audit({
                     }
                 />
             ) : null}
-            {state.connection === "offline" && allCalls.length === 0 ? (
+            {service.status === "offline" && allCalls.length === 0 ? (
                 <p className="empty">
                     Tool calls are unavailable while offline.
                 </p>
-            ) : state.connection === "connecting" && allCalls.length === 0 ? (
+            ) : service.status === "connecting" && allCalls.length === 0 ? (
                 <p className="empty">Loading tool calls…</p>
             ) : selection.items.length === 0 ? (
                 <p className="empty">
@@ -242,28 +273,16 @@ export function Audit({
             ) : (
                 <ol className="feed activity-feed">
                     {selection.items.map((call) => (
-                        <ToolCallEntry
-                            approval={approvalsByCall.get(
-                                `${call.instance}\u0000${call.callId}`,
-                            )}
+                        <ToolCallActivity
                             call={call}
                             disabled={!interactive}
+                            domains={domains}
                             initiallyOpen={
                                 route.view === "call" &&
                                 call.callId === route.callId
                             }
                             key={`${call.instance}-${call.callId}`}
-                            logs={instanceState[call.instance]?.logs ?? []}
                             now={now}
-                            onLoadImage={store.readArtifactImage}
-                            onLoadDetail={async () =>
-                                typeof store.readToolCallDetail === "function"
-                                    ? await store.readToolCallDetail(
-                                          call.instance,
-                                          call.callId,
-                                      )
-                                    : call
-                            }
                             onDecideApproval={async (approval, decision) => {
                                 const succeeded = await store.decideTool(
                                     approval.instance,
@@ -272,11 +291,18 @@ export function Audit({
                                 );
                                 if (!succeeded) {
                                     throw new Error(
-                                        store.state.error ??
+                                        storeState.error ??
                                             "Approval could not be recorded.",
                                     );
                                 }
                             }}
+                            onLoadDetail={async () =>
+                                await store.readToolCallDetail(
+                                    call.instance,
+                                    call.callId,
+                                )
+                            }
+                            onLoadImage={domains.artifactTransport.readImage}
                             onRefresh={async () =>
                                 await store.refreshToolCall(call.instance)
                             }
@@ -296,6 +322,51 @@ export function Audit({
     );
 }
 
+function ToolCallActivity({
+    call,
+    disabled,
+    domains,
+    initiallyOpen,
+    now,
+    onDecideApproval,
+    onLoadDetail,
+    onLoadImage,
+    onRefresh,
+}: {
+    call: ToolCallRecord;
+    disabled: boolean;
+    domains: WebDomainSession;
+    initiallyOpen: boolean;
+    now: number;
+    onDecideApproval(
+        approval: ApprovalRequest,
+        decision: "approve" | "deny",
+    ): Promise<void>;
+    onLoadDetail(): Promise<ToolCallRecord | undefined>;
+    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    onRefresh(): Promise<void>;
+}) {
+    const runtimeState = useDomainSnapshot(domains.runtime(call.instance));
+    const approvalState = useDomainSnapshot(domains.approval(call.instance));
+    const approval = approvalState.approvals.find(
+        (candidate) => candidate.callId === call.callId,
+    );
+    return (
+        <ToolCallEntry
+            approval={approval}
+            call={call}
+            disabled={disabled}
+            initiallyOpen={initiallyOpen}
+            logs={runtimeState.logs}
+            now={now}
+            onDecideApproval={onDecideApproval}
+            onLoadDetail={onLoadDetail}
+            onLoadImage={onLoadImage}
+            onRefresh={onRefresh}
+        />
+    );
+}
+
 function auditScope(route: Extract<WebRoute, { page: "audit" }>): AuditScope {
     if (route.view === "timeline") return route.scope;
     return route.ctxId === undefined
@@ -304,16 +375,15 @@ function auditScope(route: Extract<WebRoute, { page: "audit" }>): AuditScope {
 }
 
 function auditScopeOptions(
-    state: WebState,
+    instances: readonly InstanceListEntry[],
+    contexts: readonly McpContextRecord[],
     calls: readonly { ctxId?: string; instance: string; workspace?: string }[],
     contextStatus: AuditContextStatusFilter,
     now: number,
     currentScope: AuditScope,
 ): AuditScopeOption[] {
-    const instances = new Set(
-        state.readModel.instances.map((instance) => instance.name),
-    );
-    const contexts = new Map<
+    const instanceNames = new Set(instances.map((instance) => instance.name));
+    const contextEntries = new Map<
         string,
         {
             ctxId: string;
@@ -323,10 +393,10 @@ function auditScopeOptions(
             workspace?: string;
         }
     >();
-    for (const context of state.readModel.contexts) {
+    for (const context of contexts) {
         for (const environment of context.environments) {
-            instances.add(environment.instance);
-            contexts.set(`${environment.instance}\u0000${context.ctxId}`, {
+            instanceNames.add(environment.instance);
+            contextEntries.set(`${environment.instance}\u0000${context.ctxId}`, {
                 ctxId: context.ctxId,
                 instance: environment.instance,
                 record: context,
@@ -336,11 +406,11 @@ function auditScopeOptions(
         }
     }
     for (const call of calls) {
-        instances.add(call.instance);
+        instanceNames.add(call.instance);
         if (call.ctxId !== undefined) {
             const key = `${call.instance}\u0000${call.ctxId}`;
-            if (!contexts.has(key))
-                contexts.set(key, {
+            if (!contextEntries.has(key))
+                contextEntries.set(key, {
                     ctxId: call.ctxId,
                     instance: call.instance,
                     workspace: call.workspace,
@@ -349,12 +419,12 @@ function auditScopeOptions(
     }
     return [
         { label: "All instances", scope: { kind: "all" } },
-        ...[...instances].sort().map((instance): AuditScopeOption => ({
+        ...[...instanceNames].sort().map((instance): AuditScopeOption => ({
             group: { id: "instances", label: "Instances" },
             label: instance,
             scope: { kind: "instance", instance },
         })),
-        ...[...contexts.values()]
+        ...[...contextEntries.values()]
             .filter(
                 (context) =>
                     (currentScope.kind === "context" &&

@@ -10,8 +10,8 @@ import {
     type CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type CliCommandDescriptor,
 } from "@portable-devshell/shared";
 
@@ -64,8 +64,8 @@ export class CliExtensionCommandService {
         const { lease, registration } = acquired;
         try {
             if (typeof registration.binding !== "function") {
-                throw createError({
-                    code: errorCodes.controlCliCommandFailed,
+                throw createRemoteError({
+                    code: controlErrorCodes.cliCommandFailed,
                     details: { commandId, surface: this.#surface },
                     message: `CLI ${this.#surface} command ${commandId} has an invalid binding.`,
                     retryable: false,
@@ -116,8 +116,8 @@ export class CliExtensionCommandService {
 }
 
 function unavailable(commandId: string): Error {
-    return createError({
-        code: errorCodes.controlCliCommandFailed,
+    return createRemoteError({
+        code: controlErrorCodes.cliCommandFailed,
         details: { commandId },
         message: `CLI command ${commandId} is unavailable.`,
         retryable: false,

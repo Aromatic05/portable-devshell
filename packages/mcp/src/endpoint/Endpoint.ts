@@ -14,6 +14,7 @@ import type { McpTool } from "./tool/Schema.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
+import type { WorkspaceActionStore } from "../workspace/ActionStore.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./domain/worker/Provenance.js";
 import {
@@ -43,6 +44,7 @@ export interface McpEndpointWorkerOptions {
     workspaceAppEnabled?: boolean;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
     workspaceAppPresence?: WorkspaceAppPresenceStore;
+    workspaceActionStore?: WorkspaceActionStore;
     workspaceLiveBaseUrl?: string;
 }
 
@@ -81,6 +83,7 @@ export class McpEndpointWorker {
             worker: options.worker,
             workspaceAppLeases: options.workspaceAppLeases,
             workspaceAppPresence: options.workspaceAppPresence,
+            workspaceActionStore: options.workspaceActionStore,
             workspaceLiveBaseUrl: options.workspaceLiveBaseUrl,
         });
         this.#instanceName = options.instanceName;

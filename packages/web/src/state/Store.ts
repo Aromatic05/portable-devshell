@@ -1,64 +1,44 @@
-import {
-    ControlCommands,
-    ControlReadModel,
-    ControlRefreshScheduler,
-    errorMessage,
-    withRequestTimeout,
-    type ConfigBatchUpdateRequest,
-    type ConfigDraft,
-    type ConfigInstancePatch,
-    type ConfigMcpPatch,
-    type ConfigWebPatch,
-    type ConversationPreferencesPatch,
-    type InstanceCreateDraft,
-    type InstanceCreateSchema,
-    type InstanceCreateSummary,
-    type WebPageSnapshot,
-} from "@portable-devshell/shared/browser";
+import type {
+    ConfigBatchUpdateRequest,
+    ConfigDraft,
+    ConfigInstancePatch,
+    ConfigMcpPatch,
+    ConfigWebPatch,
+    ConversationPreferencesPatch,
+    InstanceCreateDraft,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+    ToolCallRecord,
+    WebPageSnapshot,
+} from "@portable-devshell/shared";
 
-import type { WebClients } from "../app/transport/Client.js";
+import type { WebDomainSession } from "../app/domain/Session.js";
 import { WebOperationCoordinator } from "./Operation.js";
-import { createInitialWebState, webFailures, type WebState } from "./Model.js";
+import { createInitialWebState, type WebState } from "./Model.js";
+import { errorMessage, withRequestTimeout } from "./Request.js";
 
-export type { ConnectionState, WebState } from "./Model.js";
+export type { WebState } from "./Model.js";
 
 export interface WebStoreOptions {
-    isPageVisible?: () => boolean;
     operationTimeoutMs?: number;
-    overviewRefreshIntervalMs?: number;
     requestTimeoutMs?: number;
-    streamRetryBaseMs?: number;
-    streamStableAfterMs?: number;
 }
 
 export class WebStore {
     #state = createInitialWebState();
     readonly #listeners = new Set<() => void>();
-    readonly #model: ControlReadModel;
-    readonly #commands: ControlCommands;
     readonly #operations: WebOperationCoordinator;
     readonly #requestTimeoutMs: number;
-    readonly #offTransportClose: () => void;
-    readonly #refreshScheduler: ControlRefreshScheduler;
-    #stopped = false;
-    #loadPromise?: Promise<void>;
-    #reconnectPromise?: Promise<void>;
-    #controlRestartPromise?: Promise<boolean>;
     #conversationPreferenceQueue = Promise.resolve();
+    #controlRestartPromise?: Promise<boolean>;
     #generation = 0;
-    #ignoreTransportClose = false;
-    #overviewActive = false;
+    #stopped = false;
 
     constructor(
-        readonly clients: WebClients,
+        readonly domains: WebDomainSession,
         options: WebStoreOptions = {},
     ) {
         this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
-        const isPageVisible =
-            options.isPageVisible ??
-            (() =>
-                typeof document === "undefined" ||
-                document.visibilityState !== "hidden");
         this.#operations = new WebOperationCoordinator(
             {
                 getState: () => this.#state,
@@ -66,46 +46,6 @@ export class WebStore {
                 setState: (state) => this.#set(state),
             },
             options.operationTimeoutMs ?? 30_000,
-        );
-        this.#model = new ControlReadModel({
-            clients,
-            onEvent: (event) => {
-                if (event.type !== "log.appended")
-                    this.#refreshScheduler.scheduleOverview(250);
-            },
-            requestTimeoutMs: this.#requestTimeoutMs,
-            retryBaseMs: options.streamRetryBaseMs,
-            stableAfterMs: options.streamStableAfterMs,
-        });
-        this.#commands = new ControlCommands({
-            clients,
-            model: this.#model,
-            timeoutMs: options.operationTimeoutMs ?? 30_000,
-        });
-        this.#refreshScheduler = new ControlRefreshScheduler({
-            model: this.#model,
-            overviewIntervalMs: options.overviewRefreshIntervalMs,
-            shouldRefreshOAuth: () => {
-                const status = this.#model.state.mcpStatus;
-                return (
-                    this.#listeners.size > 0 &&
-                    this.#state.connection === "online" &&
-                    isPageVisible() &&
-                    status?.authMode === "oauth2" &&
-                    status.oauthReady === true &&
-                    status.running === true
-                );
-            },
-            shouldRefreshOverview: () =>
-                this.#listeners.size > 0 &&
-                this.#state.connection === "online" &&
-                isPageVisible() &&
-                this.#overviewActive,
-        });
-        this.#refreshScheduler.start();
-        this.#model.subscribe(() => this.#syncModel());
-        this.#offTransportClose = clients.onTransportClose((error) =>
-            this.#transportClosed(error ?? new Error("Control transport closed.")),
         );
     }
 
@@ -119,50 +59,49 @@ export class WebStore {
     };
 
     setOverviewActive(active: boolean): void {
-        if (this.#overviewActive === active) return;
-        this.#overviewActive = active;
-        if (active) this.#refreshScheduler.scheduleOverview(0);
+        if (active) {
+            this.domains.overview.start();
+            this.domains.overview.scheduleRefresh(0);
+        } else {
+            this.domains.overview.stop();
+        }
     }
 
     async load(): Promise<void> {
         if (this.#stopped) return;
-        if (this.#loadPromise !== undefined) return await this.#loadPromise;
+        try {
+            await this.domains.load();
+            if (this.#stopped) return;
+            this.#set({ ...this.#state, error: undefined });
+        } catch (error) {
+            if (!this.#stopped)
+                this.#set({ ...this.#state, error: errorMessage(error) });
+        }
+    }
+
+    async reconnect(): Promise<void> {
+        if (this.#stopped) return;
+        this.#generation += 1;
         const generation = this.#generation;
+        this.#operations.cancelAll(new Error("Web connection is reconnecting."));
         this.#set({
             ...this.#state,
-            connection: "connecting",
             error: undefined,
+            notice: undefined,
+            operations: {},
         });
-        const request = this.#model
-            .load({ artifacts: true, config: true, web: true })
-            .then(
-                async () => {
-                    if (!this.#current(generation)) return;
-                    await this.#loadConversationPreferences(generation);
-                    if (this.#current(generation)) {
-                        this.#set({
-                            ...this.#state,
-                            connection: "online",
-                            error: undefined,
-                        });
-                    }
-                },
-                (error: unknown) => {
-                    if (this.#current(generation)) {
-                        this.#set({
-                            ...this.#state,
-                            connection: "offline",
-                            error: errorMessage(error),
-                        });
-                    }
-                },
-            )
-            .finally(() => {
-                if (this.#loadPromise === request)
-                    this.#loadPromise = undefined;
-            });
-        this.#loadPromise = request;
-        return await request;
+        try {
+            await withRequestTimeout(
+                this.domains.reconnect(),
+                this.#requestTimeoutMs,
+                "control.reconnect",
+            );
+            if (this.#current(generation))
+                this.#set({ ...this.#state, error: undefined });
+        } catch (error) {
+            if (this.#current(generation))
+                this.#set({ ...this.#state, error: errorMessage(error) });
+        }
     }
 
     async updateConversationPreferences(
@@ -172,25 +111,15 @@ export class WebStore {
         const run = async (): Promise<boolean> => {
             if (!this.#current(generation)) return false;
             try {
-                const preferences = await withRequestTimeout(
-                    this.clients.conversation.updatePreferences(patch),
-                    this.#requestTimeoutMs,
-                    "conversation.updatePreferences",
-                );
-                if (!this.#current(generation)) return false;
-                this.#set({
-                    ...this.#state,
-                    conversationPreferences: preferences,
-                    conversationPreferencesError: undefined,
-                });
-                return true;
+                await this.domains.conversation.updatePreferences(patch);
+                return this.#current(generation);
             } catch (error) {
-                if (this.#current(generation)) {
+                if (this.#current(generation))
                     this.#set({
                         ...this.#state,
-                        conversationPreferencesError: errorMessage(error),
+                        error: errorMessage(error),
+                        notice: undefined,
                     });
-                }
                 return false;
             }
         };
@@ -202,46 +131,29 @@ export class WebStore {
         return await request;
     }
 
-    async reconnect(): Promise<void> {
-        if (this.#reconnectPromise !== undefined)
-            return await this.#reconnectPromise;
-        const request = this.#reconnect().finally(() => {
-            if (this.#reconnectPromise === request)
-                this.#reconnectPromise = undefined;
-        });
-        this.#reconnectPromise = request;
-        return await request;
-    }
-
-    async refreshInstance(name: string): Promise<void> {
-        await this.#model.refreshInstance(name, ["snapshot"]);
-        const failures = webFailures(this.#model.state);
-        const errors = [failures[`instance:${name}`]].filter(
-            (value): value is string => value !== undefined,
-        );
-        if (errors.length > 0) throw new Error(errors.join("; "));
+    async refreshInstance(instance: string): Promise<void> {
+        const runtime = this.domains.runtime(instance);
+        await runtime.load(instance);
     }
 
     async refreshToolCall(instance: string): Promise<void> {
-        await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
-        const failures = webFailures(this.#model.state);
-        const errors = [
-            failures[`toolCalls:${instance}`],
-            failures[`logs:${instance}`],
-        ].filter((value): value is string => value !== undefined);
-        if (errors.length > 0) throw new Error(errors.join("; "));
+        const runtime = this.domains.runtime(instance);
+        await Promise.all([
+            this.domains.toolCalls.load(instance),
+            runtime.load(instance).then(() => runtime.readLogs()),
+        ]);
     }
 
-    async readToolCallDetail(instance: string, callId: string) {
-        return await this.#model.readToolCallDetail(instance, callId);
+    async readToolCallDetail(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined> {
+        const details = await this.domains.toolCalls.readDetail(instance, callId);
+        return details[0];
     }
 
     async readExtensionPage(pageId: string): Promise<WebPageSnapshot> {
-        return await withRequestTimeout(
-            this.clients.web.page(pageId),
-            this.#requestTimeoutMs,
-            `web.page:${pageId}`,
-        );
+        return await this.domains.extension.readWebPage(pageId);
     }
 
     async invokeExtensionPageAction(
@@ -249,51 +161,51 @@ export class WebStore {
         actionId: string,
         rowId?: string,
     ): Promise<WebPageSnapshot> {
-        return await withRequestTimeout(
-            this.clients.web.action(pageId, actionId, rowId),
-            this.#requestTimeoutMs,
-            `web.page:${pageId}:action:${actionId}`,
-        );
+        return await this.domains.extension.webAction(pageId, actionId, rowId);
     }
 
     async refreshAudit(): Promise<void> {
         await Promise.all([
-            this.#model.refreshInstances(),
-            this.#model.refreshContexts(),
+            this.domains.instances.refresh(),
+            this.domains.context.refresh(),
         ]);
+        const instances = this.domains.instances.state.instances.map(
+            ({ name }) => name,
+        );
         await Promise.all(
-            this.#model.state.instances.map(async ({ name }) => {
-                await this.#model.refreshInstance(name, [
-                    "toolCalls",
-                    "approvals",
-                    "comments",
-                    "logs",
+            instances.map(async (instance) => {
+                const runtime = this.domains.runtime(instance);
+                await Promise.all([
+                    runtime.load(instance).then(() => runtime.readLogs()),
+                    this.domains.approval(instance).load(instance),
+                    this.domains.toolCalls.load(instance),
+                    this.domains.conversation.refreshInstance(instance),
+                    this.domains.messages.refreshInstance(instance),
                 ]);
             }),
         );
     }
 
     async refreshMessageActivity(): Promise<void> {
-        await this.#model.refreshContexts();
+        await this.domains.context.refresh();
     }
 
     async refreshMessages(): Promise<void> {
-        const generation = this.#generation;
         await Promise.all([
-            this.#model.refreshContexts(),
-            ...this.#model.state.instances.map(async ({ name }) => {
-                await this.#model.refreshInstance(name, ["comments"]);
-            }),
-            this.#loadConversationPreferences(generation),
+            this.domains.instances.refresh(),
+            this.domains.context.refresh(),
+        ]);
+        const instances = this.domains.instances.state.instances.map(
+            ({ name }) => name,
+        );
+        await Promise.all([
+            this.domains.conversation.load(instances),
+            this.domains.messages.load(instances),
         ]);
     }
 
     readonly readArtifactImage = async (imageRef: string) =>
-        await withRequestTimeout(
-            this.clients.artifact.readImage(imageRef),
-            this.#requestTimeoutMs,
-            "artifact.readImage",
-        );
+        await this.domains.artifactTransport.readImage(imageRef);
 
     async decideTool(
         instance: string,
@@ -305,13 +217,10 @@ export class WebStore {
             `approval:${approvalId}`,
             "Approval recorded.",
             generation,
-            async (signal) => {
-                await this.#commands.decideToolApproval(
-                    instance,
-                    approvalId,
-                    decision,
-                );
-                if (signal.aborted || !this.#current(generation)) return;
+            async () => {
+                const approval = this.domains.approval(instance);
+                await approval.load(instance);
+                await approval.decide(approvalId, decision);
             },
         );
     }
@@ -320,16 +229,7 @@ export class WebStore {
         approvalId: string,
         decision: "approve" | "deny",
     ): Promise<boolean> {
-        const generation = this.#generation;
-        return await this.#operations.run(
-            `oauth:${approvalId}`,
-            "Approval recorded.",
-            generation,
-            async (signal) => {
-                await this.#commands.decideOAuthApproval(approvalId, decision);
-                if (signal.aborted || !this.#current(generation)) return;
-            },
-        );
+        return await this.decideOAuthApproval(approvalId, decision);
     }
 
     async queueContextMessage(
@@ -342,8 +242,8 @@ export class WebStore {
             `context-message:${instance}:${ctxId}`,
             "Message queued.",
             generation,
-            async (_signal) => {
-                await this.#commands.queueContextMessage(instance, ctxId, text);
+            async () => {
+                await this.domains.messages.queue(instance, ctxId, text);
             },
         );
     }
@@ -354,48 +254,31 @@ export class WebStore {
             `context-disable:${ctxId}`,
             "Context disabled.",
             generation,
-            async (signal) => {
-                await this.#commands.disableContext(ctxId);
-                if (signal.aborted || !this.#current(generation)) return;
+            async () => {
+                await this.domains.context.disable(ctxId);
             },
         );
     }
 
     async disableContexts(ctxIds: readonly string[]): Promise<boolean> {
-        const uniqueCtxIds = [...new Set(ctxIds)].filter(
-            (ctxId) => ctxId.length > 0,
-        );
-        if (uniqueCtxIds.length === 0) return true;
+        const ids = [...new Set(ctxIds)].filter(Boolean);
+        if (ids.length === 0) return true;
         const generation = this.#generation;
         return await this.#operations.run(
             "context-disable-batch",
-            `${uniqueCtxIds.length} Context${uniqueCtxIds.length === 1 ? "" : "s"} disabled.`,
+            `${ids.length} Context${ids.length === 1 ? "" : "s"} disabled.`,
             generation,
-            async (signal) => {
-                if (signal.aborted || !this.#current(generation)) return;
-                const results = await Promise.all(
-                    uniqueCtxIds.map(async (ctxId) => {
-                        try {
-                            await withRequestTimeout(
-                                this.clients.context.disable(ctxId),
-                                this.#requestTimeoutMs,
-                                `context.disable:${ctxId}`,
-                            );
-                            return undefined;
-                        } catch (error) {
-                            return `${ctxId}: ${errorMessage(error)}`;
-                        }
-                    }),
-                );
-                const failures = results.filter(
-                    (result): result is string => result !== undefined,
-                );
-                if (signal.aborted || !this.#current(generation)) return;
-                if (this.#current(generation))
-                    await this.#model.refreshContexts();
-                if (failures.length > 0) {
-                    throw new Error(`Failed to disable ${failures.join("; ")}`);
+            async () => {
+                const failures: string[] = [];
+                for (const ctxId of ids) {
+                    try {
+                        await this.domains.context.disable(ctxId);
+                    } catch (error) {
+                        failures.push(`${ctxId}: ${errorMessage(error)}`);
+                    }
                 }
+                if (failures.length > 0)
+                    throw new Error(`Failed to disable ${failures.join("; ")}`);
             },
         );
     }
@@ -406,9 +289,8 @@ export class WebStore {
             `context-renew:${ctxId}`,
             "Context renewed.",
             generation,
-            async (signal) => {
-                await this.#commands.renewContext(ctxId);
-                if (signal.aborted || !this.#current(generation)) return;
+            async () => {
+                await this.domains.context.renew(ctxId);
             },
         );
     }
@@ -420,9 +302,9 @@ export class WebStore {
             "Todo project deleted.",
             generation,
             async () => {
-                await this.clients.todo.delete(instance, taskId);
-                if (this.#current(generation))
-                    await this.#model.refreshInstance(instance, ["todo"]);
+                const todo = this.domains.todo(instance);
+                await todo.load(instance);
+                await todo.delete(taskId);
             },
         );
     }
@@ -442,9 +324,11 @@ export class WebStore {
             `${instance} restart requested.`,
             generation,
             async (signal) => {
-                await this.#commands.stopInstance(instance);
+                const runtime = this.domains.runtime(instance);
+                await runtime.load(instance);
+                await runtime.stop();
                 if (signal.aborted || !this.#current(generation)) return;
-                await this.#commands.startInstance(instance, { signal });
+                await runtime.start({ signal });
             },
         );
     }
@@ -458,11 +342,9 @@ export class WebStore {
             `enabled:${instance}`,
             `${instance} ${enabled ? "enabled" : "disabled"}.`,
             generation,
-            async (signal) => {
-                if (enabled) await this.clients.instance.enable(instance);
-                else await this.clients.instance.disable(instance);
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshControl();
+            async () => {
+                if (enabled) await this.domains.instances.enable(instance);
+                else await this.domains.instances.disable(instance);
             },
         );
     }
@@ -473,18 +355,17 @@ export class WebStore {
             `delete:${instance}`,
             `${instance} deleted.`,
             generation,
-            async (signal) => {
-                await this.clients.instance.delete(instance);
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshControl();
+            async () => {
+                await this.domains.instances.delete(instance);
+                this.domains.releaseInstance(instance);
             },
         );
     }
 
     async refreshArtifacts(): Promise<void> {
-        await this.#model.refreshArtifacts();
-        const failure = webFailures(this.#model.state).artifacts;
-        if (failure !== undefined) throw new Error(failure);
+        await this.domains.artifact.refresh();
+        if (this.domains.artifact.state.failure !== undefined)
+            throw this.domains.artifact.state.failure;
     }
 
     async revokeArtifactShare(shareId: string): Promise<boolean> {
@@ -493,10 +374,8 @@ export class WebStore {
             `artifact:revoke:${shareId}`,
             `Artifact share ${shareId} revoked.`,
             generation,
-            async (signal) => {
-                await this.clients.artifact.revokeShare(shareId);
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshArtifacts();
+            async () => {
+                await this.domains.artifact.revokeShare(shareId);
             },
         );
     }
@@ -507,17 +386,15 @@ export class WebStore {
             `artifact:cancel:${transferId}`,
             `Artifact transfer ${transferId} cancellation requested.`,
             generation,
-            async (signal) => {
-                await this.clients.artifact.cancelTransfer(transferId);
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshArtifacts();
+            async () => {
+                await this.domains.artifact.cancelTransfer(transferId);
             },
         );
     }
 
     async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
         return await withRequestTimeout(
-            this.clients.instance.createSchema(),
+            this.domains.instances.createSchema(),
             this.#requestTimeoutMs,
             "instance.createSchema",
         );
@@ -527,7 +404,7 @@ export class WebStore {
         draft: InstanceCreateDraft,
     ): Promise<InstanceCreateSummary> {
         return await withRequestTimeout(
-            this.clients.instance.validateCreate(draft),
+            this.domains.instances.validateCreate(draft),
             this.#requestTimeoutMs,
             `instance.validateCreate:${draft.name}`,
         );
@@ -543,12 +420,12 @@ export class WebStore {
             `instance-create:${draft.name || "new"}`,
             `${draft.name || "Instance"} created.`,
             generation,
-            async (signal) => {
-                const result = await this.clients.instance.create(draft);
-                if (signal.aborted || !this.#current(generation)) return;
+            async () => {
+                const result = await this.domains.instances.create(draft);
+                await this.domains.instances.refresh();
                 if (draft.provider === "reverse") {
                     try {
-                        const code = await this.clients.reverse.createCode(
+                        const code = await this.domains.reverse.createCode(
                             result.name,
                         );
                         enrollment = [
@@ -565,8 +442,6 @@ export class WebStore {
                         ].join(" ");
                     }
                 }
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshControl();
             },
         );
         return {
@@ -576,15 +451,15 @@ export class WebStore {
     }
 
     async refreshConfig(): Promise<void> {
-        await this.#model.refreshConfig();
-        const failure = webFailures(this.#model.state).config;
-        if (failure !== undefined) throw new Error(failure);
+        await this.domains.config.refresh();
+        if (this.domains.config.state.failure !== undefined)
+            throw this.domains.config.state.failure;
     }
 
     async validateConfig(draft: ConfigDraft): Promise<boolean> {
         try {
             await withRequestTimeout(
-                this.clients.config.validate(draft),
+                this.domains.config.validate(draft),
                 this.#requestTimeoutMs,
                 "config.validate",
             );
@@ -605,11 +480,9 @@ export class WebStore {
             "config:update",
             "Configuration saved.",
             generation,
-            async (signal) => {
-                await this.clients.config.update(request);
-                if (signal.aborted || !this.#current(generation)) return;
-                await this.#model.refreshConfig();
-                await this.#model.refreshMcp();
+            async () => {
+                await this.domains.config.update(request);
+                if (request.mcp !== undefined) await this.domains.mcp.refresh();
             },
         );
     }
@@ -640,11 +513,8 @@ export class WebStore {
             `oauth:${decision}:${approvalId}`,
             `OAuth request ${decision === "approve" ? "approved" : "denied"}.`,
             generation,
-            async (signal) => {
-                await this.clients.mcp.decideApproval(approvalId, decision);
-                if (signal.aborted || !this.#current(generation)) return;
-                this.#model.recordOAuthDecision(approvalId);
-                await this.#model.refreshMcp();
+            async () => {
+                await this.domains.mcp.decideApproval(approvalId, decision);
             },
         );
     }
@@ -652,7 +522,7 @@ export class WebStore {
     async createReverseCode(instance: string): Promise<string | undefined> {
         try {
             const result = await withRequestTimeout(
-                this.clients.reverse.createCode(instance),
+                this.domains.reverse.createCode(instance),
                 this.#requestTimeoutMs,
                 `reverse.createCode:${instance}`,
             );
@@ -679,7 +549,7 @@ export class WebStore {
             `${instance} device token rotated.`,
             generation,
             async () => {
-                await this.clients.reverse.rotateToken(instance);
+                await this.domains.reverse.rotateToken(instance);
             },
         );
     }
@@ -691,7 +561,7 @@ export class WebStore {
             `${instance} device token revoked.`,
             generation,
             async () => {
-                await this.clients.reverse.revokeToken(instance);
+                await this.domains.reverse.revokeToken(instance);
             },
         );
     }
@@ -721,12 +591,9 @@ export class WebStore {
         if (this.#stopped) return;
         this.#stopped = true;
         this.#generation += 1;
-        this.#offTransportClose();
         this.#operations.cancelAll(new Error("Web store closed."));
-        this.#commands.reset();
-        this.#refreshScheduler.stop();
-        this.#model.close();
-        this.clients.close();
+        this.domains.close();
+        this.#listeners.clear();
     }
 
     async #lifecycle(
@@ -739,80 +606,18 @@ export class WebStore {
             `${instance} ${action} requested.`,
             generation,
             async (signal) => {
-                if (action === "start") {
-                    await this.#commands.startInstance(instance, { signal });
-                } else {
-                    await this.#commands.stopInstance(instance);
-                }
+                const runtime = this.domains.runtime(instance);
+                await runtime.load(instance);
+                if (action === "start") await runtime.start({ signal });
+                else await runtime.stop();
             },
         );
-    }
-
-    async #loadConversationPreferences(generation: number): Promise<void> {
-        try {
-            const preferences = await withRequestTimeout(
-                this.clients.conversation.preferences(),
-                this.#requestTimeoutMs,
-                "conversation.preferences",
-            );
-            if (!this.#current(generation)) return;
-            this.#set({
-                ...this.#state,
-                conversationPreferences: preferences,
-                conversationPreferencesError: undefined,
-            });
-        } catch (error) {
-            if (!this.#current(generation)) return;
-            this.#set({
-                ...this.#state,
-                conversationPreferences: undefined,
-                conversationPreferencesError: errorMessage(error),
-            });
-        }
-    }
-
-    async #reconnect(): Promise<void> {
-        this.#generation += 1;
-        const generation = this.#generation;
-        this.#operations.cancelAll(
-            new Error("Web connection is reconnecting."),
-        );
-        this.#commands.reset();
-        this.#model.reset();
-        this.#set({
-            ...this.#state,
-            connection: "connecting",
-            conversationPreferencesError: undefined,
-            error: undefined,
-            notice: undefined,
-            operations: {},
-        });
-        this.#ignoreTransportClose = true;
-        try {
-            await withRequestTimeout(
-                this.clients.reconnect(),
-                this.#requestTimeoutMs,
-                "control.reconnect",
-            );
-        } catch (error) {
-            if (this.#current(generation)) {
-                this.#set({
-                    ...this.#state,
-                    connection: "offline",
-                    error: errorMessage(error),
-                });
-            }
-            return;
-        } finally {
-            this.#ignoreTransportClose = false;
-        }
-        if (this.#current(generation)) await this.load();
     }
 
     async #restartControl(): Promise<boolean> {
         try {
             await withRequestTimeout(
-                this.clients.service.restart(),
+                this.domains.service.restart(),
                 this.#requestTimeoutMs,
                 "control.restart",
             );
@@ -828,16 +633,19 @@ export class WebStore {
         const deadline = Date.now() + 30_000;
         while (!this.#stopped && Date.now() < deadline) {
             await new Promise((resolve) => setTimeout(resolve, 100));
-            await this.reconnect();
-            if (this.#state.connection === "online") {
-                this.#set({
-                    ...this.#state,
-                    error: undefined,
-                    notice: "Control runtime restarted.",
-                });
-                return true;
+            try {
+                await this.domains.reconnect();
+                if (this.domains.service.state.status === "online") {
+                    this.#set({
+                        ...this.#state,
+                        error: undefined,
+                        notice: "Control runtime restarted.",
+                    });
+                    return true;
+                }
+            } catch (error) {
+                lastError = errorMessage(error);
             }
-            lastError = this.#state.error ?? lastError;
         }
         this.#set({
             ...this.#state,
@@ -845,26 +653,6 @@ export class WebStore {
             notice: undefined,
         });
         return false;
-    }
-
-    #syncModel(): void {
-        if (this.#stopped) return;
-        this.#set({ ...this.#state, readModel: this.#model.state });
-    }
-
-    #transportClosed(error: Error): void {
-        if (this.#stopped || this.#ignoreTransportClose) return;
-        this.#generation += 1;
-        this.#operations.cancelAll(error);
-        this.#commands.reset();
-        this.#model.reset();
-        this.#set({
-            ...this.#state,
-            connection: "offline",
-            error: error.message,
-            notice: undefined,
-            operations: {},
-        });
     }
 
     #current(generation: number): boolean {

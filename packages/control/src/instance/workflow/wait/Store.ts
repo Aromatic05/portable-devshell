@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 
 import { cleanupStaleAtomicStateTemps } from "../../AtomicState.js";
 import { WaitState, type WaitDocument } from "./State.js";
@@ -101,9 +101,9 @@ export class WaitStore {
                 }),
             };
         } catch (error) {
-            throw createError({
+            throw createRemoteError({
                 cause: error,
-                code: errorCodes.targetInvalid,
+                code: controlErrorCodes.invalidTarget,
                 details: { filePath: this.#filePath },
                 message: `Wait state for ${this.#instanceName} is invalid.`,
                 retryable: false,

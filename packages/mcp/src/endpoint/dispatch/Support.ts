@@ -1,7 +1,7 @@
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -21,8 +21,8 @@ export function assertMcpEndpointReady(
     instanceName: string,
 ): void {
     if (!worker.snapshot().ready) {
-        throw createError({
-            code: errorCodes.coreInstanceNotReady,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceNotReady,
             details: { instance: instanceName },
             message: `Instance ${instanceName} is not ready.`,
             retryable: false,
@@ -43,8 +43,8 @@ export async function waitForMcpEndpointReady(
     while (worker.snapshot().ready !== true) {
         throwIfMcpEndpointAborted(signal);
         if (Date.now() >= deadline) {
-            throw createError({
-                code: errorCodes.coreInstanceNotReady,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceNotReady,
                 details: { instance: instanceName, waitedMs: timeoutMs },
                 message: `Instance ${instanceName} is not ready.`,
                 retryable: false,
@@ -72,8 +72,8 @@ export async function waitForMcpGatewayReady(
             if (isNotReadyError(error)) {
                 throwIfMcpEndpointAborted(signal);
                 if (Date.now() >= deadline) {
-                    throw createError({
-                        code: errorCodes.coreInstanceNotReady,
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.instanceNotReady,
                         details: { instance, waitedMs: timeoutMs },
                         message: `Instance ${instance} is not ready.`,
                         retryable: false,
@@ -89,7 +89,7 @@ export async function waitForMcpGatewayReady(
 
 function isNotReadyError(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error
-        ? (error as { code?: unknown }).code === errorCodes.coreInstanceNotReady
+        ? (error as { code?: unknown }).code === runtimeErrorCodes.instanceNotReady
         : false;
 }
 
@@ -100,8 +100,8 @@ export function requireMcpEndpointGateway(
     if (gateway !== undefined) {
         return gateway;
     }
-    throw createError({
-        code: errorCodes.coreToolSchemaUnavailable,
+    throw createRemoteError({
+        code: runtimeErrorCodes.toolSchemaUnavailable,
         details: { instance: instanceName },
         message: `Control tools are not available for ${instanceName}.`,
         retryable: false,
@@ -139,8 +139,8 @@ export function requireMcpEndpointEnvironment(
     if (worker.handshake !== undefined) {
         return worker.handshake;
     }
-    throw createError({
-        code: errorCodes.coreWorkerHandshakeFailed,
+    throw createRemoteError({
+        code: runtimeErrorCodes.workerHandshakeFailed,
         details: { instance: instanceName },
         message: `Environment information is unavailable for ${instanceName}.`,
         retryable: true,
@@ -151,8 +151,8 @@ export function mcpEndpointToolNotExposed(
     toolName: string,
     instanceName: string,
 ) {
-    return createError({
-        code: errorCodes.coreToolSchemaUnavailable,
+    return createRemoteError({
+        code: runtimeErrorCodes.toolSchemaUnavailable,
         details: { instance: instanceName, toolName },
         message: `Tool ${toolName} is not exposed by MCP.`,
         retryable: false,
@@ -186,8 +186,8 @@ export async function waitForMcpEndpointAbortable<T>(
 }
 
 function mcpEndpointCancellationError(reason: unknown) {
-    return createError({
-        code: errorCodes.coreToolCallCancelled,
+    return createRemoteError({
+        code: runtimeErrorCodes.toolCallCancelled,
         cause: reason,
         message: "MCP tool call was cancelled by the client.",
         retryable: true,

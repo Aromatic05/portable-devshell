@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ArtifactShareInput,
     type ArtifactTransferStartInput,
     type ArtifactViewImageInput,
@@ -185,8 +185,8 @@ function isRecord(
 }
 
 function invalid(message: string) {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

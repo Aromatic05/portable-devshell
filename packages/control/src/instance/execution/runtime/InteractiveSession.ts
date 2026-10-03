@@ -1,7 +1,7 @@
 import type { WorkerCommandInteractiveSession } from "@portable-devshell/core";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
     type ControlStreamMessage,
 } from "@portable-devshell/shared";
@@ -25,8 +25,8 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
             return;
         }
         if (event.name !== "input") {
-            throw createError({
-                code: errorCodes.envelopeInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.methodNotFound,
                 message: `Interactive runtime does not accept ${event.name}.`,
                 retryable: false,
             });
@@ -35,8 +35,8 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
             !isRecord(event.payload) ||
             typeof event.payload.data !== "string"
         ) {
-            throw createError({
-                code: errorCodes.targetInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.invalidTarget,
                 message: "runtime.input requires base64 data.",
                 retryable: false,
             });

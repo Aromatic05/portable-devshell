@@ -1,8 +1,8 @@
 import {
-    createError,
+    createRemoteError,
     errorMessage,
-    toControlError,
-    errorCodes,
+    toRemoteError,
+    controlErrorCodes,
     withRequestTimeout,
     type ConfigBatchUpdateRequest,
     type ConfigDraft,
@@ -111,8 +111,8 @@ export class TuiRuntimeControlOperations {
             }
         }
 
-        const failure = createError({
-            code: errorCodes.controlRestartFailed,
+        const failure = createRemoteError({
+            code: controlErrorCodes.restartFailed,
             message: `Control restart was accepted, but the replacement runtime did not become ready: ${errorMessage(lastError)}`,
             retryable: true,
         });
@@ -146,7 +146,7 @@ export class TuiRuntimeControlOperations {
                     `(expires ${code.expiresAt})`,
                 ].join(" ");
             } catch (error) {
-                const failure = toControlError(error);
+                const failure = toRemoteError(error);
                 this.options.store.setPanelError(
                     `instances:${result.name}:enrollment`,
                     failure,
@@ -179,7 +179,9 @@ export class TuiRuntimeControlOperations {
         await this.#refreshBestEffort(this.#panelKey("config"), async () => {
             await this.options.session.refreshConfig();
         });
-        return result;
+        // The config projection owns the full view; the command layer only
+        // consumes the restart signal through a JSON boundary.
+        return { restartControlRequired: result.restartControlRequired };
     }
 
     async updateInstanceConfig(
@@ -318,7 +320,7 @@ export class TuiRuntimeControlOperations {
             await refresh();
             this.options.store.setPanelError(errorKey, undefined);
         } catch (error) {
-            this.options.store.setPanelError(errorKey, toControlError(error));
+            this.options.store.setPanelError(errorKey, toRemoteError(error));
         }
     }
 

@@ -1,5 +1,6 @@
 import { topTuiOverlay } from "../../state/Overlay.js";
 import type { TuiAppState } from "../../state/store/Model.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import type { TuiTerminalTab } from "../../state/route/Model.js";
 import { renderExpandableBoxLines } from "../component/content/Box.js";
@@ -137,13 +138,14 @@ export function buildTuiTextDetailImageRegion(
 
 export function buildTuiHitRegions(
     state: TuiAppState,
+    reader: TuiDomainReader,
     viewport: { columns: number; rows: number },
 ): TuiHitRegion[] {
     if (!isTerminalSizeSupported(viewport.columns, viewport.rows)) {
         return [];
     }
     if (topTuiOverlay(state.interaction.overlays) !== undefined) {
-        return buildTuiOverlayHitRegions(state, viewport);
+        return buildTuiOverlayHitRegions(state, reader, viewport);
     }
 
     const regions: TuiHitRegion[] = [];
@@ -155,10 +157,10 @@ export function buildTuiHitRegions(
 
     const geometry = tuiMainLayoutMetrics(viewport.columns, viewport.rows);
     const layout = geometry.layout;
-    const sidebar = selectSidebarModel(state);
-    const main = selectMainScreenModel(state);
+    const sidebar = selectSidebarModel(state, reader);
+    const main = selectMainScreenModel(state, reader);
     const boxInnerWidth = geometry.boxInnerWidth;
-    const metrics = selectMainBoxFlowMetrics(state, boxInnerWidth);
+    const metrics = selectMainBoxFlowMetrics(state, reader, boxInnerWidth);
     const compact = layout.mode === "compact";
     const mainX = geometry.contentX;
     const mainWidth = geometry.contentWidth;
@@ -249,7 +251,7 @@ export function buildTuiHitRegions(
         return regions;
     }
     if (state.ui.selectedPage === "overview") {
-        const overview = selectTuiOverviewPresentation(state);
+        const overview = selectTuiOverviewPresentation(state, reader);
         const stateRows = main.loadState.kind === "ready" ? 0 : 1;
         const pageErrorHeight = tuiBlockHeight(main.errorLines);
         const overviewRows = Math.max(
@@ -261,6 +263,7 @@ export function buildTuiHitRegions(
         );
         const overviewViewport = selectTuiOverviewInstanceViewport(
             state,
+            reader,
             overviewRows,
         );
         const mainY =
@@ -370,6 +373,7 @@ export function buildTuiHitRegions(
 
 function buildTuiOverlayHitRegions(
     state: TuiAppState,
+    reader: TuiDomainReader,
     viewport: { columns: number; rows: number },
 ): TuiHitRegion[] {
     const overlay = topTuiOverlay(state.interaction.overlays);
@@ -396,14 +400,15 @@ function buildTuiOverlayHitRegions(
     }
     if (overlay.kind !== "approval") return [];
 
-    const instanceState = state.readModel.instanceState[overlay.instance];
-    const approval = instanceState?.approvals.find(
-        (candidate) => candidate.approvalId === overlay.approvalId,
-    );
+    const approval = reader
+        .approval(overlay.instance)
+        .approvals.find(
+            (candidate) => candidate.approvalId === overlay.approvalId,
+        );
     if (approval === undefined) return [];
-    const toolCall = instanceState?.toolCalls.find(
-        (candidate) => candidate.callId === approval.callId,
-    );
+    const toolCall = reader.toolCalls.instances[
+        overlay.instance
+    ]?.calls.find((candidate) => candidate.callId === approval.callId);
     return projectTuiApprovalActions(approval, toolCall, frame).map(
         (action) => ({
             height: 1,

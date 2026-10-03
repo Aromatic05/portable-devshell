@@ -12,7 +12,7 @@ export default defineConfig({
                 import.meta.dirname,
                 "../shared/src/transport/frame/Protocol.ts",
             ),
-            "@portable-devshell/shared/browser": resolve(
+            "@portable-devshell/shared": resolve(
                 import.meta.dirname,
                 "../shared/src/browser.ts",
             ),

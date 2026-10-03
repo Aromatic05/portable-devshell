@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     toolSchema,
     type ToolDefinition,
 } from "@portable-devshell/shared";
@@ -18,8 +18,8 @@ export class WorkerToolCatalog {
             const parsed = toolSchema.safeParse(tool);
 
             if (!parsed.success) {
-                throw createError({
-                    code: errorCodes.coreToolSchemaUnavailable,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.toolSchemaUnavailable,
                     message: `Worker tool catalog is incompatible: ${tool.name} has an invalid schema. Upgrade and restart the Worker to match this portable-devshell version.`,
                     retryable: false,
                     details: {

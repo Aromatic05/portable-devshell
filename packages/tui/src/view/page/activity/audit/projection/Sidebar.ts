@@ -1,19 +1,20 @@
-import { workspaceFolderName } from "@portable-devshell/shared";
-
 import type { TuiAppState } from "../../../../../state/store/Model.js";
+import { workspaceFolderName } from "../../../../presentation/Workspace.js";
 import { currentTuiRoute } from "../../../../../state/route/State.js";
 import type { TuiSidebarContextEntry } from "../../../../../state/Ui.js";
+import type { TuiDomainReader } from "../../../../domain/Reader.js";
 import { projectAuditContexts } from "./Context.js";
 
 export function selectTuiAuditSidebarEntries(
     state: TuiAppState,
+    reader: TuiDomainReader,
     focused: boolean,
     cursor: TuiAppState["interaction"]["sidebarCursor"],
 ): TuiSidebarContextEntry[] {
     const route = currentTuiRoute(state);
     const instance = state.ui.selectedInstance;
     const contexts =
-        instance === undefined ? [] : projectAuditContexts(state, instance);
+        instance === undefined ? [] : projectAuditContexts(reader, instance);
     const baseLabels = contexts.map((context) =>
         context.workspace === undefined
             ? context.label

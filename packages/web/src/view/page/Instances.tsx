@@ -3,22 +3,23 @@ import { useEffect, useRef, useState } from "react";
 import type {
     ArtifactShareResult,
     ArtifactTransferRecord,
-    JsonValue,
+    ConfigView,
+    InstanceListEntry,
     OperationalOverviewWorker,
-} from "@portable-devshell/shared/browser";
-import {
-    formatBytes,
-    formatDuration,
-    isArtifactTransferTerminal,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
+import { isArtifactTransferTerminal } from "@portable-devshell/shared";
 
+import { formatBytes, formatDuration } from "../Presentation.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 import type { WebStore } from "../../state/Store.js";
 import { webRouteHref, type WebRoute } from "../../app/Route.js";
+import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import { Config } from "./Config.js";
 import { Connections } from "./Connections.js";
 import { InstanceCreate } from "./InstancesCreate.js";
 import { useNow } from "../Clock.js";
+
+type InstanceView = "config" | "connections" | "overview";
 
 export function Instances({
     disabled = false,
@@ -32,7 +33,12 @@ export function Instances({
     store: WebStore;
 }) {
     const state = store.state;
-    const model = state.readModel;
+    const domains = useWebDomains();
+    const instances = useDomainSnapshot(domains.instances);
+    const service = useDomainSnapshot(domains.service);
+    const overviewState = useDomainSnapshot(domains.overview);
+    const config = useDomainSnapshot(domains.config);
+    const artifact = useDomainSnapshot(domains.artifact);
     const selected = route.instance;
     const view = route.view ?? "overview";
     const [confirmation, setConfirmation] = useState<{
@@ -40,24 +46,18 @@ export function Instances({
         instance: string;
     }>();
     const [confirmationFailure, setConfirmationFailure] = useState<string>();
-    const [detailFailure, setDetailFailure] = useState<string>();
-    const [refreshingInstance, setRefreshingInstance] = useState<string>();
-    const [lifecycleFailure, setLifecycleFailure] = useState<string>();
     const [creating, setCreating] = useState(false);
     const [createNotice, setCreateNotice] = useState<string>();
     const [artifactConfirmation, setArtifactConfirmation] = useState<
         { kind: "share"; id: string } | { kind: "transfer"; id: string }
     >();
     const [artifactFailure, setArtifactFailure] = useState<string>();
-    const refreshGeneration = useRef(0);
-    const selectedRef = useRef<string>();
-    selectedRef.current = selected;
-    const entry = model.instances.find(({ name }) => name === selected);
-    const selectedWorker = model.overview?.instances.find(
+    const entry = instances.instances.find(({ name }) => name === selected);
+    const selectedWorker = overviewState.overview?.instances.find(
         ({ name }) => name === entry?.name,
     )?.worker;
     const operation = confirmationOperation(confirmation);
-    const interactive = state.connection === "online" && !disabled;
+    const interactive = service.status === "online" && !disabled;
     const selfManaged =
         entry?.snapshot.reverse?.managementMode === "selfManaged";
     const lifecycleAction =
@@ -71,50 +71,15 @@ export function Instances({
     const enabled =
         entry === undefined
             ? undefined
-            : readInstanceEnabled(model.configView, entry.name);
+            : readInstanceEnabled(config.view, entry.name);
     const artifactActivity =
         entry === undefined
             ? undefined
             : projectArtifactActivity(
                   entry.name,
-                  model.artifactShares,
-                  model.artifactTransfers,
+                  artifact.shares,
+                  artifact.transfers,
               );
-
-    useEffect(() => {
-        if (
-            selected === undefined ||
-            !store.state.readModel.instances.some(
-                (item) => item.name === selected,
-            )
-        )
-            return;
-        const generation = ++refreshGeneration.current;
-        selectedRef.current = selected;
-        setDetailFailure(undefined);
-        setLifecycleFailure(undefined);
-        setRefreshingInstance(selected);
-        void store
-            .refreshInstance(selected)
-            .catch((error: unknown) => {
-                if (
-                    refreshGeneration.current === generation &&
-                    selectedRef.current === selected
-                ) {
-                    setDetailFailure(
-                        error instanceof Error
-                            ? error.message
-                            : "Instance details could not be refreshed.",
-                    );
-                }
-            })
-            .finally(() => {
-                if (refreshGeneration.current === generation)
-                    setRefreshingInstance((current) =>
-                        current === selected ? undefined : current,
-                    );
-            });
-    }, [selected, store]);
 
     return (
         <section className="instances-view">
@@ -124,8 +89,6 @@ export function Instances({
                     className="primary"
                     disabled={!interactive || creating}
                     onClick={() => {
-                        refreshGeneration.current += 1;
-                        selectedRef.current = undefined;
                         navigate({ page: "instances" });
                         setCreating(true);
                         setCreateNotice(undefined);
@@ -154,13 +117,13 @@ export function Instances({
                 />
             ) : (
                 <>
-                    {model.instances.length === 0 ? (
+                    {instances.instances.length === 0 ? (
                         <p className="empty">No instances are available.</p>
                     ) : (
                         <div
                             className={`instances${entry === undefined ? "" : " has-selection"}`}
                         >
-                            {model.instances.map((item) => (
+                            {instances.instances.map((item) => (
                                 <article
                                     className={`instance card${selected === item.name ? " selected" : ""}`}
                                     key={item.name}
@@ -191,7 +154,7 @@ export function Instances({
                                     </span>
                                     <WorkerSummary
                                         worker={
-                                            model.overview?.instances.find(
+                                            overviewState.overview?.instances.find(
                                                 ({ name }) =>
                                                     name === item.name,
                                             )?.worker
@@ -202,368 +165,33 @@ export function Instances({
                         </div>
                     )}
                     {entry === undefined ? null : (
-                        <article className="detail">
-                            <button
-                                className="back"
-                                onClick={() => {
-                                    refreshGeneration.current += 1;
-                                    selectedRef.current = undefined;
-                                    navigate({ page: "instances" });
-                                    setDetailFailure(undefined);
-                                    setLifecycleFailure(undefined);
-                                }}
-                            >
-                                Back to instances
-                            </button>
-                            <h3>{entry.name}</h3>
-                            <nav
-                                aria-label="Instance sections"
-                                className="instance-section-nav"
-                            >
-                                <a
-                                    aria-current={
-                                        view === "overview" ? "page" : undefined
-                                    }
-                                    className={
-                                        view === "overview" ? "selected" : ""
-                                    }
-                                    href={webRouteHref({
-                                        instance: entry.name,
-                                        page: "instances",
-                                    })}
-                                >
-                                    Overview
-                                </a>
-                                <a
-                                    aria-current={
-                                        view === "config" ? "page" : undefined
-                                    }
-                                    className={
-                                        view === "config" ? "selected" : ""
-                                    }
-                                    href={webRouteHref({
-                                        instance: entry.name,
-                                        page: "instances",
-                                        view: "config",
-                                    })}
-                                >
-                                    Config
-                                </a>
-                                <a
-                                    aria-current={
-                                        view === "connections"
-                                            ? "page"
-                                            : undefined
-                                    }
-                                    className={
-                                        view === "connections" ? "selected" : ""
-                                    }
-                                    href={webRouteHref({
-                                        instance: entry.name,
-                                        page: "instances",
-                                        view: "connections",
-                                    })}
-                                >
-                                    Connections
-                                </a>
-                            </nav>
-                            {view === "config" ? (
-                                <Config
-                                    disabled={!interactive}
-                                    instance={entry.name}
-                                    state={state}
-                                    store={store}
-                                />
-                            ) : view === "connections" ? (
-                                <Connections
-                                    disabled={!interactive}
-                                    instance={entry.name}
-                                    state={state}
-                                    store={store}
-                                />
-                            ) : (
-                                <>
-                                    {refreshingInstance === entry.name ? (
-                                        <p className="hint" role="status">
-                                            Refreshing instance details…
-                                        </p>
-                                    ) : null}
-                                    {detailFailure === undefined ? null : (
-                                        <p className="error" role="alert">
-                                            {detailFailure}
-                                        </p>
-                                    )}
-                                    <p>
-                                        Runtime: {entry.snapshot.status};
-                                        daemon: {entry.snapshot.daemonState};
-                                        sequence: {entry.snapshot.lastSeq}
-                                    </p>
-                                    {selfManaged ? (
-                                        <p className="hint">
-                                            Self-managed reverse worker ·{" "}
-                                            {entry.snapshot.reverse
-                                                ?.availability ?? "unknown"}
-                                            {entry.snapshot.reverse
-                                                ?.transport === undefined
-                                                ? ""
-                                                : ` · ${entry.snapshot.reverse.transport}`}
-                                            {
-                                                " · Lifecycle is managed on the remote machine."
-                                            }
-                                        </p>
-                                    ) : null}
-                                    <WorkerDiagnostics
-                                        worker={selectedWorker}
-                                    />
-                                    {artifactActivity === undefined ? null : (
-                                        <ArtifactActivity
-                                            activity={artifactActivity}
-                                            disabled={!interactive}
-                                            failure={artifactFailure}
-                                            onCancelTransfer={(transferId) => {
-                                                setArtifactFailure(undefined);
-                                                setArtifactConfirmation({
-                                                    id: transferId,
-                                                    kind: "transfer",
-                                                });
-                                            }}
-                                            onRefresh={() => {
-                                                setArtifactFailure(undefined);
-                                                void store
-                                                    .refreshArtifacts()
-                                                    .catch((error: unknown) =>
-                                                        setArtifactFailure(
-                                                            error instanceof
-                                                                Error
-                                                                ? error.message
-                                                                : "Artifact activity could not be refreshed.",
-                                                        ),
-                                                    );
-                                            }}
-                                            onRevokeShare={(shareId) => {
-                                                setArtifactFailure(undefined);
-                                                setArtifactConfirmation({
-                                                    id: shareId,
-                                                    kind: "share",
-                                                });
-                                            }}
-                                            operations={state.operations}
-                                        />
-                                    )}
-                                    <div className="actions">
-                                        <button
-                                            disabled={
-                                                !interactive ||
-                                                refreshingInstance ===
-                                                    entry.name
-                                            }
-                                            onClick={() => {
-                                                const generation =
-                                                    ++refreshGeneration.current;
-                                                setDetailFailure(undefined);
-                                                setRefreshingInstance(
-                                                    entry.name,
-                                                );
-                                                void store
-                                                    .refreshInstance(entry.name)
-                                                    .catch((error: unknown) => {
-                                                        if (
-                                                            refreshGeneration.current ===
-                                                                generation &&
-                                                            selectedRef.current ===
-                                                                entry.name
-                                                        ) {
-                                                            setDetailFailure(
-                                                                error instanceof
-                                                                    Error
-                                                                    ? error.message
-                                                                    : "Instance details could not be refreshed.",
-                                                            );
-                                                        }
-                                                    })
-                                                    .finally(() => {
-                                                        if (
-                                                            refreshGeneration.current ===
-                                                            generation
-                                                        )
-                                                            setRefreshingInstance(
-                                                                undefined,
-                                                            );
-                                                    });
-                                            }}
-                                            type="button"
-                                        >
-                                            Refresh
-                                        </button>
-                                        {lifecycleAction ===
-                                        undefined ? null : (
-                                            <button
-                                                className={
-                                                    lifecycleAction === "Start"
-                                                        ? "primary"
-                                                        : "danger"
-                                                }
-                                                disabled={
-                                                    !interactive ||
-                                                    state.operations[
-                                                        `start:${entry.name}`
-                                                    ] !== undefined ||
-                                                    state.operations[
-                                                        `stop:${entry.name}`
-                                                    ] !== undefined
-                                                }
-                                                onClick={() => {
-                                                    if (
-                                                        lifecycleAction ===
-                                                        "Start"
-                                                    ) {
-                                                        setLifecycleFailure(
-                                                            undefined,
-                                                        );
-                                                        void store
-                                                            .start(entry.name)
-                                                            .then(
-                                                                (succeeded) => {
-                                                                    if (
-                                                                        !succeeded &&
-                                                                        selectedRef.current ===
-                                                                            entry.name
-                                                                    ) {
-                                                                        setLifecycleFailure(
-                                                                            store
-                                                                                .state
-                                                                                .error ??
-                                                                                `${entry.name} could not be started.`,
-                                                                        );
-                                                                    }
-                                                                },
-                                                            );
-                                                        return;
-                                                    }
-                                                    setConfirmationFailure(
-                                                        undefined,
-                                                    );
-                                                    setConfirmation({
-                                                        action: "Stop",
-                                                        instance: entry.name,
-                                                    });
-                                                }}
-                                            >
-                                                {lifecycleAction === "Start" &&
-                                                state.operations[
-                                                    `start:${entry.name}`
-                                                ] !== undefined
-                                                    ? "Starting…"
-                                                    : lifecycleAction}
-                                            </button>
-                                        )}
-                                        {selfManaged ||
-                                        entry.snapshot.status ===
-                                            "stopped" ? null : (
-                                            <button
-                                                disabled={
-                                                    !interactive ||
-                                                    state.operations[
-                                                        `restart:${entry.name}`
-                                                    ] !== undefined
-                                                }
-                                                onClick={() => {
-                                                    setConfirmationFailure(
-                                                        undefined,
-                                                    );
-                                                    setConfirmation({
-                                                        action: "Restart",
-                                                        instance: entry.name,
-                                                    });
-                                                }}
-                                                type="button"
-                                            >
-                                                Restart
-                                            </button>
-                                        )}
-                                        {enabled ===
-                                        undefined ? null : enabled ? (
-                                            <button
-                                                disabled={
-                                                    !interactive ||
-                                                    state.operations[
-                                                        `enabled:${entry.name}`
-                                                    ] !== undefined
-                                                }
-                                                onClick={() => {
-                                                    setConfirmationFailure(
-                                                        undefined,
-                                                    );
-                                                    setConfirmation({
-                                                        action: "Disable",
-                                                        instance: entry.name,
-                                                    });
-                                                }}
-                                                type="button"
-                                            >
-                                                Disable
-                                            </button>
-                                        ) : (
-                                            <button
-                                                disabled={
-                                                    !interactive ||
-                                                    state.operations[
-                                                        `enabled:${entry.name}`
-                                                    ] !== undefined
-                                                }
-                                                onClick={() => {
-                                                    setLifecycleFailure(
-                                                        undefined,
-                                                    );
-                                                    void store
-                                                        .setInstanceEnabled(
-                                                            entry.name,
-                                                            true,
-                                                        )
-                                                        .then((succeeded) => {
-                                                            if (!succeeded)
-                                                                setLifecycleFailure(
-                                                                    store.state
-                                                                        .error ??
-                                                                        `${entry.name} could not be enabled.`,
-                                                                );
-                                                        });
-                                                }}
-                                                type="button"
-                                            >
-                                                Enable
-                                            </button>
-                                        )}
-                                        <button
-                                            className="danger"
-                                            disabled={
-                                                !interactive ||
-                                                state.operations[
-                                                    `delete:${entry.name}`
-                                                ] !== undefined
-                                            }
-                                            onClick={() => {
-                                                setConfirmationFailure(
-                                                    undefined,
-                                                );
-                                                setConfirmation({
-                                                    action: "Delete",
-                                                    instance: entry.name,
-                                                });
-                                            }}
-                                            type="button"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
-                                    {lifecycleFailure === undefined ? null : (
-                                        <p className="error" role="alert">
-                                            {lifecycleFailure}
-                                        </p>
-                                    )}
-                                </>
-                            )}
-                        </article>
+                        <InstanceDetail
+                            artifactActivity={artifactActivity}
+                            artifactFailure={artifactFailure}
+                            disabled={disabled}
+                            enabled={enabled}
+                            entry={entry}
+                            interactive={interactive}
+                            key={entry.name}
+                            lifecycleAction={lifecycleAction}
+                            navigate={navigate}
+                            onArtifactConfirm={(next) => {
+                                setArtifactFailure(undefined);
+                                setArtifactConfirmation(next);
+                            }}
+                            onArtifactFailure={setArtifactFailure}
+                            onConfirm={(action) => {
+                                setConfirmationFailure(undefined);
+                                setConfirmation({
+                                    action,
+                                    instance: entry.name,
+                                });
+                            }}
+                            selfManaged={selfManaged}
+                            store={store}
+                            view={view}
+                            worker={selectedWorker}
+                        />
                     )}
                 </>
             )}
@@ -603,11 +231,8 @@ export function Instances({
                                       );
                         void request.then((succeeded) => {
                             if (succeeded) {
-                                if (confirmation.action === "Delete") {
-                                    refreshGeneration.current += 1;
-                                    selectedRef.current = undefined;
+                                if (confirmation.action === "Delete")
                                     navigate({ page: "instances" });
-                                }
                                 setConfirmation(undefined);
                             } else {
                                 setConfirmationFailure(
@@ -671,6 +296,345 @@ export function Instances({
                 />
             )}
         </section>
+    );
+}
+
+function InstanceDetail({
+    artifactActivity,
+    artifactFailure,
+    disabled,
+    enabled,
+    entry,
+    interactive,
+    lifecycleAction,
+    navigate,
+    onArtifactConfirm,
+    onArtifactFailure,
+    onConfirm,
+    selfManaged,
+    store,
+    view,
+    worker,
+}: {
+    artifactActivity: ArtifactActivityProjection | undefined;
+    artifactFailure: string | undefined;
+    disabled: boolean;
+    enabled: boolean | undefined;
+    entry: InstanceListEntry;
+    interactive: boolean;
+    lifecycleAction: "Start" | "Stop" | undefined;
+    navigate(route: WebRoute): void;
+    onArtifactConfirm(
+        next: { kind: "share"; id: string } | { kind: "transfer"; id: string },
+    ): void;
+    onArtifactFailure(failure: string | undefined): void;
+    onConfirm(action: "Delete" | "Disable" | "Restart" | "Stop"): void;
+    selfManaged: boolean;
+    store: WebStore;
+    view: InstanceView;
+    worker: OperationalOverviewWorker | undefined;
+}) {
+    const domains = useWebDomains();
+    const runtime = useDomainSnapshot(domains.runtime(entry.name));
+    const refreshGeneration = useRef(0);
+    const [detailFailure, setDetailFailure] = useState<string>();
+    const [refreshingInstance, setRefreshingInstance] = useState<string>();
+    const [lifecycleFailure, setLifecycleFailure] = useState<string>();
+    const state = store.state;
+    const snapshot = runtime.snapshot ?? entry.snapshot;
+
+    useEffect(() => {
+        const generation = ++refreshGeneration.current;
+        setDetailFailure(undefined);
+        setLifecycleFailure(undefined);
+        setRefreshingInstance(entry.name);
+        void store
+            .refreshInstance(entry.name)
+            .catch((error: unknown) => {
+                if (refreshGeneration.current === generation)
+                    setDetailFailure(
+                        error instanceof Error
+                            ? error.message
+                            : "Instance details could not be refreshed.",
+                    );
+            })
+            .finally(() => {
+                if (refreshGeneration.current === generation)
+                    setRefreshingInstance((current) =>
+                        current === entry.name ? undefined : current,
+                    );
+            });
+        return () => {
+            refreshGeneration.current += 1;
+        };
+    }, [entry.name, store]);
+
+    return (
+        <article className="detail">
+            <button
+                className="back"
+                onClick={() => {
+                    navigate({ page: "instances" });
+                }}
+            >
+                Back to instances
+            </button>
+            <h3>{entry.name}</h3>
+            <nav aria-label="Instance sections" className="instance-section-nav">
+                <a
+                    aria-current={view === "overview" ? "page" : undefined}
+                    className={view === "overview" ? "selected" : ""}
+                    href={webRouteHref({
+                        instance: entry.name,
+                        page: "instances",
+                    })}
+                >
+                    Overview
+                </a>
+                <a
+                    aria-current={view === "config" ? "page" : undefined}
+                    className={view === "config" ? "selected" : ""}
+                    href={webRouteHref({
+                        instance: entry.name,
+                        page: "instances",
+                        view: "config",
+                    })}
+                >
+                    Config
+                </a>
+                <a
+                    aria-current={view === "connections" ? "page" : undefined}
+                    className={view === "connections" ? "selected" : ""}
+                    href={webRouteHref({
+                        instance: entry.name,
+                        page: "instances",
+                        view: "connections",
+                    })}
+                >
+                    Connections
+                </a>
+            </nav>
+            {view === "config" ? (
+                <Config
+                    disabled={!interactive}
+                    instance={entry.name}
+                    store={store}
+                />
+            ) : view === "connections" ? (
+                <Connections
+                    disabled={!interactive}
+                    instance={entry.name}
+                    store={store}
+                />
+            ) : (
+                <>
+                    {refreshingInstance === entry.name ? (
+                        <p className="hint" role="status">
+                            Refreshing instance details…
+                        </p>
+                    ) : null}
+                    {detailFailure === undefined ? null : (
+                        <p className="error" role="alert">
+                            {detailFailure}
+                        </p>
+                    )}
+                    <p>
+                        Runtime: {snapshot.status}; daemon:{" "}
+                        {snapshot.daemonState}; sequence: {snapshot.lastSeq}
+                    </p>
+                    {selfManaged ? (
+                        <p className="hint">
+                            Self-managed reverse worker ·{" "}
+                            {snapshot.reverse?.availability ?? "unknown"}
+                            {snapshot.reverse?.transport === undefined
+                                ? ""
+                                : ` · ${snapshot.reverse.transport}`}
+                            {" · Lifecycle is managed on the remote machine."}
+                        </p>
+                    ) : null}
+                    <WorkerDiagnostics worker={worker} />
+                    {artifactActivity === undefined ? null : (
+                        <ArtifactActivity
+                            activity={artifactActivity}
+                            disabled={!interactive}
+                            failure={artifactFailure}
+                            onCancelTransfer={(transferId) =>
+                                onArtifactConfirm({
+                                    id: transferId,
+                                    kind: "transfer",
+                                })
+                            }
+                            onRefresh={() => {
+                                onArtifactFailure(undefined);
+                                void store
+                                    .refreshArtifacts()
+                                    .catch((error: unknown) =>
+                                        onArtifactFailure(
+                                            error instanceof Error
+                                                ? error.message
+                                                : "Artifact activity could not be refreshed.",
+                                        ),
+                                    );
+                            }}
+                            onRevokeShare={(shareId) =>
+                                onArtifactConfirm({
+                                    id: shareId,
+                                    kind: "share",
+                                })
+                            }
+                            operations={state.operations}
+                        />
+                    )}
+                    <div className="actions">
+                        <button
+                            disabled={
+                                !interactive ||
+                                refreshingInstance === entry.name
+                            }
+                            onClick={() => {
+                                const generation =
+                                    ++refreshGeneration.current;
+                                setDetailFailure(undefined);
+                                setRefreshingInstance(entry.name);
+                                void store
+                                    .refreshInstance(entry.name)
+                                    .catch((error: unknown) => {
+                                        if (
+                                            refreshGeneration.current ===
+                                            generation
+                                        )
+                                            setDetailFailure(
+                                                error instanceof Error
+                                                    ? error.message
+                                                    : "Instance details could not be refreshed.",
+                                            );
+                                    })
+                                    .finally(() => {
+                                        if (
+                                            refreshGeneration.current ===
+                                            generation
+                                        )
+                                            setRefreshingInstance(undefined);
+                                    });
+                            }}
+                            type="button"
+                        >
+                            Refresh
+                        </button>
+                        {lifecycleAction === undefined ? null : (
+                            <button
+                                className={
+                                    lifecycleAction === "Start"
+                                        ? "primary"
+                                        : "danger"
+                                }
+                                disabled={
+                                    !interactive ||
+                                    state.operations[
+                                        `start:${entry.name}`
+                                    ] !== undefined ||
+                                    state.operations[
+                                        `stop:${entry.name}`
+                                    ] !== undefined
+                                }
+                                onClick={() => {
+                                    if (lifecycleAction === "Start") {
+                                        setLifecycleFailure(undefined);
+                                        void store
+                                            .start(entry.name)
+                                            .then((succeeded) => {
+                                                if (!succeeded)
+                                                    setLifecycleFailure(
+                                                        store.state.error ??
+                                                            `${entry.name} could not be started.`,
+                                                    );
+                                            });
+                                        return;
+                                    }
+                                    onConfirm("Stop");
+                                }}
+                            >
+                                {lifecycleAction === "Start" &&
+                                state.operations[`start:${entry.name}`] !==
+                                    undefined
+                                    ? "Starting…"
+                                    : lifecycleAction}
+                            </button>
+                        )}
+                        {selfManaged ||
+                        entry.snapshot.status === "stopped" ? null : (
+                            <button
+                                disabled={
+                                    !interactive ||
+                                    state.operations[
+                                        `restart:${entry.name}`
+                                    ] !== undefined
+                                }
+                                onClick={() => onConfirm("Restart")}
+                                type="button"
+                            >
+                                Restart
+                            </button>
+                        )}
+                        {enabled === undefined ? null : enabled ? (
+                            <button
+                                disabled={
+                                    !interactive ||
+                                    state.operations[
+                                        `enabled:${entry.name}`
+                                    ] !== undefined
+                                }
+                                onClick={() => onConfirm("Disable")}
+                                type="button"
+                            >
+                                Disable
+                            </button>
+                        ) : (
+                            <button
+                                disabled={
+                                    !interactive ||
+                                    state.operations[
+                                        `enabled:${entry.name}`
+                                    ] !== undefined
+                                }
+                                onClick={() => {
+                                    setLifecycleFailure(undefined);
+                                    void store
+                                        .setInstanceEnabled(entry.name, true)
+                                        .then((succeeded) => {
+                                            if (!succeeded)
+                                                setLifecycleFailure(
+                                                    store.state.error ??
+                                                        `${entry.name} could not be enabled.`,
+                                                );
+                                        });
+                                }}
+                                type="button"
+                            >
+                                Enable
+                            </button>
+                        )}
+                        <button
+                            className="danger"
+                            disabled={
+                                !interactive ||
+                                state.operations[`delete:${entry.name}`] !==
+                                    undefined
+                            }
+                            onClick={() => onConfirm("Delete")}
+                            type="button"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                    {lifecycleFailure === undefined ? null : (
+                        <p className="error" role="alert">
+                            {lifecycleFailure}
+                        </p>
+                    )}
+                </>
+            )}
+        </article>
     );
 }
 
@@ -862,17 +826,14 @@ function confirmationOperation(
 }
 
 function readInstanceEnabled(
-    configView: Record<string, JsonValue> | undefined,
+    configView: ConfigView | undefined,
     instance: string,
 ): boolean | undefined {
     const instances = configView?.instances;
     if (!Array.isArray(instances)) return undefined;
     for (const value of instances) {
-        if (typeof value !== "object" || value === null || Array.isArray(value))
-            continue;
-        const record = value as Record<string, JsonValue>;
-        if (record.name === instance && typeof record.enabled === "boolean")
-            return record.enabled;
+        if (value.name === instance && typeof value.enabled === "boolean")
+            return value.enabled;
     }
     return undefined;
 }

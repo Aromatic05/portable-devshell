@@ -1,5 +1,5 @@
 import {
-    errorCodes,
+    runtimeErrorCodes,
     errorMessage,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -43,7 +43,7 @@ export class ApprovalToolCallReview {
         }, signal);
         if (evaluation.decision === "allow") return { decision: "continue" };
         if (evaluation.decision === "deny") {
-            return reject(evaluation.error, errorCodes.coreApprovalDenied);
+            return reject(evaluation.error, runtimeErrorCodes.approvalDenied);
         }
 
         const resolution = await evaluation.awaitDecision;
@@ -51,12 +51,12 @@ export class ApprovalToolCallReview {
             return { decision: "continue" };
         }
         if (resolution.status === "denied") {
-            return reject(resolution.error, errorCodes.coreApprovalDenied);
+            return reject(resolution.error, runtimeErrorCodes.approvalDenied);
         }
         if (resolution.status === "cancelled") {
-            return reject(resolution.error, errorCodes.coreToolCallCancelled);
+            return reject(resolution.error, runtimeErrorCodes.toolCallCancelled);
         }
-        return reject(resolution.error, errorCodes.coreApprovalExpired);
+        return reject(resolution.error, runtimeErrorCodes.approvalExpired);
     };
 }
 

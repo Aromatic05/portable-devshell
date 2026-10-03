@@ -4,7 +4,7 @@ import type {
     WorkerArtifactPayloadOpenInput,
     WorkerArtifactReceiveBeginInput,
 } from "@portable-devshell/core";
-import { createError } from "@portable-devshell/shared";
+import { createRemoteError } from "@portable-devshell/shared";
 
 import type { ArtifactServiceEndpoint } from "../Service.js";
 import { artifactBlake3 } from "./Hash.js";
@@ -39,8 +39,6 @@ export class ArtifactHostBridge {
         return {
             abortArtifactReceive: async (receiveId) =>
                 await this.#receives.abort(receiveId),
-            appendControlEvent: async (type, data) =>
-                await context.appendControlEvent(type, data),
             beginArtifactReceive: async (
                 input: WorkerArtifactReceiveBeginInput,
             ) => await this.#receives.begin(input),
@@ -52,7 +50,7 @@ export class ArtifactHostBridge {
                 input: WorkerArtifactPayloadOpenInput,
             ) => {
                 if ("handle" in input && input.handle !== undefined) {
-                    throw createError({
+                    throw createRemoteError({
                         code: "artifact.hostHandleUnsupported",
                         message:
                             "Artifact handles cannot use the host pseudo-instance.",
@@ -60,7 +58,7 @@ export class ArtifactHostBridge {
                     });
                 }
                 if (!("path" in input) || input.path === undefined) {
-                    throw createError({
+                    throw createRemoteError({
                         code: "artifact.hostPathDenied",
                         message: "Host source requires a filesystem path.",
                         retryable: false,

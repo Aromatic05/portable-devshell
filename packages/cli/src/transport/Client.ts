@@ -1,10 +1,43 @@
 import {
     CONTROL_PROTOCOL_VERSION,
+    STREAM_GAP_CODE,
     Endpoint,
     connectControlChannel,
-    createControlClients,
+    createApprovalTransport,
+    createCliCommandTransport,
+    createConfigTransport,
+    createContextTransport,
+    createDebugTransport,
+    createExtensionRuntimeTransport,
+    createInstanceManagementTransport,
+    createMcpControlTransport,
+    createMessageTransport,
+    createOverviewTransport,
+    createRemoteError,
+    createReverseConnectionTransport,
+    createRuntimeTransport,
+    createServiceTransport,
+    createTodoTransport,
+    createToolTransport,
+    type ApprovalTransport,
+    type ConfigTransport,
+    type ContextTransport,
     type ControlChannelOptions,
-    type ControlClients,
+    type DebugTransport,
+    type ExtensionRuntimeTransport,
+    type InstanceEvent,
+    type InstanceEventStreamPort,
+    type InstanceManagementTransport,
+    type InstanceStreamMessage,
+    type JsonValue,
+    type McpControlTransport,
+    type MessageTransport,
+    type OverviewTransport,
+    type ReverseConnectionTransport,
+    type RuntimeTransport,
+    type ServiceTransport,
+    type TodoTransport,
+    type ToolTransport,
 } from "@portable-devshell/shared";
 
 import { CliRenderError } from "../app/Failure.js";
@@ -13,37 +46,69 @@ import { createCliCommandAdapter, type CliClientCommand } from "./Command.js";
 
 export interface CliClientOptions extends ControlChannelOptions {}
 
-export type CliClientTodo = Omit<ControlClients["todo"], "subscribe"> & {
+export type CliClientTodo = Omit<TodoTransport, "subscribe"> & {
     subscribe(instance: string, fromSeq: number): Promise<CliClientEventStream>;
 };
 
-export type CliClients = Omit<ControlClients, "cli" | "runtime" | "todo"> & {
+/**
+ * CLI-local dependency surface. It carries the explicitly named domain
+ * transports the stateless CLI composes over one shared Endpoint; it holds no
+ * aggregate snapshot or subscription policy.
+ */
+export interface CliClients {
+    approval: ApprovalTransport;
     cli: CliClientCommand;
-    close?(): void;
-    reconnect?(): Promise<void>;
+    config: ConfigTransport;
+    context: ContextTransport;
+    contextMessage: MessageTransport;
+    debug: DebugTransport;
+    extension: ExtensionRuntimeTransport;
+    instance: InstanceManagementTransport;
+    mcp: McpControlTransport;
+    overview: OverviewTransport;
+    reverse: ReverseConnectionTransport;
     runtime: CliClientRuntime;
+    service: ServiceTransport;
     todo: CliClientTodo;
-};
+    tool: ToolTransport;
+    close(): void;
+    reconnect(): Promise<void>;
+}
 
 export function createCliClients(options: CliClientOptions = {}): CliClients {
     const endpoint = new Endpoint({
         connectChannel: (signal) => connectControlChannel(options, signal),
     });
-    const clients = createControlClients(endpoint, { clientKind: "cli" });
+    const runtime: RuntimeTransport = createRuntimeTransport(endpoint);
+    const todo = createTodoTransport(endpoint);
     return {
-        ...clients,
-        cli: createCliCommandAdapter(endpoint, clients.cli),
-        close: () => endpoint.close(),
-        reconnect: async () => await endpoint.reconnect(),
-        runtime: createCliRuntimeAdapter(clients.runtime),
+        approval: createApprovalTransport(endpoint),
+        cli: createCliCommandAdapter(
+            endpoint,
+            createCliCommandTransport(endpoint),
+        ),
+        config: createConfigTransport(endpoint),
+        context: createContextTransport(endpoint),
+        contextMessage: createMessageTransport(endpoint, runtime),
+        debug: createDebugTransport(endpoint),
+        extension: createExtensionRuntimeTransport(endpoint),
+        instance: createInstanceManagementTransport(endpoint),
+        mcp: createMcpControlTransport(endpoint),
+        overview: createOverviewTransport(endpoint),
+        reverse: createReverseConnectionTransport(endpoint),
+        runtime: createCliRuntimeAdapter(endpoint, runtime),
+        service: createServiceTransport(endpoint, { clientKind: "cli" }),
         todo: {
-            delete: clients.todo.delete,
-            get: clients.todo.get,
+            delete: todo.delete,
+            get: todo.get,
             subscribe: async (instance, fromSeq) =>
                 new CliClientEventStream(
-                    await clients.todo.subscribe(instance, fromSeq),
+                    await todo.subscribe(instance, fromSeq),
                 ),
         },
+        tool: createToolTransport(endpoint),
+        close: () => endpoint.close(),
+        reconnect: async () => await endpoint.reconnect(),
     };
 }
 
@@ -57,15 +122,6 @@ export async function negotiateCliControl(clients: CliClients): Promise<void> {
     }
 }
 
-import {
-    createError,
-    errorCodes,
-    type InstanceEvent,
-    type InstanceEventStreamPort,
-    type InstanceStreamMessage,
-    type JsonValue,
-} from "@portable-devshell/shared";
-
 export class CliClientEventStream {
     readonly #stream: InstanceEventStreamPort;
     #closed = false;
@@ -78,8 +134,8 @@ export class CliClientEventStream {
         const message = await this.#stream.next();
         if (message.kind === "event") return message.event;
         if (message.kind === "gap") {
-            throw createError({
-                code: errorCodes.streamGap,
+            throw createRemoteError({
+                code: STREAM_GAP_CODE,
                 message:
                     "Requested event sequence is no longer available. Pull a fresh snapshot.",
                 retryable: true,
@@ -102,15 +158,9 @@ function gapDetails(
 ): JsonValue {
     return (
         message.details ?? {
-            ...(message.fromSeq === undefined
-                ? {}
-                : { fromSeq: message.fromSeq }),
-            ...(message.lastSeq === undefined
-                ? {}
-                : { lastSeq: message.lastSeq }),
-            ...(message.nextSeq === undefined
-                ? {}
-                : { nextSeq: message.nextSeq }),
+            latestSeq: message.gap.lastSeq,
+            oldestAvailableSeq: message.gap.nextSeq,
+            requestedFromSeq: message.gap.fromSeq,
         }
     );
 }

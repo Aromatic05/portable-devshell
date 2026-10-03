@@ -17,8 +17,8 @@ import {
     readToolCallErrorPayload,
 } from "@portable-devshell/core";
 import {
-    toControlErrorBody,
-    type ControlErrorBody,
+    toRemoteErrorBody,
+    type RemoteErrorBody,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -191,7 +191,7 @@ function toCallToolResult(result: McpEndpointResult) {
 }
 
 function toMcpError(error: unknown): ProtocolError {
-    const body = toControlErrorBody(error);
+    const body = toRemoteErrorBody(error);
     const comment = readToolCallComments(readToolCallErrorPayload(error));
     if (error instanceof McpToolSchemaUnavailableError) {
         return new ProtocolError(-32002, error.message, {
@@ -263,7 +263,7 @@ function toProtocolTool(
     return tool as unknown as Tool;
 }
 
-function sanitizeErrorBody(body: ControlErrorBody): Record<string, JsonValue> {
+function sanitizeErrorBody(body: RemoteErrorBody): Record<string, JsonValue> {
     return {
         code: body.code,
         ...(body.cause === undefined

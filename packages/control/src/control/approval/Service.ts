@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type ApprovalDecision,
     type ApprovalDecisionBy,
     type ApprovalPolicy,
@@ -244,8 +244,8 @@ export class ApprovalService {
                 pending?.request ?? (await this.#store.get(approvalId));
             if (request === undefined) throw notFound(this.#instance, approvalId);
             if (request.status !== "pending") {
-                throw createError({
-                    code: errorCodes.coreApprovalAlreadyDecided,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.approvalAlreadyDecided,
                     details: {
                         approvalId,
                         instance: this.#instance,
@@ -447,8 +447,8 @@ function policyDecision(
     tool: string,
 ): ApprovalPolicyDecision {
     if (!["disabled", "allow", "ask", "deny"].includes(policy.mode)) {
-        throw createError({
-            code: errorCodes.coreApprovalPolicyInvalid,
+        throw createRemoteError({
+            code: runtimeErrorCodes.approvalPolicyInvalid,
             details: { mode: policy.mode },
             message: `Approval policy mode ${String(policy.mode)} is invalid.`,
             retryable: false,
@@ -456,8 +456,8 @@ function policyDecision(
     }
     for (const rule of policy.rules ?? []) {
         if (rule.match !== "exact") {
-            throw createError({
-                code: errorCodes.coreApprovalPolicyInvalid,
+            throw createRemoteError({
+                code: runtimeErrorCodes.approvalPolicyInvalid,
                 details: { match: rule.match },
                 message: `Approval policy match ${String(rule.match)} is invalid.`,
                 retryable: false,
@@ -478,8 +478,8 @@ function policyDecision(
 }
 
 function notFound(instance: InstanceName, approvalId: string) {
-    return createError({
-        code: errorCodes.coreApprovalNotFound,
+    return createRemoteError({
+        code: runtimeErrorCodes.approvalNotFound,
         details: { approvalId, instance },
         message: `Approval ${approvalId} was not found for instance ${instance}.`,
         retryable: false,
@@ -488,7 +488,7 @@ function notFound(instance: InstanceName, approvalId: string) {
 
 function denied(instance: InstanceName, toolName: string) {
     return new ApprovalError(
-        errorCodes.coreApprovalDenied,
+        runtimeErrorCodes.approvalDenied,
         `Approval denied for ${toolName} on instance ${instance}.`,
         { instance, toolName },
     );
@@ -496,7 +496,7 @@ function denied(instance: InstanceName, toolName: string) {
 
 function expired(instance: InstanceName, toolName: string) {
     return new ApprovalError(
-        errorCodes.coreApprovalExpired,
+        runtimeErrorCodes.approvalExpired,
         `Approval expired for ${toolName} on instance ${instance}.`,
         { instance, toolName },
     );
@@ -504,7 +504,7 @@ function expired(instance: InstanceName, toolName: string) {
 
 function cancelled(instance: InstanceName, toolName: string, reason?: string) {
     return new ApprovalError(
-        errorCodes.coreToolCallCancelled,
+        runtimeErrorCodes.toolCallCancelled,
         `Approval wait cancelled for ${toolName} on instance ${instance}.`,
         { instance, reason: reason ?? "client cancelled", toolName },
     );

@@ -1,4 +1,9 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    artifactErrorCodes,
+    controlErrorCodes,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import type {
     ArtifactImageMediaType,
     ArtifactStoredImageResult,
@@ -89,8 +94,8 @@ export class ArtifactImageService {
                 throw unsupported("Artifact image source is empty.");
             }
             if (opened.descriptor.payloadBytes > MAX_ARTIFACT_IMAGE_BYTES) {
-                throw createError({
-                    code: errorCodes.artifactImageTooLarge,
+                throw createRemoteError({
+                    code: artifactErrorCodes.imageTooLarge,
                     details: {
                         bytes: opened.descriptor.payloadBytes,
                         maxBytes: MAX_ARTIFACT_IMAGE_BYTES,
@@ -247,8 +252,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     if (signal?.aborted !== true) {
         return;
     }
-    throw createError({
-        code: errorCodes.coreToolCallCancelled,
+    throw createRemoteError({
+        code: runtimeErrorCodes.toolCallCancelled,
         cause: signal.reason,
         details: {
             reason:
@@ -262,16 +267,16 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 function unsupported(message: string) {
-    return createError({
-        code: errorCodes.artifactImageUnsupported,
+    return createRemoteError({
+        code: artifactErrorCodes.imageUnsupported,
         message,
         retryable: false,
     });
 }
 
 function invalidPayload(message: string) {
-    return createError({
-        code: errorCodes.artifactPayloadInvalid,
+    return createRemoteError({
+        code: artifactErrorCodes.payloadInvalid,
         message,
         retryable: true,
     });
@@ -346,8 +351,8 @@ function parseImageRef(imageRef: string): {
 } {
     const match = IMAGE_REF_PATTERN.exec(imageRef);
     if (match === null) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             details: { imageRef },
             message: "Invalid artifact image reference.",
             retryable: false,
@@ -406,8 +411,8 @@ function result(
 }
 
 function unavailable(imageRef: string, message: string) {
-    return createError({
-        code: errorCodes.artifactContentUnavailable,
+    return createRemoteError({
+        code: artifactErrorCodes.contentUnavailable,
         details: { imageRef },
         message,
         retryable: false,

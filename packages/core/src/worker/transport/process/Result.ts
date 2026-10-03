@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 
-import type { CommandResult, ControlError } from "@portable-devshell/shared";
+import type { CommandResult, RemoteError } from "@portable-devshell/shared";
 
 import type {
     ProviderCommandContext,
@@ -13,7 +13,7 @@ export async function waitForCommandResult(
         context: ProviderCommandContext,
         cause: unknown,
         options?: { errorCode?: string; result?: Partial<CommandResult> },
-    ) => ControlError,
+    ) => RemoteError,
     context: ProviderCommandContext,
 ): Promise<WorkerCommandResult> {
     let stdout = "";

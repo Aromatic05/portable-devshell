@@ -1,14 +1,17 @@
 import {
-    formatJsonValue,
-    formatRelativeTime,
-    jsonSearchLimits,
-    parseJsonFallback,
     toolCallOutcome,
     toolCallOutput,
     type InstanceLogEntry,
     type JsonValue,
     type ToolCallRecord,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
+
+import {
+    formatJsonValue,
+    formatRelativeTime,
+    jsonSearchLimits,
+    parseJsonFallback,
+} from "../../../../Presentation.js";
 
 export { formatRelativeTime };
 

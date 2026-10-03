@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-    createEmptyConversationPreferences,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
-} from "@portable-devshell/shared/browser";
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
+} from "@portable-devshell/shared";
 
 import { webRouteHref, type WebRoute } from "../../../../app/Route.js";
-import type { WebState } from "../../../../state/Model.js";
+import {
+    useDomainSnapshot,
+    useWebDomains,
+} from "../../../../app/domain/Context.js";
 import type { WebStore } from "../../../../state/Store.js";
 import { ConversationComposer } from "./conversation/Composer.js";
 import { ConversationHistory } from "./conversation/History.js";
@@ -23,6 +25,7 @@ import {
     selectWebMessageSession,
     selectWebMessageSessions,
     type LegacyConversationPreferences,
+    type WebMessageProjection,
 } from "./Model.js";
 
 const messageActivityRefreshIntervalMs = 20_000;
@@ -30,22 +33,21 @@ const messageActivityRefreshIntervalMs = 20_000;
 export function Messages({
     navigate,
     route,
-    state,
     store,
 }: {
     navigate(route: WebRoute): void;
     route: Extract<WebRoute, { page: "messages" }>;
-    state: WebState;
     store: WebStore;
 }) {
+    const domains = useWebDomains();
+    const service = useDomainSnapshot(domains.service);
+    const instancesState = useDomainSnapshot(domains.instances);
+    const contextState = useDomainSnapshot(domains.context);
+    const conversationState = useDomainSnapshot(domains.conversation);
+    const messageState = useDomainSnapshot(domains.messages);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [clockNow, setClockNow] = useState(() => Date.now());
-    const [conversationPreferences, setConversationPreferences] =
-        useState<ConversationPreferencesSnapshot>(
-            () =>
-                state.conversationPreferences ??
-                createEmptyConversationPreferences(),
-        );
+    const [preferencesReady, setPreferencesReady] = useState(false);
     const [legacyConversationPreferences] = useState<
         LegacyConversationPreferences | undefined
     >(() => readLegacyConversationPreferences());
@@ -54,20 +56,31 @@ export function Messages({
     );
     const [currentConversationKeys, setCurrentConversationKeys] = useState<
         Set<string>
-    >(() => new Set(selectWebMessageSessions(state).map(conversationKey)));
+    >(() => new Set());
     const drawerTriggerRef = useRef<HTMLButtonElement>(null);
     const legacyMigrationStartedRef = useRef(false);
-    const preferenceMutationVersionRef = useRef(0);
-    const pendingPreferenceMutationsRef = useRef(0);
     const preferenceOrderSyncRef = useRef(false);
 
+    const projection = useMemo<WebMessageProjection>(
+        () => ({
+            contexts: contextState.contexts,
+            conversation: conversationState,
+            instances: instancesState.instances,
+            messages: messageState,
+        }),
+        [contextState, conversationState, instancesState, messageState],
+    );
+    const conversationPreferences = conversationState.preferences;
+    const preferenceFailure = conversationState.failures.preferences;
+    const preferencesLoaded =
+        preferencesReady && preferenceFailure === undefined;
     const activeSessions = useMemo(
-        () => selectWebMessageSessions(state, clockNow),
-        [clockNow, state],
+        () => selectWebMessageSessions(projection, clockNow),
+        [clockNow, projection],
     );
     const inactiveSessions = useMemo(
-        () => selectWebMessageHistorySessions(state, clockNow),
-        [clockNow, state],
+        () => selectWebMessageHistorySessions(projection, clockNow),
+        [clockNow, projection],
     );
     const allBaseSessions = useMemo(
         () => [...activeSessions, ...inactiveSessions],
@@ -75,7 +88,7 @@ export function Messages({
     );
     const selectedBase =
         route.view === "thread"
-            ? selectWebMessageSession(state, route.instance, route.ctxId)
+            ? selectWebMessageSession(projection, route.instance, route.ctxId)
             : undefined;
     const selected =
         selectedBase === undefined
@@ -86,12 +99,23 @@ export function Messages({
               )[0];
     const entries =
         route.view === "thread"
-            ? selectWebMessageEntries(state, route.instance, route.ctxId)
+            ? selectWebMessageEntries(projection, route.instance, route.ctxId)
             : [];
     const threadKey =
         route.view === "thread"
             ? `${route.instance}\u0000${route.ctxId}`
             : undefined;
+
+    useEffect(() => {
+        if (service.status !== "online") return;
+        let cancelled = false;
+        void store.refreshMessages().finally(() => {
+            if (!cancelled) setPreferencesReady(true);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [service.status, store]);
 
     useEffect(() => {
         let refreshPending = false;
@@ -135,18 +159,9 @@ export function Messages({
 
     useEffect(() => {
         if (
-            state.conversationPreferences === undefined ||
-            pendingPreferenceMutationsRef.current > 0
-        )
-            return;
-        setConversationPreferences(state.conversationPreferences);
-    }, [state.conversationPreferences]);
-
-    useEffect(() => {
-        if (
             !legacyMigrationPending ||
             legacyConversationPreferences === undefined ||
-            state.conversationPreferences === undefined ||
+            !preferencesLoaded ||
             legacyMigrationStartedRef.current
         )
             return;
@@ -164,25 +179,20 @@ export function Messages({
                 workspaceOrder: imported.workspaceOrder,
             })
             .then((succeeded) => {
-                if (succeeded) {
-                    removeLegacyConversationPreferences();
-                    setConversationPreferences(
-                        store.state?.conversationPreferences ?? imported,
-                    );
-                }
+                if (succeeded) removeLegacyConversationPreferences();
                 setLegacyMigrationPending(false);
             });
     }, [
         allBaseSessions,
         legacyConversationPreferences,
         legacyMigrationPending,
-        state.conversationPreferences,
+        preferencesLoaded,
         store,
     ]);
 
     useEffect(() => {
         if (
-            state.conversationPreferences === undefined ||
+            !preferencesLoaded ||
             legacyMigrationPending ||
             preferenceOrderSyncRef.current
         )
@@ -206,7 +216,7 @@ export function Messages({
         allBaseSessions,
         conversationPreferences,
         legacyMigrationPending,
-        state.conversationPreferences,
+        preferencesLoaded,
     ]);
 
     useEffect(() => {
@@ -214,31 +224,11 @@ export function Messages({
     }, [route]);
 
     function persistConversationPreferences(
-        next: ConversationPreferencesSnapshot,
+        _next: ConversationPreferencesSnapshot,
         patch: ConversationPreferencesPatch,
         settled?: () => void,
     ): void {
-        const mutationVersion = ++preferenceMutationVersionRef.current;
-        pendingPreferenceMutationsRef.current += 1;
-        setConversationPreferences(next);
-        void store.updateConversationPreferences(patch).then((succeeded) => {
-            pendingPreferenceMutationsRef.current = Math.max(
-                0,
-                pendingPreferenceMutationsRef.current - 1,
-            );
-            if (mutationVersion === preferenceMutationVersionRef.current) {
-                if (succeeded) {
-                    setConversationPreferences(
-                        store.state?.conversationPreferences ?? next,
-                    );
-                } else {
-                    setConversationPreferences(
-                        store.state?.conversationPreferences ??
-                            state.conversationPreferences ??
-                            createEmptyConversationPreferences(),
-                    );
-                }
-            }
+        void store.updateConversationPreferences(patch).finally(() => {
             settled?.();
         });
     }
@@ -254,10 +244,8 @@ export function Messages({
                 onClose={() => setDrawerOpen(false)}
                 open={drawerOpen}
                 persistPreferences={persistConversationPreferences}
-                preferenceError={state.conversationPreferencesError}
-                preferencesAvailable={
-                    state.conversationPreferences !== undefined
-                }
+                preferenceError={preferenceFailure?.message}
+                preferencesAvailable={preferencesLoaded}
                 route={route}
                 setCurrentConversationKeys={setCurrentConversationKeys}
                 threadKey={threadKey}
@@ -326,7 +314,6 @@ export function Messages({
                             key={threadKey}
                             onActivity={() => setDrawerOpen(false)}
                             route={route}
-                            state={state}
                             store={store}
                             title={selected?.title ?? route.ctxId}
                         />

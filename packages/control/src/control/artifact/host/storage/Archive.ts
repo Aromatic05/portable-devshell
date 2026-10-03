@@ -9,7 +9,7 @@ import { createZstdCompress, createZstdDecompress } from "node:zlib";
 import { createBLAKE3 } from "hash-wasm";
 import { extract, pack, type Headers, type Pack } from "tar-stream";
 
-import { createError } from "@portable-devshell/shared";
+import { createRemoteError } from "@portable-devshell/shared";
 
 import { createArtifactHasher, updateManifestHash } from "../Hash.js";
 
@@ -530,7 +530,7 @@ function depth(path: string): number {
 }
 
 function artifactError(code: string, message: string, cause?: unknown) {
-    return createError({
+    return createRemoteError({
         code,
         message:
             cause instanceof Error ? `${message} ${cause.message}` : message,

@@ -1,10 +1,13 @@
 import {
     compactContextId,
+    humanConversationTitle,
     parseContextMessageDirective,
-    workspaceFolderName,
     type ContextMessageStatus,
     type ConversationEntry,
+    type ConversationPreferencesSnapshot,
 } from "@portable-devshell/shared";
+
+import { workspaceFolderName } from "../../../presentation/Workspace.js";
 
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
@@ -14,6 +17,7 @@ import {
 } from "../../../../interaction/selection/Model.js";
 import type { TuiSidebarContextEntry } from "../../../../state/Ui.js";
 import { wrapTerminalText } from "../../../component/content/Box.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 
 export interface TuiMessageEntry {
     at: string;
@@ -48,52 +52,65 @@ const messageHistoryCache = new WeakMap<
 >();
 let messageSessionCache:
     | {
-          contexts: TuiAppState["readModel"]["contexts"];
-          instanceState: TuiAppState["readModel"]["instanceState"];
-          preferences: TuiAppState["conversationPreferences"];
+          contexts: TuiDomainReader["context"]["contexts"];
+          conversationInstances: TuiDomainReader["conversation"]["instances"];
+          messagesInstances: TuiDomainReader["messages"]["instances"];
+          instances: TuiDomainReader["instances"]["instances"];
+          preferences: ConversationPreferencesSnapshot;
           sessions: TuiMessageSession[];
       }
     | undefined;
 
 export function selectTuiMessageSessions(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     now: number = Date.now(),
 ): TuiMessageSession[] {
-    return projectTuiMessageSessions(state).filter(
+    return projectTuiMessageSessions(reader).filter(
         (session) =>
-            state.conversationPreferences.hiddenContexts[session.ctxId] !==
+            reader.conversation.preferences.hiddenContexts[session.ctxId] !==
                 true && isActiveMessageSession(session, now),
     );
 }
 
 export function selectTuiMessageHistorySessions(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     now: number = Date.now(),
 ): TuiMessageSession[] {
-    return projectTuiMessageSessions(state).filter(
+    return projectTuiMessageSessions(reader).filter(
         (session) =>
-            state.conversationPreferences.hiddenContexts[session.ctxId] !==
+            reader.conversation.preferences.hiddenContexts[session.ctxId] !==
                 true && !isActiveMessageSession(session, now),
     );
 }
 
 export function selectTuiMessageHiddenSessions(
-    state: TuiAppState,
+    reader: TuiDomainReader,
 ): TuiMessageSession[] {
-    return projectTuiMessageSessions(state).filter(
+    return projectTuiMessageSessions(reader).filter(
         (session) =>
-            state.conversationPreferences.hiddenContexts[session.ctxId] ===
+            reader.conversation.preferences.hiddenContexts[session.ctxId] ===
             true,
     );
 }
 
-function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
+function projectTuiMessageSessions(
+    reader: TuiDomainReader,
+): TuiMessageSession[] {
+    const contexts = reader.context.contexts;
+    const conversationInstances = reader.conversation.instances;
+    const messagesInstances = reader.messages.instances;
+    const instances = reader.instances.instances;
+    const preferences = reader.conversation.preferences;
+    const cached = messageSessionCache;
     if (
-        messageSessionCache?.contexts === state.readModel.contexts &&
-        messageSessionCache.instanceState === state.readModel.instanceState &&
-        messageSessionCache.preferences === state.conversationPreferences
+        cached !== undefined &&
+        cached.contexts === contexts &&
+        cached.conversationInstances === conversationInstances &&
+        cached.messagesInstances === messagesInstances &&
+        cached.instances === instances &&
+        cached.preferences === preferences
     )
-        return messageSessionCache.sessions;
+        return cached.sessions;
     const sessions = new Map<string, Omit<TuiMessageSession, "title">>();
     const summaries = new Map<string, { at: string; text: string }>();
     const touch = (
@@ -114,7 +131,7 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
         });
     };
 
-    for (const context of state.readModel.contexts) {
+    for (const context of contexts) {
         for (const environment of context.environments) {
             touch(environment.instance, context.ctxId, {
                 latestAt: context.lastAccessedAt || context.createdAt,
@@ -124,18 +141,16 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
             });
         }
     }
-    for (const [instance, instanceState] of Object.entries(
-        state.readModel.instanceState,
-    )) {
-        for (const entry of instanceState.conversationEntries) {
-            touch(instance, entry.ctxId, {
+    for (const { name } of instances) {
+        for (const entry of conversationInstances[name]?.entries ?? []) {
+            touch(name, entry.ctxId, {
                 latestAt: entry.createdAt,
                 startedAt: entry.createdAt,
             });
             if (entry.kind !== "comment") continue;
             const text = conversationSummary(entry.text);
             if (text === undefined) continue;
-            const key = conversationKey(instance, entry.ctxId);
+            const key = conversationKey(name, entry.ctxId);
             const current = summaries.get(key);
             if (
                 current === undefined ||
@@ -144,17 +159,22 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
                 summaries.set(key, { at: entry.createdAt, text });
             }
         }
+        for (const message of messagesInstances[name]?.messages ?? []) {
+            touch(name, message.ctxId, {
+                latestAt: message.createdAt,
+                startedAt: message.createdAt,
+            });
+        }
     }
 
     const values = [...sessions.values()];
-    const baseTitles = values.map((session) => {
-        const key = conversationKey(session.instance, session.ctxId);
-        return (
-            state.conversationPreferences.titles[key] ??
-            summaries.get(key)?.text ??
-            compactContextId(session.ctxId, 12)
-        );
-    });
+    const baseTitles = values.map(
+        (session) =>
+            preferences.titles[conversationKey(session.instance, session.ctxId)] ??
+            summaries.get(conversationKey(session.instance, session.ctxId))
+                ?.text ??
+            humanConversationTitle(session),
+    );
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles) {
         titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
@@ -162,7 +182,7 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
     const projected = values
         .map((session, index): TuiMessageSession => {
             const baseTitle =
-                baseTitles[index] ?? compactContextId(session.ctxId, 12);
+                baseTitles[index] ?? humanConversationTitle(session);
             return {
                 ...session,
                 title:
@@ -171,11 +191,13 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
                         : baseTitle,
             };
         })
-        .sort((left, right) => compareMessageSessions(state, left, right));
+        .sort((left, right) => compareMessageSessions(preferences, left, right));
     messageSessionCache = {
-        contexts: state.readModel.contexts,
-        instanceState: state.readModel.instanceState,
-        preferences: state.conversationPreferences,
+        contexts,
+        conversationInstances,
+        messagesInstances,
+        instances,
+        preferences,
         sessions: projected,
     };
     return projected;
@@ -183,33 +205,30 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
 
 export function selectTuiMessagesSidebarEntries(
     state: TuiAppState,
+    reader: TuiDomainReader,
     focused: boolean,
     cursor: TuiAppState["interaction"]["sidebarCursor"],
     now: number = Date.now(),
 ): TuiSidebarContextEntry[] {
     const route = currentTuiRoute(state);
     const scope = state.ui.messageScope;
-    const allSessions = projectTuiMessageSessions(state);
+    const allSessions = projectTuiMessageSessions(reader);
+    const hiddenContexts = reader.conversation.preferences.hiddenContexts;
     const scopedSessions =
         scope === "active"
             ? allSessions.filter(
                   (session) =>
-                      state.conversationPreferences.hiddenContexts[
-                          session.ctxId
-                      ] !== true && isActiveMessageSession(session, now),
+                      hiddenContexts[session.ctxId] !== true &&
+                      isActiveMessageSession(session, now),
               )
             : scope === "history"
               ? allSessions.filter(
                     (session) =>
-                        state.conversationPreferences.hiddenContexts[
-                            session.ctxId
-                        ] !== true && !isActiveMessageSession(session, now),
+                        hiddenContexts[session.ctxId] !== true &&
+                        !isActiveMessageSession(session, now),
                 )
               : allSessions.filter(
-                    (session) =>
-                        state.conversationPreferences.hiddenContexts[
-                            session.ctxId
-                        ] === true,
+                    (session) => hiddenContexts[session.ctxId] === true,
                 );
     const sessions = filterMessageSessions(
         scopedSessions,
@@ -349,17 +368,14 @@ function groupMessageSessions(sessions: readonly TuiMessageSession[]): Array<{
 }
 
 function compareMessageSessions(
-    state: TuiAppState,
+    preferences: ConversationPreferencesSnapshot,
     left: TuiMessageSession,
     right: TuiMessageSession,
 ): number {
     const leftWorkspace = workspacePreferenceKey(left);
     const rightWorkspace = workspacePreferenceKey(right);
     const workspaceRank = new Map(
-        state.conversationPreferences.workspaceOrder.map((key, index) => [
-            key,
-            index,
-        ]),
+        preferences.workspaceOrder.map((key, index) => [key, index]),
     );
     const leftWorkspaceRank = workspaceRank.get(leftWorkspace);
     const rightWorkspaceRank = workspaceRank.get(rightWorkspace);
@@ -371,8 +387,7 @@ function compareMessageSessions(
     if (leftWorkspace !== rightWorkspace) {
         return leftWorkspace.localeCompare(rightWorkspace);
     }
-    const order =
-        state.conversationPreferences.orderByWorkspace[leftWorkspace] ?? [];
+    const order = preferences.orderByWorkspace[leftWorkspace] ?? [];
     const leftRank = order.indexOf(conversationKey(left.instance, left.ctxId));
     const rightRank = order.indexOf(
         conversationKey(right.instance, right.ctxId),
@@ -408,12 +423,12 @@ function isActiveMessageSession(
 }
 
 export function selectTuiMessageEntries(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     ctxId: string,
 ): TuiMessageEntry[] {
     return selectTuiMessageEntriesFromSource(
-        state.readModel.instanceState[instance]?.conversationEntries ??
+        reader.conversation.instances[instance]?.entries ??
             emptyConversationEntries,
         ctxId,
     );
@@ -440,14 +455,14 @@ function selectTuiMessageEntriesFromSource(
 }
 
 export function renderTuiMessageHistoryLines(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     ctxId: string,
     width: number,
 ): Array<{ kind: "meta" | "text"; text: string }> {
     const innerWidth = Math.max(1, width - 2);
     const source =
-        state.readModel.instanceState[instance]?.conversationEntries ??
+        reader.conversation.instances[instance]?.entries ??
         emptyConversationEntries;
     let byContextAndWidth = messageHistoryCache.get(source);
     if (byContextAndWidth === undefined) {

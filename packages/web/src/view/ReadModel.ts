@@ -3,9 +3,8 @@ import {
     type OperationalOverview,
     type OperationalOverviewActivity,
     type OperationalOverviewAlert,
-} from "@portable-devshell/shared/browser";
-
-import type { WebState } from "../state/Store.js";
+    type TodoReadResult,
+} from "@portable-devshell/shared";
 
 export interface TodoSummary {
     checkpoint?: {
@@ -24,34 +23,26 @@ export interface TodoSummary {
     total: number;
 }
 
-export function todoSummaries(state: WebState): TodoSummary[] {
-    return Object.entries(state.readModel.instanceState)
-        .flatMap(([instance, value]) =>
-            value.todo === undefined ? [] : [[instance, value.todo] as const],
-        )
-        .flatMap(([instance, todo]) =>
-            projectTodoTaskSummaries(todo).map((task) => ({
-                completed: task.completed,
-                ...(task.checkpoint === undefined && todo.taskId !== task.taskId
-                    ? {}
-                    : { checkpoint: task.checkpoint ?? todo.checkpoint }),
-                ...(task.currentItem === undefined
-                    ? {}
-                    : { currentItem: task.currentItem }),
-                instance,
-                revision: task.revision,
-                status: task.status,
-                taskId: task.taskId,
-                title: task.title,
-                total: task.total,
-            })),
-        );
-}
-
-export function openTodos(state: WebState): number {
-    return todoSummaries(state).filter(
-        (todo) => !["completed", "cancelled", "none"].includes(todo.status),
-    ).length;
+export function todoSummaries(
+    instance: string,
+    todo: TodoReadResult | undefined,
+): TodoSummary[] {
+    if (todo === undefined) return [];
+    return projectTodoTaskSummaries(todo).map((task) => ({
+        completed: task.completed,
+        ...(task.checkpoint === undefined && todo.taskId !== task.taskId
+            ? {}
+            : { checkpoint: task.checkpoint ?? todo.checkpoint }),
+        ...(task.currentItem === undefined
+            ? {}
+            : { currentItem: task.currentItem }),
+        instance,
+        revision: task.revision,
+        status: task.status,
+        taskId: task.taskId,
+        title: task.title,
+        total: task.total,
+    }));
 }
 
 export function overviewAlerts(

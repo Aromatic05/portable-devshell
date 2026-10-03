@@ -7,7 +7,6 @@ import type { TuiCommandDispatcherFocus } from "./Focus.js";
 import { TuiCommandDispatcherOverlay } from "../Overlay.js";
 import { TuiCommandDispatcherViewport } from "./Viewport.js";
 import { selectTuiOverviewInstanceName } from "../../../view/page/overview/Presentation.js";
-import { selectSidebarModel } from "../../../view/projection/View.js";
 import { topTuiOverlay } from "../../../state/Overlay.js";
 import {
     currentTuiRoute,
@@ -137,9 +136,9 @@ export class TuiCommandDispatcherNavigation {
     async activateSidebarSelection(): Promise<boolean> {
         const cursor = this.#store.getState().interaction.sidebarCursor;
         if (cursor?.kind === "context") {
-            const entry = selectSidebarModel(
-                this.#store.getState(),
-            ).context.items.find((candidate) => candidate.id === cursor.id);
+            const entry = this.#projection
+                .selectSidebarModel(this.#store.getState())
+                .context.items.find((candidate) => candidate.id === cursor.id);
             if (entry === undefined) return false;
             switch (entry.target.kind) {
                 case "page":
@@ -283,8 +282,8 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setSelectedPage(page);
         this.#store.setFocusScope("sidebarContext");
         this.#store.setSidebarFocus("context");
-        const context = selectSidebarModel(this.#store.getState()).context
-            .items;
+        const context = this.#projection
+            .selectSidebarModel(this.#store.getState()).context.items;
         const cursor = context.find((entry) => entry.selected) ?? context[0];
         this.#store.setSidebarCursor(
             cursor === undefined
@@ -296,7 +295,7 @@ export class TuiCommandDispatcherNavigation {
     }
 
     #selectInstanceIndex(index: number): boolean {
-        const entry = this.#store.getState().instances[index];
+        const entry = this.#projection.domains.instances.instances[index];
         if (entry === undefined) {
             this.#store.setScreenStatus(
                 this.#store.getState().ui.selectedPage,
@@ -312,7 +311,7 @@ export class TuiCommandDispatcherNavigation {
 
     #scrollSidebar(section: "context" | "instances", delta: number): boolean {
         const state = this.#store.getState();
-        const sidebar = selectSidebarModel(state);
+        const sidebar = this.#projection.selectSidebarModel(state);
         const items =
             section === "context" ? sidebar.context.items : sidebar.instances;
         if (items.length === 0) return false;

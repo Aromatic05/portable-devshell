@@ -10,7 +10,7 @@ import {
 import type {
     ConversationPreferencesPatch,
     ConversationPreferencesSnapshot,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import type { WebRoute } from "../../../../../app/Route.js";
 import {

@@ -3,7 +3,7 @@ import {
     WebChannel,
     type Channel,
     type WebSocketClientLike,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import { webRoutePath } from "./Route.js";
 
@@ -20,7 +20,7 @@ export async function connectBrowserWebChannel(
 ): Promise<Channel> {
     return await WebChannel.connect(
         {
-            subprotocol: CONTROL_WEB_RPC_SUBPROTOCOL,
+            protocols: [CONTROL_WEB_RPC_SUBPROTOCOL],
             url,
             webSocketFactory: (value, protocols) =>
                 factory(value, protocols) as unknown as WebSocketClientLike,

@@ -464,7 +464,7 @@ export class TuiCommandDispatcherEditor {
         const snapshot =
             instance === undefined
                 ? undefined
-                : state.readModel.instanceState[instance]?.snapshot;
+                : this.#projection.domains.runtime(instance).snapshot;
         const wasRunning =
             snapshot?.daemonState === "running" || snapshot?.ready === true;
         if (
@@ -777,7 +777,7 @@ export class TuiCommandDispatcherEditor {
     }
 
     #instanceDraft(instanceName: string): Record<string, JsonValue> {
-        const configView = this.#store.getState().readModel.configView;
+        const configView = this.#projection.domains.config.view;
         const entries = configView?.instances;
         const entry = Array.isArray(entries)
             ? entries.find((value) => asRecord(value)?.name === instanceName)
@@ -808,7 +808,7 @@ export class TuiCommandDispatcherEditor {
 
     #mcpDraft(): Record<string, JsonValue> {
         return cloneRecord(
-            asRecord(this.#store.getState().readModel.configView?.mcp) ?? {
+            asRecord(this.#projection.domains.config.view?.mcp) ?? {
                 enabled: false,
                 listenHost: "127.0.0.1",
                 listenPort: 0,
@@ -817,7 +817,7 @@ export class TuiCommandDispatcherEditor {
     }
 
     #webDraft(): Record<string, JsonValue> {
-        const web = asRecord(this.#store.getState().readModel.configView?.web);
+        const web = asRecord(this.#projection.domains.config.view?.web);
         if (web === undefined) {
             return {
                 auth: "none",
@@ -837,7 +837,7 @@ export class TuiCommandDispatcherEditor {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance;
         const config = cloneRecord(
-            state.readModel.configView ?? {
+            asRecord(this.#projection.domains.config.view) ?? {
                 control: {},
                 instances: [],
                 mcp: this.#mcpDraft(),

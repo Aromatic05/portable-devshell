@@ -2,30 +2,34 @@ import { useEffect, useMemo, useState } from "react";
 import {
     configInstanceChangedPaths,
     configInstanceRequiresRestart,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
+    ConfigView,
     JsonValue,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
-import type { WebState } from "../../state/Model.js";
+import { useDomainSnapshot, useWebDomains } from "../../app/domain/Context.js";
 import type { WebStore } from "../../state/Store.js";
 
 export function Config({
     disabled,
     instance,
-    state,
     store,
 }: {
     disabled: boolean;
     instance?: string;
-    state: WebState;
     store: WebStore;
 }) {
+    const domains = useWebDomains();
+    const config = useDomainSnapshot(domains.config);
+    const instancesState = useDomainSnapshot(domains.instances);
+    const service = useDomainSnapshot(domains.service);
+    const configView = config.view;
     const instances = useMemo(
-        () => configInstances(state),
-        [state.readModel.configView],
+        () => configInstances(configView),
+        [configView],
     );
     const selectedName =
         instance === undefined
@@ -68,13 +72,16 @@ export function Config({
     const snapshot =
         selectedName === undefined
             ? undefined
-            : state.readModel.instanceState[selectedName]?.snapshot;
+            : instancesState.instances.find(
+                  (entry) => entry.name === selectedName,
+              )?.snapshot;
     const running =
         snapshot?.daemonState === "running" || snapshot?.ready === true;
     const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
-    const operationPending = state.operations["config:update"] !== undefined;
+    const operationPending =
+        store.state.operations["config:update"] !== undefined;
     const interactive =
-        state.connection === "online" && !disabled && !operationPending;
+        service.status === "online" && !disabled && !operationPending;
 
     function updateDraft(path: string, value: JsonValue | undefined): void {
         if (parsed.value === undefined) return;
@@ -91,7 +98,7 @@ export function Config({
             return false;
         }
         const draft = fullValidationDraft(
-            state.readModel.configView,
+            configView,
             selectedName,
             parsed.value,
         );
@@ -162,7 +169,7 @@ export function Config({
             }
         }
         const current = editableInstance(
-            configInstances(store.state).find(
+            configInstances(domains.config.state.view).find(
                 (entry) => entry.name === selectedName,
             ),
         );
@@ -659,7 +666,9 @@ export function Config({
                             void store.refreshConfig().then(
                                 () => {
                                     const next = editableInstance(
-                                        configInstances(store.state).find(
+                                        configInstances(
+                                            domains.config.state.view,
+                                        ).find(
                                             (entry) =>
                                                 entry.name === selectedName,
                                         ),
@@ -722,15 +731,9 @@ export function Config({
 }
 
 function configInstances(
-    state: WebState,
-): Array<Record<string, JsonValue> & { name: string }>;
-function configInstances(
-    state: Pick<WebState, "readModel">,
-): Array<Record<string, JsonValue> & { name: string }>;
-function configInstances(
-    state: Pick<WebState, "readModel">,
+    view: ConfigView | undefined,
 ): Array<Record<string, JsonValue> & { name: string }> {
-    const values = state.readModel.configView?.instances;
+    const values = view?.instances;
     if (!Array.isArray(values)) return [];
     return values.flatMap((value) => {
         const record = asRecord(value);
@@ -773,7 +776,7 @@ function parseInstance(raw: string): {
 }
 
 function fullValidationDraft(
-    configView: Record<string, JsonValue> | undefined,
+    configView: ConfigView | undefined,
     selected: string,
     next: Record<string, JsonValue>,
 ): ConfigDraft {
@@ -811,11 +814,9 @@ function instancePatch(value: Record<string, JsonValue>): ConfigInstancePatch {
     return clone as ConfigInstancePatch;
 }
 
-function asRecord(
-    value: JsonValue | undefined,
-): Record<string, JsonValue> | undefined {
+function asRecord(value: unknown): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value
+        ? (value as Record<string, JsonValue>)
         : undefined;
 }
 

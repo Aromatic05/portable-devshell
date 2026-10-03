@@ -2,7 +2,7 @@ import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { HttpHost } from "@portable-devshell/mcp";
-import { errorCodes, toControlErrorBody } from "@portable-devshell/shared";
+import { artifactErrorCodes, toRemoteErrorBody } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../Service.js";
 
@@ -305,13 +305,13 @@ function setSecurityHeaders(response: ServerResponse): void {
 }
 
 function sendShareError(response: ServerResponse, error: unknown): void {
-    const body = toControlErrorBody(error);
+    const body = toRemoteErrorBody(error);
     const status =
-        body?.code === errorCodes.artifactShareExpired ||
-        body?.code === errorCodes.artifactShareRevoked ||
-        body?.code === errorCodes.artifactShareExhausted
+        body?.code === artifactErrorCodes.shareExpired ||
+        body?.code === artifactErrorCodes.shareRevoked ||
+        body?.code === artifactErrorCodes.shareExhausted
             ? 410
-            : body?.code === errorCodes.artifactShareNotFound
+            : body?.code === artifactErrorCodes.shareNotFound
               ? 404
               : 500;
     const message =

@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef } from "react";
-import { parseContextMessageDirective } from "@portable-devshell/shared/browser";
+import { parseContextMessageDirective } from "@portable-devshell/shared";
 
 import type { WebMessageEntry } from "../Model.js";
 

@@ -46,7 +46,9 @@ export async function executeContextMessage(
             context.writeJson(
                 await context.clients.contextMessage.list(
                     command.instance,
-                    command.ctxId,
+                    command.ctxId === undefined
+                        ? undefined
+                        : { ctxId: command.ctxId },
                 ),
             );
             return true;

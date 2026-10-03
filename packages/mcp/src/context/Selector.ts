@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    contextErrorCodes,
     type ControlMcpContextMode,
     type JsonValue,
     type McpContextRecord,
@@ -94,8 +94,8 @@ class UnifiedContextSelector implements McpContextSelector {
         const contextInput = readOptionalMcpContextInput(input);
         if (this.requiresExplicitContextId) {
             if (contextInput.ctxId === undefined) {
-                throw createError({
-                    code: errorCodes.mcpContextInvalid,
+                throw createRemoteError({
+                    code: contextErrorCodes.invalid,
                     message:
                         "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
                     retryable: false,
@@ -107,8 +107,8 @@ class UnifiedContextSelector implements McpContextSelector {
             };
         }
         if (contextInput.ctxId !== undefined) {
-            throw createError({
-                code: errorCodes.mcpContextInvalid,
+            throw createRemoteError({
+                code: contextErrorCodes.invalid,
                 message:
                     "ctxId is internal when Context authority is externally bound.",
                 retryable: false,
@@ -121,8 +121,8 @@ class UnifiedContextSelector implements McpContextSelector {
             });
             if (record === undefined) continue;
             if (boundCtxId !== undefined && boundCtxId !== record.ctxId) {
-                throw createError({
-                    code: errorCodes.mcpContextInvalid,
+                throw createRemoteError({
+                    code: contextErrorCodes.invalid,
                     message: "External Context bindings disagree on ctxId.",
                     retryable: false,
                 });
@@ -143,8 +143,8 @@ class UnifiedContextSelector implements McpContextSelector {
                         : await validate(boundCtxId),
             };
         }
-        throw createError({
-            code: errorCodes.mcpContextInvalid,
+        throw createRemoteError({
+            code: contextErrorCodes.invalid,
             message:
                 "No Context is bound to this request. Call environ_info with workspace.",
             retryable: false,

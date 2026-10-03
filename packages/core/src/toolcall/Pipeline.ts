@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import {
     asInstanceName,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     errorMessage,
-    toControlErrorBody,
+    toRemoteErrorBody,
     type CommandResult,
-    type ControlErrorBody,
+    type RemoteErrorBody,
     type InstanceName,
     type JsonValue,
     type ToolCallContext,
@@ -183,7 +183,7 @@ export class ToolCallPipeline {
                 const rejectionCause =
                     review.error === undefined
                         ? undefined
-                        : createError({
+                        : createRemoteError({
                               code: review.error.code,
                               ...(review.error.details === undefined
                                   ? {}
@@ -191,8 +191,8 @@ export class ToolCallPipeline {
                               message: rejectionMessage,
                               retryable: false,
                           });
-                const error = createError({
-                    code: errorCodes.coreToolCallRejected,
+                const error = createRemoteError({
+                    code: runtimeErrorCodes.toolCallRejected,
                     ...(rejectionCause === undefined
                         ? {}
                         : { cause: rejectionCause }),
@@ -449,7 +449,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 if (toolExecutionSucceeded) throw error;
 
                 if (finalizedTerminal?.error !== undefined) {
-                    const errorCode = getErrorCode(finalizedTerminal.error, errorCodes.coreProviderFailed);
+                    const errorCode = getErrorCode(finalizedTerminal.error, runtimeErrorCodes.providerFailed);
                     if (hostRecorded) await this.#audit.failed(scope, runningContext, errorCode, undefined, async () => undefined, { executionCompleted: true });
                     throw finalizedTerminal.error;
                 }
@@ -482,7 +482,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                             runningContext,
                             getErrorCode(
                                 hookError,
-                                errorCodes.coreProviderFailed,
+                                runtimeErrorCodes.providerFailed,
                             ),
                             undefined,
                             async () => undefined,
@@ -514,11 +514,11 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
 
                 const rawErrorCode = getErrorCode(
                     outerFailure.error,
-                    errorCodes.coreProviderFailed,
+                    runtimeErrorCodes.providerFailed,
                 );
                 const errorCode =
                     rawErrorCode === "tool.cancelled"
-                        ? errorCodes.coreToolCallCancelled
+                        ? runtimeErrorCodes.toolCallCancelled
                         : rawErrorCode;
                 const nonRunningStatus =
                     readNonRunningSchedulerStatus(errorCode);
@@ -600,12 +600,12 @@ async function rewriteToolCallError(
     value: ToolCallHookValue,
 ): Promise<ToolCallOuterError> {
     const body =
-        toControlErrorBody(error) ??
+        toRemoteErrorBody(error) ??
         ({
             code: "error.unknown",
             message: errorMessage(error),
             retryable: false,
-        } satisfies ControlErrorBody);
+        } satisfies RemoteErrorBody);
     const commandResult = asCommandResult(error);
     const payload = {
         error: body as unknown as JsonValue,
@@ -627,7 +627,7 @@ async function rewriteToolCallError(
     }
     const rewrittenPayload = rewritten.payload;
     const record = rewrittenPayload as Record<string, JsonValue>;
-    const rewrittenBody = record.error as unknown as ControlErrorBody;
+    const rewrittenBody = record.error as unknown as RemoteErrorBody;
     const rewrittenResult =
         record.commandResult === undefined
             ? undefined
@@ -660,8 +660,8 @@ function executionContext(context: ToolCallHookContext): ToolCallContext {
     return execution;
 }
 
-function createErrorFromBody(body: ControlErrorBody): Error {
-    return createError({
+function createErrorFromBody(body: RemoteErrorBody): Error {
+    return createRemoteError({
         code: body.code,
         ...(body.cause === undefined
             ? {}
@@ -677,7 +677,7 @@ async function interpretTerminalValue(
     onProgress?: (progress: JsonValue) => void,
 ): Promise<{ error?: Error; result?: JsonValue }> {
     if (value.kind === "error") {
-        const body = (value.payload as Record<string, JsonValue>).error as unknown as ControlErrorBody;
+        const body = (value.payload as Record<string, JsonValue>).error as unknown as RemoteErrorBody;
         return {
             error: attachToolCallErrorPayload(
                 createErrorFromBody(body),
@@ -697,8 +697,8 @@ async function interpretTerminalValue(
 }
 
 function outboundHookFailure(): Error {
-    return createError({
-        code: errorCodes.coreProviderFailed,
+    return createRemoteError({
+        code: runtimeErrorCodes.providerFailed,
         message: "ToolCall outbound hook failed.",
         retryable: false,
     });

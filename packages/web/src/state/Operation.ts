@@ -1,8 +1,5 @@
 import type { WebState } from "./Model.js";
-import {
-    errorMessage,
-    withRequestTimeout,
-} from "@portable-devshell/shared/browser";
+import { errorMessage, withRequestTimeout } from "./Request.js";
 
 export interface WebOperationAccess {
     getState(): WebState;

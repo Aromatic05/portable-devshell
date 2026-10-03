@@ -2,8 +2,8 @@ import {
     Endpoint,
     Event,
     Rpc,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -30,8 +30,8 @@ export class WorkerToolInvoker {
         onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
         if (this.#catalog.getTool(toolName) === undefined)
-            throw createError({
-                code: errorCodes.coreToolSchemaUnavailable,
+            throw createRemoteError({
+                code: runtimeErrorCodes.toolSchemaUnavailable,
                 message: `Tool ${toolName} is not available for this instance.`,
                 retryable: false,
                 details: { toolName },

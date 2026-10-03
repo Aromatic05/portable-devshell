@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 import type {
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
@@ -174,7 +174,6 @@ export class ControlRuntimeArtifact {
             return undefined;
         if (this.#extensionAssetAuthorities.has(authorityInstance)) {
             return this.#bridge.endpointFor({
-                appendControlEvent: async () => undefined,
                 authorityInstance,
                 provider: "local",
                 securityMode: "disabled",
@@ -184,8 +183,6 @@ export class ControlRuntimeArtifact {
         if (authority === undefined) return undefined;
         const snapshot = authority.worker.snapshot();
         return this.#bridge.endpointFor({
-            appendControlEvent: async (type, data) =>
-                await authority.worker.appendControlEvent(type, data),
             authorityInstance,
             provider: authority.provider,
             securityMode: snapshot.effectiveSecurityMode ?? "disabled",
@@ -195,8 +192,8 @@ export class ControlRuntimeArtifact {
 
 function artifactShareUrl(config: ControlConfig, token: string): string {
     if (!config.mcp.enabled) {
-        throw createError({
-            code: errorCodes.controlConfigValidationFailed,
+        throw createRemoteError({
+            code: controlErrorCodes.configValidationFailed,
             message:
                 "Artifact sharing requires the MCP HTTP host to be enabled.",
             retryable: false,

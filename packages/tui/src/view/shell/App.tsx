@@ -36,6 +36,7 @@ import { type TuiAppState } from "../../state/store/Model.js";
 import { type TuiTerminalTab } from "../../state/route/Model.js";
 import { type TuiTextSelectionRenderSource } from "../../interaction/selection/Model.js";
 import { type TuiViewportRenderSource } from "../../app/Render.js";
+import type { TuiDomainReader } from "../domain/Reader.js";
 
 export interface TuiAppProps {
     runtime: TuiAppController;
@@ -55,7 +56,7 @@ export function TuiApp(props: TuiAppProps) {
     const connection = selectConnectionState(state);
     const errorLines = selectErrorMessage(state);
     const overlay = topTuiOverlay(state.interaction.overlays);
-    const footer = selectFooterModel(state);
+    const footer = selectFooterModel(state, props.runtime.reader);
     const fullWidth = tuiTerminalFullScreen(state);
     const geometry = tuiMainLayoutMetrics(
         viewport.columns,
@@ -92,7 +93,10 @@ export function TuiApp(props: TuiAppProps) {
                 header={
                     <TuiComponentHeader
                         stateLabel={connection.status}
-                        summary={selectHeaderSummary(state)}
+                        summary={selectHeaderSummary(
+                            state,
+                            props.runtime.reader,
+                        )}
                         title={selectHeaderTitle()}
                     />
                 }
@@ -103,6 +107,7 @@ export function TuiApp(props: TuiAppProps) {
                         ) : undefined}
                         {overlay !== undefined ? (
                             <TuiOverlayView
+                                reader={props.runtime.reader}
                                 onTextDetailImageVisibility={
                                     renderTextDetailImage
                                 }
@@ -150,6 +155,7 @@ export function TuiApp(props: TuiAppProps) {
                             <TuiScreenRouter
                                 boxInnerWidth={boxInnerWidth}
                                 contentWidth={contentWidth}
+                                reader={props.runtime.reader}
                                 state={state}
                                 viewportRows={viewportRows}
                             />
@@ -167,7 +173,10 @@ export function TuiApp(props: TuiAppProps) {
                         <TuiComponentSidebar
                             columns={viewport.columns}
                             compact={layout.mode === "compact"}
-                            model={selectSidebarModel(state)}
+                            model={selectSidebarModel(
+                                state,
+                                props.runtime.reader,
+                            )}
                             rows={Math.max(0, renderRows - 6)}
                         />
                     )
@@ -204,6 +213,7 @@ export interface TuiAppRenderSource {
 export interface TuiAppController {
     readonly columns: number;
     readonly rows: number;
+    readonly reader: TuiDomainReader;
     readonly scheduler: TuiAppRenderSource;
     readonly selection: TuiTextSelectionRenderSource;
     readonly terminal: TuiTerminalRenderSource;

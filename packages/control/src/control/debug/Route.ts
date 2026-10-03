@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type DebugPatchLoadRequest,
     type DebugPatchSummary,
     type DebugTargetSummary,
@@ -55,8 +55,8 @@ export function createDebugRouteModule(
 function requireLocalDebug(context: ControlPortContext): void {
     if (context.peer === "cli" && context.subject?.kind === "local-owner")
         return;
-    throw createError({
-        code: errorCodes.controlDebugAccessDenied,
+    throw createRemoteError({
+        code: controlErrorCodes.debugAccessDenied,
         message:
             "Debug patch operations are restricted to the local owner CLI.",
         retryable: false,
@@ -142,8 +142,8 @@ function readRecord(
 }
 
 function invalid(message: string) {
-    return createError({
-        code: errorCodes.controlDebugPatchInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.debugPatchInvalid,
         message,
         retryable: false,
     });

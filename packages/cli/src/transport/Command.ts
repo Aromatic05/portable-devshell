@@ -1,7 +1,7 @@
 import {
     Stream,
+    type CliCommandTransport,
     type CliCommandWireResult,
-    type ControlClients,
     type ControlStreamMessage,
     type Endpoint,
     type JsonValue,
@@ -20,7 +20,7 @@ export interface CliClientCommandOptions {
     workingDirectory?: string;
 }
 
-export type CliClientCommand = Omit<ControlClients["cli"], "command"> & {
+export type CliClientCommand = Omit<CliCommandTransport, "command"> & {
     command(
         commandId: string,
         argv: readonly string[],
@@ -30,7 +30,7 @@ export type CliClientCommand = Omit<ControlClients["cli"], "command"> & {
 
 export function createCliCommandAdapter(
     endpoint: Endpoint,
-    cli: ControlClients["cli"],
+    cli: CliCommandTransport,
 ): CliClientCommand {
     return {
         command: (commandId, argv, options = {}) =>

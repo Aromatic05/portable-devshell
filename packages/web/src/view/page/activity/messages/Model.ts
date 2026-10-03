@@ -2,14 +2,17 @@ import {
     compactContextId,
     humanConversationTitle,
     parseContextMessageDirective,
-    workspaceFolderName,
     type ContextMessageStatus,
     type ConversationEntry,
     type ConversationPreferencesPatch,
     type ConversationPreferencesSnapshot,
-} from "@portable-devshell/shared/browser";
+    type ConversationViewModelState,
+    type InstanceListEntry,
+    type McpContextRecord,
+    type MessageViewModelState,
+} from "@portable-devshell/shared";
 
-import type { WebState } from "../../../../state/Model.js";
+import { workspaceFolderName } from "../../../Presentation.js";
 
 export interface WebMessageEntry {
     at: string;
@@ -33,58 +36,56 @@ const activeSessionWindowMs = 30 * 60 * 1_000;
 const emptyConversationEntries = Object.freeze(
     [],
 ) as readonly ConversationEntry[];
-const messageEntryCache = new WeakMap<
-    readonly ConversationEntry[],
-    Map<string, WebMessageEntry[]>
->();
-let messageSessionCache:
-    | {
-          contexts: WebState["readModel"]["contexts"];
-          instanceState: WebState["readModel"]["instanceState"];
-          sessions: WebMessageSession[];
-      }
-    | undefined;
+
+/**
+ * Explicit domain state used to project Conversation sessions. Keeping the
+ * inputs as plain values lets the model stay pure without reaching into a
+ * WebState or a shared read-model snapshot.
+ */
+export interface WebMessageProjection {
+    contexts: readonly McpContextRecord[];
+    conversation: ConversationViewModelState;
+    instances: readonly InstanceListEntry[];
+    messages: MessageViewModelState;
+}
 
 export function selectWebMessageSessions(
-    state: WebState,
+    input: WebMessageProjection,
     now: number = Date.now(),
 ): WebMessageSession[] {
-    return projectWebMessageSessions(state).filter((session) =>
+    return projectWebMessageSessions(input).filter((session) =>
         isWebMessageSessionActive(session, now),
     );
 }
 
 export function selectWebMessageHistorySessions(
-    state: WebState,
+    input: WebMessageProjection,
     now: number = Date.now(),
 ): WebMessageSession[] {
-    return projectWebMessageSessions(state).filter(
+    return projectWebMessageSessions(input).filter(
         (session) => !isWebMessageSessionActive(session, now),
     );
 }
 
 export function selectWebMessageSession(
-    state: WebState,
+    input: WebMessageProjection,
     instance: string,
     ctxId: string,
 ): WebMessageSession | undefined {
-    return projectWebMessageSessions(state).find(
+    return projectWebMessageSessions(input).find(
         (session) => session.instance === instance && session.ctxId === ctxId,
     );
 }
 
-function projectWebMessageSessions(state: WebState): WebMessageSession[] {
-    if (
-        messageSessionCache?.contexts === state.readModel.contexts &&
-        messageSessionCache.instanceState === state.readModel.instanceState
-    )
-        return messageSessionCache.sessions;
+function projectWebMessageSessions(
+    input: WebMessageProjection,
+): WebMessageSession[] {
     const sessions = new Map<string, Omit<WebMessageSession, "title">>();
     const summaries = new Map<string, { at: string; text: string }>();
     const touch = (
         instance: string,
         ctxId: string | undefined,
-        input: Partial<Omit<WebMessageSession, "ctxId" | "instance" | "title">>,
+        patch: Partial<Omit<WebMessageSession, "ctxId" | "instance" | "title">>,
     ) => {
         if (ctxId === undefined || ctxId.length === 0) return;
         const key = `${instance}\u0000${ctxId}`;
@@ -92,14 +93,14 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
         sessions.set(key, {
             ctxId,
             instance,
-            latestAt: laterTimestamp(current?.latestAt, input.latestAt),
-            startedAt: earlierTimestamp(current?.startedAt, input.startedAt),
-            status: input.status ?? current?.status,
-            workspace: input.workspace ?? current?.workspace,
+            latestAt: laterTimestamp(current?.latestAt, patch.latestAt),
+            startedAt: earlierTimestamp(current?.startedAt, patch.startedAt),
+            status: patch.status ?? current?.status,
+            workspace: patch.workspace ?? current?.workspace,
         });
     };
 
-    for (const context of state.readModel.contexts) {
+    for (const context of input.contexts) {
         for (const environment of context.environments) {
             touch(environment.instance, context.ctxId, {
                 latestAt: context.lastAccessedAt || context.createdAt,
@@ -109,18 +110,16 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
             });
         }
     }
-    for (const [instance, instanceState] of Object.entries(
-        state.readModel.instanceState,
-    )) {
-        for (const entry of instanceState.conversationEntries) {
-            touch(instance, entry.ctxId, {
+    for (const { name } of input.instances) {
+        for (const entry of input.conversation.instances[name]?.entries ?? []) {
+            touch(name, entry.ctxId, {
                 latestAt: entry.createdAt,
                 startedAt: entry.createdAt,
             });
             if (entry.kind !== "comment") continue;
             const text = conversationSummary(entry.text);
             if (text === undefined) continue;
-            const key = `${instance}\u0000${entry.ctxId}`;
+            const key = `${name}\u0000${entry.ctxId}`;
             const current = summaries.get(key);
             if (
                 current === undefined ||
@@ -128,6 +127,12 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
             ) {
                 summaries.set(key, { at: entry.createdAt, text });
             }
+        }
+        for (const message of input.messages.instances[name]?.messages ?? []) {
+            touch(name, message.ctxId, {
+                latestAt: message.createdAt,
+                startedAt: message.createdAt,
+            });
         }
     }
 
@@ -140,7 +145,7 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles)
         titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-    const projected = values
+    return values
         .map((session, index): WebMessageSession => {
             const baseTitle =
                 baseTitles[index] ?? humanConversationTitle(session);
@@ -157,30 +162,17 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
                 right.startedAt.localeCompare(left.startedAt) ||
                 left.ctxId.localeCompare(right.ctxId),
         );
-    messageSessionCache = {
-        contexts: state.readModel.contexts,
-        instanceState: state.readModel.instanceState,
-        sessions: projected,
-    };
-    return projected;
 }
 
 export function selectWebMessageEntries(
-    state: WebState,
+    input: WebMessageProjection,
     instance: string,
     ctxId: string,
 ): WebMessageEntry[] {
     const source =
-        state.readModel.instanceState[instance]?.conversationEntries ??
+        input.conversation.instances[instance]?.entries ??
         emptyConversationEntries;
-    let byContext = messageEntryCache.get(source);
-    if (byContext === undefined) {
-        byContext = new Map();
-        messageEntryCache.set(source, byContext);
-    }
-    const cached = byContext.get(ctxId);
-    if (cached !== undefined) return cached;
-    const projected = source
+    return source
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): WebMessageEntry => ({
             at: entry.createdAt,
@@ -194,8 +186,6 @@ export function selectWebMessageEntries(
                 left.at.localeCompare(right.at) ||
                 left.id.localeCompare(right.id),
         );
-    byContext.set(ctxId, projected);
-    return projected;
 }
 
 export function filterWebMessageSessions(

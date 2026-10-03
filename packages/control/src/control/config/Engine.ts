@@ -1,8 +1,8 @@
 import {
     ConfigInputError,
     MASKED_CONFIG_TOKEN,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     formatConfigPath,
     normalizeConfigDraft,
     parseConfigDraft,
@@ -199,8 +199,8 @@ export class ConfigEngine {
             return read();
         } catch (error) {
             if (!(error instanceof ConfigInputError)) throw error;
-            throw createError({
-                code: errorCodes.controlConfigInvalid,
+            throw createRemoteError({
+                code: controlErrorCodes.configInvalid,
                 cause: error,
                 details: {
                     fieldPath: formatConfigPath(error.issue.path),

@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ControlConfig,
 } from "@portable-devshell/shared";
 
@@ -64,8 +64,8 @@ export class ControlRuntimeState {
 
     requireConfig(): ControlConfig {
         if (this.#config !== undefined) return this.#config;
-        throw createError({
-            code: errorCodes.controlConfigLoadFailed,
+        throw createRemoteError({
+            code: controlErrorCodes.configLoadFailed,
             message: "Control config is not loaded.",
             retryable: false,
         });

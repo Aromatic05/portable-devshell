@@ -6,6 +6,7 @@ import {
     currentTuiRoute,
     currentTuiRouteScrollKey,
 } from "../../../../state/route/State.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import {
     renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,
@@ -16,6 +17,7 @@ import {
 } from "./Projection.js";
 
 export function TuiMessagesView(props: {
+    reader: TuiDomainReader;
     state: TuiAppState;
     viewportRows: number;
     width: number;
@@ -25,10 +27,10 @@ export function TuiMessagesView(props: {
         const scope = props.state.ui.messageScope;
         const conversations =
             scope === "active"
-                ? selectTuiMessageSessions(props.state)
+                ? selectTuiMessageSessions(props.reader)
                 : scope === "history"
-                  ? selectTuiMessageHistorySessions(props.state)
-                  : selectTuiMessageHiddenSessions(props.state);
+                  ? selectTuiMessageHistorySessions(props.reader)
+                  : selectTuiMessageHiddenSessions(props.reader);
         const message =
             conversations.length === 0
                 ? scope === "active"
@@ -47,7 +49,7 @@ export function TuiMessagesView(props: {
     const instance = route.instance;
 
     const history = renderTuiMessageHistoryLines(
-        props.state,
+        props.reader,
         instance,
         route.ctxId,
         props.width,

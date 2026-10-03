@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ControlPortDefinition,
     type JsonValue,
     type MessageStream,
@@ -89,8 +89,8 @@ export function readConfigSubscriptionFromRevision(
         !Number.isSafeInteger(payload.fromRevision) ||
         payload.fromRevision < 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "config.subscribe requires a non-negative integer fromRevision.",
             retryable: false,

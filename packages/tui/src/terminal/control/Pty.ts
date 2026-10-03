@@ -1,10 +1,8 @@
 import type {
-    ControlStreamMessage,
-    MessageStream,
-    TerminalAttachInput,
-    TerminalOpenInput,
-    TerminalOpenResult,
+    TerminalAttachment,
     TerminalSessionDescriptor,
+    TerminalStreamMessage,
+    TerminalTransport,
     TerminalVersionedIdentity,
 } from "@portable-devshell/shared";
 
@@ -17,20 +15,10 @@ import type {
 
 const OPERATION_ACK_TIMEOUT_MS = 30_000;
 
-export interface TuiControlTerminalClient {
-    attach(
-        instance: string,
-        input: TerminalAttachInput,
-    ): Promise<MessageStream>;
-    kill(
-        instance: string,
-        identity: TerminalVersionedIdentity,
-    ): Promise<TerminalSessionDescriptor>;
-    open(
-        instance: string,
-        input: TerminalOpenInput,
-    ): Promise<TerminalOpenResult>;
-}
+export type TuiControlTerminalClient = Pick<
+    TerminalTransport,
+    "attach" | "kill" | "open"
+>;
 
 interface StoredTerminalIdentity extends TerminalSessionDescriptor {}
 
@@ -128,7 +116,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     #closed = false;
     #exited = false;
     #operationTail = Promise.resolve();
-    #stream?: MessageStream;
+    #stream?: TerminalAttachment;
 
     constructor(options: {
         client: TuiControlTerminalClient;
@@ -201,14 +189,13 @@ class TuiControlTerminalPty implements TuiTerminalPty {
             terminalId: identity.terminalId,
         });
         if (this.#closed) {
-            void stream.close();
+            stream.close();
             return;
         }
-        const seed = await stream.readMessage();
-        if (seed.type !== "data") throw new Error("Terminal stream closed before seed.");
-        const event = seed.message as ControlStreamMessage;
-        if (event.name !== "seed") throw new Error("Terminal stream seed is missing.");
-        const acknowledged = readSession(event);
+        const seed = await stream.next();
+        if (seed.kind !== "seed")
+            throw new Error("Terminal stream seed is missing.");
+        const acknowledged = seed.session;
         this.#writeIdentity({ ...acknowledged, latestSeq: fromSeq });
         this.#stream = stream;
         void this.#consume(stream).catch((error: unknown) => {
@@ -232,6 +219,12 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                     throw new Error("Terminal attachment is not ready.");
                 }
                 const clientSeq = ++this.#clientSeq;
+                const command = {
+                    clientSeq,
+                    generation: identity.generation,
+                    terminalId: identity.terminalId,
+                    version: identity.version,
+                };
                 const acknowledged = new Promise<void>((resolve, reject) => {
                     const timer = setTimeout(() => {
                         this.#pending.delete(clientSeq);
@@ -245,16 +238,19 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                     this.#pending.set(clientSeq, { reject, resolve, timer });
                 });
                 try {
-                    await stream.send({
-                        name: operation,
-                        payload: {
-                            clientSeq,
-                            generation: identity.generation,
-                            terminalId: identity.terminalId,
-                            version: identity.version,
-                            ...payload,
-                        },
-                    });
+                    if (operation === "input") {
+                        await stream.sendInput(
+                            (payload as { data: string }).data,
+                            command,
+                        );
+                    } else {
+                        const resize = payload as { cols: number; rows: number };
+                        await stream.sendResize(
+                            resize.cols,
+                            resize.rows,
+                            command,
+                        );
+                    }
                     await acknowledged;
                 } catch (error) {
                     const pending = this.#pending.get(clientSeq);
@@ -271,18 +267,18 @@ class TuiControlTerminalPty implements TuiTerminalPty {
             });
     }
 
-    async #consume(stream: MessageStream): Promise<void> {
+    async #consume(stream: TerminalAttachment): Promise<void> {
         while (!this.#closed && this.#stream === stream) {
-            const next = await stream.readMessage();
-            if (next.type === "close") {
-                this.#writeIdentity(readCompletedSession(next.message));
+            const next = await stream.next();
+            if (next.kind === "closed") {
+                if (next.session !== undefined)
+                    this.#writeIdentity(next.session);
                 this.#stream = undefined;
+                if (next.error !== undefined) throw next.error;
                 return;
             }
-            if (next.type === "fin") continue;
-            const event = next.message as ControlStreamMessage;
-            if (event.name === "output") {
-                const frame = readOutput(event);
+            if (next.kind === "output") {
+                const frame = next.frame;
                 const identity = this.#requireIdentity();
                 if (frame.seq <= identity.latestSeq) continue;
                 if (frame.seq !== identity.latestSeq + 1)
@@ -292,46 +288,41 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                 const updated = { ...identity, latestSeq: frame.seq };
                 this.#writeIdentity(updated);
                 this.#emitData(frame.data);
-                await stream.send({
-                    name: "ack",
-                    payload: {
-                        generation: updated.generation,
-                        terminalId: updated.terminalId,
-                        throughSeq: frame.seq,
-                        version: updated.version,
-                    },
-                });
+                await stream.ack(updated, frame.seq);
                 continue;
             }
-            if (event.name === "inputAccepted" || event.name === "resized") {
-                this.#acceptOperation(event);
+            if (
+                next.kind === "inputAccepted" ||
+                next.kind === "resized"
+            ) {
+                this.#acceptOperation(next);
                 continue;
             }
-            if (event.name === "exit") {
-                const exit = readExit(event);
+            if (next.kind === "exit") {
                 const identity = this.#requireIdentity();
                 this.#writeIdentity({ ...identity, state: "exited" });
-                this.#emitExit(exit);
+                this.#emitExit(next.event);
             }
         }
     }
 
-    #acceptOperation(event: ControlStreamMessage): void {
-        const payload = readRecord(event.payload);
-        const clientSeq = readInteger(payload.clientSeq, "clientSeq");
+    #acceptOperation(
+        event: Extract<
+            TerminalStreamMessage,
+            { kind: "inputAccepted" | "resized" }
+        >,
+    ): void {
+        const clientSeq = event.clientSeq;
         const identity = this.#requireIdentity();
-        const terminalId = readString(payload.terminalId, "terminalId");
-        const generation = readInteger(payload.generation, "generation");
         if (
-            terminalId !== identity.terminalId ||
-            generation !== identity.generation
+            event.identity.terminalId !== identity.terminalId ||
+            event.identity.generation !== identity.generation
         ) {
             throw new Error(
                 "Terminal acknowledgement identity does not match the active session.",
             );
         }
-        const version = readInteger(payload.version, "version");
-        this.#writeIdentity({ ...identity, version });
+        this.#writeIdentity({ ...identity, version: event.identity.version });
         const pending = this.#pending.get(clientSeq);
         if (pending === undefined) return;
         clearTimeout(pending.timer);
@@ -375,75 +366,6 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         this.#exited = true;
         for (const listener of [...this.#exitListeners]) listener(exit);
     }
-}
-
-function readSession(event: ControlStreamMessage): TerminalSessionDescriptor {
-    const payload = readRecord(event.payload);
-    return payload.session as unknown as TerminalSessionDescriptor;
-}
-
-function readCompletedSession(value: unknown): TerminalSessionDescriptor {
-    const payload = readRecord(value);
-    return {
-        cols: readInteger(payload.cols, "cols"),
-        createdAt: readString(payload.createdAt, "createdAt"),
-        generation: readInteger(payload.generation, "generation"),
-        instance: readString(payload.instance, "instance"),
-        latestSeq: readInteger(payload.latestSeq, "latestSeq"),
-        rows: readInteger(payload.rows, "rows"),
-        state: readTerminalState(payload.state),
-        terminalId: readString(payload.terminalId, "terminalId"),
-        version: readInteger(payload.version, "version"),
-    };
-}
-
-function readOutput(event: ControlStreamMessage): { data: string; seq: number } {
-    const payload = readRecord(event.payload);
-    return {
-        data: readString(payload.data, "data"),
-        seq: readInteger(payload.seq, "seq"),
-    };
-}
-
-function readExit(event: ControlStreamMessage): { exitCode: number; signal?: number } {
-    const payload = readRecord(event.payload);
-    const signal = payload.signal;
-    return {
-        exitCode: readInteger(payload.exitCode, "exitCode"),
-        ...(typeof signal === "number" ? { signal } : {}),
-    };
-}
-
-function readRecord(value: unknown): Record<string, unknown> {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new Error("Terminal event payload must be an object.");
-    }
-    return value as Record<string, unknown>;
-}
-
-function readString(value: unknown, field: string): string {
-    if (typeof value !== "string")
-        throw new Error(`Terminal ${field} must be a string.`);
-    return value;
-}
-
-function readInteger(value: unknown, field: string): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-        throw new Error(`Terminal ${field} must be a safe integer.`);
-    }
-    return value;
-}
-
-function readTerminalState(value: unknown): TerminalSessionDescriptor["state"] {
-    if (
-        value !== "running" &&
-        value !== "exited" &&
-        value !== "failed" &&
-        value !== "killed"
-    ) {
-        throw new Error("Terminal state is invalid.");
-    }
-    return value;
 }
 
 function asError(error: unknown): Error {

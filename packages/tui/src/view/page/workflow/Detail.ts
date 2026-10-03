@@ -3,6 +3,7 @@ import type { TodoItem, TodoReadResult } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/content/Box.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import type { TuiExpandableBoxStatus } from "../../../state/Ui.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import { buttonLine } from "../../component/Editor.js";
 import { compactSummary, formatField, makeBox } from "../Support.js";
 import { projectTodoSummaries } from "./Goal.js";
@@ -18,10 +19,11 @@ const symbols: Record<TodoItem["status"], string> = {
 
 export function buildTodoDetailBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
     todoId: string,
 ): BoxModel[] {
-    const todo = state.readModel.instanceState[instance]?.todo;
+    const todo = reader.todo(instance).todo;
     const summary = projectTodoSummaries(todo).find(
         (candidate) => candidate.taskId === todoId,
     );

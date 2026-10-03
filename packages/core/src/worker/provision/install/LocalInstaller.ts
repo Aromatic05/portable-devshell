@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import type { WorkerAsset } from "../AssetResolver.js";
 import type { WorkerTarget } from "../target/Target.js";
@@ -81,8 +81,8 @@ export class WorkerInstallerLocal {
         target: WorkerTarget,
     ): Promise<WorkerInstallerLocalResult> {
         if (asset.target.key !== target.key) {
-            throw createError({
-                code: errorCodes.coreWorkerProvisionFailed,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerProvisionFailed,
                 details: {
                     assetTargetKey: asset.target.key,
                     targetKey: target.key,
@@ -98,8 +98,8 @@ export class WorkerInstallerLocal {
             .update(source)
             .digest("hex");
         if (actualSourceSha !== asset.sha256) {
-            throw createError({
-                code: errorCodes.coreWorkerProvisionFailed,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerProvisionFailed,
                 details: {
                     actualSha256: actualSourceSha,
                     expectedSha256: asset.sha256,
@@ -146,8 +146,8 @@ export class WorkerInstallerLocal {
                 layout.shaPath,
             )) !== asset.sha256
         ) {
-            throw createError({
-                code: errorCodes.coreWorkerProvisionFailed,
+            throw createRemoteError({
+                code: runtimeErrorCodes.workerProvisionFailed,
                 details: {
                     binaryPath: layout.binaryPath,
                     expectedSha256: asset.sha256,

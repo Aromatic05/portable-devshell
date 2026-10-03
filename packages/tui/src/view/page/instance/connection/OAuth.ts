@@ -1,15 +1,17 @@
 import type { OAuthApprovalRequest } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../../component/content/Box.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import { compactSummary, makeBox } from "../../Support.js";
 
 export function buildOAuthPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string | undefined,
 ): BoxModel[] {
-    const status = oauthRuntimeStatus(state);
-    const approval = oauthApprovalConfig(state);
+    const status = oauthRuntimeStatus(reader);
+    const approval = oauthApprovalConfig(reader);
     const statusBox = makeBox(state, "connections", instanceName, {
         detailLines: [
             `Provider           ${status.provider}`,
@@ -18,7 +20,7 @@ export function buildOAuthPageBoxes(
             `Reason             ${status.reason}`,
             `Approval mode      ${approval.mode}`,
             `Approval token     ${approval.tokenConfigured ? "configured" : "not configured"}`,
-            `Pending requests   ${state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length}`,
+            `Pending requests   ${reader.mcp.approvals.filter((approval) => approval.status === "pending").length}`,
             ...(approval.mode === "token"
                 ? [
                       {
@@ -53,7 +55,7 @@ export function buildOAuthPageBoxes(
                 [
                     "pending",
                     String(
-                        state.readModel.oauthApprovals.filter(
+                        reader.mcp.approvals.filter(
                             (approval) => approval.status === "pending",
                         ).length,
                     ),
@@ -63,7 +65,7 @@ export function buildOAuthPageBoxes(
         title: "[Global] OAuth Runtime",
     });
 
-    if (state.readModel.oauthApprovals.length === 0) {
+    if (reader.mcp.approvals.length === 0) {
         return [
             statusBox,
             makeBox(state, "connections", instanceName, {
@@ -79,7 +81,7 @@ export function buildOAuthPageBoxes(
 
     return [
         statusBox,
-        ...state.readModel.oauthApprovals.map((approval) =>
+        ...reader.mcp.approvals.map((approval) =>
             oauthApprovalBox(state, instanceName, approval),
         ),
     ];
@@ -134,13 +136,13 @@ function oauthApprovalBox(
     });
 }
 
-function oauthRuntimeStatus(state: TuiAppState): {
+function oauthRuntimeStatus(reader: TuiDomainReader): {
     provider: string;
     publicBaseUrl: string;
     reason: string;
     runtime: string;
 } {
-    const status = state.readModel.mcpStatus;
+    const status = reader.mcp.status;
     const provider =
         typeof status?.authMode === "string" ? status.authMode : "none";
     if (provider !== "oauth2") {
@@ -190,11 +192,11 @@ function oauthRuntimeStatus(state: TuiAppState): {
     };
 }
 
-function oauthApprovalConfig(state: TuiAppState): {
+function oauthApprovalConfig(reader: TuiDomainReader): {
     mode: "token" | "tui";
     tokenConfigured: boolean;
 } {
-    const mcp = asRecord(state.readModel.configView?.mcp);
+    const mcp = asRecord(reader.config.view?.mcp);
     const oauth2 = asRecord(mcp?.oauth2);
     const mode = oauth2?.approval === "token" ? "token" : "tui";
     return {

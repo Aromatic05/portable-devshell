@@ -1,12 +1,13 @@
 import {
-    workspaceFolderName,
     type GoalSnapshot,
     type TodoItem,
     type TodoTaskSummary,
 } from "@portable-devshell/shared";
 import { type BoxModel } from "../../component/content/Box.js";
+import { workspaceFolderName } from "../../presentation/Workspace.js";
 import { type TuiAppState } from "../../../state/store/Model.js";
 import { type TuiExpandableBoxStatus } from "../../../state/Ui.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import { compactSummary, formatField, makeBox } from "../Support.js";
 import { projectTodoSummaries } from "./Goal.js";
 import { currentTuiRoute } from "../../../state/route/State.js";
@@ -23,9 +24,10 @@ const symbols: Record<TodoItem["status"], string> = {
 
 export function buildTodoGoalBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
 ): BoxModel[] {
-    const goals = state.readModel.instanceState[instance]?.goals ?? [];
+    const goals = reader.goals.instances[instance]?.goals ?? [];
     return goals.map((goal) => goalBox(state, instance, goal));
 }
 
@@ -69,9 +71,10 @@ function goalBox(
 
 export function buildTodoOverviewBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
 ): BoxModel[] {
-    const todo = state.readModel.instanceState[instance]?.todo;
+    const todo = reader.todo(instance).todo;
     const summaries = projectTodoSummaries(todo);
     if (summaries.length === 0) {
         return [
@@ -177,14 +180,20 @@ function itemStatus(status: TodoItem["status"]): TuiExpandableBoxStatus {
 
 export function buildTodoPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "todo") return [];
     return [
-        ...buildTodoGoalBoxes(state, instanceName),
+        ...buildTodoGoalBoxes(state, reader, instanceName),
         ...(route.view === "overview"
-            ? buildTodoOverviewBoxes(state, instanceName)
-            : buildTodoDetailBoxes(state, instanceName, route.todoId)),
+            ? buildTodoOverviewBoxes(state, reader, instanceName)
+            : buildTodoDetailBoxes(
+                  state,
+                  reader,
+                  instanceName,
+                  route.todoId,
+              )),
     ];
 }

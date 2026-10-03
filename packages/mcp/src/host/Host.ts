@@ -26,6 +26,7 @@ import {
 } from "../workspace/Route.js";
 import { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
 import { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
+import { WorkspaceActionStore } from "../workspace/ActionStore.js";
 import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
@@ -92,6 +93,7 @@ export class McpRuntimeState {
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly workers = new Map<string, WorkerInstanceLike>();
     readonly workspaceAppLeases: WorkspaceAppLeaseStore;
+    readonly workspaceActions: WorkspaceActionStore;
     readonly workspaceAppPresence = new WorkspaceAppPresenceStore();
     #initializePromise?: Promise<void>;
 
@@ -104,13 +106,20 @@ export class McpRuntimeState {
         this.workspaceAppLeases = new WorkspaceAppLeaseStore({
             filePath: config.workspaceAppLeaseFile,
         });
+        this.workspaceActions = new WorkspaceActionStore({
+            filePath: config.workspaceAppLeaseFile === undefined
+                ? undefined
+                : `${config.workspaceAppLeaseFile}.actions`,
+        });
         this.contexts.bindPresentation({
             revokeContext: async (ctxId) => {
                 await this.workspaceAppLeases.revokeContext(ctxId);
+                await this.workspaceActions.revokeContext(ctxId);
                 this.workspaceAppPresence.revokeContext(ctxId);
             },
             revokeInstance: async (instance) => {
                 await this.workspaceAppLeases.revokeInstance(instance);
+                await this.workspaceActions.revokeInstance(instance);
                 this.workspaceAppPresence.revokeInstance(instance);
             },
         });
@@ -126,6 +135,7 @@ export class McpRuntimeState {
         }
         const initialize = Promise.all([
             this.workspaceAppLeases.initialize(),
+            this.workspaceActions.initialize(),
         ]).then(() => undefined);
         this.#initializePromise = initialize;
         try {
@@ -188,6 +198,7 @@ export class McpHost {
     readonly #runtimeState: McpRuntimeState;
     readonly #workers: Map<string, WorkerInstanceLike>;
     readonly #workspaceAppLeases: WorkspaceAppLeaseStore;
+    readonly #workspaceActions: WorkspaceActionStore;
     readonly #workspaceAppPresence: WorkspaceAppPresenceStore;
     #started = false;
 
@@ -198,6 +209,7 @@ export class McpHost {
         this.#gateways = this.#runtimeState.gateways;
         this.#workers = this.#runtimeState.workers;
         this.#workspaceAppLeases = this.#runtimeState.workspaceAppLeases;
+        this.#workspaceActions = this.#runtimeState.workspaceActions;
         this.#workspaceAppPresence = this.#runtimeState.workspaceAppPresence;
         this.#runtimeState.retainInstances(
             new Set(config.instances.map((instance) => instance.name)),
@@ -288,6 +300,7 @@ export class McpHost {
                 ...(workspaceApp
                     ? {
                           workspaceAppLeases: this.#workspaceAppLeases,
+                          workspaceActionStore: this.#workspaceActions,
                           workspaceAppPresence: this.#workspaceAppPresence,
                       }
                     : {}),
@@ -313,6 +326,7 @@ export class McpHost {
                     host: this.#httpServer,
                     instanceName: instance.name,
                     leases: this.#workspaceAppLeases,
+                    actions: this.#workspaceActions,
                     presence: this.#workspaceAppPresence,
                     publicBaseUrl: this.#config.publicBaseUrl,
                     restoreTmuxWaits: async () =>
@@ -356,6 +370,7 @@ export class McpHost {
         this.#liveRouteCleanups.delete(instanceName);
         this.#workspaceAppPresence.revokeInstance(instanceName);
         await this.#workspaceAppLeases.revokeInstance(instanceName);
+        await this.#workspaceActions.revokeInstance(instanceName);
         const gateway = this.#gateways.get(instanceName);
         if (gateway === undefined) return;
         while (true) {

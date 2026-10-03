@@ -11,8 +11,11 @@ export interface EventPacket {
 export class Event {
     readonly #connection?: Connection;
     readonly #listeners = new Set<
-        (name: string, message: Message | undefined, peer: Address) =>
-            Promise<void> | void
+        (
+            name: string,
+            message: Message | undefined,
+            peer: Address,
+        ) => Promise<void> | void
     >();
     readonly #unsubscribe: () => void;
 
@@ -59,7 +62,8 @@ export class Event {
         if (typeof value !== "object" || value === null) return;
         const packet = value as Partial<EventPacket>;
         if (packet.protocol !== "event") return;
-        if (typeof packet.name !== "string") throw new Error("Invalid Event packet.");
+        if (typeof packet.name !== "string")
+            throw new Error("Invalid Event packet.");
         for (const listener of this.#listeners)
             await listener(packet.name, packet.message, peer);
     }

@@ -2,15 +2,11 @@ import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
 import { workspaceAppResourceUri } from "../../../workspace/app/App.js";
 import {
-    todoReadOutputSchema,
-    workspaceApprovalRequestOutputSchema,
-    workspaceGoalResultOutputSchema,
     workspaceOpenOutputSchema,
-    workspaceQuestionAnswerOutputSchema,
+    workspaceGoalResultOutputSchema,
     workspaceReentryOutputSchema,
     workspaceSnapshotOutputSchema,
-    workspaceWaitInterruptOutputSchema,
-    workspaceWaitRecoveryOutputSchema,
+    workspaceActionOutputSchema,
     workspaceWatchOutputSchema,
 } from "./Schema.js";
 
@@ -21,15 +17,8 @@ export type McpToolCatalogInteractionName =
     | "workspace_reconnect"
     | "workspace_snapshot"
     | "workspace_watch"
-    | "workspace_answer"
-    | "workspace_interrupt"
-    | "workspace_task"
-    | "workspace_recover"
-    | "workspace_pause"
-    | "workspace_resume"
-    | "workspace_stop"
-    | "workspace_reentry"
-    | "workspace_approval";
+    | "workspace_action"
+    | "workspace_reentry";
 
 const appOnlyMeta: JsonValue = {
     ui: { visibility: ["app"] },
@@ -223,86 +212,6 @@ export class McpToolCatalogInteraction {
         {
             _meta: appOnlyMeta,
             description:
-                "Answer one pending portable-devshell Workspace question. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    answer: { minLength: 1, type: "string" },
-                    token: { minLength: 1, type: "string" },
-                    waitId: { minLength: 1, type: "string" },
-                },
-                required: ["waitId", "answer", "token"],
-                type: "object",
-            },
-            name: "workspace_answer",
-            outputSchema: workspaceQuestionAnswerOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Stop waiting for one tmux_run wait=block without stopping the tmux task. While the original tool call is still blocked it returns immediately to the model; after Workspace handoff the App resumes the model immediately. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    token: { minLength: 1, type: "string" },
-                    waitId: { minLength: 1, type: "string" },
-                },
-                required: ["waitId", "token"],
-                type: "object",
-            },
-            name: "workspace_interrupt",
-            outputSchema: workspaceWaitInterruptOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Pause, resume, or cancel one durable task from the Workspace. This controls model re-entry state only; it does not signal terminal processes. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    action: {
-                        enum: ["pause", "resume", "cancel"],
-                        type: "string",
-                    },
-                    revision: { minimum: 1, type: "integer" },
-                    taskId: { minLength: 1, type: "string" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["taskId", "revision", "action", "token"],
-                type: "object",
-            },
-            name: "workspace_task",
-            outputSchema: todoReadOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Dismiss one previously attempted detached-wait automatic resume after human reconciliation. Automatic delivery ownership is managed only by workspace_reentry. App-only helper; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    action: { enum: ["dismiss"], type: "string" },
-                    recoveryMessageId: { minLength: 1, type: "string" },
-                    token: { minLength: 1, type: "string" },
-                    waitId: { minLength: 1, type: "string" },
-                },
-                required: ["action", "recoveryMessageId", "waitId", "token"],
-                type: "object",
-            },
-            name: "workspace_recover",
-            outputSchema: workspaceWaitRecoveryOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
                 "Arbitrate one Context-wide automatic model re-entry across Goal continuation and detached-wait recovery. App-only helper; models must not call it.",
             group: "workspace",
             inputSchema: {
@@ -322,6 +231,7 @@ export class McpToolCatalogInteraction {
                         type: "string",
                     },
                     claimId: { maxLength: 128, minLength: 1, type: "string" },
+                    directiveId: { maxLength: 256, minLength: 1, type: "string" },
                     intent: {
                         enum: [
                             "automatic",
@@ -346,85 +256,30 @@ export class McpToolCatalogInteraction {
             outputSchema: workspaceReentryOutputSchema,
             requiredCapabilities: [],
         },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Pause the current active Workspace Goal from the Workspace UI without stopping shell or tmux processes. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    goalId: { minLength: 1, type: "string" },
-                    revision: { minimum: 1, type: "integer" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["goalId", "revision", "token"],
-                type: "object",
-            },
-            name: "workspace_pause",
-            outputSchema: workspaceGoalResultOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Resume the current blocked or paused Workspace Goal from the Workspace UI. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    goalId: { minLength: 1, type: "string" },
-                    revision: { minimum: 1, type: "integer" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["goalId", "revision", "token"],
-                type: "object",
-            },
-            name: "workspace_resume",
-            outputSchema: workspaceGoalResultOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Stop the current Workspace Goal from the Workspace UI. This ends Goal continuation but does not signal shell or tmux processes. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    goalId: { minLength: 1, type: "string" },
-                    revision: { minimum: 1, type: "integer" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["goalId", "revision", "token"],
-                type: "object",
-            },
-            name: "workspace_stop",
-            outputSchema: workspaceGoalResultOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Approve or deny one pending portable-devshell tool approval. App-only human action; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    approvalId: { minLength: 1, type: "string" },
-                    decision: { enum: ["approve", "deny"], type: "string" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["approvalId", "decision", "token"],
-                type: "object",
-            },
-            name: "workspace_approval",
-            outputSchema: workspaceApprovalRequestOutputSchema,
-            requiredCapabilities: [],
-        },
     ];
 
     list(): ToolDefinition[] {
-        return this.#definitions.map((definition) => ({ ...definition }));
+        return [
+            ...this.#definitions.map((definition) => ({ ...definition })),
+            {
+                _meta: appOnlyMeta,
+                description: "Apply one currently projected Workspace action and return a fresh Workspace snapshot. App-only; models must not call it.",
+                group: "workspace",
+                inputSchema: {
+                    additionalProperties: false,
+                    properties: {
+                        actionId: { minLength: 1, type: "string" },
+                        input: { maxLength: 20_000, type: "string" },
+                        itemId: { minLength: 1, type: "string" },
+                        token: { minLength: 1, type: "string" },
+                    },
+                    required: ["itemId", "actionId", "token"],
+                    type: "object",
+                },
+                name: "workspace_action",
+                outputSchema: workspaceActionOutputSchema,
+                requiredCapabilities: [],
+            },
+        ];
     }
 }

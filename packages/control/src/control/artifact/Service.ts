@@ -13,7 +13,7 @@ import type {
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/core";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
     ArtifactShareInput,
@@ -377,10 +377,6 @@ export type ArtifactServiceSchedule = (task: () => void) => void;
 
 export interface ArtifactServiceEndpoint {
     abortArtifactReceive(receiveId: string): Promise<void>;
-    appendControlEvent(
-        type: ArtifactEventType,
-        data?: JsonValue,
-    ): Promise<unknown>;
     beginArtifactReceive(
         input: WorkerArtifactReceiveBeginInput,
         signal?: AbortSignal,
@@ -448,8 +444,8 @@ export function requireArtifactEndpoint(
         return endpoint;
     }
 
-    throw createError({
-        code: errorCodes.instanceMissing,
+    throw createRemoteError({
+        code: controlErrorCodes.instanceNotFound,
         message: `Instance ${instance} was not found.`,
         retryable: false,
         details: { instance },

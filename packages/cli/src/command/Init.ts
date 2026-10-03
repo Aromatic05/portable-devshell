@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     generateOAuth2ApprovalToken,
     type ConfigMcpPatch,
     type ConfigView,
@@ -73,8 +73,8 @@ export async function executeInit(
             (instance) => instance.name === defaultInitialInstanceName,
         );
         if (collision !== undefined) {
-            throw createError({
-                code: errorCodes.instanceAlreadyExists,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceAlreadyExists,
                 details: {
                     instance: defaultInitialInstanceName,
                     provider: collision.provider,

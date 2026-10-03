@@ -1,10 +1,11 @@
 import type { Channel } from "@portable-devshell/shared";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type JsonValue,
     type ReverseEnrollmentRequest,
     type ReverseUpstreamBatch,
+    runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
 import { ReverseCredentialStore } from "../credential/Store.js";
@@ -120,8 +121,8 @@ export class ReverseConnectionService {
                         },
                     );
                     if (this.#active.get(identity.descriptor.name) !== active) {
-                        throw createError({
-                            code: errorCodes.reverseConnectionSuperseded,
+                        throw createRemoteError({
+                            code: runtimeErrorCodes.reverseConnectionSuperseded,
                             message:
                                 "Reverse connection was superseded during activation.",
                             retryable: true,
@@ -158,8 +159,8 @@ export class ReverseConnectionService {
             identity.generation <= previousGeneration
         ) {
             channel.close();
-            throw createError({
-                code: errorCodes.reverseGenerationInvalid,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseGenerationInvalid,
                 details: {
                     generation: identity.generation,
                     instance: identity.descriptor.name,
@@ -191,8 +192,8 @@ export class ReverseConnectionService {
         const generation = this.#acquireIdentityGeneration(identity);
         try {
             if (batch.generation !== identity.generation) {
-                throw createError({
-                    code: errorCodes.reverseGenerationInvalid,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.reverseGenerationInvalid,
                     message:
                         "Upstream generation does not match request generation.",
                     retryable: true,
@@ -206,8 +207,8 @@ export class ReverseConnectionService {
                 active.generation !== identity.generation ||
                 !(active.channel instanceof ReverseSseChannel)
             ) {
-                throw createError({
-                    code: errorCodes.reverseConnectionSuperseded,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.reverseConnectionSuperseded,
                     message: "SSE connection is not the active generation.",
                     retryable: true,
                 });
@@ -270,8 +271,8 @@ export class ReverseConnectionService {
             return;
         }
         channel?.close();
-        throw createError({
-            code: errorCodes.reverseTransportUnavailable,
+        throw createRemoteError({
+            code: runtimeErrorCodes.reverseTransportUnavailable,
             message: "Reverse connection service is stopping.",
             retryable: true,
         });
@@ -280,8 +281,8 @@ export class ReverseConnectionService {
     #requireReverseInstance(instance: string): ReverseInstancePort {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceNotFound,
                 details: { instance },
                 message: `Instance ${instance} was not found.`,
                 retryable: false,
@@ -291,8 +292,8 @@ export class ReverseConnectionService {
             descriptor.provider !== "reverse" ||
             descriptor.reverseConnection === undefined
         ) {
-            throw createError({
-                code: errorCodes.reverseInstanceNotReverse,
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseInstanceNotReverse,
                 details: { instance },
                 message: `Instance ${instance} is not configured for reverse connections.`,
                 retryable: false,
@@ -324,8 +325,8 @@ export class ReverseConnectionService {
 }
 
 function invalidDeviceToken(instance: string): Error {
-    return createError({
-        code: errorCodes.reverseDeviceTokenInvalid,
+    return createRemoteError({
+        code: runtimeErrorCodes.reverseDeviceTokenInvalid,
         details: { instance },
         message: "Device token is invalid or revoked.",
         retryable: false,
@@ -333,8 +334,8 @@ function invalidDeviceToken(instance: string): Error {
 }
 
 function retiredGeneration(instance: string): Error {
-    return createError({
-        code: errorCodes.instanceConflict,
+    return createRemoteError({
+        code: runtimeErrorCodes.instanceConflict,
         details: { instance, operation: "reverse.connect" },
         message: `Instance ${instance} generation was retired during reverse connection admission.`,
         retryable: true,

@@ -2,17 +2,16 @@ import { TuiRuntimeControlOperations } from "./operation/Control.js";
 import { TuiRuntimeExecutionOperations } from "./operation/Execution.js";
 import { TuiRuntimeTmuxOperations } from "./operation/Tmux.js";
 import { type TuiAppStore } from "../state/store/App.js";
-import {
-    type ConfigBatchUpdateRequest,
-    type ConfigDraft,
-    type ConfigUpdateInstanceRequest,
-    type ConfigUpdateMcpRequest,
-    type ConfigUpdateWebRequest,
-    type InstanceCreateDraft,
-    type InstanceCreateSchema,
-    type InstanceCreateSummary,
-    type JsonValue,
-    type ReverseDeviceCodeResult,
+import type {
+    ArtifactTransport,
+    ConfigTransport,
+    InstanceManagementTransport,
+    ReverseConnectionTransport,
+    RuntimeStartOptions,
+    ServiceTransport,
+    TodoTransport,
+    ToolCallRecord,
+    ToolTransport,
 } from "@portable-devshell/shared";
 
 export interface TuiRuntimeOperationsOptions {
@@ -64,7 +63,7 @@ export class TuiRuntimeOperations {
         this.tmuxOperations = new TuiRuntimeTmuxOperations({
             clients: options.clients,
             operationTimeoutMs: timeout,
-            store: options.store,
+            session: options.session,
         });
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);
@@ -94,50 +93,18 @@ export class TuiRuntimeOperations {
     }
 }
 
+/**
+ * The operation layer composes the same explicit domain transports the session
+ * owns; it is not a second client bundle.
+ */
 export interface TuiRuntimeOperationClients {
-    artifact: {
-        cancelTransfer(transferId: string): Promise<unknown>;
-        revokeShare(shareId: string): Promise<unknown>;
-    };
-    config: {
-        update(request: ConfigBatchUpdateRequest): Promise<JsonValue>;
-        updateInstance(request: ConfigUpdateInstanceRequest): Promise<unknown>;
-        updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<unknown>;
-        updateWeb(request: ConfigUpdateWebRequest): Promise<unknown>;
-        validate(draft: ConfigDraft): Promise<unknown>;
-    };
-    instance: {
-        create(draft: InstanceCreateDraft): Promise<{ name: string }>;
-        createSchema(): Promise<InstanceCreateSchema>;
-        delete(instanceName: string): Promise<unknown>;
-        validateCreate(
-            draft: InstanceCreateDraft,
-        ): Promise<InstanceCreateSummary>;
-    };
-    reverse: {
-        createCode(
-            instance: string,
-        ): Promise<
-            Pick<
-                ReverseDeviceCodeResult,
-                "controllerUrl" | "deviceCode" | "expiresAt"
-            >
-        >;
-    };
-    service: {
-        restart(): Promise<unknown>;
-    };
-    todo: {
-        delete(instance: string, taskId: string): Promise<unknown>;
-    };
-    tool: {
-        call(
-            instance: string,
-            toolName: string,
-            input: JsonValue,
-            workspace: string,
-        ): Promise<JsonValue>;
-    };
+    artifact: ArtifactTransport;
+    config: ConfigTransport;
+    instance: InstanceManagementTransport;
+    reverse: ReverseConnectionTransport;
+    service: ServiceTransport;
+    todo: TodoTransport;
+    tool: ToolTransport;
 }
 
 export interface TuiRuntimeOperationSession {
@@ -161,14 +128,11 @@ export interface TuiRuntimeOperationSession {
         renewContext(ctxId: string): Promise<unknown>;
         startInstance(
             instance: string,
-            options?: {
-                onOutput?(chunk: string): void;
-                onRequestId?(requestId: string): void;
-                signal?: AbortSignal;
-            },
+            options?: RuntimeStartOptions,
         ): Promise<unknown>;
         stopInstance(instance: string): Promise<unknown>;
     };
+    homeDirectory(instance: string): string | undefined;
     reconnect(): Promise<unknown>;
     refresh(): Promise<unknown>;
     refreshArtifacts(): Promise<unknown>;
@@ -180,4 +144,5 @@ export interface TuiRuntimeOperationSession {
     refreshOAuth(): Promise<unknown>;
     refreshOverview(): Promise<unknown>;
     refreshTodo(instance: string): Promise<unknown>;
+    toolCallsForInstance(instance: string): readonly ToolCallRecord[];
 }

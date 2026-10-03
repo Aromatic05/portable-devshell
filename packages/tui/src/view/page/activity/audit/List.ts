@@ -1,6 +1,7 @@
-import { workspaceFolderName } from "@portable-devshell/shared";
 import { type BoxModel } from "../../../component/content/Box.js";
+import { workspaceFolderName } from "../../../presentation/Workspace.js";
 import { type TuiAppState } from "../../../../state/store/Model.js";
+import type { TuiDomainReader } from "../../../domain/Reader.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
 import { projectAuditContexts } from "./projection/Context.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
@@ -9,9 +10,10 @@ import { buildAuditConversationBoxes } from "./Conversation.js";
 
 export function buildAuditContextListBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instance: string,
 ): BoxModel[] {
-    const contexts = projectAuditContexts(state, instance);
+    const contexts = projectAuditContexts(reader, instance);
     if (contexts.length === 0) {
         return [
             makeBox(state, "audit", instance, {
@@ -101,18 +103,24 @@ export function buildAuditContextListBoxes(
 
 export function buildAuditPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "audit") return [];
     if (route.view === "contexts")
-        return buildAuditContextListBoxes(state, instanceName);
+        return buildAuditContextListBoxes(state, reader, instanceName);
     if (route.view === "conversation") {
-        return buildAuditConversationBoxes(state, instanceName, route.ctxId);
+        return buildAuditConversationBoxes(
+            state,
+            reader,
+            instanceName,
+            route.ctxId,
+        );
     }
     const key =
         route.scope === "unscoped"
             ? { kind: "unscoped" as const }
             : { ctxId: route.ctxId, kind: "context" as const };
-    return buildAuditContextBoxes(state, instanceName, key);
+    return buildAuditContextBoxes(state, reader, instanceName, key);
 }

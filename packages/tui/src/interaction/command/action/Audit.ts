@@ -11,7 +11,7 @@ import {
     resolveAuditOutput,
 } from "../../../view/page/activity/audit/projection/Detail.js";
 import type { TuiAppStore } from "../../../state/store/App.js";
-import { selectTuiLogs } from "../../../state/store/Model.js";
+import type { TuiInteractionProjection } from "../../Projection.js";
 import type { TuiUiIntent } from "../../../state/Interaction.js";
 import { topTuiOverlay } from "../../../state/Overlay.js";
 import type { TuiFocusManager } from "../../focus/Manager.js";
@@ -35,6 +35,7 @@ interface CommandAuditOptions {
         instance: string,
         callId: string,
     ): Promise<ToolCallRecord | undefined>;
+    projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
 
@@ -43,6 +44,7 @@ export class TuiCommandDispatcherAudit {
     readonly #focusManager: TuiFocusManager;
     readonly #onArtifactViewImage?: CommandAuditOptions["onArtifactViewImage"];
     readonly #onToolCallDetail?: CommandAuditOptions["onToolCallDetail"];
+    readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
     constructor(options: CommandAuditOptions) {
@@ -50,6 +52,7 @@ export class TuiCommandDispatcherAudit {
         this.#focusManager = options.focusManager;
         this.#onArtifactViewImage = options.onArtifactViewImage;
         this.#onToolCallDetail = options.onToolCallDetail;
+        this.#projection = options.projection;
         this.#store = options.store;
     }
 
@@ -84,7 +87,7 @@ export class TuiCommandDispatcherAudit {
         if (record === undefined) return false;
         const output = resolveAuditOutput(
             record.output,
-            selectTuiLogs(this.#store.getState(), instance),
+            this.#projection.domains.runtime(instance).logs,
             callId,
         );
         const imageInput =
@@ -123,10 +126,11 @@ export class TuiCommandDispatcherAudit {
         const state = this.#store.getState();
         const overlay = topTuiOverlay(state.interaction.overlays);
         if (overlay?.kind !== "approval") return false;
-        const approval = state.readModel.instanceState[
-            overlay.instance
-        ]?.approvals?.find(
-            (candidate) => candidate.approvalId === overlay.approvalId,
+        const approval = (
+            this.#projection.domains.approval(overlay.instance).approvals ?? []
+        ).find(
+            (candidate: { approvalId: string }) =>
+                candidate.approvalId === overlay.approvalId,
         );
         if (approval === undefined) return this.returnToPage();
 
@@ -179,11 +183,9 @@ export class TuiCommandDispatcherAudit {
         instance: string,
         callId: string,
     ): Promise<ToolCallRecord | undefined> {
-        const compact = this.#store
-            .getState()
-            .readModel.instanceState[instance]?.toolCalls.find(
-                (candidate) => candidate.callId === callId,
-            );
+        const compact = (
+            this.#projection.domains.toolCalls.instances[instance]?.calls ?? []
+        ).find((candidate: ToolCallRecord) => candidate.callId === callId);
         if (compact === undefined) return undefined;
         if (compact.input !== undefined && compact.output !== undefined)
             return compact;

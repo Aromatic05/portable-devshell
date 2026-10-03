@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    artifactErrorCodes,
     isArtifactTransferTerminal,
     recoverArtifactTransferStatus,
-    toControlErrorBody,
+    runtimeErrorCodes,
+    toRemoteErrorBody,
 } from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
@@ -125,7 +126,7 @@ export class ArtifactTransferService {
                     transfer.record.completedAt = new Date().toISOString();
                     transfer.record.updatedAt = transfer.record.completedAt;
                     transfer.record.failure = {
-                        code: errorCodes.artifactTransferInterrupted,
+                        code: artifactErrorCodes.transferInterrupted,
                         message:
                             "Artifact transfer was interrupted by control restart.",
                         retryable: true,
@@ -168,7 +169,7 @@ export class ArtifactTransferService {
                 transfer.record.completedAt = now;
                 transfer.record.updatedAt = now;
                 transfer.record.failure = {
-                    code: errorCodes.artifactTransferInterrupted,
+                    code: artifactErrorCodes.transferInterrupted,
                     message:
                         "Artifact transfer was interrupted by control shutdown.",
                     retryable: true,
@@ -364,26 +365,11 @@ export class ArtifactTransferService {
         transfer: StoredArtifactTransfer,
         type: ArtifactEventType,
     ): Promise<void> {
-        const sourceEndpoint = this.#resolveEndpoint(
-            transfer.record.source.instance,
-            transfer.defaultInstance,
-        );
-        const targetEndpoint = this.#resolveEndpoint(
-            transfer.record.target.instance,
-            transfer.defaultInstance,
-        );
         const data = toJsonValue(transfer.record);
 
-        // The global sequence records one entry per logical transfer event even
-        // though the same event is fanned out to the source and target workers.
+        // Artifact owns its own global event sequence. Runtime instance events
+        // deliberately do not include artifact.* events.
         this.#recordEvent(transfer.defaultInstance, type, data);
-
-        if (sourceEndpoint !== undefined) {
-            await emitToEndpoint(sourceEndpoint, type, data);
-        }
-        if (targetEndpoint !== undefined && targetEndpoint !== sourceEndpoint) {
-            await emitToEndpoint(targetEndpoint, type, data);
-        }
     }
 
     #resolveTransferWaiters(record: ArtifactTransferRecord): void {
@@ -467,17 +453,9 @@ function restoreStoredTransfer(
     else target.receiveId = previous.receiveId;
 }
 
-async function emitToEndpoint(
-    endpoint: ArtifactServiceEndpoint,
-    type: ArtifactEventType,
-    data?: JsonValue,
-): Promise<void> {
-    await endpoint.appendControlEvent(type, data).catch(() => undefined);
-}
-
 function transferNotFound(transferId: string) {
-    return createError({
-        code: errorCodes.artifactTransferNotFound,
+    return createRemoteError({
+        code: artifactErrorCodes.transferNotFound,
         message: "Artifact transfer was not found.",
         retryable: false,
         details: { transferId },
@@ -791,8 +769,8 @@ export class ArtifactTransferExecutor {
                         written.nextOffsetBytes !==
                         offsetBytes + chunk.returnedBytes
                     ) {
-                        throw createError({
-                            code: errorCodes.artifactPayloadInvalid,
+                        throw createRemoteError({
+                            code: artifactErrorCodes.payloadInvalid,
                             message:
                                 "Artifact receiver returned an unexpected offset.",
                             retryable: true,
@@ -827,8 +805,8 @@ export class ArtifactTransferExecutor {
                 finished.bytes !== opened.descriptor.payloadBytes ||
                 finished.blake3 !== opened.descriptor.payloadBlake3
             ) {
-                throw createError({
-                    code: errorCodes.artifactPayloadInvalid,
+                throw createRemoteError({
+                    code: artifactErrorCodes.payloadInvalid,
                     message:
                         "Artifact receiver verification result does not match the source payload.",
                     retryable: false,
@@ -965,8 +943,8 @@ function validatePayloadChunk(
         chunk.returnedBytes <= 0 ||
         chunk.returnedBytes > totalBytes - expectedOffset
     ) {
-        throw createError({
-            code: errorCodes.artifactPayloadInvalid,
+        throw createRemoteError({
+            code: artifactErrorCodes.payloadInvalid,
             message: "Artifact source returned an invalid payload chunk.",
             retryable: true,
         });
@@ -974,7 +952,7 @@ function validatePayloadChunk(
 }
 
 function failureFromError(error: unknown): ArtifactTransferFailure {
-    const body = toControlErrorBody(error);
+    const body = toRemoteErrorBody(error);
     if (body !== undefined) {
         return {
             code: body.code,
@@ -983,7 +961,7 @@ function failureFromError(error: unknown): ArtifactTransferFailure {
         };
     }
     return {
-        code: errorCodes.coreProviderFailed,
+        code: runtimeErrorCodes.providerFailed,
         message: error instanceof Error ? error.message : String(error),
         retryable: true,
     };

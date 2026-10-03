@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type CommandDiagnostic,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -64,12 +64,12 @@ export function wrapWorkerCommandError(
     if (
         !isKnownErrorCode(error) ||
         getErrorCode(error, code) === code ||
-        getErrorCode(error, code) !== errorCodes.coreProviderFailed
+        getErrorCode(error, code) !== runtimeErrorCodes.providerFailed
     ) {
         return error;
     }
 
-    return createError({
+    return createRemoteError({
         code,
         cause: error,
         message,

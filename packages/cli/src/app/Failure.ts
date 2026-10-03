@@ -1,18 +1,18 @@
 import {
-    toControlErrorBody,
-    type ControlErrorBody,
+    toRemoteErrorBody,
+    type RemoteErrorBody,
     type JsonValue,
 } from "@portable-devshell/shared";
 
 export interface CliRenderErrorOptions {
-    cause?: ControlErrorBody;
+    cause?: RemoteErrorBody;
     details?: JsonValue;
     retryable?: boolean;
 }
 
 export class CliRenderError extends Error {
     readonly code: string;
-    readonly causeBody?: ControlErrorBody;
+    readonly causeBody?: RemoteErrorBody;
     readonly details?: JsonValue;
     readonly retryable?: boolean;
 
@@ -107,7 +107,7 @@ function renderDiagnosticSummary(
 
 function renderVerboseDetails(
     details: Record<string, JsonValue> | undefined,
-    cause: ControlErrorBody | undefined,
+    cause: RemoteErrorBody | undefined,
 ): string[] {
     const lines: string[] = [];
 
@@ -145,7 +145,7 @@ function pushTail(
     lines.push(value.replace(/\n$/u, ""));
 }
 
-function readErrorBody(error: unknown): ControlErrorBody | undefined {
+function readErrorBody(error: unknown): RemoteErrorBody | undefined {
     if (
         typeof error === "object" &&
         error !== null &&
@@ -154,7 +154,7 @@ function readErrorBody(error: unknown): ControlErrorBody | undefined {
         "message" in error
     ) {
         const candidate = error as {
-            causeBody?: ControlErrorBody;
+            causeBody?: RemoteErrorBody;
             code?: string;
             details?: JsonValue;
             message?: string;
@@ -179,7 +179,7 @@ function readErrorBody(error: unknown): ControlErrorBody | undefined {
         }
     }
 
-    return toControlErrorBody(error);
+    return toRemoteErrorBody(error);
 }
 
 function readMessage(error: unknown): string {

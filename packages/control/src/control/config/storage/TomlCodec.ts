@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 import { parse, stringify, type TomlTableWithoutBigInt } from "smol-toml";
 
 export type ConfigTomlDocument = TomlTableWithoutBigInt;
@@ -8,8 +8,8 @@ export class ControlConfigTomlCodec {
         try {
             return parse(source) as ConfigTomlDocument;
         } catch (error) {
-            throw createError({
-                code: errorCodes.controlConfigParseFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.configParseFailed,
                 cause: error,
                 details: { phase: "decode" },
                 message: error instanceof Error ? error.message : String(error),
@@ -22,8 +22,8 @@ export class ControlConfigTomlCodec {
         try {
             return stringify(document);
         } catch (error) {
-            throw createError({
-                code: errorCodes.controlConfigValidationFailed,
+            throw createRemoteError({
+                code: controlErrorCodes.configValidationFailed,
                 cause: error,
                 details: { phase: "encode" },
                 message: error instanceof Error ? error.message : String(error),

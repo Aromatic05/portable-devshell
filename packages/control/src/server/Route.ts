@@ -1,6 +1,6 @@
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ControlPortDefinition,
     type ControlPortHandler,
     type ControlPortStreamHandler,
@@ -30,8 +30,8 @@ export function routeModule(
 
 export function requirePort<T>(port: T | undefined, message: string): T {
     if (port !== undefined) return port;
-    throw createError({
-        code: errorCodes.envelopeInvalid,
+    throw createRemoteError({
+        code: controlErrorCodes.methodNotFound,
         message,
         retryable: false,
     });

@@ -16,8 +16,8 @@ import {
 
 import {
     asInstanceName,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type ReverseEnrollmentState,
 } from "@portable-devshell/shared";
 
@@ -106,14 +106,14 @@ export class ReverseCredentialStore {
 
             if (record === undefined) {
                 throw reverseError(
-                    errorCodes.reverseDeviceCodeInvalid,
+                    runtimeErrorCodes.reverseDeviceCodeInvalid,
                     "Device code is invalid.",
                     false,
                 );
             }
             if (safeHashEquals(record.consumedDeviceCodeHash, hash)) {
                 throw reverseError(
-                    errorCodes.reverseDeviceCodeConsumed,
+                    runtimeErrorCodes.reverseDeviceCodeConsumed,
                     "Device code has already been consumed.",
                     false,
                     {
@@ -126,7 +126,7 @@ export class ReverseCredentialStore {
                 Date.parse(record.deviceCodeExpiresAt) <= Date.now()
             ) {
                 throw reverseError(
-                    errorCodes.reverseDeviceCodeExpired,
+                    runtimeErrorCodes.reverseDeviceCodeExpired,
                     "Device code has expired.",
                     false,
                     {
@@ -182,7 +182,7 @@ export class ReverseCredentialStore {
                 record.revokedAt !== undefined
             ) {
                 throw reverseError(
-                    errorCodes.reverseDeviceTokenRevoked,
+                    runtimeErrorCodes.reverseDeviceTokenRevoked,
                     "Device credential is not active.",
                     false,
                     {
@@ -241,7 +241,7 @@ export class ReverseCredentialStore {
             return record;
         }
         throw reverseError(
-            errorCodes.reverseDeviceTokenInvalid,
+            runtimeErrorCodes.reverseDeviceTokenInvalid,
             "Reverse credential does not exist.",
             false,
             {
@@ -421,8 +421,8 @@ function reverseError(
     retryable: boolean,
     details?: Record<string, string>,
 ) {
-    return createError({
-        code: code as (typeof errorCodes)[keyof typeof errorCodes],
+    return createRemoteError({
+        code,
         ...(details === undefined ? {} : { details }),
         message,
         retryable,

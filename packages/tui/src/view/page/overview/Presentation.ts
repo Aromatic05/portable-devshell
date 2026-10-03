@@ -7,6 +7,7 @@ import {
 
 import type { TuiAppState } from "../../../state/store/Model.js";
 import { currentTuiRouteScrollKey } from "../../../state/route/State.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import type {
     TuiOverviewActivityRowModel,
     TuiOverviewInstanceRowModel,
@@ -38,8 +39,9 @@ const EMPTY_COUNTS: TuiOverviewPresentation["counts"] = {
 
 export function selectTuiOverviewPresentation(
     state: TuiAppState,
+    reader: TuiDomainReader,
 ): TuiOverviewPresentation {
-    const overview = state.readModel.overview;
+    const overview = reader.overview.overview;
     const query = (state.ui.searchQueries.overview ?? "").trim().toLowerCase();
     if (overview === undefined) {
         return {
@@ -125,8 +127,11 @@ export function selectTuiOverviewPresentation(
     };
 }
 
-export function selectTuiOverviewFocusIds(state: TuiAppState): string[] {
-    return selectTuiOverviewPresentation(state).instances.map(
+export function selectTuiOverviewFocusIds(
+    state: TuiAppState,
+    reader: TuiDomainReader,
+): string[] {
+    return selectTuiOverviewPresentation(state, reader).instances.map(
         (instance) => instance.id,
     );
 }
@@ -146,9 +151,10 @@ export function overviewInstanceViewportRows(viewportRows: number): number {
 
 export function selectTuiOverviewInstanceViewport(
     state: TuiAppState,
+    reader: TuiDomainReader,
     viewportRows: number,
 ): TuiOverviewInstanceViewport {
-    const model = selectTuiOverviewPresentation(state);
+    const model = selectTuiOverviewPresentation(state, reader);
     const visibleRowCount = overviewInstanceViewportRows(viewportRows);
     const maxOffset = Math.max(0, model.instances.length - visibleRowCount);
     const offset = Math.min(

@@ -1,7 +1,7 @@
 import {
     asInstanceName,
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type InstanceName,
     type JsonValue,
     type ToolCallQuery,
@@ -249,8 +249,8 @@ function isRecord(
 }
 
 function invalid(message: string) {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return createRemoteError({
+        code: controlErrorCodes.invalidTarget,
         message,
         retryable: false,
     });

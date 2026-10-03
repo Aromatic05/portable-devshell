@@ -1,7 +1,7 @@
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import {
-    errorCodes,
-    toControlErrorBody,
+    runtimeErrorCodes,
+    toRemoteErrorBody,
     type GoalActivityKind,
     type JsonValue,
     type McpContextEnvironment,
@@ -28,6 +28,7 @@ import type { McpToolCatalogInteractionName } from "../domain/interaction/Catalo
 import type { McpToolCatalogTodoName } from "../domain/todo/Catalog.js";
 import type { WorkspaceAppLeaseStore } from "../../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../../workspace/app/Presence.js";
+import type { WorkspaceActionStore } from "../../workspace/ActionStore.js";
 import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
 import {
     throwIfMcpEndpointAborted,
@@ -84,6 +85,7 @@ export interface McpEndpointDispatchOptions {
     worker: McpEndpointWorkerPort;
     workspaceAppLeases?: WorkspaceAppLeaseStore;
     workspaceAppPresence?: WorkspaceAppPresenceStore;
+    workspaceActionStore?: WorkspaceActionStore;
     workspaceLiveBaseUrl?: string;
 }
 
@@ -154,8 +156,10 @@ export class McpEndpointDispatch {
             instanceName: options.instanceName,
             workspaceAppLeases: options.workspaceAppLeases,
             workspaceAppPresence: options.workspaceAppPresence,
+            workspaceActionStore: options.workspaceActionStore,
             workspaceLiveBaseUrl: options.workspaceLiveBaseUrl,
             workspaceReentryArbiter: this.#reentry,
+            onWaitInterrupted: (waitId: string) => this.#interruptTmuxWaitTracker(this.#instanceName, waitId),
         };
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
@@ -314,14 +318,6 @@ export class McpEndpointDispatch {
                               input,
                               context,
                           );
-                if (toolName === "workspace_interrupt") {
-                    const waitId = readWorkspaceWaitId(input);
-                    if (waitId !== undefined)
-                        this.#interruptTmuxWaitTracker(
-                            this.#instanceName,
-                            waitId,
-                        );
-                }
                 return result;
             }
 
@@ -1660,14 +1656,7 @@ function isAppOnlyInteractionTool(toolName: string): boolean {
         toolName === "workspace_snapshot" ||
         toolName === "workspace_watch" ||
         toolName === "workspace_reentry" ||
-        toolName === "workspace_pause" ||
-        toolName === "workspace_resume" ||
-        toolName === "workspace_stop" ||
-        toolName === "workspace_answer" ||
-        toolName === "workspace_interrupt" ||
-        toolName === "workspace_task" ||
-        toolName === "workspace_recover" ||
-        toolName === "workspace_approval"
+        toolName === "workspace_action"
     );
 }
 
@@ -1813,22 +1802,13 @@ function tmuxReadReady(result: JsonValue, line: number): boolean {
 }
 
 function isRetryableTmuxObservationError(error: unknown): boolean {
-    const body = toControlErrorBody(error);
+    const body = toRemoteErrorBody(error);
     return (
         body?.retryable === true ||
-        body?.code === errorCodes.coreInstanceNotReady ||
-        body?.code === errorCodes.coreWorkerTransportDisconnected ||
-        body?.code === errorCodes.reverseTransportUnavailable
+        body?.code === runtimeErrorCodes.instanceNotReady ||
+        body?.code === runtimeErrorCodes.workerTransportDisconnected ||
+        body?.code === runtimeErrorCodes.reverseTransportUnavailable
     );
-}
-
-function readWorkspaceWaitId(input: JsonValue): string | undefined {
-    if (typeof input !== "object" || input === null || Array.isArray(input))
-        return undefined;
-    const waitId = input.waitId;
-    return typeof waitId === "string" && waitId.trim().length > 0
-        ? waitId.trim()
-        : undefined;
 }
 
 function hasToolProvenance(provenance: ToolCallProvenance): boolean {

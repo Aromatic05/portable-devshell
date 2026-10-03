@@ -1,5 +1,5 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 import type {
     InstanceEvent,
     JsonValue,
@@ -62,8 +62,8 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
         !Number.isSafeInteger(payload.fromSeq) ||
         payload.fromSeq < 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "todo.subscribe requires a non-negative integer fromSeq.",
             retryable: false,
         });
@@ -74,8 +74,8 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
 export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     if (payload === undefined) return undefined;
     if (!isRecord(payload)) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "todo.get payload must be an object.",
             retryable: false,
         });
@@ -83,8 +83,8 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     const keys = Object.keys(payload);
     if (keys.length === 0) return undefined;
     if (keys.length !== 1 || (keys[0] !== "taskId" && keys[0] !== "title")) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message:
                 "todo.get accepts only one optional selector: taskId or title.",
             retryable: false,
@@ -93,8 +93,8 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     const key = keys[0] as "taskId" | "title";
     const value = payload[key];
     if (typeof value !== "string" || value.trim().length === 0) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: `todo.get ${key} must be a non-empty string.`,
             retryable: false,
         });
@@ -108,8 +108,8 @@ export function readTodoTaskId(payload?: JsonValue): string {
         typeof payload.taskId !== "string" ||
         payload.taskId.trim().length === 0
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
             message: "todo.delete taskId must be a non-empty string.",
             retryable: false,
         });

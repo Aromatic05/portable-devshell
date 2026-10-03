@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../Descriptor.js";
 import type { InstanceRegistry } from "./Registry.js";
@@ -30,8 +30,8 @@ export class InstanceConnectionService {
         const descriptor = generation.descriptor;
         if (!descriptor.enabled) {
             generation.release();
-            throw createError({
-                code: errorCodes.instanceConflict,
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
                 details: { instance, operation: "connect" },
                 message: `Instance ${instance} is disabled.`,
                 retryable: false,
@@ -45,8 +45,8 @@ export class InstanceConnectionService {
                 if (descriptor.worker.managementMode === "selfManaged") {
                     snapshot = await descriptor.worker.refreshStatus();
                     if (!snapshot.ready) {
-                        throw createError({
-                            code: errorCodes.reverseSelfManagedOffline,
+                        throw createRemoteError({
+                            code: runtimeErrorCodes.reverseSelfManagedOffline,
                             details: { instance },
                             message: `Instance ${instance} is self-managed and is not connected.`,
                             retryable: true,
@@ -65,8 +65,8 @@ export class InstanceConnectionService {
                 ) {
                     await descriptor.worker.stop();
                 }
-                throw createError({
-                    code: errorCodes.instanceConflict,
+                throw createRemoteError({
+                    code: runtimeErrorCodes.instanceConflict,
                     details: { instance, operation: "connect" },
                     message: `Instance ${instance} generation was retired while connecting.`,
                     retryable: true,

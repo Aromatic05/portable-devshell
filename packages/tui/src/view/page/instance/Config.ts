@@ -6,6 +6,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../component/content/Box.js";
+import type { TuiDomainReader } from "../../domain/Reader.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import {
     buildSelectedInstancePageContext,
@@ -32,14 +33,15 @@ import {
 
 export function buildConfigPageBoxes(
     state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): BoxModel[] {
     const { instance, snapshot } = buildSelectedInstancePageContext(
-        state,
+        reader,
         instanceName,
     );
     const fallback = comparableInstanceDraft(
-        instanceDraft(state, instanceName),
+        instanceDraft(reader, instanceName),
     );
     const draft = editorDraft(state, `config:${instanceName}`, fallback);
     const comparableDraft = comparableInstanceDraft(draft);
@@ -625,10 +627,10 @@ function managedContainerLines(
 }
 
 function instanceDraft(
-    state: TuiAppState,
+    reader: TuiDomainReader,
     instanceName: string,
 ): Record<string, JsonValue> {
-    const entries = state.readModel.configView?.instances;
+    const entries = reader.config.view?.instances;
     const existing = Array.isArray(entries)
         ? entries.find((entry) => asRecord(entry)?.name === instanceName)
         : undefined;

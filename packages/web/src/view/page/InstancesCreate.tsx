@@ -3,7 +3,7 @@ import type {
     InstanceCreateDraft,
     InstanceCreateProvider,
     InstanceCreateSchema,
-} from "@portable-devshell/shared/browser";
+} from "@portable-devshell/shared";
 
 import type { WebStore } from "../../state/Store.js";
 

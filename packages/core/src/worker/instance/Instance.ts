@@ -2,8 +2,8 @@ import {
     type Endpoint,
     type InstanceName,
     type MessageStream,
-    createError,
-    errorCodes,
+    createRemoteError,
+    runtimeErrorCodes,
     type JsonValue,
     type ToolCallContext,
     type ToolCallQuery,
@@ -546,8 +546,8 @@ export class WorkerInstance {
         if (this.snapshot().ready) {
             return;
         }
-        throw createError({
-            code: errorCodes.coreInstanceNotReady,
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceNotReady,
             message: `Instance ${this.#config.name} is not ready.`,
             retryable: false,
             details: { instanceName: this.#config.name },

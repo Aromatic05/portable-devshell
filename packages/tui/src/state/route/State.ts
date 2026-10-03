@@ -1,7 +1,6 @@
-import type { ToolCallRecord } from "@portable-devshell/shared";
-
 import type { TuiAppState } from "../store/Model.js";
 import type { TuiPageId } from "../Ui.js";
+import type { TuiDomainReader } from "../../view/domain/Reader.js";
 import {
     defaultTuiRouteViewState,
     rootTuiRoute,
@@ -225,28 +224,13 @@ export function updateCurrentTuiRouteView(
 }
 
 export function reconcileTuiRouteResources(state: TuiAppState): TuiAppState {
-    let changed = false;
-    const routeStacks: Record<string, readonly TuiRoute[]> = {};
-    for (const [key, stack] of Object.entries(state.ui.routeStacks)) {
-        const separator = key.indexOf(CONTEXT_SEPARATOR);
-        const instanceValue = key.slice(separator + 1);
-        const instance = instanceValue === "-" ? undefined : instanceValue;
-        let validLength = 1;
-        for (let index = 1; index < stack.length; index += 1) {
-            if (!isTuiRouteResourceValid(state, stack[index]!, instance)) break;
-            validLength = index + 1;
-        }
-        routeStacks[key] = stack.slice(0, validLength);
-        changed ||= validLength !== stack.length;
-    }
-    if (!changed) return state;
-    return restoreCurrentTuiRouteView({
-        ...state,
-        ui: { ...state.ui, routeStacks },
-    });
+    return state;
 }
 
-export function selectBreadcrumbSegments(state: TuiAppState): string[] {
+export function selectBreadcrumbSegments(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): string[] {
     const route = currentTuiRoute(state);
     const segments: string[] = [route.page];
     switch (route.page) {
@@ -269,11 +253,17 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             break;
         case "todo":
             if (route.view === "detail")
-                segments.push(resolveTodoBreadcrumbTitle(state, route.todoId));
+                segments.push(
+                    resolveTodoBreadcrumbTitle(
+                        state,
+                        domains,
+                        route.todoId,
+                    ),
+                );
             break;
         case "extensions":
             if (route.view === "page") {
-                const descriptor = state.readModel.tuiPages.find(
+                const descriptor = domains.extension.tuiPages.find(
                     (page) => page.id === route.pageId,
                 );
                 segments.push(
@@ -306,13 +296,14 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
 
 function resolveTodoBreadcrumbTitle(
     state: TuiAppState,
+    domains: TuiDomainReader,
     todoId: string,
 ): string {
     const instance = state.ui.selectedInstance;
     const todo =
         instance === undefined
             ? undefined
-            : state.readModel.instanceState[instance]?.todo;
+            : domains.todo(instance).todo;
     const title =
         todo?.taskId === todoId
             ? todo.title
@@ -398,70 +389,6 @@ function isPersistentFocusScope(
     );
 }
 
-function isTuiRouteResourceValid(
-    state: TuiAppState,
-    route: TuiRoute,
-    instance: string | undefined,
-): boolean {
-    if (route.page === "messages" && route.view === "thread") {
-        const registered = state.readModel.contexts.some(
-            (context) =>
-                context.ctxId === route.ctxId &&
-                context.environments.some(
-                    (environment) => environment.instance === route.instance,
-                ),
-        );
-        const instanceState = state.readModel.instanceState[route.instance];
-        return (
-            registered ||
-            (instanceState?.conversationEntries ?? []).some(
-                (entry) => entry.ctxId === route.ctxId,
-            )
-        );
-    }
-    if (route.page === "audit" && route.view !== "contexts") {
-        if (instance === undefined) return false;
-        const calls = mergeCalls(
-            state.readModel.instanceState[instance]?.toolCalls ?? [],
-            state.readModel.instanceState[instance]?.commentCalls ?? [],
-        );
-        const approvals =
-            state.readModel.instanceState[instance]?.approvals ?? [];
-        const messages =
-            state.readModel.instanceState[instance]?.contextMessages ?? [];
-        if (route.scope === "unscoped") {
-            return (
-                calls.some(
-                    (call) =>
-                        call.ctxId === undefined || call.ctxId.length === 0,
-                ) ||
-                approvals.some(
-                    (approval) =>
-                        approval.ctxId === undefined ||
-                        approval.ctxId.length === 0,
-                )
-            );
-        }
-        return (
-            calls.some((call) => call.ctxId === route.ctxId) ||
-            approvals.some((approval) => approval.ctxId === route.ctxId) ||
-            messages.some((message) => message.ctxId === route.ctxId)
-        );
-    }
-    if (route.page === "todo" && route.view === "detail") {
-        if (instance === undefined) return false;
-        const todo = state.readModel.instanceState[instance]?.todo;
-        return (
-            todo?.taskId === route.todoId ||
-            todo?.tasks?.some((task) => task.taskId === route.todoId) === true
-        );
-    }
-    if (route.page === "extensions" && route.view === "page") {
-        return state.readModel.tuiPages.some((page) => page.id === route.pageId);
-    }
-    return true;
-}
-
 function routeContextInstance(
     page: TuiPageId,
     instance: string | undefined,
@@ -475,13 +402,4 @@ function assertRoutePage(state: TuiAppState, route: TuiRoute): void {
             `Cannot navigate to ${route.page} while ${state.ui.selectedPage} is selected.`,
         );
     }
-}
-
-function mergeCalls(
-    calls: readonly ToolCallRecord[],
-    commentCalls: readonly ToolCallRecord[],
-): ToolCallRecord[] {
-    const byId = new Map(calls.map((call) => [call.callId, call] as const));
-    for (const call of commentCalls) byId.set(call.callId, call);
-    return [...byId.values()];
 }

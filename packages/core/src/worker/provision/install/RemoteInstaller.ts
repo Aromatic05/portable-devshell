@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import {
-    ControlError,
-    errorCodes,
-    type ControlError as ControlErrorType,
+    RemoteError,
+    runtimeErrorCodes,
+    type RemoteError as ControlErrorType,
 } from "@portable-devshell/shared";
 
 import type { ProviderCommandContext } from "../../transport/command/Transport.js";
@@ -75,7 +75,7 @@ export class WorkerInstallerRemote {
     async #installDefaultWorker(): Promise<string> {
         const target = await this.#probeTarget();
         const asset = await this.#resolver.resolve(target).catch((error) => {
-            if (error instanceof ControlError) {
+            if (error instanceof RemoteError) {
                 throw error;
             }
 
@@ -109,7 +109,7 @@ export class WorkerInstallerRemote {
                 new Error(
                     `worker bundle checksum mismatch: expected ${asset.sha256}, got ${actualSha256}`,
                 ),
-                { errorCode: errorCodes.coreWorkerProvisionFailed },
+                { errorCode: runtimeErrorCodes.workerProvisionFailed },
             );
         }
         const commandLine = buildInstallScript(
@@ -147,7 +147,7 @@ export class WorkerInstallerRemote {
                     result.stderr || result.stdout || "worker install failed",
                 ),
                 {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    errorCode: runtimeErrorCodes.workerProvisionFailed,
                     result,
                 },
             );
@@ -191,7 +191,7 @@ export class WorkerInstallerRemote {
                         "worker install check failed",
                 ),
                 {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    errorCode: runtimeErrorCodes.workerProvisionFailed,
                     result,
                 },
             );
@@ -211,7 +211,7 @@ export class WorkerInstallerRemote {
                 `unexpected worker install check result: ${status || "empty"}`,
             ),
             {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
+                errorCode: runtimeErrorCodes.workerProvisionFailed,
                 result,
             },
         );
@@ -257,7 +257,7 @@ export class WorkerInstallerRemote {
                 new Error(
                     result.stderr || result.stdout || "failed to resolve HOME",
                 ),
-                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+                { errorCode: runtimeErrorCodes.workerProvisionFailed, result },
             );
         }
 
@@ -266,7 +266,7 @@ export class WorkerInstallerRemote {
             throw this.#createProviderError(
                 context,
                 new Error("HOME is required to install the worker"),
-                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
+                { errorCode: runtimeErrorCodes.workerProvisionFailed, result },
             );
         }
 
@@ -431,7 +431,7 @@ async function writeToChildStdin(
             context,
             new Error(`${payloadName} stdin is unavailable`),
             {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
+                errorCode: runtimeErrorCodes.workerProvisionFailed,
             },
         );
     }
@@ -441,7 +441,7 @@ async function writeToChildStdin(
             stdin.off("finish", onFinish);
             reject(
                 createError(context, error, {
-                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    errorCode: runtimeErrorCodes.workerProvisionFailed,
                 }),
             );
         };

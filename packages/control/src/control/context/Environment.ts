@@ -1,4 +1,4 @@
-import { createError, errorCodes, type JsonValue, type McpContextEnvironment, type McpContextEnvironmentCleanup, type McpContextExternalBinding } from "@portable-devshell/shared";
+import { createRemoteError, contextErrorCodes, runtimeErrorCodes, type JsonValue, type McpContextEnvironment, type McpContextEnvironmentCleanup, type McpContextExternalBinding } from "@portable-devshell/shared";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort, PreparedEnvironmentFacts } from "../../../../mcp/src/context/Port.js";
 import { isMcpGoalGateway, type McpInstanceGateway, type McpEndpointWorkerPort } from "../../../../mcp/src/endpoint/Port.js";
@@ -75,8 +75,8 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             }
             const selected = workspace ?? stored?.workspace;
             if (selected === undefined) {
-                throw createError({
-                    code: errorCodes.mcpContextWorkspaceRequired,
+                throw createRemoteError({
+                    code: contextErrorCodes.workspaceRequired,
                     details: { ctxId, instance },
                     message: `No workspace is attached to ${instance} for the current Context. Obtain its handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.`,
                     retryable: false,
@@ -220,7 +220,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     #requireGateway(instance: string): McpInstanceGateway {
         const gateway = this.#gateway(instance);
         if (gateway !== undefined) return gateway;
-        throw createError({ code: errorCodes.coreToolSchemaUnavailable, details: { instance }, message: `Remote environment attachment is not available for ${instance}.`, retryable: false });
+        throw createRemoteError({ code: runtimeErrorCodes.toolSchemaUnavailable, details: { instance }, message: `Remote environment attachment is not available for ${instance}.`, retryable: false });
     }
 
     #run<T>(ctxId: string, operation: () => Promise<T>): Promise<T> {

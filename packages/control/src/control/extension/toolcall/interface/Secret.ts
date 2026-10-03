@@ -5,8 +5,8 @@ import type {
     ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 import {
-    createError,
-    errorCodes,
+    createRemoteError,
+    controlErrorCodes,
     type ControlConfig,
 } from "@portable-devshell/shared";
 
@@ -97,8 +97,8 @@ export class ToolCallSecretRewrite {
             (candidate) => candidate.name === instanceName,
         );
         if (instance === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
+            throw createRemoteError({
+                code: controlErrorCodes.instanceNotFound,
                 details: { instance: instanceName },
                 message: `Instance ${instanceName} was not found or is disabled.`,
                 retryable: false,

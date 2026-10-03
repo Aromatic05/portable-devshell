@@ -29,11 +29,6 @@ const nonDestructiveMutationTools = new Set([
     "tmux_read",
     "workspace_ask",
     "workspace_goal",
-    "workspace_resume",
-    "workspace_stop",
-    "workspace_answer",
-    "workspace_interrupt",
-    "workspace_recover",
 ]);
 
 const idempotentMutationTools = new Set<string>();
@@ -55,16 +50,10 @@ const closedWorldTools = new Set([
     "todo_write",
     "workspace_ask",
     "workspace_goal",
-    "workspace_resume",
-    "workspace_stop",
     "workspace_open",
     "workspace_reconnect",
-    "workspace_approval",
-    "workspace_answer",
+    "workspace_action",
     "workspace_snapshot",
-    "workspace_task",
-    "workspace_interrupt",
-    "workspace_recover",
     "workspace_watch",
 ]);
 
@@ -199,17 +188,11 @@ const titles: Readonly<Record<string, string>> = {
     todo_read: "Read task plan",
     todo_write: "Update task plan",
     workspace_ask: "Ask user",
-    workspace_approval: "Decide approval",
+    workspace_action: "Apply Workspace action",
     workspace_goal: "Manage goal",
-    workspace_resume: "Resume goal",
-    workspace_stop: "Stop goal",
     workspace_open: "Open Workspace",
     workspace_reconnect: "Reconnect Workspace",
-    workspace_answer: "Answer question",
     workspace_snapshot: "Read Workspace snapshot",
-    workspace_task: "Control task",
-    workspace_interrupt: "Stop waiting",
-    workspace_recover: "Dismiss wait resume",
     workspace_watch: "Watch Workspace",
 };
 
