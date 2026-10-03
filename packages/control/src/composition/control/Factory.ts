@@ -125,7 +125,7 @@ export class ControlRuntimeFactory {
                             allowed,
                             extensionId,
                             listContexts: async (query) =>
-                                await contexts.list(query),
+                                await contexts.registry.list(query),
                         }),
                     instanceFactory: ({
                         extensionId,

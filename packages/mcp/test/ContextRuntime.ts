@@ -154,7 +154,6 @@ export function createTestContextRuntime(
     const service = new ContextService({
         cleanup,
         environment,
-        gateway,
         registry,
         worker,
     });
@@ -231,7 +230,6 @@ export function createTestMcpRuntimeState(
     const contexts = new ContextService({
         cleanup,
         environment,
-        gateway,
         registry,
         worker,
     });

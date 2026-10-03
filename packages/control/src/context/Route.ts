@@ -1,5 +1,5 @@
 import { ContextChangeHub, type ContextCommittedChange } from "./Registry/Change.js";
-import type { ContextSnapshot } from "../../../shared/src/workspace/context/Revision.js";
+import type { ContextRecordSourcePort } from "./Service/index.js";
 import type { MessageStream } from "@portable-devshell/shared";
 import type {
     McpContextRecord,
@@ -13,20 +13,15 @@ import {
 
 import { requirePort, routeModule } from "../server/Route.js";
 
+type ContextAdminRegistryPort = Pick<
+    ContextRecordSourcePort,
+    "changes" | "list" | "referenceInstance" | "snapshot" | "validateForInstance"
+>;
+
 export interface ContextAdminPort {
-    readonly changes: ContextChangeHub;
-    snapshot(): Promise<ContextSnapshot>;
-    referenceInstance(
-        ctxId: string,
-        instance: string,
-    ): Promise<{ current: boolean; handle?: string } | undefined>;
+    readonly registry: ContextAdminRegistryPort;
     disable(ctxId: string): Promise<McpContextRecord>;
-    list(): Promise<McpContextRecord[]>;
     renew(ctxId: string): Promise<McpContextRecord>;
-    validateForInstance(
-        ctxId: string,
-        instance: string,
-    ): Promise<McpContextRecord>;
 }
 
 export function createContextRouteModule(
@@ -38,8 +33,10 @@ export function createContextRouteModule(
             "Contexts are not available.",
         );
     return routeModule("context", {
-        snapshot: async () => (await admin().snapshot()) as unknown as JsonValue,
-        list: async () => (await admin().list()) as unknown as JsonValue,
+        snapshot: async () =>
+            (await admin().registry.snapshot()) as unknown as JsonValue,
+        list: async () =>
+            (await admin().registry.list()) as unknown as JsonValue,
         disable: async (request) =>
             (await admin().disable(
                 readCtxId(request.payload),
@@ -50,7 +47,11 @@ export function createContextRouteModule(
             )) as unknown as JsonValue,
     }, {
         subscribe: (stream, request) => {
-            new ContextChangeStream(stream, admin().changes, readContextSubscriptionFromRevision(request.payload));
+            new ContextChangeStream(
+                stream,
+                admin().registry.changes,
+                readContextSubscriptionFromRevision(request.payload),
+            );
         },
     });
 }

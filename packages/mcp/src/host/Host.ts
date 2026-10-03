@@ -375,7 +375,7 @@ export class McpHost {
         if (gateway === undefined) return;
         while (true) {
             const claims =
-                await this.#contextRegistry.listAutomaticReentryClaimsForInstance(
+                await this.#contextRegistry.reentry.listAutomaticReentryClaimsForInstance(
                     instanceName,
                 );
             if (claims.length === 0) break;
@@ -422,7 +422,7 @@ export class McpHost {
                         claim.ctxId,
                     );
                 }
-                await this.#contextRegistry.markAutomaticReentryRejected(
+                await this.#contextRegistry.reentry.markAutomaticReentryRejected(
                     claim.ctxId,
                     instanceName,
                     claim.claimId,

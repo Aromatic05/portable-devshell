@@ -6,7 +6,6 @@ import {
     isCtxId,
     cloneRecord,
     parseEnvironmentCleanup,
-    cloneEnvironmentCleanup,
     sameEnvironmentCleanup,
     appendEnvironmentCleanup,
 } from "./Record.js";
@@ -45,7 +44,7 @@ export class ContextCleanupLedger implements ContextCleanupLedgerPort {
                 )
                 .flatMap((record) =>
                     (record.pendingEnvironmentCleanup ?? []).map((cleanup) => ({
-                        cleanup: cloneEnvironmentCleanup(cleanup),
+                        cleanup: { ...cleanup },
                         ctxId: record.ctxId,
                     })),
                 );

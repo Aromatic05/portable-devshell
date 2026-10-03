@@ -436,7 +436,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     );
     assert.equal(environment.workspace, "/workspace");
     assert.equal(typeof environment.ctxId, "string");
-    await contextRegistry.suppressAutomaticReentry(
+    await contextRegistry.reentry.suppressAutomaticReentry(
         environment.ctxId,
         "demo-local",
         "user interrupted",
@@ -451,7 +451,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     assert.deepEqual(todo, { items: [], revision: 0 });
     assert.equal(
         (
-            await contextRegistry.readAutomaticReentry(
+            await contextRegistry.reentry.readAutomaticReentry(
                 environment.ctxId,
                 "demo-local",
             )
@@ -492,7 +492,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     assert.deepEqual(workerResult, { ok: true, toolName: "bash_run" });
     assert.equal(
         (
-            await contextRegistry.readAutomaticReentry(
+            await contextRegistry.reentry.readAutomaticReentry(
                 environment.ctxId,
                 "demo-local",
             )

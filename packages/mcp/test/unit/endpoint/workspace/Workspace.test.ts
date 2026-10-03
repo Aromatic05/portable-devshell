@@ -2379,7 +2379,7 @@ async function callProjectedAction(
                 )?.status,
                 "resolved",
             );
-            const reentry = await registry.readAutomaticReentry(
+            const reentry = await registry.reentry.readAutomaticReentry(
                 context.ctxId!,
                 "demo",
             );
@@ -2453,7 +2453,7 @@ async function callProjectedAction(
                 ),
                 /wait release persistence failed/u,
             );
-            const reentry = await registry.readAutomaticReentry(
+            const reentry = await registry.reentry.readAutomaticReentry(
                 context.ctxId!,
                 "demo",
             );
@@ -2537,7 +2537,7 @@ async function callProjectedAction(
                 ),
                 /wait attempt persistence failed|rollback was incomplete/u,
             );
-            const reentry = await registry.readAutomaticReentry(
+            const reentry = await registry.reentry.readAutomaticReentry(
                 context.ctxId!,
                 "demo",
             );
@@ -2570,7 +2570,7 @@ async function callProjectedAction(
                 ],
                 principal: "local",
             });
-            Object.assign(registry, {
+            Object.assign(registry.reentry, {
                 async bindAutomaticReentrySource() {
                     throw new Error("context source bind persistence failed");
                 },
@@ -2645,7 +2645,7 @@ async function callProjectedAction(
             );
             assert.deepEqual(actions, ["claim", "release"]);
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 undefined,
             );
@@ -2772,7 +2772,7 @@ async function callProjectedAction(
                 call("report", { outcome: "accepted" }),
                 /goal report persistence failed/u,
             );
-            const reentry = await registry.readAutomaticReentry(
+            const reentry = await registry.reentry.readAutomaticReentry(
                 context.ctxId!,
                 "demo",
             );
@@ -2861,8 +2861,8 @@ async function callProjectedAction(
             );
 
             const markAccepted =
-                registry.markAutomaticReentryAccepted.bind(registry);
-            Object.assign(registry, {
+                registry.reentry.markAutomaticReentryAccepted.bind(registry.reentry);
+            Object.assign(registry.reentry, {
                 async markAutomaticReentryAccepted() {
                     throw new Error("context acceptance persistence failed");
                 },
@@ -2878,16 +2878,16 @@ async function callProjectedAction(
                 "consumed",
             );
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 claimId,
             );
 
-            Object.assign(registry, {
+            Object.assign(registry.reentry, {
                 markAutomaticReentryAccepted: markAccepted,
             });
             await arbiter.observeExecutionStart(context.ctxId!);
-            const reconciled = await registry.readAutomaticReentry(
+            const reconciled = await registry.reentry.readAutomaticReentry(
                 context.ctxId!,
                 "demo",
             );
@@ -2998,9 +2998,9 @@ async function callProjectedAction(
             );
 
             const releaseContext =
-                registry.releaseAutomaticReentry.bind(registry);
+                registry.reentry.releaseAutomaticReentry.bind(registry.reentry);
             let failContextRelease = true;
-            Object.assign(registry, {
+            Object.assign(registry.reentry, {
                 async releaseAutomaticReentry(
                     ctxId: string,
                     instance: string,
@@ -3025,7 +3025,7 @@ async function callProjectedAction(
                 /context release persistence failed/u,
             );
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 claimId,
             );
@@ -3040,7 +3040,7 @@ async function callProjectedAction(
             )) as { released?: boolean };
             assert.equal(released.released, true);
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 undefined,
             );
@@ -3068,7 +3068,7 @@ async function callProjectedAction(
                 ],
                 principal: "local",
             });
-            Object.assign(registry, {
+            Object.assign(registry.reentry, {
                 async bindAutomaticReentrySource() {
                     throw new Error("explicit source bind persistence failed");
                 },
@@ -3135,7 +3135,7 @@ async function callProjectedAction(
             );
             assert.deepEqual(actions, []);
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 undefined,
             );
@@ -3235,7 +3235,7 @@ async function callProjectedAction(
             assert.equal(goalClaim.claimId, "goal-claim");
             assert.deepEqual(continuationClaims, ["goal-claim"]);
             assert.equal(
-                (await registry.readAutomaticReentry(context.ctxId!, "demo"))
+                (await registry.reentry.readAutomaticReentry(context.ctxId!, "demo"))
                     .claimId,
                 "context-claim",
             );
@@ -3317,7 +3317,7 @@ async function callProjectedAction(
                 ],
                 principal: "local",
             });
-            await registry.observeExecutionActivity(context.ctxId!, "demo");
+            await registry.reentry.observeExecutionActivity(context.ctxId!, "demo");
             const fake = createInteractionGateway();
             const now = new Date(nowMs).toISOString();
             fake.waits.push({

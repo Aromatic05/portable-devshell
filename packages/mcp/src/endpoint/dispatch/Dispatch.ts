@@ -459,7 +459,7 @@ export class McpEndpointDispatch {
         const goalActivity = value.toolName === "workspace_goal" ? undefined
             : workspaceGoalActivity(value.toolName, value.payload, this.#tmuxBlockSyncMs, definition?._meta);
         if (goalActivity !== undefined) {
-            await this.#contextRegistry.observeAutomaticReentryActivity(record.ctxId, instance, goalActivity).catch(() => undefined);
+            await this.#contextRegistry.reentry.observeAutomaticReentryActivity(record.ctxId, instance, goalActivity).catch(() => undefined);
             await gateway.touchGoal?.(instance, record.ctxId, goalActivity);
         }
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {

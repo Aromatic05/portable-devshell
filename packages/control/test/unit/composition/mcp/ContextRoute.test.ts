@@ -27,24 +27,26 @@ function record(ctxId: string): McpContextRecord {
 test("context routes resolve the current admin port for every request", async () => {
     let current = "first";
     const port = (): ContextAdminPort => ({
-        changes: new ContextChangeHub(),
-        async snapshot() {
-            return { contexts: [record(`${current}:snapshot`)], revision: 0 };
-        },
-        async referenceInstance() {
-            return { current: true };
+        registry: {
+            changes: new ContextChangeHub(),
+            async snapshot() {
+                return { contexts: [record(`${current}:snapshot`)], revision: 0 };
+            },
+            async referenceInstance() {
+                return { current: true };
+            },
+            async list() {
+                return [record(`${current}:list`)];
+            },
+            async validateForInstance(ctxId, instance) {
+                return record(`${current}:validate:${instance}:${ctxId}`);
+            },
         },
         async disable(ctxId) {
             return record(`${current}:disable:${ctxId}`);
         },
-        async list() {
-            return [record(`${current}:list`)];
-        },
         async renew(ctxId) {
             return record(`${current}:renew:${ctxId}`);
-        },
-        async validateForInstance(ctxId, instance) {
-            return record(`${current}:validate:${instance}:${ctxId}`);
         },
     });
     const module = createContextRouteModule(port);

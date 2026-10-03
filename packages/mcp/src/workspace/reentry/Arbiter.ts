@@ -160,13 +160,13 @@ export class McpWorkspaceReentryArbiter {
         const request = readReentryControl(input);
         const registry = this.options.contextRegistry;
         if (request.action === "get") {
-            return (await registry.readAutomaticReentry(
+            return (await registry.reentry.readAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             )) as unknown as JsonValue;
         }
         if (request.action === "yield") {
-            const state = await registry.suppressAutomaticReentry(
+            const state = await registry.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 request.reason ?? "user interrupted automatic execution",
@@ -174,7 +174,7 @@ export class McpWorkspaceReentryArbiter {
             return { ...state, suppressed: true } as unknown as JsonValue;
         }
         if (request.action === "resume") {
-            const state = await registry.resumeAutomaticReentry(
+            const state = await registry.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );
@@ -216,7 +216,7 @@ export class McpWorkspaceReentryArbiter {
             );
         }
         await this.#releaseSource(gateway, ctxId, claimId);
-        const state = await registry.releaseAutomaticReentry(
+        const state = await registry.reentry.releaseAutomaticReentry(
             ctxId,
             this.options.instanceName,
             claimId,
@@ -227,14 +227,14 @@ export class McpWorkspaceReentryArbiter {
     async observeExecutionStart(ctxId: string, instance = this.options.instanceName): Promise<number | undefined> {
         await this.#settleAttemptedFromExecution(ctxId, instance);
         return (
-            await this.options.contextRegistry
+            await this.options.contextRegistry.reentry
                 .observeExecutionActivity(ctxId, instance)
                 .catch(() => undefined)
         )?.executionEpoch;
     }
 
     async observeExecutionActivity(ctxId: string, instance = this.options.instanceName): Promise<void> {
-        await this.options.contextRegistry
+        await this.options.contextRegistry.reentry
             .observeExecutionActivity(ctxId, instance)
             .catch(() => undefined);
     }
@@ -245,7 +245,7 @@ export class McpWorkspaceReentryArbiter {
         instance = this.options.instanceName,
     ): Promise<void> {
         if (executionEpoch === undefined) return;
-        await this.options.contextRegistry
+        await this.options.contextRegistry.reentry
             .releaseExecutionActivity(
                 ctxId,
                 instance,
@@ -260,7 +260,7 @@ export class McpWorkspaceReentryArbiter {
     ): Promise<boolean> {
         try {
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
@@ -292,7 +292,7 @@ export class McpWorkspaceReentryArbiter {
         );
         if (waitDelivery !== undefined) {
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
@@ -369,7 +369,7 @@ export class McpWorkspaceReentryArbiter {
             return await this.#releaseUnclaimedContext(ctxId, claimId);
         }
         try {
-            await this.options.contextRegistry.bindAutomaticReentrySource(
+            await this.options.contextRegistry.reentry.bindAutomaticReentrySource(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -405,7 +405,7 @@ export class McpWorkspaceReentryArbiter {
                 : undefined,
             await this.#workspaceSnapshot(gateway, ctxId),
         );
-        const state = await this.options.contextRegistry.readAutomaticReentry(
+        const state = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -440,7 +440,7 @@ export class McpWorkspaceReentryArbiter {
         );
         if (waitDelivery !== undefined) {
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
@@ -470,7 +470,7 @@ export class McpWorkspaceReentryArbiter {
         let state;
         try {
             state =
-                await this.options.contextRegistry.bindAutomaticReentrySource(
+                await this.options.contextRegistry.reentry.bindAutomaticReentrySource(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -518,7 +518,7 @@ export class McpWorkspaceReentryArbiter {
         if (await this.#contextExecutionBusy(gateway, ctxId)) {
             await this.#consumeResolvedWaitsDuringExecution(gateway, ctxId);
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
@@ -526,14 +526,14 @@ export class McpWorkspaceReentryArbiter {
         }
         if (await this.#hasPendingContextApproval(gateway, ctxId)) {
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
             return { claimed: false as const, state };
         }
         const arbitration =
-            await this.options.contextRegistry.claimAutomaticReentry(
+            await this.options.contextRegistry.reentry.claimAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -543,7 +543,7 @@ export class McpWorkspaceReentryArbiter {
         if (await this.#contextExecutionBusy(gateway, ctxId)) {
             await this.#consumeResolvedWaitsDuringExecution(gateway, ctxId);
             const state =
-                await this.options.contextRegistry.releaseAutomaticReentry(
+                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -552,7 +552,7 @@ export class McpWorkspaceReentryArbiter {
         }
         if (await this.#hasPendingContextApproval(gateway, ctxId)) {
             const state =
-                await this.options.contextRegistry.releaseAutomaticReentry(
+                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -569,7 +569,7 @@ export class McpWorkspaceReentryArbiter {
     ): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
         const validation =
-            await this.options.contextRegistry.validateAutomaticReentry(
+            await this.options.contextRegistry.reentry.validateAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -592,7 +592,7 @@ export class McpWorkspaceReentryArbiter {
                 );
             else await this.#releaseSource(gateway, ctxId, claimId);
             const state =
-                await this.options.contextRegistry.releaseAutomaticReentry(
+                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -602,7 +602,7 @@ export class McpWorkspaceReentryArbiter {
         if (await this.#hasPendingContextApproval(gateway, ctxId)) {
             await this.#releaseSource(gateway, ctxId, claimId);
             const state =
-                await this.options.contextRegistry.releaseAutomaticReentry(
+                await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -663,12 +663,12 @@ export class McpWorkspaceReentryArbiter {
         );
         const valid = goalValidation?.valid === true;
         if (!valid)
-            await this.options.contextRegistry.releaseAutomaticReentry(
+            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
             );
-        const state = await this.options.contextRegistry.readAutomaticReentry(
+        const state = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -697,7 +697,7 @@ export class McpWorkspaceReentryArbiter {
                   ? "goal"
                   : "wait";
         const state =
-            await this.options.contextRegistry.markAutomaticReentryAttempted(
+            await this.options.contextRegistry.reentry.markAutomaticReentryAttempted(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -742,7 +742,7 @@ export class McpWorkspaceReentryArbiter {
                 );
             }
             try {
-                await this.options.contextRegistry.markAutomaticReentryRejected(
+                await this.options.contextRegistry.reentry.markAutomaticReentryRejected(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -765,7 +765,7 @@ export class McpWorkspaceReentryArbiter {
         outcome: "accepted" | "rejected" | "uncertain",
     ): Promise<JsonValue> {
         const ctxId = requireCtxId(context);
-        const reentry = await this.options.contextRegistry.readAutomaticReentry(
+        const reentry = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -849,7 +849,7 @@ export class McpWorkspaceReentryArbiter {
 
         const state =
             outcome === "rejected"
-                ? await this.options.contextRegistry.markAutomaticReentryRejected(
+                ? await this.options.contextRegistry.reentry.markAutomaticReentryRejected(
                       ctxId,
                       this.options.instanceName,
                       claimId,
@@ -905,7 +905,7 @@ export class McpWorkspaceReentryArbiter {
                 return undefined;
             }
             try {
-                await this.options.contextRegistry.bindAutomaticReentrySource(
+                await this.options.contextRegistry.reentry.bindAutomaticReentrySource(
                     ctxId,
                     this.options.instanceName,
                     claimId,
@@ -938,7 +938,7 @@ export class McpWorkspaceReentryArbiter {
         ctxId: string,
         claimId: string,
     ): Promise<void> {
-        const reentry = await this.options.contextRegistry.readAutomaticReentry(
+        const reentry = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -985,7 +985,7 @@ export class McpWorkspaceReentryArbiter {
         error: unknown,
     ): Promise<never> {
         try {
-            await this.options.contextRegistry.releaseAutomaticReentry(
+            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -1014,7 +1014,7 @@ export class McpWorkspaceReentryArbiter {
             );
         }
         try {
-            await this.options.contextRegistry.releaseAutomaticReentry(
+            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -1030,14 +1030,14 @@ export class McpWorkspaceReentryArbiter {
 
     async #markContextAcceptedOrConfirmSettled(ctxId: string, claimId: string) {
         try {
-            return await this.options.contextRegistry.markAutomaticReentryAccepted(
+            return await this.options.contextRegistry.reentry.markAutomaticReentryAccepted(
                 ctxId,
                 this.options.instanceName,
                 claimId,
             );
         } catch (error) {
             const state =
-                await this.options.contextRegistry.readAutomaticReentry(
+                await this.options.contextRegistry.reentry.readAutomaticReentry(
                     ctxId,
                     this.options.instanceName,
                 );
@@ -1081,7 +1081,7 @@ export class McpWorkspaceReentryArbiter {
     async #settleAttemptedFromExecution(ctxId: string, instance: string): Promise<void> {
         let state;
         try {
-            state = await this.options.contextRegistry.readAutomaticReentry(
+            state = await this.options.contextRegistry.reentry.readAutomaticReentry(
                 ctxId,
                 instance,
             );
@@ -1169,7 +1169,7 @@ export class McpWorkspaceReentryArbiter {
             settled = false;
         }
         if (!settled) return;
-        await this.options.contextRegistry
+        await this.options.contextRegistry.reentry
             .markAutomaticReentryAccepted(
                 ctxId,
                 instance,
@@ -1274,7 +1274,7 @@ export class McpWorkspaceReentryArbiter {
         gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<boolean> {
-        const state = await this.options.contextRegistry.readAutomaticReentry(
+        const state = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -1350,7 +1350,7 @@ export class McpWorkspaceReentryArbiter {
             ctxId,
             this.options.instanceName,
         );
-        const reentry = await this.options.contextRegistry.readAutomaticReentry(
+        const reentry = await this.options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -1384,7 +1384,7 @@ export class McpWorkspaceReentryArbiter {
 
     async #invalidClaim(ctxId: string, claimId: string): Promise<JsonValue> {
         const state =
-            await this.options.contextRegistry.releaseAutomaticReentry(
+            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -1397,7 +1397,7 @@ export class McpWorkspaceReentryArbiter {
         claimId: string,
     ): Promise<JsonValue> {
         const state =
-            await this.options.contextRegistry.releaseAutomaticReentry(
+            await this.options.contextRegistry.reentry.releaseAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,

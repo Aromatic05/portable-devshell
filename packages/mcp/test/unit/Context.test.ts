@@ -385,14 +385,14 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
             principal: "local",
         });
 
-        const first = await registry.claimAutomaticReentry(
+        const first = await registry.reentry.claimAutomaticReentry(
             "ctx-reentry",
             "demo-local",
             "claim-1",
         );
         assert.equal(first.claimed, true);
         assert.equal(first.state.pending, true);
-        const second = await registry.claimAutomaticReentry(
+        const second = await registry.reentry.claimAutomaticReentry(
             "ctx-reentry",
             "demo-local",
             "claim-2",
@@ -400,7 +400,7 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
         assert.equal(second.claimed, false);
         assert.equal(
             (
-                await registry.validateAutomaticReentry(
+                await registry.reentry.validateAutomaticReentry(
                     "ctx-reentry",
                     "demo-local",
                     "claim-1",
@@ -409,34 +409,34 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
             true,
         );
 
-        await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
+        await registry.reentry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-reentry", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-reentry", "demo-local"))
                 .pending,
             false,
         );
-        await registry.suppressAutomaticReentry(
+        await registry.reentry.suppressAutomaticReentry(
             "ctx-reentry",
             "demo-local",
             "user action",
             "user_owned",
         );
-        const suppressed = await registry.readAutomaticReentry(
+        const suppressed = await registry.reentry.readAutomaticReentry(
             "ctx-reentry",
             "demo-local",
         );
         assert.equal(typeof suppressed.suppressedAt, "string");
         assert.equal(suppressed.mode, "user_owned");
-        await registry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
+        await registry.reentry.clearAutomaticReentryClaim("ctx-reentry", "demo-local");
         assert.equal(
             typeof (
-                await registry.readAutomaticReentry("ctx-reentry", "demo-local")
+                await registry.reentry.readAutomaticReentry("ctx-reentry", "demo-local")
             ).suppressedAt,
             "string",
         );
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-reentry",
                     "demo-local",
                     "claim-3",
@@ -444,46 +444,46 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
             ).claimed,
             false,
         );
-        await registry.observeAutomaticReentryActivity(
+        await registry.reentry.observeAutomaticReentryActivity(
             "ctx-reentry",
             "demo-local",
             "observation",
         );
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-reentry", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-reentry", "demo-local"))
                 .mode,
             "user_owned",
         );
-        await registry.observeAutomaticReentryActivity(
+        await registry.reentry.observeAutomaticReentryActivity(
             "ctx-reentry",
             "demo-local",
             "mutation",
         );
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-reentry", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-reentry", "demo-local"))
                 .mode,
             "automatic",
         );
 
-        await registry.suppressAutomaticReentry(
+        await registry.reentry.suppressAutomaticReentry(
             "ctx-reentry",
             "demo-local",
             "goal paused",
             "paused",
         );
-        await registry.observeAutomaticReentryActivity(
+        await registry.reentry.observeAutomaticReentryActivity(
             "ctx-reentry",
             "demo-local",
             "mutation",
         );
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-reentry", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-reentry", "demo-local"))
                 .mode,
             "paused",
         );
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-reentry",
                     "demo-local",
                     "claim-paused",
@@ -492,8 +492,8 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
             false,
         );
 
-        await registry.resumeAutomaticReentry("ctx-reentry", "demo-local");
-        const resumed = await registry.claimAutomaticReentry(
+        await registry.reentry.resumeAutomaticReentry("ctx-reentry", "demo-local");
+        const resumed = await registry.reentry.claimAutomaticReentry(
             "ctx-reentry",
             "demo-local",
             "claim-4",
@@ -503,7 +503,7 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
         const reloaded = new McpContextRegistry({ filePath });
         await reloaded.initialize();
         assert.equal(
-            (await reloaded.readAutomaticReentry("ctx-reentry", "demo-local"))
+            (await reloaded.reentry.readAutomaticReentry("ctx-reentry", "demo-local"))
                 .pending,
             true,
         );
@@ -537,13 +537,13 @@ test("McpContextRegistry binds re-entry ownership to one instance and exposes on
             workspace: "/beta",
         });
 
-        const claimed = await registry.claimAutomaticReentry(
+        const claimed = await registry.reentry.claimAutomaticReentry(
             "ctx-reentry-owner",
             "alpha",
             "claim-alpha",
         );
         assert.equal(claimed.claimed, true);
-        await registry.bindAutomaticReentrySource(
+        await registry.reentry.bindAutomaticReentrySource(
             "ctx-reentry-owner",
             "alpha",
             "claim-alpha",
@@ -552,7 +552,7 @@ test("McpContextRegistry binds re-entry ownership to one instance and exposes on
         );
         assert.equal(
             (
-                await registry.validateAutomaticReentry(
+                await registry.reentry.validateAutomaticReentry(
                     "ctx-reentry-owner",
                     "beta",
                     "claim-alpha",
@@ -561,18 +561,18 @@ test("McpContextRegistry binds re-entry ownership to one instance and exposes on
             false,
         );
         assert.equal(
-            (await registry.listAutomaticReentryClaimsForInstance("beta"))
+            (await registry.reentry.listAutomaticReentryClaimsForInstance("beta"))
                 .length,
             0,
         );
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-reentry-owner", "alpha"))
+            (await registry.reentry.readAutomaticReentry("ctx-reentry-owner", "alpha"))
                 .pending,
             true,
         );
 
         const owned =
-            await registry.listAutomaticReentryClaimsForInstance("alpha");
+            await registry.reentry.listAutomaticReentryClaimsForInstance("alpha");
         assert.deepEqual(owned, [
             {
                 attempted: false,
@@ -582,12 +582,12 @@ test("McpContextRegistry binds re-entry ownership to one instance and exposes on
                 sourceKind: "wait",
             },
         ]);
-        await registry.markAutomaticReentryRejected(
+        await registry.reentry.markAutomaticReentryRejected(
             "ctx-reentry-owner",
             "alpha",
             "claim-alpha",
         );
-        const after = await registry.readAutomaticReentry(
+        const after = await registry.reentry.readAutomaticReentry(
             "ctx-reentry-owner",
             "alpha",
         );
@@ -616,19 +616,19 @@ test("McpContextRegistry drops legacy re-entry claims that have no instance owne
             ],
             principal: "local",
         });
-        await registry.claimAutomaticReentry(
+        await registry.reentry.claimAutomaticReentry(
             "ctx-reentry-legacy-owner",
             "demo-local",
             "claim-legacy",
         );
-        await registry.bindAutomaticReentrySource(
+        await registry.reentry.bindAutomaticReentrySource(
             "ctx-reentry-legacy-owner",
             "demo-local",
             "claim-legacy",
             "wait",
             "wait-legacy",
         );
-        await registry.markAutomaticReentryAttempted(
+        await registry.reentry.markAutomaticReentryAttempted(
             "ctx-reentry-legacy-owner",
             "demo-local",
             "claim-legacy",
@@ -643,7 +643,7 @@ test("McpContextRegistry drops legacy re-entry claims that have no instance owne
 
         const reloaded = new McpContextRegistry({ filePath });
         await reloaded.initialize();
-        const state = await reloaded.readAutomaticReentry(
+        const state = await reloaded.reentry.readAutomaticReentry(
             "ctx-reentry-legacy-owner",
             "demo-local",
         );
@@ -678,13 +678,13 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
         });
 
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-execution", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-execution", "demo-local"))
                 .executionActive,
             false,
         );
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-execution",
                     "demo-local",
                     "claim-before-tool",
@@ -693,7 +693,7 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
             true,
         );
 
-        const active = await registry.observeExecutionActivity(
+        const active = await registry.reentry.observeExecutionActivity(
             "ctx-execution",
             "demo-local",
         );
@@ -702,7 +702,7 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
         assert.equal(active.pending, false);
         assert.equal(
             (
-                await registry.validateAutomaticReentry(
+                await registry.reentry.validateAutomaticReentry(
                     "ctx-execution",
                     "demo-local",
                     "claim-before-tool",
@@ -712,7 +712,7 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
         );
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-execution",
                     "demo-local",
                     "claim-during-tool",
@@ -723,13 +723,13 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
 
         now += 60_001;
         assert.equal(
-            (await registry.readAutomaticReentry("ctx-execution", "demo-local"))
+            (await registry.reentry.readAutomaticReentry("ctx-execution", "demo-local"))
                 .executionActive,
             false,
         );
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-execution",
                     "demo-local",
                     "claim-after-idle",
@@ -737,7 +737,7 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
             ).claimed,
             true,
         );
-        const delivered = await registry.markAutomaticReentryAccepted(
+        const delivered = await registry.reentry.markAutomaticReentryAccepted(
             "ctx-execution",
             "demo-local",
             "claim-after-idle",
@@ -749,13 +749,13 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
         const reloaded = new McpContextRegistry({ filePath, now: () => now });
         await reloaded.initialize();
         assert.equal(
-            (await reloaded.readAutomaticReentry("ctx-execution", "demo-local"))
+            (await reloaded.reentry.readAutomaticReentry("ctx-execution", "demo-local"))
                 .executionActive,
             true,
         );
         assert.equal(
             (
-                await reloaded.claimAutomaticReentry(
+                await reloaded.reentry.claimAutomaticReentry(
                     "ctx-execution",
                     "demo-local",
                     "claim-after-reload",
@@ -790,13 +790,13 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         });
         const structuralState = await readFile(filePath, "utf8");
 
-        const first = await registry.observeExecutionActivity(
+        const first = await registry.reentry.observeExecutionActivity(
             "ctx-execution-release",
             "demo-local",
         );
         assert.equal(first.executionEpoch, 1);
         assert.equal(first.executionActive, true);
-        const staleBefore = await registry.releaseExecutionActivity(
+        const staleBefore = await registry.reentry.releaseExecutionActivity(
             "ctx-execution-release",
             "demo-local",
             0,
@@ -804,12 +804,12 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         assert.equal(staleBefore.executionEpoch, 1);
         assert.equal(staleBefore.executionActive, true);
 
-        const second = await registry.observeExecutionActivity(
+        const second = await registry.reentry.observeExecutionActivity(
             "ctx-execution-release",
             "demo-local",
         );
         assert.equal(second.executionEpoch, 2);
-        const staleAfter = await registry.releaseExecutionActivity(
+        const staleAfter = await registry.reentry.releaseExecutionActivity(
             "ctx-execution-release",
             "demo-local",
             1,
@@ -817,7 +817,7 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         assert.equal(staleAfter.executionEpoch, 2);
         assert.equal(staleAfter.executionActive, true);
 
-        const released = await registry.releaseExecutionActivity(
+        const released = await registry.reentry.releaseExecutionActivity(
             "ctx-execution-release",
             "demo-local",
             2,
@@ -828,7 +828,7 @@ test("McpContextRegistry releases only the execution lease owned by the expected
 
         const reloaded = new McpContextRegistry({ filePath, now: () => now });
         await reloaded.initialize();
-        const persisted = await reloaded.readAutomaticReentry(
+        const persisted = await reloaded.reentry.readAutomaticReentry(
             "ctx-execution-release",
             "demo-local",
         );
@@ -860,7 +860,7 @@ test("McpContextRegistry prunes execution sidecar state with terminal Context hi
             ],
             principal: "local",
         });
-        await registry.observeExecutionActivity(
+        await registry.reentry.observeExecutionActivity(
             "ctx-pruned-execution",
             "demo-local",
         );
@@ -922,7 +922,7 @@ test("McpContextRegistry ordinary instance validation does not depend on executi
             "ctx-execution-isolation",
         );
         await assert.rejects(
-            registry.readAutomaticReentry(
+            registry.reentry.readAutomaticReentry(
                 "ctx-execution-isolation",
                 "demo-local",
             ),
@@ -956,7 +956,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
         });
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-attempted",
                     "demo-local",
                     "claim-attempted",
@@ -964,14 +964,14 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
             ).claimed,
             true,
         );
-        await registry.bindAutomaticReentrySource(
+        await registry.reentry.bindAutomaticReentrySource(
             "ctx-attempted",
             "demo-local",
             "claim-attempted",
             "task-resume",
             "task-1",
         );
-        const attempted = await registry.markAutomaticReentryAttempted(
+        const attempted = await registry.reentry.markAutomaticReentryAttempted(
             "ctx-attempted",
             "demo-local",
             "claim-attempted",
@@ -980,7 +980,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
         assert.equal(attempted.sourceKind, "task-resume");
 
         now += 10 * 60_000;
-        const afterTtl = await registry.readAutomaticReentry(
+        const afterTtl = await registry.reentry.readAutomaticReentry(
             "ctx-attempted",
             "demo-local",
         );
@@ -988,7 +988,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
         assert.equal(afterTtl.attempted, true);
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-attempted",
                     "demo-local",
                     "claim-replay",
@@ -997,7 +997,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
             false,
         );
 
-        const active = await registry.observeExecutionActivity(
+        const active = await registry.reentry.observeExecutionActivity(
             "ctx-attempted",
             "demo-local",
         );
@@ -1007,7 +1007,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
         assert.equal(active.sourceId, "task-1");
         assert.equal(
             (
-                await registry.claimAutomaticReentry(
+                await registry.reentry.claimAutomaticReentry(
                     "ctx-attempted",
                     "demo-local",
                     "claim-during-execution",
@@ -1016,7 +1016,7 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
             false,
         );
 
-        const settled = await registry.markAutomaticReentryAccepted(
+        const settled = await registry.reentry.markAutomaticReentryAccepted(
             "ctx-attempted",
             "demo-local",
             "claim-attempted",

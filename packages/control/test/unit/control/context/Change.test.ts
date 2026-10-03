@@ -41,9 +41,9 @@ test("Context revisions include public touches and environments but exclude clai
     const registry = new ContextRegistry({ idFactory: () => "ctx-public", now: () => now });
     const created = await registry.create({ principal: "user", environments: [{ instance: "local", workspace: "/old" }] });
     assert.equal(registry.changes.revision, 1);
-    await registry.claimAutomaticReentry(created.ctxId, "local", "claim-private");
-    await registry.observeExecutionActivity(created.ctxId, "local");
-    await registry.suppressAutomaticReentry(created.ctxId, "local", "private reason");
+    await registry.reentry.claimAutomaticReentry(created.ctxId, "local", "claim-private");
+    await registry.reentry.observeExecutionActivity(created.ctxId, "local");
+    await registry.reentry.suppressAutomaticReentry(created.ctxId, "local", "private reason");
     await registry.recordEnvironmentCleanup(created.ctxId, { instance: "remote", kind: "instance_reference" });
     assert.equal(registry.changes.revision, 1);
     assert.deepEqual(Object.keys((await registry.snapshot()).contexts[0]).sort(), [
@@ -111,7 +111,11 @@ test("failed persistence does not publish a Context record that was rolled back"
 test("Context route seeds replay, orders live events, reports gaps, and unregisters on close", async () => {
     const registry = new ContextRegistry({ idFactory: () => "ctx-route" });
     await registry.create({ principal: "user" });
-    const route = createContextRouteModule(registry);
+    const route = createContextRouteModule({
+        registry,
+        disable: (ctxId) => registry.disable(ctxId),
+        renew: (ctxId) => registry.renew(ctxId),
+    });
     const snapshot = route.operations.find(operation => operation.name === "snapshot")!;
     assert.ok(snapshot);
     assert.deepEqual(await snapshot.handle({ id: "snapshot", name: "snapshot" }, {} as never), await registry.snapshot());

@@ -34,7 +34,7 @@ export class ContextModule extends ContextService {
             gateway,
             worker,
         });
-        super({ registry, environment, cleanup, gateway, worker });
+        super({ registry, environment, cleanup, worker });
         this.#gatewayHolder = gatewayHolder;
     }
 

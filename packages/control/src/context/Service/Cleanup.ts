@@ -5,7 +5,10 @@ import type {
     McpContextRecord,
 } from "@portable-devshell/shared";
 import type { ContextCleanupPort } from "@portable-devshell/mcp";
-import type { ContextPresentationPort } from "./View.js";
+export interface ContextPresentationPort {
+    revokeContext(ctxId: string): Promise<void>;
+    revokeInstance(instance: string): Promise<void>;
+}
 
 export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
     bindPresentation(presentation: ContextPresentationPort): void;

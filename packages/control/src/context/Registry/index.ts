@@ -209,21 +209,7 @@ export class ContextRegistry implements ContextRegistryPort {
             ) {
                 throw invalidExternalBinding();
             }
-            const now = this.#now();
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
-            }
+            await this.#requireActive(record);
             await this.#mutateAndPersist(() => {
                 bindExternalRecord(
                     this.#contexts.values(),
@@ -248,15 +234,7 @@ export class ContextRegistry implements ContextRegistryPort {
             const matches = this.#externalMatches(external, binding.principal);
             if (matches.length === 0) return undefined;
             if (matches.length !== 1) throw invalidExternalBinding();
-            const record = matches[0]!;
-            const now = this.#now();
-            const snapshot = cloneRecord(record);
-            if (
-                snapshot.status === "active" &&
-                Date.parse(snapshot.expiresAt) <= now
-            )
-                snapshot.status = "expired";
-            return snapshot;
+            return cloneRecordForRead(matches[0]!, this.#now());
         });
     }
 
@@ -272,21 +250,7 @@ export class ContextRegistry implements ContextRegistryPort {
             const matches = this.#externalMatches(external, binding.principal);
             if (matches.length !== 1) throw invalidExternalBinding();
             const record = matches[0]!;
-            const now = this.#now();
-            if (record.status === "disabled") {
-                throw disabledContext(record.ctxId);
-            }
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(record.ctxId, record.expiresAt);
-            }
+            const now = await this.#requireActive(record);
             await this.#touchRecord(record, now);
             return cloneRecord(record);
         });
@@ -298,21 +262,10 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            if (!isCtxId(ctxId)) throw invalidContext(ctxId);
-            const record = this.#contexts.get(ctxId);
-            if (
-                record === undefined ||
-                record.principal !== binding.principal
-            ) {
-                throw invalidContext(ctxId);
-            }
-            const snapshot = cloneRecord(record);
-            if (
-                snapshot.status === "active" &&
-                Date.parse(snapshot.expiresAt) <= this.#now()
-            )
-                snapshot.status = "expired";
-            return snapshot;
+            return cloneRecordForRead(
+                this.#record(ctxId, binding.principal),
+                this.#now(),
+            );
         });
     }
 
@@ -322,30 +275,10 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            if (!isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined) {
-                throw invalidContext(ctxId);
-            }
-            const now = this.#now();
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
+            const record = this.#record(ctxId);
+            const now = await this.#requireActive(record);
             if (record.principal !== binding.principal) {
                 throw invalidContext(ctxId);
-            }
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
             }
             await this.#touchRecord(record, now);
             return cloneRecord(record);
@@ -370,28 +303,8 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            if (!isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined) {
-                throw invalidContext(ctxId);
-            }
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            const now = this.#now();
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
-            }
+            const record = this.#record(ctxId);
+            await this.#requireActive(record);
             if ((record.maskedInstances ?? []).includes(instance)) {
                 throw maskedInstance(ctxId, instance);
             }
@@ -426,66 +339,6 @@ export class ContextRegistry implements ContextRegistryPort {
                 throw maskedInstance(ctxId, instance);
             }
         });
-    }
-
-    readAutomaticReentry(...args: Parameters<ContextReentry["readAutomaticReentry"]>): ReturnType<ContextReentry["readAutomaticReentry"]> {
-        return this.#reentry.readAutomaticReentry(...args);
-    }
-
-    suppressAutomaticReentry(...args: Parameters<ContextReentry["suppressAutomaticReentry"]>): ReturnType<ContextReentry["suppressAutomaticReentry"]> {
-        return this.#reentry.suppressAutomaticReentry(...args);
-    }
-
-    resumeAutomaticReentry(...args: Parameters<ContextReentry["resumeAutomaticReentry"]>): ReturnType<ContextReentry["resumeAutomaticReentry"]> {
-        return this.#reentry.resumeAutomaticReentry(...args);
-    }
-
-    observeAutomaticReentryActivity(...args: Parameters<ContextReentry["observeAutomaticReentryActivity"]>): ReturnType<ContextReentry["observeAutomaticReentryActivity"]> {
-        return this.#reentry.observeAutomaticReentryActivity(...args);
-    }
-
-    observeExecutionActivity(...args: Parameters<ContextReentry["observeExecutionActivity"]>): ReturnType<ContextReentry["observeExecutionActivity"]> {
-        return this.#reentry.observeExecutionActivity(...args);
-    }
-
-    releaseExecutionActivity(...args: Parameters<ContextReentry["releaseExecutionActivity"]>): ReturnType<ContextReentry["releaseExecutionActivity"]> {
-        return this.#reentry.releaseExecutionActivity(...args);
-    }
-
-    markAutomaticReentryAttempted(...args: Parameters<ContextReentry["markAutomaticReentryAttempted"]>): ReturnType<ContextReentry["markAutomaticReentryAttempted"]> {
-        return this.#reentry.markAutomaticReentryAttempted(...args);
-    }
-
-    markAutomaticReentryAccepted(...args: Parameters<ContextReentry["markAutomaticReentryAccepted"]>): ReturnType<ContextReentry["markAutomaticReentryAccepted"]> {
-        return this.#reentry.markAutomaticReentryAccepted(...args);
-    }
-
-    markAutomaticReentryRejected(...args: Parameters<ContextReentry["markAutomaticReentryRejected"]>): ReturnType<ContextReentry["markAutomaticReentryRejected"]> {
-        return this.#reentry.markAutomaticReentryRejected(...args);
-    }
-
-    claimAutomaticReentry(...args: Parameters<ContextReentry["claimAutomaticReentry"]>): ReturnType<ContextReentry["claimAutomaticReentry"]> {
-        return this.#reentry.claimAutomaticReentry(...args);
-    }
-
-    bindAutomaticReentrySource(...args: Parameters<ContextReentry["bindAutomaticReentrySource"]>): ReturnType<ContextReentry["bindAutomaticReentrySource"]> {
-        return this.#reentry.bindAutomaticReentrySource(...args);
-    }
-
-    validateAutomaticReentry(...args: Parameters<ContextReentry["validateAutomaticReentry"]>): ReturnType<ContextReentry["validateAutomaticReentry"]> {
-        return this.#reentry.validateAutomaticReentry(...args);
-    }
-
-    releaseAutomaticReentry(...args: Parameters<ContextReentry["releaseAutomaticReentry"]>): ReturnType<ContextReentry["releaseAutomaticReentry"]> {
-        return this.#reentry.releaseAutomaticReentry(...args);
-    }
-
-    clearAutomaticReentryClaim(...args: Parameters<ContextReentry["clearAutomaticReentryClaim"]>): ReturnType<ContextReentry["clearAutomaticReentryClaim"]> {
-        return this.#reentry.clearAutomaticReentryClaim(...args);
-    }
-
-    listAutomaticReentryClaimsForInstance(...args: Parameters<ContextReentry["listAutomaticReentryClaimsForInstance"]>): ReturnType<ContextReentry["listAutomaticReentryClaimsForInstance"]> {
-        return this.#reentry.listAutomaticReentryClaimsForInstance(...args);
     }
 
     async detachInstance(instance: string): Promise<McpContextRecord[]> {
@@ -550,25 +403,8 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            const now = this.#now();
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
-            }
+            const record = this.#record(ctxId);
+            await this.#requireActive(record);
             if ((record.maskedInstances ?? []).includes(binding.instance)) {
                 throw maskedInstance(ctxId, binding.instance);
             }
@@ -822,10 +658,7 @@ export class ContextRegistry implements ContextRegistryPort {
     async disable(ctxId: string): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
+            const record = this.#record(ctxId);
             if (
                 record.status !== "disabled" ||
                 record.cleanupPending === undefined
@@ -850,10 +683,7 @@ export class ContextRegistry implements ContextRegistryPort {
     async discard(ctxId: string): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
+            const record = this.#record(ctxId);
             await this.#mutateAndPersist(() => {
                 this.#contexts.delete(ctxId);
             });
@@ -867,50 +697,14 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (
-                record === undefined ||
-                !isCtxId(ctxId) ||
-                record.principal !== binding.principal
-            ) {
-                throw invalidContext(ctxId);
-            }
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            if (record.status === "expired" && record.cleanupPending === true) {
-                throw expiredContext(ctxId, record.expiresAt);
-            }
-            const now = this.#now();
-            await this.#mutateAndPersist(() => {
-                record.status = "active";
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            });
-            return cloneRecord(record);
+            return await this.#renew(this.#record(ctxId, binding.principal));
         });
     }
 
     async renew(ctxId: string): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            if (record.status === "expired" && record.cleanupPending === true) {
-                throw expiredContext(ctxId, record.expiresAt);
-            }
-            const now = this.#now();
-            await this.#mutateAndPersist(() => {
-                record.status = "active";
-                record.lastAccessedAt = new Date(now).toISOString();
-                record.expiresAt = new Date(now + this.#ttlMs).toISOString();
-            });
-            return cloneRecord(record);
+            return await this.#renew(this.#record(ctxId));
         });
     }
 
@@ -924,25 +718,8 @@ export class ContextRegistry implements ContextRegistryPort {
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
-            const record = this.#contexts.get(ctxId);
-            if (record === undefined || !isCtxId(ctxId)) {
-                throw invalidContext(ctxId);
-            }
-            if (record.status === "disabled") {
-                throw disabledContext(ctxId);
-            }
-            const now = this.#now();
-            if (
-                record.status === "expired" ||
-                Date.parse(record.expiresAt) <= now
-            ) {
-                if (record.status !== "expired") {
-                    await this.#mutateAndPersist(() => {
-                        record.status = "expired";
-                    });
-                }
-                throw expiredContext(ctxId, record.expiresAt);
-            }
+            const record = this.#record(ctxId);
+            await this.#requireActive(record);
             const environment = contextEnvironment(record, instance);
             if (environment === undefined) {
                 throw invalidContext(ctxId);
@@ -966,9 +743,7 @@ export class ContextRegistry implements ContextRegistryPort {
     }
 
     #activeRecord(ctxId: string): McpContextStoredRecord {
-        if (!isCtxId(ctxId)) throw invalidContext(ctxId);
-        const record = this.#contexts.get(ctxId);
-        if (record === undefined) throw invalidContext(ctxId);
+        const record = this.#record(ctxId);
         if (record.status === "disabled") throw disabledContext(ctxId);
         if (
             record.status === "expired" ||
@@ -977,6 +752,44 @@ export class ContextRegistry implements ContextRegistryPort {
             throw expiredContext(ctxId, record.expiresAt);
         }
         return record;
+    }
+
+    #record(ctxId: string, principal?: string): McpContextStoredRecord {
+        const record = isCtxId(ctxId) ? this.#contexts.get(ctxId) : undefined;
+        if (
+            record === undefined ||
+            (principal !== undefined && record.principal !== principal)
+        )
+            throw invalidContext(ctxId);
+        return record;
+    }
+
+    async #renew(record: McpContextStoredRecord): Promise<McpContextRecord> {
+        if (record.status === "disabled") throw disabledContext(record.ctxId);
+        if (record.status === "expired" && record.cleanupPending === true)
+            throw expiredContext(record.ctxId, record.expiresAt);
+        const now = this.#now();
+        await this.#mutateAndPersist(() => {
+            record.status = "active";
+            record.lastAccessedAt = new Date(now).toISOString();
+            record.expiresAt = new Date(now + this.#ttlMs).toISOString();
+        });
+        return cloneRecord(record);
+    }
+
+    async #requireActive(record: McpContextStoredRecord): Promise<number> {
+        if (record.status === "disabled") throw disabledContext(record.ctxId);
+        const now = this.#now();
+        if (
+            record.status !== "expired" &&
+            !(Date.parse(record.expiresAt) <= now)
+        )
+            return now;
+        if (record.status !== "expired")
+            await this.#mutateAndPersist(() => {
+                record.status = "expired";
+            });
+        throw expiredContext(record.ctxId, record.expiresAt);
     }
 
     #externalMatches(

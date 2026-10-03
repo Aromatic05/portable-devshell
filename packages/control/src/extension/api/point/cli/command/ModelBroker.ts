@@ -250,7 +250,10 @@ export class ModelDevshellBroker {
                 const admin = this.#contextAdmin();
                 if (admin === undefined)
                     throw integrityError("Context authority is unavailable.");
-                return await admin.referenceInstance(request.ctxId, instance);
+                return await admin.registry.referenceInstance(
+                    request.ctxId,
+                    instance,
+                );
             },
         });
         try {
@@ -362,7 +365,7 @@ export class ModelDevshellBroker {
             throw integrityError("Context authority is unavailable.");
         }
         try {
-            return await admin.validateForInstance(ctxId, instance);
+            return await admin.registry.validateForInstance(ctxId, instance);
         } catch {
             throw integrityError(
                 "Worker model devshell Context is unavailable, expired, disabled, or bound elsewhere.",

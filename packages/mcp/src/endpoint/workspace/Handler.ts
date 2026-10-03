@@ -308,12 +308,12 @@ export class McpEndpointHandlerWorkspace {
         }
         if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
         if (request.action === "start") {
-            await this.options.contextRegistry?.resumeAutomaticReentry(
+            await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );
         } else if (request.action !== "get") {
-            await this.options.contextRegistry?.observeAutomaticReentryActivity(
+            await this.options.contextRegistry?.reentry.observeAutomaticReentryActivity(
                 ctxId,
                 this.options.instanceName,
                 request.action === "block"
@@ -350,7 +350,7 @@ export class McpEndpointHandlerWorkspace {
             },
             ctxId,
         );
-        await this.options.contextRegistry?.suppressAutomaticReentry(
+        await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
             ctxId,
             this.options.instanceName,
             "Workspace Goal paused by user",
@@ -380,7 +380,7 @@ export class McpEndpointHandlerWorkspace {
             ctxId,
         );
         if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
-        await this.options.contextRegistry?.suppressAutomaticReentry(
+        await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
             ctxId,
             this.options.instanceName,
             "Workspace Goal stopped by user",
@@ -410,7 +410,7 @@ export class McpEndpointHandlerWorkspace {
             ctxId,
         );
         if (goal !== undefined) await this.#reconcileGoalWaits(ctxId, goal);
-        await this.options.contextRegistry?.resumeAutomaticReentry(
+        await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -521,7 +521,7 @@ export class McpEndpointHandlerWorkspace {
             ctxId,
             this.options.instanceName,
         );
-        const reentry = await registry.readAutomaticReentry(
+        const reentry = await registry.reentry.readAutomaticReentry(
             ctxId,
             this.options.instanceName,
         );
@@ -556,7 +556,7 @@ export class McpEndpointHandlerWorkspace {
                 contextInstances: async (id) => await this.#contextInstances(id),
                 reentry: async (id) => this.options.contextRegistry === undefined
                     ? undefined
-                    : await this.options.contextRegistry.readAutomaticReentry(id, this.options.instanceName) as unknown as JsonValue,
+                    : await this.options.contextRegistry.reentry.readAutomaticReentry(id, this.options.instanceName) as unknown as JsonValue,
                 snapshot: async (activeGateway, id, _directives) => {
                     const current = await this.#workspaceSnapshot(activeGateway, id);
                     const record = asRecord(current);
@@ -622,7 +622,7 @@ export class McpEndpointHandlerWorkspace {
                 await this.#resumeGoal({ goalId: target, revision: action.revision } as unknown as JsonValue, scoped);
                 return { kind: "reentry", intent: "goal-resume", sourceId: target };
             case "goal-retry":
-                await this.options.contextRegistry?.resumeAutomaticReentry(
+                await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
                     requireCtxId(context),
                     this.options.instanceName,
                 );
@@ -870,7 +870,7 @@ export class McpEndpointHandlerWorkspace {
             waitId,
             { answer },
         );
-        await this.options.contextRegistry?.resumeAutomaticReentry(
+        await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
             requireCtxId(context),
             this.options.instanceName,
         );
@@ -921,7 +921,7 @@ export class McpEndpointHandlerWorkspace {
             waitId,
             interrupted,
         );
-        await this.options.contextRegistry?.resumeAutomaticReentry(
+        await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
             requireCtxId(context),
             this.options.instanceName,
         );
@@ -972,20 +972,20 @@ export class McpEndpointHandlerWorkspace {
         );
         if (action === "cancel") {
             await this.#disableTaskWaits(ctxId, taskId);
-            await this.options.contextRegistry?.suppressAutomaticReentry(
+            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "Workspace task cancelled by user",
             );
         } else if (action === "pause") {
-            await this.options.contextRegistry?.suppressAutomaticReentry(
+            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "Workspace task paused by user",
                 "paused",
             );
         } else {
-            await this.options.contextRegistry?.resumeAutomaticReentry(
+            await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );

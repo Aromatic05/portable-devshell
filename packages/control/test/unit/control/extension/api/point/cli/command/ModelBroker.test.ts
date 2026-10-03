@@ -126,21 +126,23 @@ function harness(
         { surface: "model" },
     );
     const contextAdmin = {
-        async referenceInstance(ctxId: string, instance: string) {
-            contextReferences.push({ ctxId, instance });
-            return { current: false, handle: "ih-remote" };
-        },
-        async validateForInstance(ctxId: string, instance: string) {
-            assert.equal(ctxId, "ctx-a");
-            assert.equal(instance, options.instance ?? "demo-local");
-            return {
-                ctxId,
-                environments: [
-                    { instance: "alpha", workspace: "/a" },
-                    { instance: "beta", workspace: "/b" },
-                    { instance: "demo-local", workspace: contextWorkspace },
-                ],
-            } as McpContextRecord;
+        registry: {
+            async referenceInstance(ctxId: string, instance: string) {
+                contextReferences.push({ ctxId, instance });
+                return { current: false, handle: "ih-remote" };
+            },
+            async validateForInstance(ctxId: string, instance: string) {
+                assert.equal(ctxId, "ctx-a");
+                assert.equal(instance, options.instance ?? "demo-local");
+                return {
+                    ctxId,
+                    environments: [
+                        { instance: "alpha", workspace: "/a" },
+                        { instance: "beta", workspace: "/b" },
+                        { instance: "demo-local", workspace: contextWorkspace },
+                    ],
+                } as McpContextRecord;
+            },
         },
     } as unknown as ContextAdminPort;
     const broker = new ModelDevshellBroker({

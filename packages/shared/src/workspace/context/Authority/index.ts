@@ -7,5 +7,6 @@ import type { ContextCleanupLedgerPort } from "./Cleanup.js";
 
 export interface ContextRegistryPort extends
     ContextRecordPort,
-    ContextReentryPort,
-    ContextCleanupLedgerPort {}
+    ContextCleanupLedgerPort {
+    readonly reentry: ContextReentryPort;
+}

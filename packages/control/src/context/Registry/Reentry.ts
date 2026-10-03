@@ -41,12 +41,9 @@ export class ContextReentry implements ContextReentryPort {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            return automaticReentryState(record, this.#host.now());
-        });
+        return await this.#withRecord(ctxId, instance, (record) =>
+            automaticReentryState(record, this.#host.now()),
+        );
     }
 
     async suppressAutomaticReentry(
@@ -58,10 +55,7 @@ export class ContextReentry implements ContextReentryPort {
             "automatic"
         > = "user_owned",
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             const at = new Date(this.#host.now()).toISOString();
             await this.#host.mutate(() => {
                 record.automaticReentryEpoch =
@@ -69,12 +63,7 @@ export class ContextReentry implements ContextReentryPort {
                 record.automaticReentryMode = mode;
                 record.automaticReentrySuppressedAt = at;
                 record.automaticReentrySuppressionReason = reason;
-                delete record.automaticReentryAttemptedAt;
-                delete record.automaticReentryClaimedAt;
-                delete record.automaticReentryClaimId;
-                delete record.automaticReentryInstance;
-                delete record.automaticReentrySourceId;
-                delete record.automaticReentrySourceKind;
+                clearAutomaticReentryClaim(record);
             });
             return automaticReentryState(record, this.#host.now());
         });
@@ -84,22 +73,9 @@ export class ContextReentry implements ContextReentryPort {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             await this.#host.mutate(() => {
-                record.automaticReentryEpoch =
-                    (record.automaticReentryEpoch ?? 0) + 1;
-                delete record.automaticReentryMode;
-                delete record.automaticReentrySuppressedAt;
-                delete record.automaticReentrySuppressionReason;
-                delete record.automaticReentryAttemptedAt;
-                delete record.automaticReentryClaimedAt;
-                delete record.automaticReentryClaimId;
-                delete record.automaticReentryInstance;
-                delete record.automaticReentrySourceId;
-                delete record.automaticReentrySourceKind;
+                resumeAutomaticReentry(record);
             });
             return automaticReentryState(record, this.#host.now());
         });
@@ -110,10 +86,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         kind: GoalActivityKind,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             if (
                 kind === "observation" ||
                 record.automaticReentryMode !== "user_owned"
@@ -121,17 +94,7 @@ export class ContextReentry implements ContextReentryPort {
                 return automaticReentryState(record, this.#host.now());
             }
             await this.#host.mutate(() => {
-                record.automaticReentryEpoch =
-                    (record.automaticReentryEpoch ?? 0) + 1;
-                delete record.automaticReentryMode;
-                delete record.automaticReentrySuppressedAt;
-                delete record.automaticReentrySuppressionReason;
-                delete record.automaticReentryAttemptedAt;
-                delete record.automaticReentryClaimedAt;
-                delete record.automaticReentryClaimId;
-                delete record.automaticReentryInstance;
-                delete record.automaticReentrySourceId;
-                delete record.automaticReentrySourceKind;
+                resumeAutomaticReentry(record);
             });
             return automaticReentryState(record, this.#host.now());
         });
@@ -141,11 +104,7 @@ export class ContextReentry implements ContextReentryPort {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             const previous = cloneStoredRecord(record);
             const clearsClaim =
                 record.automaticReentryAttemptedAt === undefined &&
@@ -161,11 +120,7 @@ export class ContextReentry implements ContextReentryPort {
                     now + MCP_CONTEXT_EXECUTION_LEASE_MS,
                 ).toISOString();
                 if (record.automaticReentryAttemptedAt === undefined) {
-                    delete record.automaticReentryClaimedAt;
-                    delete record.automaticReentryClaimId;
-                    delete record.automaticReentryInstance;
-                    delete record.automaticReentrySourceId;
-                    delete record.automaticReentrySourceKind;
+                    clearAutomaticReentryClaim(record);
                 }
                 await this.#persistExecution(record, clearsClaim);
             } catch (error) {
@@ -182,11 +137,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         expectedEpoch: number,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             if ((record.executionEpoch ?? 0) !== expectedEpoch) {
                 return automaticReentryState(record, now);
             }
@@ -209,11 +160,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             if (
                 record.automaticReentrySuppressedAt !== undefined ||
                 contextExecutionActive(record, now) ||
@@ -241,11 +188,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             if (
                 record.automaticReentrySuppressedAt !== undefined ||
                 !automaticReentryClaimFresh(record, now) ||
@@ -262,12 +205,7 @@ export class ContextReentry implements ContextReentryPort {
                 record.executionLeaseUntil = new Date(
                     now + MCP_CONTEXT_EXECUTION_LEASE_MS,
                 ).toISOString();
-                delete record.automaticReentryAttemptedAt;
-                delete record.automaticReentryClaimedAt;
-                delete record.automaticReentryClaimId;
-                delete record.automaticReentryInstance;
-                delete record.automaticReentrySourceId;
-                delete record.automaticReentrySourceKind;
+                clearAutomaticReentryClaim(record);
             });
             this.#persistExecutionBestEffort(record);
             return automaticReentryState(record, now);
@@ -279,21 +217,13 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             if (
                 record.automaticReentryClaimId === claimId &&
                 record.automaticReentryInstance === instance
             ) {
                 await this.#host.mutate(() => {
-                    delete record.automaticReentryAttemptedAt;
-                    delete record.automaticReentryClaimedAt;
-                    delete record.automaticReentryClaimId;
-                    delete record.automaticReentryInstance;
-                    delete record.automaticReentrySourceId;
-                    delete record.automaticReentrySourceKind;
+                    clearAutomaticReentryClaim(record);
                 });
             }
             return automaticReentryState(record, this.#host.now());
@@ -305,11 +235,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<{ claimed: boolean; state: McpContextAutomaticReentryState }> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             const freshClaim = automaticReentryClaimFresh(record, now);
             if (
                 record.automaticReentrySuppressedAt !== undefined ||
@@ -324,9 +250,7 @@ export class ContextReentry implements ContextReentryPort {
                 };
             }
             await this.#host.mutate(() => {
-                delete record.automaticReentryAttemptedAt;
-                delete record.automaticReentrySourceId;
-                delete record.automaticReentrySourceKind;
+                clearAutomaticReentryClaim(record);
                 record.automaticReentryClaimId = claimId;
                 record.automaticReentryClaimedAt = new Date(now).toISOString();
                 record.automaticReentryInstance = instance;
@@ -343,11 +267,7 @@ export class ContextReentry implements ContextReentryPort {
             "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait",
         sourceId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, async (record, now) => {
             if (
                 !automaticReentryClaimFresh(record, now) ||
                 record.automaticReentryClaimId !== claimId ||
@@ -381,11 +301,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<{ state: McpContextAutomaticReentryState; valid: boolean }> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
-            const now = this.#host.now();
+        return await this.#withTimedRecord(ctxId, instance, (record, now) => {
             const valid =
                 record.automaticReentrySuppressedAt === undefined &&
                 !contextExecutionActive(record, now) &&
@@ -401,10 +317,7 @@ export class ContextReentry implements ContextReentryPort {
         instance: string,
         claimId: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             if (
                 record.automaticReentryClaimId === claimId &&
                 record.automaticReentryInstance === instance
@@ -415,11 +328,7 @@ export class ContextReentry implements ContextReentryPort {
                     );
                 }
                 await this.#host.mutate(() => {
-                    delete record.automaticReentryClaimedAt;
-                    delete record.automaticReentryClaimId;
-                    delete record.automaticReentryInstance;
-                    delete record.automaticReentrySourceId;
-                    delete record.automaticReentrySourceKind;
+                    clearAutomaticReentryClaim(record);
                 });
             }
             return automaticReentryState(record, this.#host.now());
@@ -430,22 +339,14 @@ export class ContextReentry implements ContextReentryPort {
         ctxId: string,
         instance: string,
     ): Promise<McpContextAutomaticReentryState> {
-        await this.#host.validateForInstance(ctxId, instance, { execution: true });
-        return await this.#host.run(async () => {
-            const record = this.#host.records.get(ctxId);
-            if (record === undefined) throw invalidContext(ctxId);
+        return await this.#withRecord(ctxId, instance, async (record) => {
             if (
                 record.automaticReentryInstance === instance &&
                 (record.automaticReentryClaimId !== undefined ||
                     record.automaticReentryClaimedAt !== undefined)
             ) {
                 await this.#host.mutate(() => {
-                    delete record.automaticReentryAttemptedAt;
-                    delete record.automaticReentryClaimedAt;
-                    delete record.automaticReentryClaimId;
-                    delete record.automaticReentryInstance;
-                    delete record.automaticReentrySourceId;
-                    delete record.automaticReentrySourceKind;
+                    clearAutomaticReentryClaim(record);
                 });
             }
             return automaticReentryState(record, this.#host.now());
@@ -522,6 +423,36 @@ export class ContextReentry implements ContextReentryPort {
         }
     }
 
+    async #withRecord<Result>(
+        ctxId: string,
+        instance: string,
+        operation: (record: McpContextStoredRecord) => Result | Promise<Result>,
+    ): Promise<Result> {
+        await this.#host.validateForInstance(ctxId, instance, { execution: true });
+        return await this.#host.run(async () => {
+            const record = this.#host.records.get(ctxId);
+            if (record === undefined) throw invalidContext(ctxId);
+            return await operation(record);
+        });
+    }
+
+    #withTimedRecord<Result>(
+        ctxId: string,
+        instance: string,
+        operation: (record: McpContextStoredRecord, now: number) => Result | Promise<Result>,
+    ): Promise<Result> {
+        return this.#withRecord(ctxId, instance, (record) =>
+            operation(record, this.#host.now()),
+        );
+    }
+}
+
+function resumeAutomaticReentry(record: McpContextStoredRecord): void {
+    record.automaticReentryEpoch = (record.automaticReentryEpoch ?? 0) + 1;
+    delete record.automaticReentryMode;
+    delete record.automaticReentrySuppressedAt;
+    delete record.automaticReentrySuppressionReason;
+    clearAutomaticReentryClaim(record);
 }
 
 export interface ContextExecutionRecord {

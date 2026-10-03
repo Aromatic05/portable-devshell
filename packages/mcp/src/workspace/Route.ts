@@ -182,7 +182,7 @@ function registerLiveRouteBase(
                                     {
                                         instances: authorized.instances,
                                         reentry:
-                                            (await options.contextRegistry.readAutomaticReentry(
+                                            (await options.contextRegistry.reentry.readAutomaticReentry(
                                                 ctxId,
                                                 options.instanceName,
                                             )) as unknown as JsonValue,
@@ -245,7 +245,7 @@ async function authorize(
             ctxId,
             options.instanceName,
         );
-        const reentry = await options.contextRegistry.readAutomaticReentry(
+        const reentry = await options.contextRegistry.reentry.readAutomaticReentry(
             ctxId,
             options.instanceName,
         );

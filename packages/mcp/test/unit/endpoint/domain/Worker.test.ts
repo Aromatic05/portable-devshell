@@ -2166,7 +2166,7 @@ for (const remote of [true, false]) {
             h.final.lastAccessedAt,
         );
         assert.equal(
-            (await h.registry.readAutomaticReentry(h.final.ctxId, h.instance))
+            (await h.registry.reentry.readAutomaticReentry(h.final.ctxId, h.instance))
                 .executionEpoch,
             2,
         );

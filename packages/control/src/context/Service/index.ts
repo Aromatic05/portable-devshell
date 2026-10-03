@@ -1,15 +1,13 @@
-import type { ContextPresentationPort } from "./View.js";
-export type { ContextPresentationPort } from "./View.js";
 import type { ContextChangeHub } from "../Registry/Change.js";
 import type { ContextSnapshot } from "../../../../shared/src/workspace/context/Revision.js";
-import type { ContextLifecycleCleanupPort } from "./Cleanup.js";
-import {
-    type McpInstanceGateway,
-    type WorkerInstanceLike,
-} from "@portable-devshell/mcp";
+import type {
+    ContextLifecycleCleanupPort,
+    ContextPresentationPort,
+} from "./Cleanup.js";
+export type { ContextPresentationPort } from "./Cleanup.js";
+import { type WorkerInstanceLike } from "@portable-devshell/mcp";
 import type {
     ContextRegistryPort,
-    McpContextQuery,
     McpContextRecord,
 } from "@portable-devshell/shared";
 import type {
@@ -32,7 +30,6 @@ export class ContextService {
         registry: ContextRecordSourcePort;
         environment: ContextEnvironmentPort;
         cleanup: ContextLifecycleCleanupPort;
-        gateway(instance: string): McpInstanceGateway | undefined;
         worker(instance: string): WorkerInstanceLike | undefined;
     }) {
         this.registry = options.registry;
@@ -46,24 +43,12 @@ export class ContextService {
         this.cleanup.bindPresentation(presentation);
     }
 
-    get changes(): ContextChangeHub {
-        return this.registry.changes;
-    }
-
-    snapshot(): Promise<ContextSnapshot> {
-        return this.registry.snapshot();
-    }
-
     async initialize(): Promise<void> {
         await this.registry.initialize();
     }
 
     async reconcile(): Promise<void> {
         await this.cleanup.reconcile();
-    }
-
-    async list(query: McpContextQuery = {}): Promise<McpContextRecord[]> {
-        return await this.registry.list(query);
     }
 
     async disable(ctxId: string): Promise<McpContextRecord> {
@@ -82,17 +67,6 @@ export class ContextService {
             }
         }
         return record;
-    }
-
-    async referenceInstance(ctxId: string, instance: string) {
-        return await this.registry.referenceInstance(ctxId, instance);
-    }
-
-    async validateForInstance(
-        ctxId: string,
-        instance: string,
-    ): Promise<McpContextRecord> {
-        return await this.registry.validateForInstance(ctxId, instance);
     }
 
     async detachInstance(instance: string): Promise<McpContextRecord[]> {

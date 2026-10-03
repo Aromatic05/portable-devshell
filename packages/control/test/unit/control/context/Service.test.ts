@@ -41,7 +41,6 @@ test("terminal Context cleanup retains shared alerts until the final active asso
         registry,
         cleanup,
         environment,
-        gateway: () => gateway,
         worker: () => undefined,
     });
 

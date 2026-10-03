@@ -64,13 +64,13 @@ export class McpWorkspaceLegacyV0615 {
         const ctxId = requireCtxId(context);
         const request = readReentryControl(input);
         if (request.action === "get") {
-            return (await registry.readAutomaticReentry(
+            return (await registry.reentry.readAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             )) as unknown as JsonValue;
         }
         if (request.action === "yield") {
-            const state = await registry.suppressAutomaticReentry(
+            const state = await registry.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 request.reason ?? "user interrupted automatic execution",
@@ -78,7 +78,7 @@ export class McpWorkspaceLegacyV0615 {
             return { ...state, suppressed: true } as unknown as JsonValue;
         }
         if (request.action === "resume") {
-            const state = await registry.resumeAutomaticReentry(
+            const state = await registry.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );
@@ -87,7 +87,7 @@ export class McpWorkspaceLegacyV0615 {
         if (request.action === "claim") {
             const claimId =
                 request.claimId ?? `workspace-reentry-${randomUUID()}`;
-            const result = await registry.claimAutomaticReentry(
+            const result = await registry.reentry.claimAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 claimId,
@@ -103,7 +103,7 @@ export class McpWorkspaceLegacyV0615 {
                 throw new Error(
                     "workspace_reentry_control validate requires claimId.",
                 );
-            const result = await registry.validateAutomaticReentry(
+            const result = await registry.reentry.validateAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 request.claimId,
@@ -117,7 +117,7 @@ export class McpWorkspaceLegacyV0615 {
             throw new Error(
                 "workspace_reentry_control release requires claimId.",
             );
-        const state = await registry.releaseAutomaticReentry(
+        const state = await registry.reentry.releaseAutomaticReentry(
             ctxId,
             this.options.instanceName,
             request.claimId,

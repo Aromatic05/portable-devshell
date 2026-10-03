@@ -214,10 +214,10 @@ test("detaching an instance invalidates only its automatic reentry claim", async
             { instance: "worker-b", workspace: "/work/b" },
         ],
     });
-    await registry.claimAutomaticReentry(record.ctxId, "worker-a", "claim-a");
+    await registry.reentry.claimAutomaticReentry(record.ctxId, "worker-a", "claim-a");
     await registry.detachInstance("worker-a");
     assert.deepEqual(
-        await registry.listAutomaticReentryClaimsForInstance("worker-a"),
+        await registry.reentry.listAutomaticReentryClaimsForInstance("worker-a"),
         [],
     );
     assert.deepEqual(

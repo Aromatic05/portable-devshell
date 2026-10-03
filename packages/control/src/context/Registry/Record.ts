@@ -16,60 +16,50 @@ import {
 } from "../Model.js";
 
 export function invalidContext(ctxId: string) {
-    return createRemoteError({
-        code: contextErrorCodes.invalid,
-        details: { ctxId },
-        message: "ctxId is invalid for the current environment.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.invalid,
+        "ctxId is invalid for the current environment.",
+        { ctxId },
+    );
 }
 
 export function invalidRemoteHandle(ctxId: string) {
-    return createRemoteError({
-        code: contextErrorCodes.invalid,
-        details: { ctxId },
-        message:
-            "Remote instance handle is invalid for the current Context. Obtain a current handle with devshell instance list or status.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.invalid,
+        "Remote instance handle is invalid for the current Context. Obtain a current handle with devshell instance list or status.",
+        { ctxId },
+    );
 }
 
 export function maskedInstance(ctxId: string, instance: string) {
-    return createRemoteError({
-        code: contextErrorCodes.instanceMasked,
-        details: { ctxId, instance },
-        message:
-            "This remote instance is permanently masked for the lifetime of the current Context.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.instanceMasked,
+        "This remote instance is permanently masked for the lifetime of the current Context.",
+        { ctxId, instance },
+    );
 }
 
 export function invalidExternalBinding() {
-    return createRemoteError({
-        code: contextErrorCodes.invalid,
-        message: "No valid Context is bound to the current external identity.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.invalid,
+        "No valid Context is bound to the current external identity.",
+    );
 }
 
 export function expiredContext(ctxId: string, expiresAt: string) {
-    return createRemoteError({
-        code: contextErrorCodes.expired,
-        details: { ctxId, expiresAt },
-        message:
-            "ctxId lease has expired. Call environ_info to reactivate the same Context.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.expired,
+        "ctxId lease has expired. Call environ_info to reactivate the same Context.",
+        { ctxId, expiresAt },
+    );
 }
 
 export function disabledContext(ctxId: string) {
-    return createRemoteError({
-        code: contextErrorCodes.disabled,
-        details: { ctxId },
-        message:
-            "ctxId is disabled and cannot be reactivated. Call environ_info with workspace to establish a new active Context.",
-        retryable: false,
-    });
+    return contextError(
+        contextErrorCodes.disabled,
+        "ctxId is disabled and cannot be reactivated. Call environ_info with workspace to establish a new active Context.",
+        { ctxId },
+    );
 }
 
 export function isCtxId(value: string): boolean {
@@ -77,32 +67,14 @@ export function isCtxId(value: string): boolean {
 }
 
 export function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
-    const {
-        cleanupPending: _cleanupPending,
-        executionEpoch: _executionEpoch,
-        executionLastActivityAt: _executionLastActivityAt,
-        executionLeaseUntil: _executionLeaseUntil,
-        automaticReentryAttemptedAt: _automaticReentryAttemptedAt,
-        automaticReentryClaimedAt: _automaticReentryClaimedAt,
-        automaticReentryClaimId: _automaticReentryClaimId,
-        automaticReentryMode: _automaticReentryMode,
-        automaticReentryInstance: _automaticReentryInstance,
-        automaticReentryEpoch: _automaticReentryEpoch,
-        automaticReentrySuppressedAt: _automaticReentrySuppressedAt,
-        automaticReentrySuppressionReason: _automaticReentrySuppressionReason,
-        automaticReentrySourceId: _automaticReentrySourceId,
-        automaticReentrySourceKind: _automaticReentrySourceKind,
-        externalBindings: _externalBindings,
-        maskedInstances: _maskedInstances,
-        pendingEnvironmentCleanup: _pendingEnvironmentCleanup,
-        remoteInstanceHandles: _remoteInstanceHandles,
-        ...publicRecord
-    } = record;
     return {
-        ...publicRecord,
-        environments: record.environments.map((environment) => ({
-            ...environment,
-        })),
+        createdAt: record.createdAt,
+        ctxId: record.ctxId,
+        environments: structuredClone(record.environments),
+        expiresAt: record.expiresAt,
+        lastAccessedAt: record.lastAccessedAt,
+        principal: record.principal,
+        status: record.status,
     };
 }
 
@@ -119,25 +91,7 @@ export function cloneRecordForRead(
 export function cloneStoredRecord(
     record: McpContextStoredRecord,
 ): McpContextStoredRecord {
-    return {
-        ...record,
-        externalBindings: record.externalBindings?.map((binding) => ({
-            ...binding,
-        })),
-        maskedInstances:
-            record.maskedInstances === undefined
-                ? undefined
-                : [...record.maskedInstances],
-        pendingEnvironmentCleanup: record.pendingEnvironmentCleanup?.map(
-            cloneEnvironmentCleanup,
-        ),
-        remoteInstanceHandles: record.remoteInstanceHandles?.map(
-            (reference) => ({ ...reference }),
-        ),
-        environments: record.environments.map((environment) => ({
-            ...environment,
-        })),
-    };
+    return structuredClone(record);
 }
 
 export function contextEnvironment(
@@ -152,12 +106,7 @@ export function contextEnvironment(
 export function cloneContextMap(
     contexts: ReadonlyMap<string, McpContextStoredRecord>,
 ): Map<string, McpContextStoredRecord> {
-    return new Map(
-        [...contexts].map(([ctxId, record]) => [
-            ctxId,
-            cloneStoredRecord(record),
-        ]),
-    );
+    return structuredClone(new Map(contexts));
 }
 
 export function restoreContextMap(
@@ -165,26 +114,17 @@ export function restoreContextMap(
     previous: ReadonlyMap<string, McpContextStoredRecord>,
 ): void {
     contexts.clear();
-    for (const [ctxId, record] of previous) {
-        contexts.set(ctxId, cloneStoredRecord(record));
-    }
+    for (const [ctxId, record] of cloneContextMap(previous))
+        contexts.set(ctxId, record);
 }
 
 export function isDocument(value: unknown): value is McpContextDocument {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        (value as { version?: unknown }).version === 2 &&
-        Array.isArray((value as { contexts?: unknown }).contexts)
-    );
+    return isObject(value) && value.version === 2 && Array.isArray(value.contexts);
 }
 
 export function parseRecord(value: unknown): McpContextStoredRecord | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-    const raw = value as Record<string, unknown>;
+    if (!isObject(value)) return undefined;
+    const raw = value;
     const record = value as Partial<McpContextStoredRecord>;
     const status = raw.status;
     const parsedBindings = Array.isArray(record.externalBindings)
@@ -340,10 +280,8 @@ export function parseRecord(value: unknown): McpContextStoredRecord | undefined 
 export function parseRemoteInstanceHandle(
     value: unknown,
 ): McpContextRemoteInstanceHandle | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return undefined;
-    const handle = (value as { handle?: unknown }).handle;
-    const instance = (value as { instance?: unknown }).instance;
+    if (!isObject(value)) return undefined;
+    const { handle, instance } = value;
     return typeof handle === "string" &&
         handle.startsWith("ih-") &&
         handle.length > 3 &&
@@ -356,9 +294,8 @@ export function parseRemoteInstanceHandle(
 export function parseEnvironmentCleanup(
     value: unknown,
 ): McpContextEnvironmentCleanup | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return undefined;
-    const cleanup = value as Record<string, unknown>;
+    if (!isObject(value)) return undefined;
+    const cleanup = value;
     if (typeof cleanup.instance !== "string" || cleanup.instance.length === 0) {
         return undefined;
     }
@@ -380,12 +317,6 @@ export function parseEnvironmentCleanup(
         };
     }
     return undefined;
-}
-
-export function cloneEnvironmentCleanup(
-    cleanup: McpContextEnvironmentCleanup,
-): McpContextEnvironmentCleanup {
-    return { ...cleanup };
 }
 
 export function sameEnvironmentCleanup(
@@ -413,7 +344,7 @@ export function appendEnvironmentCleanup(
     }
     record.pendingEnvironmentCleanup = [
         ...(record.pendingEnvironmentCleanup ?? []),
-        cloneEnvironmentCleanup(cleanup),
+        { ...cleanup },
     ];
 }
 
@@ -534,9 +465,8 @@ export function parseExternalBinding(
 }
 
 export function isExternalBinding(value: unknown): value is McpContextExternalBinding {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return false;
-    const binding = value as Partial<McpContextExternalBinding>;
+    if (!isObject(value)) return false;
+    const binding = value;
     return (
         typeof binding.kind === "string" &&
         binding.kind.length > 0 &&
@@ -584,12 +514,7 @@ export function uniqueExternalBindings(
 }
 
 export function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "ENOENT"
-    );
+    return isObject(error) && error.code === "ENOENT";
 }
 
 
@@ -682,7 +607,7 @@ export function migrateContextDocument(
             (item.externalBindings !== undefined &&
                 (!Array.isArray(item.externalBindings) ||
                     item.externalBindings.some(
-                        (binding) => !validExternalBinding(binding),
+                        (binding) => !isExternalBinding(binding),
                     ))) ||
             (item.maskedInstances !== undefined &&
                 (!Array.isArray(item.maskedInstances) ||
@@ -694,12 +619,17 @@ export function migrateContextDocument(
             (item.remoteInstanceHandles !== undefined &&
                 (!Array.isArray(item.remoteInstanceHandles) ||
                     item.remoteInstanceHandles.some(
-                        (handle) => !validRemoteHandle(handle),
+                        (handle) =>
+                            !isObject(handle) ||
+                            typeof handle.handle !== "string" ||
+                            !handle.handle.startsWith("ih-") ||
+                            typeof handle.instance !== "string" ||
+                            handle.instance.length === 0,
                     ))) ||
             (item.pendingEnvironmentCleanup !== undefined &&
                 (!Array.isArray(item.pendingEnvironmentCleanup) ||
                     item.pendingEnvironmentCleanup.some(
-                        (cleanup) => !validCleanup(cleanup),
+                        (cleanup) => parseEnvironmentCleanup(cleanup) === undefined,
                     )))
         ) {
             throw new Error(
@@ -722,34 +652,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validExternalBinding(value: unknown): boolean {
-    return (
-        isObject(value) &&
-        typeof value.kind === "string" &&
-        value.kind.length > 0 &&
-        typeof value.value === "string" &&
-        value.value.length > 0
-    );
-}
-
-function validRemoteHandle(value: unknown): boolean {
-    return (
-        isObject(value) &&
-        typeof value.handle === "string" &&
-        value.handle.startsWith("ih-") &&
-        typeof value.instance === "string" &&
-        value.instance.length > 0
-    );
-}
-
-function validCleanup(value: unknown): boolean {
-    return (
-        isObject(value) &&
-        typeof value.instance === "string" &&
-        value.instance.length > 0 &&
-        (value.kind === "instance_reference" ||
-            (value.kind === "alerts" &&
-                typeof value.workspace === "string" &&
-                value.workspace.length > 0))
-    );
+function contextError(
+    code: string,
+    message: string,
+    details?: Record<string, string>,
+) {
+    return createRemoteError({
+        code,
+        ...(details === undefined ? {} : { details }),
+        message,
+        retryable: false,
+    });
 }
