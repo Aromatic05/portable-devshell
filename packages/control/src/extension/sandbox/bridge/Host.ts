@@ -16,10 +16,7 @@ import type {
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
 import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
-import type {
-    ExtensionWorkerCapability,
-    ExtensionWorkerSession,
-} from "@portable-devshell/extension/worker";
+import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
@@ -46,7 +43,6 @@ import {
     type ExtensionSandboxInvokeOperation,
     type ExtensionSandboxToHostMessage,
     type ExtensionSandboxWorkerData,
-    type ExtensionSandboxWorkerSessionDescriptor,
     type SandboxArtifactShareInput,
     type SandboxArtifactTransferInput,
     type SandboxAssetProjectInput,
@@ -67,6 +63,7 @@ import {
     type SandboxWorkerOpenInput,
 } from "./Protocol.js";
 import { ExtensionSandboxProcessBridge } from "./ProcessBridge.js";
+import { ExtensionSandboxWorkerSessions } from "./WorkerSessions.js";
 import {
     DEFAULT_EXTENSION_SANDBOX_EXTERNAL_MEMORY_LIMIT_MB,
     DEFAULT_EXTENSION_SANDBOX_RESOURCE_LIMITS,
@@ -161,11 +158,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #processes: ExtensionSandboxProcessBridge;
     readonly #toolCallHistoryCapability: ToolCallHistoryCapability;
     readonly #capabilityControllers = new Map<string, AbortController>();
-    readonly #workerDelegateCapability: ExtensionWorkerCapability;
     readonly #ready: Promise<ExtensionSandboxReadyDescriptor>;
-    readonly #sessions = new Map<string, ExtensionWorkerSession>();
+    readonly #sessions: ExtensionSandboxWorkerSessions;
     readonly #worker: Worker;
-    readonly #workerExecuteCapability: ExtensionWorkerCapability;
     #closing = false;
     #configCoreUnsubscribe?: () => void;
     #configUnsubscribe?: () => void;
@@ -177,7 +172,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     #readyReject?: (error: Error) => void;
     #readySettled = false;
     #readyTimer?: NodeJS.Timeout;
-    #sessionCleanup?: Promise<void>;
 
     get faultError(): Error | undefined {
         return this.#faulted;
@@ -233,8 +227,18 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             send: (message) => this.#send(message),
         });
         this.#toolCallHistoryCapability = options.toolCallHistory;
-        this.#workerDelegateCapability = options.workerDelegate;
-        this.#workerExecuteCapability = options.workerExecute;
+        this.#sessions = new ExtensionSandboxWorkerSessions({
+            acceptanceError: () =>
+                this.#faulted ??
+                (this.#closing
+                    ? new Error(
+                          "Extension sandbox stopped accepting Worker sessions.",
+                      )
+                    : undefined),
+            delegate: options.workerDelegate,
+            execute: options.workerExecute,
+            send: (message) => this.#send(message),
+        });
         const workerData: ExtensionSandboxWorkerData = {
             capabilities: [...options.capabilities],
             codeDirectory: options.codeDirectory,
@@ -375,7 +379,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     async dispose(): Promise<void> {
         if (this.#closing) return;
         if (this.#faulted !== undefined) {
-            const cleanupFailure = await this.#closeSessions().then(
+            const cleanupFailure = await this.#sessions.closeAll().then(
                 () => undefined,
                 (error: unknown) => toError(error),
             );
@@ -406,7 +410,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             this.#fault(failure);
         }
         if (timer !== undefined) clearTimeout(timer);
-        const cleanupFailure = await this.#closeSessions().then(
+        const cleanupFailure = await this.#sessions.closeAll().then(
             () => undefined,
             (error: unknown) => toError(error),
         );
@@ -455,7 +459,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 if (
                     this.#faulted !== undefined ||
                     this.#closing ||
-                    this.#sessionCleanup !== undefined
+                    this.#sessions.closing
                 )
                     return;
                 await this.#executeCapability(
@@ -733,44 +737,29 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     input as SandboxProcessTerminateInput,
                 );
                 return undefined;
-            case "workerExecute.openSession": {
-                const opened = await this.#workerExecuteCapability.openSession(
+            case "workerExecute.openSession":
+                return await this.#sessions.open(
+                    "execute",
                     input as SandboxWorkerOpenInput,
                 );
-                return await this.#registerWorkerSession(opened);
-            }
-            case "workerDelegate.openSession": {
-                const opened = await this.#workerDelegateCapability.openSession(
+            case "workerDelegate.openSession":
+                return await this.#sessions.open(
+                    "delegate",
                     input as SandboxWorkerOpenInput,
                 );
-                return await this.#registerWorkerSession(opened);
-            }
             case "workerDelegate.callTool":
-            case "workerExecute.callTool": {
-                const value = input as SandboxWorkerCallInput;
-                const session = this.#requireSession(value.sessionId);
-                return await session.callTool(value.toolName, value.input, {
-                    ...(value.operationId === undefined
-                        ? {}
-                        : { operationId: value.operationId }),
-                    onProgress: (progress) =>
-                        this.#send({
-                            id,
-                            type: "capabilityProgress",
-                            value: progress,
-                        }),
+            case "workerExecute.callTool":
+                return await this.#sessions.callTool(
+                    id,
+                    input as SandboxWorkerCallInput,
                     signal,
-                });
-            }
+                );
             case "workerDelegate.closeSession":
-            case "workerExecute.closeSession": {
-                const value = input as SandboxWorkerCloseInput;
-                const session = this.#sessions.get(value.sessionId);
-                if (session === undefined) return undefined;
-                this.#sessions.delete(value.sessionId);
-                await session.close();
+            case "workerExecute.closeSession":
+                await this.#sessions.close(
+                    (input as SandboxWorkerCloseInput).sessionId,
+                );
                 return undefined;
-            }
         }
     }
 
@@ -855,39 +844,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         return pending;
     }
 
-    async #registerWorkerSession(
-        opened: ExtensionWorkerSession,
-    ): Promise<ExtensionSandboxWorkerSessionDescriptor> {
-        if (
-            this.#faulted !== undefined ||
-            this.#closing ||
-            this.#sessionCleanup !== undefined
-        ) {
-            await opened.close();
-            throw (
-                this.#faulted ??
-                new Error(
-                    "Extension sandbox stopped accepting Worker sessions.",
-                )
-            );
-        }
-        const sessionId = randomUUID();
-        this.#sessions.set(sessionId, opened);
-        void opened.closed
-            .then(() => {
-                this.#sessions.delete(sessionId);
-                this.#send({ sessionId, type: "workerSessionClosed" });
-            })
-            .catch(() => undefined);
-        return {
-            environment: opened.environment,
-            instance: opened.instance,
-            sessionId,
-            tools: opened.listTools(),
-            workspace: opened.workspace,
-        };
-    }
-
     #requireConfig(): ExtensionConfig {
         if (this.#config !== undefined) return this.#config;
         throw new Error("Extension sandbox Config is unavailable.");
@@ -897,14 +853,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         if (this.#configCore !== undefined) return this.#configCore;
         throw new Error(
             "Extension sandbox config.core capability is unavailable.",
-        );
-    }
-
-    #requireSession(id: string): ExtensionWorkerSession {
-        const session = this.#sessions.get(id);
-        if (session !== undefined) return session;
-        throw new Error(
-            `Extension sandbox Worker session is unavailable: ${id}.`,
         );
     }
 
@@ -942,7 +890,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#invocationInterfaces.clear();
         this.#processes.releaseSubscriptions();
         this.#releaseConfigSubscription();
-        void this.#closeSessions().catch((cleanupError: unknown) => {
+        void this.#sessions.closeAll().catch((cleanupError: unknown) => {
             this.#logger.warn(
                 "Extension sandbox Worker sessions did not close cleanly after a fault.",
                 {
@@ -962,29 +910,6 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#configUnsubscribe = undefined;
         this.#configCoreUnsubscribe?.();
         this.#configCoreUnsubscribe = undefined;
-    }
-
-    async #closeSessions(): Promise<void> {
-        this.#sessionCleanup ??= this.#closeSessionsOnce();
-        await this.#sessionCleanup;
-    }
-
-    async #closeSessionsOnce(): Promise<void> {
-        const sessions = [...this.#sessions.values()];
-        this.#sessions.clear();
-        const settled = await Promise.allSettled(
-            sessions.map(async (session) => await session.close()),
-        );
-        const failures = settled.flatMap((result) =>
-            result.status === "rejected" ? [result.reason] : [],
-        );
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1) {
-            throw new AggregateError(
-                failures,
-                "Extension sandbox Worker sessions failed to close.",
-            );
-        }
     }
 
     async #terminate(): Promise<void> {
