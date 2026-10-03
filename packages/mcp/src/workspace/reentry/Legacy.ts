@@ -10,11 +10,11 @@ import type {
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     isMcpGoalGateway,
-    isMcpInteractionGateway,
+    isMcpWorkspaceActionGateway,
     isMcpWaitRecoveryGateway,
     isMcpWorkspaceGateway,
     type McpInstanceGateway,
-    type McpInteractionGateway,
+    type McpWorkspaceActionGateway,
 } from "../../endpoint/Port.js";
 import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
 
@@ -126,7 +126,7 @@ export class McpWorkspaceLegacyV0615 {
     }
 
     async #continueGoal(
-        interactionGateway: McpInteractionGateway,
+        workspaceActionGateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -137,17 +137,17 @@ export class McpWorkspaceLegacyV0615 {
         const ctxId = requireCtxId(context);
         const request = readGoalContinuationInput(input);
         if (request.action !== "report" && request.action !== "reset") {
-            const workspaceGateway = isMcpWorkspaceGateway(interactionGateway)
-                ? interactionGateway
+            const workspaceGateway = isMcpWorkspaceGateway(workspaceActionGateway)
+                ? workspaceActionGateway
                 : undefined;
             const instances = await this.#contextInstances(ctxId);
             const [goal, waits, approvalSlices, activeCallSlices] =
                 await Promise.all([
                     goalGateway.readGoal(this.options.instanceName, ctxId),
-                    interactionGateway.listWaits(this.options.instanceName),
+                    workspaceActionGateway.listWaits(this.options.instanceName),
                     Promise.allSettled(
                         instances.map(async (instance) =>
-                            await interactionGateway.approval.listPendingApprovals(instance, ctxId),
+                            await workspaceActionGateway.approval.listPendingApprovals(instance, ctxId),
                         ),
                     ),
                     Promise.allSettled(
@@ -206,7 +206,7 @@ export class McpWorkspaceLegacyV0615 {
     }
 
     async #recoverWait(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -528,8 +528,8 @@ function requireGoalGateway(
 function requireInteractionGateway(
     gateway: McpInstanceGateway | undefined,
     instance: string,
-): McpInteractionGateway {
-    if (!isMcpInteractionGateway(gateway))
+): McpWorkspaceActionGateway {
+    if (!isMcpWorkspaceActionGateway(gateway))
         throw new Error(
             `Workspace interaction is unavailable for ${instance}.`,
         );

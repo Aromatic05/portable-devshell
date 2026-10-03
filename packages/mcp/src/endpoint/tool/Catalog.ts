@@ -12,7 +12,7 @@ import {
     createMcpContextSelector,
     type McpContextSelector,
 } from "../../context/Selector.js";
-import { isMcpInteractionGateway, type McpInstanceGateway } from "../Port.js";
+import { isMcpWorkspaceActionGateway, type McpInstanceGateway } from "../Port.js";
 import {
     mcpToolAnnotations,
     mcpToolPreserveInputDescriptions,
@@ -28,10 +28,10 @@ import { McpToolCatalogArtifact } from "../domain/artifact/Catalog.js";
 import {
     isMcpEnvironmentToolName,
     McpToolCatalogEnvironment,
-} from "../domain/environment/Catalog.js";
-import { McpToolCatalogInteraction } from "../domain/interaction/Catalog.js";
-import { McpToolCatalogTodo } from "../domain/todo/Catalog.js";
-import { withMcpCommentOutputSchema } from "../domain/interaction/Handler.js";
+} from "../domain/context/environment/Catalog.js";
+import { McpToolCatalogWorkspace } from "../workspace/Catalog.js";
+import { McpToolCatalogTodo } from "../domain/task/Catalog.js";
+import { withMcpCommentOutputSchema } from "../workspace/Handler.js";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
@@ -70,7 +70,7 @@ export class McpEndpointCatalog {
     readonly #environmentTools = new McpToolCatalogEnvironment();
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #interactionTools = new McpToolCatalogInteraction();
+    readonly #workspaceTools = new McpToolCatalogWorkspace();
     readonly #presentationResourceUri?: string;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpToolCatalogTodo();
@@ -198,8 +198,8 @@ export class McpEndpointCatalog {
         const workspaceTools =
             this.#workspaceAppEnabled &&
             this.#gateway !== undefined &&
-            isMcpInteractionGateway(this.#gateway)
-                ? this.#interactionTools.list()
+            isMcpWorkspaceActionGateway(this.#gateway)
+                ? this.#workspaceTools.list()
                 : [];
         const sources: McpToolCatalogEndpointSource[] = [
             {

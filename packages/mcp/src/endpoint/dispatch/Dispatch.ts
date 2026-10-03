@@ -23,9 +23,9 @@ import {
     type McpTmuxWaitGateway,
 } from "../Port.js";
 import type { McpToolCatalogArtifactName } from "../domain/artifact/Catalog.js";
-import { mcpEnvironmentToolName } from "../domain/environment/Catalog.js";
-import type { McpToolCatalogInteractionName } from "../domain/interaction/Catalog.js";
-import type { McpToolCatalogTodoName } from "../domain/todo/Catalog.js";
+import { mcpEnvironmentToolName } from "../domain/context/environment/Catalog.js";
+import type { McpToolCatalogWorkspaceName } from "../workspace/Catalog.js";
+import type { McpToolCatalogTodoName } from "../domain/task/Catalog.js";
 import type { WorkspaceAppLeaseStore } from "../../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../../workspace/app/Presence.js";
 import type { WorkspaceActionStore } from "../../workspace/ActionStore.js";
@@ -39,7 +39,7 @@ import {
 import {
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool,
-} from "../domain/worker/Compatibility.js";
+} from "../Compatibility.js";
 import type {
     McpEndpointCatalog,
     McpEndpointCatalogWorker,
@@ -52,12 +52,12 @@ import {
 } from "./Input.js";
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../Endpoint.js";
-import type { McpToolProvenanceRecorder } from "../domain/worker/Provenance.js";
+import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
 import { McpEndpointHandlerArtifact } from "../domain/artifact/Handler.js";
-import { McpEndpointHandlerEnvironment } from "../domain/environment/Handler.js";
-import { McpEndpointHandlerInteraction } from "../domain/interaction/Handler.js";
-import { McpEndpointHandlerTodo } from "../domain/todo/Handler.js";
-import { McpEndpointHandlerWorker } from "../domain/worker/Handler.js";
+import { McpEndpointHandlerEnvironment } from "../domain/context/environment/Handler.js";
+import { McpEndpointHandlerWorkspace } from "../workspace/Handler.js";
+import { McpEndpointHandlerTodo } from "../domain/task/Handler.js";
+import { McpEndpointHandlerTool } from "../tool/Handler.js";
 import {
     callMcpEndpointToolOperation,
     assertMcpEndpointReady,
@@ -115,7 +115,7 @@ export class McpEndpointDispatch {
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #interaction: McpEndpointHandlerInteraction;
+    readonly #workspace: McpEndpointHandlerWorkspace;
     readonly #reentry: McpWorkspaceReentryArbiter;
     readonly #tmuxBlockSyncMs: number;
     readonly #readyWaitMs?: number;
@@ -128,7 +128,7 @@ export class McpEndpointDispatch {
     readonly #todo: McpEndpointHandlerTodo;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
-    readonly #workerHandler: McpEndpointHandlerWorker;
+    readonly #workerHandler: McpEndpointHandlerTool;
 
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
@@ -171,9 +171,9 @@ export class McpEndpointDispatch {
             instanceName: options.instanceName,
             worker: options.worker,
         });
-        this.#interaction = new McpEndpointHandlerInteraction(controlOptions);
+        this.#workspace = new McpEndpointHandlerWorkspace(controlOptions);
         this.#todo = new McpEndpointHandlerTodo(controlOptions);
-        this.#workerHandler = new McpEndpointHandlerWorker({
+        this.#workerHandler = new McpEndpointHandlerTool({
             gateway: options.gateway,
             instanceName: options.instanceName,
         });
@@ -241,7 +241,7 @@ export class McpEndpointDispatch {
             );
             if (!workspaceApp || toolName !== mcpEnvironmentToolName)
                 return environment.structuredContent;
-            return await this.#interaction.bootstrapWorkspace(
+            return await this.#workspace.bootstrapWorkspace(
                 environment.ctxId,
                 environment.structuredContent,
             );
@@ -306,14 +306,14 @@ export class McpEndpointDispatch {
                 this.#catalog.assertAdaptable(selected.definition);
                 const result =
                     legacyWorkspaceAppTool === undefined
-                        ? await this.#interaction.call(
-                              toolName as McpToolCatalogInteractionName,
+                        ? await this.#workspace.call(
+                              toolName as McpToolCatalogWorkspaceName,
                               input,
                               context,
                               context.requestId ?? "workspace-app",
                               signal,
                           )
-                        : await this.#interaction.callLegacyV0615(
+                        : await this.#workspace.callLegacyV0615(
                               legacyWorkspaceAppTool,
                               input,
                               context,
@@ -1632,8 +1632,8 @@ export class McpEndpointDispatch {
                 });
             }
             case "workspace":
-                return await this.#interaction.call(
-                    toolName as McpToolCatalogInteractionName,
+                return await this.#workspace.call(
+                    toolName as McpToolCatalogWorkspaceName,
                     input,
                     context,
                     callId,

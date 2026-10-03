@@ -311,7 +311,7 @@ export interface McpInstanceGateway {
     ): Promise<ArtifactViewImageResult>;
 }
 
-export type McpInteractionGateway = McpInstanceGateway &
+export type McpWorkspaceActionGateway = McpInstanceGateway &
     Required<
         Pick<
             McpInstanceGateway,
@@ -324,9 +324,9 @@ export type McpInteractionGateway = McpInstanceGateway &
         >
     > & { approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">> };
 
-export function isMcpInteractionGateway(
+export function isMcpWorkspaceActionGateway(
     gateway: McpInstanceGateway | undefined,
-): gateway is McpInteractionGateway {
+): gateway is McpWorkspaceActionGateway {
     return (
         gateway !== undefined &&
         gateway.createWait !== undefined &&
@@ -341,7 +341,7 @@ export function isMcpInteractionGateway(
     );
 }
 
-export type McpWaitRecoveryGateway = McpInteractionGateway &
+export type McpWaitRecoveryGateway = McpWorkspaceActionGateway &
     Required<
         Pick<
             McpInstanceGateway,
@@ -359,7 +359,7 @@ export function isMcpWaitRecoveryGateway(
     gateway: McpInstanceGateway | undefined,
 ): gateway is McpWaitRecoveryGateway {
     return (
-        isMcpInteractionGateway(gateway) &&
+        isMcpWorkspaceActionGateway(gateway) &&
         gateway.claimWaitRecovery !== undefined &&
         gateway.completeWaitRecovery !== undefined &&
         gateway.dismissWaitRecovery !== undefined &&
@@ -370,14 +370,14 @@ export function isMcpWaitRecoveryGateway(
     );
 }
 
-export type McpWaitTrackingGateway = McpInteractionGateway &
+export type McpWaitTrackingGateway = McpWorkspaceActionGateway &
     Required<Pick<McpInstanceGateway, "cancelWait" | "reattachWait">>;
 
 export function isMcpWaitTrackingGateway(
     gateway: McpInstanceGateway | undefined,
 ): gateway is McpWaitTrackingGateway {
     return (
-        isMcpInteractionGateway(gateway) &&
+        isMcpWorkspaceActionGateway(gateway) &&
         gateway.cancelWait !== undefined &&
         gateway.reattachWait !== undefined
     );
@@ -395,14 +395,14 @@ export function isMcpTmuxWaitGateway(
     );
 }
 
-export type McpWorkspaceGateway = McpInteractionGateway &
+export type McpWorkspaceGateway = McpWorkspaceActionGateway &
     Required<Pick<McpInstanceGateway, "readToolCalls" | "readWorkspaceEvents">>;
 
 export function isMcpWorkspaceGateway(
     gateway: McpInstanceGateway | undefined,
 ): gateway is McpWorkspaceGateway {
     return (
-        isMcpInteractionGateway(gateway) &&
+        isMcpWorkspaceActionGateway(gateway) &&
         gateway.readToolCalls !== undefined &&
         gateway.readWorkspaceEvents !== undefined
     );

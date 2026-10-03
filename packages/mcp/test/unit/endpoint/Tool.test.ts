@@ -9,7 +9,7 @@ import {
     mcpToolTitle,
     McpToolCatalogArtifact,
     McpToolCatalogEnvironment,
-    McpToolCatalogInteraction,
+    McpToolCatalogWorkspace,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
@@ -550,7 +550,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             ...new McpToolCatalogEnvironment().list({
                 presentationResourceUri: workspaceAppResourceUri,
             }),
-            ...new McpToolCatalogInteraction().list(),
+            ...new McpToolCatalogWorkspace().list(),
         ];
 
         for (const definition of definitions) {

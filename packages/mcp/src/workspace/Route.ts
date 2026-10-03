@@ -5,13 +5,14 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { HttpHost } from "../host/Http.js";
 import {
-    isMcpInteractionGateway,
+    isMcpWorkspaceActionGateway,
     isMcpWorkspaceGateway,
-    type McpInteractionGateway,
+    type McpWorkspaceActionGateway,
     type McpInstanceGateway,
     type McpWorkspaceGateway,
 } from "../endpoint/Port.js";
-import { readWorkspaceSnapshot, workspaceEventBelongsTo } from "./Snapshot.js";
+import { readWorkspaceSnapshot } from "./Projection.js";
+import { workspaceEventBelongsTo } from "./contributor/Activity.js";
 import { WorkspaceAppLeaseStore } from "./app/Lease.js";
 import { WorkspaceAppPresenceStore } from "./app/Presence.js";
 import { WorkspaceActionStore } from "./ActionStore.js";
@@ -56,7 +57,7 @@ export function workspaceLiveBaseUrl(
 export function installMcpWorkspaceLiveRoute(
     options: McpWorkspaceLiveRouteOptions,
 ): () => void {
-    const gateway = isMcpInteractionGateway(options.gateway)
+    const gateway = isMcpWorkspaceActionGateway(options.gateway)
         ? options.gateway
         : undefined;
     const workspaceGateway = isMcpWorkspaceGateway(options.gateway)
@@ -78,7 +79,7 @@ export function installMcpWorkspaceLiveRoute(
 
 function registerLiveRouteBase(
     options: McpWorkspaceLiveRouteOptions,
-    gateway: McpInteractionGateway,
+    gateway: McpWorkspaceActionGateway,
     workspaceGateway: McpWorkspaceGateway,
     base: string,
 ): Array<() => void> {

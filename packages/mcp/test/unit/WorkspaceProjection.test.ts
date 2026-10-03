@@ -3,13 +3,13 @@ import test from "node:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { GoalSnapshot, TodoTaskSummary, WaitRecord } from "@portable-devshell/shared";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
-import type { McpInteractionGateway } from "../../src/endpoint/Port.js";
-import { workspaceSnapshotOutputSchema } from "../../src/endpoint/domain/interaction/Schema.js";
+import type { McpWorkspaceActionGateway } from "../../src/endpoint/Port.js";
+import { workspaceSnapshotOutputSchema } from "../../src/endpoint/workspace/Schema.js";
 import { contributeGoal } from "../../src/workspace/contributor/Goal.js";
 import { contributeTodo } from "../../src/workspace/contributor/Todo.js";
 import { contributeWaits } from "../../src/workspace/contributor/Wait.js";
 import { projectWorkspaceReentry } from "../../src/workspace/ReentryView.js";
-import { readWorkspaceProjection, readWorkspaceSnapshot } from "../../src/workspace/Snapshot.js";
+import { readWorkspaceProjection, readWorkspaceSnapshot } from "../../src/workspace/Projection.js";
 
 test("Workspace projection keeps context scoped state, stable actions, model context, and re-entry schedule", async () => {
     const gateway = {
@@ -26,7 +26,7 @@ test("Workspace projection keeps context scoped state, stable actions, model con
         hasActiveToolCalls: () => false,
         readToolCalls: async () => [],
         readWorkspaceEvents: async () => ({ events: [], gap: false, lastSeq: 19 }),
-    } as unknown as McpInteractionGateway;
+    } as unknown as McpWorkspaceActionGateway;
     const options = { instances: ["beta"], reentry: { epoch: 3, mode: "automatic", pending: false, executionActive: false }, directives: [{ kind: "reentry" as const, intent: "goal-resume" as const, sourceId: "goal-a", id: "directive-a" }] };
     const first = await readWorkspaceProjection(gateway, "alpha", "ctx-a", options);
     const second = await readWorkspaceProjection(gateway, "alpha", "ctx-a", options);
@@ -56,7 +56,7 @@ test("Workspace projection suppresses automatic schedule while re-entry is user-
         goalContinuation: async () => ({}), manageGoal: async () => undefined,
         readToolCalls: async () => [],
         readWorkspaceEvents: async () => ({ events: [], gap: false, lastSeq: 0 }),
-    } as unknown as McpInteractionGateway;
+    } as unknown as McpWorkspaceActionGateway;
     const { snapshot } = await readWorkspaceProjection(gateway, "alpha", "ctx-a", { reentry: { mode: "paused", pending: true, epoch: 4 } });
     assert.equal(snapshot.reentry.pending, true);
     assert.equal(snapshot.reentry.schedule, undefined);
@@ -145,7 +145,7 @@ test("Workspace snapshot reads events before the domain snapshot", async () => {
         approval: { listPendingApprovals: async () => [], decideApproval: async () => ({}) },
         readWorkspaceEvents: async () => { taskTitle = "new"; return { events: [], gap: false, lastSeq: 42 }; },
         readToolCalls: async () => [], hasActiveToolCalls: () => false,
-    } as unknown as McpInteractionGateway;
+    } as unknown as McpWorkspaceActionGateway;
     const result = await readWorkspaceProjection(gateway, "alpha", "ctx-a");
     assert.equal(result.snapshot.cursor, 42);
     assert.equal(result.snapshot.presentation.work[0]?.title, "new");

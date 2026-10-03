@@ -1,6 +1,6 @@
 import { runtimeErrorCodes, type JsonValue, type ToolCallContext, type WaitRecord } from "@portable-devshell/shared";
-import type { McpInteractionGateway } from "../endpoint/Port.js";
-import { readWorkspaceProjection } from "./Snapshot.js";
+import type { McpWorkspaceActionGateway } from "../endpoint/Port.js";
+import { readWorkspaceProjection } from "./Projection.js";
 import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction, WorkspaceSnapshot } from "./Contract.js";
 import { WorkspaceActionStore } from "./ActionStore.js";
 
@@ -74,14 +74,14 @@ export interface WorkspaceActionRouterOptions {
     instance: string;
     contextInstances(ctxId: string): Promise<string[]>;
     reentry(ctxId: string): Promise<JsonValue | undefined>;
-    snapshot(gateway: McpInteractionGateway, ctxId: string, directives: WorkspaceActionEffect[]): Promise<WorkspaceSnapshot>;
+    snapshot(gateway: McpWorkspaceActionGateway, ctxId: string, directives: WorkspaceActionEffect[]): Promise<WorkspaceSnapshot>;
     preflight?(action: WorkspaceResolvedAction, request: WorkspaceActionRequest, context: ToolCallContext): Promise<void>;
     mutate(action: WorkspaceResolvedAction, request: WorkspaceActionRequest, context: ToolCallContext): Promise<WorkspaceActionEffect | undefined>;
 }
 
 export async function executeWorkspaceAction(
     options: WorkspaceActionRouterOptions,
-    gateway: McpInteractionGateway,
+    gateway: McpWorkspaceActionGateway,
     request: WorkspaceActionRequest,
     context: ToolCallContext,
 ): Promise<JsonValue> {

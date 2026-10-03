@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveMcpLegacyTool } from "../../../../src/endpoint/domain/worker/Compatibility.ts";
+import { resolveMcpLegacyTool } from "../../../../src/endpoint/Compatibility.ts";
 
 test("legacy MCP compatibility aliases only the semantic superset", () => {
     assert.deepEqual(resolveMcpLegacyTool("ask_question"), {

@@ -12,34 +12,32 @@ import type {
 
 import {
     isMcpGoalGateway,
-    isMcpInteractionGateway,
+    isMcpWorkspaceActionGateway,
     isMcpWaitRecoveryGateway,
     isMcpWaitTrackingGateway,
     isMcpWorkspaceGateway,
     type McpInstanceGateway,
-    type McpInteractionGateway,
-} from "../../Port.js";
+    type McpWorkspaceActionGateway,
+} from "../Port.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { McpToolCatalogInteractionName } from "./Catalog.js";
-import { McpToolSchemaUnavailableError } from "../../tool/Schema.js";
-import { McpWorkspaceLegacyV0615 } from "../../../workspace/reentry/Legacy.js";
-import { McpWorkspaceReentryArbiter } from "../../../workspace/reentry/Arbiter.js";
-import {
-    readWorkspaceSnapshot,
-    workspaceEventBelongsTo,
-} from "../../../workspace/Snapshot.js";
-import { WorkspaceAppLeaseStore } from "../../../workspace/app/Lease.js";
-import { WorkspaceAppPresenceStore } from "../../../workspace/app/Presence.js";
-import { WorkspaceActionStore } from "../../../workspace/ActionStore.js";
-import { attemptWorkspaceDelivery, executeWorkspaceAction, readWorkspaceDeliveryOutcome, reportWorkspaceDelivery, validateWorkspaceDirectiveClaim, validateWorkspaceQuestionAnswer, WorkspaceActionStaleError, workspaceWaitReentryEffect } from "../../../workspace/Action.js";
-import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction } from "../../../workspace/Contract.js";
+import type { McpToolCatalogWorkspaceName } from "./Catalog.js";
+import { McpToolSchemaUnavailableError } from "../tool/Schema.js";
+import { McpWorkspaceLegacyV0615 } from "../../workspace/reentry/Legacy.js";
+import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
+import { readWorkspaceSnapshot } from "../../workspace/Projection.js";
+import { workspaceEventBelongsTo } from "../../workspace/contributor/Activity.js";
+import { WorkspaceAppLeaseStore } from "../../workspace/app/Lease.js";
+import { WorkspaceAppPresenceStore } from "../../workspace/app/Presence.js";
+import { WorkspaceActionStore } from "../../workspace/ActionStore.js";
+import { attemptWorkspaceDelivery, executeWorkspaceAction, readWorkspaceDeliveryOutcome, reportWorkspaceDelivery, validateWorkspaceDirectiveClaim, validateWorkspaceQuestionAnswer, WorkspaceActionStaleError, workspaceWaitReentryEffect } from "../../workspace/Action.js";
+import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction } from "../../workspace/Contract.js";
 import {
     throwIfMcpEndpointAborted,
     waitForMcpEndpointAbortable,
-} from "../../dispatch/Support.js";
-import { McpNativeToolResult, type McpEndpointResult } from "../../Endpoint.js";
+} from "../dispatch/Support.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../Endpoint.js";
 
-export class McpEndpointHandlerInteraction {
+export class McpEndpointHandlerWorkspace {
     readonly #appLeases: WorkspaceAppLeaseStore;
     readonly #appPresence: WorkspaceAppPresenceStore;
     readonly #legacyV0615: McpWorkspaceLegacyV0615;
@@ -83,7 +81,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async call(
-        toolName: McpToolCatalogInteractionName,
+        toolName: McpToolCatalogWorkspaceName,
         input: JsonValue,
         context: ToolCallContext,
         callId: string,
@@ -159,7 +157,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #askQuestion(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
         callId: string,
@@ -420,7 +418,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #readWorkspace(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
@@ -434,7 +432,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #reconnectWorkspace(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<McpNativeToolResult> {
@@ -448,7 +446,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #watchWorkspace(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
@@ -508,7 +506,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #workspaceSnapshot(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<JsonValue> {
         const registry = this.options.contextRegistry;
@@ -545,7 +543,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #workspaceAction(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -562,7 +560,7 @@ export class McpEndpointHandlerInteraction {
                 snapshot: async (activeGateway, id, _directives) => {
                     const current = await this.#workspaceSnapshot(activeGateway, id);
                     const record = asRecord(current);
-                    return record as unknown as import("../../../workspace/Contract.js").WorkspaceSnapshot;
+                    return record as unknown as import("../../workspace/Contract.js").WorkspaceSnapshot;
                 },
                 preflight: async (action, actionRequest, actionContext) => {
                     if (action.operation !== "question-answer") return;
@@ -583,7 +581,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #mutateWorkspaceAction(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         action: WorkspaceResolvedAction,
         request: WorkspaceActionRequest,
         context: ToolCallContext,
@@ -849,7 +847,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #answerQuestion(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -891,7 +889,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #interruptWait(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -943,7 +941,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #controlTask(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -996,7 +994,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #recoverWait(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -1034,7 +1032,7 @@ export class McpEndpointHandlerInteraction {
     }
 
     async #decideApproval(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
@@ -1043,7 +1041,7 @@ export class McpEndpointHandlerInteraction {
         const instances = await this.#contextInstances(ctxId);
         let approval:
             | Awaited<
-                  ReturnType<McpInteractionGateway["approval"]["listApprovals"]>
+                  ReturnType<McpWorkspaceActionGateway["approval"]["listApprovals"]>
               >[number]
             | undefined;
         let approvalInstance: string | undefined;
@@ -1104,8 +1102,8 @@ export class McpEndpointHandlerInteraction {
 function requireInteractionGateway(
     gateway: McpInstanceGateway | undefined,
     instanceName: string,
-): McpInteractionGateway {
-    if (isMcpInteractionGateway(gateway)) return gateway;
+): McpWorkspaceActionGateway {
+    if (isMcpWorkspaceActionGateway(gateway)) return gateway;
     throw new Error(
         `Workspace interaction backend is unavailable for ${instanceName}.`,
     );
@@ -1311,7 +1309,7 @@ function taskBelongsToContext(
 }
 
 async function currentTodoAssociation(
-    gateway: McpInteractionGateway,
+    gateway: McpWorkspaceActionGateway,
     instance: string,
     ctxId: string,
 ): Promise<

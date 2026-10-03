@@ -9,10 +9,10 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { ContextEnvironmentPort, ContextCleanupPort } from "../../../context/Port.js";
+import type { ContextEnvironmentPort, ContextCleanupPort } from "../../../../context/Port.js";
 import type { McpContextExternalBinding } from "@portable-devshell/shared";
-import type { McpContextSelector } from "../../../context/Selector.js";
-import type { McpInstanceGateway } from "../../Port.js";
+import type { McpContextSelector } from "../../../../context/Selector.js";
+import type { McpInstanceGateway } from "../../../Port.js";
 import {
     mcpEnvironmentToolName,
     mcpRemoteEnvironmentToolName,
@@ -24,12 +24,12 @@ import {
 import type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
-} from "../../Port.js";
+} from "../../../Port.js";
 import {
     callMcpEndpointToolOperation,
     mcpEndpointToolNotExposed,
     requireMcpEndpointEnvironment,
-} from "../../dispatch/Support.js";
+} from "../../../dispatch/Support.js";
 
 interface BoundContextLookup {
     bindings: McpContextExternalBinding[];

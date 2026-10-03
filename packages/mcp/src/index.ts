@@ -14,7 +14,7 @@ export type { McpHostInstanceConfig, McpHostConfig, WorkerInstanceLike } from ".
 export type {
     McpToolProvenanceRecord,
     McpToolProvenanceRecorder,
-} from "./endpoint/domain/worker/Provenance.js";
+} from "./endpoint/tool/Provenance.js";
 export { HttpHost } from "./host/Http.js";
 export { isMcpGoalGateway } from "./endpoint/Port.js";
 export type { McpApprovalPort, McpInstanceGateway, McpEndpointWorkerPort } from "./endpoint/Port.js";

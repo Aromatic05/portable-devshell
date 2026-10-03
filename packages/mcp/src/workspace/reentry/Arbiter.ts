@@ -9,10 +9,10 @@ import type {
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     isMcpGoalGateway,
-    isMcpInteractionGateway,
+    isMcpWorkspaceActionGateway,
     isMcpWaitRecoveryGateway,
     type McpInstanceGateway,
-    type McpInteractionGateway,
+    type McpWorkspaceActionGateway,
 } from "../../endpoint/Port.js";
 import {
     explicitReentryDelivery,
@@ -21,7 +21,7 @@ import {
     type WorkspaceExplicitReentryKind,
     type WorkspaceReentryDelivery,
 } from "./Delivery.js";
-import { readWorkspaceSnapshot } from "../Snapshot.js";
+import { readWorkspaceSnapshot } from "../Projection.js";
 
 export async function assertWorkspaceWaitRecoveryAssociationAvailable(
     options: { gateway?: McpInstanceGateway; instanceName: string },
@@ -272,7 +272,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #claimAutomatic(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
     ): Promise<JsonValue> {
@@ -418,7 +418,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #claimExplicit(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
         intent: WorkspaceExplicitReentryKind,
@@ -511,7 +511,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #claimContext(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
         claimId: string,
     ) {
@@ -563,7 +563,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #validate(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
     ): Promise<JsonValue> {
@@ -676,7 +676,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #attempt(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
     ): Promise<JsonValue> {
@@ -759,7 +759,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #report(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
         outcome: "accepted" | "rejected" | "uncertain",
@@ -862,7 +862,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #claimResolvedWaitDelivery(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         context: ToolCallContext,
         claimId: string,
     ): Promise<WorkspaceReentryDelivery | undefined> {
@@ -934,7 +934,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #releaseSource(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
         claimId: string,
     ): Promise<void> {
@@ -1179,7 +1179,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #explicitSourceAvailable(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
         intent: WorkspaceExplicitReentryKind,
         sourceId: string,
@@ -1208,7 +1208,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #claimedWait(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
         claimId: string,
     ): Promise<WaitRecord | undefined> {
@@ -1221,7 +1221,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #resolvedAutomaticWaits(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<WaitRecord[]> {
         return (await gateway.listWaits(this.options.instanceName))
@@ -1241,7 +1241,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #hasBlockingAutomaticWait(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<boolean> {
         return (await gateway.listWaits(this.options.instanceName)).some(
@@ -1262,7 +1262,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #consumeResolvedWaitsDuringExecution(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<void> {
         for (const wait of await this.#resolvedAutomaticWaits(gateway, ctxId)) {
@@ -1271,7 +1271,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #contextExecutionBusy(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<boolean> {
         const state = await this.options.contextRegistry.readAutomaticReentry(
@@ -1327,7 +1327,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #hasPendingContextApproval(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<boolean> {
         for (const instance of await this.#contextInstances(ctxId)) {
@@ -1343,7 +1343,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #workspaceSnapshot(
-        gateway: McpInteractionGateway,
+        gateway: McpWorkspaceActionGateway,
         ctxId: string,
     ): Promise<JsonValue> {
         const record = await this.options.contextRegistry.validateForInstance(
@@ -1480,8 +1480,8 @@ function readReentryControl(input: JsonValue): {
 function requireInteractionGateway(
     gateway: McpInstanceGateway | undefined,
     instanceName: string,
-): McpInteractionGateway {
-    if (isMcpInteractionGateway(gateway)) return gateway;
+): McpWorkspaceActionGateway {
+    if (isMcpWorkspaceActionGateway(gateway)) return gateway;
     throw new Error(
         `Workspace interaction backend is unavailable for ${instanceName}.`,
     );

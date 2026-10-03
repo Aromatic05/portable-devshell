@@ -16,7 +16,7 @@ import type { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
 import type { WorkspaceActionStore } from "../workspace/ActionStore.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
-import type { McpToolProvenanceRecorder } from "./domain/worker/Provenance.js";
+import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import {
     McpEndpointDispatch,
     type McpEndpointCallContext,

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
-import type { McpInteractionGateway } from "../../src/endpoint/Port.ts";
+import type { McpWorkspaceActionGateway } from "../../src/endpoint/Port.ts";
 import {
     workspaceActionOutputSchema,
     workspaceSnapshotOutputSchema,
-} from "../../src/endpoint/domain/interaction/Schema.ts";
-import { readWorkspaceProjection } from "../../src/workspace/Snapshot.ts";
+} from "../../src/endpoint/workspace/Schema.ts";
+import { readWorkspaceProjection } from "../../src/workspace/Projection.ts";
 
 const validator = new AjvJsonSchemaValidator();
 const validateSnapshot = validator.getValidator(
@@ -17,7 +17,7 @@ const validateAction = validator.getValidator(
     workspaceActionOutputSchema as JsonSchemaType,
 );
 
-function questionGateway(): McpInteractionGateway {
+function questionGateway(): McpWorkspaceActionGateway {
     return {
         readTodo: async () => ({
             tasks: [{
@@ -34,7 +34,7 @@ function questionGateway(): McpInteractionGateway {
         }],
         resolveWait: async () => ({}),
         approval: { listPendingApprovals: async () => [], decideApproval: async () => ({}) },
-    } as unknown as McpInteractionGateway;
+    } as unknown as McpWorkspaceActionGateway;
 }
 
 test("projected Question choices and durable directives satisfy the MCP wire schemas", async () => {

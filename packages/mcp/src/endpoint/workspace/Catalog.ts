@@ -1,6 +1,6 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
-import { workspaceAppResourceUri } from "../../../workspace/app/App.js";
+import { workspaceAppResourceUri } from "../../workspace/app/App.js";
 import {
     workspaceOpenOutputSchema,
     workspaceGoalResultOutputSchema,
@@ -10,7 +10,7 @@ import {
     workspaceWatchOutputSchema,
 } from "./Schema.js";
 
-export type McpToolCatalogInteractionName =
+export type McpToolCatalogWorkspaceName =
     | "workspace_ask"
     | "workspace_goal"
     | "workspace_open"
@@ -41,7 +41,7 @@ const goalStepSchema: JsonValue = {
     type: "object",
 };
 
-export class McpToolCatalogInteraction {
+export class McpToolCatalogWorkspace {
     readonly #definitions: readonly ToolDefinition[] = [
         {
             description:

@@ -10,7 +10,7 @@ import type {
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextRuntimePort } from "../context/Runtime.js";
 import {
-    isMcpInteractionGateway,
+    isMcpWorkspaceActionGateway,
     type McpInstanceGateway,
 } from "../endpoint/Port.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
@@ -19,7 +19,7 @@ import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
 import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
 import { createWorkspaceMcpExtension } from "../endpoint/extension/Workspace.js";
-import type { McpToolProvenanceRecorder } from "../endpoint/domain/worker/Provenance.js";
+import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import {
     installMcpWorkspaceLiveRoute,
     workspaceLiveBaseUrl,
@@ -273,7 +273,7 @@ export class McpHost {
         this.#workers.set(instance.name, instance.worker);
         const workspaceApp =
             instance.workspaceEnabled !== false &&
-            isMcpInteractionGateway(instance.gateway);
+            isMcpWorkspaceActionGateway(instance.gateway);
         if (!workspaceApp)
             this.#workspaceAppPresence.revokeInstance(instance.name);
         const liveBaseUrl = workspaceApp

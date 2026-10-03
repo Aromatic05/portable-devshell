@@ -21,21 +21,21 @@ import {
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
-    McpEndpointHandlerInteraction,
-    McpToolCatalogInteraction,
+    McpEndpointHandlerWorkspace,
+    McpToolCatalogWorkspace,
     McpToolSchemaAdapter,
     WorkspaceAppLeaseStore,
-    type McpInteractionGateway,
+    type McpWorkspaceActionGateway,
     type McpWorkspaceGateway,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 import { McpWorkspaceReentryArbiter } from "../../../../src/workspace/reentry/Arbiter.ts";
-import { readWorkspaceProjection } from "../../../../src/workspace/Snapshot.ts";
+import { readWorkspaceProjection } from "../../../../src/workspace/Projection.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 async function callProjectedAction(
-    handler: McpEndpointHandlerInteraction,
-    gateway: McpInteractionGateway,
+    handler: McpEndpointHandlerWorkspace,
+    gateway: McpWorkspaceActionGateway,
     context: ToolCallContext,
     token: string,
     operation: string,
@@ -540,7 +540,7 @@ async function callProjectedAction(
 
     test("workspace_ask holds the original call until the Workspace app answers", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -588,7 +588,7 @@ async function callProjectedAction(
 
     test("workspace_ask detaches durable wait state when the host cancels the held call", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -634,8 +634,8 @@ async function callProjectedAction(
             async touchGoal() {
                 throw new Error("goal store unavailable");
             },
-        }) as McpInteractionGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        }) as McpWorkspaceActionGateway;
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
         });
@@ -705,8 +705,8 @@ async function callProjectedAction(
                     ],
                 };
             },
-        }) as McpInteractionGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        }) as McpWorkspaceActionGateway;
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
         });
@@ -780,7 +780,7 @@ async function callProjectedAction(
                 goalTouches += 1;
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -811,7 +811,7 @@ async function callProjectedAction(
 
     test("Workspace authorization stays in hidden metadata and gates app-only tools", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -858,7 +858,7 @@ async function callProjectedAction(
 
     test("Workspace App can re-establish its lifecycle after remount", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -901,7 +901,7 @@ async function callProjectedAction(
 
     test("Workspace reconnect refuses to mint App authorization without the existing capability", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -931,7 +931,7 @@ async function callProjectedAction(
             const fake = createInteractionGateway();
             const firstStore = new WorkspaceAppLeaseStore({ filePath });
             await firstStore.initialize();
-            const firstHandler = new McpEndpointHandlerInteraction({
+            const firstHandler = new McpEndpointHandlerWorkspace({
                 gateway: fake.gateway,
                 instanceName: "demo",
                 workspaceAppLeases: firstStore,
@@ -940,7 +940,7 @@ async function callProjectedAction(
 
             const restartedStore = new WorkspaceAppLeaseStore({ filePath });
             await restartedStore.initialize();
-            const restartedHandler = new McpEndpointHandlerInteraction({
+            const restartedHandler = new McpEndpointHandlerWorkspace({
                 gateway: fake.gateway,
                 instanceName: "demo",
                 workspaceAppLeases: restartedStore,
@@ -974,7 +974,7 @@ async function callProjectedAction(
 
     test("Workspace reconnect reuses a live App token instead of invalidating sibling mounts", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1048,7 +1048,7 @@ async function callProjectedAction(
                     return { events: [], gap: false, lastSeq: 0 };
                 },
             }) as McpWorkspaceGateway;
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 gateway,
                 instanceName: "demo",
                 workspaceAppLeases: secondStore,
@@ -1160,7 +1160,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 7 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
         });
@@ -1272,7 +1272,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 1 };
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             contextRegistry: registry,
             gateway: fake.gateway,
             instanceName: "demo",
@@ -1328,7 +1328,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: eventSeq };
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1378,7 +1378,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 0 };
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             contextRegistry: registry,
             gateway: fake.gateway,
             instanceName: "demo",
@@ -1445,7 +1445,7 @@ async function callProjectedAction(
                 waitId: "wait-new",
             },
         );
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1510,7 +1510,7 @@ async function callProjectedAction(
                 return structuredClone(record);
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
         });
@@ -1543,7 +1543,7 @@ async function callProjectedAction(
             updatedAt: now,
             waitId: "wait-tmux",
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1596,7 +1596,7 @@ async function callProjectedAction(
                 return structuredClone(record);
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
         });
@@ -1664,7 +1664,7 @@ async function callProjectedAction(
                 return goal;
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1735,7 +1735,7 @@ async function callProjectedAction(
                 return goal;
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -1799,7 +1799,7 @@ async function callProjectedAction(
                 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
             watchHeartbeatMs: 100,
@@ -1853,7 +1853,7 @@ async function callProjectedAction(
                 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
             watchHeartbeatMs: 0,
@@ -1889,7 +1889,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 11 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
             watchHeartbeatMs: 0,
@@ -1939,7 +1939,7 @@ async function callProjectedAction(
 
     test("workspace_ask refuses to hold a call before Workspace is open", async () => {
         const fake = createInteractionGateway();
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
             workspaceActivationGraceMs: 5,
@@ -1976,7 +1976,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 0 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
             watchHeartbeatMs: 60_000,
@@ -2041,7 +2041,7 @@ async function callProjectedAction(
                 return { events: [], gap: false, lastSeq: 0 };
             },
         }) as McpWorkspaceGateway;
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway,
             instanceName: "demo",
             now: () => now,
@@ -2091,7 +2091,7 @@ async function callProjectedAction(
                 return undefined;
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
             workspaceActivationGraceMs: 5,
@@ -2173,7 +2173,7 @@ async function callProjectedAction(
                 };
             },
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -2229,7 +2229,7 @@ async function callProjectedAction(
                 updatedAt: now,
                 waitId: "wait-once",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2331,7 +2331,7 @@ async function callProjectedAction(
                     throw new Error("wait persistence failed");
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2424,7 +2424,7 @@ async function callProjectedAction(
                 updatedAt: now,
                 waitId: "wait-release-failure",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2505,7 +2505,7 @@ async function callProjectedAction(
                 updatedAt: now,
                 waitId: "wait-attempt-rollback-failure",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2622,7 +2622,7 @@ async function callProjectedAction(
                     return goal;
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2734,7 +2734,7 @@ async function callProjectedAction(
                     return goalSnapshot();
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2825,7 +2825,7 @@ async function callProjectedAction(
                 gateway: fake.gateway,
                 instanceName: "demo",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -2973,7 +2973,7 @@ async function callProjectedAction(
                     return goalSnapshot();
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3111,7 +3111,7 @@ async function callProjectedAction(
                     return goal;
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3206,7 +3206,7 @@ async function callProjectedAction(
                     return goal;
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3260,7 +3260,7 @@ async function callProjectedAction(
             updatedAt: now,
             waitId: "wait-legacy",
         });
-        const handler = new McpEndpointHandlerInteraction({
+        const handler = new McpEndpointHandlerWorkspace({
             gateway: fake.gateway,
             instanceName: "demo",
         });
@@ -3333,7 +3333,7 @@ async function callProjectedAction(
                 updatedAt: now,
                 waitId: "wait-busy",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3414,7 +3414,7 @@ async function callProjectedAction(
                     };
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3525,7 +3525,7 @@ async function callProjectedAction(
                     };
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3615,7 +3615,7 @@ async function callProjectedAction(
                     return goal;
                 },
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3771,7 +3771,7 @@ async function callProjectedAction(
                 updatedAt: now,
                 waitId: "wait-priority",
             });
-            const handler = new McpEndpointHandlerInteraction({
+            const handler = new McpEndpointHandlerWorkspace({
                 contextRegistry: registry,
                 gateway: fake.gateway,
                 instanceName: "demo",
@@ -3845,7 +3845,7 @@ async function callProjectedAction(
     });
 
     test("Workspace tool metadata keeps reopen and exposes one unified action tool", () => {
-        const definitions = new McpToolCatalogInteraction().list();
+        const definitions = new McpToolCatalogWorkspace().list();
         const adapter = new McpToolSchemaAdapter();
         const open = definitions.find(
             (definition) => definition.name === "workspace_open",
@@ -3950,7 +3950,7 @@ async function callProjectedAction(
             );
         }
 
-        const compatibilityDefinitions = new McpToolCatalogInteraction().list();
+        const compatibilityDefinitions = new McpToolCatalogWorkspace().list();
         const compatibilityOpen = compatibilityDefinitions.find(
             (definition) => definition.name === "workspace_open",
         );
@@ -3991,7 +3991,7 @@ async function callProjectedAction(
     });
 
     async function openWorkspace(
-        handler: McpEndpointHandlerInteraction,
+        handler: McpEndpointHandlerWorkspace,
     ): Promise<string> {
         const opened = await handler.call(
             "workspace_open",
@@ -4015,7 +4015,7 @@ async function callProjectedAction(
 
     function createInteractionGateway(): {
         created: Promise<WaitRecord>;
-        gateway: McpInteractionGateway;
+        gateway: McpWorkspaceActionGateway;
         waits: WaitRecord[];
     } {
         const waits: WaitRecord[] = [];
@@ -4293,7 +4293,7 @@ async function callProjectedAction(
                     throw new Error("No approval in this test");
                 },
             },
-        } as unknown as McpInteractionGateway;
+        } as unknown as McpWorkspaceActionGateway;
 
         return { created, gateway, waits };
     }
