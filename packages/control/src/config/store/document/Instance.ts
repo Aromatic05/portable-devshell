@@ -1,91 +1,13 @@
 import {
     configInputError,
-    parseConfigGlobalDraft,
     parseConfigInstanceDraft,
-    type ConfigGlobalDraft,
     type ConfigInstanceDraft,
-    type ControlGlobalConfig,
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
-import {
-    migrateGlobalConfigV1,
-    migrateInstanceConfigV2OrV3,
-} from "../../migration/Config.js";
+import { migrateInstanceConfigV2OrV3 } from "../../../migration/Config.js";
 
-import { ConfigRegistry, createCoreConfigRegistry } from "../Registry.js";
-import type { ConfigTomlDocument } from "./TomlCodec.js";
-
-export class ControlGlobalTomlDocument {
-    readonly #registry: ConfigRegistry;
-
-    constructor(registry: ConfigRegistry = createCoreConfigRegistry()) {
-        this.#registry = registry;
-    }
-
-    decode(document: ConfigTomlDocument): ConfigGlobalDraft {
-        const record = asRecord(document);
-        const version = readDocumentVersion(record.version);
-        if (version !== 1 && version !== 2) {
-            throw configInputError(
-                "parse",
-                ["version"],
-                "config.document.versionUnsupported",
-                "must be 1 or 2",
-            );
-        }
-        if (record.instances !== undefined) {
-            throw configInputError(
-                "parse",
-                ["instances"],
-                "config.document.legacyInstances",
-                "is not supported; move instances into ~/.devshell/control/instances/*.toml",
-            );
-        }
-        const { version: _version, ...config } = record;
-        assertRegisteredGlobalDomains(config, this.#registry);
-        if (version === 1) return migrateGlobalConfigV1(config);
-        return parseConfigGlobalDraft(config);
-    }
-
-    encode(config: ControlGlobalConfig): ConfigTomlDocument {
-        return compact({
-            version: 2,
-            control: {
-                artifactDirectTransfer: config.control.artifactDirectTransfer,
-                logLevel: config.control.logLevel,
-            },
-            mcp: {
-                enabled: config.mcp.enabled,
-                listenHost: config.mcp.listenHost,
-                listenPort: config.mcp.listenPort,
-                oauth2:
-                    config.mcp.oauth2.approval === "token"
-                        ? compact({
-                              approval: config.mcp.oauth2.approval,
-                              token: config.mcp.oauth2.token,
-                          })
-                        : { approval: config.mcp.oauth2.approval },
-                publicBaseUrl: config.mcp.publicBaseUrl,
-            },
-            web: {
-                auth: config.web.auth.mode,
-                enabled: config.web.enabled,
-                listenHost: config.web.listenHost,
-                listenPort: config.web.listenPort,
-                oauth2:
-                    config.web.auth.mode === "oauth2"
-                        ? compact(config.web.auth.oauth2)
-                        : undefined,
-                publicBaseUrl: config.web.publicBaseUrl,
-                token:
-                    config.web.auth.mode === "token"
-                        ? config.web.auth.token
-                        : undefined,
-            },
-        });
-    }
-}
+import type { ConfigTomlDocument } from "../TomlCodec.js";
 
 export class ControlInstanceTomlDocument {
     decode(document: ConfigTomlDocument): ConfigInstanceDraft {
@@ -156,20 +78,6 @@ export class ControlInstanceTomlDocument {
             workspace: instance.workspace,
         });
     }
-}
-
-function assertRegisteredGlobalDomains(
-    config: Record<string, unknown>,
-    registry: ConfigRegistry,
-): void {
-    const unknown = Object.keys(config).find((key) => !registry.has(key));
-    if (unknown === undefined) return;
-    throw configInputError(
-        "parse",
-        [unknown],
-        "config.field.unknown",
-        "is not supported",
-    );
 }
 
 function readDocumentVersion(value: unknown): number {

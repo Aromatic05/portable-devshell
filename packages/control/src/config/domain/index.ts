@@ -1,13 +1,13 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { ControlConfigMutationRunner } from "../editor/Lock.js";
+import type { ControlConfigMutationRunner } from "../engine/Lock.js";
 import {
     assertConfigDomainValue,
     type ConfigDomainDefinition,
     type ConfigRegistry,
     normalizeConfigDomainDefinition,
     sameConfigOwner,
-} from "../Registry.js";
+} from "./Registry.js";
 import { ConfigDomainStore } from "./Store.js";
 
 export interface ConfigDomainControllerOptions {

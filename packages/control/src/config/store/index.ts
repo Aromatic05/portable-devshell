@@ -30,13 +30,13 @@ import {
     normalizeMigratedInstanceConfig,
 } from "../../migration/Config.js";
 
-import { ControlConfigValidator } from "../Validator.js";
+import { ControlConfigValidator } from "../engine/Validator.js";
 import {
     ControlGlobalTomlDocument,
-    ControlInstanceTomlDocument,
-} from "./TomlDocument.js";
+} from "./document/Global.js";
+import { ControlInstanceTomlDocument } from "./document/Instance.js";
 import { ControlConfigTomlCodec } from "./TomlCodec.js";
-import type { ConfigRegistry } from "../Registry.js";
+import type { ConfigRegistry } from "../domain/Registry.js";
 
 export interface ControlConfigStoreOptions {
     globalDocument?: ControlGlobalTomlDocument;

@@ -1189,6 +1189,88 @@ test("Control disable does not stop self-managed reverse workers but retires loc
     assert.equal(registry.get("demo-local"), undefined);
 });
 
+test("batch instance failure restores a hot-applied endpoint before configuration and descriptor state", async () => {
+    let config = createConfig();
+    const previous = config;
+    const actions: string[] = [];
+    const writes: ControlConfig[] = [];
+    const failure = new Error("worker reconfigure failed");
+    let runtimeSecurityMode = "disabled";
+    let runtimeWebEnabled = previous.web.enabled;
+    let reconfigureCalls = 0;
+    const worker = {
+        reconfigure(input: { effectiveSecurityMode?: string }) {
+            reconfigureCalls += 1;
+            runtimeSecurityMode = input.effectiveSecurityMode ?? "";
+            actions.push(`worker:${runtimeSecurityMode}`);
+            if (reconfigureCalls === 1) throw failure;
+        },
+        snapshot: () => ({
+            connectionState: "disconnected",
+            daemonState: "stopped",
+            lastSeq: 0,
+            name: "demo-local",
+            ready: false,
+            status: "stopped",
+        }),
+    };
+    const originalDescriptor = descriptor(worker);
+    const registry = new InstanceRegistry([originalDescriptor]);
+    const changes = new ConfigChangeHub();
+    const service = new ConfigEditorCoordinator({
+        changeHub: changes,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                actions.push(`persist:${nextConfig.web.enabled}`);
+                writes.push(nextConfig);
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        runtimeApply: {
+            async apply(_previous, nextConfig) {
+                runtimeWebEnabled = nextConfig.web.enabled;
+                actions.push(`runtime:${runtimeWebEnabled}`);
+                return true;
+            },
+        },
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await assert.rejects(
+        service.updateConfig({
+            instance: {
+                instanceName: "demo-local",
+                patch: {
+                    approvalPolicy: { mode: "ask" },
+                },
+            },
+            web: { enabled: true },
+        }),
+        failure,
+    );
+
+    assert.deepEqual(actions, [
+        "persist:true",
+        "runtime:true",
+        "worker:disabled",
+        "runtime:false",
+        "persist:false",
+        "worker:disabled",
+    ]);
+    assert.equal(writes.length, 2);
+    assert.equal(writes[1], previous);
+    assert.equal(config, previous);
+    assert.equal(runtimeSecurityMode, "disabled");
+    assert.equal(reconfigureCalls, 2);
+    assert.equal(runtimeWebEnabled, previous.web.enabled);
+    assert.equal(registry.get("demo-local"), originalDescriptor);
+    assert.equal(changes.revision, 0);
+});
+
 test("instance reconfigure failure restores persisted and runtime configuration", async () => {
     let config = createConfig();
     const writes: ControlConfig[] = [];

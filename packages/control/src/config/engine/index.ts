@@ -1,13 +1,9 @@
 import {
     ConfigInputError,
-    MASKED_CONFIG_TOKEN,
     createRemoteError,
     controlErrorCodes,
     formatConfigPath,
-    normalizeConfigDraft,
-    parseConfigDraft,
     toConfigView,
-    type ConfigDraft,
     type ControlConfig,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -16,15 +12,15 @@ import { ControlConfigValidator } from "./Validator.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
-} from "./editor/Lock.js";
-import { buildApplyResult, type ConfigApplyChange } from "./editor/Result.js";
+} from "./Lock.js";
+import { buildApplyResult, type ConfigApplyChange } from "./Result.js";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
     type ConfigDomainDefinition,
-} from "./Registry.js";
-import { ConfigChangeHub } from "./Change.js";
-import { diffConfigPaths } from "./Path.js";
+} from "../domain/Registry.js";
+import { ConfigChangeHub } from "../change/Config.js";
+import { diffConfigPaths } from "../Path.js";
 
 export interface ConfigRuntimeChangeSet {
     instanceAuth: boolean;
@@ -120,19 +116,6 @@ export class ConfigEngine {
         return this.#validator.validate(config);
     }
 
-    validateConfigDraft(params: JsonValue | undefined): JsonValue {
-        const draft = this.readInput(() =>
-            parseConfigDraft(stripConfigViewMetadata(params)),
-        );
-        const config = this.readInput(() =>
-            normalizeConfigDraft(this.#resolveMaskedTokens(draft)),
-        );
-        return toConfigView(
-            this.validateConfig(config),
-            this.#getRestartControlRequired(),
-        ) as unknown as JsonValue;
-    }
-
     async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
         return await this.#mutationRunner.runExclusive(operation);
     }
@@ -149,6 +132,24 @@ export class ConfigEngine {
         this.#setConfig(config);
     }
 
+    async commit(
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: readonly ConfigApplyChange[],
+        runtimeChanges: ConfigRuntimeChangeSet,
+        preflight = true,
+    ): Promise<JsonValue> {
+        const validated = this.validateConfig(next);
+        if (preflight) await this.preflight(previous, validated);
+        await this.persist(validated);
+        const hotApplied = await this.applyRuntimeOrRestore(
+            previous,
+            validated,
+            runtimeChanges,
+        );
+        return this.finalizeApplyResult(previous, validated, changes, hotApplied);
+    }
+
     async applyRuntimeOrRestore(
         previous: ControlConfig,
         next: ControlConfig,
@@ -158,7 +159,14 @@ export class ConfigEngine {
         try {
             return await this.#runtimeApply.apply(previous, next, changes);
         } catch (error) {
-            await this.persist(previous);
+            try {
+                await this.persist(previous);
+            } catch (restoreError) {
+                throw new AggregateError(
+                    [error, restoreError],
+                    "Configuration runtime apply failed and configuration restore was incomplete.",
+                );
+            }
             throw error;
         }
     }
@@ -212,50 +220,8 @@ export class ConfigEngine {
             });
         }
     }
-
-    #resolveMaskedTokens(draft: ConfigDraft): ConfigDraft {
-        const current = this.#getConfig();
-        const webAuth = current.web.auth;
-        const web =
-            draft.web?.token === MASKED_CONFIG_TOKEN && webAuth.mode === "token"
-                ? { ...draft.web, token: webAuth.token }
-                : draft.web;
-        const mcp =
-            draft.mcp?.oauth2?.token === MASKED_CONFIG_TOKEN &&
-            current.mcp.oauth2.approval === "token"
-                ? {
-                      ...draft.mcp,
-                      oauth2: {
-                          ...draft.mcp.oauth2,
-                          token: current.mcp.oauth2.token,
-                      },
-                  }
-                : draft.mcp;
-        const instances = draft.instances?.map((instance) => {
-            if (instance.mcp?.token !== MASKED_CONFIG_TOKEN) return instance;
-            const existing = current.instances.find(
-                (candidate) => candidate.name === instance.name,
-            );
-            if (existing?.mcp.auth.mode !== "token") return instance;
-            return {
-                ...instance,
-                mcp: { ...instance.mcp, token: existing.mcp.auth.token },
-            };
-        });
-        return { ...draft, mcp, web, instances };
-    }
 }
 
 const noopRuntimePreflight = {
     async assertAvailable(): Promise<void> {},
 };
-
-function stripConfigViewMetadata(
-    value: JsonValue | undefined,
-): JsonValue | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return value;
-    const { restartControlRequired: _restartControlRequired, ...config } =
-        value;
-    return config;
-}

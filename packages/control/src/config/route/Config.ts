@@ -6,8 +6,8 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../server/Route.js";
-import { ConfigChangeHub, type ConfigCommittedChange } from "./Change.js";
+import { requirePort, routeModule } from "../../server/Route.js";
+import { ConfigChangeHub, type ConfigCommittedChange } from "../change/Config.js";
 
 export interface ConfigEditorPort {
     deleteInstance(params?: JsonValue): Promise<JsonValue>;

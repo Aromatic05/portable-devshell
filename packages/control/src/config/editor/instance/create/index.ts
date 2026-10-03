@@ -19,12 +19,12 @@ import {
 
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
-import { McpEndpointFactory } from "../../../composition/mcp/Endpoint.js";
-import { ControlConfigValidator } from "../../Validator.js";
+import { McpEndpointFactory } from "../../../../composition/mcp/Endpoint.js";
+import { ControlConfigValidator } from "../../../engine/Validator.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
-} from "../../editor/Lock.js";
+} from "../../../engine/Lock.js";
 import { listInstanceCreateProviders } from "./ProviderCatalog.js";
 import { discoverSshConfigHosts } from "./SshConfig.js";
 

@@ -14,7 +14,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
-import type { InstanceChange, InstanceChangeHub } from "./Change.js";
+import type { InstanceChange, InstanceChangeHub } from "../change/Instance.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 
 export interface InstanceCreatePort {
