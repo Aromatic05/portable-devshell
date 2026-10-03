@@ -4,7 +4,6 @@ import {
     createEmptyConversationPreferences,
     type ContextMessageRecord,
     type InstanceCreateDraft,
-    type InstanceCreateSchema,
     type InstanceSnapshot,
     type McpContextRecord,
     type ProcessStartOptions,
@@ -235,57 +234,6 @@ describe("WebStore", () => {
         expect(messagesLoad).toHaveBeenCalledWith(["demo"]);
         expect(readLogs).not.toHaveBeenCalled();
         expect(loadToolCalls).not.toHaveBeenCalled();
-    });
-
-    it("refreshes only Context state for Message activity", async () => {
-        const domains = new WebTestDomains();
-        const contextRefresh = vi.spyOn(domains.domains.context, "refresh");
-        const conversationRefresh = vi.spyOn(
-            domains.domains.conversation,
-            "refreshInstance",
-        );
-        const store = new WebStore(domains.domains);
-
-        await store.load();
-        contextRefresh.mockClear();
-        conversationRefresh.mockClear();
-
-        await store.refreshMessageActivity();
-
-        expect(contextRefresh).toHaveBeenCalledOnce();
-        expect(conversationRefresh).not.toHaveBeenCalled();
-    });
-
-    it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
-        const domains = new WebTestDomains();
-        const runtime = domains.domains.runtime("demo");
-        const load = vi.spyOn(runtime, "load");
-        const readLogs = vi.spyOn(runtime, "readLogs");
-        const store = new WebStore(domains.domains);
-
-        await store.load();
-        expect(readLogs).not.toHaveBeenCalled();
-
-        await store.refreshInstance("demo");
-
-        expect(load).toHaveBeenCalledWith("demo");
-        expect(readLogs).not.toHaveBeenCalled();
-    });
-
-    it("surfaces snapshot failures from a manual Instance refresh without reading logs", async () => {
-        const domains = new WebTestDomains();
-        const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => {
-            throw new Error("snapshot refresh failed");
-        });
-        const readLogs = vi.spyOn(runtime, "readLogs");
-        const store = new WebStore(domains.domains);
-        await store.load();
-
-        await expect(store.refreshInstance("demo")).rejects.toThrow(
-            "snapshot refresh failed",
-        );
-        expect(readLogs).not.toHaveBeenCalled();
     });
 
     it("revokes and cancels artifacts through the artifact domain", async () => {
@@ -527,37 +475,6 @@ describe("WebStore", () => {
             enabled: true,
             name: "reverse-web",
         }));
-        const createSchema = vi.fn(async (): Promise<InstanceCreateSchema> => ({
-            container: {
-                defaultMode: "existingImage" as const,
-                modes: [
-                    "preset",
-                    "dockerfile",
-                    "compose",
-                    "existingImage",
-                    "existingStoppedContainer",
-                ] as const,
-                presets: [],
-            },
-            defaultEnabled: true,
-            defaultMcpEnabled: true,
-            defaultModelExtensions: ["instance"],
-            defaultProvider: "local" as const,
-            defaultSecurityMode: "disabled" as const,
-            providers: ["local", "reverse"] as const,
-        }));
-        const validateCreate = vi.fn(async (_draft: InstanceCreateDraft) => ({
-            enabled: true,
-            extensions: { model: ["instance"] },
-            mcp: {
-                auth: { mode: "none" as const },
-                enabled: true,
-                path: "/reverse-web/mcp",
-            },
-            name: "reverse-web",
-            provider: "reverse" as const,
-            security: { mode: "disabled" as const },
-        }));
         const createCode = vi.fn(async (_instance: string) => ({
             controllerUrl: "https://controller.example.test",
             deviceCode: "device-code",
@@ -565,21 +482,11 @@ describe("WebStore", () => {
             instance: asInstanceName("reverse-web"),
         }));
         domains.domains.instances.create = create;
-        domains.domains.instances.createSchema = createSchema;
-        domains.domains.instances.validateCreate = validateCreate;
         domains.domains.reverse.createCode = createCode;
         const refresh = vi.spyOn(domains.domains.instances, "refresh");
         const store = new WebStore(domains.domains);
         await store.load();
 
-        await expect(store.getInstanceCreateSchema()).resolves.toMatchObject({
-            defaultProvider: "local",
-        });
-        await expect(
-            store.validateInstanceCreate(draft),
-        ).resolves.toMatchObject({
-            name: "reverse-web",
-        });
         const result = await store.createInstance(draft);
 
         expect(create).toHaveBeenCalledWith(draft);
@@ -591,25 +498,6 @@ describe("WebStore", () => {
             succeeded: true,
         });
         store.close();
-    });
-
-    it("toggles the Overview activity through the overview domain", async () => {
-        const domains = new WebTestDomains();
-        const start = vi.spyOn(domains.domains.overview, "start");
-        const stop = vi.spyOn(domains.domains.overview, "stop");
-        const scheduleRefresh = vi.spyOn(
-            domains.domains.overview,
-            "scheduleRefresh",
-        );
-        const store = new WebStore(domains.domains);
-        await store.load();
-
-        store.setOverviewActive(true);
-        expect(start).toHaveBeenCalledOnce();
-        expect(scheduleRefresh).toHaveBeenCalledWith(0);
-
-        store.setOverviewActive(false);
-        expect(stop).toHaveBeenCalledOnce();
     });
 });
 

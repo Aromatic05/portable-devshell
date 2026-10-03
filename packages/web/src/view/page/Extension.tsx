@@ -6,7 +6,7 @@ import type {
     WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import type { WebStore } from "../../state/Store.js";
+import { useWebDomains } from "../../app/domain/Context.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 
 interface PendingAction {
@@ -16,11 +16,11 @@ interface PendingAction {
 
 export function ExtensionPage({
     descriptor,
-    store,
 }: {
     descriptor?: WebPageDescriptor;
-    store: WebStore;
 }) {
+    const domains = useWebDomains();
+    const extension = domains.extension;
     const [snapshot, setSnapshot] = useState<WebPageSnapshot>();
     const [error, setError] = useState<string>();
     const [busy, setBusy] = useState<string>();
@@ -32,7 +32,7 @@ export function ExtensionPage({
         let active = true;
         setSnapshot(undefined);
         setError(undefined);
-        void store.readExtensionPage(pageId).then(
+        void extension.readWebPage(pageId).then(
             (value) => {
                 if (active) setSnapshot(value);
             },
@@ -43,7 +43,7 @@ export function ExtensionPage({
         return () => {
             active = false;
         };
-    }, [descriptor?.id, store]);
+    }, [descriptor?.id, extension]);
 
     if (descriptor === undefined) {
         return (
@@ -59,7 +59,7 @@ export function ExtensionPage({
         setError(undefined);
         try {
             setSnapshot(
-                await store.invokeExtensionPageAction(
+                await extension.webAction(
                     descriptor!.id,
                     action.id,
                     rowId,

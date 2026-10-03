@@ -162,7 +162,6 @@ function webStore(domains: WebTestDomains): WebStore {
 function messageStore(overrides: Record<string, unknown> = {}): WebStore {
     return {
         queueContextMessage: vi.fn(async () => true),
-        refreshMessageActivity: vi.fn(async () => undefined),
         refreshMessages: vi.fn(async () => undefined),
         state,
         subscribe: vi.fn(() => () => undefined),
@@ -1097,15 +1096,12 @@ describe("Messages", () => {
             ),
         );
         const store = webStore(domains);
-        const refreshMessageActivity = vi.spyOn(
-            store,
-            "refreshMessageActivity",
-        );
         await renderMessages(
             domains,
             { page: "messages", view: "contexts" },
             store,
         );
+        const contextRefresh = vi.spyOn(domains.context, "refresh");
         const conversation = screen.getByRole("button", {
             name: /Investigate the first regression/u,
         });
@@ -1115,7 +1111,7 @@ describe("Messages", () => {
             await vi.advanceTimersByTimeAsync(20_000);
         });
 
-        expect(refreshMessageActivity).toHaveBeenCalledOnce();
+        expect(contextRefresh).toHaveBeenCalledOnce();
         expect(conversation).toHaveTextContent("idle");
     });
 

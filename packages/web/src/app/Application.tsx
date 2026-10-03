@@ -73,9 +73,14 @@ function ApplicationBody({
     const interactionDisabled = busy !== undefined;
 
     useEffect(() => {
-        store.setOverviewActive(route.page === "overview");
-        return () => store.setOverviewActive(false);
-    }, [route.page, store]);
+        if (route.page === "overview") {
+            domains.overview.start();
+            domains.overview.scheduleRefresh(0);
+        } else {
+            domains.overview.stop();
+        }
+        return () => domains.overview.stop();
+    }, [route.page, domains]);
 
     useEffect(() => {
         if (service.status !== "online") return;
@@ -184,7 +189,6 @@ function ApplicationBody({
                         descriptor={extension.webPages.find(
                             (page) => page.id === route.id,
                         )}
-                        store={store}
                     />
                 ) : null}
                 {route.page === "instances" ? (

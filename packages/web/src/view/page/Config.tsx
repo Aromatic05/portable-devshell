@@ -145,10 +145,12 @@ export function Config({
             }
             stopped = true;
         }
-        const succeeded = await store.updateInstanceConfig(
-            selectedName,
-            instancePatch(parsed.value),
-        );
+        const succeeded = await store.updateConfig({
+            instance: {
+                instanceName: selectedName,
+                patch: instancePatch(parsed.value),
+            },
+        });
         if (!succeeded) {
             if (stopped) await store.start(selectedName);
             setFeedback({
@@ -663,28 +665,29 @@ export function Config({
                     <button
                         disabled={!interactive}
                         onClick={() =>
-                            void store.refreshConfig().then(
-                                () => {
-                                    const next = editableInstance(
-                                        configInstances(
-                                            domains.config.state.view,
-                                        ).find(
-                                            (entry) =>
-                                                entry.name === selectedName,
-                                        ),
-                                    );
-                                    setDraftText(stringify(next));
-                                    setFeedback({
-                                        kind: "success",
-                                        text: "Reloaded from Control.",
-                                    });
-                                },
-                                (error: unknown) =>
+                            void domains.config.refresh().then(() => {
+                                const failure = domains.config.state.failure;
+                                if (failure !== undefined) {
                                     setFeedback({
                                         kind: "error",
-                                        text: readError(error),
-                                    }),
-                            )
+                                        text: readError(failure),
+                                    });
+                                    return;
+                                }
+                                const next = editableInstance(
+                                    configInstances(
+                                        domains.config.state.view,
+                                    ).find(
+                                        (entry) =>
+                                            entry.name === selectedName,
+                                    ),
+                                );
+                                setDraftText(stringify(next));
+                                setFeedback({
+                                    kind: "success",
+                                    text: "Reloaded from Control.",
+                                });
+                            })
                         }
                         type="button"
                     >

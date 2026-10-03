@@ -116,13 +116,13 @@ it("creates a local instance from only name and provider", async () => {
         config: localConfig(),
         instances: [localInstance("ready")],
     });
-    vi.spyOn(store, "getInstanceCreateSchema").mockResolvedValue(
+    vi.spyOn(domains.instances, "createSchema").mockResolvedValue(
         createSchema(),
     );
     const createInstance = vi
         .spyOn(store, "createInstance")
         .mockResolvedValue({ succeeded: true });
-    const validateInstanceCreate = vi.spyOn(store, "validateInstanceCreate");
+    const validateCreate = vi.spyOn(domains.instances, "validateCreate");
     renderInstances(domains, store);
 
     fireEvent.click(screen.getByRole("button", { name: "New instance" }));
@@ -137,7 +137,7 @@ it("creates a local instance from only name and provider", async () => {
             provider: "local",
         }),
     );
-    expect(validateInstanceCreate).not.toHaveBeenCalled();
+    expect(validateCreate).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent(
         "Instance created successfully.",
     );
@@ -148,7 +148,7 @@ it("defaults creation to SSH and uses discovered OpenSSH hosts", async () => {
         config: localConfig(),
         instances: [localInstance("ready")],
     });
-    vi.spyOn(store, "getInstanceCreateSchema").mockResolvedValue({
+    vi.spyOn(domains.instances, "createSchema").mockResolvedValue({
         ...createSchema(),
         defaultProvider: "ssh",
         sshHosts: ["aromatic-server"],
@@ -199,7 +199,7 @@ it("offers restart, disable, delete, and refresh actions for a managed instance"
         instances: [localInstance("ready")],
     });
     renderInstances(domains, store, "local-one");
-    const refreshInstance = vi.spyOn(store, "refreshInstance");
+    const refreshInstance = vi.spyOn(domains.runtime("local-one"), "load");
     const restart = vi.spyOn(store, "restart");
     const setInstanceEnabled = vi.spyOn(store, "setInstanceEnabled");
     const deleteInstance = vi.spyOn(store, "deleteInstance");
@@ -240,7 +240,7 @@ it("shows per-instance artifact activity and confirms revoke and cancel", async 
         instances: [localInstance("ready")],
     });
     renderInstances(domains, store, "local-one");
-    const refreshArtifacts = vi.spyOn(store, "refreshArtifacts");
+    const refreshArtifacts = vi.spyOn(domains.artifact, "refresh");
     const revokeArtifactShare = vi.spyOn(store, "revokeArtifactShare");
     const cancelArtifactTransfer = vi.spyOn(store, "cancelArtifactTransfer");
 
@@ -350,7 +350,7 @@ it("shows instance refresh failures beside the selected detail instead of failin
         config: localConfig(),
         instances: [localInstance("ready")],
     });
-    vi.spyOn(store, "refreshInstance").mockRejectedValue(
+    vi.spyOn(domains.runtime("local-one"), "load").mockRejectedValue(
         new Error("Instance refresh failed."),
     );
     renderInstances(domains, store, "local-one");

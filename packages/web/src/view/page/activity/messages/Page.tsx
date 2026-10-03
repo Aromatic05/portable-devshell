@@ -127,7 +127,7 @@ export function Messages({
             setClockNow(Date.now());
             if (refreshPending) return;
             refreshPending = true;
-            void store.refreshMessageActivity().finally(() => {
+            void domains.context.refresh().finally(() => {
                 refreshPending = false;
             });
         };
@@ -143,7 +143,7 @@ export function Messages({
             window.clearInterval(timer);
             document.removeEventListener("visibilitychange", visibilityChanged);
         };
-    }, [store]);
+    }, [domains]);
 
     useEffect(() => {
         setCurrentConversationKeys((current) => {

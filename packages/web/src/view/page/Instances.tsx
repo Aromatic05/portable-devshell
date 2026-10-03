@@ -348,8 +348,9 @@ function InstanceDetail({
         setDetailFailure(undefined);
         setLifecycleFailure(undefined);
         setRefreshingInstance(entry.name);
-        void store
-            .refreshInstance(entry.name)
+        void domains
+            .runtime(entry.name)
+            .load(entry.name)
             .catch((error: unknown) => {
                 if (refreshGeneration.current === generation)
                     setDetailFailure(
@@ -466,15 +467,12 @@ function InstanceDetail({
                             }
                             onRefresh={() => {
                                 onArtifactFailure(undefined);
-                                void store
-                                    .refreshArtifacts()
-                                    .catch((error: unknown) =>
-                                        onArtifactFailure(
-                                            error instanceof Error
-                                                ? error.message
-                                                : "Artifact activity could not be refreshed.",
-                                        ),
-                                    );
+                                void domains.artifact.refresh().then(() => {
+                                    const failure =
+                                        domains.artifact.state.failure;
+                                    if (failure !== undefined)
+                                        onArtifactFailure(failure.message);
+                                });
                             }}
                             onRevokeShare={(shareId) =>
                                 onArtifactConfirm({
@@ -496,8 +494,9 @@ function InstanceDetail({
                                     ++refreshGeneration.current;
                                 setDetailFailure(undefined);
                                 setRefreshingInstance(entry.name);
-                                void store
-                                    .refreshInstance(entry.name)
+                                void domains
+                                    .runtime(entry.name)
+                                    .load(entry.name)
                                     .catch((error: unknown) => {
                                         if (
                                             refreshGeneration.current ===

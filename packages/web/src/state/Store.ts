@@ -1,15 +1,9 @@
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
-    ConfigInstancePatch,
-    ConfigMcpPatch,
-    ConfigWebPatch,
     ConversationPreferencesPatch,
     InstanceCreateDraft,
     InstanceCreateSchema,
-    InstanceCreateSummary,
-    ToolCallRecord,
-    WebPageSnapshot,
 } from "@portable-devshell/shared";
 
 import type { WebDomainSession } from "../app/domain/Session.js";
@@ -57,15 +51,6 @@ export class WebStore {
         this.#listeners.add(listener);
         return () => this.#listeners.delete(listener);
     };
-
-    setOverviewActive(active: boolean): void {
-        if (active) {
-            this.domains.overview.start();
-            this.domains.overview.scheduleRefresh(0);
-        } else {
-            this.domains.overview.stop();
-        }
-    }
 
     async load(): Promise<void> {
         if (this.#stopped) return;
@@ -131,37 +116,12 @@ export class WebStore {
         return await request;
     }
 
-    async refreshInstance(instance: string): Promise<void> {
-        const runtime = this.domains.runtime(instance);
-        await runtime.load(instance);
-    }
-
     async refreshToolCall(instance: string): Promise<void> {
         const runtime = this.domains.runtime(instance);
         await Promise.all([
             this.domains.toolCalls.load(instance),
             runtime.load(instance).then(() => runtime.readLogs()),
         ]);
-    }
-
-    async readToolCallDetail(
-        instance: string,
-        callId: string,
-    ): Promise<ToolCallRecord | undefined> {
-        const details = await this.domains.toolCalls.readDetail(instance, callId);
-        return details[0];
-    }
-
-    async readExtensionPage(pageId: string): Promise<WebPageSnapshot> {
-        return await this.domains.extension.readWebPage(pageId);
-    }
-
-    async invokeExtensionPageAction(
-        pageId: string,
-        actionId: string,
-        rowId?: string,
-    ): Promise<WebPageSnapshot> {
-        return await this.domains.extension.webAction(pageId, actionId, rowId);
     }
 
     async refreshAudit(): Promise<void> {
@@ -186,10 +146,6 @@ export class WebStore {
         );
     }
 
-    async refreshMessageActivity(): Promise<void> {
-        await this.domains.context.refresh();
-    }
-
     async refreshMessages(): Promise<void> {
         await Promise.all([
             this.domains.instances.refresh(),
@@ -204,9 +160,6 @@ export class WebStore {
             this.domains.messages.load(instances),
         ]);
     }
-
-    readonly readArtifactImage = async (imageRef: string) =>
-        await this.domains.artifactTransport.readImage(imageRef);
 
     async decideTool(
         instance: string,
@@ -224,13 +177,6 @@ export class WebStore {
                 await approval.decide(approvalId, decision);
             },
         );
-    }
-
-    async decideOAuth(
-        approvalId: string,
-        decision: "approve" | "deny",
-    ): Promise<boolean> {
-        return await this.decideOAuthApproval(approvalId, decision);
     }
 
     async queueContextMessage(
@@ -363,12 +309,6 @@ export class WebStore {
         );
     }
 
-    async refreshArtifacts(): Promise<void> {
-        await this.domains.artifact.refresh();
-        if (this.domains.artifact.state.failure !== undefined)
-            throw this.domains.artifact.state.failure;
-    }
-
     async revokeArtifactShare(shareId: string): Promise<boolean> {
         const generation = this.#generation;
         return await this.#operations.run(
@@ -398,16 +338,6 @@ export class WebStore {
             this.domains.instances.createSchema(),
             this.#requestTimeoutMs,
             "instance.createSchema",
-        );
-    }
-
-    async validateInstanceCreate(
-        draft: InstanceCreateDraft,
-    ): Promise<InstanceCreateSummary> {
-        return await withRequestTimeout(
-            this.domains.instances.validateCreate(draft),
-            this.#requestTimeoutMs,
-            `instance.validateCreate:${draft.name}`,
         );
     }
 
@@ -451,12 +381,6 @@ export class WebStore {
         };
     }
 
-    async refreshConfig(): Promise<void> {
-        await this.domains.config.refresh();
-        if (this.domains.config.state.failure !== undefined)
-            throw this.domains.config.state.failure;
-    }
-
     async validateConfig(draft: ConfigDraft): Promise<boolean> {
         try {
             await withRequestTimeout(
@@ -484,38 +408,6 @@ export class WebStore {
             async () => {
                 await this.domains.config.update(request);
                 if (request.mcp !== undefined) await this.domains.mcp.refresh();
-            },
-        );
-    }
-
-    async updateInstanceConfig(
-        instance: string,
-        patch: ConfigInstancePatch,
-    ): Promise<boolean> {
-        return await this.updateConfig({
-            instance: { instanceName: instance, patch },
-        });
-    }
-
-    async updateMcpConfig(patch: ConfigMcpPatch): Promise<boolean> {
-        return await this.updateConfig({ mcp: patch });
-    }
-
-    async updateWebConfig(patch: ConfigWebPatch): Promise<boolean> {
-        return await this.updateConfig({ web: patch });
-    }
-
-    async decideOAuthApproval(
-        approvalId: string,
-        decision: "approve" | "deny",
-    ): Promise<boolean> {
-        const generation = this.#generation;
-        return await this.#operations.run(
-            `oauth:${decision}:${approvalId}`,
-            `OAuth request ${decision === "approve" ? "approved" : "denied"}.`,
-            generation,
-            async () => {
-                await this.domains.mcp.decideApproval(approvalId, decision);
             },
         );
     }

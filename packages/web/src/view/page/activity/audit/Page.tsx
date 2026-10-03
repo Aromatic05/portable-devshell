@@ -297,10 +297,12 @@ export function Audit({
                                 }
                             }}
                             onLoadDetail={async () =>
-                                await store.readToolCallDetail(
-                                    call.instance,
-                                    call.callId,
-                                )
+                                (
+                                    await domains.toolCalls.readDetail(
+                                        call.instance,
+                                        call.callId,
+                                    )
+                                )[0]
                             }
                             onLoadImage={domains.artifactTransport.readImage}
                             onRefresh={async () =>

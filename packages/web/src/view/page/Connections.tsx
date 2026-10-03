@@ -103,14 +103,16 @@ export function Connections({
             mode === "token" && (rotate || !oauthApproval.tokenConfigured)
                 ? generateOAuth2ApprovalToken()
                 : undefined;
-        const succeeded = await store.updateMcpConfig({
-            oauth2:
-                mode === "tui"
-                    ? { approval: "tui" }
-                    : {
-                          approval: "token",
-                          ...(token === undefined ? {} : { token }),
-                      },
+        const succeeded = await store.updateConfig({
+            mcp: {
+                oauth2:
+                    mode === "tui"
+                        ? { approval: "tui" }
+                        : {
+                              approval: "token",
+                              ...(token === undefined ? {} : { token }),
+                          },
+            },
         });
         if (!succeeded) {
             setFeedback({

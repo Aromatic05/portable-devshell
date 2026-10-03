@@ -14,7 +14,7 @@ describe("Web Config", () => {
         const { store } = renderConfig();
         const validateConfig = vi.spyOn(store, "validateConfig");
         const stop = vi.spyOn(store, "stop");
-        const updateInstanceConfig = vi.spyOn(store, "updateInstanceConfig");
+        const updateConfig = vi.spyOn(store, "updateConfig");
         const start = vi.spyOn(store, "start");
 
         fireEvent.change(
@@ -32,10 +32,14 @@ describe("Web Config", () => {
         await waitFor(() => expect(validateConfig).toHaveBeenCalledTimes(1));
         expect(stop).toHaveBeenCalledWith("alpha");
         await waitFor(() =>
-            expect(updateInstanceConfig).toHaveBeenCalledWith(
-                "alpha",
-                expect.objectContaining({ logs: { retentionDays: 30 } }),
-            ),
+            expect(updateConfig).toHaveBeenCalledWith({
+                instance: {
+                    instanceName: "alpha",
+                    patch: expect.objectContaining({
+                        logs: { retentionDays: 30 },
+                    }),
+                },
+            }),
         );
         expect(start).toHaveBeenCalledWith("alpha");
     });
@@ -45,7 +49,7 @@ describe("Web Config", () => {
         const validateConfig = vi.spyOn(store, "validateConfig");
         const stop = vi.spyOn(store, "stop");
         const start = vi.spyOn(store, "start");
-        const updateInstanceConfig = vi.spyOn(store, "updateInstanceConfig");
+        const updateConfig = vi.spyOn(store, "updateConfig");
 
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Workspace enabled" }),
@@ -59,10 +63,14 @@ describe("Web Config", () => {
         fireEvent.click(save);
 
         await waitFor(() =>
-            expect(updateInstanceConfig).toHaveBeenCalledWith(
-                "alpha",
-                expect.objectContaining({ workspace: { enabled: false } }),
-            ),
+            expect(updateConfig).toHaveBeenCalledWith({
+                instance: {
+                    instanceName: "alpha",
+                    patch: expect.objectContaining({
+                        workspace: { enabled: false },
+                    }),
+                },
+            }),
         );
         expect(validateConfig).toHaveBeenCalledTimes(1);
         expect(stop).not.toHaveBeenCalled();

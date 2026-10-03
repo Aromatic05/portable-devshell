@@ -530,8 +530,8 @@ describe("Audit", () => {
 
     it("shows Tool Call detail loading failures inside the expanded record", async () => {
         renderAudit({
-            configure: (store) => {
-                vi.spyOn(store, "readToolCallDetail").mockRejectedValue(
+            configure: (store, domains) => {
+                vi.spyOn(domains.toolCalls, "readDetail").mockRejectedValue(
                     new Error("Tool Call detail unavailable."),
                 );
                 vi.spyOn(store, "refreshToolCall").mockResolvedValue(undefined);

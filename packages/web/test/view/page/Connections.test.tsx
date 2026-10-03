@@ -137,7 +137,7 @@ describe("Web Connections", () => {
         const config = connectionView();
         config.mcp.oauth2 = { approval: "token", token: "********" };
         const { domains, store } = setup({ config });
-        const updateMcpConfig = vi.spyOn(store, "updateMcpConfig");
+        const updateConfig = vi.spyOn(store, "updateConfig");
         renderConnections(store, domains);
 
         const oauth = screen.getByRole("heading", { name: "OAuth runtime" })
@@ -150,8 +150,8 @@ describe("Web Connections", () => {
                 name: "Rotate approval token",
             }),
         );
-        await waitFor(() => expect(updateMcpConfig).toHaveBeenCalledOnce());
-        const patch = updateMcpConfig.mock.calls[0]?.[0];
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledOnce());
+        const patch = updateConfig.mock.calls[0]?.[0]?.mcp;
         expect(patch?.oauth2?.approval).toBe("token");
         expect(patch?.oauth2?.token).toMatch(/^ds_[0-9a-f]{64}$/u);
         await waitFor(() =>
