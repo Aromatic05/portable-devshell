@@ -301,6 +301,9 @@ importers:
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
 
   packages/shared:
     dependencies:
@@ -3618,7 +3621,9 @@ snapshots:
       - react-dom
       - supports-color
 
-  '@portable-devshell/shared@file:packages/shared': {}
+  '@portable-devshell/shared@file:packages/shared':
+    dependencies:
+      protobufjs: 7.6.6
 
   '@portable-devshell/tui@file:packages/tui(@types/react@19.3.0)':
     dependencies:
