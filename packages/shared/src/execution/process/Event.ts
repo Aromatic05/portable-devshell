@@ -1,5 +1,10 @@
 import type { InstanceEventRecord } from "../../client/Stream.js";
-import type { ToolCallSource } from "../tool/Model.js";
+
+/**
+ * Origin of an instance log line. Deliberately local: process events must not
+ * depend on the ToolCall domain even though the current values coincide.
+ */
+type InstanceLogSource = "cli" | "tui" | "web" | "mcp" | "extension";
 
 export type ProcessEventType =
     | "instance.started"
@@ -36,7 +41,7 @@ export interface InstanceLogEntry {
     message: string;
     requestId?: string;
     seq: number;
-    source?: ToolCallSource;
+    source?: InstanceLogSource;
     stream: "stderr" | "stdout";
     toolName?: string;
 }

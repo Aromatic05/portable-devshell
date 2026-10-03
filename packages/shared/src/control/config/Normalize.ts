@@ -1,4 +1,4 @@
-import type { ApprovalPolicy } from "../../workspace/approval/Model.js";
+import type { ApprovalPolicy } from "./Policy.js";
 import type {
     InstanceContainerConfig,
     InstanceContainerDraft,

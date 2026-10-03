@@ -3,7 +3,7 @@ import type {
     ApprovalPolicyDecision,
     ApprovalPolicyMode,
     ApprovalPolicySourceScope,
-} from "../../workspace/approval/Model.js";
+} from "./Policy.js";
 import { configInputError, type ConfigPathSegment } from "./Error.js";
 import type { InstanceContainerDraft } from "./Model.js";
 import type {

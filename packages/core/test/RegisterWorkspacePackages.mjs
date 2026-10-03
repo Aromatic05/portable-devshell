@@ -67,6 +67,14 @@ const workspacePackages = new Map([
         new URL("../../shared/src/transport/frame/Protocol.ts", import.meta.url)
             .href,
     ],
+    [
+        "@portable-devshell/shared/config",
+        new URL("../../shared/src/control/config/Type.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/shared/toolcall",
+        new URL("../../shared/src/toolcall/Type.ts", import.meta.url).href,
+    ],
 ]);
 
 registerHooks({

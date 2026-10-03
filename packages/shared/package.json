@@ -13,6 +13,14 @@
         "./transport/frame": {
             "types": "./dist/transport/frame/Protocol.d.ts",
             "default": "./dist/transport/frame/Protocol.js"
+        },
+        "./config": {
+            "types": "./dist/control/config/Type.d.ts",
+            "default": "./dist/control/config/Type.js"
+        },
+        "./toolcall": {
+            "types": "./dist/toolcall/Type.d.ts",
+            "default": "./dist/toolcall/Type.js"
         }
     },
     "files": [

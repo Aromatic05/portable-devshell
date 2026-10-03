@@ -1,9 +1,46 @@
-// Tool definitions and tool-call records. Tool definitions come from the
-// target worker; tool-call records are the instance-scoped execution ledger.
+// Tool execution model. The stable cross-domain ToolCall data types live in
+// the `toolcall` surface and are re-exported here so existing consumers of the
+// execution domain keep working. What remains local is execution-specific:
+// session results, instance events, and the ToolDefinition parser.
 
 import type { InstanceEventRecord } from "../../client/Stream.js";
-import type { InstanceName } from "../../types/Instance.js";
 import type { JsonValue } from "../../types/Json.js";
+import type {
+    ToolCallContext,
+    ToolCallRecord,
+    ToolDefinition,
+} from "../../toolcall/Type.js";
+
+export type {
+    ToolCallContext,
+    ToolCallRecord,
+    ToolDefinition,
+} from "../../toolcall/Type.js";
+
+export type ToolCapability = ToolDefinition["requiredCapabilities"][number];
+export type ToolCallSource = ToolCallContext["source"];
+export interface ToolCallProvenance {
+    explanation?: string;
+    purpose?: string;
+}
+export type ToolCallStatus = ToolCallRecord["status"];
+export type ToolCallFailureStage = NonNullable<ToolCallRecord["failureStage"]>;
+export type ToolTermination = NonNullable<ToolCallRecord["termination"]>;
+
+export interface ToolCallQuery {
+    after?: string;
+    before?: string;
+    callIds?: string[];
+    ctxId?: string;
+    includeInput?: boolean;
+    includeOutput?: boolean;
+    limit?: number;
+    maxBytes?: number;
+    source?: ToolCallSource;
+    status?: ToolCallStatus;
+    toolName?: string;
+    workspace?: string;
+}
 
 export const bootstrapToolNamespace = "environ" as const;
 
@@ -23,46 +60,10 @@ export function toolNamespace(name: string): string | undefined {
         : undefined;
 }
 
-export type ToolCapability = "read" | "write" | "execute" | "manage";
-
-export interface ToolDefinition {
-    _meta?: JsonValue;
-    description: string;
-    group: string;
-    inputSchema: JsonValue;
-    name: string;
-    outputSchema: JsonValue;
-    requiredCapabilities: readonly ToolCapability[];
-}
-
 export interface ToolSessionOpenResult {
     tools: ToolDefinition[];
     workspace: string;
 }
-
-export type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "extension";
-
-export interface ToolCallContext {
-    requestId?: string;
-    operationId?: string;
-    ctxId?: string;
-    workspace?: string;
-    source: ToolCallSource;
-}
-
-export interface ToolCallProvenance {
-    explanation?: string;
-    purpose?: string;
-}
-
-export type ToolCallStatus =
-    | "queued"
-    | "running"
-    | "completed"
-    | "failed"
-    | "denied"
-    | "queueTimeout"
-    | "cancelled";
 
 export type ToolEventType =
     | "toolCall.queued"
@@ -74,49 +75,6 @@ export type ToolEventType =
     | "toolCall.queueTimeout"
     | "toolCall.cancelled";
 export type ToolEvent = InstanceEventRecord<ToolEventType>;
-
-export type ToolCallFailureStage = "postExecution" | "outboundHook";
-
-export interface ToolCallQuery {
-    after?: string;
-    before?: string;
-    callIds?: string[];
-    ctxId?: string;
-    includeInput?: boolean;
-    includeOutput?: boolean;
-    limit?: number;
-    maxBytes?: number;
-    source?: ToolCallSource;
-    status?: ToolCallStatus;
-    toolName?: string;
-    workspace?: string;
-}
-
-export interface ToolCallRecord extends ToolCallProvenance {
-    callId: string;
-    completedAt?: string;
-    error?: string;
-    executionCompleted?: boolean;
-    exitCode?: number | null;
-    failureStage?: ToolCallFailureStage;
-    inputSummary: string;
-    input?: JsonValue;
-    output?: JsonValue;
-    instance: InstanceName;
-    requestId?: string;
-    ctxId?: string;
-    source: ToolCallSource;
-    startedAt: string;
-    status: ToolCallStatus;
-    stderrBytes?: number;
-    stdoutBytes?: number;
-    termSignal?: number;
-    termination?: ToolTermination;
-    toolName: string;
-    workspace?: string;
-}
-
-export type ToolTermination = "exited" | "signaled" | "timeout";
 
 export function isToolCallEvent(type: string): type is ToolEventType {
     return type.startsWith("toolCall.");

@@ -1,19 +1,18 @@
-// Tool approval domain model. Decisions and policy are owned by the instance
-// approval service; the client treats the pending list as an authoritative
-// snapshot plus an event cursor.
+// Tool approval domain model. Decisions are owned by the instance approval
+// service; the client treats the pending list as an authoritative snapshot
+// plus an event cursor. Approval policy is Config vocabulary and lives in
+// control/config/Type.ts.
 
 import type { InstanceEventRecord } from "../../client/Stream.js";
 import type { InstanceName } from "../../types/Instance.js";
-import type { ToolCallSource } from "../../execution/tool/Model.js";
 import type { JsonValue } from "../../types/Json.js";
+
+type ApprovalSource = "cli" | "tui" | "web" | "mcp" | "extension";
 
 export type ApprovalStatus =
     "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecisionValue = "approve" | "deny";
 export type ApprovalDecisionBy = "cli" | "tui" | "web" | "policy";
-export type ApprovalPolicyMode = "disabled" | "allow" | "ask" | "deny";
-export type ApprovalPolicyDecision = "allow" | "ask" | "deny";
-export type ApprovalPolicySourceScope = ToolCallSource | "all";
 export type ApprovalRiskLevel = "low" | "medium" | "high";
 export type ApprovalEventType =
     | "approval.requested"
@@ -46,7 +45,7 @@ export interface ApprovalRequest {
     riskLevel: ApprovalRiskLevel;
     ctxId?: string;
     extensionId?: string;
-    source: ToolCallSource;
+    source: ApprovalSource;
     status: ApprovalStatus;
     terminalAt?: string;
     toolName: string;
@@ -61,18 +60,6 @@ export interface ApprovalDecision {
     policyPatch?: JsonValue;
     reason?: string;
     remember?: boolean;
-}
-
-export interface ApprovalPolicyRule {
-    decision: ApprovalPolicyDecision;
-    match: "exact";
-    source: ApprovalPolicySourceScope;
-    toolName?: string;
-}
-
-export interface ApprovalPolicy {
-    mode: ApprovalPolicyMode;
-    rules?: ApprovalPolicyRule[];
 }
 
 export interface ApprovalTimeout {

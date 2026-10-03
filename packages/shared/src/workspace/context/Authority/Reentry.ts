@@ -1,15 +1,20 @@
-import type { GoalActivityKind } from "../../task/Model.js";
 import type {
     McpContextAutomaticReentryMode,
     McpContextAutomaticReentrySourceKind,
     McpContextAutomaticReentryState,
 } from "../Model.js";
 
+type ContextReentryActivityKind =
+    | "observation"
+    | "execution"
+    | "mutation"
+    | "wait";
+
 export interface ContextReentryPort {
     readAutomaticReentry(ctxId: string, instance: string): Promise<McpContextAutomaticReentryState>;
     suppressAutomaticReentry(ctxId: string, instance: string, reason: string, mode?: Exclude<McpContextAutomaticReentryMode, "automatic">): Promise<McpContextAutomaticReentryState>;
     resumeAutomaticReentry(ctxId: string, instance: string): Promise<McpContextAutomaticReentryState>;
-    observeAutomaticReentryActivity(ctxId: string, instance: string, activity: GoalActivityKind): Promise<McpContextAutomaticReentryState>;
+    observeAutomaticReentryActivity(ctxId: string, instance: string, activity: ContextReentryActivityKind): Promise<McpContextAutomaticReentryState>;
     observeExecutionActivity(ctxId: string, instance: string): Promise<McpContextAutomaticReentryState>;
     releaseExecutionActivity(ctxId: string, instance: string, expectedEpoch: number): Promise<McpContextAutomaticReentryState>;
     markAutomaticReentryAttempted(ctxId: string, instance: string, claimId: string): Promise<McpContextAutomaticReentryState>;

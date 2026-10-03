@@ -5,14 +5,14 @@ import {
     type ApprovalDecision,
     type ApprovalDecisionBy,
     type ApprovalEventType,
-    type ApprovalPolicy,
-    type ApprovalPolicyDecision,
     type ApprovalRequest,
     type ApprovalTimeout,
     type InstanceName,
     type JsonValue,
-    type ToolCallSource,
 } from "@portable-devshell/shared";
+import type { ApprovalPolicy } from "@portable-devshell/shared/config";
+
+type ApprovalPolicyDecision = Exclude<ApprovalPolicy["mode"], "disabled">;
 
 const TERMINAL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const TERMINAL_MAX_COUNT = 1000;
@@ -32,7 +32,7 @@ export class ApprovalError extends Error {
 
 export interface ApprovalEvaluationInput {
     callId: string;
-    source: ToolCallSource;
+    source: ApprovalRequest["source"];
     requestId?: string;
     ctxId?: string;
     workspace?: string;
@@ -479,7 +479,7 @@ export class ApprovalService {
 
 function policyDecision(
     policy: ApprovalPolicy,
-    source: ToolCallSource,
+    source: ApprovalRequest["source"],
     tool: string,
 ): ApprovalPolicyDecision {
     if (!["disabled", "allow", "ask", "deny"].includes(policy.mode)) {

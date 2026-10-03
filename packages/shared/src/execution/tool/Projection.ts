@@ -1,6 +1,16 @@
 import type { JsonValue } from "../../types/Json.js";
-import type { InstanceLogEntry } from "../process/Event.js";
 import type { ToolCallRecord, ToolCallStatus } from "./Model.js";
+
+/**
+ * Minimal structural view of an instance log entry. Projection only needs the
+ * call linkage, stream name, and message; depending on the Process domain's
+ * `InstanceLogEntry` for that would invert the dependency direction.
+ */
+interface ToolCallLogEntry {
+    callId?: string;
+    message: string;
+    stream: "stderr" | "stdout";
+}
 
 const failedStatuses = new Set<ToolCallStatus>([
     "cancelled",
@@ -13,7 +23,7 @@ const pendingStatuses = new Set<ToolCallStatus>(["queued", "running"]);
 export function resolveToolOutput(
     output: JsonValue | undefined,
     callId: string,
-    logs: readonly Pick<InstanceLogEntry, "callId" | "message" | "stream">[],
+    logs: readonly ToolCallLogEntry[],
 ): JsonValue | undefined {
     const linked = logs.filter((entry) => entry.callId === callId);
     const stdout = linked
@@ -45,7 +55,7 @@ export function toolCallOutcome(
 
 export function toolCallOutput(
     call: ToolCallRecord,
-    logs: readonly InstanceLogEntry[],
+    logs: readonly ToolCallLogEntry[],
 ): JsonValue | undefined {
     return resolveToolOutput(call.output, call.callId, logs);
 }

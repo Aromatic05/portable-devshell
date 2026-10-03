@@ -11,6 +11,12 @@
             "@portable-devshell/shared/transport/frame": [
                 "./packages/shared/dist/transport/frame/Protocol.d.ts"
             ],
+            "@portable-devshell/shared/config": [
+                "./packages/shared/dist/control/config/Type.d.ts"
+            ],
+            "@portable-devshell/shared/toolcall": [
+                "./packages/shared/dist/toolcall/Type.d.ts"
+            ],
             "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"

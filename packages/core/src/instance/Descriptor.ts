@@ -8,7 +8,6 @@ import type { WorkerTransportConnection } from "../worker/transport/Transport.js
 import type {
     ActiveTodoSummary,
     ApprovalDecisionBy,
-    ApprovalPolicy,
     ApprovalRequest,
     ControlMcpContextMode,
     GoalActivityKind,
@@ -23,6 +22,7 @@ import type {
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
+import type { ApprovalPolicy } from "@portable-devshell/shared/config";
 
 export interface InstanceTodoPort {
     cancelAll(): Promise<void>;

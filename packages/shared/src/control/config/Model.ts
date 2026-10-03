@@ -3,7 +3,7 @@ import {
     type InstanceListEntry,
     type InstanceSnapshot,
 } from "../../execution/process/Model.js";
-import { type ApprovalPolicy } from "../../workspace/approval/Model.js";
+import { type ApprovalPolicy } from "./Policy.js";
 
 export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
