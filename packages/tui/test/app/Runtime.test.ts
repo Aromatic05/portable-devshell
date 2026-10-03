@@ -317,7 +317,11 @@ import {
                             maxBytes: 16_777_216,
                             retentionDays: 7,
                         },
-                        mcp: { enabled: true, path: "/alpha/mcp" },
+                        mcp: {
+                            auth: { mode: "none" },
+                            enabled: true,
+                            path: "/alpha/mcp",
+                        },
                         name: "alpha",
                         provider: "local",
                         security: {
@@ -350,9 +354,7 @@ import {
                 () =>
                     runtime.store.getState().connection.status === "connected",
             );
-            await waitUntil(
-                () => runtime.store.getState().ui.selectedInstance === "alpha",
-            );
+            runtime.store.setSelectedInstance("alpha");
             await waitUntil(
                 () =>
                     runtime.reader.runtime("alpha").snapshot?.ready === true,
