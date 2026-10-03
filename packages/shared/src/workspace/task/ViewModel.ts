@@ -1,12 +1,12 @@
-import { type InstanceEvent } from "../../execution/process/Event.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import {
     type GoalSnapshot,
     isGoalEvent,
     isTodoEvent,
+    type TaskEvent,
     type TodoReadInput,
     type TodoReadResult,
 } from "./Model.js";
@@ -23,7 +23,7 @@ interface GoalViewModelState {
     instances: Record<string, GoalInstanceState>;
 }
 interface GoalViewModelOptions {
-    onEvent?(event: InstanceEvent): void;
+    onEvent?(event: TaskEvent): void;
     refreshDelayMs?: number;
     retryBaseMs?: number;
     retryMaxMs?: number;
@@ -31,12 +31,15 @@ interface GoalViewModelOptions {
 }
 export class GoalViewModel {
     readonly #listeners = new Set<() => void>();
-    readonly #onEvent?: (event: InstanceEvent) => void;
+    readonly #onEvent?: (event: TaskEvent) => void;
     readonly #refreshDelayMs: number;
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #retryBaseMs: number;
     readonly #retryMaxMs: number;
-    readonly #subscriptions = new Map<string, InstanceEventSubscription>();
+    readonly #subscriptions = new Map<
+        string,
+        InstanceEventSubscription<TaskEvent>
+    >();
     readonly #transport: TaskTransport;
     readonly #versions = new Map<string, number>();
     #epoch = 0;
@@ -150,7 +153,7 @@ export class GoalViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription(fromSeq, {
+        const subscription = new InstanceEventSubscription<TaskEvent>(fromSeq, {
             onEvent: (event) => {
                 if (this.#current(epoch)) this.#applyEvent(event);
             },
@@ -171,7 +174,7 @@ export class GoalViewModel {
         subscription.start();
     }
 
-    #applyEvent(event: InstanceEvent): void {
+    #applyEvent(event: TaskEvent): void {
         if (!isGoalEvent(event.type)) return;
         const instance = event.instanceName;
         this.#updateInstance(instance, (state) => ({
@@ -270,7 +273,7 @@ export class TodoViewModel {
     #published: TodoViewModelState = emptyTodoState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: TodoViewModelState = emptyTodoState();
-    #subscription?: InstanceEventSubscription;
+    #subscription?: InstanceEventSubscription<TaskEvent>;
 
     constructor(transport: TaskTransport) {
         this.#transport = transport;
@@ -328,8 +331,8 @@ export class TodoViewModel {
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
         const instance = this.#requireInstance();
-        this.#subscription = new InstanceEventSubscription(fromSeq, {
-            onEvent: (event: InstanceEvent) => {
+        this.#subscription = new InstanceEventSubscription<TaskEvent>(fromSeq, {
+            onEvent: (event: TaskEvent) => {
                 if (isTodoEvent(event.type)) this.#scheduleRefresh();
             },
             onGap: () => this.#recover(),

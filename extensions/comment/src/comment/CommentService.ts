@@ -3,9 +3,9 @@ import type {
     ContextMessageQueueInput,
     ContextMessageReadResult,
     ContextMessageRecord,
-    InstanceEventType,
     JsonValue,
     ControlPortDefinition,
+    MessageEventType,
 } from "@portable-devshell/shared";
 import { ExtensionError } from "@portable-devshell/extension";
 import { randomUUID } from "node:crypto";
@@ -19,7 +19,7 @@ import { CommentState } from "./CommentState.js";
 
 export interface CommentServiceOptions {
     appendEvent(
-        type: Extract<InstanceEventType, `context.message.${string}`>,
+        type: Extract<MessageEventType, `context.message.${string}`>,
         data: JsonValue,
     ): Promise<void>;
     instanceName: string;
@@ -346,17 +346,17 @@ export function createCommentRouteModule(
     service: Pick<CommentService, "list" | "queue">,
 ): ControlPortDefinition {
     return {
-        name: "contextMessage",
+        name: "message",
         operations: [
             {
-                name: "list",
+                name: "listContextMessages",
                 handle: async (request) =>
                     (await service.list(
                         readCommentListInput(request.payload ?? {}),
                     )) as unknown as JsonValue,
             },
             {
-                name: "queue",
+                name: "queueContextMessage",
                 handle: async (request) =>
                     (await service.queue(
                         readCommentQueueInput(request.payload ?? {}),
@@ -374,7 +374,7 @@ function readCommentQueueInput(value: JsonValue): ContextMessageQueueInput {
         Object.keys(value).some((key) => key !== "ctxId" && key !== "text")
     ) {
         throw invalidRouteInput(
-            "contextMessage.queue requires only ctxId and text strings.",
+            "message.queueContextMessage requires only ctxId and text strings.",
         );
     }
     return { ctxId: value.ctxId, text: value.text };
@@ -388,19 +388,23 @@ function readCommentListInput(value: JsonValue): ContextMessageListInput {
         )
     ) {
         throw invalidRouteInput(
-            "contextMessage.list accepts only before, ctxId, limit, and maxBytes.",
+            "message.listContextMessages accepts only before, ctxId, limit, and maxBytes.",
         );
     }
     if (value.before !== undefined && typeof value.before !== "string")
-        throw invalidRouteInput("contextMessage.list before must be a string.");
+        throw invalidRouteInput(
+            "message.listContextMessages before must be a string.",
+        );
     if (value.ctxId !== undefined && typeof value.ctxId !== "string")
-        throw invalidRouteInput("contextMessage.list ctxId must be a string.");
+        throw invalidRouteInput(
+            "message.listContextMessages ctxId must be a string.",
+        );
     if (
         value.limit !== undefined &&
         (typeof value.limit !== "number" || !Number.isSafeInteger(value.limit))
     )
         throw invalidRouteInput(
-            "contextMessage.list limit must be an integer.",
+            "message.listContextMessages limit must be an integer.",
         );
     if (
         value.maxBytes !== undefined &&
@@ -408,7 +412,7 @@ function readCommentListInput(value: JsonValue): ContextMessageListInput {
             !Number.isSafeInteger(value.maxBytes))
     )
         throw invalidRouteInput(
-            "contextMessage.list maxBytes must be an integer.",
+            "message.listContextMessages maxBytes must be an integer.",
         );
     return {
         ...(value.before === undefined ? {} : { before: value.before }),

@@ -14,8 +14,8 @@ import {
 } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
-    InstanceEventType,
     JsonValue,
+    TaskEventType,
     TodoCheckpoint,
     TodoCheckpointInput,
     TodoItem,
@@ -178,7 +178,7 @@ export interface TodoTransition {
     document: TodoDocument;
     events: Array<{
         data: JsonValue;
-        type: Extract<InstanceEventType, `todo.${string}`>;
+        type: Extract<TaskEventType, `todo.${string}`>;
     }>;
 }
 
@@ -792,7 +792,7 @@ function isCompletedItems(items: readonly TodoItem[]): boolean {
 }
 
 function todoEvent(
-    type: Extract<InstanceEventType, `todo.${string}`>,
+    type: Extract<TaskEventType, `todo.${string}`>,
     state: SharedTodoState,
 ): TodoTransition["events"][number] {
     return {

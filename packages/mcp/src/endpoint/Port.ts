@@ -9,7 +9,7 @@ import type {
     GoalContinuationInput,
     GoalManageInput,
     GoalSnapshot,
-    InstanceEvent,
+    InstanceEventRecord,
     JsonValue,
     TodoReadInput,
     TodoTaskControlAction,
@@ -88,7 +88,7 @@ export interface McpEndpointCallContext {
 }
 
 export interface McpWorkspaceEventSlice {
-    events: InstanceEvent[];
+    events: InstanceEventRecord[];
     gap: boolean;
     lastSeq: number;
 }

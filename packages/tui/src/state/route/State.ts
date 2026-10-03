@@ -1,6 +1,6 @@
 import type { TuiAppState } from "../store/Model.js";
-import type { TuiPageId } from "../Ui.js";
 import type { TuiDomainReader } from "../../view/domain/Reader.js";
+import type { TuiPageId } from "../Ui.js";
 import {
     defaultTuiRouteViewState,
     rootTuiRoute,
@@ -8,6 +8,7 @@ import {
     type TuiRoute,
     type TuiRouteViewState,
 } from "./Model.js";
+import { findAuditContext } from "../../view/page/activity/audit/projection/Context.js";
 
 const CONTEXT_SEPARATOR = "\u0000";
 
@@ -223,8 +224,70 @@ export function updateCurrentTuiRouteView(
     };
 }
 
-export function reconcileTuiRouteResources(state: TuiAppState): TuiAppState {
-    return state;
+export function reconcileTuiRouteResources(
+    state: TuiAppState,
+    domains: TuiDomainReader,
+): TuiAppState {
+    let changed = false;
+    const routeStacks: Record<string, readonly TuiRoute[]> = {};
+    for (const [key, stack] of Object.entries(state.ui.routeStacks)) {
+        const separator = key.indexOf(CONTEXT_SEPARATOR);
+        const instanceValue = key.slice(separator + 1);
+        const instance = instanceValue === "-" ? undefined : instanceValue;
+        let validLength = 1;
+        for (let index = 1; index < stack.length; index += 1) {
+            if (!isTuiRouteResourceValid(domains, stack[index]!, instance))
+                break;
+            validLength = index + 1;
+        }
+        routeStacks[key] = stack.slice(0, validLength);
+        changed ||= validLength !== stack.length;
+    }
+    if (!changed) return state;
+    return restoreCurrentTuiRouteView({
+        ...state,
+        ui: { ...state.ui, routeStacks },
+    });
+}
+
+function isTuiRouteResourceValid(
+    domains: TuiDomainReader,
+    route: TuiRoute,
+    instance: string | undefined,
+): boolean {
+    if (route.page === "messages" && route.view === "thread") {
+        const resolved = route.instance ?? instance;
+        if (resolved === undefined) return false;
+        const registered = domains.context.contexts.some((context) =>
+            context.environments.some(
+                (environment) => environment.instance === resolved,
+            ),
+        );
+        const conversationEntries =
+            domains.conversation.instances[resolved]?.entries ?? [];
+        return (
+            registered ||
+            conversationEntries.some((entry) => entry.ctxId === route.ctxId)
+        );
+    }
+    if (route.page === "audit" && route.view !== "contexts") {
+        if (instance === undefined) return false;
+        const key =
+            route.scope === "unscoped"
+                ? ({ kind: "unscoped" } as const)
+                : ({ ctxId: route.ctxId, kind: "context" } as const);
+        const context = findAuditContext(domains, instance, key);
+        return context !== undefined && context.calls.length > 0;
+    }
+    if (route.page === "todo" && route.view === "detail") {
+        if (instance === undefined) return false;
+        const todo = domains.todo(instance).todo;
+        return (
+            todo?.taskId === route.todoId ||
+            todo?.tasks?.some((task) => task.taskId === route.todoId) === true
+        );
+    }
+    return true;
 }
 
 export function selectBreadcrumbSegments(

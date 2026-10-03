@@ -1,4 +1,17 @@
+import type { InstanceEventRecord } from "../../client/Stream.js";
 import { type JsonValue } from "../../types/Json.js";
+
+export type TaskEventType =
+    | "goal.updated"
+    | "todo.created"
+    | "todo.updated"
+    | "todo.completed"
+    | "todo.archived"
+    | "todo.deleted";
+export type TaskEvent = InstanceEventRecord<TaskEventType>;
+export function isTaskEventType(type: string): type is TaskEventType {
+    return isGoalEvent(type) || isTodoEvent(type);
+}
 
 // Workspace goal records. Goals are read as an authoritative snapshot plus the
 // instance event sequence at read time, so a reader can subscribe from the
@@ -126,7 +139,9 @@ export interface GoalSnapshotEnvelope {
     lastSeq: number;
 }
 /** Instance activity events that change the goal projection. */
-export function isGoalEvent(type: string): boolean {
+export function isGoalEvent(
+    type: string,
+): type is Extract<TaskEventType, `goal.${string}`> {
     return type.startsWith("goal.");
 }
 // Todo task model. A todo read is an authoritative snapshot plus the instance
@@ -223,16 +238,14 @@ export interface TodoReadEnvelope {
     lastSeq: number;
     todo: TodoReadResult;
 }
-export function isTodoEvent(type: string): boolean {
+export function isTodoEvent(
+    type: string,
+): type is Extract<TaskEventType, `todo.${string}`> {
     return type.startsWith("todo.");
 }
 export type WaitKind = "approval" | "question" | "tmux";
 export type WaitStatus =
-    | "waiting"
-    | "detached"
-    | "resolved"
-    | "consumed"
-    | "cancelled";
+    "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
 export interface WaitCreateInput {
     automaticRecovery?: boolean;
     createdByCtxId: string;

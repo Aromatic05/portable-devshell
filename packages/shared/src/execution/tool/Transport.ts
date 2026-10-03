@@ -9,10 +9,16 @@ import {
 } from "../../transport/endpoint/PortClient.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
-import type { InstanceStreamEnvelope } from "../process/Event.js";
+import { asInstanceName } from "../../types/Instance.js";
+import {
+    type EventStreamEnvelope,
+    InstanceEventStream,
+    type InstanceEventStreamPort,
+} from "../../client/Stream.js";
 import type {
     ToolCallQuery,
     ToolCallRecord,
+    ToolEvent,
     ToolSessionOpenResult,
 } from "./Model.js";
 
@@ -46,6 +52,10 @@ export interface ToolTransport {
         instance: string,
         workspace: string,
     ): Promise<ToolSessionOpenResult>;
+    subscribe(
+        instance: string,
+        fromSeq: number,
+    ): Promise<InstanceEventStreamPort<ToolEvent>>;
 }
 
 export function createToolTransport(endpoint: Endpoint): ToolTransport {
@@ -86,6 +96,11 @@ export function createToolTransport(endpoint: Endpoint): ToolTransport {
             port(instance).request<ToolSessionOpenResult>("openSession", {
                 workspace,
             }),
+        subscribe: async (instance, fromSeq) =>
+            new InstanceEventStream<ToolEvent>(
+                asInstanceName(instance),
+                await port(instance).open("subscribe", { fromSeq }),
+            ),
     };
 }
 async function streamToolCall(
@@ -93,7 +108,7 @@ async function streamToolCall(
     options: ToolCallOptions,
 ): Promise<JsonValue> {
     const offData = stream.onData((message) => {
-        const envelope = message as InstanceStreamEnvelope;
+        const envelope = message as EventStreamEnvelope;
         if (envelope.name === "progress")
             options.onProgress?.(envelope.payload ?? null);
     });

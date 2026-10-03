@@ -13,23 +13,23 @@ export async function executeInstanceLifecycle(
 ): Promise<boolean> {
     switch (command.kind) {
         case "instance.list": {
-            const instances = await context.clients.instance.list();
+            const instances = await context.clients.instance.listInstances();
             context.writeRecords(instances, renderInstanceList(instances));
             return true;
         }
         case "instance.delete":
             context.writeJson(
-                await context.clients.instance.delete(command.instance),
+                await context.clients.instance.deleteInstance(command.instance),
             );
             return true;
         case "instance.enable":
             context.writeJson(
-                await context.clients.instance.enable(command.instance),
+                await context.clients.instance.enableInstance(command.instance),
             );
             return true;
         case "instance.disable":
             context.writeJson(
-                await context.clients.instance.disable(command.instance),
+                await context.clients.instance.disableInstance(command.instance),
             );
             return true;
         case "instance.deviceCode": {

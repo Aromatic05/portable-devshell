@@ -2,7 +2,7 @@ import {
     toRemoteError,
     type ConversationPreferencesPatch,
     type ConversationPreferencesSnapshot,
-    type RuntimeStartOptions,
+    type ProcessStartOptions,
     type ToolCallRecord,
     type TodoReadInput,
 } from "@portable-devshell/shared";
@@ -12,6 +12,7 @@ import {
     type TuiDomainSession,
 } from "./Client.js";
 import { TuiAppStore } from "../../state/store/App.js";
+import { TuiDomainReader } from "../../view/domain/Reader.js";
 
 export interface TuiControlSessionOptions {
     domains?: TuiDomainSession;
@@ -58,7 +59,7 @@ export class TuiControlSession {
         },
         startInstance: async (
             instance: string,
-            options: RuntimeStartOptions = {},
+            options: ProcessStartOptions = {},
         ) => {
             const runtime = this.domains.runtime(instance);
             await runtime.load(instance);
@@ -73,7 +74,14 @@ export class TuiControlSession {
 
     constructor(options: TuiControlSessionOptions = {}) {
         this.domains = options.domains ?? createTuiDomainSession();
-        this.#store = options.store ?? new TuiAppStore();
+        this.#store =
+            options.store ??
+            new TuiAppStore({
+                domains: new TuiDomainReader(
+                    this.domains,
+                    () => () => undefined,
+                ),
+            });
         this.#offService = this.domains.service.subscribe(() =>
             this.#syncConnection(),
         );
@@ -179,6 +187,7 @@ export class TuiControlSession {
         );
         await Promise.all([
             this.domains.conversation.load(instances),
+            this.domains.conversationPreferences.refresh(),
             this.domains.messages.load(instances),
         ]);
     }
@@ -213,13 +222,13 @@ export class TuiControlSession {
         signal?: AbortSignal,
     ): Promise<void> {
         if (signal?.aborted) return;
-        await this.domains.conversation.refreshPreferences();
+        await this.domains.conversationPreferences.refresh();
     }
 
     async updateConversationPreferences(
         patch: ConversationPreferencesPatch,
     ): Promise<ConversationPreferencesSnapshot> {
-        return await this.domains.conversation.updatePreferences(patch);
+        return await this.domains.conversationPreferences.update(patch);
     }
 
     async refreshToolCallsForInstance(
@@ -288,7 +297,7 @@ export class TuiControlSession {
             this.domains.overview.refresh(),
             this.domains.mcp.refresh(),
             this.domains.extension.refreshCatalogs(),
-            this.domains.conversation.refreshPreferences(),
+            this.domains.conversationPreferences.refresh(),
         ]);
     }
 

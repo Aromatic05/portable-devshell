@@ -1,4 +1,5 @@
 import { reconcileTuiRouteResources } from "../../route/State.js";
+import type { TuiDomainReader } from "../../../view/domain/Reader.js";
 import { reduceTuiStoreReducerControl } from "./data/Control.js";
 import { reduceTuiStoreReducerInstance } from "./data/Instance.js";
 import { reduceTuiStoreReducerInteraction } from "./ui/Interaction.js";
@@ -9,6 +10,7 @@ import type { TuiAppAction, TuiAppState } from "../Model.js";
 export function tuiAppReducer(
     state: TuiAppState,
     action: TuiAppAction,
+    domains?: TuiDomainReader,
 ): TuiAppState {
     const nextState =
         reduceTuiStoreReducerControl(state, action) ??
@@ -18,5 +20,7 @@ export function tuiAppReducer(
         reduceTuiStoreReducerInstance(state, action) ??
         state;
 
-    return reconcileTuiRouteResources(nextState);
+    return domains === undefined
+        ? nextState
+        : reconcileTuiRouteResources(nextState, domains);
 }

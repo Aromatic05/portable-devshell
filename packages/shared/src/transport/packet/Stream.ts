@@ -32,6 +32,7 @@ export class Stream {
             name: string,
             message: Message | undefined,
             peer: Address,
+            local: Address,
         ) => Promise<void> | void
     >();
     readonly #unsubscribe: () => void;
@@ -40,7 +41,7 @@ export class Stream {
         this.#target = target;
         if (target instanceof Connection) {
             const offPacket = target.onPacket((packet) =>
-                this.#accept(packet, target.remote),
+                this.#accept(packet, target.remote, target.local),
             );
             const offClose = target.onClose((error) =>
                 this.#disconnect(error),
@@ -50,8 +51,8 @@ export class Stream {
                 offClose();
             };
         } else {
-            this.#unsubscribe = target.onPacket((packet, peer) =>
-                this.#accept(packet, peer),
+            this.#unsubscribe = target.onPacket((packet, peer, local) =>
+                this.#accept(packet, peer, local),
             );
         }
     }
@@ -61,7 +62,12 @@ export class Stream {
             throw new Error("Stream open requires a Connection.");
         const connection = this.#target;
         const id = crypto.randomUUID();
-        const stream = this.#create(id, connection.remote, connection);
+        const stream = this.#create(
+            id,
+            connection.remote,
+            connection.local,
+            connection,
+        );
         await connection.send({
             protocol: "stream",
             type: "open",
@@ -78,6 +84,7 @@ export class Stream {
             name: string,
             message: Message | undefined,
             peer: Address,
+            local: Address,
         ) => Promise<void> | void,
     ): () => void {
         this.#openListeners.add(listener);
@@ -100,18 +107,18 @@ export class Stream {
         this.#streams.clear();
     }
 
-    async #accept(value: unknown, peer: Address): Promise<void> {
+    async #accept(value: unknown, peer: Address, local: Address): Promise<void> {
         const packet = parse(value);
         if (packet === undefined) return;
-        const key = `${peer.host}\u0000${peer.port}\u0000${packet.id}`;
+        const key = streamKey(local, peer, packet.id);
         if (packet.type === "open") {
             const connection =
                 this.#target instanceof Connection
                     ? this.#target
-                    : this.#target.connect(peer.host, peer.port);
-            const stream = this.#create(packet.id, peer, connection);
+                    : this.#target.connect(peer.host, peer.port, local);
+            const stream = this.#create(packet.id, peer, local, connection);
             for (const listener of this.#openListeners)
-                await listener(stream, packet.name, packet.message, peer);
+                await listener(stream, packet.name, packet.message, peer, local);
             return;
         }
         const stream = this.#streams.get(key);
@@ -129,14 +136,23 @@ export class Stream {
         else stream.acceptClose(packet.message);
     }
 
-    #create(id: string, peer: Address, connection: Connection): MessageStream {
-        const key = `${peer.host}\u0000${peer.port}\u0000${id}`;
+    #create(
+        id: string,
+        peer: Address,
+        local: Address,
+        connection: Connection,
+    ): MessageStream {
+        const key = streamKey(local, peer, id);
         const stream = new MessageStream(id, connection, () =>
             this.#streams.delete(key),
         );
         this.#streams.set(key, stream);
         return stream;
     }
+}
+
+function streamKey(local: Address, peer: Address, id: string): string {
+    return `${local.host}\u0000${local.port}\u0000${peer.host}\u0000${peer.port}\u0000${id}`;
 }
 
 export class MessageStream {

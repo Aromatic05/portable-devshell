@@ -1,18 +1,26 @@
 import type {
-    InstanceEventType,
     JsonValue,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
 
+type WaitEventType =
+    | "wait.created"
+    | "wait.detached"
+    | "wait.reattached"
+    | "wait.resolved"
+    | "wait.recoveryClaimed"
+    | "wait.recoveryDismissed"
+    | "wait.recoveryMessageAttempted"
+    | "wait.recoveryReleased"
+    | "wait.consumed"
+    | "wait.cancelled";
+
 import { WaitState, type WaitDocument, type WaitTransition } from "./State.js";
 import { WaitStore } from "./Store.js";
 
 export interface WaitServiceOptions {
-    appendEvent(
-        type: Extract<InstanceEventType, `wait.${string}`>,
-        data: JsonValue,
-    ): Promise<void>;
+    appendEvent(type: WaitEventType, data: JsonValue): Promise<void>;
     filePath: string;
     instanceName: string;
 }
@@ -198,10 +206,8 @@ export class WaitService {
 
     async #commit(
         eventType:
-            | Extract<InstanceEventType, `wait.${string}`>
-            | ((
-                  record: WaitRecord,
-              ) => Extract<InstanceEventType, `wait.${string}`>),
+            | WaitEventType
+            | ((record: WaitRecord) => WaitEventType),
         transition: (document: WaitDocument) => WaitTransition,
     ): Promise<WaitRecord> {
         return await this.#runExclusive(async () => {

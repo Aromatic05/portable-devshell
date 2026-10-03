@@ -12,7 +12,7 @@ import { TuiCommandDispatcher } from "../interaction/command/Dispatch.js";
 import { TuiControlSession } from "./control/Session.js";
 import { TuiFocusManager } from "../interaction/focus/Manager.js";
 import { TuiKeyDispatcher } from "../interaction/Input.js";
-import { TuiRenderScheduler } from "./Render.js";
+import { TuiRenderScheduler, type TuiRenderSource } from "./Render.js";
 import { buildFocusGraphForState } from "../view/shell/Router.js";
 import { TuiAppStore } from "../state/store/App.js";
 import { topTuiOverlay } from "../state/Overlay.js";
@@ -146,8 +146,6 @@ export class TuiRuntime {
         );
         this.#inkStdin = createInkStdin(this.#stdin);
         this.#alternateScreen = new AlternateScreen(this.#stdout);
-        this.store = new TuiAppStore();
-        this.scheduler = new TuiRenderScheduler(this.store);
 
         const domains =
             dependencies.domains ??
@@ -164,9 +162,33 @@ export class TuiRuntime {
                 xdgRuntimeDir: options.xdgRuntimeDir,
             });
         this.domains = domains;
-        this.reader = new TuiDomainReader(domains, (source) =>
-            this.scheduler.attach(source),
-        );
+        let scheduler: TuiRenderScheduler | undefined;
+        const pending = new Set<{
+            detach?: () => void;
+            detached: boolean;
+            source: TuiRenderSource;
+        }>();
+        this.reader = new TuiDomainReader(domains, (source) => {
+            const binding: {
+                detach?: () => void;
+                detached: boolean;
+                source: TuiRenderSource;
+            } = { detached: false, source };
+            if (scheduler === undefined) pending.add(binding);
+            else binding.detach = scheduler.attach(source);
+            return () => {
+                binding.detached = true;
+                pending.delete(binding);
+                binding.detach?.();
+            };
+        });
+        this.store = new TuiAppStore({ domains: this.reader });
+        scheduler = new TuiRenderScheduler(this.store);
+        this.scheduler = scheduler;
+        for (const binding of pending) {
+            pending.delete(binding);
+            if (!binding.detached) binding.detach = scheduler.attach(binding.source);
+        }
         this.projection = createTuiViewProjection(this.reader);
         this.focusManager = new TuiFocusManager(this.store, {
             boxIdForLine: (lineId) =>
@@ -217,10 +239,9 @@ export class TuiRuntime {
         const operationClients = {
             artifact: domains.artifactTransport,
             config: domains.configTransport,
-            instance: domains.instanceTransport,
             reverse: domains.reverse,
             service: domains.serviceTransport,
-            todo: domains.todoTransport,
+            task: domains.taskTransport,
             tool: domains.toolTransport,
         };
         this.#operations = new TuiRuntimeOperations({

@@ -9,8 +9,14 @@ import {
     CONTROL_PROTOCOL_VERSION,
     Endpoint,
     connectControlChannel,
-    createControlClients,
-    type ControlClients,
+    createConfigTransport,
+    createProcessTransport,
+    createServiceTransport,
+    createToolTransport,
+    type ConfigTransport,
+    type ProcessTransport,
+    type ServiceTransport,
+    type ToolTransport,
 } from "@portable-devshell/shared";
 
 import { projectAgentModelTools } from "../../../builtin/provider/AgentToolProjection.js";
@@ -29,7 +35,10 @@ export interface StandaloneDevshellPiOptions {
 }
 
 interface StandaloneControlSession {
-    clients: ControlClients;
+    instance: ConfigTransport;
+    runtime: ProcessTransport;
+    service: ServiceTransport;
+    tool: ToolTransport;
     close(): void;
 }
 
@@ -130,16 +139,16 @@ export async function openStandaloneDevshellPiToolSession(
         const requested = resolveStandaloneTarget(options);
         const instance =
             requested.instance ??
-            (await selectStandaloneInstance(control.clients));
-        const instances = await control.clients.instance.list();
+            (await selectStandaloneInstance(control.instance));
+        const instances = await control.instance.listInstances();
         const selected = instances.find(
             (candidate) => candidate.name === instance,
         );
         if (selected === undefined)
             throw new Error(`Unknown devshell instance: ${instance}`);
         if (!selected.snapshot.ready)
-            await control.clients.runtime.start(instance);
-        const opened = await control.clients.tool.openSession(
+            await (await control.runtime.start(instance)).snapshot;
+        const opened = await control.tool.openSession(
             instance,
             requested.workspace,
         );
@@ -155,7 +164,7 @@ export async function openStandaloneDevshellPiToolSession(
             tools,
             async callTool(toolName, input, operationId, signal, onProgress) {
                 signal?.throwIfAborted();
-                const result = await control.clients.tool.callStreaming(
+                const result = await control.tool.callStreaming(
                     instance,
                     toolName,
                     input,
@@ -169,7 +178,7 @@ export async function openStandaloneDevshellPiToolSession(
                 if (closed) return;
                 closed = true;
                 try {
-                    await control.clients.tool.closeSession(instance);
+                    await control.tool.closeSession(instance);
                 } finally {
                     control.close();
                 }
@@ -209,9 +218,9 @@ export function parseStandaloneDevshellPiTarget(
 async function connectStandaloneControl(
     options: StandaloneDevshellPiOptions,
 ): Promise<StandaloneControlSession> {
-    let control = createStandaloneControlClients(options.environment);
+    let control = createStandaloneControl(options.environment);
     try {
-        await negotiate(control.clients);
+        await negotiate(control.service);
     } catch (firstError) {
         control.close();
         if (
@@ -220,8 +229,8 @@ async function connectStandaloneControl(
         )
             throw firstError;
         await startControl(options);
-        control = createStandaloneControlClients(options.environment);
-        await negotiate(control.clients).catch((error) => {
+        control = createStandaloneControl(options.environment);
+        await negotiate(control.service).catch((error) => {
             control.close();
             throw error;
         });
@@ -229,7 +238,7 @@ async function connectStandaloneControl(
     return control;
 }
 
-function createStandaloneControlClients(
+function createStandaloneControl(
     environment?: NodeJS.ProcessEnv,
 ): StandaloneControlSession {
     const endpoint = new Endpoint({
@@ -245,13 +254,16 @@ function createStandaloneControlClients(
             ),
     });
     return {
-        clients: createControlClients(endpoint, { clientKind: "cli" }),
+        instance: createConfigTransport(endpoint),
+        runtime: createProcessTransport(endpoint),
+        service: createServiceTransport(endpoint, { clientKind: "cli" }),
+        tool: createToolTransport(endpoint),
         close: () => endpoint.close(),
     };
 }
 
-async function negotiate(clients: ControlClients): Promise<void> {
-    const hello = await clients.service.hello();
+async function negotiate(service: ServiceTransport): Promise<void> {
+    const hello = await service.hello();
     if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
         throw new Error(
             `Incompatible devshell Control protocol version: ${hello.protocolVersion}.`,
@@ -279,9 +291,9 @@ function resolveStandaloneTarget(options: StandaloneDevshellPiOptions): {
 }
 
 async function selectStandaloneInstance(
-    clients: ControlClients,
+    instance: ConfigTransport,
 ): Promise<string> {
-    const instances = await clients.instance.list();
+    const instances = await instance.listInstances();
     const namedLocal = instances.find(
         (candidate) => candidate.name === "local",
     );

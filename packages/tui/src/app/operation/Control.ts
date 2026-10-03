@@ -124,7 +124,7 @@ export class TuiRuntimeControlOperations {
         draft: InstanceCreateDraft,
     ): Promise<string | undefined> {
         const result = await this.#request(
-            this.options.clients.instance.create(draft),
+            this.options.clients.config.createInstance(draft),
             `instance.create:${draft.name}`,
         );
         let status: string | undefined;
@@ -166,7 +166,7 @@ export class TuiRuntimeControlOperations {
 
     async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
         return await this.#request(
-            this.options.clients.instance.createSchema(),
+            this.options.clients.config.createInstanceSchema(),
             "instance.createSchema",
         );
     }
@@ -196,7 +196,7 @@ export class TuiRuntimeControlOperations {
 
     async deleteInstance(instance: string): Promise<void> {
         await this.#request(
-            this.options.clients.instance.delete(instance),
+            this.options.clients.config.deleteInstance(instance),
             `instance.delete:${instance}`,
         );
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
@@ -206,7 +206,7 @@ export class TuiRuntimeControlOperations {
 
     async deleteTodo(instance: string, taskId: string): Promise<void> {
         await this.#request(
-            this.options.clients.todo.delete(instance, taskId),
+            this.options.clients.task.deleteTodo(instance, taskId),
             `todo.delete:${instance}:${taskId}`,
         );
         await this.#refreshBestEffort(`todo:${instance}`, async () => {
@@ -271,7 +271,7 @@ export class TuiRuntimeControlOperations {
         draft: InstanceCreateDraft,
     ): Promise<InstanceCreateSummary> {
         return await this.#request(
-            this.options.clients.instance.validateCreate(draft),
+            this.options.clients.config.validateInstanceCreate(draft),
             `instance.validateCreate:${draft.name}`,
         );
     }

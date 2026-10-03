@@ -9,15 +9,14 @@ import {
     createContextTransport,
     createDebugTransport,
     createExtensionRuntimeTransport,
-    createInstanceManagementTransport,
-    createMcpControlTransport,
+    createAuthTransport,
     createMessageTransport,
     createOverviewTransport,
     createRemoteError,
-    createReverseConnectionTransport,
-    createRuntimeTransport,
+    createConnectionTransport,
+    createProcessTransport,
     createServiceTransport,
-    createTodoTransport,
+    createTaskTransport,
     createToolTransport,
     type ApprovalTransport,
     type ConfigTransport,
@@ -25,18 +24,18 @@ import {
     type ControlChannelOptions,
     type DebugTransport,
     type ExtensionRuntimeTransport,
-    type InstanceEvent,
+    type InstanceEventRecord,
     type InstanceEventStreamPort,
-    type InstanceManagementTransport,
-    type InstanceStreamMessage,
     type JsonValue,
-    type McpControlTransport,
+    type AuthTransport,
     type MessageTransport,
     type OverviewTransport,
-    type ReverseConnectionTransport,
-    type RuntimeTransport,
+    type ConnectionTransport,
+    type ProcessTransport,
     type ServiceTransport,
-    type TodoTransport,
+    type StreamMessage,
+    type TaskEvent,
+    type TaskTransport,
     type ToolTransport,
 } from "@portable-devshell/shared";
 
@@ -46,8 +45,11 @@ import { createCliCommandAdapter, type CliClientCommand } from "./Command.js";
 
 export interface CliClientOptions extends ControlChannelOptions {}
 
-export type CliClientTodo = Omit<TodoTransport, "subscribe"> & {
-    subscribe(instance: string, fromSeq: number): Promise<CliClientEventStream>;
+export type CliClientTodo = Pick<TaskTransport, "deleteTodo" | "getTodo"> & {
+    subscribe(
+        instance: string,
+        fromSeq: number,
+    ): Promise<CliClientEventStream<TaskEvent>>;
 };
 
 /**
@@ -63,10 +65,10 @@ export interface CliClients {
     contextMessage: MessageTransport;
     debug: DebugTransport;
     extension: ExtensionRuntimeTransport;
-    instance: InstanceManagementTransport;
-    mcp: McpControlTransport;
+    instance: ConfigTransport;
+    mcp: AuthTransport;
     overview: OverviewTransport;
-    reverse: ReverseConnectionTransport;
+    reverse: ConnectionTransport;
     runtime: CliClientRuntime;
     service: ServiceTransport;
     todo: CliClientTodo;
@@ -79,8 +81,8 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
     const endpoint = new Endpoint({
         connectChannel: (signal) => connectControlChannel(options, signal),
     });
-    const runtime: RuntimeTransport = createRuntimeTransport(endpoint);
-    const todo = createTodoTransport(endpoint);
+    const runtime: ProcessTransport = createProcessTransport(endpoint);
+    const task = createTaskTransport(endpoint);
     return {
         approval: createApprovalTransport(endpoint),
         cli: createCliCommandAdapter(
@@ -89,21 +91,21 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
         ),
         config: createConfigTransport(endpoint),
         context: createContextTransport(endpoint),
-        contextMessage: createMessageTransport(endpoint, runtime),
+        contextMessage: createMessageTransport(endpoint),
         debug: createDebugTransport(endpoint),
         extension: createExtensionRuntimeTransport(endpoint),
-        instance: createInstanceManagementTransport(endpoint),
-        mcp: createMcpControlTransport(endpoint),
+        instance: createConfigTransport(endpoint),
+        mcp: createAuthTransport(endpoint),
         overview: createOverviewTransport(endpoint),
-        reverse: createReverseConnectionTransport(endpoint),
+        reverse: createConnectionTransport(endpoint),
         runtime: createCliRuntimeAdapter(endpoint, runtime),
         service: createServiceTransport(endpoint, { clientKind: "cli" }),
         todo: {
-            delete: todo.delete,
-            get: todo.get,
+            deleteTodo: task.deleteTodo,
+            getTodo: task.getTodo,
             subscribe: async (instance, fromSeq) =>
                 new CliClientEventStream(
-                    await todo.subscribe(instance, fromSeq),
+                    await task.subscribe(instance, fromSeq),
                 ),
         },
         tool: createToolTransport(endpoint),
@@ -122,15 +124,17 @@ export async function negotiateCliControl(clients: CliClients): Promise<void> {
     }
 }
 
-export class CliClientEventStream {
-    readonly #stream: InstanceEventStreamPort;
+export class CliClientEventStream<
+    Event extends InstanceEventRecord = InstanceEventRecord,
+> {
+    readonly #stream: InstanceEventStreamPort<Event>;
     #closed = false;
 
-    constructor(stream: InstanceEventStreamPort) {
+    constructor(stream: InstanceEventStreamPort<Event>) {
         this.#stream = stream;
     }
 
-    async nextEvent(): Promise<InstanceEvent> {
+    async nextEvent(): Promise<Event> {
         const message = await this.#stream.next();
         if (message.kind === "event") return message.event;
         if (message.kind === "gap") {
@@ -153,8 +157,8 @@ export class CliClientEventStream {
     }
 }
 
-function gapDetails(
-    message: Extract<InstanceStreamMessage, { kind: "gap" }>,
+function gapDetails<Event>(
+    message: Extract<StreamMessage<Event>, { kind: "gap" }>,
 ): JsonValue {
     return (
         message.details ?? {

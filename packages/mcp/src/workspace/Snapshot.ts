@@ -1,5 +1,5 @@
 import type {
-    InstanceEvent,
+    InstanceEventRecord,
     JsonValue,
     TodoTaskSummary,
 } from "@portable-devshell/shared";
@@ -204,7 +204,7 @@ export async function readWorkspaceSnapshot(
 }
 
 export function workspaceEventBelongsTo(
-    event: InstanceEvent,
+    event: InstanceEventRecord,
     ctxId: string,
 ): boolean {
     if (

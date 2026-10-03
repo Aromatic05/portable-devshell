@@ -30,6 +30,7 @@ export class TuiDomainReader {
         this.#attachSource(domains.artifact);
         this.#attachSource(domains.context);
         this.#attachSource(domains.conversation);
+        this.#attachSource(domains.conversationPreferences);
         this.#attachSource(domains.messages);
         this.#attachSource(domains.goals);
         this.#attachSource(domains.toolCalls);
@@ -69,6 +70,10 @@ export class TuiDomainReader {
 
     get conversation() {
         return this.domains.conversation.state;
+    }
+
+    get conversationPreferences() {
+        return this.domains.conversationPreferences.state;
     }
 
     get messages() {

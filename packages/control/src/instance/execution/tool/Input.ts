@@ -1,8 +1,6 @@
 import {
-    asInstanceName,
     createRemoteError,
     controlErrorCodes,
-    type InstanceName,
     type JsonValue,
     type ToolCallQuery,
     type ToolCallRecord,
@@ -15,7 +13,6 @@ const MAX_TOOL_CALL_READ_LIMIT = 1_000;
 const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export function readToolCall(payload?: JsonValue): {
-    instance: InstanceName;
     input: JsonValue;
     operationId?: string;
     recording?: "caller" | "host";
@@ -28,12 +25,6 @@ export function readToolCall(payload?: JsonValue): {
         payload.toolName.length === 0
     ) {
         throw invalid("tool.call requires toolName.");
-    }
-    if (
-        typeof payload.instance !== "string" ||
-        payload.instance.length === 0
-    ) {
-        throw invalid("tool.call requires instance.");
     }
     if (
         typeof payload.workspace !== "string" ||
@@ -56,7 +47,6 @@ export function readToolCall(payload?: JsonValue): {
         throw invalid("tool.call recording must be caller or host.");
     }
     return {
-        instance: asInstanceName(payload.instance),
         input: payload.input ?? null,
         ...(payload.operationId === undefined
             ? {}

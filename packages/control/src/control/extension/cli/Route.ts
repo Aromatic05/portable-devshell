@@ -33,12 +33,12 @@ export interface CliCommandPort {
 export function createCliRouteModule(
     port: CliCommandPort,
 ): ControlPortDefinition {
-    return routeModule("cli", {
-        commands: (_request, context) => {
+    return routeModule("extension", {
+        cliCommands: (_request, context) => {
             requireCli(context);
             return [...port.list()] as unknown as JsonValue;
         },
-        command: async (request, context) => {
+        cliCommand: async (request, context) => {
             requireCli(context);
             const input = readAuthorizedCommand(request.payload, context);
             return assertCommandResult(
@@ -51,7 +51,7 @@ export function createCliRouteModule(
             ) as unknown as JsonValue;
         },
     }, {
-        commandStream: async (stream, request, context) => {
+        cliCommandStream: async (stream, request, context) => {
             requireCli(context);
             const input = readAuthorizedCommand(request.payload, context);
             const io = new CliCommandStreamIo();

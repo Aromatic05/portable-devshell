@@ -9,7 +9,7 @@ import {
 } from "../../transport/endpoint/PortClient.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
-import type { InstanceStreamEnvelope } from "../process/Event.js";
+import type { EventStreamEnvelope } from "../../client/Stream.js";
 import type {
     TerminalAttachInput,
     TerminalExitEvent,
@@ -90,7 +90,7 @@ class MessageStreamTerminalAttachment implements TerminalAttachment {
         this.#stream = stream;
         stream.onData((message) =>
             this.#push(
-                readTerminalStreamMessage(message as InstanceStreamEnvelope),
+                readTerminalStreamMessage(message as EventStreamEnvelope),
             ),
         );
         stream.onClose((message) => this.#finish(undefined, message));
@@ -201,7 +201,7 @@ function readSessionMessage(
 }
 
 function readTerminalStreamMessage(
-    envelope: InstanceStreamEnvelope,
+    envelope: EventStreamEnvelope,
 ): TerminalStreamMessage | undefined {
     const payload: Record<string, JsonValue> = record(envelope.payload) ?? {};
     if (envelope.name === "seed") {

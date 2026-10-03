@@ -29,7 +29,7 @@ export interface InstanceEditorPort {
     enableInstance(params?: JsonValue): Promise<JsonValue>;
 }
 
-export interface InstanceRouteModuleOptions {
+export interface InstanceConfigRouteModuleOptions {
     /**
      * Persistent revision feed signalled by composition after the registry or
      * a list-affecting Config commit has been applied.
@@ -41,18 +41,18 @@ export interface InstanceRouteModuleOptions {
     registry: InstanceRegistry;
 }
 
-export function createInstanceRouteModule(
-    options: InstanceRouteModuleOptions,
+export function createInstanceConfigRouteModule(
+    options: InstanceConfigRouteModuleOptions,
 ): ControlPortDefinition {
     const create = () =>
         requirePort(options.create, "Instance creation is not available.");
     const editor = () =>
         requirePort(options.editor, "Config editing is not available.");
     return routeModule(
-        "instance",
+        "config",
         {
-            list: () => readInstances(options) as never,
-            snapshot: () => {
+            listInstances: () => readInstances(options) as never,
+            snapshotInstances: () => {
                 // Stable read: the envelope's revision must label exactly the
                 // list we returned, so retry if the feed advanced mid-read.
                 for (;;) {
@@ -63,20 +63,20 @@ export function createInstanceRouteModule(
                     }
                 }
             },
-            createSchema: () => create().getSchema() as never,
-            validateCreate: (request) =>
+            createInstanceSchema: () => create().getSchema() as never,
+            validateInstanceCreate: (request) =>
                 create().validateDraft(request.payload) as never,
-            create: async (request) =>
+            createInstance: async (request) =>
                 (await create().createInstance(request.payload)) as never,
-            enable: async (request) =>
+            enableInstance: async (request) =>
                 await editor().enableInstance(request.payload),
-            disable: async (request) =>
+            disableInstance: async (request) =>
                 await editor().disableInstance(request.payload),
-            delete: async (request) =>
+            deleteInstance: async (request) =>
                 await editor().deleteInstance(request.payload),
         },
         {
-            subscribe: async (stream, request) => {
+            subscribeInstances: async (stream, request) => {
                 const fromRevision = readSubscribeFromRevision(request.payload);
                 const replay = options.changes.replay(fromRevision);
                 if (replay.kind === "gap") {
@@ -143,7 +143,7 @@ export function createInstanceRouteModule(
 }
 
 function readInstances(
-    options: InstanceRouteModuleOptions,
+    options: InstanceConfigRouteModuleOptions,
 ): InstanceListEntry[] {
     const configured =
         options.configuredInstances?.() ??
@@ -184,7 +184,7 @@ function readSubscribeFromRevision(payload?: JsonValue): number {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
             message:
-                "instance.subscribe requires a non-negative integer fromRevision.",
+                "config.subscribeInstances requires a non-negative integer fromRevision.",
             retryable: false,
         });
     }

@@ -4,7 +4,7 @@
 import {
     InstanceEventStream,
     type InstanceEventStreamPort,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import {
     createPortClient,
@@ -12,6 +12,7 @@ import {
 } from "../../transport/endpoint/PortClient.js";
 import { asInstanceName } from "../../types/Instance.js";
 import type {
+    ApprovalEvent,
     ApprovalDecisionOptions,
     ApprovalDecisionValue,
     ApprovalListResult,
@@ -37,7 +38,7 @@ export interface ApprovalTransport {
     subscribe(
         instance: string,
         fromSeq: number,
-    ): Promise<InstanceEventStreamPort>;
+    ): Promise<InstanceEventStreamPort<ApprovalEvent>>;
 }
 
 export function createApprovalTransport(endpoint: Endpoint): ApprovalTransport {
@@ -57,7 +58,7 @@ export function createApprovalTransport(endpoint: Endpoint): ApprovalTransport {
         snapshot: (instance, options) =>
             port(instance).request<ApprovalListResult>("snapshot", options),
         subscribe: async (instance, fromSeq) =>
-            new InstanceEventStream(
+            new InstanceEventStream<ApprovalEvent>(
                 asInstanceName(instance),
                 await port(instance).open("subscribe", { fromSeq }),
             ),

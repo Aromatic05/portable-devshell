@@ -44,7 +44,7 @@ export async function executeContextMessage(
     switch (command.kind) {
         case "context.messages":
             context.writeJson(
-                await context.clients.contextMessage.list(
+                await context.clients.contextMessage.listContextMessages(
                     command.instance,
                     command.ctxId === undefined
                         ? undefined
@@ -54,7 +54,7 @@ export async function executeContextMessage(
             return true;
         case "context.send":
             context.writeJson(
-                await context.clients.contextMessage.queue(command.instance, {
+                await context.clients.contextMessage.queueContextMessage(command.instance, {
                     ctxId: command.ctxId,
                     text: command.text,
                 }),

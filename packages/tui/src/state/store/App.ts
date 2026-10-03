@@ -14,6 +14,7 @@ import type {
 } from "../Ui.js";
 import { createInitialTuiAppState } from "./Initial.js";
 import { tuiAppReducer } from "./reducer/Reducer.js";
+import type { TuiDomainReader } from "../../view/domain/Reader.js";
 import {
     type TuiAppAction,
     type TuiAppState,
@@ -22,16 +23,19 @@ import {
 } from "./Model.js";
 
 export interface TuiAppStoreOptions {
+    domains?: TuiDomainReader;
     initialState?: TuiAppState;
     maxRawEvents?: number;
 }
 
 export class TuiAppStore {
+    readonly #domains?: TuiDomainReader;
     readonly #listeners = new Set<() => void>();
     readonly #maxRawEvents: number;
     #state: TuiAppState;
 
     constructor(options: TuiAppStoreOptions = {}) {
+        this.#domains = options.domains;
         this.#maxRawEvents = options.maxRawEvents ?? 100;
         this.#state = options.initialState ?? createInitialTuiAppState();
     }
@@ -50,11 +54,15 @@ export class TuiAppStore {
     dispatch(action: TuiAppAction): void {
         const nextState =
             action.type === "event.append"
-                ? tuiAppReducer(this.#state, {
-                      ...action,
-                      maxEvents: this.#maxRawEvents,
-                  })
-                : tuiAppReducer(this.#state, action);
+                ? tuiAppReducer(
+                      this.#state,
+                      {
+                          ...action,
+                          maxEvents: this.#maxRawEvents,
+                      },
+                      this.#domains,
+                  )
+                : tuiAppReducer(this.#state, action, this.#domains);
 
         if (nextState === this.#state) {
             return;

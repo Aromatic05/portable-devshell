@@ -111,7 +111,7 @@ export class WebStore {
         const run = async (): Promise<boolean> => {
             if (!this.#current(generation)) return false;
             try {
-                await this.domains.conversation.updatePreferences(patch);
+                await this.domains.conversationPreferences.update(patch);
                 return this.#current(generation);
             } catch (error) {
                 if (this.#current(generation))
@@ -200,6 +200,7 @@ export class WebStore {
         );
         await Promise.all([
             this.domains.conversation.load(instances),
+            this.domains.conversationPreferences.refresh(),
             this.domains.messages.load(instances),
         ]);
     }

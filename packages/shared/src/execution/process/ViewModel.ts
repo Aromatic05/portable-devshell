@@ -2,11 +2,14 @@
 // and a single filtered event subscription that reconnects and recovers gaps
 // by re-reading the snapshot (the cursor is snapshot.lastSeq + 1).
 
-import type { InstanceEvent } from "./Event.js";
-import type { InstanceLogEntry, InstanceLogQuery } from "./Event.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
+} from "../../client/Stream.js";
+import type {
+    InstanceLogEntry,
+    InstanceLogQuery,
+    ProcessEvent,
 } from "./Event.js";
 import type { InstanceSnapshot } from "./Model.js";
 import type { ProcessStartOptions, ProcessTransport } from "./Transport.js";
@@ -28,7 +31,7 @@ export class ProcessViewModel {
     #published: ProcessViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ProcessViewModelState = emptyState();
-    #subscription?: InstanceEventSubscription;
+    #subscription?: InstanceEventSubscription<ProcessEvent>;
 
     constructor(transport: ProcessTransport) {
         this.#transport = transport;
@@ -108,19 +111,22 @@ export class ProcessViewModel {
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
         const instance = this.#requireInstance();
-        this.#subscription = new InstanceEventSubscription(fromSeq, {
-            onEvent: (event) => this.#onEvent(event),
-            onGap: () => this.#recover(),
-            onStatusChange: (status) => {
-                this.#state = { ...this.#state, connection: status };
-                this.#emit();
+        this.#subscription = new InstanceEventSubscription<ProcessEvent>(
+            fromSeq,
+            {
+                onEvent: (event) => this.#onEvent(event),
+                onGap: () => this.#recover(),
+                onStatusChange: (status) => {
+                    this.#state = { ...this.#state, connection: status };
+                    this.#emit();
+                },
+                open: (cursor) => this.#transport.subscribe(instance, cursor),
             },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
-        });
+        );
         this.#subscription.start();
     }
 
-    #onEvent(event: InstanceEvent): void {
+    #onEvent(event: ProcessEvent): void {
         if (event.type === "log.appended" && this.#state.logsLoaded) {
             this.#scheduleRefresh();
             return;

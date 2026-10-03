@@ -8,6 +8,7 @@ import type { Address, Host, PortName } from "../Address.js";
 export type PacketListener = (
     packet: Packet,
     source: Address,
+    destination: Address,
 ) => Promise<void> | void;
 
 export class Connection {
@@ -15,9 +16,9 @@ export class Connection {
     readonly remote: Address;
     readonly #port: Port;
 
-    constructor(port: Port, remote: Address) {
+    constructor(port: Port, remote: Address, local: Address = port.local) {
         this.#port = port;
-        this.local = port.local;
+        this.local = local;
         this.remote = remote;
     }
 
@@ -27,14 +28,16 @@ export class Connection {
 
     send(packet: Packet): Promise<void> {
         if (!this.connected) throw new Error("Connection is closed.");
-        return this.#port.send(this.remote, packet);
+        return this.#port.send(this.remote, packet, this.local);
     }
 
     onPacket(listener: (packet: Packet) => Promise<void> | void): () => void {
-        return this.#port.onPacket((packet, source) => {
+        return this.#port.onPacket((packet, source, destination) => {
             if (
                 source.host === this.remote.host &&
-                source.port === this.remote.port
+                source.port === this.remote.port &&
+                destination.host === this.local.host &&
+                destination.port === this.local.port
             )
                 return listener(packet);
         });
@@ -68,8 +71,12 @@ export class Port {
         return this.#closed;
     }
 
-    connect(host: Host, port: PortName = this.local.port): Connection {
-        return new Connection(this, { host, port });
+    connect(
+        host: Host,
+        port: PortName = this.local.port,
+        local: Address = this.local,
+    ): Connection {
+        return new Connection(this, { host, port }, local);
     }
 
     canReach(dest: Address): boolean {
@@ -89,9 +96,13 @@ export class Port {
         return this.#route.onUnreachable(dest, listener);
     }
 
-    send(dest: Address, packet: Packet): Promise<void> {
+    send(
+        dest: Address,
+        packet: Packet,
+        source: Address = this.local,
+    ): Promise<void> {
         if (this.#closed) throw new Error("Port is closed.");
-        return this.#route.send(this.local, dest, packet);
+        return this.#route.send(source, dest, packet);
     }
 
     broadcast(port: PortName, packet: Packet): Promise<void> {
@@ -113,8 +124,13 @@ export class Port {
         for (const listener of listeners) listener();
     }
 
-    async receive(packet: Packet, source: Address): Promise<void> {
-        for (const listener of this.#listeners) await listener(packet, source);
+    async receive(
+        packet: Packet,
+        source: Address,
+        destination: Address = this.local,
+    ): Promise<void> {
+        for (const listener of this.#listeners)
+            await listener(packet, source, destination);
     }
 }
 
@@ -149,6 +165,8 @@ export class Route {
     canReach(dest: Address): boolean {
         return (
             this.#ports.get(dest.host)?.has(dest.port) === true ||
+            (dest.host !== "*" &&
+                this.#ports.get("*")?.has(dest.port) === true) ||
             this.#peers.has(dest.host) ||
             this.#gateway !== undefined
         );
@@ -231,10 +249,16 @@ export class Route {
         if (envelope.dest.host === "*") {
             const deliveries: Array<Promise<void> | void> = [];
             for (const [host, ports] of this.#ports) {
+                if (host === "*") continue;
                 if (host === envelope.source.host) continue;
                 const port = ports.get(envelope.dest.port);
                 if (port !== undefined)
-                    deliveries.push(port.receive(envelope.packet, envelope.source));
+                    deliveries.push(
+                        port.receive(envelope.packet, envelope.source, {
+                            host,
+                            port: envelope.dest.port,
+                        }),
+                    );
             }
             for (const [host, peer] of this.#peers) {
                 if (host === envelope.source.host || peer === incoming) continue;
@@ -246,9 +270,11 @@ export class Route {
             return;
         }
 
-        const port = this.#ports.get(envelope.dest.host)?.get(envelope.dest.port);
-        if (port !== undefined) {
-            await port.receive(envelope.packet, envelope.source);
+        const exact = this.#ports
+            .get(envelope.dest.host)
+            ?.get(envelope.dest.port);
+        if (exact !== undefined) {
+            await exact.receive(envelope.packet, envelope.source, envelope.dest);
             return;
         }
         const peer = this.#peers.get(envelope.dest.host);
@@ -258,6 +284,15 @@ export class Route {
         }
         if (this.#gateway !== undefined && this.#gateway !== incoming) {
             await this.#gateway.send(envelope);
+            return;
+        }
+        const fallback = this.#ports.get("*")?.get(envelope.dest.port);
+        if (fallback !== undefined) {
+            await fallback.receive(
+                envelope.packet,
+                envelope.source,
+                envelope.dest,
+            );
             return;
         }
         throw new Error(

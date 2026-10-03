@@ -83,11 +83,11 @@ export function createExtensionRuntimeTransport(
 export function createCliCommandTransport(
     endpoint: Endpoint,
 ): CliCommandTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "cli");
+    const port = createPortClient(endpoint, CONTROL_HOST, "extension");
     return {
         command: (commandId, argv, options = {}) =>
             port.request<CliCommandWireResult>(
-                "command",
+                "cliCommand",
                 {
                     argv: [...argv],
                     commandId,
@@ -97,40 +97,40 @@ export function createCliCommandTransport(
                 },
                 options.signal,
             ),
-        commands: () => port.request<CliCommandDescriptor[]>("commands"),
+        commands: () => port.request<CliCommandDescriptor[]>("cliCommands"),
     };
 }
 
 export function createTuiPageTransport(endpoint: Endpoint): TuiPageTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "tui");
+    const port = createPortClient(endpoint, CONTROL_HOST, "extension");
     return {
         action: (pageId, actionId, itemId) =>
-            port.request<TuiPageSnapshot>("page", {
+            port.request<TuiPageSnapshot>("tuiPage", {
                 actionId,
                 ...(itemId === undefined ? {} : { itemId }),
                 kind: "action",
                 pageId,
             }),
         page: (pageId) =>
-            port.request<TuiPageSnapshot>("page", { kind: "read", pageId }),
-        pages: () => port.request<TuiPageDescriptor[]>("pages"),
+            port.request<TuiPageSnapshot>("tuiPage", { kind: "read", pageId }),
+        pages: () => port.request<TuiPageDescriptor[]>("tuiPages"),
     };
 }
 
 export function createWebPageTransport(endpoint: Endpoint): WebPageTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "web");
+    const port = createPortClient(endpoint, CONTROL_HOST, "extension");
     return {
         action: (pageId, actionId, rowId) =>
-            port.request<WebPageSnapshot>("page", {
+            port.request<WebPageSnapshot>("webPage", {
                 actionId,
                 kind: "action",
                 pageId,
                 ...(rowId === undefined ? {} : { rowId }),
             }),
         applications: () =>
-            port.request<WebApplicationDescriptor[]>("applications"),
+            port.request<WebApplicationDescriptor[]>("webApplications"),
         page: (pageId) =>
-            port.request<WebPageSnapshot>("page", { kind: "read", pageId }),
-        pages: () => port.request<WebPageDescriptor[]>("pages"),
+            port.request<WebPageSnapshot>("webPage", { kind: "read", pageId }),
+        pages: () => port.request<WebPageDescriptor[]>("webPages"),
     };
 }

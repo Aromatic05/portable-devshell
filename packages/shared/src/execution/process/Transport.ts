@@ -7,12 +7,16 @@ import {
 } from "../../transport/endpoint/PortClient.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
-import { InstanceEventStream } from "./Event.js";
+import {
+    type EventStreamEnvelope,
+    InstanceEventStream,
+    type InstanceEventStreamPort,
+} from "../../client/Stream.js";
 import type {
-    InstanceEventStreamPort,
-    InstanceStreamEnvelope,
+    ProcessEvent,
+    InstanceLogEntry,
+    InstanceLogQuery,
 } from "./Event.js";
-import type { InstanceLogEntry, InstanceLogQuery } from "./Event.js";
 import { asInstanceName } from "../../types/Instance.js";
 import { readInstanceSnapshot } from "./Snapshot.js";
 import type { InstanceProcessEnvelope, InstanceSnapshot } from "./Model.js";
@@ -46,7 +50,7 @@ export interface ProcessTransport {
     subscribe(
         instance: string,
         fromSeq: number,
-    ): Promise<InstanceEventStreamPort>;
+    ): Promise<InstanceEventStreamPort<ProcessEvent>>;
 }
 
 export function createProcessTransport(endpoint: Endpoint): ProcessTransport {
@@ -68,7 +72,7 @@ export function createProcessTransport(endpoint: Endpoint): ProcessTransport {
             startProcess(() => open(instance, "start"), options),
         stop: (instance) => port(instance).request<InstanceSnapshot>("stop"),
         subscribe: async (instance, fromSeq) =>
-            new InstanceEventStream(
+            new InstanceEventStream<ProcessEvent>(
                 asInstanceName(instance),
                 await open(instance, "subscribe", { fromSeq }),
             ),
@@ -82,7 +86,7 @@ async function startProcess(
     const stream = await openStart();
     options.onRequestId?.(stream.id);
     const offData = stream.onData((message) => {
-        const envelope = message as InstanceStreamEnvelope;
+        const envelope = message as EventStreamEnvelope;
         if (envelope.name !== "output") return;
         const payload = record(envelope.payload);
         if (typeof payload?.chunk === "string")

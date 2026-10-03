@@ -1,6 +1,6 @@
 import type {
     RemoteError,
-    InstanceEvent,
+    InstanceEventRecord,
     InstanceLogEntry,
     JsonValue,
 } from "@portable-devshell/shared";
@@ -113,7 +113,7 @@ export type TuiAppAction =
     | { type: "ui.bumpRedrawNonce" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" };
 
-export function toRawEventRecord(event: InstanceEvent): TuiRawEventRecord {
+export function toRawEventRecord(event: InstanceEventRecord): TuiRawEventRecord {
     return {
         event: event.type,
         instance: event.instanceName,

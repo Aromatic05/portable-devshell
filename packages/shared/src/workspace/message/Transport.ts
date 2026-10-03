@@ -1,7 +1,7 @@
 import {
     InstanceEventStream,
     type InstanceEventStreamPort,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import {
     createPortClient,
@@ -15,6 +15,7 @@ import type {
     ContextMessageRecord,
     ConversationListInput,
     ConversationListResult,
+    MessageEvent,
 } from "./Model.js";
 
 export interface MessageTransport {
@@ -33,7 +34,7 @@ export interface MessageTransport {
     subscribe(
         instance: string,
         fromSeq: number,
-    ): Promise<InstanceEventStreamPort>;
+    ): Promise<InstanceEventStreamPort<MessageEvent>>;
 }
 
 export function createMessageTransport(endpoint: Endpoint): MessageTransport {
@@ -56,7 +57,7 @@ export function createMessageTransport(endpoint: Endpoint): MessageTransport {
                 input,
             ),
         subscribe: async (instance, fromSeq) =>
-            new InstanceEventStream(
+            new InstanceEventStream<MessageEvent>(
                 asInstanceName(instance),
                 await port(instance).open("subscribe", { fromSeq }),
             ),

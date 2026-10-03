@@ -29,8 +29,8 @@ import {
 } from "../control/extension/Route.js";
 import type { InstanceCreatePort } from "../control/instance/Route.js";
 import {
-    createInstanceRouteModule,
-    type InstanceRouteModuleOptions,
+    createInstanceConfigRouteModule,
+    type InstanceConfigRouteModuleOptions,
 } from "../control/instance/Route.js";
 import { InstanceChangeHub } from "../control/instance/Change.js";
 import type { InstanceRegistry } from "../control/instance/registry/Registry.js";
@@ -38,23 +38,24 @@ import {
     createContextRouteModule,
     type ContextAdminPort,
 } from "../control/context/Route.js";
-import { createMcpRouteModule } from "./mcp/route/Module.js";
+import { createAuthRouteModule } from "./mcp/route/Module.js";
 import type { OperationalOverviewPort } from "../control/overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../control/overview/Route.js";
 import { OperationalOverviewService } from "../control/overview/Service.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/Service.js";
-import { createReverseRouteModule } from "../control/reverse/Route.js";
+import { createConnectionRouteModule } from "../control/reverse/Route.js";
 import type { ToolCallProvenanceStore } from "../instance/execution/tool/Provenance.js";
 import { createApprovalRouteModule } from "../control/approval/Route.js";
-import { createGoalRouteModule } from "../instance/workflow/goal/Route.js";
-import { createRuntimeRouteModule } from "../instance/execution/runtime/Route.js";
+import { createMessageRouteModule } from "../instance/interaction/message/Route.js";
+import { createGoalTaskRouteModule } from "../instance/workflow/goal/Route.js";
+import { createProcessRouteModule } from "../instance/execution/runtime/Route.js";
 import { RuntimeSubscriptionManager } from "../instance/execution/runtime/Subscription.js";
 import { createServiceRouteModule } from "../server/endpoint/Channel.js";
-import { createTodoRouteModule } from "../instance/workflow/todo/Route.js";
+import { createTodoTaskRouteModule } from "../instance/workflow/todo/Route.js";
 import { createTerminalRouteModule } from "../instance/execution/terminal/Route.js";
 import { TerminalSessionService } from "../instance/execution/terminal/Service.js";
 import {
-    createControlToolRouteModule,
+    createToolIngressRouteModule,
     createToolRouteModule,
     type ToolCallIngressPort,
 } from "../instance/execution/tool/Route.js";
@@ -79,7 +80,7 @@ export interface ControlRouteCompositionOptions {
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
-    configuredInstances?: InstanceRouteModuleOptions["configuredInstances"];
+    configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
@@ -177,7 +178,7 @@ export class ControlRouteComposition {
         const definitions: ControlHostDefinition[] = [
             {
                 host: "@control",
-                ports: [
+                ports: mergePortDefinitionsByName([
                     createServiceRouteModule({
                         instanceCount: () =>
                             this.#options.instances.list().length,
@@ -208,7 +209,7 @@ export class ControlRouteComposition {
                                   this.#options.webPages,
                               ),
                           ]),
-                    createMcpRouteModule({
+                    createAuthRouteModule({
                         approvals:
                             this.#options.oauthApprovals ?? (() => undefined),
                         status:
@@ -219,36 +220,39 @@ export class ControlRouteComposition {
                             })),
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
-                    ...(this.#options.toolCalls === undefined
-                        ? []
-                        : [
-                              createControlToolRouteModule(
-                                  this.#options.toolCalls,
-                              ),
-                          ]),
                     ...(this.#options.extensionRoutes?.modules("control") ??
                         []),
                     createOperationalOverviewRouteModule(this.#overview),
-                    createInstanceRouteModule({
-                        changes: this.#instanceChanges,
-                        configuredInstances: this.#options.configuredInstances,
-                        create: this.#options.instanceCreate,
-                        editor: this.#options.config,
-                        registry: this.#options.instances,
-                    }),
-                    createConfigRouteModule(
-                        this.#options.config,
-                        this.#configChanges,
+                    mergePortDefinitions(
+                        createConfigRouteModule(
+                            this.#options.config,
+                            this.#configChanges,
+                        ),
+                        createInstanceConfigRouteModule({
+                            changes: this.#instanceChanges,
+                            configuredInstances:
+                                this.#options.configuredInstances,
+                            create: this.#options.instanceCreate,
+                            editor: this.#options.config,
+                            registry: this.#options.instances,
+                        }),
                     ),
-                    createReverseRouteModule(this.#options.reverse),
+                    createConnectionRouteModule(this.#options.reverse),
                     createArtifactRouteModule(this.#options.artifact),
-                ],
+                ]),
             },
         ];
 
+        if (this.#options.toolCalls !== undefined) {
+            definitions.push({
+                host: "*",
+                ports: [createToolIngressRouteModule(this.#options.toolCalls)],
+            });
+        }
+
         for (const descriptor of descriptors) {
-            const modules: ControlPortDefinition[] = [
-                createRuntimeRouteModule(
+            const modules = mergePortDefinitionsByName([
+                createProcessRouteModule(
                     {
                         enabled: descriptor.enabled,
                         name: descriptor.name,
@@ -259,10 +263,18 @@ export class ControlRouteComposition {
                     this.#subscriptions,
                 ),
                 ...(this.#options.extensionRoutes?.modules("instance") ?? []),
-                createGoalRouteModule(descriptor),
-                createTodoRouteModule(descriptor, this.#subscriptions),
+                createMessageRouteModule(descriptor, this.#subscriptions),
+                mergePortDefinitions(
+                    createGoalTaskRouteModule(descriptor),
+                    createTodoTaskRouteModule(descriptor, this.#subscriptions),
+                ),
                 createApprovalRouteModule(descriptor, this.#subscriptions),
-                createToolRouteModule(descriptor, this.#options.toolProvenance),
+                createToolRouteModule(
+                    descriptor,
+                    this.#options.toolProvenance,
+                    this.#options.toolCalls,
+                    this.#subscriptions,
+                ),
                 ...(descriptor.terminal === undefined
                     ? []
                     : [
@@ -280,7 +292,7 @@ export class ControlRouteComposition {
                               sessions: this.#terminals,
                           }),
                       ]),
-            ];
+            ]);
             definitions.push({
                 host: asInstanceName(descriptor.name),
                 ports: fenceInstanceGeneration(
@@ -293,6 +305,42 @@ export class ControlRouteComposition {
 
         return definitions;
     }
+}
+
+function mergePortDefinitions(
+    ...definitions: readonly ControlPortDefinition[]
+): ControlPortDefinition {
+    const first = definitions[0];
+    if (first === undefined) throw new Error("Cannot merge an empty port list.");
+    if (definitions.some((definition) => definition.name !== first.name))
+        throw new Error("Cannot merge ports with different names.");
+    const operations = definitions.flatMap((definition) => definition.operations);
+    const streams = definitions.flatMap((definition) => definition.streams ?? []);
+    const names = new Set<string>();
+    for (const operation of [...operations, ...streams]) {
+        if (names.has(operation.name))
+            throw new Error(
+                `Duplicate ${first.name} operation: ${operation.name}`,
+            );
+        names.add(operation.name);
+    }
+    return {
+        name: first.name,
+        operations,
+        ...(streams.length === 0 ? {} : { streams }),
+    };
+}
+
+function mergePortDefinitionsByName(
+    definitions: readonly ControlPortDefinition[],
+): ControlPortDefinition[] {
+    const groups = new Map<string, ControlPortDefinition[]>();
+    for (const definition of definitions) {
+        const group = groups.get(definition.name) ?? [];
+        group.push(definition);
+        groups.set(definition.name, group);
+    }
+    return [...groups.values()].map((group) => mergePortDefinitions(...group));
 }
 
 function fenceInstanceGeneration(

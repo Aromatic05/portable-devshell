@@ -5,13 +5,15 @@
 
 import type { WorkerInstance } from "@portable-devshell/core";
 import type {
+    ApprovalEvent,
     ApprovalDecisionBy,
     ControlPortContext,
     ControlPortDefinition,
-    InstanceEvent,
+    InstanceEventRecord,
     JsonValue,
     MessageStream,
 } from "@portable-devshell/shared";
+import { isApprovalEventType } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../instance/Descriptor.js";
 import { routeModule } from "../../server/Route.js";
@@ -29,7 +31,9 @@ export interface ApprovalRouteSubscriptionPort {
         instanceName: string,
         instance: Pick<WorkerInstance, "subscribe">,
         fromSeq: number,
-        eventFilter?: (event: InstanceEvent) => boolean,
+        projectEvent?: (
+            event: InstanceEventRecord,
+        ) => ApprovalEvent | undefined,
     ): Promise<void>;
 }
 
@@ -85,7 +89,10 @@ export function createApprovalRouteModule(
                     instance.name,
                     instance.worker,
                     readApprovalSubscriptionFromSeq(request.payload),
-                    (event) => event.type.startsWith("approval."),
+                    (event) =>
+                        isApprovalEventType(event.type)
+                            ? (event as ApprovalEvent)
+                            : undefined,
                 ),
         },
     );

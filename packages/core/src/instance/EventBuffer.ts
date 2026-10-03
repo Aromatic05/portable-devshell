@@ -1,6 +1,6 @@
 import {
     STREAM_GAP_CODE,
-    type InstanceEvent,
+    type InstanceEventRecord,
     type InstanceName,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -10,7 +10,7 @@ import type { AuditRecordStore } from "../storage/audit/RecordStore.js";
 export interface InstanceEventInput {
     at: string;
     data?: JsonValue;
-    type: InstanceEvent["type"];
+    type: string;
 }
 
 export interface InstanceEventStreamGap {
@@ -22,7 +22,7 @@ export interface InstanceEventStreamGap {
 }
 
 export interface InstanceEventStreamSlice {
-    events: InstanceEvent[];
+    events: InstanceEventRecord[];
     kind: "events";
     lastSeq: number;
 }
@@ -30,16 +30,16 @@ export interface InstanceEventStreamSlice {
 export class InstanceEventBuffer {
     readonly #instanceName: InstanceName;
     readonly #capacity: number;
-    readonly #store?: AuditRecordStore<InstanceEvent>;
+    readonly #store?: AuditRecordStore<InstanceEventRecord>;
     #appendTail: Promise<void> = Promise.resolve();
     #initialized = false;
-    #events: InstanceEvent[] = [];
+    #events: InstanceEventRecord[] = [];
     #lastSeq = 0;
 
     constructor(
         instanceName: InstanceName,
         capacity: number,
-        store?: AuditRecordStore<InstanceEvent>,
+        store?: AuditRecordStore<InstanceEventRecord>,
     ) {
         this.#instanceName = instanceName;
         this.#capacity = capacity;
@@ -50,10 +50,10 @@ export class InstanceEventBuffer {
         return this.#lastSeq;
     }
 
-    async append(event: InstanceEventInput): Promise<InstanceEvent> {
+    async append(event: InstanceEventInput): Promise<InstanceEventRecord> {
         const operation = this.#appendTail.then(async () => {
             await this.#initialize();
-            const storedEvent: InstanceEvent = {
+            const storedEvent: InstanceEventRecord = {
                 at: event.at,
                 data: event.data,
                 instanceName: this.#instanceName,

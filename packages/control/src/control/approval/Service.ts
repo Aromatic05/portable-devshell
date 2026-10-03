@@ -4,6 +4,7 @@ import {
     runtimeErrorCodes,
     type ApprovalDecision,
     type ApprovalDecisionBy,
+    type ApprovalEventType,
     type ApprovalPolicy,
     type ApprovalPolicyDecision,
     type ApprovalRequest,
@@ -65,12 +66,7 @@ export interface ApprovalStorePort {
 
 export interface ApprovalEventPort {
     append(
-        type:
-            | "approval.requested"
-            | "approval.approved"
-            | "approval.denied"
-            | "approval.cancelled"
-            | "approval.expired",
+        type: ApprovalEventType,
         data: Record<string, JsonValue>,
     ): Promise<unknown>;
 }
@@ -166,9 +162,7 @@ export class ApprovalService {
                     ? {}
                     : { requestId: input.requestId }),
                 riskLevel: "medium",
-                ...(input.ctxId === undefined
-                    ? {}
-                    : { ctxId: input.ctxId }),
+                ...(input.ctxId === undefined ? {} : { ctxId: input.ctxId }),
                 source: input.source,
                 status: "pending",
                 toolName: input.toolName,
@@ -191,14 +185,19 @@ export class ApprovalService {
             this.#arm(request.approvalId, pending, this.#timeoutMs);
             if (signal !== undefined) {
                 const cancelPending = () => {
-                    void this.cancel(request.approvalId, abortReason(signal.reason))
-                        .catch(() => undefined);
+                    void this.cancel(
+                        request.approvalId,
+                        abortReason(signal.reason),
+                    ).catch(() => undefined);
                 };
                 pending.removeAbortListener = () => {
                     signal.removeEventListener("abort", cancelPending);
                 };
                 if (signal.aborted) cancelPending();
-                else signal.addEventListener("abort", cancelPending, { once: true });
+                else
+                    signal.addEventListener("abort", cancelPending, {
+                        once: true,
+                    });
             }
             await this.#events.append("approval.requested", eventData(request));
             return { decision: "ask", request, awaitDecision };
@@ -217,7 +216,9 @@ export class ApprovalService {
         await this.#ensureReady();
         return [...this.#pending.values()]
             .map(({ request }) => request)
-            .filter((request) => ctxId === undefined || request.ctxId === ctxId);
+            .filter(
+                (request) => ctxId === undefined || request.ctxId === ctxId,
+            );
     }
 
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
@@ -242,7 +243,8 @@ export class ApprovalService {
             const pending = this.#pending.get(approvalId);
             const request =
                 pending?.request ?? (await this.#store.get(approvalId));
-            if (request === undefined) throw notFound(this.#instance, approvalId);
+            if (request === undefined)
+                throw notFound(this.#instance, approvalId);
             if (request.status !== "pending") {
                 throw createRemoteError({
                     code: runtimeErrorCodes.approvalAlreadyDecided,
@@ -290,7 +292,10 @@ export class ApprovalService {
         });
     }
 
-    async cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+    async cancel(
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest> {
         await this.#ensureReady();
         return this.#exclusive(() => this.#cancel(approvalId, reason));
     }
@@ -318,10 +323,14 @@ export class ApprovalService {
             status: "cancelled" as const,
             terminalAt: new Date(this.#now()).toISOString(),
         };
-        await this.#complete(updated, {
-            error: cancelled(this.#instance, request.toolName, reason),
-            status: "cancelled",
-        }, reason);
+        await this.#complete(
+            updated,
+            {
+                error: cancelled(this.#instance, request.toolName, reason),
+                status: "cancelled",
+            },
+            reason,
+        );
         await this.#pruneTerminal();
         return updated;
     }
@@ -335,15 +344,23 @@ export class ApprovalService {
                         Date.parse(request.expiresAt) <= this.#now()
                             ? "expired"
                             : "cancelled";
-                    const terminalAt = status === "expired"
-                        ? request.expiresAt
-                        : new Date(this.#now()).toISOString();
-                    await this.#complete({ ...request, status, terminalAt }, {
-                        error: status === "expired"
-                            ? expired(this.#instance, request.toolName)
-                            : cancelled(this.#instance, request.toolName),
-                        status,
-                    });
+                    const terminalAt =
+                        status === "expired"
+                            ? request.expiresAt
+                            : new Date(this.#now()).toISOString();
+                    await this.#complete(
+                        { ...request, status, terminalAt },
+                        {
+                            error:
+                                status === "expired"
+                                    ? expired(this.#instance, request.toolName)
+                                    : cancelled(
+                                          this.#instance,
+                                          request.toolName,
+                                      ),
+                            status,
+                        },
+                    );
                 }
                 await this.#pruneTerminal();
             })();
@@ -359,7 +376,11 @@ export class ApprovalService {
         pending.timeout = setTimeout(() => {
             void this.#expire(id).catch(() => {
                 if (this.#pending.get(id) === pending) {
-                    this.#arm(id, pending, Math.min(1000, Math.max(1, this.#timeoutMs)));
+                    this.#arm(
+                        id,
+                        pending,
+                        Math.min(1000, Math.max(1, this.#timeoutMs)),
+                    );
                 }
             });
         }, delay);
@@ -388,18 +409,33 @@ export class ApprovalService {
             .filter((request) => request.status !== "pending")
             .map((request) => ({
                 request,
-                time: Date.parse(request.terminalAt ?? request.decision?.decidedAt
-                    ?? (request.status === "expired" ? request.expiresAt : request.createdAt)),
+                time: Date.parse(
+                    request.terminalAt ??
+                        request.decision?.decidedAt ??
+                        (request.status === "expired"
+                            ? request.expiresAt
+                            : request.createdAt),
+                ),
             }))
-            .sort((left, right) => left.time - right.time
-                || left.request.approvalId.localeCompare(right.request.approvalId)
-                || left.request.createdAt.localeCompare(right.request.createdAt));
+            .sort(
+                (left, right) =>
+                    left.time - right.time ||
+                    left.request.approvalId.localeCompare(
+                        right.request.approvalId,
+                    ) ||
+                    left.request.createdAt.localeCompare(
+                        right.request.createdAt,
+                    ),
+            );
         const retained: ApprovalRequest[] = [];
         for (const { request, time } of terminals) {
             if (time < cutoff) await this.#store.delete(request.approvalId);
             else retained.push(request);
         }
-        for (const request of retained.slice(0, Math.max(0, retained.length - TERMINAL_MAX_COUNT))) {
+        for (const request of retained.slice(
+            0,
+            Math.max(0, retained.length - TERMINAL_MAX_COUNT),
+        )) {
             await this.#store.delete(request.approvalId);
         }
     }

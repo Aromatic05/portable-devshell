@@ -1,7 +1,7 @@
 import type {
     ActiveTodoSummary,
-    InstanceEventType,
     JsonValue,
+    TaskEventType,
     TodoReadInput,
     TodoReadResult,
     TodoTaskControlAction,
@@ -13,7 +13,7 @@ import { TodoStore } from "./Store.js";
 
 export interface TodoServiceOptions {
     appendEvent(
-        type: Extract<InstanceEventType, `todo.${string}`>,
+        type: Extract<TaskEventType, `todo.${string}`>,
         data: JsonValue,
     ): Promise<void>;
     filePath: string;

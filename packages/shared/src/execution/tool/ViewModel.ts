@@ -14,14 +14,13 @@
 // cursor first, re-reads the ledger, and resumes from cursor + 1.
 
 import type { JsonValue } from "../../types/Json.js";
-import type { InstanceEventSource } from "../process/Event.js";
-import type { InstanceEvent } from "../process/Event.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
-} from "../process/Event.js";
+} from "../../client/Stream.js";
 import {
     isToolCallEvent,
+    type ToolEvent,
     type ToolCallQuery,
     type ToolCallRecord,
 } from "./Model.js";
@@ -54,9 +53,7 @@ interface ToolCallViewModelOptions {
      * the Process snapshot.
      */
     cursor(instance: string): Promise<number>;
-    /** Opens the shared instance event stream; the view model filters events. */
-    events: InstanceEventSource;
-    onEvent?(event: InstanceEvent): void;
+    onEvent?(event: ToolEvent): void;
     refreshDelayMs?: number;
     retryBaseMs?: number;
     retryMaxMs?: number;
@@ -65,15 +62,17 @@ interface ToolCallViewModelOptions {
 
 export class ToolCallViewModel {
     readonly #cursor: (instance: string) => Promise<number>;
-    readonly #events: InstanceEventSource;
     readonly #listeners = new Set<() => void>();
-    readonly #onEvent?: (event: InstanceEvent) => void;
+    readonly #onEvent?: (event: ToolEvent) => void;
     readonly #queries = new Map<string, ToolCallQuery | undefined>();
     readonly #refreshDelayMs: number;
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     readonly #retryBaseMs: number;
     readonly #retryMaxMs: number;
-    readonly #subscriptions = new Map<string, InstanceEventSubscription>();
+    readonly #subscriptions = new Map<
+        string,
+        InstanceEventSubscription<ToolEvent>
+    >();
     readonly #transport: ToolTransport;
     readonly #versions = new Map<string, number>();
     #epoch = 0;
@@ -82,7 +81,6 @@ export class ToolCallViewModel {
 
     constructor(options: ToolCallViewModelOptions) {
         this.#cursor = options.cursor;
-        this.#events = options.events;
         this.#onEvent = options.onEvent;
         this.#refreshDelayMs =
             options.refreshDelayMs ?? DEFAULT_REFRESH_DELAY_MS;
@@ -241,7 +239,7 @@ export class ToolCallViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription(fromSeq, {
+        const subscription = new InstanceEventSubscription<ToolEvent>(fromSeq, {
             onEvent: (event) => {
                 if (this.#current(epoch)) this.#applyEvent(event);
             },
@@ -254,7 +252,7 @@ export class ToolCallViewModel {
                 }));
                 this.#emit();
             },
-            open: (cursor) => this.#events.subscribe(instance, cursor),
+            open: (cursor) => this.#transport.subscribe(instance, cursor),
             retryBaseMs: this.#retryBaseMs,
             retryMaxMs: this.#retryMaxMs,
         });
@@ -262,7 +260,7 @@ export class ToolCallViewModel {
         subscription.start();
     }
 
-    #applyEvent(event: InstanceEvent): void {
+    #applyEvent(event: ToolEvent): void {
         if (!isToolCallEvent(event.type)) return;
         const instance = event.instanceName;
         this.#updateInstance(instance, (state) => ({

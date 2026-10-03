@@ -1,6 +1,6 @@
 import {
     Endpoint,
-    type InstanceEvent,
+    type InstanceEventRecord,
 } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 
@@ -40,7 +40,7 @@ export class WorkerInstanceFactory {
             paths.auditDatabaseFile,
             resolved.auditStorage,
         );
-        const eventStore = auditDatabase.store<InstanceEvent>("events", {
+        const eventStore = auditDatabase.store<InstanceEventRecord>("events", {
             legacyFile: paths.legacyEventsFile,
             maxRecords: resolved.eventBufferSize,
             sequence: (record) => record.seq,

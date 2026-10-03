@@ -281,7 +281,7 @@ export class ControlChannelServer {
                     operation.name,
                     async (payload: unknown, rpc: RpcContext) => {
                         const prepared = this.#context(
-                            definition.host,
+                            rpc.local.host,
                             definition.port.name,
                             operation.name,
                             payload as JsonValue | undefined,
@@ -316,7 +316,7 @@ export class ControlChannelServer {
                 ]),
             );
             const offOpen = stream.onOpen(
-                async (messageStream, name, payload, peer) => {
+                async (messageStream, name, payload, peer, local) => {
                     const handle = streamHandlers.get(name);
                     if (handle === undefined) {
                         await messageStream.cancel({
@@ -329,7 +329,7 @@ export class ControlChannelServer {
                     messageStream.onClose(() => controller.abort());
                     messageStream.onCancel(() => controller.abort());
                     const context = this.#streamContext(
-                        definition.host,
+                        local.host,
                         peer.host,
                         messageStream,
                         controller.signal,

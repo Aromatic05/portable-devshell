@@ -1,4 +1,16 @@
-import { type InstanceEvent } from "../../execution/process/Event.js";
+import type { InstanceEventRecord } from "../../client/Stream.js";
+
+export type MessageEventType =
+    | "context.message.queued"
+    | "context.message.delivered"
+    | "context.message.failed"
+    | "conversation.changed";
+export type MessageEvent = InstanceEventRecord<MessageEventType>;
+export function isMessageEventType(type: string): type is MessageEventType {
+    return (
+        type.startsWith("context.message.") || type === "conversation.changed"
+    );
+}
 
 export type ContextMessageStatus = "pending" | "sent" | "delivered" | "failed";
 export type ContextMessageDirective = "push" | "resume" | "stop";
@@ -51,7 +63,7 @@ export interface ContextMessageReadResult {
     messages: Array<Pick<ContextMessageRecord, "createdAt" | "id" | "text">>;
 }
 /** Instance activity events that change the Context message projection. */
-export function isContextMessageEvent(event: InstanceEvent): boolean {
+export function isContextMessageEvent(event: MessageEvent): boolean {
     return event.type.startsWith("context.message.");
 }
 /**
@@ -184,19 +196,11 @@ export function mergeConversationEntryList(
     );
 }
 /** Instance activity events that change the Conversation projection. */
-export function isConversationEvent(event: InstanceEvent): boolean {
-    if (event.type.startsWith("context.message.")) return true;
-    return (
-        event.type === "toolCall.completed" &&
-        isRecord(event.data) &&
-        event.data.toolName === "todo_report"
-    );
+export function isConversationEvent(_event: MessageEvent): boolean {
+    return true;
 }
 function workspaceFolderName(workspace: string): string {
     const normalized = workspace.replace(/[\\/]+$/u, "");
     if (normalized.length === 0) return workspace;
     return normalized.split(/[\\/]/u).at(-1) || workspace;
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

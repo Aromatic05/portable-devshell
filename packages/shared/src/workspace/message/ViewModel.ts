@@ -1,12 +1,12 @@
-import { type InstanceEvent } from "../../execution/process/Event.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import {
     type ContextMessageListInput,
     type ContextMessageRecord,
     type ConversationEntry,
+    type MessageEvent,
     isContextMessageEvent,
     isConversationEvent,
     mergeContextMessage,
@@ -25,7 +25,7 @@ export interface MessageViewModelState {
     instances: Record<string, MessageInstanceState>;
 }
 interface MessageViewModelOptions {
-    onEvent?(event: InstanceEvent): void;
+    onEvent?(event: MessageEvent): void;
     transport: MessageTransport;
 }
 const REFRESH_DELAY_MS = 100;
@@ -34,10 +34,13 @@ const MESSAGE_LIST_MAX_BYTES = 1024 * 1024;
 export class MessageViewModel {
     readonly #transport: MessageTransport;
     readonly #listeners = new Set<() => void>();
-    readonly #onEvent?: (event: InstanceEvent) => void;
+    readonly #onEvent?: (event: MessageEvent) => void;
     readonly #versions = new Map<string, number>();
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    readonly #subscriptions = new Map<string, InstanceEventSubscription>();
+    readonly #subscriptions = new Map<
+        string,
+        InstanceEventSubscription<MessageEvent>
+    >();
     #epoch = 0;
     #publishedState: MessageViewModelState =
         createInitialMessageViewModelState();
@@ -188,26 +191,29 @@ export class MessageViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription(fromSeq, {
-            onEvent: (event) => {
-                if (this.#current(epoch)) this.#applyEvent(event);
+        const subscription = new InstanceEventSubscription<MessageEvent>(
+            fromSeq,
+            {
+                onEvent: (event) => {
+                    if (this.#current(epoch)) this.#applyEvent(event);
+                },
+                onGap: () => this.#recover(instance, epoch),
+                onStatusChange: (status) => {
+                    if (!this.#current(epoch)) return;
+                    this.#updateInstance(instance, (state) => ({
+                        ...state,
+                        status,
+                    }));
+                    this.#emit();
+                },
+                open: (cursor) => this.#transport.subscribe(instance, cursor),
             },
-            onGap: () => this.#recover(instance, epoch),
-            onStatusChange: (status) => {
-                if (!this.#current(epoch)) return;
-                this.#updateInstance(instance, (state) => ({
-                    ...state,
-                    status,
-                }));
-                this.#emit();
-            },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
-        });
+        );
         this.#subscriptions.set(instance, subscription);
         subscription.start();
     }
 
-    #applyEvent(event: InstanceEvent): void {
+    #applyEvent(event: MessageEvent): void {
         if (!isContextMessageEvent(event)) return;
         this.#updateInstance(event.instanceName, (state) => ({
             ...state,
@@ -329,7 +335,7 @@ export interface ConversationViewModelState {
 }
 interface ConversationViewModelOptions {
     transport: MessageTransport;
-    onEvent?(event: InstanceEvent): void;
+    onEvent?(event: MessageEvent): void;
 }
 const CONVERSATION_REFRESH_DELAY_MS = 100;
 const CONVERSATION_LIST_LIMIT = 400;
@@ -337,10 +343,13 @@ const CONVERSATION_LIST_MAX_BYTES = 1024 * 1024;
 export class ConversationViewModel {
     readonly #transport: MessageTransport;
     readonly #listeners = new Set<() => void>();
-    readonly #onEvent?: (event: InstanceEvent) => void;
+    readonly #onEvent?: (event: MessageEvent) => void;
     readonly #versions = new Map<string, number>();
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    readonly #subscriptions = new Map<string, InstanceEventSubscription>();
+    readonly #subscriptions = new Map<
+        string,
+        InstanceEventSubscription<MessageEvent>
+    >();
     #epoch = 0;
     #publishedState: ConversationViewModelState =
         createInitialConversationViewModelState();
@@ -436,26 +445,29 @@ export class ConversationViewModel {
     #ensureSubscription(instance: string, fromSeq: number): void {
         if (this.#subscriptions.has(instance)) return;
         const epoch = this.#epoch;
-        const subscription = new InstanceEventSubscription(fromSeq, {
-            onEvent: (event) => {
-                if (this.#current(epoch)) this.#applyEvent(event);
+        const subscription = new InstanceEventSubscription<MessageEvent>(
+            fromSeq,
+            {
+                onEvent: (event) => {
+                    if (this.#current(epoch)) this.#applyEvent(event);
+                },
+                onGap: () => this.#recover(instance, epoch),
+                onStatusChange: (status) => {
+                    if (!this.#current(epoch)) return;
+                    this.#updateInstance(instance, (state) => ({
+                        ...state,
+                        status,
+                    }));
+                    this.#emit();
+                },
+                open: (cursor) => this.#transport.subscribe(instance, cursor),
             },
-            onGap: () => this.#recover(instance, epoch),
-            onStatusChange: (status) => {
-                if (!this.#current(epoch)) return;
-                this.#updateInstance(instance, (state) => ({
-                    ...state,
-                    status,
-                }));
-                this.#emit();
-            },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
-        });
+        );
         this.#subscriptions.set(instance, subscription);
         subscription.start();
     }
 
-    #applyEvent(event: InstanceEvent): void {
+    #applyEvent(event: MessageEvent): void {
         if (!isConversationEvent(event)) return;
         this.#updateInstance(event.instanceName, (state) => ({
             ...state,

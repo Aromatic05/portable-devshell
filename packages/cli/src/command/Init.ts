@@ -83,7 +83,7 @@ export async function executeInit(
                 retryable: false,
             });
         }
-        await context.clients.instance.create({
+        await context.clients.instance.createInstance({
             mcp: {
                 auth: "oauth2",
                 contextMode: "openai-session",

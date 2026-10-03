@@ -1,6 +1,7 @@
 // Tool definitions and tool-call records. Tool definitions come from the
 // target worker; tool-call records are the instance-scoped execution ledger.
 
+import type { InstanceEventRecord } from "../../client/Stream.js";
 import type { InstanceName } from "../../types/Instance.js";
 import type { JsonValue } from "../../types/Json.js";
 
@@ -63,6 +64,17 @@ export type ToolCallStatus =
     | "queueTimeout"
     | "cancelled";
 
+export type ToolEventType =
+    | "toolCall.queued"
+    | "toolCall.started"
+    | "toolCall.running"
+    | "toolCall.completed"
+    | "toolCall.failed"
+    | "toolCall.denied"
+    | "toolCall.queueTimeout"
+    | "toolCall.cancelled";
+export type ToolEvent = InstanceEventRecord<ToolEventType>;
+
 export type ToolCallFailureStage = "postExecution" | "outboundHook";
 
 export interface ToolCallQuery {
@@ -106,7 +118,7 @@ export interface ToolCallRecord extends ToolCallProvenance {
 
 export type ToolTermination = "exited" | "signaled" | "timeout";
 
-export function isToolCallEvent(type: string): boolean {
+export function isToolCallEvent(type: string): type is ToolEventType {
     return type.startsWith("toolCall.");
 }
 type ParseSuccess<T> = { data: T; success: true };

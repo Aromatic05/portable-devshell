@@ -4,8 +4,8 @@ import type {
     GoalManageInput,
     GoalRecord,
     GoalSnapshot,
-    InstanceEventType,
     JsonValue,
+    TaskEventType,
 } from "@portable-devshell/shared";
 
 import {
@@ -17,7 +17,7 @@ import { GoalStore } from "./storage/Store.js";
 
 export class GoalService {
     readonly #appendEvent: (
-        type: Extract<InstanceEventType, `goal.${string}`>,
+        type: Extract<TaskEventType, `goal.${string}`>,
         data: JsonValue,
     ) => Promise<void>;
     readonly #state: GoalState;
@@ -26,7 +26,7 @@ export class GoalService {
 
     constructor(options: {
         appendEvent(
-            type: Extract<InstanceEventType, `goal.${string}`>,
+            type: Extract<TaskEventType, `goal.${string}`>,
             data: JsonValue,
         ): Promise<void>;
         filePath: string;

@@ -67,7 +67,7 @@ export function selectTuiMessageSessions(
 ): TuiMessageSession[] {
     return projectTuiMessageSessions(reader).filter(
         (session) =>
-            reader.conversation.preferences.hiddenContexts[session.ctxId] !==
+            reader.conversationPreferences.preferences.hiddenContexts[session.ctxId] !==
                 true && isActiveMessageSession(session, now),
     );
 }
@@ -78,7 +78,7 @@ export function selectTuiMessageHistorySessions(
 ): TuiMessageSession[] {
     return projectTuiMessageSessions(reader).filter(
         (session) =>
-            reader.conversation.preferences.hiddenContexts[session.ctxId] !==
+            reader.conversationPreferences.preferences.hiddenContexts[session.ctxId] !==
                 true && !isActiveMessageSession(session, now),
     );
 }
@@ -88,7 +88,7 @@ export function selectTuiMessageHiddenSessions(
 ): TuiMessageSession[] {
     return projectTuiMessageSessions(reader).filter(
         (session) =>
-            reader.conversation.preferences.hiddenContexts[session.ctxId] ===
+            reader.conversationPreferences.preferences.hiddenContexts[session.ctxId] ===
             true,
     );
 }
@@ -100,7 +100,7 @@ function projectTuiMessageSessions(
     const conversationInstances = reader.conversation.instances;
     const messagesInstances = reader.messages.instances;
     const instances = reader.instances.instances;
-    const preferences = reader.conversation.preferences;
+    const preferences = reader.conversationPreferences.preferences;
     const cached = messageSessionCache;
     if (
         cached !== undefined &&
@@ -213,7 +213,7 @@ export function selectTuiMessagesSidebarEntries(
     const route = currentTuiRoute(state);
     const scope = state.ui.messageScope;
     const allSessions = projectTuiMessageSessions(reader);
-    const hiddenContexts = reader.conversation.preferences.hiddenContexts;
+    const hiddenContexts = reader.conversationPreferences.preferences.hiddenContexts;
     const scopedSessions =
         scope === "active"
             ? allSessions.filter(

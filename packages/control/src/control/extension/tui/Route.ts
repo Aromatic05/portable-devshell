@@ -89,8 +89,8 @@ export class TuiExtensionPageService implements TuiPagePort {
 export function createTuiPageRouteModule(
     port: TuiPagePort,
 ): ControlPortDefinition {
-    return routeModule("tui", {
-        page: async (request, context) => {
+    return routeModule("extension", {
+        tuiPage: async (request, context) => {
             requireTui(context);
             const input = readPageRequest(request.payload);
             return (await port.invoke(input.pageId, input.request, {
@@ -99,7 +99,7 @@ export function createTuiPageRouteModule(
                 signal: context.signal,
             })) as unknown as JsonValue;
         },
-        pages: (_request, context) => {
+        tuiPages: (_request, context) => {
             requireTui(context);
             return [...port.list()] as unknown as JsonValue;
         },

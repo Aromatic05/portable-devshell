@@ -38,9 +38,9 @@ import type {
     ContextMessageRecord,
     ConversationEntry,
     ConversationListInput,
-    InstanceEventType,
     JsonValue,
     ControlPortDefinition,
+    MessageEventType,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -80,7 +80,7 @@ export type CommentControlDecision =
 
 export interface CommentExtensionInstance {
     appendEvent(
-        type: Extract<InstanceEventType, `context.message.${string}`>,
+        type: Extract<MessageEventType, `context.message.${string}`>,
         data: JsonValue,
     ): Promise<void>;
     conversationDatabaseFile: string;
@@ -647,32 +647,32 @@ function registerCommentRoutes(
     for (const route of [
         {
             id: "context-message-list",
-            module: "contextMessage",
-            operation: "list",
+            module: "message",
+            operation: "listContextMessages",
             scope: "instance",
         },
         {
             id: "context-message-queue",
-            module: "contextMessage",
-            operation: "queue",
+            module: "message",
+            operation: "queueContextMessage",
             scope: "instance",
         },
         {
             id: "conversation-list",
-            module: "conversation",
-            operation: "list",
+            module: "message",
+            operation: "listConversationEntries",
             scope: "instance",
         },
         {
             id: "conversation-preferences",
-            module: "conversation",
-            operation: "preferences",
+            module: "config",
+            operation: "getConversationPreferences",
             scope: "control",
         },
         {
             id: "conversation-update-preferences",
-            module: "conversation",
-            operation: "updatePreferences",
+            module: "config",
+            operation: "updateConversationPreferences",
             scope: "control",
         },
     ] as const) {

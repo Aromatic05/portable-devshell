@@ -2,6 +2,7 @@
 // approval service; the client treats the pending list as an authoritative
 // snapshot plus an event cursor.
 
+import type { InstanceEventRecord } from "../../client/Stream.js";
 import type { InstanceName } from "../../types/Instance.js";
 import type { ToolCallSource } from "../../execution/tool/Model.js";
 import type { JsonValue } from "../../types/Json.js";
@@ -14,6 +15,16 @@ export type ApprovalPolicyMode = "disabled" | "allow" | "ask" | "deny";
 export type ApprovalPolicyDecision = "allow" | "ask" | "deny";
 export type ApprovalPolicySourceScope = ToolCallSource | "all";
 export type ApprovalRiskLevel = "low" | "medium" | "high";
+export type ApprovalEventType =
+    | "approval.requested"
+    | "approval.approved"
+    | "approval.denied"
+    | "approval.expired"
+    | "approval.cancelled";
+export type ApprovalEvent = InstanceEventRecord<ApprovalEventType>;
+export function isApprovalEventType(type: string): type is ApprovalEventType {
+    return type.startsWith("approval.");
+}
 
 export interface ApprovalDecisionOptions {
     policyPatch?: JsonValue;

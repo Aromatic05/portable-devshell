@@ -1,15 +1,19 @@
 import type { WorkerInstance } from "@portable-devshell/core";
 import { createRemoteError, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type {
-    InstanceEvent,
+    InstanceEventRecord,
     JsonValue,
     ControlPortContext,
     MessageStream,
 } from "@portable-devshell/shared";
 
+export type RuntimeEventProjector = (
+    event: InstanceEventRecord,
+) => InstanceEventRecord | undefined;
+
 export interface RuntimeSubscription {
     connectionId: string;
-    eventFilter?: (event: InstanceEvent) => boolean;
+    projectEvent?: RuntimeEventProjector;
     instance: Pick<WorkerInstance, "subscribe">;
     instanceName: string;
     nextSeq: number;
@@ -18,11 +22,11 @@ export interface RuntimeSubscription {
 }
 
 interface RuntimeEventWatch {
-    eventFilter?: (event: InstanceEvent) => boolean;
+    projectEvent?: RuntimeEventProjector;
     instance: RuntimeSubscription["instance"];
     instanceName: string;
     nextSeq: number;
-    onEvent(event: InstanceEvent): Promise<void> | void;
+    onEvent(event: InstanceEventRecord): Promise<void> | void;
     onGap(gap: {
         lastSeq: number;
         nextSeq: number;
@@ -50,7 +54,7 @@ export class RuntimeSubscriptionManager {
         instanceName: string,
         instance: RuntimeSubscription["instance"],
         fromSeq: number,
-        eventFilter?: (event: InstanceEvent) => boolean,
+        projectEvent?: RuntimeEventProjector,
     ): Promise<void> {
         const slice = instance.subscribe(fromSeq);
         if (slice.kind === "gap") {
@@ -72,9 +76,13 @@ export class RuntimeSubscriptionManager {
         await stream.send({
             name: "seed",
             payload: {
-                events: (eventFilter === undefined
-                    ? slice.events
-                    : slice.events.filter(eventFilter)) as unknown as JsonValue,
+                events: slice.events.flatMap((event) => {
+                    const projected =
+                        projectEvent === undefined
+                            ? event
+                            : projectEvent(event);
+                    return projected === undefined ? [] : [projected];
+                }) as unknown as JsonValue,
                 lastSeq: slice.lastSeq,
             },
         });
@@ -87,7 +95,7 @@ export class RuntimeSubscriptionManager {
 
         this.#subscriptions.set(key, {
             connectionId: context.connectionId,
-            eventFilter,
+            projectEvent,
             instance,
             instanceName,
             nextSeq: slice.lastSeq + 1,
@@ -103,8 +111,8 @@ export class RuntimeSubscriptionManager {
         fromSeq: number,
         signal: AbortSignal,
         handlers: {
-            eventFilter?: (event: InstanceEvent) => boolean;
-            onEvent(event: InstanceEvent): Promise<void> | void;
+            projectEvent?: RuntimeEventProjector;
+            onEvent(event: InstanceEventRecord): Promise<void> | void;
             onGap(gap: {
                 lastSeq: number;
                 nextSeq: number;
@@ -113,7 +121,7 @@ export class RuntimeSubscriptionManager {
     ): Promise<void> {
         signal.throwIfAborted();
         const seed: RuntimeEventWatch = {
-            eventFilter: handlers.eventFilter,
+            projectEvent: handlers.projectEvent,
             instance,
             instanceName,
             nextSeq: fromSeq,
@@ -197,15 +205,15 @@ export class RuntimeSubscriptionManager {
                 }
 
                 for (const event of slice.events) {
-                    if (
-                        subscription.eventFilter !== undefined &&
-                        !subscription.eventFilter(event)
-                    )
-                        continue;
+                    const projected =
+                        subscription.projectEvent === undefined
+                            ? event
+                            : subscription.projectEvent(event);
+                    if (projected === undefined) continue;
                     await subscription.stream.send({
                         name: "event",
-                        payload: event as unknown as JsonValue,
-                        seq: event.seq,
+                        payload: projected as unknown as JsonValue,
+                        seq: projected.seq,
                     });
                 }
                 subscription.nextSeq = slice.lastSeq + 1;
@@ -241,9 +249,12 @@ export class RuntimeSubscriptionManager {
             return recovered ?? slice.nextSeq;
         }
         for (const event of slice.events) {
-            if (watch.eventFilter !== undefined && !watch.eventFilter(event))
-                continue;
-            await watch.onEvent(event);
+            const projected =
+                watch.projectEvent === undefined
+                    ? event
+                    : watch.projectEvent(event);
+            if (projected === undefined) continue;
+            await watch.onEvent(projected);
         }
         return slice.lastSeq + 1;
     }

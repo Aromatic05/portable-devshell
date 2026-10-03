@@ -6,6 +6,7 @@
 // surfaces as a stream error instead of throwing inside the data listener.
 
 import type { MessageStream } from "../transport/packet/Stream.js";
+import type { InstanceName } from "../types/Instance.js";
 import type { JsonValue } from "../types/Json.js";
 
 export const STREAM_GAP_CODE = "stream.gap";
@@ -23,6 +24,15 @@ export interface EventStreamEnvelope {
     name: string;
     payload?: JsonValue;
     seq?: number;
+}
+
+/** Domain-blind instance event record used by storage and stream mechanics. */
+export interface InstanceEventRecord<Type extends string = string> {
+    at: string;
+    data?: JsonValue;
+    instanceName: InstanceName;
+    seq: number;
+    type: Type;
 }
 
 export type StreamMessage<Event> =
@@ -336,4 +346,73 @@ export class EventSubscription<Event> {
         this.#status = status;
         this.#options.onStatusChange?.(status);
     }
+}
+
+export type InstanceEventStreamPort<
+    Event extends InstanceEventRecord = InstanceEventRecord,
+> = EventStreamPort<Event>;
+
+export class InstanceEventStream<
+    Event extends InstanceEventRecord = InstanceEventRecord,
+> extends EventStreamReader<Event> {
+    constructor(instance: InstanceName, stream: MessageStream) {
+        super(stream, {
+            decodeEvent: (payload) => {
+                const event = readInstanceEventRecord(payload);
+                if (event.instanceName !== instance)
+                    throw new Error("Subscription contains another instance.");
+                return event as Event;
+            },
+            readGap: readStreamGapPayload,
+        });
+    }
+}
+
+export type InstanceEventSubscriptionStatus = SubscriptionStatus;
+
+export interface InstanceEventSubscriptionOptions<
+    Event extends InstanceEventRecord = InstanceEventRecord,
+> {
+    onEvent(event: Event): void;
+    onGap(gap: StreamGap): Promise<number | undefined> | number | undefined;
+    onStatusChange?(status: InstanceEventSubscriptionStatus): void;
+    open(fromSeq: number): Promise<InstanceEventStreamPort<Event>>;
+    retryBaseMs?: number;
+    retryMaxMs?: number;
+}
+
+export class InstanceEventSubscription<
+    Event extends InstanceEventRecord = InstanceEventRecord,
+> extends EventSubscription<Event> {
+    constructor(
+        fromSeq: number,
+        options: InstanceEventSubscriptionOptions<Event>,
+    ) {
+        super(fromSeq, {
+            ...options,
+            eventSeq: (event) => event.seq,
+            readGapError: readStreamGap,
+        });
+    }
+}
+
+function readInstanceEventRecord(
+    value: JsonValue | undefined,
+): InstanceEventRecord {
+    const event = record(value);
+    if (
+        event === undefined ||
+        typeof event.at !== "string" ||
+        typeof event.instanceName !== "string" ||
+        typeof event.seq !== "number" ||
+        typeof event.type !== "string"
+    )
+        throw new Error("Invalid instance event.");
+    return {
+        at: event.at,
+        ...(event.data === undefined ? {} : { data: event.data }),
+        instanceName: event.instanceName as InstanceName,
+        seq: event.seq,
+        type: event.type,
+    };
 }

@@ -45,8 +45,8 @@ async function runCommandStream(
     argv: readonly string[],
     options: CliClientCommandOptions,
 ): Promise<CliCommandWireResult> {
-    const protocol = new Stream(await endpoint.connect("@control", "cli"));
-    const stream = await protocol.open("commandStream", {
+    const protocol = new Stream(await endpoint.connect("@control", "extension"));
+    const stream = await protocol.open("cliCommandStream", {
         argv: [...argv],
         commandId,
         ...(options.workingDirectory === undefined

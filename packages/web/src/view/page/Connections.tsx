@@ -7,7 +7,7 @@ import type {
     ConfigView,
     ConfigWebPatch,
     JsonValue,
-    McpRuntimeStatus,
+    AuthStatus,
     OAuthApprovalRequest,
 } from "@portable-devshell/shared";
 
@@ -602,7 +602,7 @@ function OAuthSection({
     onRotate(): void;
     onUseToken(): void;
     onUseTui(): void;
-    status: McpRuntimeStatus | undefined;
+    status: AuthStatus | undefined;
 }) {
     const pending = approvals.filter(
         (approval) => approval.status === "pending",

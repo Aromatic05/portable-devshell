@@ -116,10 +116,10 @@ export function createConversationRouteModule(
     service: Pick<ConversationService, "list">,
 ): ControlPortDefinition {
     return {
-        name: "conversation",
+        name: "message",
         operations: [
             {
-                name: "list",
+                name: "listConversationEntries",
                 handle: async (request) =>
                     (await service.list(
                         readConversationListInput(request.payload ?? {}),
@@ -137,23 +137,31 @@ function readConversationListInput(value: JsonValue): ConversationListInput {
         )
     )
         throw invalidRouteInput(
-            "conversation.list accepts only before, ctxId, limit, and maxBytes.",
+            "message.listConversationEntries accepts only before, ctxId, limit, and maxBytes.",
         );
     if (value.before !== undefined && typeof value.before !== "string")
-        throw invalidRouteInput("conversation.list before must be a string.");
+        throw invalidRouteInput(
+            "message.listConversationEntries before must be a string.",
+        );
     if (value.ctxId !== undefined && typeof value.ctxId !== "string")
-        throw invalidRouteInput("conversation.list ctxId must be a string.");
+        throw invalidRouteInput(
+            "message.listConversationEntries ctxId must be a string.",
+        );
     if (
         value.limit !== undefined &&
         (typeof value.limit !== "number" || !Number.isSafeInteger(value.limit))
     )
-        throw invalidRouteInput("conversation.list limit must be an integer.");
+        throw invalidRouteInput(
+            "message.listConversationEntries limit must be an integer.",
+        );
     if (
         value.maxBytes !== undefined &&
         (typeof value.maxBytes !== "number" ||
             !Number.isSafeInteger(value.maxBytes))
     )
-        throw invalidRouteInput("conversation.list maxBytes must be an integer.");
+        throw invalidRouteInput(
+            "message.listConversationEntries maxBytes must be an integer.",
+        );
     return {
         ...(value.before === undefined ? {} : { before: value.before }),
         ...(value.ctxId === undefined ? {} : { ctxId: value.ctxId }),

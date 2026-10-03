@@ -2,16 +2,17 @@ import {
     ApprovalViewModel,
     ArtifactViewModel,
     ConfigViewModel,
+    ConversationPreferenceViewModel,
     ContextViewModel,
     ConversationViewModel,
     Endpoint,
     ExtensionViewModel,
     GoalViewModel,
-    InstanceRegistryViewModel,
-    McpViewModel,
+    InstanceConfigViewModel,
+    AuthViewModel,
     MessageViewModel,
     OverviewViewModel,
-    RuntimeViewModel,
+    ProcessViewModel,
     ServiceSession,
     TodoViewModel,
     ToolCallViewModel,
@@ -19,22 +20,20 @@ import {
     createArtifactTransport,
     createConfigTransport,
     createContextTransport,
-    createConversationTransport,
     createExtensionRuntimeTransport,
-    createGoalTransport,
-    createInstanceManagementTransport,
-    createMcpControlTransport,
+    createTaskTransport,
+    createAuthTransport,
     createMessageTransport,
     createOverviewTransport,
-    createReverseConnectionTransport,
-    createRuntimeTransport,
+    createConnectionTransport,
+    createProcessTransport,
     createServiceTransport,
-    createTodoTransport,
     createToolTransport,
     createTuiPageTransport,
     createWebPageTransport,
     type Channel,
-    type ReverseConnectionTransport,
+    type ConnectionTransport,
+    type MessageTransport,
 } from "@portable-devshell/shared";
 
 export type WebChannelConnector = (signal?: AbortSignal) => Promise<Channel>;
@@ -51,29 +50,32 @@ export class WebDomainSession {
     readonly config: ConfigViewModel;
     readonly context: ContextViewModel;
     readonly conversation: ConversationViewModel;
+    readonly conversationPreferences: ConversationPreferenceViewModel;
     readonly extension: ExtensionViewModel;
     readonly goals: GoalViewModel;
-    readonly instances: InstanceRegistryViewModel;
-    readonly mcp: McpViewModel;
+    readonly instances: InstanceConfigViewModel;
+    readonly mcp: AuthViewModel;
     readonly messages: MessageViewModel;
     readonly overview: OverviewViewModel;
-    readonly reverse: ReverseConnectionTransport;
+    readonly reverse: ConnectionTransport;
     readonly service: ServiceSession;
     readonly toolCalls: ToolCallViewModel;
 
     readonly #approvals = new Map<string, ApprovalViewModel>();
     readonly #endpoint: Endpoint;
-    readonly #runtimes = new Map<string, RuntimeViewModel>();
+    readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #todos = new Map<string, TodoViewModel>();
     readonly #approvalTransport;
+    readonly #messageTransport: MessageTransport;
     readonly #runtimeTransport;
-    readonly #todoTransport;
+    readonly #taskTransport;
 
     constructor(options: WebDomainSessionOptions) {
         this.#endpoint = new Endpoint({ connectChannel: options.connectChannel });
-        this.#runtimeTransport = createRuntimeTransport(this.#endpoint);
+        this.#runtimeTransport = createProcessTransport(this.#endpoint);
         this.#approvalTransport = createApprovalTransport(this.#endpoint);
-        this.#todoTransport = createTodoTransport(this.#endpoint);
+        this.#messageTransport = createMessageTransport(this.#endpoint);
+        this.#taskTransport = createTaskTransport(this.#endpoint);
         const toolTransport = createToolTransport(this.#endpoint);
 
         this.service = new ServiceSession(
@@ -81,11 +83,14 @@ export class WebDomainSession {
             createServiceTransport(this.#endpoint, { clientKind: "web" }),
         );
         this.config = new ConfigViewModel(createConfigTransport(this.#endpoint));
+        this.conversationPreferences = new ConversationPreferenceViewModel(
+            createConfigTransport(this.#endpoint),
+        );
         this.overview = new OverviewViewModel(
             createOverviewTransport(this.#endpoint),
             { refreshIntervalMs: options.overviewRefreshIntervalMs },
         );
-        this.mcp = new McpViewModel(createMcpControlTransport(this.#endpoint), {
+        this.mcp = new AuthViewModel(createAuthTransport(this.#endpoint), {
             pollIntervalMs: options.mcpPollIntervalMs,
         });
         this.extension = new ExtensionViewModel(
@@ -93,41 +98,31 @@ export class WebDomainSession {
             createTuiPageTransport(this.#endpoint),
             createWebPageTransport(this.#endpoint),
         );
-        this.instances = new InstanceRegistryViewModel(
-            createInstanceManagementTransport(this.#endpoint),
+        this.instances = new InstanceConfigViewModel(
+            createConfigTransport(this.#endpoint),
         );
         this.artifactTransport = createArtifactTransport(this.#endpoint);
         this.artifact = new ArtifactViewModel(this.artifactTransport);
         this.context = new ContextViewModel(createContextTransport(this.#endpoint));
         this.conversation = new ConversationViewModel({
-            transport: createConversationTransport(
-                this.#endpoint,
-                this.#runtimeTransport,
-            ),
+            transport: this.#messageTransport,
         });
         this.messages = new MessageViewModel({
-            transport: createMessageTransport(
-                this.#endpoint,
-                this.#runtimeTransport,
-            ),
+            transport: this.#messageTransport,
         });
-        this.goals = new GoalViewModel({
-            events: this.#runtimeTransport,
-            transport: createGoalTransport(this.#endpoint),
-        });
+        this.goals = new GoalViewModel({ transport: this.#taskTransport });
         this.toolCalls = new ToolCallViewModel({
             cursor: async (instance) =>
                 (await this.#runtimeTransport.snapshot(instance)).lastSeq,
-            events: this.#runtimeTransport,
             transport: toolTransport,
         });
-        this.reverse = createReverseConnectionTransport(this.#endpoint);
+        this.reverse = createConnectionTransport(this.#endpoint);
     }
 
-    runtime(instance: string): RuntimeViewModel {
+    runtime(instance: string): ProcessViewModel {
         let viewModel = this.#runtimes.get(instance);
         if (viewModel === undefined) {
-            viewModel = new RuntimeViewModel(this.#runtimeTransport);
+            viewModel = new ProcessViewModel(this.#runtimeTransport);
             this.#runtimes.set(instance, viewModel);
         }
         return viewModel;
@@ -145,7 +140,7 @@ export class WebDomainSession {
     todo(instance: string): TodoViewModel {
         let viewModel = this.#todos.get(instance);
         if (viewModel === undefined) {
-            viewModel = new TodoViewModel(this.#todoTransport);
+            viewModel = new TodoViewModel(this.#taskTransport);
             this.#todos.set(instance, viewModel);
         }
         return viewModel;
@@ -173,6 +168,7 @@ export class WebDomainSession {
             this.mcp.load(),
             this.extension.refreshCatalogs(),
             this.conversation.load(),
+            this.conversationPreferences.refresh(),
         ]);
         this.overview.start();
         this.mcp.start();
@@ -188,7 +184,7 @@ export class WebDomainSession {
             this.overview.refresh(),
             this.mcp.refresh(),
             this.extension.refreshCatalogs(),
-            this.conversation.refreshPreferences(),
+            this.conversationPreferences.refresh(),
         ]);
     }
 
@@ -203,6 +199,7 @@ export class WebDomainSession {
         this.toolCalls.close();
         this.messages.close();
         this.conversation.close();
+        this.conversationPreferences.close();
         this.context.close();
         this.artifact.close();
         this.instances.close();

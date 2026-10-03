@@ -4,15 +4,15 @@
 // re-reads and resumes from lastSeq + 1.
 
 import {
+    type ApprovalEvent,
     type ApprovalDecisionOptions,
     type ApprovalDecisionValue,
     type ApprovalRequest,
 } from "./Model.js";
-import type { InstanceEvent } from "../../execution/process/Event.js";
 import {
     InstanceEventSubscription,
     type InstanceEventSubscriptionStatus,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import type { ApprovalTransport } from "./Transport.js";
 
 interface ApprovalViewModelState {
@@ -30,7 +30,7 @@ export class ApprovalViewModel {
     #published: ApprovalViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ApprovalViewModelState = emptyState();
-    #subscription?: InstanceEventSubscription;
+    #subscription?: InstanceEventSubscription<ApprovalEvent>;
 
     constructor(transport: ApprovalTransport) {
         this.#transport = transport;
@@ -116,15 +116,18 @@ export class ApprovalViewModel {
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
         const instance = this.#requireInstance();
-        this.#subscription = new InstanceEventSubscription(fromSeq, {
-            onEvent: (_event: InstanceEvent) => this.#scheduleRefresh(),
-            onGap: () => this.#recover(),
-            onStatusChange: (status) => {
-                this.#state = { ...this.#state, status };
-                this.#emit();
+        this.#subscription = new InstanceEventSubscription<ApprovalEvent>(
+            fromSeq,
+            {
+                onEvent: () => this.#scheduleRefresh(),
+                onGap: () => this.#recover(),
+                onStatusChange: (status) => {
+                    this.#state = { ...this.#state, status };
+                    this.#emit();
+                },
+                open: (cursor) => this.#transport.subscribe(instance, cursor),
             },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
-        });
+        );
         this.#subscription.start();
     }
 

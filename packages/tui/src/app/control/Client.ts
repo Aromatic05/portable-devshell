@@ -2,16 +2,17 @@ import {
     ApprovalViewModel,
     ArtifactViewModel,
     ConfigViewModel,
+    ConversationPreferenceViewModel,
     ContextViewModel,
     ConversationViewModel,
     Endpoint,
     ExtensionViewModel,
     GoalViewModel,
-    InstanceRegistryViewModel,
-    McpViewModel,
+    InstanceConfigViewModel,
+    AuthViewModel,
     MessageViewModel,
     OverviewViewModel,
-    RuntimeViewModel,
+    ProcessViewModel,
     ServiceSession,
     TodoViewModel,
     ToolCallViewModel,
@@ -20,18 +21,15 @@ import {
     createArtifactTransport,
     createConfigTransport,
     createContextTransport,
-    createConversationTransport,
     createExtensionRuntimeTransport,
-    createGoalTransport,
-    createInstanceManagementTransport,
-    createMcpControlTransport,
+    createTaskTransport,
+    createAuthTransport,
     createMessageTransport,
     createOverviewTransport,
-    createReverseConnectionTransport,
-    createRuntimeTransport,
+    createConnectionTransport,
+    createProcessTransport,
     createServiceTransport,
     createTerminalTransport,
-    createTodoTransport,
     createToolTransport,
     createTuiPageTransport,
     createWebPageTransport,
@@ -39,12 +37,12 @@ import {
     type ArtifactTransport,
     type ConfigTransport,
     type ControlChannelOptions,
-    type InstanceManagementTransport,
-    type ReverseConnectionTransport,
-    type RuntimeTransport,
+    type MessageTransport,
+    type ConnectionTransport,
+    type ProcessTransport,
     type ServiceTransport,
     type TerminalTransport,
-    type TodoTransport,
+    type TaskTransport,
     type ToolTransport,
 } from "@portable-devshell/shared";
 
@@ -60,36 +58,37 @@ export class TuiDomainSession {
     readonly service: ServiceSession;
     readonly config: ConfigViewModel;
     readonly overview: OverviewViewModel;
-    readonly mcp: McpViewModel;
+    readonly mcp: AuthViewModel;
     readonly extension: ExtensionViewModel;
-    readonly instances: InstanceRegistryViewModel;
+    readonly instances: InstanceConfigViewModel;
     readonly artifact: ArtifactViewModel;
     readonly context: ContextViewModel;
     readonly conversation: ConversationViewModel;
+    readonly conversationPreferences: ConversationPreferenceViewModel;
     readonly messages: MessageViewModel;
     readonly goals: GoalViewModel;
     readonly toolCalls: ToolCallViewModel;
 
     readonly artifactTransport: ArtifactTransport;
     readonly configTransport: ConfigTransport;
-    readonly instanceTransport: InstanceManagementTransport;
-    readonly reverse: ReverseConnectionTransport;
+    readonly messageTransport: MessageTransport;
+    readonly reverse: ConnectionTransport;
     readonly serviceTransport: ServiceTransport;
     readonly terminalTransport: TerminalTransport;
-    readonly todoTransport: TodoTransport;
+    readonly taskTransport: TaskTransport;
     readonly toolTransport: ToolTransport;
 
     readonly #approvals = new Map<string, ApprovalViewModel>();
-    readonly #runtimes = new Map<string, RuntimeViewModel>();
+    readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #todos = new Map<string, TodoViewModel>();
     readonly #approvalTransport: ApprovalTransport;
-    readonly #runtimeTransport: RuntimeTransport;
+    readonly #runtimeTransport: ProcessTransport;
 
     constructor(options: TuiClientOptions = {}) {
         const endpoint = new Endpoint({
             connectChannel: (signal) => connectControlChannel(options, signal),
         });
-        this.#runtimeTransport = createRuntimeTransport(endpoint);
+        this.#runtimeTransport = createProcessTransport(endpoint);
         this.#approvalTransport = createApprovalTransport(endpoint);
         this.terminalTransport = createTerminalTransport(endpoint);
 
@@ -100,50 +99,43 @@ export class TuiDomainSession {
 
         this.configTransport = createConfigTransport(endpoint);
         this.config = new ConfigViewModel(this.configTransport);
+        this.conversationPreferences = new ConversationPreferenceViewModel(
+            this.configTransport,
+        );
         this.overview = new OverviewViewModel(createOverviewTransport(endpoint));
-        this.mcp = new McpViewModel(createMcpControlTransport(endpoint));
+        this.mcp = new AuthViewModel(createAuthTransport(endpoint));
         this.extension = new ExtensionViewModel(
             createExtensionRuntimeTransport(endpoint),
             createTuiPageTransport(endpoint),
             createWebPageTransport(endpoint),
         );
-        this.instanceTransport = createInstanceManagementTransport(endpoint);
-        this.instances = new InstanceRegistryViewModel(this.instanceTransport);
+        this.instances = new InstanceConfigViewModel(this.configTransport);
 
         this.artifactTransport = createArtifactTransport(endpoint);
         this.artifact = new ArtifactViewModel(this.artifactTransport);
         this.context = new ContextViewModel(createContextTransport(endpoint));
+        this.messageTransport = createMessageTransport(endpoint);
         this.conversation = new ConversationViewModel({
-            transport: createConversationTransport(
-                endpoint,
-                this.#runtimeTransport,
-            ),
+            transport: this.messageTransport,
         });
         this.messages = new MessageViewModel({
-            transport: createMessageTransport(
-                endpoint,
-                this.#runtimeTransport,
-            ),
+            transport: this.messageTransport,
         });
-        this.goals = new GoalViewModel({
-            events: this.#runtimeTransport,
-            transport: createGoalTransport(endpoint),
-        });
+        this.taskTransport = createTaskTransport(endpoint);
+        this.goals = new GoalViewModel({ transport: this.taskTransport });
         this.toolTransport = createToolTransport(endpoint);
         this.toolCalls = new ToolCallViewModel({
             cursor: async (instance) =>
                 (await this.#runtimeTransport.snapshot(instance)).lastSeq,
-            events: this.#runtimeTransport,
             transport: this.toolTransport,
         });
-        this.todoTransport = createTodoTransport(endpoint);
-        this.reverse = createReverseConnectionTransport(endpoint);
+        this.reverse = createConnectionTransport(endpoint);
     }
 
-    runtime(instance: string): RuntimeViewModel {
+    runtime(instance: string): ProcessViewModel {
         let viewModel = this.#runtimes.get(instance);
         if (viewModel === undefined) {
-            viewModel = new RuntimeViewModel(this.#runtimeTransport);
+            viewModel = new ProcessViewModel(this.#runtimeTransport);
             this.#runtimes.set(instance, viewModel);
         }
         return viewModel;
@@ -161,7 +153,7 @@ export class TuiDomainSession {
     todo(instance: string): TodoViewModel {
         let viewModel = this.#todos.get(instance);
         if (viewModel === undefined) {
-            viewModel = new TodoViewModel(this.todoTransport);
+            viewModel = new TodoViewModel(this.taskTransport);
             this.#todos.set(instance, viewModel);
         }
         return viewModel;
@@ -189,6 +181,7 @@ export class TuiDomainSession {
             this.mcp.load(),
             this.extension.refreshCatalogs(),
             this.conversation.load(),
+            this.conversationPreferences.refresh(),
         ]);
         this.overview.start();
         this.mcp.start();
@@ -204,7 +197,7 @@ export class TuiDomainSession {
             this.overview.refresh(),
             this.mcp.refresh(),
             this.extension.refreshCatalogs(),
-            this.conversation.refreshPreferences(),
+            this.conversationPreferences.refresh(),
         ]);
     }
 
@@ -219,6 +212,7 @@ export class TuiDomainSession {
         this.toolCalls.close();
         this.messages.close();
         this.conversation.close();
+        this.conversationPreferences.close();
         this.context.close();
         this.artifact.close();
         this.instances.close();

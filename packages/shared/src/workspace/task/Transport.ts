@@ -1,7 +1,7 @@
 import {
     InstanceEventStream,
     type InstanceEventStreamPort,
-} from "../../execution/process/Event.js";
+} from "../../client/Stream.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import {
     createPortClient,
@@ -10,6 +10,7 @@ import {
 import { asInstanceName } from "../../types/Instance.js";
 import type {
     GoalSnapshotEnvelope,
+    TaskEvent,
     TodoReadEnvelope,
     TodoReadInput,
 } from "./Model.js";
@@ -24,7 +25,7 @@ export interface TaskTransport {
     subscribe(
         instance: string,
         fromSeq: number,
-    ): Promise<InstanceEventStreamPort>;
+    ): Promise<InstanceEventStreamPort<TaskEvent>>;
 }
 
 export function createTaskTransport(endpoint: Endpoint): TaskTransport {
@@ -40,7 +41,7 @@ export function createTaskTransport(endpoint: Endpoint): TaskTransport {
         getTodo: (instance, input) =>
             port(instance).request<TodoReadEnvelope>("getTodo", input),
         subscribe: async (instance, fromSeq) =>
-            new InstanceEventStream(
+            new InstanceEventStream<TaskEvent>(
                 asInstanceName(instance),
                 await port(instance).open("subscribe", { fromSeq }),
             ),

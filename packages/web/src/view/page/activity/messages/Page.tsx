@@ -44,6 +44,9 @@ export function Messages({
     const instancesState = useDomainSnapshot(domains.instances);
     const contextState = useDomainSnapshot(domains.context);
     const conversationState = useDomainSnapshot(domains.conversation);
+    const conversationPreferenceState = useDomainSnapshot(
+        domains.conversationPreferences,
+    );
     const messageState = useDomainSnapshot(domains.messages);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [clockNow, setClockNow] = useState(() => Date.now());
@@ -70,8 +73,8 @@ export function Messages({
         }),
         [contextState, conversationState, instancesState, messageState],
     );
-    const conversationPreferences = conversationState.preferences;
-    const preferenceFailure = conversationState.failures.preferences;
+    const conversationPreferences = conversationPreferenceState.preferences;
+    const preferenceFailure = conversationPreferenceState.failure;
     const preferencesLoaded =
         preferencesReady && preferenceFailure === undefined;
     const activeSessions = useMemo(

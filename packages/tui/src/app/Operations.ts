@@ -5,11 +5,10 @@ import { type TuiAppStore } from "../state/store/App.js";
 import type {
     ArtifactTransport,
     ConfigTransport,
-    InstanceManagementTransport,
-    ReverseConnectionTransport,
-    RuntimeStartOptions,
+    ConnectionTransport,
+    ProcessStartOptions,
     ServiceTransport,
-    TodoTransport,
+    TaskTransport,
     ToolCallRecord,
     ToolTransport,
 } from "@portable-devshell/shared";
@@ -100,10 +99,9 @@ export class TuiRuntimeOperations {
 export interface TuiRuntimeOperationClients {
     artifact: ArtifactTransport;
     config: ConfigTransport;
-    instance: InstanceManagementTransport;
-    reverse: ReverseConnectionTransport;
+    reverse: ConnectionTransport;
     service: ServiceTransport;
-    todo: TodoTransport;
+    task: TaskTransport;
     tool: ToolTransport;
 }
 
@@ -128,7 +126,7 @@ export interface TuiRuntimeOperationSession {
         renewContext(ctxId: string): Promise<unknown>;
         startInstance(
             instance: string,
-            options?: RuntimeStartOptions,
+            options?: ProcessStartOptions,
         ): Promise<unknown>;
         stopInstance(instance: string): Promise<unknown>;
     };

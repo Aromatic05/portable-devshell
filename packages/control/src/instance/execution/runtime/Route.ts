@@ -1,7 +1,13 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { createRemoteError, controlErrorCodes, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    controlErrorCodes,
+    isProcessEventType,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
+    ProcessEvent,
     JsonValue,
     ControlPortDefinition,
     ControlStreamMessage,
@@ -10,7 +16,7 @@ import { routeModule } from "../../../server/Route.js";
 import { RuntimeInteractiveSession } from "./InteractiveSession.js";
 import type { RuntimeSubscriptionManager } from "./Subscription.js";
 
-export interface RuntimeRouteInstancePort {
+export interface ProcessRouteInstancePort {
     enabled: boolean;
     name: string;
     todoSummaries(): ActiveTodoSummary[];
@@ -25,97 +31,108 @@ export interface RuntimeRouteInstancePort {
     >;
 }
 
-export interface RuntimeRouteOwnershipPort {
+export interface ProcessRouteOwnershipPort {
     clearOwned(instanceName: string): void;
     delete(instanceName: string): void;
     markOwned(instanceName: string): void;
 }
 
-export function createRuntimeRouteModule(
-    instance: RuntimeRouteInstancePort,
-    ownership: RuntimeRouteOwnershipPort,
+export function createProcessRouteModule(
+    instance: ProcessRouteInstancePort,
+    ownership: ProcessRouteOwnershipPort,
     subscriptions: RuntimeSubscriptionManager,
 ): ControlPortDefinition {
-    return routeModule("runtime", {
-        snapshot: () => {
-            const snapshot = withTodoSummaries(
-                instance.worker.snapshot(),
-                instance.todoSummaries(),
-            );
-            return {
-                lastSeq: snapshot.lastSeq,
-                snapshot,
-            } as unknown as JsonValue;
-        },
-        refresh: async () => {
-            const snapshot = withTodoSummaries(
-                await instance.worker.refreshStatus(),
-                instance.todoSummaries(),
-            );
-            return {
-                lastSeq: snapshot.lastSeq,
-                snapshot,
-            } as unknown as JsonValue;
-        },
-        stop: async () => {
-            const result = withTodoSummaries(
-                await instance.worker.stop(),
-                instance.todoSummaries(),
-            );
-            ownership.clearOwned(instance.name);
-            if (!instance.enabled) {
-                ownership.delete(instance.name);
-            }
-            return result as unknown as JsonValue;
-        },
-        readLogs: async (request) => {
-            const query = readRuntimeLogQuery(request.payload);
-            return limitRuntimeLogResponse(
-                await instance.worker.readLogs(query),
-                query.fromSeq === undefined,
-            ) as unknown as JsonValue;
-        },
-    }, {
-        start: async (stream) => {
-            if (!instance.enabled)
-                throw createRemoteError({
-                    code: runtimeErrorCodes.instanceConflict,
-                    details: { instance: instance.name, operation: "start" },
-                    message: `Instance ${instance.name} is disabled.`,
-                    retryable: false,
-                });
-            const relay = new RuntimeInteractiveSession();
-            const offData = stream.onData((message) =>
-                relay.accept(message as ControlStreamMessage),
-            );
-            const offClose = stream.onClose(() => relay.closeInput());
-            const offCancel = stream.onCancel(() => relay.closeInput());
-            relay.bindOutput((chunk) =>
-                stream.send({ name: "output", payload: { chunk } }),
-            );
-            try {
-                const result = withTodoSummaries(
-                    await instance.worker.startInteractive(relay),
+    return routeModule(
+        "process",
+        {
+            snapshot: () => {
+                const snapshot = withTodoSummaries(
+                    instance.worker.snapshot(),
                     instance.todoSummaries(),
                 );
-                ownership.markOwned(instance.name);
-                await stream.close(result as unknown as JsonValue);
-            } finally {
-                offData();
-                offClose();
-                offCancel();
-                relay.closeInput();
-            }
+                return {
+                    lastSeq: snapshot.lastSeq,
+                    snapshot,
+                } as unknown as JsonValue;
+            },
+            refresh: async () => {
+                const snapshot = withTodoSummaries(
+                    await instance.worker.refreshStatus(),
+                    instance.todoSummaries(),
+                );
+                return {
+                    lastSeq: snapshot.lastSeq,
+                    snapshot,
+                } as unknown as JsonValue;
+            },
+            stop: async () => {
+                const result = withTodoSummaries(
+                    await instance.worker.stop(),
+                    instance.todoSummaries(),
+                );
+                ownership.clearOwned(instance.name);
+                if (!instance.enabled) {
+                    ownership.delete(instance.name);
+                }
+                return result as unknown as JsonValue;
+            },
+            readLogs: async (request) => {
+                const query = readProcessLogQuery(request.payload);
+                return limitProcessLogResponse(
+                    await instance.worker.readLogs(query),
+                    query.fromSeq === undefined,
+                ) as unknown as JsonValue;
+            },
         },
-        subscribe: async (stream, request, context) =>
-            await subscriptions.subscribe(
-                stream,
-                context,
-                instance.name,
-                instance.worker,
-                readRuntimeSubscriptionFromSeq(request.payload),
-            ),
-    });
+        {
+            start: async (stream) => {
+                if (!instance.enabled)
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.instanceConflict,
+                        details: {
+                            instance: instance.name,
+                            operation: "start",
+                        },
+                        message: `Instance ${instance.name} is disabled.`,
+                        retryable: false,
+                    });
+                const relay = new RuntimeInteractiveSession();
+                const offData = stream.onData((message) =>
+                    relay.accept(message as ControlStreamMessage),
+                );
+                const offClose = stream.onClose(() => relay.closeInput());
+                const offCancel = stream.onCancel(() => relay.closeInput());
+                relay.bindOutput((chunk) =>
+                    stream.send({ name: "output", payload: { chunk } }),
+                );
+                try {
+                    const result = withTodoSummaries(
+                        await instance.worker.startInteractive(relay),
+                        instance.todoSummaries(),
+                    );
+                    ownership.markOwned(instance.name);
+                    await stream.close(result as unknown as JsonValue);
+                } finally {
+                    offData();
+                    offClose();
+                    offCancel();
+                    relay.closeInput();
+                }
+            },
+            subscribe: async (stream, request, context) =>
+                await subscriptions.subscribe(
+                    stream,
+                    context,
+                    instance.name,
+                    instance.worker,
+                    readProcessSubscriptionFromSeq(request.payload),
+                    (event) =>
+                        isProcessEventType(event.type)
+                            ? (event as ProcessEvent)
+                            : undefined,
+                ),
+        },
+    );
 }
 
 function withTodoSummaries<T extends { lastSeq: number }>(
@@ -134,7 +151,7 @@ const MAX_LOG_RESPONSE_BYTES = 1024 * 1024;
 
 const LOG_TRUNCATION_MARKER = "\n[log output truncated]\n";
 
-export function readRuntimeLogQuery(payload?: JsonValue): {
+export function readProcessLogQuery(payload?: JsonValue): {
     fromSeq?: number;
     limit?: number;
     maxDecodedBytes: number;
@@ -164,7 +181,7 @@ export function readRuntimeLogQuery(payload?: JsonValue): {
     };
 }
 
-export function readRuntimeSubscriptionFromSeq(payload?: JsonValue): number {
+export function readProcessSubscriptionFromSeq(payload?: JsonValue): number {
     if (
         !isRecord(payload) ||
         typeof payload.fromSeq !== "number" ||
@@ -172,13 +189,13 @@ export function readRuntimeSubscriptionFromSeq(payload?: JsonValue): number {
         payload.fromSeq < 0
     ) {
         throw invalid(
-            "runtime.subscribe requires a non-negative integer fromSeq.",
+            "process.subscribe requires a non-negative integer fromSeq.",
         );
     }
     return payload.fromSeq;
 }
 
-export function limitRuntimeLogResponse<TLog extends { message: string }>(
+export function limitProcessLogResponse<TLog extends { message: string }>(
     logs: TLog[],
     preserveNewest: boolean,
 ): TLog[] {

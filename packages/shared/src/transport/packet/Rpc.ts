@@ -11,6 +11,7 @@ export interface RpcError {
 }
 
 export interface RpcContext {
+    readonly local: Address;
     readonly peer: Address;
     readonly requestId: string;
     readonly signal: AbortSignal;
@@ -54,7 +55,7 @@ export class Rpc {
         this.#target = target;
         if (target instanceof Connection) {
             const offPacket = target.onPacket((packet) =>
-                this.#accept(packet, target.remote),
+                this.#accept(packet, target.remote, target.local),
             );
             const offClose = target.onClose((error) => this.#disconnect(error));
             this.#unsubscribe = () => {
@@ -62,8 +63,8 @@ export class Rpc {
                 offClose();
             };
         } else {
-            this.#unsubscribe = target.onPacket((packet, peer) =>
-                this.#accept(packet, peer),
+            this.#unsubscribe = target.onPacket((packet, peer, local) =>
+                this.#accept(packet, peer, local),
             );
         }
         for (const [method, handler] of Object.entries(handlers))
@@ -150,15 +151,15 @@ export class Rpc {
         this.#pending.clear();
     }
 
-    async #accept(value: unknown, peer: Address): Promise<void> {
+    async #accept(value: unknown, peer: Address, local: Address): Promise<void> {
         const packet = parse(value);
         if (packet === undefined) return;
         if (packet.type === "request") {
-            await this.#request(packet, peer);
+            await this.#request(packet, peer, local);
             return;
         }
         if (packet.type === "cancel") {
-            this.#active.get(packet.id)?.abort();
+            this.#active.get(activeKey(local, peer, packet.id))?.abort();
             return;
         }
         const pending = this.#pending.get(packet.id);
@@ -176,11 +177,12 @@ export class Rpc {
     async #request(
         packet: Extract<RpcPacket, { type: "request" }>,
         peer: Address,
+        local: Address,
     ): Promise<void> {
         const connection =
             this.#target instanceof Connection
                 ? this.#target
-                : this.#target.connect(peer.host, peer.port);
+                : this.#target.connect(peer.host, peer.port, local);
         const handler = this.#handlers.get(packet.method);
         if (handler === undefined) {
             if (connection.connected)
@@ -197,13 +199,15 @@ export class Rpc {
             return;
         }
         const controller = new AbortController();
+        const key = activeKey(local, peer, packet.id);
         const afterReply: Array<() => Promise<void> | void> = [];
-        this.#active.set(packet.id, controller);
+        this.#active.set(key, controller);
         try {
             let message: Message | undefined;
             try {
                 message = await handler(packet.message, {
                     afterReply: (action) => afterReply.push(action),
+                    local,
                     peer,
                     requestId: packet.id,
                     signal: controller.signal,
@@ -228,9 +232,13 @@ export class Rpc {
             for (const action of afterReply)
                 queueMicrotask(() => void action());
         } finally {
-            this.#active.delete(packet.id);
+            this.#active.delete(key);
         }
     }
+}
+
+function activeKey(local: Address, peer: Address, id: string): string {
+    return `${local.host}\u0000${local.port}\u0000${peer.host}\u0000${peer.port}\u0000${id}`;
 }
 
 function parse(value: unknown): RpcPacket | undefined {

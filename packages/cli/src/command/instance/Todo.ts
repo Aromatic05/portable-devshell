@@ -12,7 +12,7 @@ export class CliCommandInstanceTodo {
         maxEvents?: number,
     ): Promise<void> {
         const load = async () => {
-            const envelope = await todoClient.get(instance);
+            const envelope = await todoClient.getTodo(instance);
             await onTodo(envelope.todo);
             return envelope.lastSeq + 1;
         };
@@ -24,7 +24,7 @@ export class CliCommandInstanceTodo {
             loadFromSeq: load,
             maxEvents,
             async onEvent() {
-                await onTodo((await todoClient.get(instance)).todo);
+                await onTodo((await todoClient.getTodo(instance)).todo);
             },
             subscribe: (fromSeq) => todoClient.subscribe(instance, fromSeq),
         });
@@ -107,7 +107,10 @@ export async function executeTodoCommand(
 ): Promise<boolean> {
     if (command.kind === "todo.delete") {
         context.writeJson(
-            await context.clients.todo.delete(command.instance, command.taskId),
+            await context.clients.todo.deleteTodo(
+                command.instance,
+                command.taskId,
+            ),
         );
         return true;
     }

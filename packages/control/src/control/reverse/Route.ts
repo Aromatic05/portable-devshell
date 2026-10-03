@@ -4,22 +4,22 @@ import { requirePort, routeModule } from "../../server/Route.js";
 import { readReverseInstanceName } from "./Input.js";
 import type { ReverseCredentialService } from "./credential/Service.js";
 
-export function createReverseRouteModule(
+export function createConnectionRouteModule(
     service?: ReverseCredentialService,
 ): ControlPortDefinition {
-    const reverse = () =>
-        requirePort(service, "Reverse connection management is not available.");
-    return routeModule("reverse", {
+    const connection = () =>
+        requirePort(service, "Connection management is not available.");
+    return routeModule("connection", {
         createCode: async (request) =>
-            (await reverse().createDeviceCode(
+            (await connection().createDeviceCode(
                 readReverseInstanceName(request.payload),
             )) as never,
         rotateToken: async (request) =>
-            (await reverse().rotateDeviceToken(
+            (await connection().rotateDeviceToken(
                 readReverseInstanceName(request.payload),
             )) as never,
         revokeToken: async (request) =>
-            (await reverse().revokeDeviceToken(
+            (await connection().revokeDeviceToken(
                 readReverseInstanceName(request.payload),
             )) as never,
     });

@@ -68,7 +68,7 @@ export async function executeControlLifecycle(
             if (current.running && !context.controlNegotiated)
                 await context.negotiate();
             const restore = current.running
-                ? (await context.clients.instance.list()).filter(
+                ? (await context.clients.instance.listInstances()).filter(
                       (entry) =>
                           entry.snapshot.reverse === undefined &&
                           (entry.snapshot.daemonState === "running" ||

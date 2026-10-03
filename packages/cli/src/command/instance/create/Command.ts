@@ -1,12 +1,12 @@
 import type {
     InstanceCreateResult,
-    InstanceManagementTransport,
-    ReverseConnectionTransport,
+    ConfigTransport,
+    ConnectionTransport,
     ReverseDeviceCodeResult,
 } from "@portable-devshell/shared";
 
-type CliClientInstance = InstanceManagementTransport;
-type CliClientReverse = ReverseConnectionTransport;
+type CliClientInstance = ConfigTransport;
+type CliClientReverse = ConnectionTransport;
 import { CliWizardInstanceCreate } from "./Wizard.js";
 
 export interface CliInstanceCreateResult extends InstanceCreateResult {
@@ -19,15 +19,15 @@ export class CliCommandInstanceCreate {
         reverseClient: CliClientReverse,
         wizard: CliWizardInstanceCreate,
     ): Promise<CliInstanceCreateResult | undefined> {
-        const schema = await instanceClient.createSchema();
+        const schema = await instanceClient.createInstanceSchema();
         const prepared = await wizard.run(
             schema,
-            async (draft) => await instanceClient.validateCreate(draft),
+            async (draft) => await instanceClient.validateInstanceCreate(draft),
         );
         if (prepared === undefined) {
             return undefined;
         }
-        const result = await instanceClient.create(prepared.draft);
+        const result = await instanceClient.createInstance(prepared.draft);
         if (prepared.draft.provider !== "reverse") {
             return result;
         }

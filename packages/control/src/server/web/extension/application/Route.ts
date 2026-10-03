@@ -29,12 +29,12 @@ export function createWebApplicationRouteModule(
     port: WebApplicationCatalogPort,
     pages?: WebPagePort,
 ): ControlPortDefinition {
-    return routeModule("web", {
-        applications: (_request, context) => {
+    return routeModule("extension", {
+        webApplications: (_request, context) => {
             requireWeb(context);
             return [...port.list()] as unknown as JsonValue;
         },
-        page: async (request, context) => {
+        webPage: async (request, context) => {
             requireWeb(context);
             if (pages === undefined) throw unavailable();
             const input = readPageRequest(request.payload);
@@ -43,7 +43,7 @@ export function createWebApplicationRouteModule(
                 signal: context.signal,
             })) as unknown as JsonValue;
         },
-        pages: (_request, context) => {
+        webPages: (_request, context) => {
             requireWeb(context);
             return [...(pages?.list() ?? [])] as unknown as JsonValue;
         },

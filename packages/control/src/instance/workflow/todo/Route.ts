@@ -1,58 +1,72 @@
 import type { WorkerInstance } from "@portable-devshell/core";
-import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    controlErrorCodes,
+} from "@portable-devshell/shared";
 import type {
-    InstanceEvent,
+    InstanceEventRecord,
     JsonValue,
     ControlPortContext,
     ControlPortDefinition,
     MessageStream,
+    TaskEvent,
     TodoReadInput,
 } from "@portable-devshell/shared";
+import { isTaskEventType } from "@portable-devshell/shared";
 import { routeModule } from "../../../server/Route.js";
 import type { TodoService } from "./Service.js";
 
-export interface TodoRouteSubscriptionPort {
+export interface TodoTaskRouteSubscriptionPort {
     subscribe(
         stream: MessageStream,
         context: ControlPortContext,
         instanceName: string,
         instance: Pick<WorkerInstance, "subscribe">,
         fromSeq: number,
-        eventFilter?: (event: InstanceEvent) => boolean,
+        projectEvent?: (event: InstanceEventRecord) => TaskEvent | undefined,
     ): Promise<void>;
 }
 
-export interface TodoRouteInstancePort {
+export interface TodoTaskRouteInstancePort {
     name: string;
     todo: Pick<TodoService, "delete" | "read">;
     worker: Pick<WorkerInstance, "snapshot" | "subscribe">;
 }
 
-export function createTodoRouteModule(
-    instance: TodoRouteInstancePort,
-    subscriptions: TodoRouteSubscriptionPort,
+export function createTodoTaskRouteModule(
+    instance: TodoTaskRouteInstancePort,
+    subscriptions: TodoTaskRouteSubscriptionPort,
 ): ControlPortDefinition {
-    return routeModule("todo", {
-        get: async (request) =>
-            ({
-                lastSeq: instance.worker.snapshot().lastSeq,
-                todo: await instance.todo.read(readTodoInput(request.payload)),
-            }) as unknown as JsonValue,
-        delete: async (request) => {
-            await instance.todo.delete(readTodoTaskId(request.payload));
-            return {};
+    return routeModule(
+        "task",
+        {
+            getTodo: async (request) =>
+                ({
+                    lastSeq: instance.worker.snapshot().lastSeq,
+                    todo: await instance.todo.read(
+                        readTodoInput(request.payload),
+                    ),
+                }) as unknown as JsonValue,
+            deleteTodo: async (request) => {
+                await instance.todo.delete(readTodoTaskId(request.payload));
+                return {};
+            },
         },
-    }, {
-        subscribe: async (stream, request, context) =>
-            await subscriptions.subscribe(
-                stream,
-                context,
-                instance.name,
-                instance.worker,
-                readTodoSubscriptionFromSeq(request.payload),
-                (event) => event.type.startsWith("todo."),
-            ),
-    });
+        {
+            subscribe: async (stream, request, context) =>
+                await subscriptions.subscribe(
+                    stream,
+                    context,
+                    instance.name,
+                    instance.worker,
+                    readTodoSubscriptionFromSeq(request.payload),
+                    (event) =>
+                        isTaskEventType(event.type)
+                            ? (event as TaskEvent)
+                            : undefined,
+                ),
+        },
+    );
 }
 
 export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
@@ -64,7 +78,7 @@ export function readTodoSubscriptionFromSeq(payload?: JsonValue): number {
     ) {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message: "todo.subscribe requires a non-negative integer fromSeq.",
+            message: "task.subscribe requires a non-negative integer fromSeq.",
             retryable: false,
         });
     }
@@ -76,7 +90,7 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     if (!isRecord(payload)) {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message: "todo.get payload must be an object.",
+            message: "task.getTodo payload must be an object.",
             retryable: false,
         });
     }
@@ -86,7 +100,7 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
             message:
-                "todo.get accepts only one optional selector: taskId or title.",
+                "task.getTodo accepts only one optional selector: taskId or title.",
             retryable: false,
         });
     }
@@ -95,7 +109,7 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     if (typeof value !== "string" || value.trim().length === 0) {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message: `todo.get ${key} must be a non-empty string.`,
+            message: `task.getTodo ${key} must be a non-empty string.`,
             retryable: false,
         });
     }
@@ -110,7 +124,7 @@ export function readTodoTaskId(payload?: JsonValue): string {
     ) {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message: "todo.delete taskId must be a non-empty string.",
+            message: "task.deleteTodo taskId must be a non-empty string.",
             retryable: false,
         });
     }
