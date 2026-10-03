@@ -11,6 +11,11 @@ import {
     type ExtensionGenerationLease,
 } from "./registration/Generation.js";
 import {
+    notifyContextEnvironmentRetired,
+    notifyInstanceGenerationRetired,
+    retireInstanceHostResources,
+} from "./registration/GenerationEvents.js";
+import {
     ExtensionCatalog,
     type ExtensionCatalogRegistration,
 } from "./discovery/Catalog.js";
@@ -480,10 +485,10 @@ export class ExtensionHost {
 
     async retireInstanceGeneration(instance: string): Promise<void> {
         const failures: unknown[] = [];
-        await this.#notifyInstanceGenerationRetired(instance).catch((error) =>
+        await notifyInstanceGenerationRetired(this.#active, instance).catch((error) =>
             failures.push(error),
         );
-        await this.#retireInstanceHostResources(instance).catch((error) =>
+        await retireInstanceHostResources(this.#active, instance).catch((error) =>
             failures.push(error),
         );
         if (failures.length === 1) throw failures[0];
@@ -495,87 +500,12 @@ export class ExtensionHost {
         }
     }
 
-    async #notifyInstanceGenerationRetired(instance: string): Promise<void> {
-        const event = { instance };
-        const failures: unknown[] = [];
-        await Promise.all(
-            [...this.#active.entries()].map(async ([id, generation]) => {
-                try {
-                    await generation.instanceGenerationRetired(event);
-                } catch (error) {
-                    failures.push(
-                        new Error(
-                            `Extension ${id} failed to handle Instance generation retirement for ${event.instance}.`,
-                            { cause: error },
-                        ),
-                    );
-                }
-            }),
-        );
-        if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                `Extensions failed to handle Instance generation retirement for ${event.instance}.`,
-            );
-        }
-    }
-
     async contextEnvironmentRetired(input: {
         ctxId: string;
         instance: string;
         reason: "disabled" | "expired";
     }): Promise<void> {
-        const failures: unknown[] = [];
-        await Promise.all(
-            [...this.#active.entries()].map(async ([id, generation]) => {
-                try {
-                    await generation.contextEnvironmentRetired(input);
-                } catch (error) {
-                    failures.push(
-                        new Error(
-                            "Extension " +
-                                id +
-                                " failed to handle retired Context environment " +
-                                input.ctxId +
-                                ".",
-                            { cause: error },
-                        ),
-                    );
-                }
-            }),
-        );
-        if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                "Extensions failed to handle retired Context environment " +
-                    input.ctxId +
-                    ".",
-            );
-        }
-    }
-
-    async #retireInstanceHostResources(instance: string): Promise<void> {
-        const failures: unknown[] = [];
-        await Promise.all(
-            [...this.#active.entries()].map(async ([id, generation]) => {
-                try {
-                    await generation.retireInstanceHostResources(instance);
-                } catch (error) {
-                    failures.push(
-                        new Error(
-                            `Extension ${id} failed to retire host-managed resources for instance ${instance}.`,
-                            { cause: error },
-                        ),
-                    );
-                }
-            }),
-        );
-        if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                `Extensions failed to retire host-managed resources for instance ${instance}.`,
-            );
-        }
+        await notifyContextEnvironmentRetired(this.#active, input);
     }
 
     #notifyChange(): void {
