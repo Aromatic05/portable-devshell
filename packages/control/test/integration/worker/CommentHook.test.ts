@@ -25,7 +25,7 @@ import {
     ToolCallPipeline,
     ToolCallExecutionTarget,
 } from "@portable-devshell/core";
-import { ToolCallExtensionBinding } from "../../../src/extension/toolcall/Binding.ts";
+import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/Binding.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";

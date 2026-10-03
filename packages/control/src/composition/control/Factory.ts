@@ -1,15 +1,15 @@
 import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ExtensionHost } from "../../extension/Host.js";
-import { ExtensionArtifactCapabilityControl } from "../../extension/capability/Artifact.js";
-import { ExtensionAssetCapabilityControl } from "../../extension/capability/Asset.js";
+import { ExtensionHost } from "../../extension/host/Host.js";
+import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
+import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/Control.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../extension/capability/Instance.js";
-import { ExtensionContextObserveCapabilityControl } from "../../extension/capability/Context.js";
-import { ExtensionWorkerCapabilityControl } from "../../extension/capability/Worker.js";
+} from "../../extension/api/cap/instance/Control.js";
+import { ExtensionContextObserveCapabilityControl } from "../../extension/api/cap/context/Control.js";
+import { ExtensionWorkerCapabilityControl } from "../../extension/api/cap/worker/Control.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
@@ -18,7 +18,7 @@ import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
 import { ExtensionLoader } from "../../extension/discovery/Loader.js";
 import { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../../extension/state/Store.js";
-import { ExtensionConfigControl } from "../../extension/config/Control.js";
+import { ExtensionConfigControl } from "../../extension/api/cap/config/Control.js";
 import { createControlExtensionPointRegistry } from "../Extension.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ArtifactModule } from "../../artifact/Module.js";

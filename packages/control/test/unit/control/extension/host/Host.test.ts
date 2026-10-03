@@ -20,7 +20,7 @@ import {
     type ExtensionRegistrySnapshot,
 } from "../../../../../src/extension/state/Model.ts";
 import type { ExtensionRegistryPort } from "../../../../../src/extension/state/Store.ts";
-import { createCoreConfigRegistry } from "../../../../../src/config/Registry.ts";
+import { createCoreConfigRegistry } from "../../../../../src/config/domain/Registry.ts";
 import { ExtensionChangeHub } from "../../../../../src/extension/manager/Change.ts";
 import { readExtensionSnapshot } from "../../../../../src/extension/manager/Snapshot.ts";
 

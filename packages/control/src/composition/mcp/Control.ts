@@ -15,13 +15,13 @@ import type {
 import {
     ConfigEditorCoordinator,
     type ConfigRuntimeChangeSet,
-} from "../../config/editor/Coordinator.js";
+} from "../../config/editor/index.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";
 import {
     decorateMcpInstanceGatewayArtifact,
     McpInstanceGatewayControl,
 } from "./Gateway.js";
-import { InstanceCreateCoordinator } from "../../config/instance/create/Coordinator.js";
+import { InstanceCreateCoordinator } from "../../config/editor/instance/create/index.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";

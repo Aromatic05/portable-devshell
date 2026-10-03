@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/extension/mcp";
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../extension/Host.js";
+import type { ExtensionHost } from "../../../extension/host/Host.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<

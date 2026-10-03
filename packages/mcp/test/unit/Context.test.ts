@@ -9,8 +9,8 @@ import {
     McpNativeToolResult,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { ContextCleanupService } from "../../../control/src/context/Cleanup.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../control/src/context/Registry.ts";
+import { ContextCleanupService } from "../../../control/src/context/Service/Cleanup.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../control/src/context/Registry/index.ts";
 import {
     TestMcpEndpointWorker as McpEndpointWorker,
     TestMcpHost as McpHost,
@@ -22,7 +22,7 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-import { ContextExecutionStore as McpContextExecutionStore } from "../../../control/src/context/Execution.ts";
+import { ContextExecutionStore as McpContextExecutionStore } from "../../../control/src/context/Registry/Reentry.ts";
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
     return (

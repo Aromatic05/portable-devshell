@@ -5,7 +5,7 @@ import test from "node:test";
 
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import { TestMcpEndpointWorker as McpEndpointWorker } from "../../../ContextRuntime.ts";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;

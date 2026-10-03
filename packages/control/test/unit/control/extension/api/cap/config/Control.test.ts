@@ -5,9 +5,9 @@ import test from "node:test";
 import type { ExtensionConfigDeclaration } from "@portable-devshell/extension";
 import { createDefaultControlConfig } from "@portable-devshell/shared";
 
-import { ConfigChangeHub } from "../../../../../../../src/config/Change.ts";
-import { ControlConfigMutationLock } from "../../../../../../../src/config/editor/Lock.ts";
-import { createCoreConfigRegistry } from "../../../../../../../src/config/Registry.ts";
+import { ConfigChangeHub } from "../../../../../../../src/config/change/Config.ts";
+import { ControlConfigMutationLock } from "../../../../../../../src/config/engine/Lock.ts";
+import { createCoreConfigRegistry } from "../../../../../../../src/config/domain/Registry.ts";
 import {
     ExtensionConfigControl,
     extensionConfigDomainDefinition,

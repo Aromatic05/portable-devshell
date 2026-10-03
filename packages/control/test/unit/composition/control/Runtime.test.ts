@@ -25,7 +25,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRuntime } from "../../../../src/testing.ts";
-import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { ExtensionPathLayout } from "../../../../src/extension/state/Layout.ts";
 import { McpControlModule } from "../../../../src/composition/mcp/Control.ts";
 import { ContextModule } from "../../../../src/context/Module.ts";

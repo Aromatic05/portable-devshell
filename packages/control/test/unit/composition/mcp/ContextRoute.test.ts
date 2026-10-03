@@ -10,6 +10,7 @@ import {
     createContextRouteModule,
     type ContextAdminPort,
 } from "../../../../src/context/Route.ts";
+import { ContextChangeHub } from "../../../../src/context/Registry/Change.ts";
 
 function record(ctxId: string): McpContextRecord {
     return {
@@ -26,6 +27,10 @@ function record(ctxId: string): McpContextRecord {
 test("context routes resolve the current admin port for every request", async () => {
     let current = "first";
     const port = (): ContextAdminPort => ({
+        changes: new ContextChangeHub(),
+        async snapshot() {
+            return { contexts: [record(`${current}:snapshot`)], revision: 0 };
+        },
         async referenceInstance() {
             return { current: true };
         },

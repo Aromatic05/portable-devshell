@@ -15,7 +15,7 @@ import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
 import { mcpTmuxBlockSyncMsForContextMode } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import type { McpInstanceGateway } from "../../../../src/endpoint/Port.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import { createTestEndpointDispatch } from "../../../ContextRuntime.ts";
 import { createMcpContextSelector } from "../../../../src/context/Selector.ts";
 

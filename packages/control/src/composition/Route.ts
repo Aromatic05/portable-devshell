@@ -19,25 +19,23 @@ import { createArtifactRouteModule } from "../artifact/route/Module.js";
 import {
     createCliRouteModule,
     type CliCommandPort,
-} from "../extension/cli/Route.js";
+} from "../extension/api/point/cli/Endpoint.js";
 import {
     createTuiPageRouteModule,
     type TuiPagePort,
-} from "../extension/tui/Route.js";
-import type { ConfigEditorPort } from "../config/Route.js";
-import { createConfigRouteModule } from "../config/Route.js";
-import { ConfigChangeHub } from "../config/Change.js";
+} from "../extension/api/point/tui/Endpoint.js";
+import type { ConfigEditorPort } from "../config/route/Config.js";
+import { createConfigRouteModule } from "../config/route/Config.js";
+import { ConfigChangeHub } from "../config/change/Config.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../debug/Route.js";
-import {
-    createExtensionRouteModule,
-    type ExtensionControlPort,
-} from "../extension/Route.js";
-import type { InstanceCreatePort } from "../config/instance/Route.js";
+import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
+import type { ExtensionControlPort } from "../extension/manager/Port.js";
+import type { InstanceCreatePort } from "../config/route/Instance.js";
 import {
     createInstanceConfigRouteModule,
     type InstanceConfigRouteModuleOptions,
-} from "../config/instance/Route.js";
-import { InstanceChangeHub } from "../config/instance/Change.js";
+} from "../config/route/Instance.js";
+import { InstanceChangeHub } from "../config/change/Instance.js";
 import {
     createContextRouteModule,
     type ContextAdminPort,

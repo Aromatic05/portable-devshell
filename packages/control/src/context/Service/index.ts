@@ -8,7 +8,7 @@ import {
     type WorkerInstanceLike,
 } from "@portable-devshell/mcp";
 import type {
-    ContextRecordPort,
+    ContextRegistryPort,
     McpContextQuery,
     McpContextRecord,
 } from "@portable-devshell/shared";
@@ -16,7 +16,7 @@ import type {
     ContextEnvironmentPort,
 } from "@portable-devshell/mcp";
 
-export interface ContextRecordSourcePort extends ContextRecordPort {
+export interface ContextRecordSourcePort extends ContextRegistryPort {
     readonly changes: ContextChangeHub;
     snapshot(): Promise<ContextSnapshot>;
 }

@@ -5,8 +5,8 @@ import {
     controlErrorCodes,
     type ControlConfig,
 } from "@portable-devshell/shared";
-import { ConfigEngine } from "../../../../src/config/Engine.ts";
-import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
+import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { createDefaultControlConfig } from "../../../../src/testing.ts";
 
 const runtimeChanges = { instanceAuth: false, mcp: false, web: true };

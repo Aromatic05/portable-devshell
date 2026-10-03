@@ -4,7 +4,7 @@ import {
 } from "@portable-devshell/extension/web";
 import type { WebPageDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../extension/Host.js";
+import type { ExtensionHost } from "../../../../extension/host/Host.js";
 
 export class WebExtensionPageCatalog {
     readonly #extensions: Pick<ExtensionHost, "listDeclarations">;

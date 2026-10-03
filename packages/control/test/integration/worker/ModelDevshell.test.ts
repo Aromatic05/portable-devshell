@@ -16,9 +16,9 @@ import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import { executeInstanceCommand } from "@portable-devshell/instance-extension";
 import type { CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
 
-import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
-import { ModelDevshellBroker } from "../../../src/extension/cli/command/ModelBroker.ts";
-import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/capability/Instance.ts";
+import { CliExtensionCommandService } from "../../../src/extension/api/point/cli/command/Service.ts";
+import { ModelDevshellBroker } from "../../../src/extension/api/point/cli/command/ModelBroker.ts";
+import { ExtensionInstanceObserveCapabilityControl } from "../../../src/extension/api/cap/instance/Control.ts";
 import type { InstanceDescriptor } from "@portable-devshell/core";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";

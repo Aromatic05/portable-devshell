@@ -4,13 +4,13 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 
-import { ControlConfigStore } from "../../config/storage/Store.js";
-import { ControlConfigMutationLock } from "../../config/editor/Lock.js";
+import { ControlConfigStore } from "../../config/store/index.js";
+import { ControlConfigMutationLock } from "../../config/engine/Lock.js";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
-} from "../../config/Registry.js";
-import { ConfigChangeHub } from "../../config/Change.js";
+} from "../../config/domain/Registry.js";
+import { ConfigChangeHub } from "../../config/change/Config.js";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceRegistryFactory } from "@portable-devshell/core";
 

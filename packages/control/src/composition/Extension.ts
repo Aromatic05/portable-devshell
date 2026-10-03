@@ -1,14 +1,14 @@
 import {
     cliModelCommandsExtensionPointDefinition,
     cliNativeCommandsExtensionPointDefinition,
-} from "../extension/cli/Point.js";
-import { controlRoutesExtensionPointDefinition } from "../extension/Route.js";
+} from "../extension/api/point/cli/Declaration.js";
+import { controlRoutesExtensionPointDefinition } from "../extension/api/point/control/Declaration.js";
 import { mcpToolsExtensionPointDefinition } from "./mcp/extension/Point.js";
-import { tuiPagesExtensionPointDefinition } from "../extension/tui/Point.js";
+import { tuiPagesExtensionPointDefinition } from "../extension/api/point/tui/Declaration.js";
 import {
     toolCallReviewExtensionPointDefinition,
     toolCallRewriteExtensionPointDefinition,
-} from "../extension/toolcall/Point.js";
+} from "../extension/api/point/toolcall/Declaration.js";
 import { ExtensionPointRegistry } from "../extension/registration/PointRegistry.js";
 import type { ExtensionSandboxPointCodecRegistry } from "../extension/sandbox/bridge/PointCodec.js";
 import {

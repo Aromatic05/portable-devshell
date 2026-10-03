@@ -1,14 +1,14 @@
 import {
     cliModelCommandsSandboxCodec,
     cliNativeCommandsSandboxCodec,
-} from "../extension/cli/Sandbox.js";
-import { controlRoutesSandboxCodec } from "../extension/Route.js";
+} from "../extension/api/point/cli/Sandbox.js";
+import { controlRoutesSandboxCodec } from "../extension/api/point/control/Sandbox.js";
 import { mcpToolsSandboxCodec } from "./mcp/extension/Sandbox.js";
-import { tuiPagesSandboxCodec } from "../extension/tui/Sandbox.js";
+import { tuiPagesSandboxCodec } from "../extension/api/point/tui/Sandbox.js";
 import {
     toolCallReviewSandboxCodec,
     toolCallRewriteSandboxCodec,
-} from "../extension/toolcall/Sandbox.js";
+} from "../extension/api/point/toolcall/Sandbox.js";
 import { ExtensionSandboxPointCodecRegistry } from "../extension/sandbox/bridge/PointCodec.js";
 import {
     webApplicationsSandboxCodec,

@@ -33,9 +33,9 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
-import { ConfigEditorCoordinator } from "../../../../src/config/editor/Coordinator.ts";
+import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
-import { ControlConfigStore } from "../../../../src/config/storage/Store.ts";
+import { ControlConfigStore } from "../../../../src/config/store/index.ts";
 import { DebugPatchService } from "../../../../src/debug/Service.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceRegistryFactory } from "@portable-devshell/core";

@@ -12,10 +12,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/Extension.ts";
-import { CliExtensionCommandService } from "../../../src/extension/cli/command/Service.ts";
-import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/capability/Context.ts";
+import { CliExtensionCommandService } from "../../../src/extension/api/point/cli/command/Service.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/api/cap/context/Control.ts";
 import { ExtensionLoader } from "../../../src/extension/discovery/Loader.ts";
-import { ExtensionHost } from "../../../src/extension/Host.ts";
+import { ExtensionHost } from "../../../src/extension/host/Host.ts";
 import { ExtensionInstallService } from "../../../src/extension/install/Service.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";

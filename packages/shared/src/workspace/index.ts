@@ -1,5 +1,5 @@
 export * from "./context/Model.js";
-export * from "./context/Authority.js";
+export * from "./context/Authority/index.js";
 export * from "./context/Transport.js";
 export * from "./context/ViewModel.js";
 

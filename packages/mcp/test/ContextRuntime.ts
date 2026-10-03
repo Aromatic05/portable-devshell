@@ -1,15 +1,15 @@
 import type {
-    ContextRegistryPort,
     JsonValue,
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
-import { ContextCleanupService } from "../../control/src/context/Cleanup.ts";
-import { ContextEnvironmentService } from "../../control/src/context/Environment.ts";
-import { ContextRegistry } from "../../control/src/context/Registry.ts";
+import { ContextCleanupService } from "../../control/src/context/Service/Cleanup.ts";
+import { ContextEnvironmentService } from "../../control/src/context/Service/Scope.ts";
+import { ContextRegistry } from "../../control/src/context/Registry/index.ts";
 import type { McpContextRegistryOptions } from "../../control/src/context/Model.ts";
-import { ContextService } from "../../control/src/context/Service.ts";
+import { ContextService } from "../../control/src/context/Service/index.ts";
+import type { ContextRecordSourcePort } from "../../control/src/context/Service/index.ts";
 import {
     McpEndpointWorker,
     type McpEndpointWorkerOptions,
@@ -124,7 +124,7 @@ export function createTestCallOperationGateway(): McpInstanceGateway {
 
 export function createTestContextRuntime(
     options: {
-        contextRegistry?: ContextRegistryPort;
+        contextRegistry?: ContextRecordSourcePort;
         registryOptions?: McpContextRegistryOptions;
         instanceName?: string;
         gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
@@ -163,7 +163,7 @@ export function createTestContextRuntime(
 
 export function createTestContextEnvironment(
     options: {
-        contextRegistry?: ContextRegistryPort;
+        contextRegistry?: ContextRecordSourcePort;
         registryOptions?: McpContextRegistryOptions;
         instanceName?: string;
         gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
@@ -177,7 +177,7 @@ export function createTestEndpointDispatch(
     options: Omit<
         McpEndpointDispatchOptions,
         "cleanup" | "contextRegistry" | "environmentService"
-    > & { contextRegistry?: ContextRegistryPort },
+    > & { contextRegistry?: ContextRecordSourcePort },
 ) {
     const runtime = createTestContextRuntime({
         contextRegistry: options.contextRegistry,
@@ -272,7 +272,7 @@ export class TestMcpEndpointWorker extends McpEndpointWorker {
             McpEndpointWorkerOptions,
             "cleanup" | "contextRegistry" | "environmentService"
         > & {
-            contextRegistry?: ContextRegistryPort;
+            contextRegistry?: ContextRecordSourcePort;
         },
     ) {
         const runtime = createTestContextRuntime({

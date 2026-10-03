@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 
 test("config change hub revisions, de-duplicates, and replays committed paths", () => {
     const hub = new ConfigChangeHub({ historyLimit: 4 });

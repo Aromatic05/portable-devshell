@@ -24,7 +24,7 @@ import {
     workspaceAppStableResourceUri,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import {
     createTestCallOperationGateway,
     TestMcpEndpointWorker as McpEndpointWorker,

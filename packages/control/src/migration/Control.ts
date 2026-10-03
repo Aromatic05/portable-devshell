@@ -7,7 +7,7 @@ import { parseExtensionManifest } from "@portable-devshell/extension";
 import { CONTROL_PROTOCOL_RANGE } from "@portable-devshell/shared";
 import { FRAME_PROTOCOL_RANGE } from "@portable-devshell/shared/transport/frame";
 
-import { ControlConfigStore } from "../config/storage/Store.js";
+import { ControlConfigStore } from "../config/store/index.js";
 import { ExtensionHostModuleResolver } from "../extension/discovery/ModuleResolver.js";
 import { ExtensionPathLayout } from "../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../extension/state/Store.js";

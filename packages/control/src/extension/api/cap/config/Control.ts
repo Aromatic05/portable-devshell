@@ -13,10 +13,10 @@ import type { ControlConfig, JsonValue } from "@portable-devshell/shared";
 import {
     ConfigChangeHub,
     type ConfigCommittedChange,
-} from "../../../../config/Change.js";
-import { ConfigDomainController } from "../../../../config/domain/Controller.js";
+} from "../../../../config/change/Config.js";
+import { ConfigDomainController } from "../../../../config/domain/index.js";
 import { ConfigDomainStore } from "../../../../config/domain/Store.js";
-import type { ControlConfigMutationRunner } from "../../../../config/editor/Lock.js";
+import type { ControlConfigMutationRunner } from "../../../../config/engine/Lock.js";
 import {
     diffConfigPaths,
     getConfigPathValue,
@@ -27,7 +27,7 @@ import type {
     ConfigDomainDefinition,
     ConfigPathPermission,
     ConfigRegistry,
-} from "../../../../config/Registry.js";
+} from "../../../../config/domain/Registry.js";
 
 export interface ExtensionConfigControlOptions {
     changeHub: ConfigChangeHub;

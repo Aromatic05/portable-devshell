@@ -8,7 +8,7 @@ import type {
     WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../extension/Host.js";
+import type { ExtensionHost } from "../../../../extension/host/Host.js";
 import { WebExtensionPageCatalog } from "./Catalog.js";
 import { validateWebPageSnapshot } from "./Snapshot.js";
 

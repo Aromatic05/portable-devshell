@@ -10,7 +10,7 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-import { ConfigChangeHub } from "../../../../src/config/Change.ts";
+import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { ContextModule } from "../../../../src/context/Module.ts";
 import {
     MASKED_CONFIG_TOKEN,

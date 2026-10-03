@@ -13,7 +13,7 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import {
     createTestContextEnvironment,
     TestMcpEndpointWorker as McpEndpointWorker,

@@ -20,7 +20,7 @@ import {
 } from "../discovery/Catalog.js";
 import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRetirementTracker } from "../registration/Retirement.js";
-import type { ConfigRegistry } from "../../config/Registry.js";
+import type { ConfigRegistry } from "../../config/domain/Registry.js";
 import { ExtensionConfigPublisher } from "./ConfigPublisher.js";
 import {
     ExtensionCandidatePublicationError,

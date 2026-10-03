@@ -13,7 +13,7 @@ import type {
 import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
 import type { McpEndpointDispatch } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import {
     createTestContextEnvironment,
     createTestEndpointDispatch,
