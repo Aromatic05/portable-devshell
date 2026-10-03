@@ -318,7 +318,7 @@ import {
                             retentionDays: 7,
                         },
                         mcp: {
-                            auth: { mode: "none" },
+                            auth: "none",
                             enabled: true,
                             path: "/alpha/mcp",
                         },

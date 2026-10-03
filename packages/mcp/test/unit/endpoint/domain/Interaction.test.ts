@@ -13,8 +13,11 @@ import type {
 import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
 import type { McpEndpointDispatch } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
-import { createTestContextEnvironment, createTestEndpointDispatch } from "../../../ContextRuntime.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
+import {
+    createTestContextEnvironment,
+    createTestEndpointDispatch,
+} from "../../../ContextRuntime.ts";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -46,7 +49,9 @@ async function callProjectedAction(
         context.ctxId!,
     );
     const action = projection.actions.find(
-        (candidate) => candidate.operation === operation && candidate.targetId === targetId,
+        (candidate) =>
+            candidate.operation === operation &&
+            candidate.targetId === targetId,
     );
     assert.ok(action, `missing projected ${operation} action for ${targetId}`);
     return await handler.call(
@@ -213,12 +218,21 @@ async function callProjectedAction(
                 toolName: string,
                 input: JsonValue,
                 context: ToolCallContext,
-                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+                operation: (
+                    callId: string,
+                    input: JsonValue,
+                    finalValue: ToolCallHookValue,
+                ) => Promise<T>,
                 _signal?: AbortSignal,
             ): Promise<T> {
                 audited.push({ instance, toolName });
                 const callId = `audit-${toolName}`;
-                const result = await operation(callId, input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
+                const result = await operation(callId, input, {
+                    kind: "call",
+                    toolName: toolName,
+                    payload: input,
+                    context: { ...context, instance: asInstanceName(instance) },
+                });
                 if (instance === "beta" && context.ctxId !== undefined) {
                     consumed.push({
                         callId,
@@ -416,10 +430,22 @@ async function callProjectedAction(
                 _toolName: string,
                 input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+                operation: (
+                    callId: string,
+                    input: JsonValue,
+                    finalValue: ToolCallHookValue,
+                ) => Promise<T>,
                 _signal?: AbortSignal,
             ): Promise<T> {
-                return await operation("call-test", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
+                return await operation("call-test", input, {
+                    kind: "call",
+                    toolName: _toolName,
+                    payload: input,
+                    context: {
+                        ..._context,
+                        instance: asInstanceName(instance),
+                    },
+                });
             },
             async callTool(
                 instance: string,
@@ -431,17 +457,30 @@ async function callProjectedAction(
                     result: JsonValue,
                     callId: string,
                 ) => Promise<JsonValue>,
-                invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+                invocationInput?: (
+                    input: JsonValue,
+                    callId: string,
+                    finalValue: ToolCallHookValue,
+                ) => Promise<JsonValue> | JsonValue,
                 _onProgress?: (progress: JsonValue) => void,
                 _recording?: "caller" | "host",
             ): Promise<JsonValue> {
                 if (worker.fail) throw new Error("worker failed");
                 const callId = `worker-call-${++callSequence}`;
-                await invocationInput?.(input, callId, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
+                await invocationInput?.(input, callId, {
+                    kind: "call",
+                    toolName: _toolName,
+                    payload: input,
+                    context: {
+                        ..._context,
+                        instance: asInstanceName(instance),
+                    },
+                });
                 const result = { exitCode: 0, stderr: "", stdout: "ok" };
-                const transformed = transformResult === undefined
-                    ? result
-                    : await transformResult(result, callId);
+                const transformed =
+                    transformResult === undefined
+                        ? result
+                        : await transformResult(result, callId);
                 const comments =
                     gatewayOverrides.comments?.(_context, callId) ?? [];
                 if (
@@ -529,7 +568,16 @@ async function callProjectedAction(
         assert.equal(wait.status, "waiting");
         assert.equal(settled, false);
 
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "B", "call-app");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "B",
+            "call-app",
+        );
 
         assert.deepEqual(await held, {
             answer: "B",
@@ -561,7 +609,7 @@ async function callProjectedAction(
             fake.waits.find((entry) => entry.waitId === wait.waitId)?.status,
             "detached",
         );
-        const actionResult = await callProjectedAction(
+        const actionResult = (await callProjectedAction(
             handler,
             fake.gateway,
             context,
@@ -570,9 +618,11 @@ async function callProjectedAction(
             wait.waitId,
             "yes",
             "call-answer",
-        ) as { status?: string };
+        )) as { status?: string };
         assert.equal(actionResult.status, "applied");
-        const answered = fake.waits.find((entry) => entry.waitId === wait.waitId);
+        const answered = fake.waits.find(
+            (entry) => entry.waitId === wait.waitId,
+        );
         assert.equal(answered?.status, "resolved");
         assert.deepEqual(answered?.result, { answer: "yes" });
         assert.equal(typeof answered?.detachedAt, "string");
@@ -598,7 +648,16 @@ async function callProjectedAction(
         );
         const wait = await fake.created;
 
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer-post-answer-failure");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "yes",
+            "call-answer-post-answer-failure",
+        );
         await assert.rejects(held, /goal store unavailable/u);
         const recovered = fake.waits.find(
             (entry) => entry.waitId === wait.waitId,
@@ -661,7 +720,16 @@ async function callProjectedAction(
         );
         const wait = await fake.created;
         assert.equal(wait.taskId, "task-1");
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "yes",
+            "call-answer",
+        );
         await held;
     });
 
@@ -727,7 +795,16 @@ async function callProjectedAction(
 
         assert.equal(wait.goalId, "goal-1");
         assert.equal(wait.taskId, undefined);
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "continue", "call-answer");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "continue",
+            "call-answer",
+        );
         await held;
         assert.equal(goalTouches, 1);
     });
@@ -809,7 +886,16 @@ async function callProjectedAction(
             "call-after-reconnect",
         );
         const wait = await fake.created;
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "yes",
+            "call-answer",
+        );
         await assert.doesNotReject(held);
     });
 
@@ -1090,23 +1176,37 @@ async function callProjectedAction(
         const snapshot = result.structuredContent as {
             agentBusy?: boolean;
             cursor?: number;
-            modelContext?: { content?: unknown[]; structuredContent?: { portableDevshellWorkspace?: unknown } };
-            presentation?: { background?: Array<Record<string, unknown>>; primary?: Record<string, unknown>; work?: Array<Record<string, unknown>> };
+            modelContext?: {
+                content?: unknown[];
+                structuredContent?: { portableDevshellWorkspace?: unknown };
+            };
+            presentation?: {
+                background?: Array<Record<string, unknown>>;
+                primary?: Record<string, unknown>;
+                work?: Array<Record<string, unknown>>;
+            };
             reentry?: { pending?: boolean; delivery?: { status?: string } };
         };
         assert.equal(snapshot.cursor, 7);
         assert.equal(snapshot.agentBusy, true);
         assert.ok(snapshot.presentation);
         assert.ok(snapshot.modelContext?.content);
-        assert.ok(snapshot.modelContext?.structuredContent?.portableDevshellWorkspace);
+        assert.ok(
+            snapshot.modelContext?.structuredContent?.portableDevshellWorkspace,
+        );
         assert.ok(snapshot.reentry);
         const items = [
-            ...(snapshot.presentation.primary ? [snapshot.presentation.primary] : []),
+            ...(snapshot.presentation.primary
+                ? [snapshot.presentation.primary]
+                : []),
             ...(snapshot.presentation.work ?? []),
             ...(snapshot.presentation.background ?? []),
         ];
         for (const id of ["wait-tmux", "wait-question-resolved", "task-1"])
-            assert.ok(items.some((item) => item.id === id), id);
+            assert.ok(
+                items.some((item) => item.id === id),
+                id,
+            );
         assert.equal(JSON.stringify(items).includes(context.ctxId!), false);
     });
 
@@ -1116,10 +1216,12 @@ async function callProjectedAction(
             idFactory: () => context.ctxId!,
         });
         const created = await registry.create({
-            environments: [{
-                instance: "demo",
-                workspace: "/local",
-            }],
+            environments: [
+                {
+                    instance: "demo",
+                    workspace: "/local",
+                },
+            ],
             principal: "tester",
         });
         assert.equal(created.ctxId, context.ctxId);
@@ -1185,11 +1287,17 @@ async function callProjectedAction(
         assert.ok(result instanceof McpNativeToolResult);
         const snapshot = result.structuredContent as {
             agentBusy?: boolean;
-            presentation?: { primary?: Record<string, unknown>; work?: Array<Record<string, unknown>>; background?: Array<Record<string, unknown>> };
+            presentation?: {
+                primary?: Record<string, unknown>;
+                work?: Array<Record<string, unknown>>;
+                background?: Array<Record<string, unknown>>;
+            };
         };
         assert.equal(snapshot.agentBusy, true);
         const items = [
-            ...(snapshot.presentation?.primary ? [snapshot.presentation.primary] : []),
+            ...(snapshot.presentation?.primary
+                ? [snapshot.presentation.primary]
+                : []),
             ...(snapshot.presentation?.work ?? []),
             ...(snapshot.presentation?.background ?? []),
         ];
@@ -1244,10 +1352,12 @@ async function callProjectedAction(
             idFactory: () => context.ctxId!,
         });
         await registry.create({
-            environments: [{
-                instance: "demo",
-                workspace: "/local",
-            }],
+            environments: [
+                {
+                    instance: "demo",
+                    workspace: "/local",
+                },
+            ],
             principal: "tester",
         });
         await registry.attachEnvironment(context.ctxId!, {
@@ -1347,18 +1457,27 @@ async function callProjectedAction(
             "call-app",
         );
         assert.ok(result instanceof McpNativeToolResult);
-        const presentation = (result.structuredContent as {
-            presentation?: {
-                background?: Array<Record<string, unknown>>;
-                primary?: Record<string, unknown>;
-                work?: Array<Record<string, unknown>>;
-            };
-        }).presentation;
+        const presentation = (
+            result.structuredContent as {
+                presentation?: {
+                    background?: Array<Record<string, unknown>>;
+                    primary?: Record<string, unknown>;
+                    work?: Array<Record<string, unknown>>;
+                };
+            }
+        ).presentation;
         assert.equal(presentation?.primary?.kind, "question");
         assert.equal(presentation?.primary?.id, "wait-old");
         assert.equal(presentation?.primary?.prompt, "Oldest question");
-        assert.equal(presentation?.work?.some((item) => item.id === "wait-new"), false);
-        assert.ok(presentation?.background?.some((item) => item.id === "wait-tmux-new"));
+        assert.equal(
+            presentation?.work?.some((item) => item.id === "wait-new"),
+            false,
+        );
+        assert.ok(
+            presentation?.background?.some(
+                (item) => item.id === "wait-tmux-new",
+            ),
+        );
     });
 
     test("Workspace question answer reports owner loss that races with resolution", async () => {
@@ -1397,7 +1516,16 @@ async function callProjectedAction(
         });
         const token = await openWorkspace(handler);
 
-        await callProjectedAction(handler, gateway, context, token, "question-answer", "wait-question-race", "yes", "call-answer-race");
+        await callProjectedAction(
+            handler,
+            gateway,
+            context,
+            token,
+            "question-answer",
+            "wait-question-race",
+            "yes",
+            "call-answer-race",
+        );
         assert.equal(typeof fake.waits[0]?.detachedAt, "string");
     });
 
@@ -1421,7 +1549,16 @@ async function callProjectedAction(
         });
         const token = await openWorkspace(handler);
 
-        await callProjectedAction(handler, fake.gateway, context, token, "wait-interrupt", "wait-tmux", undefined, "call-app");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "wait-interrupt",
+            "wait-tmux",
+            undefined,
+            "call-app",
+        );
         assert.equal(fake.waits[0]?.status, "resolved");
         assert.deepEqual(fake.waits[0]?.result, {
             interrupted: true,
@@ -1464,7 +1601,16 @@ async function callProjectedAction(
             instanceName: "demo",
         });
         const token = await openWorkspace(handler);
-        await callProjectedAction(handler, gateway, context, token, "wait-interrupt", "wait-tmux-race", undefined, "call-interrupt-race");
+        await callProjectedAction(
+            handler,
+            gateway,
+            context,
+            token,
+            "wait-interrupt",
+            "wait-tmux-race",
+            undefined,
+            "call-interrupt-race",
+        );
         assert.equal(typeof fake.waits[0]?.detachedAt, "string");
     });
 
@@ -1765,8 +1911,14 @@ async function callProjectedAction(
                 agentBusy?: boolean;
                 ctxId?: string;
                 cursor?: number;
-                modelContext?: { structuredContent?: { portableDevshellWorkspace?: unknown } };
-                presentation?: { background?: unknown[]; primary?: unknown; work?: unknown[] };
+                modelContext?: {
+                    structuredContent?: { portableDevshellWorkspace?: unknown };
+                };
+                presentation?: {
+                    background?: unknown[];
+                    primary?: unknown;
+                    work?: unknown[];
+                };
                 reentry?: { pending?: boolean };
             };
         };
@@ -1779,7 +1931,10 @@ async function callProjectedAction(
         assert.deepEqual(update.snapshot?.presentation?.work, []);
         assert.deepEqual(update.snapshot?.presentation?.background, []);
         assert.equal(update.snapshot?.reentry?.pending, false);
-        assert.ok(update.snapshot?.modelContext?.structuredContent?.portableDevshellWorkspace);
+        assert.ok(
+            update.snapshot?.modelContext?.structuredContent
+                ?.portableDevshellWorkspace,
+        );
     });
 
     test("workspace_ask refuses to hold a call before Workspace is open", async () => {
@@ -1857,7 +2012,16 @@ async function callProjectedAction(
             watchAbort.signal,
         );
         const wait = await fake.created;
-        await callProjectedAction(handler, fake.gateway, context, token, "question-answer", wait.waitId, "yes", "call-answer");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "question-answer",
+            wait.waitId,
+            "yes",
+            "call-answer",
+        );
         assert.deepEqual(await held, {
             answer: "yes",
             questionId: wait.targetId,
@@ -2015,7 +2179,16 @@ async function callProjectedAction(
         });
         const token = await openWorkspace(handler);
 
-        await callProjectedAction(handler, fake.gateway, context, token, "goal-resume", "goal-1", undefined, "call-goal-resume");
+        await callProjectedAction(
+            handler,
+            fake.gateway,
+            context,
+            token,
+            "goal-resume",
+            "goal-1",
+            undefined,
+            "call-goal-resume",
+        );
         assert.deepEqual(actions, ["resume"]);
         const wait = fake.waits.find(
             (entry) => entry.waitId === "wait-goal-resume",
@@ -2033,10 +2206,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2128,10 +2303,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2224,10 +2401,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2301,10 +2480,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2381,10 +2562,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             Object.assign(registry, {
@@ -2482,10 +2665,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2610,10 +2795,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2722,10 +2909,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -2871,10 +3060,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             Object.assign(registry, {
@@ -2964,10 +3155,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -3116,10 +3309,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             await registry.observeExecutionActivity(context.ctxId!, "demo");
@@ -3175,10 +3370,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -3269,10 +3466,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -3371,10 +3570,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -3457,10 +3658,12 @@ async function callProjectedAction(
             });
             await registry.initialize();
             await registry.create({
-                environments: [{
-                    instance: "demo",
-                    workspace: "/workspace",
-                }],
+                environments: [
+                    {
+                        instance: "demo",
+                        workspace: "/workspace",
+                    },
+                ],
                 principal: "local",
             });
             const fake = createInteractionGateway();
@@ -3730,8 +3933,21 @@ async function callProjectedAction(
         assert.deepEqual(askInputSchema.required, ["question"]);
         assert.equal(ask._meta, undefined);
         assert.equal(goal._meta, undefined);
-        for (const name of ["workspace_answer", "workspace_interrupt", "workspace_task", "workspace_recover", "workspace_pause", "workspace_resume", "workspace_stop", "workspace_approval"]) {
-            assert.equal(definitions.some((definition) => definition.name === name), false, name);
+        for (const name of [
+            "workspace_answer",
+            "workspace_interrupt",
+            "workspace_task",
+            "workspace_recover",
+            "workspace_pause",
+            "workspace_resume",
+            "workspace_stop",
+            "workspace_approval",
+        ]) {
+            assert.equal(
+                definitions.some((definition) => definition.name === name),
+                false,
+                name,
+            );
         }
 
         const compatibilityDefinitions = new McpToolCatalogInteraction().list();
@@ -3759,9 +3975,18 @@ async function callProjectedAction(
             compatibilitySnapshotSchema.properties?.ctxId,
             undefined,
         );
-        assert.notEqual(compatibilitySnapshotSchema.properties?.presentation, undefined);
-        assert.notEqual(compatibilitySnapshotSchema.properties?.modelContext, undefined);
-        assert.notEqual(compatibilitySnapshotSchema.properties?.reentry, undefined);
+        assert.notEqual(
+            compatibilitySnapshotSchema.properties?.presentation,
+            undefined,
+        );
+        assert.notEqual(
+            compatibilitySnapshotSchema.properties?.modelContext,
+            undefined,
+        );
+        assert.notEqual(
+            compatibilitySnapshotSchema.properties?.reentry,
+            undefined,
+        );
         assert.equal(compatibilityOpen?.description, open.description);
     });
 
@@ -4058,7 +4283,9 @@ async function callProjectedAction(
                 return structuredClone(record);
             },
             approval: {
-                async listPendingApprovals() { return []; },
+                async listPendingApprovals() {
+                    return [];
+                },
                 async listApprovals() {
                     return [];
                 },

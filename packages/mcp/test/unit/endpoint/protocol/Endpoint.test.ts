@@ -24,7 +24,7 @@ import {
     workspaceAppStableResourceUri,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
 import {
     createTestCallOperationGateway,
     TestMcpEndpointWorker as McpEndpointWorker,
@@ -337,7 +337,7 @@ test("MCP endpoint serves App resources and environment presentation from a gene
             extensions,
             instanceName: "demo",
             gateway: harness.gateway,
-        worker: harness.worker,
+            worker: harness.worker,
             workspaceAppEnabled: false,
         }),
     );
@@ -775,7 +775,7 @@ test("tools/call forwards stale worker arguments even when the advertised schema
         new McpEndpointWorker({
             instanceName: "demo",
             gateway: harness.gateway,
-        worker: harness.worker,
+            worker: harness.worker,
         }),
     );
     const server = await createBindingServer(binding);
@@ -1376,7 +1376,12 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
     const ctxId = (await registry.list())[0]?.ctxId;
     assert.equal(ctxId, "ctx-openai-workspace-app");
 
-    const snapshot = structuredResult<{ ctxId?: string; modelContext?: unknown; presentation?: unknown; reentry?: unknown }>(
+    const snapshot = structuredResult<{
+        ctxId?: string;
+        modelContext?: unknown;
+        presentation?: unknown;
+        reentry?: unknown;
+    }>(
         await endpoint.callTool(
             "workspace_snapshot",
             { ctxId, token: token as string },
@@ -1927,10 +1932,26 @@ test("tools/call waits for a transiently not-ready instance before executing", a
     let invoked = false;
     worker.snapshot = () => ({ ready: pending.ready });
     harness.gateway.assertReady = () => {
-        if (!pending.ready) throw Object.assign(new Error("not ready"), { code: "core.instanceNotReady" });
+        if (!pending.ready)
+            throw Object.assign(new Error("not ready"), {
+                code: "core.instanceNotReady",
+            });
     };
-    harness.gateway.callTool = async (_instance, toolName, input, context, _signal, transformResult, invocationInput) => {
-        await invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName("demo") } });
+    harness.gateway.callTool = async (
+        _instance,
+        toolName,
+        input,
+        context,
+        _signal,
+        transformResult,
+        invocationInput,
+    ) => {
+        await invocationInput?.(input, "call-test", {
+            kind: "call",
+            toolName,
+            payload: input,
+            context: { ...context, instance: asInstanceName("demo") },
+        });
         invoked = true;
         return { exitCode: 0, stderr: "", stdout: "/workspace\n" };
     };
@@ -1978,7 +1999,11 @@ function createBinding(
                   ...harness.gateway,
                   consumeWait: unused,
                   createWait: unused,
-                  approval: { decideApproval: unused, listApprovals: async () => [], listPendingApprovals: async () => [] },
+                  approval: {
+                      decideApproval: unused,
+                      listApprovals: async () => [],
+                      listPendingApprovals: async () => [],
+                  },
                   detachWait: unused,
                   listTools: () => [],
                   listWaits: async () => [],
@@ -1999,7 +2024,7 @@ function createBinding(
             ...(gateway === undefined ? {} : { gateway }),
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
-        worker: harness.worker,
+            worker: harness.worker,
         }),
         options?.serverVersion,
     );
@@ -2289,19 +2314,32 @@ function createWorkerHarness(options?: {
         listTools() {
             return tools;
         },
-        };
+    };
     const gateway: McpInstanceGateway = {
         async callToolOperation<T extends JsonValue>(
             instance: string,
             toolName: string,
             input: JsonValue,
             context: { ctxId?: string; requestId?: string; source: string },
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
             _signal?: AbortSignal,
-            ): Promise<T> {
+        ): Promise<T> {
             auditedCalls.push({ context, input, toolName });
-            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, source: "mcp", instance: asInstanceName(instance) } });
-            },
+            return await operation("call-test", input, {
+                kind: "call",
+                toolName: toolName,
+                payload: input,
+                context: {
+                    ...context,
+                    source: "mcp",
+                    instance: asInstanceName(instance),
+                },
+            });
+        },
         async callTool(
             instance: string,
             toolName: string,
@@ -2312,11 +2350,25 @@ function createWorkerHarness(options?: {
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            _invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            _invocationInput?: (
+                input: JsonValue,
+                callId: string,
+                finalValue: ToolCallHookValue,
+            ) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            ) {
-            input = await _invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, source: "mcp", instance: asInstanceName(instance) } }) ?? input;
+        ) {
+            input =
+                (await _invocationInput?.(input, "call-test", {
+                    kind: "call",
+                    toolName,
+                    payload: input,
+                    context: {
+                        ...context,
+                        source: "mcp",
+                        instance: asInstanceName(instance),
+                    },
+                })) ?? input;
             if (!worker.snapshot().ready) {
                 const error = new Error("not ready");
                 Object.assign(error, {
@@ -2340,7 +2392,10 @@ function createWorkerHarness(options?: {
                               signal,
                           );
             } catch (error) {
-                if ((options?.comments?.length ?? 0) > 0 && error instanceof Error)
+                if (
+                    (options?.comments?.length ?? 0) > 0 &&
+                    error instanceof Error
+                )
                     throw attachToolCallErrorPayload(error, {
                         comment: [...options!.comments!],
                     });
@@ -2360,36 +2415,55 @@ function createWorkerHarness(options?: {
             return transformResult === undefined
                 ? toolResult
                 : await transformResult(toolResult, "call-test");
-            },
+        },
         async appendMcpToolCalled() {},
         assertReady() {
-            if (!worker.snapshot().ready) throw Object.assign(new Error("not ready"), { code: "core.instanceNotReady" });
+            if (!worker.snapshot().ready)
+                throw Object.assign(new Error("not ready"), {
+                    code: "core.instanceNotReady",
+                });
         },
         environment: () => worker.handshake,
         listTools: () => tools,
-        async listInstances() { return []; },
-        async prepareWorkspace(_instance, workspace) { return await worker.prepareWorkspace(workspace); },
-        async readAlerts() { return { advice: [] }; },
+        async listInstances() {
+            return [];
+        },
+        async prepareWorkspace(_instance, workspace) {
+            return await worker.prepareWorkspace(workspace);
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
         async releaseAlerts() {},
         async touchAlerts() {},
         async touchTemporaryDirectory() {},
-        async connectInstance() { return {}; },
+        async connectInstance() {
+            return {};
+        },
         async releaseInstanceReference() {},
-        async statusInstance() { return {}; },
-        async stopInstance() { return {}; },
-        async readTodo() { return {}; },
-        async writeTodo() { return {}; },
+        async statusInstance() {
+            return {};
+        },
+        async stopInstance() {
+            return {};
+        },
+        async readTodo() {
+            return {};
+        },
+        async writeTodo() {
+            return {};
+        },
     };
     return {
-auditedCalls,
-calls: calls as Array<{
+        auditedCalls,
+        calls: calls as Array<{
             input: JsonValue;
             requestId?: string;
             ctxId?: string;
             source?: string;
             toolName: string;
         }>,
-events,
+        events,
         gateway,
         worker,
     } as const;

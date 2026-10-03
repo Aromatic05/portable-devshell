@@ -1,5 +1,9 @@
 import { asInstanceName } from "@portable-devshell/shared";
-import { ToolCallPipeline, ToolCallHookSequence, type ToolCallHookValue } from "@portable-devshell/core";
+import {
+    ToolCallPipeline,
+    ToolCallHookSequence,
+    type ToolCallHookValue,
+} from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -8,11 +12,12 @@ import type {
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
+import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
 import {
-    type McpInstanceGateway,
-} from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
-import { createTestContextEnvironment, TestMcpEndpointWorker as McpEndpointWorker } from "../../../ContextRuntime.ts";
+    createTestContextEnvironment,
+    TestMcpEndpointWorker as McpEndpointWorker,
+} from "../../../ContextRuntime.ts";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
@@ -53,10 +58,12 @@ const contextRegistry = new McpContextRegistry({
     idFactory: () => "ctx-instance-test",
 });
 const activeContext = await contextRegistry.create({
-    environments: [{
-        instance: "main-pc",
-        workspace: "/workspace",
-    }],
+    environments: [
+        {
+            instance: "main-pc",
+            workspace: "/workspace",
+        },
+    ],
     principal: "local",
 });
 const withContext = <T extends Record<string, unknown>>(
@@ -166,10 +173,12 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
         idFactory: () => "ctx-environ-remote-bootstrap",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     const endpoint = new McpEndpointWorker({
@@ -213,10 +222,12 @@ test("environment tools cross the ToolCall operation boundary before side effect
         now: () => now,
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     const boundaryCalls: string[] = [];
@@ -297,16 +308,17 @@ test("environment tools cross the ToolCall operation boundary before side effect
     );
 });
 
-
 test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-environ-remote",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     const remoteCalls: string[] = [];
@@ -495,7 +507,12 @@ test("worker calls default to the endpoint instance and route explicit targets t
         tools: [bashTool, fileReadTool],
     });
     const gateway = createGateway({
-        callTool: async (instance, toolName, input, callContext): Promise<JsonValue> => {
+        callTool: async (
+            instance,
+            toolName,
+            input,
+            callContext,
+        ): Promise<JsonValue> => {
             if (instance === "main-pc") {
                 localCalls.push({ input, toolName });
                 return { local: true };
@@ -614,10 +631,12 @@ test("remote environment attach reuses a live workspace attachment and releases 
         idFactory: () => "ctx-connect-idempotent",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let prepareCalls = 0;
@@ -673,10 +692,12 @@ test("remote workspace replacement keeps the committed attachment and retries cl
         idFactory: () => "ctx-connect-cleanup-retry",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let releaseAttempts = 0;
@@ -686,7 +707,8 @@ test("remote workspace replacement keeps the committed attachment and retries cl
                 projectMemoryAgentFile: workspace + "/AGENT.md",
                 projectMemoryDirectory: workspace + "/.memory",
                 projectMemoryPresent: true,
-                temporaryDirectory: "/tmp/" + instance + "-" + workspace.slice(1),
+                temporaryDirectory:
+                    "/tmp/" + instance + "-" + workspace.slice(1),
                 workspace,
             };
         },
@@ -713,10 +735,11 @@ test("remote workspace replacement keeps the committed attachment and retries cl
         remote.attachRemote(created.ctxId, handle, "/remote-b"),
     );
     assert.equal(
-        (await registry.validateForInstance(created.ctxId, "remote-server"))
-            .environments.find(
-                (environment) => environment.instance === "remote-server",
-            )?.workspace,
+        (
+            await registry.validateForInstance(created.ctxId, "remote-server")
+        ).environments.find(
+            (environment) => environment.instance === "remote-server",
+        )?.workspace,
         "/remote-b",
     );
     assert.equal((await registry.listEnvironmentCleanup()).length, 1);
@@ -731,10 +754,12 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
         idFactory: () => "ctx-mask-cleanup-retry",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let referenceAttempts = 0;
@@ -764,14 +789,11 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
     );
     await remote.attachRemote(created.ctxId, handle, "/remote-mask");
 
-    await assert.rejects(
-        remote.maskRemote(created.ctxId, handle),
-    );
+    await assert.rejects(remote.maskRemote(created.ctxId, handle));
     await assert.rejects(
         registry.validateForInstance(created.ctxId, "remote-server"),
         (error: unknown) =>
-            (error as { code?: string }).code ===
-            "mcp.contextInstanceMasked",
+            (error as { code?: string }).code === "mcp.contextInstanceMasked",
     );
     assert.equal(referenceAttempts, 1);
     assert.equal(alertAttempts, 1);
@@ -796,10 +818,12 @@ test("remote environment attach cleans an unused alert lease and reference when 
         idFactory: () => "ctx-connect-failure",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     const releasedAlerts: string[] = [];
@@ -848,10 +872,12 @@ test("remote attach persists cleanup intent before acquiring external resources"
         idFactory: () => "ctx-connect-write-ahead-cleanup",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let referenceIntentVisible = false;
@@ -860,7 +886,9 @@ test("remote attach persists cleanup intent before acquiring external resources"
     let alertReleases = 0;
     const gateway = createGateway({
         async connectInstance(instance, reference) {
-            const pending = await registry.listEnvironmentCleanup(created.ctxId);
+            const pending = await registry.listEnvironmentCleanup(
+                created.ctxId,
+            );
             referenceIntentVisible = pending.some(
                 ({ cleanup }) =>
                     cleanup.kind === "instance_reference" &&
@@ -869,10 +897,13 @@ test("remote attach persists cleanup intent before acquiring external resources"
             return { instance, reference };
         },
         async readAlerts(_instance, workspace) {
-            const pending = await registry.listEnvironmentCleanup(created.ctxId);
+            const pending = await registry.listEnvironmentCleanup(
+                created.ctxId,
+            );
             alertIntentVisible = pending.some(
                 ({ cleanup }) =>
-                    cleanup.kind === "alerts" && cleanup.workspace === workspace,
+                    cleanup.kind === "alerts" &&
+                    cleanup.workspace === workspace,
             );
             return { advice: [] };
         },
@@ -908,10 +939,12 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
         idFactory: () => "ctx-connect-cleanup-debt",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let alertReads = 0;
@@ -929,7 +962,8 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
         },
         async readAlerts() {
             alertReads += 1;
-            if (alertReads === 1) throw new Error("alerts failed before commit");
+            if (alertReads === 1)
+                throw new Error("alerts failed before commit");
             return { advice: [] };
         },
         async releaseAlerts(_instance, workspace) {
@@ -987,10 +1021,11 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
     assert.equal(referenceReleaseAttempts, 2);
     assert.deepEqual(await registry.listEnvironmentCleanup(), []);
     assert.equal(
-        (await registry.validateForInstance(created.ctxId, "remote-server"))
-            .environments.find(
-                (environment) => environment.instance === "remote-server",
-            )?.workspace,
+        (
+            await registry.validateForInstance(created.ctxId, "remote-server")
+        ).environments.find(
+            (environment) => environment.instance === "remote-server",
+        )?.workspace,
         "/remote-retry",
     );
 });
@@ -1000,10 +1035,12 @@ test("remote attach records reference cleanup debt when the gateway cannot relea
         idFactory: () => "ctx-connect-cleanup-capability",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     const gateway = createGateway({
@@ -1051,10 +1088,12 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
         idFactory: () => "ctx-remote-artifact",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     await registry.attachEnvironment(created.ctxId, {
@@ -1194,10 +1233,12 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
         idFactory: () => "ctx-cancel-remote",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let resolveStart!: (value: JsonValue) => void;
@@ -1247,9 +1288,7 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
     resolveStart({ instance: "remote-server", state: "running" });
     await released;
 
-    assert.deepEqual(releasedReferences, [
-        "remote-server:" + created.ctxId,
-    ]);
+    assert.deepEqual(releasedReferences, ["remote-server:" + created.ctxId]);
     const contextAfterAbort = (await registry.list()).find(
         (candidate) => candidate.ctxId === created.ctxId,
     );
@@ -1266,10 +1305,12 @@ test("concurrent remote attaches serialize one Context reference transaction", a
         idFactory: () => "ctx-concurrent-remote",
     });
     const created = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     let referenceHeld = false;
@@ -1452,7 +1493,11 @@ function createGateway(
             toolName: string,
             input: JsonValue,
             callContext: ToolCallContext,
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
             signal?: AbortSignal,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
@@ -1465,7 +1510,12 @@ function createGateway(
                     signal,
                 );
             }
-            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...callContext, instance: asInstanceName(instance) } });
+            return await operation("call-test", input, {
+                kind: "call",
+                toolName: toolName,
+                payload: input,
+                context: { ...callContext, instance: asInstanceName(instance) },
+            });
         },
         async callTool(
             instance,
@@ -1478,8 +1528,15 @@ function createGateway(
             onProgress,
             recording,
         ) {
-            const finalValue: ToolCallHookValue = { kind: "call", toolName, payload: input, context: { ...callContext, instance: asInstanceName(instance) } };
-            const preparedInput = await invocationInput?.(input, "call-test", finalValue) ?? input;
+            const finalValue: ToolCallHookValue = {
+                kind: "call",
+                toolName,
+                payload: input,
+                context: { ...callContext, instance: asInstanceName(instance) },
+            };
+            const preparedInput =
+                (await invocationInput?.(input, "call-test", finalValue)) ??
+                input;
             const result =
                 overrides.callTool === undefined
                     ? { instance, toolName }
@@ -1751,10 +1808,12 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
         idFactory: () => "ctx-session-todo",
     });
     const current = await registry.create({
-        environments: [{
-            instance: "main-pc",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "main-pc",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
     await registry.bindExternal(
@@ -1833,8 +1892,11 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
     );
 });
 
-
-async function rewrittenEndpoint(toolName: string, remote: boolean, reject = false) {
+async function rewrittenEndpoint(
+    toolName: string,
+    remote: boolean,
+    reject = false,
+) {
     let now = Date.now();
     const registry = new McpContextRegistry({ now: () => now });
     const original = await registry.create({
@@ -1854,80 +1916,299 @@ async function rewrittenEndpoint(toolName: string, remote: boolean, reject = fal
     const callIds: string[] = [];
     const reviews: string[] = [];
     const pipeline = new ToolCallPipeline({
-        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence({
-            reviews: [({ value }) => { reviews.push(value.context.instance); return reject ? { decision: "reject", reason: "blocked" } : { decision: "continue" }; }],
-            rewrites: [({ value }) => ({ ...value, toolName, payload: { command: "rewritten", task: "final-task", wait: "block", timeMs: 180000 }, context: { ...value.context, instance: asInstanceName(instance), ctxId: final.ctxId, workspace: "/final" } })],
-        }) }),
+        hooks: () => ({
+            release() {},
+            sequence: new ToolCallHookSequence({
+                reviews: [
+                    ({ value }) => {
+                        reviews.push(value.context.instance);
+                        return reject
+                            ? { decision: "reject", reason: "blocked" }
+                            : { decision: "continue" };
+                    },
+                ],
+                rewrites: [
+                    ({ value }) => ({
+                        ...value,
+                        toolName,
+                        payload: {
+                            command: "rewritten",
+                            task: "final-task",
+                            wait: "block",
+                            timeMs: 180000,
+                        },
+                        context: {
+                            ...value.context,
+                            instance: asInstanceName(instance),
+                            ctxId: final.ctxId,
+                            workspace: "/final",
+                        },
+                    }),
+                ],
+            }),
+        }),
         resolveTarget(target) {
             assert.equal(target, instance);
-            return { async dispatch(request): Promise<JsonValue> {
-                values.push(request.value);
-                callIds.push(request.callId);
-                inputs.push(await request.invocationInput?.(request.value.payload, request.callId, request.value) ?? request.value.payload);
-                const result: JsonValue = request.operation === undefined ? { task: { id: "final-task", status: "completed" }, output: "ready", waitReason: "terminal" } : await request.operation(request.callId, request.value.payload, request.value);
-                return await request.transformResult?.(result, request.callId) ?? result;
-            } };
+            return {
+                async dispatch(request): Promise<JsonValue> {
+                    values.push(request.value);
+                    callIds.push(request.callId);
+                    inputs.push(
+                        (await request.invocationInput?.(
+                            request.value.payload,
+                            request.callId,
+                            request.value,
+                        )) ?? request.value.payload,
+                    );
+                    const result: JsonValue =
+                        request.operation === undefined
+                            ? {
+                                  task: {
+                                      id: "final-task",
+                                      status: "completed",
+                                  },
+                                  output: "ready",
+                                  waitReason: "terminal",
+                              }
+                            : await request.operation(
+                                  request.callId,
+                                  request.value.payload,
+                                  request.value,
+                              );
+                    return (
+                        (await request.transformResult?.(
+                            result,
+                            request.callId,
+                        )) ?? result
+                    );
+                },
+            };
         },
     });
-    const prepare = async (target: string, workspace: string) => { changes.push(["workspace", target, workspace]); return { projectMemoryAgentFile: "/memory/AGENT.md", projectMemoryDirectory: "/memory", temporaryDirectory: "/tmp/final", workspace }; };
-    const called = async (target: string, name: string, context: unknown) => { changes.push(["event", target, name, context]); };
+    const prepare = async (target: string, workspace: string) => {
+        changes.push(["workspace", target, workspace]);
+        return {
+            projectMemoryAgentFile: "/memory/AGENT.md",
+            projectMemoryDirectory: "/memory",
+            temporaryDirectory: "/tmp/final",
+            workspace,
+        };
+    };
+    const called = async (target: string, name: string, context: unknown) => {
+        changes.push(["event", target, name, context]);
+    };
     const gateway = createGateway({
         callToolOperation: (...args) => pipeline.callOperation(...args),
-        assertReady(target) { changes.push(["ready", target]); },
+        assertReady(target) {
+            changes.push(["ready", target]);
+        },
         appendMcpToolCalled: called,
         prepareWorkspace: prepare,
-        async touchAlerts(target, workspace) { changes.push(["alerts", target, workspace]); },
-        async touchGoal(target, ctxId) { changes.push(["goal", target, ctxId]); },
-        listTools: () => [bashTool, fileReadTool, { ...bashTool, group: "tmux", name: "tmux_run" }, { ...bashTool, group: "tmux", name: "tmux_read" }],
-        listExtensionTools: () => [{ ...bashTool, group: "ext", name: "ext_original" }, { ...bashTool, group: "ext", name: "ext_final" }],
-        async callExtensionTool(target, name, input, context) { changes.push(["extension", target, name, input, context]); return { structuredContent: {} }; },
+        async touchAlerts(target, workspace) {
+            changes.push(["alerts", target, workspace]);
+        },
+        async touchGoal(target, ctxId) {
+            changes.push(["goal", target, ctxId]);
+        },
+        listTools: () => [
+            bashTool,
+            fileReadTool,
+            { ...bashTool, group: "tmux", name: "tmux_run" },
+            { ...bashTool, group: "tmux", name: "tmux_read" },
+        ],
+        listExtensionTools: () => [
+            { ...bashTool, group: "ext", name: "ext_original" },
+            { ...bashTool, group: "ext", name: "ext_final" },
+        ],
+        async callExtensionTool(target, name, input, context) {
+            changes.push(["extension", target, name, input, context]);
+            return { structuredContent: {} };
+        },
     });
     Object.assign(gateway, {
-        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => pipeline.call(...args),
-        approval: { async listApprovals() { return []; }, async listPendingApprovals() { return []; }, async decideApproval() { throw new Error("unexpected approval"); } },
-        async listWaits() { return []; },
-        async createWait() { throw new Error("unexpected wait"); },
-        async detachWait() { throw new Error("unexpected wait"); },
-        async consumeWait() { throw new Error("unexpected wait"); },
-        async resolveWait() { throw new Error("unexpected wait"); },
-        async waitForWait() { throw new Error("unexpected wait"); },
-        async cancelWait() { throw new Error("unexpected wait"); },
-        async reattachWait() { throw new Error("unexpected wait"); },
-        async observeTmuxTask() { throw new Error("unexpected observation"); },
-        invokeToolInternal: async (target: string, name: string, _input: JsonValue, context: ToolCallContext) => { changes.push(["internal", target, name, context]); return { task: { id: "final-task", status: "completed" }, output: "ready" }; },
+        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) =>
+            pipeline.call(...args),
+        approval: {
+            async listApprovals() {
+                return [];
+            },
+            async listPendingApprovals() {
+                return [];
+            },
+            async decideApproval() {
+                throw new Error("unexpected approval");
+            },
+        },
+        async listWaits() {
+            return [];
+        },
+        async createWait() {
+            throw new Error("unexpected wait");
+        },
+        async detachWait() {
+            throw new Error("unexpected wait");
+        },
+        async consumeWait() {
+            throw new Error("unexpected wait");
+        },
+        async resolveWait() {
+            throw new Error("unexpected wait");
+        },
+        async waitForWait() {
+            throw new Error("unexpected wait");
+        },
+        async cancelWait() {
+            throw new Error("unexpected wait");
+        },
+        async reattachWait() {
+            throw new Error("unexpected wait");
+        },
+        async observeTmuxTask() {
+            throw new Error("unexpected observation");
+        },
+        invokeToolInternal: async (
+            target: string,
+            name: string,
+            _input: JsonValue,
+            context: ToolCallContext,
+        ) => {
+            changes.push(["internal", target, name, context]);
+            return {
+                task: { id: "final-task", status: "completed" },
+                output: "ready",
+            };
+        },
     });
     const endpoint = new McpEndpointWorker({
-        contextRegistry: registry, gateway, instanceName: "main-pc",
-        toolProvenance: { async record(value) { provenance.push(value); } },
-        worker: { ...createWorker({ tools: [bashTool, fileReadTool, { ...bashTool, group: "tmux", name: "tmux_run" }, { ...bashTool, group: "tmux", name: "tmux_read" }] }), prepareWorkspace: (workspace) => prepare("main-pc", workspace), appendMcpToolCalled: (name, context) => called("main-pc", name, context), async touchAlerts(workspace) { changes.push(["alerts", "main-pc", workspace]); } },
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        toolProvenance: {
+            async record(value) {
+                provenance.push(value);
+            },
+        },
+        worker: {
+            ...createWorker({
+                tools: [
+                    bashTool,
+                    fileReadTool,
+                    { ...bashTool, group: "tmux", name: "tmux_run" },
+                    { ...bashTool, group: "tmux", name: "tmux_read" },
+                ],
+            }),
+            prepareWorkspace: (workspace) => prepare("main-pc", workspace),
+            appendMcpToolCalled: (name, context) =>
+                called("main-pc", name, context),
+            async touchAlerts(workspace) {
+                changes.push(["alerts", "main-pc", workspace]);
+            },
+        },
     });
-    return { endpoint, registry, original, final, instance, changes, inputs, provenance, values, callIds, reviews };
+    return {
+        endpoint,
+        registry,
+        original,
+        final,
+        instance,
+        changes,
+        inputs,
+        provenance,
+        values,
+        callIds,
+        reviews,
+    };
 }
 
 for (const remote of [true, false]) {
     test(`MCP accepted bookkeeping uses final instance, tool and Context (${remote ? "remote" : "local"})`, async () => {
         const h = await rewrittenEndpoint("file_read", remote);
-        await h.endpoint.callTool("bash_run", { ctxId: h.original.ctxId, instance: "unknown", command: "original", purpose: "final target" }, context);
+        await h.endpoint.callTool(
+            "bash_run",
+            {
+                ctxId: h.original.ctxId,
+                instance: "unknown",
+                command: "original",
+                purpose: "final target",
+            },
+            context,
+        );
         assert.deepEqual(h.reviews, ["unknown"]);
-        assert.deepEqual(h.changes.filter((change) => change[0] === "ready"), [
-            ["ready", h.instance],
-            ["ready", h.instance],
+        assert.deepEqual(
+            h.changes.filter((change) => change[0] === "ready"),
+            [
+                ["ready", h.instance],
+                ["ready", h.instance],
+            ],
+        );
+        assert.deepEqual(
+            h.changes.find((change) => change[0] === "workspace"),
+            ["workspace", h.instance, "/final"],
+        );
+        assert.deepEqual(
+            h.changes.find((change) => change[0] === "event"),
+            ["event", h.instance, "file_read", h.values[0]!.context],
+        );
+        assert.deepEqual(h.provenance, [
+            {
+                callId: h.callIds[0],
+                instance: h.instance,
+                purpose: "final target",
+            },
         ]);
-        assert.deepEqual(h.changes.find((change) => change[0] === "workspace"), ["workspace", h.instance, "/final"]);
-        assert.deepEqual(h.changes.find((change) => change[0] === "event"), ["event", h.instance, "file_read", h.values[0]!.context]);
-        assert.deepEqual(h.provenance, [{ callId: h.callIds[0], instance: h.instance, purpose: "final target" }]);
-        assert.equal((await h.registry.validate(h.original.ctxId, context)).lastAccessedAt, h.original.lastAccessedAt);
-        assert.notEqual((await h.registry.validate(h.final.ctxId, context)).lastAccessedAt, h.final.lastAccessedAt);
-        assert.equal((await h.registry.readAutomaticReentry(h.final.ctxId, h.instance)).executionEpoch, 2);
+        assert.equal(
+            (await h.registry.validate(h.original.ctxId, context))
+                .lastAccessedAt,
+            h.original.lastAccessedAt,
+        );
+        assert.notEqual(
+            (await h.registry.validate(h.final.ctxId, context)).lastAccessedAt,
+            h.final.lastAccessedAt,
+        );
+        assert.equal(
+            (await h.registry.readAutomaticReentry(h.final.ctxId, h.instance))
+                .executionEpoch,
+            2,
+        );
     });
 }
 
 for (const name of ["tmux_run", "tmux_read"]) {
     test(`${name} adapts final rewritten input and finishes against final Context`, async () => {
         const h = await rewrittenEndpoint(name, true);
-        await h.endpoint.callTool(name, { ctxId: h.original.ctxId, instance: "unknown", command: "original", task: "original-task", wait: "block", timeMs: 180000, purpose: "tmux" }, context);
-        assert.deepEqual(h.inputs[0], name === "tmux_run" ? { command: "rewritten", task: "final-task", wait: "nonblock", timeMs: 180000, consumeOutput: false } : { consumeOutput: false, line: 0, task: "final-task", timeMs: 0 });
-        const internal = h.changes.find((change) => change[0] === "internal") as [string, string, string, ToolCallContext];
+        await h.endpoint.callTool(
+            name,
+            {
+                ctxId: h.original.ctxId,
+                instance: "unknown",
+                command: "original",
+                task: "original-task",
+                wait: "block",
+                timeMs: 180000,
+                purpose: "tmux",
+            },
+            context,
+        );
+        assert.deepEqual(
+            h.inputs[0],
+            name === "tmux_run"
+                ? {
+                      command: "rewritten",
+                      task: "final-task",
+                      wait: "nonblock",
+                      timeMs: 180000,
+                      consumeOutput: false,
+                  }
+                : {
+                      consumeOutput: false,
+                      line: 0,
+                      task: "final-task",
+                      timeMs: 0,
+                  },
+        );
+        const internal = h.changes.find(
+            (change) => change[0] === "internal",
+        ) as [string, string, string, ToolCallContext];
         assert.equal(internal[1], "final");
         assert.equal(internal[3].ctxId, h.final.ctxId);
     });
@@ -1936,19 +2217,51 @@ for (const name of ["tmux_run", "tmux_read"]) {
 for (const name of ["bash_run", "ext_original", "tmux_run"]) {
     test(`${name} rejected review leaves accepted MCP state untouched`, async () => {
         const h = await rewrittenEndpoint(name, true, true);
-        await assert.rejects(h.endpoint.callTool(name, { ctxId: h.original.ctxId, instance: "unknown", wait: "block", purpose: "rejected" }, context), { code: "core.toolCallRejected" });
+        await assert.rejects(
+            h.endpoint.callTool(
+                name,
+                {
+                    ctxId: h.original.ctxId,
+                    instance: "unknown",
+                    wait: "block",
+                    purpose: "rejected",
+                },
+                context,
+            ),
+            { code: "core.toolCallRejected" },
+        );
         assert.deepEqual(h.changes, []);
         assert.deepEqual(h.values, []);
         assert.deepEqual(h.provenance, []);
-        assert.deepEqual(await h.registry.validate(h.original.ctxId, context), h.original);
+        assert.deepEqual(
+            await h.registry.validate(h.original.ctxId, context),
+            h.original,
+        );
     });
 }
 
-
 test("MCP Extension operation uses final rewritten tool and Context without worker preparation", async () => {
     const h = await rewrittenEndpoint("ext_final", true);
-    await h.endpoint.callTool("ext_original", { ctxId: h.original.ctxId, purpose: "operation" }, context);
-    assert.deepEqual(h.changes.find((change) => change[0] === "extension"), ["extension", "final", "ext_final", h.values[0]!.payload, h.values[0]!.context]);
-    assert.equal(h.changes.some((change) => change[0] === "workspace"), false);
-    assert.deepEqual(h.provenance, [{ callId: h.callIds[0], instance: "final", purpose: "operation" }]);
+    await h.endpoint.callTool(
+        "ext_original",
+        { ctxId: h.original.ctxId, purpose: "operation" },
+        context,
+    );
+    assert.deepEqual(
+        h.changes.find((change) => change[0] === "extension"),
+        [
+            "extension",
+            "final",
+            "ext_final",
+            h.values[0]!.payload,
+            h.values[0]!.context,
+        ],
+    );
+    assert.equal(
+        h.changes.some((change) => change[0] === "workspace"),
+        false,
+    );
+    assert.deepEqual(h.provenance, [
+        { callId: h.callIds[0], instance: "final", purpose: "operation" },
+    ]);
 });

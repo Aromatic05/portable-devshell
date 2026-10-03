@@ -1,18 +1,15 @@
-import type { ContextRegistryPort, JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import type {
+    ContextRegistryPort,
+    JsonValue,
+    ToolCallContext,
+    ToolDefinition,
+} from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
-import {
-    ContextCleanupService,
-} from "../../control/src/control/context/Cleanup.ts";
-import {
-    ContextEnvironmentService,
-} from "../../control/src/control/context/Environment.ts";
-import {
-    ContextRegistry,
-} from "../../control/src/control/context/Registry.ts";
-import type { McpContextRegistryOptions } from "../../control/src/control/context/Model.ts";
-import {
-    ContextService,
-} from "../../control/src/control/context/Service.ts";
+import { ContextCleanupService } from "../../control/src/context/Cleanup.ts";
+import { ContextEnvironmentService } from "../../control/src/context/Environment.ts";
+import { ContextRegistry } from "../../control/src/context/Registry.ts";
+import type { McpContextRegistryOptions } from "../../control/src/context/Model.ts";
+import { ContextService } from "../../control/src/context/Service.ts";
 import {
     McpEndpointWorker,
     type McpEndpointWorkerOptions,
@@ -27,7 +24,12 @@ import type {
     McpEndpointWorkerPort,
     McpInstanceGateway,
 } from "../src/endpoint/Port.ts";
-import { ToolCallHookSequence, ToolCallPipeline, type ToolCallHookValue, type ToolCallTargetResolver } from "@portable-devshell/core";
+import {
+    ToolCallHookSequence,
+    ToolCallPipeline,
+    type ToolCallHookValue,
+    type ToolCallTargetResolver,
+} from "@portable-devshell/core";
 
 function unexpectedGatewayOperation(name: string): never {
     throw new Error(`Unexpected test gateway operation: ${name}`);
@@ -35,7 +37,8 @@ function unexpectedGatewayOperation(name: string): never {
 
 function createFailClosedGateway(): McpInstanceGateway {
     return {
-        appendMcpToolCalled: async () => unexpectedGatewayOperation("appendMcpToolCalled"),
+        appendMcpToolCalled: async () =>
+            unexpectedGatewayOperation("appendMcpToolCalled"),
         assertReady() {},
         callTool: async () => unexpectedGatewayOperation("callTool"),
         async callToolOperation<T extends JsonValue>(
@@ -43,7 +46,11 @@ function createFailClosedGateway(): McpInstanceGateway {
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
         ): Promise<T> {
             return await operation("test-call", input, {
                 kind: "call",
@@ -56,15 +63,20 @@ function createFailClosedGateway(): McpInstanceGateway {
         listInstances: async () => unexpectedGatewayOperation("listInstances"),
         listTools: () => [],
         readTodo: async () => unexpectedGatewayOperation("readTodo"),
-        prepareWorkspace: async () => unexpectedGatewayOperation("prepareWorkspace"),
+        prepareWorkspace: async () =>
+            unexpectedGatewayOperation("prepareWorkspace"),
         readAlerts: async () => unexpectedGatewayOperation("readAlerts"),
         releaseAlerts: async () => unexpectedGatewayOperation("releaseAlerts"),
-        connectInstance: async () => unexpectedGatewayOperation("connectInstance"),
-        releaseInstanceReference: async () => unexpectedGatewayOperation("releaseInstanceReference"),
-        statusInstance: async () => unexpectedGatewayOperation("statusInstance"),
+        connectInstance: async () =>
+            unexpectedGatewayOperation("connectInstance"),
+        releaseInstanceReference: async () =>
+            unexpectedGatewayOperation("releaseInstanceReference"),
+        statusInstance: async () =>
+            unexpectedGatewayOperation("statusInstance"),
         stopInstance: async () => unexpectedGatewayOperation("stopInstance"),
         touchAlerts: async () => unexpectedGatewayOperation("touchAlerts"),
-        touchTemporaryDirectory: async () => unexpectedGatewayOperation("touchTemporaryDirectory"),
+        touchTemporaryDirectory: async () =>
+            unexpectedGatewayOperation("touchTemporaryDirectory"),
         writeTodo: async () => unexpectedGatewayOperation("writeTodo"),
     };
 }
@@ -94,7 +106,11 @@ export function createTestCallOperationGateway(): McpInstanceGateway {
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
         ): Promise<T> {
             return await operation("test-call", input, {
                 kind: "call",
@@ -106,13 +122,15 @@ export function createTestCallOperationGateway(): McpInstanceGateway {
     };
 }
 
-export function createTestContextRuntime(options: {
-    contextRegistry?: ContextRegistryPort;
-    registryOptions?: McpContextRegistryOptions;
-    instanceName?: string;
-    gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
-    worker?: McpEndpointWorkerPort;
-} = {}) {
+export function createTestContextRuntime(
+    options: {
+        contextRegistry?: ContextRegistryPort;
+        registryOptions?: McpContextRegistryOptions;
+        instanceName?: string;
+        gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
+        worker?: McpEndpointWorkerPort;
+    } = {},
+) {
     const registry =
         options.contextRegistry ?? new ContextRegistry(options.registryOptions);
     const gateway = (_instance: string): McpInstanceGateway | undefined =>
@@ -143,13 +161,15 @@ export function createTestContextRuntime(options: {
     return { cleanup, environment, registry, service };
 }
 
-export function createTestContextEnvironment(options: {
-    contextRegistry?: ContextRegistryPort;
-    registryOptions?: McpContextRegistryOptions;
-    instanceName?: string;
-    gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
-    worker?: McpEndpointWorkerPort;
-} = {}) {
+export function createTestContextEnvironment(
+    options: {
+        contextRegistry?: ContextRegistryPort;
+        registryOptions?: McpContextRegistryOptions;
+        instanceName?: string;
+        gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
+        worker?: McpEndpointWorkerPort;
+    } = {},
+) {
     return createTestContextRuntime(options).environment;
 }
 
@@ -173,11 +193,13 @@ export function createTestEndpointDispatch(
     });
 }
 
-export function createTestMcpRuntimeState(options: {
-    contextFile?: string;
-    storageDir?: string;
-    workspaceAppLeaseFile?: string;
-} = {}) {
+export function createTestMcpRuntimeState(
+    options: {
+        contextFile?: string;
+        storageDir?: string;
+        workspaceAppLeaseFile?: string;
+    } = {},
+) {
     const registry = new ContextRegistry({
         ...(options.contextFile === undefined
             ? {}

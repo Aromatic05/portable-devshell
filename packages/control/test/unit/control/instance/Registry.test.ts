@@ -9,6 +9,7 @@ import {
     McpEndpointFactory,
     McpRuntimeFactory,
 } from "../../../../src/testing.ts";
+import { McpRuntimeState } from "@portable-devshell/mcp";
 import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
@@ -67,7 +68,13 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         workspaceEnabled: true,
     });
 
-    const host = new McpRuntimeFactory().wire(config, registry);
+    const host = new McpRuntimeFactory().wire(config, registry, {
+        runtimeState: new McpRuntimeState({
+            contexts: {
+                bindPresentation() {},
+            } as never,
+        }),
+    });
 
     assert.ok(host !== undefined);
     assert.ok(host.server);

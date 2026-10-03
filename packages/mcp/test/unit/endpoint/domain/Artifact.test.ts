@@ -4,10 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
-import {
-    type McpInstanceGateway,
-} from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
 import { TestMcpEndpointWorker as McpEndpointWorker } from "../../../ContextRuntime.ts";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;
@@ -15,10 +13,12 @@ const contextRegistry = new McpContextRegistry({
     idFactory: () => "ctx-artifact-test",
 });
 const activeContext = await contextRegistry.create({
-    environments: [{
-        instance: "main-pc",
-        workspace: "/workspace",
-    }],
+    environments: [
+        {
+            instance: "main-pc",
+            workspace: "/workspace",
+        },
+    ],
     principal: "local",
 });
 const withContext = <T extends Record<string, unknown>>(
@@ -127,7 +127,11 @@ function createGateway(
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
             signal?: AbortSignal,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
@@ -140,7 +144,12 @@ function createGateway(
                     signal,
                 );
             }
-            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
+            return await operation("call-test", input, {
+                kind: "call",
+                toolName: toolName,
+                payload: input,
+                context: { ...context, instance: asInstanceName(instance) },
+            });
         },
         async callTool() {
             return {};
@@ -226,9 +235,18 @@ test("native control result uses the Boundary-returned structured content", asyn
         _toolName: string,
         input: JsonValue,
         _context: ToolCallContext,
-        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+        operation: (
+            callId: string,
+            input: JsonValue,
+            finalValue: ToolCallHookValue,
+        ) => Promise<T>,
     ): Promise<T> => {
-        const result = await operation("call-boundary", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
+        const result = await operation("call-boundary", input, {
+            kind: "call",
+            toolName: _toolName,
+            payload: input,
+            context: { ..._context, instance: asInstanceName(instance) },
+        });
         return {
             ...(result as Record<string, JsonValue>),
             name: "outer-masked.png",

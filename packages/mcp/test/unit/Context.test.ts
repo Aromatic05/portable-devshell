@@ -9,16 +9,20 @@ import {
     McpNativeToolResult,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { ContextCleanupService } from "../../../control/src/control/context/Cleanup.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../control/src/control/context/Registry.ts";
-import { TestMcpEndpointWorker as McpEndpointWorker, TestMcpHost as McpHost, createTestMcpRuntimeState } from "../ContextRuntime.ts";
+import { ContextCleanupService } from "../../../control/src/context/Cleanup.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../control/src/context/Registry.ts";
+import {
+    TestMcpEndpointWorker as McpEndpointWorker,
+    TestMcpHost as McpHost,
+    createTestMcpRuntimeState,
+} from "../ContextRuntime.ts";
 import type {
     JsonValue,
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-import { ContextExecutionStore as McpContextExecutionStore } from "../../../control/src/control/context/Execution.ts";
+import { ContextExecutionStore as McpContextExecutionStore } from "../../../control/src/context/Execution.ts";
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
     return (
@@ -56,10 +60,12 @@ test("McpContextRegistry persists active contexts and renews their sliding expir
         });
         await registry.initialize();
         const created = await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         assert.equal(created.ctxId, "ctx-persisted");
@@ -116,10 +122,12 @@ test("McpContextRegistry keeps remote handles private and makes masking durable 
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/alpha",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/alpha",
+                },
+            ],
             principal: "subject",
         });
 
@@ -252,10 +260,12 @@ test("McpContextRegistry batches sliding lease persistence until the durable lea
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "subject",
         });
 
@@ -297,17 +307,21 @@ test("McpContextRegistry persists detached instance environments across restart"
         });
         await registry.initialize();
         const single = await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/alpha/single",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/alpha/single",
+                },
+            ],
             principal: "subject",
         });
         const multi = await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/alpha/multi",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/alpha/multi",
+                },
+            ],
             principal: "subject",
         });
         await registry.attachEnvironment(multi.ctxId, {
@@ -362,10 +376,12 @@ test("McpContextRegistry arbitrates one automatic re-entry and preserves explici
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
 
@@ -508,10 +524,12 @@ test("McpContextRegistry binds re-entry ownership to one instance and exposes on
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/alpha",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/alpha",
+                },
+            ],
             principal: "local",
         });
         await registry.attachEnvironment("ctx-reentry-owner", {
@@ -590,10 +608,12 @@ test("McpContextRegistry drops legacy re-entry claims that have no instance owne
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         await registry.claimAutomaticReentry(
@@ -648,10 +668,12 @@ test("McpContextRegistry execution lease fences automatic re-entry across tool a
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
 
@@ -758,10 +780,12 @@ test("McpContextRegistry releases only the execution lease owned by the expected
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         const structuralState = await readFile(filePath, "utf8");
@@ -828,10 +852,12 @@ test("McpContextRegistry prunes execution sidecar state with terminal Context hi
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         await registry.observeExecutionActivity(
@@ -876,10 +902,12 @@ test("McpContextRegistry ordinary instance validation does not depend on executi
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         await writeFile(executionFilePath, "not-a-sqlite-database", "utf8");
@@ -918,10 +946,12 @@ test("McpContextRegistry attempted delivery survives claim TTL and execution act
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/workspace",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/workspace",
+                },
+            ],
             principal: "local",
         });
         assert.equal(
@@ -1013,10 +1043,12 @@ test("McpContextRegistry keeps external bindings private and does not retire the
         });
         await registry.initialize();
         const oldContext = await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/old",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/old",
+                },
+            ],
             principal: "subject-1",
         });
         await registry.bindExternal(oldContext.ctxId, selector, {
@@ -1033,10 +1065,12 @@ test("McpContextRegistry keeps external bindings private and does not retire the
         assert.equal("externalSelector" in (await registry.list())[0]!, false);
 
         const current = await registry.create({
-            environments: [{
-                instance: "demo-local",
-                workspace: "/current",
-            }],
+            environments: [
+                {
+                    instance: "demo-local",
+                    workspace: "/current",
+                },
+            ],
             principal: "subject-1",
         });
         await registry.bindExternal(current.ctxId, selector, {
@@ -1225,7 +1259,9 @@ test("McpContextRegistry rolls back in-memory mutations when persistence fails",
             principal: "local",
         });
         const target = await atomicRegistry.create({
-            environments: [{ instance: "demo-local", workspace: "/target-old" }],
+            environments: [
+                { instance: "demo-local", workspace: "/target-old" },
+            ],
             principal: "local",
         });
         await rm(atomicPath, { force: true });
@@ -1246,9 +1282,9 @@ test("McpContextRegistry rolls back in-memory mutations when persistence fails",
             ),
         );
         assert.equal(
-            (await atomicRegistry.list()).find(
-                ({ ctxId }) => ctxId === target.ctxId,
-            )?.environments.find(({ instance }) => instance === "demo-local")
+            (await atomicRegistry.list())
+                .find(({ ctxId }) => ctxId === target.ctxId)
+                ?.environments.find(({ instance }) => instance === "demo-local")
                 ?.workspace,
             "/target-old",
         );
@@ -1319,10 +1355,12 @@ test("McpContextRegistry validates attached instances without binding ctxId auth
     });
     await registry.initialize();
     const created = await registry.create({
-        environments: [{
-            instance: "alpha",
-            workspace: "/workspace/alpha",
-        }],
+        environments: [
+            {
+                instance: "alpha",
+                workspace: "/workspace/alpha",
+            },
+        ],
         principal: "client-alpha",
     });
 
@@ -1444,10 +1482,12 @@ test("McpContextRegistry never compacts terminal Context cleanup debt", async ()
     });
     await registry.initialize();
     await registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/workspace",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/workspace",
+            },
+        ],
         principal: "local",
     });
 
@@ -1523,10 +1563,12 @@ test("McpContextRegistry persists environment cleanup debt across workspace repl
         });
         await registry.initialize();
         await registry.create({
-            environments: [{
-                instance: "alpha",
-                workspace: "/alpha",
-            }],
+            environments: [
+                {
+                    instance: "alpha",
+                    workspace: "/alpha",
+                },
+            ],
             principal: "local",
         });
         const reference = await registry.referenceInstance(
@@ -1613,10 +1655,12 @@ test("McpContextRegistry detach preserves unresolved environment cleanup debt", 
     });
     await registry.initialize();
     await registry.create({
-        environments: [{
-            instance: "alpha",
-            workspace: "/alpha",
-        }],
+        environments: [
+            {
+                instance: "alpha",
+                workspace: "/alpha",
+            },
+        ],
         principal: "local",
     });
     await registry.referenceInstance("ctx-detach-cleanup-debt", "beta");
@@ -1660,15 +1704,19 @@ test("McpContextRegistry detach preserves unresolved environment cleanup debt", 
         },
     ]);
     assert.deepEqual(
-        (await registry.lookup("ctx-detach-cleanup-debt", {
-            principal: "local",
-        })).environments.map((environment) => environment.instance),
+        (
+            await registry.lookup("ctx-detach-cleanup-debt", {
+                principal: "local",
+            })
+        ).environments.map((environment) => environment.instance),
         ["alpha"],
     );
 });
 
 test("McpContextRegistry fails closed on malformed persisted environment cleanup debt", async () => {
-    const root = await createTestTempDirectory("context-environment-cleanup-invalid");
+    const root = await createTestTempDirectory(
+        "context-environment-cleanup-invalid",
+    );
     const filePath = join(root, "contexts.json");
     try {
         await writeFile(
@@ -1741,10 +1789,12 @@ test("Context reference cleanup remains pending when the gateway cannot release 
     });
     await registry.initialize();
     await registry.create({
-        environments: [{
-            instance: "alpha",
-            workspace: "/alpha",
-        }],
+        environments: [
+            {
+                instance: "alpha",
+                workspace: "/alpha",
+            },
+        ],
         principal: "local",
     });
     await registry.recordEnvironmentCleanup("ctx-cleanup-capability", {
@@ -1761,7 +1811,8 @@ test("Context reference cleanup remains pending when the gateway cannot release 
         (error: unknown) => error instanceof AggregateError,
     );
     assert.equal(
-        (await registry.listEnvironmentCleanup("ctx-cleanup-capability")).length,
+        (await registry.listEnvironmentCleanup("ctx-cleanup-capability"))
+            .length,
         1,
     );
 });
@@ -1849,22 +1900,25 @@ test("McpHost context admin releases alerts only after the last workspace contex
                         terminalContexts.push(ctxId);
                     },
                     approval: {
-                    async listApprovals() {
-                        return approvals;
-                    },
-                    async cancelApproval(
-                        _instance: string,
-                        approvalId: string,
-                        reason?: string,
-                    ) {
-                        assert.match(reason ?? "", /Context .* was disabled/u);
-                        cancelledApprovals.push(approvalId);
-                        const approval = approvals.find(
-                            (entry) => entry.approvalId === approvalId,
-                        )!;
-                        approval.status = "cancelled";
-                        return approval;
-                    },
+                        async listApprovals() {
+                            return approvals;
+                        },
+                        async cancelApproval(
+                            _instance: string,
+                            approvalId: string,
+                            reason?: string,
+                        ) {
+                            assert.match(
+                                reason ?? "",
+                                /Context .* was disabled/u,
+                            );
+                            cancelledApprovals.push(approvalId);
+                            const approval = approvals.find(
+                                (entry) => entry.approvalId === approvalId,
+                            )!;
+                            approval.status = "cancelled";
+                            return approval;
+                        },
                     },
                 } as never,
                 name: "demo-local",
@@ -1884,17 +1938,21 @@ test("McpHost context admin releases alerts only after the last workspace contex
     });
     await host.contexts.initialize();
     const first = await host.contexts.registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/alpha",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/alpha",
+            },
+        ],
         principal: "local",
     });
     const second = await host.contexts.registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/alpha",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/alpha",
+            },
+        ],
         principal: "local",
     });
     waits.push(
@@ -1956,10 +2014,12 @@ test("McpHost context admin releases alerts only after the last workspace contex
     ]);
 
     const renewed = await host.contexts.registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/beta",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/beta",
+            },
+        ],
         principal: "local",
     });
     await host.contexts.renew(renewed.ctxId);
@@ -1991,10 +2051,12 @@ test("terminal Context cleanup attempts alert release even when the worker is no
     });
     await host.contexts.initialize();
     const context = await host.contexts.registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/offline",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/offline",
+            },
+        ],
         principal: "local",
     });
 
@@ -2034,10 +2096,12 @@ test("disabled Context cleanup is reconciled from durable state after restart", 
     );
     await firstHost.contexts.initialize();
     const context = await firstHost.contexts.registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/reconcile",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/reconcile",
+            },
+        ],
         principal: "local",
     });
     const originalWarn = console.warn;
@@ -2152,26 +2216,61 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
             throw releaseAlertError;
         }
     };
-    const gateway: Pick<McpInstanceGateway, "callTool" | "callToolOperation" | "assertReady" | "listTools" | "releaseAlerts"> = {
-            async callToolOperation<T extends JsonValue>(
-                instance: string,
-                _toolName: string,
+    const gateway: Pick<
+        McpInstanceGateway,
+        | "callTool"
+        | "callToolOperation"
+        | "assertReady"
+        | "listTools"
+        | "releaseAlerts"
+    > = {
+        async callToolOperation<T extends JsonValue>(
+            instance: string,
+            _toolName: string,
+            input: JsonValue,
+            _context: ToolCallContext,
+            operation: (
+                callId: string,
                 input: JsonValue,
-                _context: ToolCallContext,
-                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
-                _signal?: AbortSignal,
-            ): Promise<T> {
-                return await operation("call-test", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
-            },
-            async callTool(instance, toolName, input, context, _signal, transformResult, invocationInput) {
-                const finalValue: ToolCallHookValue = { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } };
-                const prepared = await invocationInput?.(input, "call-test", finalValue) ?? input;
-                calls.push({ context, input: prepared, toolName });
-                return await transformResult?.({ ok: true }, "call-test") ?? { ok: true };
-            },
-            async releaseAlerts(_instance: string, workspace: string) {
-                await releaseAlerts(workspace);
-            },
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
+            _signal?: AbortSignal,
+        ): Promise<T> {
+            return await operation("call-test", input, {
+                kind: "call",
+                toolName: _toolName,
+                payload: input,
+                context: { ..._context, instance: asInstanceName(instance) },
+            });
+        },
+        async callTool(
+            instance,
+            toolName,
+            input,
+            context,
+            _signal,
+            transformResult,
+            invocationInput,
+        ) {
+            const finalValue: ToolCallHookValue = {
+                kind: "call",
+                toolName,
+                payload: input,
+                context: { ...context, instance: asInstanceName(instance) },
+            };
+            const prepared =
+                (await invocationInput?.(input, "call-test", finalValue)) ??
+                input;
+            calls.push({ context, input: prepared, toolName });
+            return (
+                (await transformResult?.({ ok: true }, "call-test")) ?? {
+                    ok: true,
+                }
+            );
+        },
+        async releaseAlerts(_instance: string, workspace: string) {
+            await releaseAlerts(workspace);
+        },
         assertReady() {},
         listTools: () => [bashRun],
     };
@@ -2351,10 +2450,9 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         { command: "pwd", ctxId: "ctx-created" },
         { principal: "local", requestId: "run" },
     );
-    assert.deepEqual(
-        structuredResult<Record<string, JsonValue>>(run).comment,
-        ["Workspace temporary storage is overused."],
-    );
+    assert.deepEqual(structuredResult<Record<string, JsonValue>>(run).comment, [
+        "Workspace temporary storage is overused.",
+    ]);
     assert.deepEqual(calls, [
         {
             context: {

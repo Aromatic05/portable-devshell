@@ -126,8 +126,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 () =>
                     runtime.store.getState().connection.status === "connected",
             );
+            runtime.store.setSelectedInstance("demo");
             await waitUntil(
-                () => runtime.store.getState().ui.selectedInstance === "demo",
+                () => runtime.reader.mcp.status?.authMode === "oauth2",
             );
             await openOAuthPage(runtime, terminal);
 

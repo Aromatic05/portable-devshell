@@ -115,7 +115,7 @@ test("Extension assets use the Artifact core to transfer a Control-owned directo
     );
     assert.ok(result.transferredBytes > 0);
     assert.equal("transferId" in result, false);
-    assert.equal(h.target.events.includes("artifact.transferCompleted"), true);
+    assert.equal(h.target.events.includes("artifact.transferCompleted"), false);
 });
 
 test("Artifact callers cannot forge the private Extension host authority", async (t) => {

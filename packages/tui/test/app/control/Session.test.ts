@@ -325,7 +325,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         session.store.setSelectedInstance("alpha");
         session.store.setSelectedPage("audit");
         await session.refreshAudit("alpha");
-        session.domains.messages.mergeMessage("alpha", {
+        worker.addMessage({
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
             id: "message-1",
@@ -333,7 +333,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             status: "sent",
             text: "first guidance",
         });
-        session.domains.messages.mergeMessage("alpha", {
+        worker.addMessage({
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
             id: "message-2",
@@ -341,6 +341,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             status: "sent",
             text: "second guidance",
         });
+        await session.domains.messages.load(["alpha"]);
 
         const firstCompletedAt = new Date(10).toISOString();
         worker.addToolCall({
@@ -471,7 +472,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await session.start();
             assert.equal(
                 session.store.getState().connection.status,
-                "disconnected",
+                "error",
             );
             assert.equal(
                 session.store.getState().connection.errorCode,
@@ -526,14 +527,21 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await session.start();
-        await waitFor(() => worker.subscribeFromSeqs.length === 1);
-        const rawEventCount = session.store.getState().rawEvents.length;
-        const subscriptionReads = worker.subscribeFromSeqs.length;
-        worker.emit("mcp.sessionOpened", { sessionId: "invisible-session" });
         await waitFor(
-            () => worker.subscribeFromSeqs.length > subscriptionReads,
+            () => session.store.getState().connection.status === "connected",
         );
+        await session.refreshAudit("alpha");
+        await waitFor(() => worker.subscribeFromSeqs.length >= 1);
+        const rawEventCount = session.store.getState().rawEvents.length;
+        const toolCallsBefore =
+            session.domains.toolCalls.state.instances.alpha?.calls.length ?? 0;
+        worker.emit("mcp.sessionOpened", { sessionId: "invisible-session" });
+        await new Promise<void>((resolve) => setTimeout(resolve, 80));
         assert.equal(session.store.getState().rawEvents.length, rawEventCount);
+        assert.equal(
+            session.domains.toolCalls.state.instances.alpha?.calls.length ?? 0,
+            toolCallsBefore,
+        );
     });
 
     test("TUI domain session sends explicit instance operations and preserves start relay output", async (t) => {
@@ -833,6 +841,21 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                                                       worker.snapshot().lastSeq,
                                               }) as unknown as JsonValue,
                                       },
+                                      {
+                                          name: "listContextMessages",
+                                          handle: async () =>
+                                              worker.listContextMessages() as unknown as JsonValue,
+                                      },
+                                      {
+                                          name: "queueContextMessage",
+                                          handle: async (request) =>
+                                              worker.queueContextMessage(
+                                                  request.payload as {
+                                                      ctxId: string;
+                                                      text: string;
+                                                  },
+                                              ) as unknown as JsonValue,
+                                      },
                                   ],
                               },
                           ];
@@ -847,6 +870,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 },
                 listTransfers() {
                     return [];
+                },
+            } as never,
+            toolCalls: {
+                async call(..._args: unknown[]) {
+                    return (await worker.callTool()) as unknown as JsonValue;
                 },
             } as never,
             contextAdmin:
@@ -963,6 +991,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             stream: "stderr" | "stdout";
         }>;
         readonly #toolCalls: ToolCallRecord[];
+        readonly #messages: ContextMessageRecord[] = [];
         snapshotCallCount = 0;
         subscribeFromSeqs: number[] = [];
         logReadQueries: Array<{ limit?: number }> = [];
@@ -1063,6 +1092,36 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         async readLogs(query?: { limit?: number }) {
             this.logReadQueries.push(query ?? {});
             return this.#logs;
+        }
+
+        addMessage(message: ContextMessageRecord): void {
+            this.#messages.push({ ...message });
+        }
+
+        listContextMessages(): {
+            messages: ContextMessageRecord[];
+            lastSeq: number;
+        } {
+            return {
+                messages: this.#messages.map((message) => ({ ...message })),
+                lastSeq: this.#lastSeq,
+            };
+        }
+
+        queueContextMessage(input: {
+            ctxId: string;
+            text: string;
+        }): ContextMessageRecord {
+            const queued: ContextMessageRecord = {
+                createdAt: new Date().toISOString(),
+                ctxId: input.ctxId,
+                id: `queued-${this.#messages.length + 1}`,
+                instance: this.#name,
+                status: "pending",
+                text: input.text,
+            };
+            this.#messages.push(queued);
+            return queued;
         }
 
         async readToolCalls(query: ToolCallQuery = {}) {
@@ -1181,6 +1240,23 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
             this.#lastSeq = event.seq;
             this.#events.push(event);
+            if (type === "context.message.delivered") {
+                const ids = Array.isArray(data?.ids)
+                    ? data.ids.filter(
+                          (id): id is string => typeof id === "string",
+                      )
+                    : [];
+                for (const [index, message] of this.#messages.entries()) {
+                    if (!ids.includes(message.id)) continue;
+                    this.#messages[index] = {
+                        ...message,
+                        ...(typeof data?.callId === "string"
+                            ? { callId: data.callId }
+                            : {}),
+                        status: "delivered",
+                    };
+                }
+            }
         }
 
         dropBefore(seq: number): void {

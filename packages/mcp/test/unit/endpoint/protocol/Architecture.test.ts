@@ -15,7 +15,7 @@ import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
 import { mcpTmuxBlockSyncMsForContextMode } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import type { McpInstanceGateway } from "../../../../src/endpoint/Port.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry.ts";
 import { createTestEndpointDispatch } from "../../../ContextRuntime.ts";
 import { createMcpContextSelector } from "../../../../src/context/Selector.ts";
 
@@ -171,11 +171,20 @@ function createWorker(
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            operation: (
+                callId: string,
+                input: JsonValue,
+                finalValue: ToolCallHookValue,
+            ) => Promise<T>,
             _signal?: AbortSignal,
         ): Promise<T> {
             audited.push({ context, toolName });
-            const result = await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
+            const result = await operation("call-test", input, {
+                kind: "call",
+                toolName: toolName,
+                payload: input,
+                context: { ...context, instance: asInstanceName(instance) },
+            });
             auditResults.push({ result, toolName });
             if (options.failAuditAfterOperation === true)
                 throw new Error("audit finalize failed");
@@ -191,13 +200,28 @@ function createWorker(
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            invocationInput?: (
+                input: JsonValue,
+                callId: string,
+                finalValue: ToolCallHookValue,
+            ) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
         ): Promise<JsonValue> {
-            input = await invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } }) ?? input;
+            input =
+                (await invocationInput?.(input, "call-test", {
+                    kind: "call",
+                    toolName,
+                    payload: input,
+                    context: { ...context, instance: asInstanceName(instance) },
+                })) ?? input;
             calls.push({ context, input, toolName });
-            return await transformResult?.({ ok: true, toolName }, "call-test") ?? { ok: true, toolName };
+            return (
+                (await transformResult?.(
+                    { ok: true, toolName },
+                    "call-test",
+                )) ?? { ok: true, toolName }
+            );
         },
         async appendMcpToolCalled() {},
         approval: {
@@ -214,28 +238,64 @@ function createWorker(
         assertReady() {},
         environment: () => worker.handshake,
         listTools: () => options.tools ?? [workerTool()],
-        async listInstances() { return []; },
-        async prepareWorkspace(_instance, workspace) { return await worker.prepareWorkspace(workspace); },
-        async readAlerts() { return { advice: [] }; },
+        async listInstances() {
+            return [];
+        },
+        async prepareWorkspace(_instance, workspace) {
+            return await worker.prepareWorkspace(workspace);
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
         async releaseAlerts(_instance: string, workspace: string) {
             releasedAlerts.push(workspace);
         },
         async touchAlerts() {},
         async touchTemporaryDirectory() {},
-        async connectInstance() { return {}; },
+        async connectInstance() {
+            return {};
+        },
         async releaseInstanceReference() {},
-        async statusInstance() { return {}; },
-        async stopInstance() { return {}; },
-        async readTodo() { return {}; },
-        async writeTodo() { return {}; },
-        async createWait() { throw new Error("unexpected wait creation"); },
-        async detachWait() { throw new Error("unexpected wait detachment"); },
-        async consumeWait() { throw new Error("unexpected wait consumption"); },
-        async resolveWait() { throw new Error("unexpected wait resolution"); },
-        async waitForWait() { throw new Error("unexpected wait"); },
-        async listWaits() { return []; },
+        async statusInstance() {
+            return {};
+        },
+        async stopInstance() {
+            return {};
+        },
+        async readTodo() {
+            return {};
+        },
+        async writeTodo() {
+            return {};
+        },
+        async createWait() {
+            throw new Error("unexpected wait creation");
+        },
+        async detachWait() {
+            throw new Error("unexpected wait detachment");
+        },
+        async consumeWait() {
+            throw new Error("unexpected wait consumption");
+        },
+        async resolveWait() {
+            throw new Error("unexpected wait resolution");
+        },
+        async waitForWait() {
+            throw new Error("unexpected wait");
+        },
+        async listWaits() {
+            return [];
+        },
     };
-    return { audited, auditResults, calls, events, gateway, releasedAlerts, worker };
+    return {
+        audited,
+        auditResults,
+        calls,
+        events,
+        gateway,
+        releasedAlerts,
+        worker,
+    };
 }
 
 test("McpEndpointCatalog keeps control tools available without a worker schema", () => {
@@ -774,8 +834,19 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
-        async invokeToolInternal(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal) {
-            return await ingress.invokeToolInternal("demo-local", toolName, input, context, signal);
+        async invokeToolInternal(
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+            signal?: AbortSignal,
+        ) {
+            return await ingress.invokeToolInternal(
+                "demo-local",
+                toolName,
+                input,
+                context,
+                signal,
+            );
         },
     };
     const ingress = {
@@ -815,7 +886,11 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            invocationInput?: (
+                input: JsonValue,
+                callId: string,
+                finalValue: ToolCallHookValue,
+            ) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
         ): Promise<JsonValue> {
@@ -829,7 +904,16 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             assert.deepEqual(
                 invocationInput === undefined
                     ? input
-                    : await invocationInput(input, callId, { kind: "call", toolName: toolName, payload: input, context: { ..._context, source: "mcp", instance: asInstanceName(instance) } }),
+                    : await invocationInput(input, callId, {
+                          kind: "call",
+                          toolName: toolName,
+                          payload: input,
+                          context: {
+                              ..._context,
+                              source: "mcp",
+                              instance: asInstanceName(instance),
+                          },
+                      }),
                 {
                     command: "sleep 10",
                     consumeOutput: false,
@@ -1082,26 +1166,46 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     assert.equal(waits[0]?.status, "waiting");
     const snapshot = structuredResult<{
         presentation: {
-            background: Array<{ id: string; actions: Array<{ id: string; label: string }> }>;
-            primary?: { id: string; actions: Array<{ id: string; label: string }> };
-            work: Array<{ id: string; actions: Array<{ id: string; label: string }> }>;
+            background: Array<{
+                id: string;
+                actions: Array<{ id: string; label: string }>;
+            }>;
+            primary?: {
+                id: string;
+                actions: Array<{ id: string; label: string }>;
+            };
+            work: Array<{
+                id: string;
+                actions: Array<{ id: string; label: string }>;
+            }>;
         };
-    }>(await dispatch.callTool(
-        "workspace_snapshot",
-        { ctxId: environment.ctxId, token },
-        { principal: "tester", requestId: "snapshot-before-interrupt" },
-    ));
+    }>(
+        await dispatch.callTool(
+            "workspace_snapshot",
+            { ctxId: environment.ctxId, token },
+            { principal: "tester", requestId: "snapshot-before-interrupt" },
+        ),
+    );
     const interruptItem = [
-        ...(snapshot.presentation.primary ? [snapshot.presentation.primary] : []),
+        ...(snapshot.presentation.primary
+            ? [snapshot.presentation.primary]
+            : []),
         ...snapshot.presentation.work,
         ...snapshot.presentation.background,
     ].find((item) => item.id === waits[0]!.waitId);
     assert.ok(interruptItem);
-    const stopWaiting = interruptItem.actions.find((action) => action.label === "Stop waiting");
+    const stopWaiting = interruptItem.actions.find(
+        (action) => action.label === "Stop waiting",
+    );
     assert.ok(stopWaiting);
     await dispatch.callTool(
         "workspace_action",
-        { actionId: stopWaiting.id, ctxId: environment.ctxId, itemId: interruptItem.id, token },
+        {
+            actionId: stopWaiting.id,
+            ctxId: environment.ctxId,
+            itemId: interruptItem.id,
+            token,
+        },
         { principal: "tester", requestId: "interrupt-wait" },
     );
     const interrupted = await interruptible;
@@ -1307,11 +1411,18 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     let internalReadCalls = 0;
     let logicalReadCalls = 0;
     const goalActivityKinds: GoalActivityKind[] = [];
-    const harness = createWorker({ cached: true, tools: [tmuxReadBlockTool()] });
+    const harness = createWorker({
+        cached: true,
+        tools: [tmuxReadBlockTool()],
+    });
     const worker = {
         ...harness.worker,
         async invokeToolInternal(toolName: string, input: JsonValue) {
-            return await ingress.invokeToolInternal("demo-local", toolName, input);
+            return await ingress.invokeToolInternal(
+                "demo-local",
+                toolName,
+                input,
+            );
         },
     };
     const ingress = {
@@ -1334,7 +1445,11 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            invocationInput?: (
+                input: JsonValue,
+                callId: string,
+                finalValue: ToolCallHookValue,
+            ) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
         ): Promise<JsonValue> {
@@ -1343,7 +1458,16 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
             const result = await readTmux(
                 invocationInput === undefined
                     ? input
-                    : await invocationInput(input, "call-tmux-read", { kind: "call", toolName: toolName, payload: input, context: { ..._context, source: "mcp", instance: asInstanceName(instance) } }),
+                    : await invocationInput(input, "call-tmux-read", {
+                          kind: "call",
+                          toolName: toolName,
+                          payload: input,
+                          context: {
+                              ..._context,
+                              source: "mcp",
+                              instance: asInstanceName(instance),
+                          },
+                      }),
             );
             return transformResult === undefined
                 ? result
@@ -1743,10 +1867,12 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const oldContext = await registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/old",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/old",
+            },
+        ],
         principal: "tester",
     });
     const stoppedGoals: string[] = [];
@@ -1816,10 +1942,12 @@ test("successful environ_info creates a new explicit Context without retiring ol
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const oldContext = await registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/old",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/old",
+            },
+        ],
         principal: "tester",
     });
     const releasedAlerts: string[] = [];
@@ -1896,10 +2024,12 @@ test("environ_info releases the previous workspace alert lease after an explicit
         idFactory: () => "ctx-switch-workspace",
     });
     const context = await registry.create({
-        environments: [{
-            instance: "demo-local",
-            workspace: "/projects/old",
-        }],
+        environments: [
+            {
+                instance: "demo-local",
+                workspace: "/projects/old",
+            },
+        ],
         principal: "tester",
     });
     const harness = createWorker();
@@ -2021,10 +2151,12 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     const ids = ["ctx-existing", "ctx-rollback"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const existing = await registry.create({
-        environments: [{
-            instance: "origin",
-            workspace: "/projects/origin",
-        }],
+        environments: [
+            {
+                instance: "origin",
+                workspace: "/projects/origin",
+            },
+        ],
         principal: "tester",
     });
     await registry.attachEnvironment(existing.ctxId, {

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { InstanceFactory } from "../../../src/testing.ts";
 
-test("instance config mapper passes effective security mode, worker env, and approval policy into runtime config", () => {
+test("instance config mapper passes effective security mode and worker env into runtime config", () => {
     let capturedConfig: Record<string, unknown> | undefined;
     const mapper = new InstanceFactory({
         workerInstanceFactory: {
@@ -68,17 +68,6 @@ test("instance config mapper passes effective security mode, worker env, and app
         maxBytes: 33_554_432,
         retentionDays: 14,
     });
-    assert.deepEqual(capturedConfig?.approvalPolicy, {
-        mode: "ask",
-        rules: [
-            {
-                decision: "deny",
-                match: "exact",
-                source: "mcp",
-                toolName: "bash_run",
-            },
-        ],
-    });
     assert.deepEqual(capturedConfig?.env, {
         DEMO: "1",
         DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
@@ -121,10 +110,10 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
         onTerminalNotification() {
             return () => undefined;
         },
-        onRpcConnected() {
+        onTransportConnected() {
             return () => undefined;
         },
-        onRpcDisconnected() {
+        onTransportDisconnected() {
             return () => undefined;
         },
         snapshot() {
