@@ -55,6 +55,7 @@ import type {
     ExtensionPointValidationContext,
 } from "../registration/PointRegistry.js";
 import { ExtensionHostModuleResolver } from "../discovery/ModuleResolver.js";
+import { readExtensionModule } from "../Entry.js";
 import { hardenSandboxRuntime } from "./Hardening.js";
 import {
     assertExtensionSandboxMessage,
@@ -177,7 +178,10 @@ async function bootstrap(): Promise<void> {
 
 async function initialize(): Promise<void> {
     try {
-        extensionModule = readExtensionModule(await import(data.entryUrl));
+        extensionModule = readExtensionModule(
+            await import(data.entryUrl),
+            data.context.id,
+        );
         await extensionModule.activate(createContext());
         send({ descriptor: describeRegistrations(), type: "ready" });
     } catch (error) {
@@ -1115,66 +1119,6 @@ function requireRegistration(pointId: string, id: string): unknown {
 
 function registrationKey(pointId: string, id: string): string {
     return `${pointId}\u0000${id}`;
-}
-
-function readExtensionModule(value: unknown): ExtensionModule {
-    if (!isRecord(value) || typeof value.activate !== "function") {
-        throw new TypeError(
-            `Extension ${data.context.id} entry must export an activate(context) function.`,
-        );
-    }
-    if (
-        value.deactivate !== undefined &&
-        typeof value.deactivate !== "function"
-    ) {
-        throw new TypeError(
-            `Extension ${data.context.id} deactivate export must be a function.`,
-        );
-    }
-    if (
-        value.contextEnvironmentRetired !== undefined &&
-        typeof value.contextEnvironmentRetired !== "function"
-    ) {
-        throw new TypeError(
-            "Extension " +
-                data.context.id +
-                " contextEnvironmentRetired export must be a function.",
-        );
-    }
-    if (
-        value.instanceGenerationRetired !== undefined &&
-        typeof value.instanceGenerationRetired !== "function"
-    ) {
-        throw new TypeError(
-            `Extension ${data.context.id} instanceGenerationRetired export must be a function.`,
-        );
-    }
-    return {
-        activate: value.activate as ExtensionModule["activate"],
-        ...(value.deactivate === undefined
-            ? {}
-            : {
-                  deactivate: value.deactivate as NonNullable<
-                      ExtensionModule["deactivate"]
-                  >,
-              }),
-        ...(value.contextEnvironmentRetired === undefined
-            ? {}
-            : {
-                  contextEnvironmentRetired:
-                      value.contextEnvironmentRetired as NonNullable<
-                          ExtensionModule["contextEnvironmentRetired"]
-                      >,
-              }),
-        ...(value.instanceGenerationRetired === undefined
-            ? {}
-            : {
-                  instanceGenerationRetired:
-                      value.instanceGenerationRetired as NonNullable<
-                          ExtensionModule["instanceGenerationRetired"]
-                      >,
-              }),
-    };
 }
 
 function send(message: ExtensionSandboxToHostMessage): void {
