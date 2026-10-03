@@ -1,3 +1,4 @@
+import type { ExtensionCapability } from "./ExtensionCapability.js";
 import type {
     ExtensionJsonValue,
     ExtensionPoint,
@@ -67,19 +68,6 @@ export interface ExtensionConfig {
 }
 
 export type ExtensionActivationPolicy = "eager" | "lazy";
-
-/** Host-managed runtime resource categories granted to one Extension generation. */
-export type ExtensionCapability =
-    | "artifacts"
-    | "assets"
-    | "context.observe"
-    | "instance.events.publish"
-    | "instance.manage"
-    | "instance.observe"
-    | "processes"
-    | "toolcall.history"
-    | "worker.delegate"
-    | "worker.execute";
 
 export interface ExtensionManifest {
     activation: ExtensionActivationPolicy;

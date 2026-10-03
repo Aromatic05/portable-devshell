@@ -1,8 +1,11 @@
 import type {
-    ExtensionCapability,
     ExtensionConfigAccess,
     ExtensionManifest,
 } from "./ExtensionApi.js";
+import {
+    EXTENSION_CAPABILITY_IDS,
+    type ExtensionCapability,
+} from "./ExtensionCapability.js";
 import type {
     ExtensionJsonValue,
     ExtensionPointDeclaration,
@@ -11,18 +14,7 @@ import type {
 export const EXTENSION_API_VERSION = "5.0.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
 
-const capabilities = new Set<ExtensionCapability>([
-    "artifacts",
-    "assets",
-    "context.observe",
-    "instance.events.publish",
-    "instance.manage",
-    "instance.observe",
-    "processes",
-    "toolcall.history",
-    "worker.delegate",
-    "worker.execute",
-]);
+const capabilities = new Set<ExtensionCapability>(EXTENSION_CAPABILITY_IDS);
 
 /**
  * @compat extension-manifest-schema-v1

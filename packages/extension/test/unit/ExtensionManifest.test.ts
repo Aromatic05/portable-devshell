@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     EXTENSION_API_VERSION,
+    EXTENSION_CAPABILITY_IDS,
     EXTENSION_MANIFEST_SCHEMA_VERSION,
     parseExtensionManifest,
     satisfiesExtensionVersionRange,
@@ -23,18 +24,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
     assert.deepEqual(
         parseExtensionManifest({
             ...base,
-            capabilities: [
-                "artifacts",
-                "assets",
-                "context.observe",
-                "instance.events.publish",
-                "instance.manage",
-                "instance.observe",
-                "processes",
-                "toolcall.history",
-                "worker.delegate",
-                "worker.execute",
-            ],
+            capabilities: [...EXTENSION_CAPABILITY_IDS],
             extensions: {
                 "cli.native-commands": [
                     {

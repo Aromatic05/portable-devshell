@@ -3,15 +3,18 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+    EXTENSION_CAPABILITY_IDS as rootCapabilityIds,
     defineExtensionPoint as defineRootExtensionPoint,
     type ExtensionJsonValue,
 } from "../../src/index.ts";
+import { EXTENSION_CAPABILITY_IDS as capabilityIds } from "../../src/ExtensionCapability.ts";
 import { defineExtensionPoint as defineCoreExtensionPoint } from "../../src/ExtensionCore.ts";
 
 test("Extension root re-exports core primitives without wrapping them", () => {
     const value: ExtensionJsonValue = { enabled: true };
 
     assert.deepEqual(value, { enabled: true });
+    assert.equal(rootCapabilityIds, capabilityIds);
     assert.equal(defineRootExtensionPoint, defineCoreExtensionPoint);
 });
 
