@@ -100,6 +100,7 @@ test("Extension worker session enters host ingress and keeps cleanup on its orig
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls,
         connections: {
             async acquire(instance, reference) {
@@ -198,6 +199,7 @@ test("delegated Worker capability fixes caller-owned recording at the host bound
     };
     const common = {
         allowed: true,
+        authority: "worker.execute" as const,
         toolCalls,
         connections: {
             async acquire() {
@@ -222,7 +224,7 @@ test("delegated Worker capability fixes caller-owned recording at the host bound
 
     const delegated = new ExtensionWorkerCapabilityControl({
         ...common,
-        recording: "caller",
+        authority: "worker.delegate",
     });
     const delegatedSession = await delegated.openSession({
         workspace: "/repo",
@@ -237,6 +239,7 @@ test("Extension worker capability refuses undeclared access before acquiring an 
     let acquired = false;
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: false,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
@@ -309,6 +312,7 @@ test("Extension worker instance retirement closes only matching sessions", async
     }
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {
@@ -365,6 +369,7 @@ test("Extension worker closeAll cleans an openSession that finishes after close 
     const worker = lifecycleWorker("local", releasedToolSessions);
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {
@@ -410,6 +415,7 @@ test("Extension worker openSession preserves primary and cleanup failures", asyn
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
@@ -453,6 +459,7 @@ test("Extension worker closeAll retries fault cleanup failures during retirement
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
@@ -503,6 +510,7 @@ test("Extension worker instance retirement fences an older openSession but permi
     let acquireCount = 0;
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        authority: "worker.execute",
         toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {

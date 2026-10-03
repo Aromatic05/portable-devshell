@@ -159,9 +159,17 @@ export class ControlRuntimeFactory {
                     paths: extensionPaths,
                     points: extensionPoints,
                     toolCallDecorator: mcp.toolProvenance,
-                    workerFactory: (input) =>
+                    workerDelegateFactory: (input) =>
                         new ExtensionWorkerCapabilityControl({
                             ...input,
+                            authority: "worker.delegate",
+                            instances: options.state.instances,
+                            toolCalls: mcp.instanceGateway,
+                        }),
+                    workerExecuteFactory: (input) =>
+                        new ExtensionWorkerCapabilityControl({
+                            ...input,
+                            authority: "worker.execute",
                             instances: options.state.instances,
                             toolCalls: mcp.instanceGateway,
                         }),

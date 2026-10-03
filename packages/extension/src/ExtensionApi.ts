@@ -17,7 +17,10 @@ import type {
 } from "./domain/instance.js";
 import type { ToolCallHistoryCapability } from "./domain/toolcall.js";
 import type { ExtensionProcessCapability } from "./domain/process.js";
-import type { ExtensionWorkerCapability } from "./domain/worker.js";
+import type {
+    ExtensionWorkerDelegateCapability,
+    ExtensionWorkerExecuteCapability,
+} from "./domain/worker.js";
 
 export interface ExtensionErrorOptions {
     readonly code: string;
@@ -123,8 +126,8 @@ export interface ExtensionCapabilities {
     readonly processes?: ExtensionProcessCapability;
     readonly toolCallHistory?: ToolCallHistoryCapability;
     /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
-    readonly workerDelegate?: ExtensionWorkerCapability;
-    readonly workerExecute?: ExtensionWorkerCapability;
+    readonly workerDelegate?: ExtensionWorkerDelegateCapability;
+    readonly workerExecute?: ExtensionWorkerExecuteCapability;
 }
 
 export interface ExtensionContext {

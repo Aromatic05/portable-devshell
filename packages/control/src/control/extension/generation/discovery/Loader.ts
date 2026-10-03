@@ -105,11 +105,15 @@ export interface ExtensionLoaderOptions {
     ) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
     toolCallDecorator?: ExtensionToolCallDecorator;
-    workerFactory?: (input: {
+    workerDelegateFactory?: (input: {
         allowed: boolean;
         extensionId: string;
         generation: string;
-        recording: "caller" | "host";
+    }) => ExtensionWorkerRuntime;
+    workerExecuteFactory?: (input: {
+        allowed: boolean;
+        extensionId: string;
+        generation: string;
     }) => ExtensionWorkerRuntime;
 }
 
@@ -135,7 +139,8 @@ export class ExtensionLoader {
     ) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
     readonly #toolCallDecorator?: ExtensionToolCallDecorator;
-    readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
+    readonly #workerDelegateFactory?: ExtensionLoaderOptions["workerDelegateFactory"];
+    readonly #workerExecuteFactory?: ExtensionLoaderOptions["workerExecuteFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
         this.#artifactFactory = options.artifactFactory;
@@ -158,7 +163,8 @@ export class ExtensionLoader {
             ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
         this.#toolCallDecorator = options.toolCallDecorator;
-        this.#workerFactory = options.workerFactory;
+        this.#workerDelegateFactory = options.workerDelegateFactory;
+        this.#workerExecuteFactory = options.workerExecuteFactory;
     }
 
     async load(id: string, generation: string): Promise<ExtensionGeneration> {
@@ -253,19 +259,17 @@ export class ExtensionLoader {
             });
 
         const workerExecute = manifest.capabilities.includes("worker.execute")
-            ? (this.#workerFactory?.({
+            ? (this.#workerExecuteFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
-                  recording: "host",
               }) ?? unavailableWorkerRuntime(id, "worker.execute"))
             : unavailableWorkerRuntime(id, "worker.execute");
         const workerDelegate = manifest.capabilities.includes("worker.delegate")
-            ? (this.#workerFactory?.({
+            ? (this.#workerDelegateFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
-                  recording: "caller",
               }) ?? unavailableWorkerRuntime(id, "worker.delegate"))
             : unavailableWorkerRuntime(id, "worker.delegate");
         const processes =

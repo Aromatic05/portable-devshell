@@ -63,3 +63,11 @@ export interface ExtensionWorkerCapability {
         input: ExtensionWorkerOpenInput,
     ): Promise<ExtensionWorkerSession>;
 }
+
+/** Worker execution whose ToolCall transcript remains host-owned. */
+export interface ExtensionWorkerExecuteCapability
+    extends ExtensionWorkerCapability {}
+
+/** Worker execution delegated to an Extension-owned transcript/runtime. */
+export interface ExtensionWorkerDelegateCapability
+    extends ExtensionWorkerCapability {}

@@ -59,16 +59,17 @@ export interface ExtensionWorkerToolCallPort {
 
 export interface ExtensionWorkerCapabilityControlOptions {
     allowed: boolean;
+    authority: "worker.delegate" | "worker.execute";
     connections?: ExtensionWorkerConnectionPort;
     extensionId: string;
     generation: string;
     instances: InstanceRegistry;
-    recording?: "caller" | "host";
     toolCalls: ExtensionWorkerToolCallPort;
 }
 
 export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapability {
     readonly #allowed: boolean;
+    readonly #authority: ExtensionWorkerCapabilityControlOptions["authority"];
     readonly #connections: ExtensionWorkerConnectionPort;
     readonly #extensionId: string;
     readonly #generation: string;
@@ -82,13 +83,15 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
 
     constructor(options: ExtensionWorkerCapabilityControlOptions) {
         this.#allowed = options.allowed;
+        this.#authority = options.authority;
         this.#connections =
             options.connections ??
             new InstanceConnectionService(options.instances);
         this.#extensionId = options.extensionId;
         this.#generation = options.generation;
         this.#instances = options.instances;
-        this.#recording = options.recording ?? "host";
+        this.#recording =
+            options.authority === "worker.delegate" ? "caller" : "host";
         this.#toolCalls = options.toolCalls;
     }
 
@@ -97,12 +100,12 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
     ): Promise<ExtensionWorkerSession> {
         if (!this.#allowed) {
             throw new Error(
-                `Extension ${this.#extensionId} did not declare the workers capability.`,
+                `Extension ${this.#extensionId} did not declare the ${this.#authority} capability.`,
             );
         }
         if (this.#closed)
             throw new Error(
-                `Extension ${this.#extensionId} workers capability is closed.`,
+                `Extension ${this.#extensionId} ${this.#authority} capability is closed.`,
             );
         if (input.workspace.length === 0)
             throw new TypeError(
@@ -136,7 +139,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
             ) {
                 throw new Error(
                     this.#closed
-                        ? `Extension ${this.#extensionId} worker capability closed while opening a session.`
+                        ? `Extension ${this.#extensionId} ${this.#authority} capability closed while opening a session.`
                         : `Extension ${this.#extensionId} Worker instance ${instance} retired while opening a session.`,
                 );
             }

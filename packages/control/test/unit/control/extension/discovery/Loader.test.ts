@@ -179,7 +179,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
 
     const candidate = await loader.load(id, generation);
@@ -232,6 +232,48 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     await assert.rejects(
         access(harness.paths.runtimeDirectory(id, generation)),
     );
+});
+
+test("Extension loader binds execute and delegate through independent Worker authority factories", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const { id, generation } = await harness.writeGeneration({
+        capabilities: ["worker.execute", "worker.delegate"],
+    });
+    const factoryCalls: string[] = [];
+    let seenContext: ExtensionContext | undefined;
+    const loader = new ExtensionLoader({
+        importer: async () => ({
+            activate(context: ExtensionContext) {
+                seenContext = context;
+            },
+        }),
+        instances: { list: () => [] } as never,
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+        workerDelegateFactory: (input) => {
+            factoryCalls.push(
+                "delegate:" + input.extensionId + ":" + input.generation,
+            );
+            return fakeWorker([]);
+        },
+        workerExecuteFactory: (input) => {
+            factoryCalls.push(
+                "execute:" + input.extensionId + ":" + input.generation,
+            );
+            return fakeWorker([]);
+        },
+    });
+
+    const candidate = await loader.load(id, generation);
+
+    assert.deepEqual(factoryCalls, [
+        "execute:" + id + ":" + generation,
+        "delegate:" + id + ":" + generation,
+    ]);
+    assert.ok(seenContext?.capabilities.workerExecute);
+    assert.ok(seenContext?.capabilities.workerDelegate);
+    await candidate.retire();
 });
 
 test("Extension loader validates declared Config and injects context.config", async (t) => {
@@ -415,7 +457,7 @@ test("Extension loader rolls back Worker resources and runtime directory when ac
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
 
     await assert.rejects(
@@ -448,7 +490,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
 
     await assert.rejects(
@@ -475,7 +517,7 @@ test("Extension loader separates Instance generation notification from host-mana
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
     const candidate = await loader.load(target.id, target.generation);
     candidate.activate();
@@ -516,7 +558,7 @@ test("Extension loader notifies retired Context environments without touching Wo
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
     const candidate = await loader.load(target.id, target.generation);
     candidate.activate();
@@ -554,7 +596,7 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
-        workerFactory: () => fakeWorker(events),
+        workerExecuteFactory: () => fakeWorker(events),
     });
 
     await assert.rejects(
