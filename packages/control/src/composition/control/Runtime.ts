@@ -55,7 +55,6 @@ import {
     type ContextService,
 } from "@portable-devshell/core/context";
 import type { McpControlModule } from "../mcp/Control.js";
-import type { ConnectionModule } from "../../connection/Module.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import { McpExtensionService } from "../mcp/extension/Service.js";
 

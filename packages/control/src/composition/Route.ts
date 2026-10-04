@@ -45,7 +45,6 @@ import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
 import { OperationalOverviewService } from "../overview/Service.js";
 import type { ReverseCredentialService } from "@portable-devshell/core";
-import { createConnectionRouteModule } from "../connection/Route.js";
 import { createServiceRouteModule } from "../service/Route.js";
 import {
     createWebApplicationRouteModule,

@@ -36,12 +36,10 @@ export * from "./instance/editor/create/index.js";
 export * from "./composition/mcp/Gateway.js";
 export * from "./composition/mcp/Endpoint.js";
 export * from "./composition/mcp/Runtime.js";
-export * from "./connection/Gateway.js";
 export {
     ReverseCredentialService,
     ReverseCredentialStore,
 } from "@portable-devshell/core";
-export * from "./connection/SseChannel.js";
 export * from "./composition/Route.js";
 export * from "./composition/InstanceRuntime.js";
 export {
@@ -49,7 +47,6 @@ export {
     type ControlRuntimeOptions,
 } from "./composition/control/Runtime.js";
 export * from "./server/endpoint/Socket.js";
-export * from "./connection/Module.js";
 
 export * from "./context/Registry/index.js";
 export * from "./context/Service/Scope.js";

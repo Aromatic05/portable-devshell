@@ -32,7 +32,6 @@ import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { ContextModule } from "@portable-devshell/core/context";
 import { McpControlModule } from "../mcp/Control.js";
-import { ConnectionModule } from "../../connection/Module.js";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {
