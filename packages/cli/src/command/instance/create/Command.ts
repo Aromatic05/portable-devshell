@@ -1,11 +1,11 @@
 import type {
     InstanceCreateResult,
-    ConfigTransport,
+    InstanceTransport,
     ConnectionTransport,
     ReverseDeviceCodeResult,
 } from "@portable-devshell/shared";
 
-type CliClientInstance = ConfigTransport;
+type CliClientInstance = InstanceTransport;
 type CliClientReverse = ConnectionTransport;
 import { CliWizardInstanceCreate } from "./Wizard.js";
 

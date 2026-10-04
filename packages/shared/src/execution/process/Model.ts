@@ -3,7 +3,6 @@
 // subscription cursor.
 
 import type { InstanceName } from "../../types/Instance.js";
-import type { ActiveTodoSummary } from "../../workspace/task/Model.js";
 
 export type ReverseTransport = "wss" | "sse";
 export type ReverseEnrollmentState = "pending" | "enrolled" | "revoked";
@@ -30,7 +29,6 @@ export type ProcessStatus =
 export type EffectiveSecurityMode = "disabled" | "workspace";
 
 export interface InstanceSnapshot {
-    activeTodos?: ActiveTodoSummary[];
     connectionState: ConnectionState;
     daemonState: DaemonState;
     effectiveSecurityMode?: EffectiveSecurityMode;

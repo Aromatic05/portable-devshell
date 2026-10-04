@@ -1,9 +1,17 @@
 export { type InstanceConnectionLease, InstanceConnectionService } from "./instance/Connection.js";
 export { type InstanceDescriptor } from "./instance/Descriptor.js";
 export { InstanceFactory } from "./instance/Factory.js";
-export { createInstanceHost, createInstanceToolIngressHost } from "./instance/Host.js";
+export { createInstanceHost, createInstanceToolIngressHost } from "./composition/InstanceHost.js";
 export { InstanceRegistry } from "./instance/Registry.js";
 export { InstanceRegistryFactory } from "./instance/RegistryFactory.js";
+export { InstancePaths } from "./instance/Paths.js";
+export { type ApprovalApi } from "./approval/Api.js";
+export { createInstanceApprovalService } from "./approval/Factory.js";
+export type { TaskApi } from "./task/Api.js";
+export { createInstanceTaskServices } from "./task/Factory.js";
+export { type TerminalBackend } from "./terminal/Backend.js";
+export { createInstanceTerminalBackend } from "./terminal/Factory.js";
+export { resolveWorkerHomeDirectory } from "./worker/provision/HomeDirectory.js";
 export { ProcessSubscriptionManager } from "./process/Subscription.js";
 export { TerminalSessionService } from "./terminal/Service.js";
 export { readToolCallErrorPayload } from "./tool/ErrorPayload.js";

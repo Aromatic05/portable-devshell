@@ -7,8 +7,8 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import { InstanceFactory, type InstanceRegistry } from "@portable-devshell/core";
-import type { ConfigEngine } from "../../../engine/index.js";
-import type { ConfigEditorCoordinatorOptions } from "../../index.js";
+import type { ConfigEngine } from "../../../config/engine/index.js";
+import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceRetirementNotification } from "./Notification.js";
 import { InstanceRetirementState, closeDescriptorResourcesBestEffort } from "./State.js";
 import { warnCommittedCleanupFailures, type InstanceCleanupDebt } from "./Debt.js";
@@ -27,13 +27,13 @@ export class InstanceRetirementCoordinator {
 
     readonly #engine: ConfigEngine;
 
-    readonly #mcp: ConfigEditorCoordinatorOptions["mcp"];
+    readonly #mcp: InstanceEditorCoordinatorOptions["mcp"];
 
     readonly #instanceConfigMapper: InstanceFactory;
 
     readonly #instanceRegistry: InstanceRegistry;
 
-constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }) {
+constructor(options: InstanceEditorCoordinatorOptions) {
         this.#detachContextInstance = options.detachContextInstance;
         this.#reconcileContextInstanceCleanup = options.reconcileContextInstanceCleanup;
         this.#engine = options.engine;
@@ -168,7 +168,6 @@ constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }) 
                         .catch((error) => failures.push(error));
                 }
                 failures.push(...await this.notification.retireDisable(existing));
-                failures.push(...await this.#state.retireDisabledInteractions(descriptor));
                 await this.notification.notifyDisabled(existing).catch((error) => failures.push(error));
             }
         }

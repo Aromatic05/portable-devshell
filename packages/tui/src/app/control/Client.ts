@@ -20,6 +20,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
+    createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
     createTaskTransport,
@@ -36,6 +37,7 @@ import {
     type ApprovalTransport,
     type ArtifactTransport,
     type ConfigTransport,
+    type InstanceTransport,
     type ControlChannelOptions,
     type MessageTransport,
     type ConnectionTransport,
@@ -71,6 +73,7 @@ export class TuiDomainSession {
 
     readonly artifactTransport: ArtifactTransport;
     readonly configTransport: ConfigTransport;
+    readonly instanceTransport: InstanceTransport;
     readonly messageTransport: MessageTransport;
     readonly reverse: ConnectionTransport;
     readonly serviceTransport: ServiceTransport;
@@ -98,6 +101,7 @@ export class TuiDomainSession {
         this.service = new ServiceSession(endpoint, this.serviceTransport);
 
         this.configTransport = createConfigTransport(endpoint);
+        this.instanceTransport = createInstanceTransport(endpoint);
         this.config = new ConfigViewModel(this.configTransport);
         this.conversationPreferences = new ConversationPreferenceViewModel(
             this.configTransport,
@@ -109,7 +113,7 @@ export class TuiDomainSession {
             createTuiPageTransport(endpoint),
             createWebPageTransport(endpoint),
         );
-        this.instances = new InstanceConfigViewModel(this.configTransport);
+        this.instances = new InstanceConfigViewModel(this.instanceTransport);
 
         this.artifactTransport = createArtifactTransport(endpoint);
         this.artifact = new ArtifactViewModel(this.artifactTransport);

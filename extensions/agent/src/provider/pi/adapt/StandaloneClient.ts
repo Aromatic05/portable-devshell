@@ -10,10 +10,12 @@ import {
     Endpoint,
     connectControlChannel,
     createConfigTransport,
+    createInstanceTransport,
     createProcessTransport,
     createServiceTransport,
     createToolTransport,
     type ConfigTransport,
+    type InstanceTransport,
     type ProcessTransport,
     type ServiceTransport,
     type ToolTransport,
@@ -35,7 +37,7 @@ export interface StandaloneDevshellPiOptions {
 }
 
 interface StandaloneControlSession {
-    instance: ConfigTransport;
+    instance: InstanceTransport;
     runtime: ProcessTransport;
     service: ServiceTransport;
     tool: ToolTransport;
@@ -254,7 +256,7 @@ function createStandaloneControl(
             ),
     });
     return {
-        instance: createConfigTransport(endpoint),
+        instance: createInstanceTransport(endpoint),
         runtime: createProcessTransport(endpoint),
         service: createServiceTransport(endpoint, { clientKind: "cli" }),
         tool: createToolTransport(endpoint),
@@ -291,7 +293,7 @@ function resolveStandaloneTarget(options: StandaloneDevshellPiOptions): {
 }
 
 async function selectStandaloneInstance(
-    instance: ConfigTransport,
+    instance: InstanceTransport,
 ): Promise<string> {
     const instances = await instance.listInstances();
     const namedLocal = instances.find(

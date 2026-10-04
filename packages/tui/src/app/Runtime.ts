@@ -239,6 +239,7 @@ export class TuiRuntime {
         const operationClients = {
             artifact: domains.artifactTransport,
             config: domains.configTransport,
+            instance: domains.instanceTransport,
             reverse: domains.reverse,
             service: domains.serviceTransport,
             task: domains.taskTransport,

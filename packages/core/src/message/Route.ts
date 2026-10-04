@@ -1,4 +1,3 @@
-import type { WorkerInstance } from "../worker/instance/Instance.js";
 import {
     controlErrorCodes,
     createRemoteError,
@@ -10,21 +9,22 @@ import {
     type MessageEvent,
     type MessageStream,
 } from "@portable-devshell/shared";
+import type { InstanceEventSource } from "../instance/EventBuffer.js";
 
 export interface MessageRouteSubscriptionPort {
     subscribe(
         stream: MessageStream,
         context: ControlPortContext,
         instanceName: string,
-        instance: Pick<WorkerInstance, "subscribe">,
+        instance: Pick<InstanceEventSource, "subscribe">,
         fromSeq: number,
         projectEvent?: (event: InstanceEventRecord) => MessageEvent | undefined,
     ): Promise<void>;
 }
 
 export interface MessageRouteInstancePort {
+    events: Pick<InstanceEventSource, "subscribe">;
     name: string;
-    worker: Pick<WorkerInstance, "subscribe">;
 }
 
 export function createMessageRouteModule(
@@ -42,7 +42,7 @@ export function createMessageRouteModule(
                         stream,
                         context,
                         instance.name,
-                        instance.worker,
+                        instance.events,
                         readMessageSubscriptionFromSeq(request.payload),
                         projectMessageEvent,
                     ),

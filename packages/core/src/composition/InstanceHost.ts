@@ -4,28 +4,35 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
+import type { ApprovalApi } from "../approval/Api.js";
 import { createApprovalRouteModule } from "../approval/Route.js";
 import { createMessageRouteModule } from "../message/Route.js";
 import { createProcessRouteModule } from "../process/Route.js";
 import { ProcessSubscriptionManager } from "../process/Subscription.js";
+import type { TaskApi } from "../task/Api.js";
 import { createGoalTaskRouteModule } from "../task/goal/Route.js";
 import { createTodoTaskRouteModule } from "../task/todo/Route.js";
+import type { TerminalBackend } from "../terminal/Backend.js";
 import { createTerminalRouteModule } from "../terminal/Route.js";
 import { TerminalSessionService } from "../terminal/Service.js";
 import {
     createToolIngressRouteModule,
-    createToolRouteModule,
     type ToolCallIngressPort,
 } from "../tool/Route.js";
+import { createToolRouteModule } from "./ToolRoute.js";
 import type { ToolCallProvenanceStore } from "../tool/Provenance.js";
-import type { InstanceDescriptor } from "./Descriptor.js";
-import type { InstanceRegistry } from "./Registry.js";
+import type { InstanceDescriptor } from "../instance/Descriptor.js";
+import type { InstanceRegistry } from "../instance/Registry.js";
+import type { InstanceEventSource } from "../instance/EventBuffer.js";
 
 export interface InstanceHostOptions {
+    approval: ApprovalApi;
     descriptor: InstanceDescriptor;
     extensionModules?: readonly ControlPortDefinition[];
     registry: InstanceRegistry;
     subscriptions: ProcessSubscriptionManager;
+    task: TaskApi;
+    terminal?: TerminalBackend;
     terminalMaxUnackedBytes?: number;
     terminals: TerminalSessionService;
     toolCalls?: ToolCallIngressPort;
@@ -36,35 +43,65 @@ export function createInstanceHost(
     options: InstanceHostOptions,
 ): ControlHostDefinition {
     const { descriptor } = options;
+    const events: InstanceEventSource = {
+        cursor: () => descriptor.worker.snapshot().lastSeq,
+        subscribe: (fromSeq) => descriptor.worker.subscribe(fromSeq),
+    };
     const modules = mergePortDefinitionsByName([
         createProcessRouteModule(
             {
                 enabled: descriptor.enabled,
                 name: descriptor.name,
-                todoSummaries: () => descriptor.task.todo.summaries(),
+                projectSnapshot: (snapshot) => {
+                    const activeTodos = options.task.todo.summaries();
+                    return {
+                        ...snapshot,
+                        ...(activeTodos.length === 0 ? {} : { activeTodos }),
+                    } as never;
+                },
                 worker: descriptor.worker,
             },
             options.registry,
             options.subscriptions,
         ),
         ...(options.extensionModules ?? []),
-        createMessageRouteModule(descriptor, options.subscriptions),
-        mergePortDefinitions(
-            createGoalTaskRouteModule(descriptor),
-            createTodoTaskRouteModule(descriptor, options.subscriptions),
+        createMessageRouteModule(
+            { events, name: descriptor.name },
+            options.subscriptions,
         ),
-        createApprovalRouteModule(descriptor, options.subscriptions),
+        mergePortDefinitions(
+            createGoalTaskRouteModule({
+                events,
+                goal: options.task.goal,
+            }),
+            createTodoTaskRouteModule(
+                {
+                    events,
+                    name: descriptor.name,
+                    todo: options.task.todo,
+                },
+                options.subscriptions,
+            ),
+        ),
+        createApprovalRouteModule(
+            {
+                approval: options.approval,
+                events,
+                name: descriptor.name,
+            },
+            options.subscriptions,
+        ),
         createToolRouteModule(
             descriptor,
             options.toolProvenance,
             options.toolCalls,
             options.subscriptions,
         ),
-        ...(descriptor.terminal === undefined
+        ...(options.terminal === undefined
             ? []
             : [
                   createTerminalRouteModule({
-                      backend: descriptor.terminal,
+                      backend: options.terminal,
                       instance: descriptor.name,
                       ...(options.terminalMaxUnackedBytes === undefined
                           ? {}

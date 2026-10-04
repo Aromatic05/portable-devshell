@@ -19,7 +19,7 @@ interface GoalInstanceState {
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
 }
-interface GoalViewModelState {
+export interface GoalViewModelState {
     instances: Record<string, GoalInstanceState>;
 }
 interface GoalViewModelOptions {
@@ -258,7 +258,7 @@ function instanceKey(instance: string): string {
 function toError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
 }
-interface TodoViewModelState {
+export interface TodoViewModelState {
     failure?: Error;
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;

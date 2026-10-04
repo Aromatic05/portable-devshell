@@ -25,7 +25,7 @@ import type {
 } from "./Transport.js";
 import { EventSubscription, readStreamGap } from "../../client/Stream.js";
 
-interface ExtensionViewModelState {
+export interface ExtensionViewModelState {
     extensions: ExtensionPublicRuntimeRecord[];
     revision: number;
     extensionsFailure?: Error;

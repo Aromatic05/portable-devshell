@@ -135,7 +135,7 @@ export class ControlRuntimeFactory {
                         manage: new ExtensionInstanceManageCapabilityControl({
                             allowed: manageAllowed,
                             create: mcp.instanceCreate,
-                            editor: mcp.configEditor,
+                            editor: mcp.instanceEditor,
                             extensionId,
                             instances: options.state.instances,
                         }),
@@ -182,7 +182,7 @@ export class ControlRuntimeFactory {
                 mcp,
                 state: options.state,
             });
-            mcp.configEditor.registerInstanceGenerationRetirement(
+            mcp.instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await artifact.service.retireInstance(instance.name);
                 },

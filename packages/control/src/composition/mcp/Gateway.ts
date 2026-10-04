@@ -25,9 +25,11 @@ import { InstanceConnectionService } from "@portable-devshell/core";
 import type { ToolCallProvenanceStore } from "@portable-devshell/core";
 import type { ArtifactImageApi } from "../../artifact/Api.js";
 import type { McpExtensionService } from "./extension/Service.js";
+import type { InstanceDomainRuntime } from "../InstanceRuntime.js";
 
 export interface McpInstanceGatewayControlOptions {
     getConfig: () => ControlConfig;
+    instanceDomains: InstanceDomainRuntime;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
     toolProvenance?: ToolCallProvenanceStore;
@@ -36,13 +38,11 @@ export interface McpInstanceGatewayControlOptions {
 export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly approval: McpApprovalPort = {
         listApprovals: async (instance) =>
-            await this.#requireDescriptor(instance).approval.listApprovals(),
+            await this.#requireApproval(instance).listApprovals(),
         listPendingApprovals: async (instance, ctxId) =>
-            await this.#requireDescriptor(
-                instance,
-            ).approval.listPendingApprovals(ctxId),
+            await this.#requireApproval(instance).listPendingApprovals(ctxId),
         decideApproval: async (instance, approvalId, decision) =>
-            await this.#requireDescriptor(instance).approval.decideApproval(
+            await this.#requireApproval(instance).decideApproval(
                 approvalId,
                 {
                     decidedBy: "web",
@@ -50,12 +50,13 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 },
             ),
         cancelApproval: async (instance, approvalId, reason) =>
-            await this.#requireDescriptor(instance).approval.cancel(
+            await this.#requireApproval(instance).cancel(
                 approvalId,
                 reason,
             ),
     };
     readonly #getConfig: () => ControlConfig;
+    readonly #instanceDomains: InstanceDomainRuntime;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;
@@ -65,6 +66,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     constructor(options: McpInstanceGatewayControlOptions) {
         this.#getConfig = options.getConfig;
+        this.#instanceDomains = options.instanceDomains;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConnections =
             options.instanceConnections ??
@@ -234,7 +236,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 provider: config?.provider,
                 snapshot: withTodoSummaries(
                     descriptor.worker.snapshot(),
-                    descriptor.task.todo.summaries(),
+                    this.#requireTask(descriptor.name).todo.summaries(),
                 ),
             };
         }) as unknown as JsonValue;
@@ -358,7 +360,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: import("@portable-devshell/shared").GoalContinuationInput,
         ctxId: string,
     ): Promise<JsonValue> {
-        return await this.#requireDescriptor(instance).goal.continuation(
+        return await this.#requireTask(instance).goal.continuation(
             ctxId,
             input,
         );
@@ -369,14 +371,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: import("@portable-devshell/shared").GoalManageInput,
         ctxId: string,
     ) {
-        return await this.#requireDescriptor(instance).goal.manage(
+        return await this.#requireTask(instance).goal.manage(
             ctxId,
             input,
         );
     }
 
     async readGoal(instance: string, ctxId: string) {
-        return await this.#requireDescriptor(instance).goal.read(ctxId);
+        return await this.#requireTask(instance).goal.read(ctxId);
     }
 
     async recordGoalReentry(
@@ -384,7 +386,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         ctxId: string,
         progressEpoch?: number,
     ): Promise<void> {
-        await this.#requireDescriptor(instance).goal.recordReentry(
+        await this.#requireTask(instance).goal.recordReentry(
             ctxId,
             progressEpoch,
         );
@@ -395,7 +397,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         ctxId: string,
         kind: import("@portable-devshell/shared").GoalActivityKind = "execution",
     ): Promise<void> {
-        await this.#requireDescriptor(instance).goal.touch(ctxId, kind);
+        await this.#requireTask(instance).goal.touch(ctxId, kind);
     }
 
     async readToolCalls(instance: string, ctxId: string, limit: number) {
@@ -429,7 +431,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         ctxId: string,
         expectedRevision?: number,
     ): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.control(
+        return (await this.#requireTask(instance).todo.control(
             taskId,
             action,
             ctxId,
@@ -441,7 +443,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         instance: string,
         input?: import("@portable-devshell/shared").TodoReadInput,
     ): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.read(
+        return (await this.#requireTask(instance).todo.read(
             input,
         )) as unknown as JsonValue;
     }
@@ -477,7 +479,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         return withTodoSummaries(
             snapshot,
-            descriptor.task.todo.summaries(),
+            this.#requireTask(descriptor.name).todo.summaries(),
         ) as unknown as JsonValue;
     }
 
@@ -500,7 +502,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             provider: config?.provider,
             snapshot: withTodoSummaries(
                 descriptor.worker.snapshot(),
-                descriptor.task.todo.summaries(),
+                this.#requireTask(descriptor.name).todo.summaries(),
             ),
         } as unknown as JsonValue;
     }
@@ -509,7 +511,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         const snapshot = withTodoSummaries(
             await descriptor.worker.stop(),
-            descriptor.task.todo.summaries(),
+            this.#requireTask(descriptor.name).todo.summaries(),
         );
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
@@ -535,16 +537,29 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
     ): Promise<JsonValue> {
-        const descriptor = this.#requireDescriptor(instance);
         const ctxId = requireCtxId(context);
-        return (await descriptor.task.todo.write(
+        return (await this.#requireTask(instance).todo.write(
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
             ctxId,
         )) as unknown as JsonValue;
     }
 
+    #requireApproval(instance: string) {
+        const approval = this.#instanceDomains.approval(instance);
+        if (approval !== undefined) return approval;
+        this.#requireDescriptor(instance);
+        throw new Error(`Instance ${instance} approval runtime is unavailable.`);
+    }
+
+    #requireTask(instance: string) {
+        const task = this.#instanceDomains.task(instance);
+        if (task !== undefined) return task;
+        this.#requireDescriptor(instance);
+        throw new Error(`Instance ${instance} task runtime is unavailable.`);
+    }
+
     #requireWait(instance: string) {
-        const wait = this.#requireDescriptor(instance).wait;
+        const wait = this.#requireTask(instance).wait;
         if (wait === undefined) {
             throw createRemoteError({
                 code: controlErrorCodes.methodNotFound,

@@ -1,6 +1,6 @@
 import type { ControlMcpAuthConfig } from "@portable-devshell/shared";
 
-export interface ConfigMcpRuntimePort {
+export interface InstanceMcpRuntimePort {
     registerInstance(
         instance: string,
         auth: ControlMcpAuthConfig,

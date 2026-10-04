@@ -44,6 +44,9 @@
             "@portable-devshell/shared/browser": [
                 "./packages/shared/src/browser.ts"
             ],
+            "@portable-devshell/shared/testing": [
+                "./packages/shared/src/testing.ts"
+            ],
             "@portable-devshell/shared/transport/frame": [
                 "./packages/shared/src/transport/frame/Protocol.ts"
             ],

@@ -3,21 +3,40 @@ import {
     applyConfigWebPatch,
     normalizeConfigGlobalDraft,
     parseConfigBatchUpdateRequest,
+    type ConfigUpdateInstanceRequest,
     type ControlConfig,
     type JsonValue,
 } from "@portable-devshell/shared";
 import type { ConfigEngine, ConfigRuntimeChangeSet } from "../engine/index.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
-import type { InstanceReconfigurationCoordinator, InstanceConfigUpdatePlan } from "./instance/Update.js";
 import { coupledRuntimeChanges } from "./GlobalPatch.js";
+
+export interface ConfigBatchInstancePlan {
+    readonly authChanged: boolean;
+    readonly instance: ControlConfig["instances"][number];
+    readonly target: string;
+    assertReady(): void;
+    commit(
+        previous: ControlConfig,
+        next: ControlConfig,
+        runtimeChanges: ConfigRuntimeChangeSet,
+    ): Promise<boolean>;
+}
+
+export interface ConfigBatchInstancePort {
+    createPlan(
+        request: ConfigUpdateInstanceRequest,
+        currentConfig: ControlConfig,
+    ): Promise<ConfigBatchInstancePlan>;
+}
 
 export class ConfigBatchEditor {
     readonly #engine: ConfigEngine;
-    readonly #updates: InstanceReconfigurationCoordinator;
+    readonly #instances?: ConfigBatchInstancePort;
 
-    constructor(engine: ConfigEngine, updates: InstanceReconfigurationCoordinator) {
+    constructor(engine: ConfigEngine, instances?: ConfigBatchInstancePort) {
         this.#engine = engine;
-        this.#updates = updates;
+        this.#instances = instances;
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
@@ -36,11 +55,11 @@ export class ConfigBatchEditor {
         const plan =
             request.instance === undefined
                 ? undefined
-                : await this.#updates.createUpdatePlan(
+                : await this.#requireInstances().createPlan(
                       request.instance,
                       currentConfig,
                   );
-        if (plan !== undefined) this.#updates.assertUpdateReady(plan);
+        plan?.assertReady();
 
         const global = this.#engine.readInput(() =>
             normalizeConfigGlobalDraft({
@@ -91,7 +110,7 @@ export class ConfigBatchEditor {
         changes: readonly ConfigApplyChange[],
         requestedRuntimeChanges: ConfigRuntimeChangeSet,
         preflight = true,
-        plan?: InstanceConfigUpdatePlan,
+        plan?: ConfigBatchInstancePlan,
     ): Promise<JsonValue> {
         const runtimeChanges = coupledRuntimeChanges(previous, next, requestedRuntimeChanges);
         if (plan === undefined) {
@@ -99,16 +118,16 @@ export class ConfigBatchEditor {
         }
         const validated = this.#engine.validateConfig(next);
         if (preflight) await this.#engine.preflight(previous, validated);
-        const preparedDescriptor = this.#updates.prepareUpdate(plan);
-        await this.#updates.persistPreparedConfig(validated, plan, preparedDescriptor);
-        const hotApplied = await this.#updates.applyPreparedUpdate(
-            plan,
+        const hotApplied = await plan.commit(
             previous,
             validated,
-            preparedDescriptor,
             runtimeChanges,
         );
-        await this.#updates.cleanupPreparedUpdate(plan, preparedDescriptor);
         return this.#engine.finalizeApplyResult(previous, validated, changes, hotApplied);
+    }
+
+    #requireInstances(): ConfigBatchInstancePort {
+        if (this.#instances !== undefined) return this.#instances;
+        throw new Error("Instance Config updates are not available.");
     }
 }

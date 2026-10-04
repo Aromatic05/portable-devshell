@@ -10,8 +10,8 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import { InstanceFactory, type InstanceRegistry } from "@portable-devshell/core";
-import type { ConfigEngine } from "../../../engine/index.js";
-import type { ConfigEditorCoordinatorOptions } from "../../index.js";
+import type { ConfigEngine } from "../../../config/engine/index.js";
+import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { closeDescriptorResourcesBestEffort } from "./State.js";
 import type { InstanceRetirementCoordinator } from "./index.js";
 
@@ -187,14 +187,14 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
 export class InstanceCleanupDebt {
     readonly #cleanupDebts: InstanceCleanupDebtStore;
     readonly #cleanupOnlyDescriptors = new Map<string, ReturnType<InstanceRegistry["get"]>>();
-    readonly #mcp: ConfigEditorCoordinatorOptions["mcp"];
+    readonly #mcp: InstanceEditorCoordinatorOptions["mcp"];
     readonly #engine: ConfigEngine;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
 
-    constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }, retirement: InstanceRetirementCoordinator, syncMcpEndpoint: (instance: string) => Promise<void>) {
+    constructor(options: InstanceEditorCoordinatorOptions, retirement: InstanceRetirementCoordinator, syncMcpEndpoint: (instance: string) => Promise<void>) {
         this.#cleanupDebts = new InstanceCleanupDebtStore(options.cleanupDebtFile);
         this.#engine = options.engine;
         this.#mcp = options.mcp;

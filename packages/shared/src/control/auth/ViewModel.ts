@@ -14,7 +14,7 @@ import type {
 } from "./Model.js";
 import type { AuthTransport } from "./Transport.js";
 
-interface AuthViewModelState {
+export interface AuthViewModelState {
     /** Failure of the most recent approval read or decision, if any. */
     approvalFailure?: Error;
     approvals: OAuthApprovalRequest[];

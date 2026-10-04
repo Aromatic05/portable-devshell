@@ -1,4 +1,4 @@
-import type { ContextInstancePort } from "@portable-devshell/mcp";
+import type { ContextInstancePort } from "./Port.js";
 import { ContextService } from "./Service/index.js";
 import { ContextRegistry } from "./Registry/index.js";
 import { ContextEnvironmentService } from "./Service/Scope.js";

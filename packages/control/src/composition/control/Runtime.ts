@@ -136,7 +136,7 @@ export class ControlRuntime {
         );
         this.#toolCallHookUnregister = [
             registerApprovalToolCallReview(toolCalls.hooks, (instance) =>
-                this.#instances.get(instance)?.approval,
+                options.mcp.instanceDomains.approval(instance),
             ),
             extensionToolCalls.install(toolCalls.hooks),
         ];
@@ -189,10 +189,13 @@ export class ControlRuntime {
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
             instanceCreate: options.mcp.instanceCreate,
+            instanceDomains: options.mcp.instanceDomains,
+            instanceEditor: options.mcp.instanceEditor,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: new OperationalOverviewService({
+                instanceDomains: options.mcp.instanceDomains,
                 instances: options.instances,
                 oauthApprovals: () => options.mcp.oauthApprovals,
             }),
@@ -206,17 +209,17 @@ export class ControlRuntime {
             webApplications: new WebApplicationCatalog(this.#extensions),
             webPages: new WebExtensionPageService(this.#extensions),
         });
-        this.#mcp.configEditor.registerInstanceGenerationRetirement(
+        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceGeneration(instance.name);
             },
         );
-        this.#mcp.configEditor.registerInstanceGenerationRetirement(
+        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#debug.retireInstance(instance.name);
             },
         );
-        this.#mcp.configEditor.registerInstanceGenerationRetirement(
+        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#routes.retireInstance(instance.name);
             },

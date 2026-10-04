@@ -1,15 +1,15 @@
-import type { WorkerInstance } from "../../worker/instance/Instance.js";
 import type {
     JsonValue,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../Port.js";
+import type { InstanceEventSource } from "../../instance/EventBuffer.js";
 import type { GoalService } from "./Service.js";
 
 export interface GoalTaskRouteInstancePort {
+    events: Pick<InstanceEventSource, "cursor">;
     goal: Pick<GoalService, "list">;
-    worker: Pick<WorkerInstance, "snapshot">;
 }
 
 export function createGoalTaskRouteModule(
@@ -19,7 +19,7 @@ export function createGoalTaskRouteModule(
         getGoals: async () =>
             ({
                 goals: await instance.goal.list(),
-                lastSeq: instance.worker.snapshot().lastSeq,
+                lastSeq: instance.events.cursor(),
             }) as unknown as JsonValue,
     });
 }

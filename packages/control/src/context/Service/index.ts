@@ -5,14 +5,14 @@ import type {
     ContextPresentationPort,
 } from "./Cleanup.js";
 export type { ContextPresentationPort } from "./Cleanup.js";
-import { type WorkerInstanceLike } from "@portable-devshell/mcp";
 import type {
     ContextRegistryPort,
     McpContextRecord,
 } from "@portable-devshell/shared";
 import type {
     ContextEnvironmentPort,
-} from "@portable-devshell/mcp";
+    ContextWorkerPort,
+} from "../Port.js";
 
 export interface ContextRecordSourcePort extends ContextRegistryPort {
     readonly changes: ContextChangeHub;
@@ -23,14 +23,14 @@ export class ContextService {
     readonly registry: ContextRecordSourcePort;
     readonly environment: ContextEnvironmentPort;
     readonly cleanup: ContextLifecycleCleanupPort;
-    readonly #worker: (instance: string) => WorkerInstanceLike | undefined;
+    readonly #worker: (instance: string) => ContextWorkerPort | undefined;
     #presentation?: ContextPresentationPort;
 
     constructor(options: {
         registry: ContextRecordSourcePort;
         environment: ContextEnvironmentPort;
         cleanup: ContextLifecycleCleanupPort;
-        worker(instance: string): WorkerInstanceLike | undefined;
+        worker(instance: string): ContextWorkerPort | undefined;
     }) {
         this.registry = options.registry;
         this.environment = options.environment;

@@ -6,6 +6,7 @@ import {
     createApprovalTransport,
     createCliCommandTransport,
     createConfigTransport,
+    createInstanceTransport,
     createContextTransport,
     createDebugTransport,
     createExtensionRuntimeTransport,
@@ -20,6 +21,7 @@ import {
     createToolTransport,
     type ApprovalTransport,
     type ConfigTransport,
+    type InstanceTransport,
     type ContextTransport,
     type ControlChannelOptions,
     type DebugTransport,
@@ -65,7 +67,7 @@ export interface CliClients {
     contextMessage: MessageTransport;
     debug: DebugTransport;
     extension: ExtensionRuntimeTransport;
-    instance: ConfigTransport;
+    instance: InstanceTransport;
     mcp: AuthTransport;
     overview: OverviewTransport;
     reverse: ConnectionTransport;
@@ -94,7 +96,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
         contextMessage: createMessageTransport(endpoint),
         debug: createDebugTransport(endpoint),
         extension: createExtensionRuntimeTransport(endpoint),
-        instance: createConfigTransport(endpoint),
+        instance: createInstanceTransport(endpoint),
         mcp: createAuthTransport(endpoint),
         overview: createOverviewTransport(endpoint),
         reverse: createConnectionTransport(endpoint),

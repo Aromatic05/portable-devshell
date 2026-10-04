@@ -340,7 +340,7 @@ export interface McpInstanceGateway
     approval?: McpApprovalPort;
 }
 
-export type McpWorkspaceActionGateway = McpTaskPort &
+export type McpWorkspaceActionGateway = McpWorkspacePort &
     Required<
         Pick<
             McpTaskPort,
@@ -435,7 +435,7 @@ export function isMcpTmuxWaitGateway(
 }
 
 export type McpWorkspaceGateway = McpWorkspaceActionGateway &
-    Required<Pick<McpToolCallPort, "readToolCalls">> &
+    Required<Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls">> &
     Required<Pick<McpWorkspaceEventPort, "readWorkspaceEvents">>;
 
 export function isMcpWorkspaceGateway(
@@ -448,13 +448,14 @@ export function isMcpWorkspaceGateway(
     );
 }
 
-export type McpGoalGateway =
-    Required<
-        Pick<McpTaskPort, "goalContinuation" | "manageGoal" | "readGoal">
-    >;
+export type McpGoalGateway = Required<
+    Pick<McpTaskPort, "goalContinuation" | "manageGoal" | "readGoal">
+>;
 
 export function isMcpGoalGateway(
-    gateway: McpTaskPort | undefined,
+    gateway:
+        | Pick<McpTaskPort, "goalContinuation" | "manageGoal" | "readGoal">
+        | undefined,
 ): gateway is McpGoalGateway {
     return (
         gateway !== undefined &&
@@ -465,7 +466,9 @@ export function isMcpGoalGateway(
 }
 
 export function requireMcpGoalGateway(
-    gateway: McpTaskPort | undefined,
+    gateway:
+        | Pick<McpTaskPort, "goalContinuation" | "manageGoal" | "readGoal">
+        | undefined,
     instanceName: string,
 ): McpGoalGateway {
     if (isMcpGoalGateway(gateway)) return gateway;

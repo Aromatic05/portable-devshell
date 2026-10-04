@@ -13,26 +13,23 @@ import type {
 } from "@portable-devshell/shared";
 import type {
     ContextEnvironmentPort,
+    ContextInstancePort,
+    ContextWorkerPort,
     PreparedEnvironmentFacts,
-} from "../../../../mcp/src/context/Port.js";
-import {
-    isMcpGoalGateway,
-    type ContextInstancePort,
-    type McpEndpointWorkerPort,
-} from "@portable-devshell/mcp";
+} from "../Port.js";
 import { ContextCleanupService } from "./Cleanup.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
     readonly #gateway: (instance: string) => ContextInstancePort | undefined;
-    readonly #worker: (instance: string) => McpEndpointWorkerPort | undefined;
+    readonly #worker: (instance: string) => ContextWorkerPort | undefined;
     readonly #cleanup: ContextCleanupService;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
         contextRegistry: ContextRecordPort & ContextCleanupLedgerPort;
         gateway(instance: string): ContextInstancePort | undefined;
-        worker(instance: string): McpEndpointWorkerPort | undefined;
+        worker(instance: string): ContextWorkerPort | undefined;
         cleanup: ContextCleanupService;
     }) {
         this.#registry = options.contextRegistry;
@@ -397,7 +394,10 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     ): Promise<void> {
         if (previousWorkspace === undefined) return;
         const gateway = this.#gateway(instance);
-        if (gateway !== undefined && isMcpGoalGateway(gateway)) {
+        if (
+            gateway?.readGoal !== undefined &&
+            gateway.manageGoal !== undefined
+        ) {
             const goal = await gateway.readGoal(instance, ctxId);
             if (goal?.status === "active" || goal?.status === "blocked")
                 throw new Error(

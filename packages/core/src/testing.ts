@@ -40,9 +40,11 @@ export * from "./worker/transport/service/Model.js";
 export * from "./worker/protocol/Terminal.js";
 
 export * from "./instance/Registry.js";
+export type { InstanceDescriptor } from "./instance/Descriptor.js";
 export type { ApprovalApi as InstanceApprovalPort } from "./approval/Api.js";
 export type {
     GoalApi as InstanceGoalPort,
+    TaskApi,
     TodoApi as InstanceTodoPort,
     WaitApi as InstanceWaitPort,
 } from "./task/Api.js";
@@ -57,3 +59,12 @@ export {
 } from "./process/Route.js";
 export { readTodoSubscriptionFromSeq } from "./task/todo/Route.js";
 export { readToolCall } from "./tool/Input.js";
+export * from "./tool/Pipeline.js";
+export * from "./worker/instance/tool/ExecutionTarget.js";
+export * from "./tool/Runtime.js";
+export * from "./tool/hook/Sequence.js";
+export * from "./tool/hook/Review.js";
+export * from "./tool/Context.js";
+export * from "./tool/ErrorPayload.js";
+export * from "./task/goal/Service.js";
+export * from "./task/todo/Service.js";

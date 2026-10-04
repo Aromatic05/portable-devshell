@@ -1,4 +1,3 @@
-import type { WorkerInstance } from "../worker/instance/Instance.js";
 import { createRemoteError, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type {
     InstanceEventRecord,
@@ -6,6 +5,7 @@ import type {
     ControlPortContext,
     MessageStream,
 } from "@portable-devshell/shared";
+import type { InstanceEventSource } from "../instance/EventBuffer.js";
 
 export type ProcessEventProjector = (
     event: InstanceEventRecord,
@@ -14,7 +14,7 @@ export type ProcessEventProjector = (
 export interface ProcessSubscription {
     connectionId: string;
     projectEvent?: ProcessEventProjector;
-    instance: Pick<WorkerInstance, "subscribe">;
+    instance: Pick<InstanceEventSource, "subscribe">;
     instanceName: string;
     nextSeq: number;
     requestId: string;

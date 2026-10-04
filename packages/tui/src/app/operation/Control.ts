@@ -121,7 +121,7 @@ export class TuiRuntimeControlOperations {
         draft: InstanceCreateDraft,
     ): Promise<string | undefined> {
         const result = await this.#request(
-            this.options.clients.config.createInstance(draft),
+            this.options.clients.instance.createInstance(draft),
             `instance.create:${draft.name}`,
         );
         let status: string | undefined;
@@ -163,7 +163,7 @@ export class TuiRuntimeControlOperations {
 
     async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
         return await this.#request(
-            this.options.clients.config.createInstanceSchema(),
+            this.options.clients.instance.createInstanceSchema(),
             "instance.createSchema",
         );
     }
@@ -186,14 +186,14 @@ export class TuiRuntimeControlOperations {
         patch: ConfigInstancePatch,
     ): Promise<void> {
         await this.#request(
-            this.options.clients.config.updateInstance({ instanceName, patch }),
+            this.options.clients.instance.updateInstance({ instanceName, patch }),
             `config.instance.update:${instanceName}`,
         );
     }
 
     async deleteInstance(instance: string): Promise<void> {
         await this.#request(
-            this.options.clients.config.deleteInstance(instance),
+            this.options.clients.instance.deleteInstance(instance),
             `instance.delete:${instance}`,
         );
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
@@ -216,7 +216,7 @@ export class TuiRuntimeControlOperations {
         enabled: boolean,
     ): Promise<void> {
         await this.#request(
-            this.options.clients.config.updateInstance({
+            this.options.clients.instance.updateInstance({
                 instanceName: instance,
                 patch: { enabled },
             }),
@@ -265,7 +265,7 @@ export class TuiRuntimeControlOperations {
         draft: InstanceCreateDraft,
     ): Promise<InstanceCreateSummary> {
         return await this.#request(
-            this.options.clients.config.validateInstanceCreate(draft),
+            this.options.clients.instance.validateInstanceCreate(draft),
             `instance.validateCreate:${draft.name}`,
         );
     }

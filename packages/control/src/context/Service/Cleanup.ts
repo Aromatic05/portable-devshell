@@ -1,10 +1,13 @@
-import { isMcpGoalGateway } from "@portable-devshell/mcp";
 import type {
     ContextCleanupLedgerPort,
     ContextRecordPort,
     McpContextRecord,
 } from "@portable-devshell/shared";
-import type { ContextCleanupPort } from "@portable-devshell/mcp";
+import type {
+    ContextCleanupPort,
+    ContextInstanceCleanupPort,
+    ContextInstancePort,
+} from "../Port.js";
 export interface ContextPresentationPort {
     revokeContext(ctxId: string): Promise<void>;
     revokeInstance(instance: string): Promise<void>;
@@ -16,8 +19,6 @@ export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
 }
 
 import type { McpContextEnvironmentCleanup } from "@portable-devshell/shared";
-import type { ContextInstancePort } from "@portable-devshell/mcp";
-import type { ContextInstanceCleanupPort } from "../../../../mcp/src/context/Port.js";
 
 export class ContextCleanupService {
     readonly #registry: ContextCleanupLedgerPort &
@@ -151,7 +152,11 @@ export class ContextCleanupService {
                 !reconciledInstances.has(environment.instance)
             ) {
                 reconciledInstances.add(environment.instance);
-                if (isMcpGoalGateway(gateway)) {
+                if (
+                    gateway.readGoal !== undefined &&
+                    gateway.manageGoal !== undefined
+                ) {
+                    const manageGoal = gateway.manageGoal;
                     const goal = await gateway
                         .readGoal(environment.instance, terminal.ctxId)
                         .catch((error) => {
@@ -163,7 +168,7 @@ export class ContextCleanupService {
                         goal?.status === "blocked"
                     ) {
                         await cleanup(async () => {
-                            await gateway.manageGoal(
+                            await manageGoal(
                                 environment.instance,
                                 { action: "stop" },
                                 terminal.ctxId,

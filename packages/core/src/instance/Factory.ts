@@ -1,7 +1,5 @@
-import { InstancePaths } from "./Paths.js";
 import { WorkerInstanceFactory } from "../worker/instance/Factory.js";
 import type { WorkerInstanceConfig } from "../worker/instance/Config.js";
-import type { WorkerInstance } from "../worker/instance/Instance.js";
 import { resolveWorkerHomeDirectory } from "../worker/provision/HomeDirectory.js";
 import { WorkerTransportFactory } from "../worker/transport/Factory.js";
 import { WorkerTransportConnection } from "../worker/transport/Transport.js";
@@ -12,12 +10,6 @@ import {
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "./Descriptor.js";
-import { GoalService } from "../task/goal/Service.js";
-import { TodoService } from "../task/todo/Service.js";
-import { WaitService } from "../task/wait/Service.js";
-import { WorkerTerminalBackend } from "../terminal/Backend.js";
-import { ApprovalService } from "../approval/Service.js";
-import { InstanceApprovalStore } from "../approval/Store.js";
 
 export class InstanceFactory {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
@@ -28,67 +20,24 @@ export class InstanceFactory {
     }
 
     map(instance: ControlInstanceConfig): InstanceDescriptor {
-        const name = asInstanceName(instance.name);
         const homeDirectory = resolveWorkerHomeDirectory();
-        const paths = new InstancePaths(name, homeDirectory);
         const reverseConnection =
             instance.provider === "reverse"
                 ? new WorkerTransportConnection()
                 : undefined;
-        const workerHolder: { value?: WorkerInstance } = {};
-        const todo = new TodoService({
-            appendEvent: async (type, data) => {
-                await workerHolder.value?.appendControlEvent(type, data);
-            },
-            filePath: paths.todoFile,
-            instanceName: instance.name,
-        });
-        const goal = new GoalService({
-            appendEvent: async (type, data) => {
-                await workerHolder.value?.appendControlEvent(type, data);
-            },
-            filePath: paths.goalsFile,
-            instanceName: instance.name,
-        });
-        const wait = new WaitService({
-            appendEvent: async (type, data) => {
-                await workerHolder.value?.appendControlEvent(type, data);
-            },
-            filePath: paths.waitsFile,
-            instanceName: instance.name,
-        });
         const worker = this.#workerInstanceFactory.create(
             this.#toWorkerConfig(instance, reverseConnection, homeDirectory),
         );
-        workerHolder.value = worker;
-        const approvalStore = new InstanceApprovalStore(
-            paths.auditDatabaseFile,
-            paths.legacyApprovalsFile,
-        );
-        const approval = new ApprovalService({
-            instanceName: name,
-            policy: instance.approvalPolicy,
-            store: approvalStore,
-            events: {
-                append: async (type, data) => {
-                    await worker.appendControlEvent(type, data);
-                },
-            },
-        });
-        const terminal = new WorkerTerminalBackend({ worker });
 
         return {
-            approval,
-            mcpContextMode: instance.mcp.contextMode,
             enabled: instance.enabled,
+            mcpContextMode: instance.mcp.contextMode,
             mcpEnabled: instance.mcp.enabled,
             mcpPath: `/${instance.name}/mcp`,
             modelExtensions: [...instance.extensions.model],
             name: instance.name,
             provider: instance.provider,
             ...(reverseConnection === undefined ? {} : { reverseConnection }),
-            task: { goal, todo, wait },
-            terminal,
             worker,
         };
     }

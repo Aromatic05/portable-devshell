@@ -19,6 +19,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
+    createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
     createTaskTransport,
@@ -99,7 +100,7 @@ export class WebDomainSession {
             createWebPageTransport(this.#endpoint),
         );
         this.instances = new InstanceConfigViewModel(
-            createConfigTransport(this.#endpoint),
+            createInstanceTransport(this.#endpoint),
         );
         this.artifactTransport = createArtifactTransport(this.#endpoint);
         this.artifact = new ArtifactViewModel(this.artifactTransport);

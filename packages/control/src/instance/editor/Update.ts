@@ -13,14 +13,14 @@ import {
 
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
-import type { ConfigMcpRuntimePort } from "../Mcp.js";
-import { type ConfigEngine, type ConfigRuntimeChangeSet } from "../../engine/index.js";
+import type { InstanceMcpRuntimePort } from "../Mcp.js";
+import { type ConfigEngine, type ConfigRuntimeChangeSet } from "../../config/engine/index.js";
 import {
     requiresWorkerRebuild,
     toWorkerReconfigureInput,
-} from "../../engine/Result.js";
+} from "../../config/engine/Result.js";
 
-import type { ConfigEditorCoordinatorOptions } from "../index.js";
+import type { InstanceEditorCoordinatorOptions } from "./Options.js";
 import type { InstanceRetirementCoordinator } from "./retirement/index.js";
 import type { InstanceCleanupDebt } from "./retirement/Debt.js";
 import { closeDescriptorResourcesBestEffort } from "./retirement/State.js";
@@ -42,12 +42,12 @@ export class InstanceReconfigurationCoordinator {
     readonly #engine: ConfigEngine;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #mcp?: ConfigMcpRuntimePort;
+    readonly #mcp?: InstanceMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #cleanup: InstanceCleanupDebt;
 
     constructor(
-        options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine },
+        options: InstanceEditorCoordinatorOptions,
         retirement: InstanceRetirementCoordinator,
         cleanup: InstanceCleanupDebt,
     ) {
@@ -370,7 +370,6 @@ export class InstanceReconfigurationCoordinator {
                 await descriptor.worker.reconfigure(
                     toWorkerReconfigureInput(existing),
                 );
-                descriptor.approval.setPolicy(existing.approvalPolicy);
                 descriptor.mcpContextMode = existing.mcp.contextMode;
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
@@ -441,7 +440,6 @@ export class InstanceReconfigurationCoordinator {
             return;
         }
         await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
-        descriptor.approval.setPolicy(instance.approvalPolicy);
         descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.enabled = true;
         descriptor.mcpEnabled = instance.mcp.enabled;

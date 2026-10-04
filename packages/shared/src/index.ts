@@ -1,5 +1,5 @@
 export { connectControlChannel, CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX, CONTROL_REMOTE_RPC_PATH, CONTROL_REMOTE_RPC_SUBPROTOCOL, CONTROL_WEB_BASE_PATH, CONTROL_WEB_RPC_SUBPROTOCOL, type ControlChannelOptions, controlRemoteRpcPath, controlWebBasePath } from "./client/Control.js";
-export { ControlLogger, ControlPidFile } from "./client/Daemon.js";
+export { ControlLifecycleManager, ControlLogger, ControlPidFile } from "./client/Daemon.js";
 export { ControlPathHome, ControlPathRuntime, ControlSocketFile, isWindowsNamedPipePath, removeControlIpcEndpoint } from "./client/Path.js";
 export { withRequestTimeout } from "./client/Request.js";
 export { ServiceSession } from "./client/Session.js";
@@ -8,13 +8,16 @@ export { type AuthStatus, generateOAuth2ApprovalToken, type OAuthApprovalDecisio
 export { type AuthTransport, createAuthTransport } from "./control/auth/Transport.js";
 export { AuthViewModel } from "./control/auth/ViewModel.js";
 export { configInputError, ConfigInputError, formatConfigPath } from "./control/config/Error.js";
-export { type ConfigBatchUpdateRequest, type ConfigDraft, type ConfigGlobalDraft, configInstanceChangedPaths, type ConfigInstanceDraft, type ConfigInstancePatch, configInstanceRequiresRestart, type ConfigMcpAuthDraft, type ConfigMcpPatch, type ConfigUpdateInstanceRequest, type ConfigView, type ConfigWebPatch, type ControlConfig, type ControlGlobalConfig, type ControlInstanceAlertsConfig, type ControlInstanceConfig, type ControlMcpAuthConfig, type ControlMcpContextMode, type ControlWebAuthConfig, type ControlWebOAuth2Config, defaultConfigNormalizeContext, type InstanceContainerConfig, type InstanceContainerMountConfig, type InstanceContainerPresetSchema, type InstanceCreateDraft, type InstanceCreateProvider, type InstanceCreateResult, type InstanceCreateSchema, type InstanceCreateSummary, MASKED_CONFIG_TOKEN, minimumAuditStorageBytes } from "./control/config/Model.js";
+export { type ConfigBatchUpdateRequest, type ConfigDraft, type ConfigGlobalDraft, configInstanceChangedPaths, type ConfigInstanceDraft, type ConfigInstancePatch, configInstanceRequiresRestart, type ConfigMcpAuthDraft, type ConfigMcpPatch, type ConfigUpdateInstanceRequest, type ConfigView, type ConfigWebPatch, type ControlConfig, type ControlGlobalConfig, type ControlInstanceAlertsConfig, type ControlInstanceConfig, type ControlMcpAuthConfig, type ControlMcpContextMode, type ControlWebAuthConfig, type ControlWebOAuth2Config, defaultConfigNormalizeContext, type InstanceContainerConfig, type InstanceContainerMountConfig, type InstanceContainerPresetSchema, MASKED_CONFIG_TOKEN, minimumAuditStorageBytes } from "./control/config/Model.js";
+export { type InstanceChangeEvent, type InstanceChangeKind, type InstanceCreateDraft, type InstanceCreateProvider, type InstanceCreateResult, type InstanceCreateSchema, type InstanceCreateSummary, type InstanceListEnvelope } from "./control/instance/Model.js";
 export { applyConfigInstancePatch, applyConfigMcpPatch, applyConfigWebPatch, createDefaultControlConfig, normalizeConfigDraft, normalizeConfigGlobalDraft, normalizeConfigInstanceDraft, toConfigInstanceDraft, toConfigView } from "./control/config/Normalize.js";
 export { parseConfigBatchUpdateRequest, parseConfigDraft, parseConfigGlobalDraft, parseConfigInstanceDraft, parseConfigInstancePatch, parseConfigInstanceTargetRequest, parseConfigMcpPatch, parseConfigUpdateInstanceRequest, parseConfigUpdateMcpRequest, parseConfigUpdateWebRequest, parseConfigWebPatch, parseMcpAuthDraft } from "./control/config/Parse.js";
-export { type ConversationPreferencesPatch, type ConversationPreferencesSnapshot } from "./control/config/Preference.js";
+export { applyConversationPreferencesPatch, cloneConversationPreferences, CONVERSATION_PREFERENCES_VERSION, type ConversationPreferencesPatch, type ConversationPreferencesSnapshot, createEmptyConversationPreferences, parseConversationPreferencesPatch, parseConversationPreferencesSnapshot, sameConversationPreferences } from "./control/config/Preference.js";
 export { type ConfigTransport, createConfigTransport } from "./control/config/Transport.js";
+export { createInstanceTransport, type InstanceTransport } from "./control/instance/Transport.js";
 export { validateConfigSemantics } from "./control/config/Validate.js";
-export { ConfigViewModel, ConversationPreferenceViewModel, InstanceConfigViewModel } from "./control/config/ViewModel.js";
+export { ConfigViewModel, ConversationPreferenceViewModel } from "./control/config/ViewModel.js";
+export { InstanceConfigViewModel } from "./control/instance/ViewModel.js";
 export { type ReverseDeviceCodeResult, type ReverseEnrollmentRequest, type ReverseUpstreamBatch } from "./control/connection/Model.js";
 export { type ConnectionTransport, createConnectionTransport } from "./control/connection/Transport.js";
 export { type DebugInvocationSummary, type DebugPatchLoadRequest, type DebugPatchScope, type DebugPatchSummary, type DebugTargetSummary } from "./control/debug/Model.js";
@@ -63,7 +66,7 @@ export { type ContextCleanupLedgerPort } from "./workspace/context/Authority/Cle
 export { type ContextRecordPort } from "./workspace/context/Authority/Record.js";
 export { type ContextReentryPort } from "./workspace/context/Authority/Reentry.js";
 export { type ContextRegistryPort } from "./workspace/context/Authority/index.js";
-export { contextErrorCodes, type McpContextAutomaticReentryMode, type McpContextAutomaticReentrySourceKind, type McpContextEnvironment, type McpContextEnvironmentCleanup, type McpContextExternalBinding, type McpContextRecord, type McpContextStatus } from "./workspace/context/Model.js";
+export { contextErrorCodes, type McpContextAutomaticReentryMode, type McpContextAutomaticReentrySourceKind, type McpContextAutomaticReentryState, type McpContextBinding, type McpContextEnvironment, type McpContextEnvironmentBinding, type McpContextEnvironmentCleanup, type McpContextExternalBinding, type McpContextInstanceReference, type McpContextMaskedInstance, type McpContextQuery, type McpContextRecord, type McpContextStatus, type McpContextValidationBinding } from "./workspace/context/Model.js";
 export { type ContextTransport, createContextTransport } from "./workspace/context/Transport.js";
 export { ContextViewModel } from "./workspace/context/ViewModel.js";
 export { compactContextId, type ContextMessageDirective, type ContextMessageListInput, type ContextMessageQueueInput, type ContextMessageReadResult, type ContextMessageRecord, type ContextMessageStatus, type ConversationEntry, type ConversationEntryKind, type ConversationListInput, humanConversationTitle, isMessageEventType, type MessageEvent, type MessageEventType, parseContextMessageDirective } from "./workspace/message/Model.js";

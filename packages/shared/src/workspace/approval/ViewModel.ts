@@ -15,7 +15,7 @@ import {
 } from "../../client/Stream.js";
 import type { ApprovalTransport } from "./Transport.js";
 
-interface ApprovalViewModelState {
+export interface ApprovalViewModelState {
     approvals: ApprovalRequest[];
     failure?: Error;
     lastSeq: number;

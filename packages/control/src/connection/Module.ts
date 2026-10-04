@@ -19,14 +19,14 @@ interface ConnectionLifecyclePort {
 }
 
 interface ConnectionMcpPort {
-    readonly configEditor: ConnectionLifecyclePort;
+    readonly instanceEditor: ConnectionLifecyclePort;
     readonly host?: {
         readonly server: Parameters<ReverseConnectionGateway["install"]>[0];
     };
 }
 
 interface ConnectionStatePort {
-    readonly homeDirectory: string;
+    readonly homeDirectory?: string;
     readonly instances: InstanceRegistry;
     requireConfig(): ControlConfig;
 }
@@ -74,13 +74,13 @@ export class ConnectionModule {
         this.service.setDisconnectHandler((instance) =>
             this.#gateway?.disconnect(instance),
         );
-        options.mcp.configEditor.registerInstanceDeleteRetirement(
+        options.mcp.instanceEditor.registerInstanceDeleteRetirement(
             async (instance) => {
                 if (instance.provider !== "reverse") return;
                 await this.service?.retireInstance(instance.name);
             },
         );
-        options.mcp.configEditor.registerInstanceDisableRetirement(
+        options.mcp.instanceEditor.registerInstanceDisableRetirement(
             async (instance) => {
                 if (instance.provider !== "reverse") return;
                 await this.service?.retireInstance(instance.name);

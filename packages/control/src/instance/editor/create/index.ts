@@ -18,12 +18,12 @@ import {
 
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
-import type { ConfigMcpRuntimePort } from "../../Mcp.js";
-import { ControlConfigValidator } from "../../../engine/Validator.js";
+import type { InstanceMcpRuntimePort } from "../../Mcp.js";
+import { ControlConfigValidator } from "../../../config/engine/Validator.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
-} from "../../../engine/Lock.js";
+} from "../../../config/engine/Lock.js";
 import { listInstanceCreateProviders } from "./ProviderCatalog.js";
 import { discoverSshConfigHosts } from "./SshConfig.js";
 
@@ -65,7 +65,7 @@ export interface InstanceCreateCoordinatorOptions {
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
-    mcp?: ConfigMcpRuntimePort;
+    mcp?: InstanceMcpRuntimePort;
     mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
     sshHosts?: () => readonly string[];
@@ -79,7 +79,7 @@ export class InstanceCreateCoordinator {
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #mcp?: ConfigMcpRuntimePort;
+    readonly #mcp?: InstanceMcpRuntimePort;
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
     readonly #setConfig: (config: ControlConfig) => void;

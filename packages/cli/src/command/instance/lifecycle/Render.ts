@@ -12,7 +12,11 @@ export function renderInstanceList(
 
 import type { InstanceSnapshot } from "@portable-devshell/shared";
 
-export function renderInstanceSnapshot(snapshot: InstanceSnapshot): string {
+export function renderInstanceSnapshot(
+    snapshot: InstanceSnapshot & {
+        activeTodos?: import("@portable-devshell/shared").ActiveTodoSummary[];
+    },
+): string {
     const lines = [
         `instance: ${snapshot.name}`,
         `status: ${snapshot.status}`,

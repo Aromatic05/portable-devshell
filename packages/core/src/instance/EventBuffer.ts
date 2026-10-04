@@ -27,6 +27,13 @@ export interface InstanceEventStreamSlice {
     lastSeq: number;
 }
 
+export interface InstanceEventSource {
+    cursor(): number;
+    subscribe(
+        fromSeq?: number,
+    ): InstanceEventStreamGap | InstanceEventStreamSlice;
+}
+
 export class InstanceEventBuffer {
     readonly #instanceName: InstanceName;
     readonly #capacity: number;

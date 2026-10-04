@@ -15,10 +15,8 @@ import type { AuditToolCallHistory } from "../../../storage/audit/ToolCallHistor
 import type { WorkerToolInvoker } from "../../tool/Invoker.js";
 import type { WorkerToolCallScheduler } from "../../tool/Scheduler.js";
 import { WorkerInstanceToolAudit } from "./record/Audit.js";
-import {
-    ToolCallExecutionTarget,
-    type ToolCallTarget,
-} from "../../../tool/Pipeline.js";
+import { ToolCallExecutionTarget } from "./ExecutionTarget.js";
+import type { ToolCallTarget } from "../../../tool/Pipeline.js";
 import { WorkerInstanceToolLog } from "./record/Log.js";
 
 interface WorkerToolOptions {

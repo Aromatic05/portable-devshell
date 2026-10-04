@@ -13,8 +13,8 @@ import {
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../../server/Route.js";
-import type { InstanceChange, InstanceChangeHub } from "../change/Instance.js";
+import { requirePort, routeModule } from "../server/Route.js";
+import type { InstanceChange, InstanceChangeHub } from "./Change.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 
 export interface InstanceCreatePort {
@@ -27,6 +27,7 @@ export interface InstanceEditorPort {
     deleteInstance(params?: JsonValue): Promise<JsonValue>;
     disableInstance(params?: JsonValue): Promise<JsonValue>;
     enableInstance(params?: JsonValue): Promise<JsonValue>;
+    updateInstanceConfig(params?: JsonValue): Promise<JsonValue>;
 }
 
 export interface InstanceConfigRouteModuleOptions {
@@ -74,6 +75,8 @@ export function createInstanceConfigRouteModule(
                 await editor().disableInstance(request.payload),
             deleteInstance: async (request) =>
                 await editor().deleteInstance(request.payload),
+            updateInstance: async (request) =>
+                await editor().updateInstanceConfig(request.payload),
         },
         {
             subscribeInstances: async (stream, request) => {

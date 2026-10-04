@@ -42,7 +42,7 @@ interface ToolCallInstanceState {
     status: InstanceEventSubscriptionStatus;
 }
 
-interface ToolCallViewModelState {
+export interface ToolCallViewModelState {
     instances: Record<string, ToolCallInstanceState>;
 }
 

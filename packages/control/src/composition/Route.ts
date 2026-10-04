@@ -24,18 +24,22 @@ import {
     createTuiPageRouteModule,
     type TuiPagePort,
 } from "../extension/api/point/tui/Endpoint.js";
-import type { ConfigEditorPort } from "../config/route/Config.js";
-import { createConfigRouteModule } from "../config/route/Config.js";
+import type { ConfigEditorPort } from "./ConfigRoute.js";
+import { createConfigRouteModule } from "./ConfigRoute.js";
 import { ConfigChangeHub } from "../config/change/Config.js";
 import { createDebugRouteModule, type DebugPatchPort } from "../debug/Route.js";
 import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
 import type { ExtensionControlPort } from "../extension/manager/Port.js";
-import type { InstanceCreatePort } from "../config/route/Instance.js";
+import type {
+    InstanceCreatePort,
+    InstanceEditorPort,
+} from "../instance/Route.js";
 import {
     createInstanceConfigRouteModule,
     type InstanceConfigRouteModuleOptions,
-} from "../config/route/Instance.js";
-import { InstanceChangeHub } from "../config/change/Instance.js";
+} from "../instance/Route.js";
+import { InstanceChangeHub } from "../instance/Change.js";
+import type { InstanceDomainRuntime } from "./InstanceRuntime.js";
 import {
     createContextRouteModule,
     type ContextAdminPort,
@@ -68,6 +72,8 @@ export interface ControlRouteCompositionOptions {
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
+    instanceDomains: InstanceDomainRuntime;
+    instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
@@ -221,7 +227,7 @@ export class ControlRouteComposition {
                             configuredInstances:
                                 this.#options.configuredInstances,
                             create: this.#options.instanceCreate,
-                            editor: this.#options.config,
+                            editor: this.#options.instanceEditor,
                             registry: this.#options.instances,
                         }),
                     ),
@@ -238,14 +244,18 @@ export class ControlRouteComposition {
         }
 
         for (const descriptor of descriptors) {
+            const domains = this.#options.instanceDomains.services(descriptor);
             definitions.push(
                 createInstanceHost({
+                    approval: domains.approval,
                     descriptor,
                     extensionModules:
                         this.#options.extensionRoutes?.modules("instance") ??
                         [],
                     registry: this.#options.instances,
                     subscriptions: this.#subscriptions,
+                    task: domains.task,
+                    terminal: domains.terminal,
                     terminalMaxUnackedBytes:
                         this.#options.terminalMaxUnackedBytes,
                     terminals: this.#terminals,

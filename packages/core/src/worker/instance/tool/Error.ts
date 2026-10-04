@@ -50,25 +50,6 @@ export function normalizeToolSchedulerError(error: unknown): unknown {
     });
 }
 
-export function throwIfToolCallAborted(signal: AbortSignal | undefined): void {
-    if (signal?.aborted !== true) {
-        return;
-    }
-
-    throw createRemoteError({
-        code: runtimeErrorCodes.toolCallCancelled,
-        cause: signal.reason,
-        message: "Tool call was cancelled by the client.",
-        retryable: true,
-        details: {
-            reason:
-                typeof signal.reason === "string"
-                    ? signal.reason
-                    : "client cancelled",
-        },
-    });
-}
-
 function readErrorDetails(error: unknown): JsonValue {
     if (
         typeof error !== "object" ||

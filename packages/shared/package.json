@@ -10,6 +10,10 @@
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
         },
+        "./testing": {
+            "types": "./dist/testing.d.ts",
+            "default": "./dist/testing.js"
+        },
         "./transport/frame": {
             "types": "./dist/transport/frame/Protocol.d.ts",
             "default": "./dist/transport/frame/Protocol.js"

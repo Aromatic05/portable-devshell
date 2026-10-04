@@ -6,6 +6,7 @@ import type { TuiDomainSession } from "./control/Client.js";
 import type {
     ArtifactTransport,
     ConfigTransport,
+    InstanceTransport,
     ConnectionTransport,
     ProcessStartOptions,
     ServiceTransport,
@@ -105,6 +106,7 @@ export class TuiRuntimeOperations {
 export interface TuiRuntimeOperationClients {
     artifact: ArtifactTransport;
     config: ConfigTransport;
+    instance: InstanceTransport;
     reverse: ConnectionTransport;
     service: ServiceTransport;
     task: TaskTransport;

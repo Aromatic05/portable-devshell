@@ -1,4 +1,3 @@
-import type { WorkerInstance } from "../../worker/instance/Instance.js";
 import {
     createRemoteError,
     controlErrorCodes,
@@ -14,6 +13,7 @@ import type {
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
 import { routeModule } from "../../Port.js";
+import type { InstanceEventSource } from "../../instance/EventBuffer.js";
 import type { TodoService } from "./Service.js";
 
 export interface TodoTaskRouteSubscriptionPort {
@@ -21,16 +21,16 @@ export interface TodoTaskRouteSubscriptionPort {
         stream: MessageStream,
         context: ControlPortContext,
         instanceName: string,
-        instance: Pick<WorkerInstance, "subscribe">,
+        instance: Pick<InstanceEventSource, "subscribe">,
         fromSeq: number,
         projectEvent?: (event: InstanceEventRecord) => TaskEvent | undefined,
     ): Promise<void>;
 }
 
 export interface TodoTaskRouteInstancePort {
+    events: InstanceEventSource;
     name: string;
     todo: Pick<TodoService, "delete" | "read">;
-    worker: Pick<WorkerInstance, "snapshot" | "subscribe">;
 }
 
 export function createTodoTaskRouteModule(
@@ -42,7 +42,7 @@ export function createTodoTaskRouteModule(
         {
             getTodo: async (request) =>
                 ({
-                    lastSeq: instance.worker.snapshot().lastSeq,
+                    lastSeq: instance.events.cursor(),
                     todo: await instance.todo.read(
                         readTodoInput(request.payload),
                     ),
@@ -58,7 +58,7 @@ export function createTodoTaskRouteModule(
                     stream,
                     context,
                     instance.name,
-                    instance.worker,
+                    instance.events,
                     readTodoSubscriptionFromSeq(request.payload),
                     (event) =>
                         isTaskEventType(event.type)

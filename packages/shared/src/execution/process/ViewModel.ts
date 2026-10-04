@@ -14,7 +14,7 @@ import type {
 import type { InstanceSnapshot } from "./Model.js";
 import type { ProcessStartOptions, ProcessTransport } from "./Transport.js";
 
-interface ProcessViewModelState {
+export interface ProcessViewModelState {
     connection: InstanceEventSubscriptionStatus;
     failure?: Error;
     lastSeq: number;

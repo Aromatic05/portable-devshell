@@ -3,7 +3,7 @@ import type { ContextChangeEvent, ContextSnapshot } from "./Revision.js";
 import type { McpContextRecord } from "./Model.js";
 import type { ContextTransport } from "./Transport.js";
 
-interface ContextViewModelState {
+export interface ContextViewModelState {
     contexts: McpContextRecord[];
     revision: number;
     connection: SubscriptionStatus;

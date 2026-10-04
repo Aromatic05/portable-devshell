@@ -20,7 +20,7 @@ export {
     InstanceRegistry,
     InstanceRegistryFactory,
 } from "@portable-devshell/core";
-export * from "./config/editor/instance/create/index.js";
+export * from "./instance/editor/create/index.js";
 export * from "./composition/mcp/Gateway.js";
 export * from "./composition/mcp/Endpoint.js";
 export * from "./composition/mcp/Runtime.js";

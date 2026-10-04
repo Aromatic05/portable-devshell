@@ -5,6 +5,9 @@
         "moduleResolution": "NodeNext",
         "paths": {
             "@portable-devshell/shared": ["./packages/shared/dist/index.d.ts"],
+            "@portable-devshell/shared/testing": [
+                "./packages/shared/dist/testing.d.ts"
+            ],
             "@portable-devshell/shared/browser": [
                 "./packages/shared/dist/browser.d.ts"
             ],

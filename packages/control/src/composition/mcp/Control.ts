@@ -16,13 +16,16 @@ import {
     ConfigEditorCoordinator,
     type ConfigRuntimeChangeSet,
 } from "../../config/editor/index.js";
-import type { ConfigMcpRuntimePort } from "../../config/editor/Mcp.js";
+import { ConfigEngine } from "../../config/engine/index.js";
+import { HttpEndpointPreflight } from "../../server/endpoint/Http.js";
+import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
+import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";
 import {
     decorateMcpInstanceGatewayArtifact,
     McpInstanceGatewayControl,
 } from "./Gateway.js";
-import { InstanceCreateCoordinator } from "../../config/editor/instance/create/index.js";
+import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
@@ -30,6 +33,7 @@ import type { ArtifactModule } from "../../artifact/Module.js";
 import type { ContextModule } from "../../context/Module.js";
 import type { ControlRuntimeState } from "../control/State.js";
 import type { InstanceDescriptor } from "@portable-devshell/core";
+import { InstanceDomainRuntime } from "../InstanceRuntime.js";
 
 export interface McpControlModuleOptions {
     contexts: ContextModule;
@@ -41,6 +45,8 @@ export interface McpControlModuleOptions {
 
 export class McpControlModule {
     readonly configEditor: ConfigEditorCoordinator;
+    readonly instanceDomains: InstanceDomainRuntime;
+    readonly instanceEditor: InstanceEditorCoordinator;
     readonly instanceCreate: InstanceCreateCoordinator;
     readonly instanceGateway: McpInstanceGatewayControl;
     readonly toolProvenance: ToolCallProvenanceStore;
@@ -86,13 +92,19 @@ export class McpControlModule {
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
+        this.instanceDomains = new InstanceDomainRuntime({
+            getConfig: () => options.state.requireConfig(),
+            homeDirectory: options.state.homeDirectory,
+            instances: options.state.instances,
+        });
         this.instanceGateway = new McpInstanceGatewayControl({
             getConfig: () => options.state.requireConfig(),
+            instanceDomains: this.instanceDomains,
             instanceRegistry: options.state.instances,
             toolProvenance: this.toolProvenance,
         });
         const endpointFactory = new McpEndpointFactory();
-        const configMcp: ConfigMcpRuntimePort = {
+        const instanceMcp: InstanceMcpRuntimePort = {
             registerInstance: (instance, auth, workspaceEnabled = true) => {
                 const descriptor = options.state.instances.get(instance);
                 if (descriptor === undefined) return;
@@ -112,14 +124,73 @@ export class McpControlModule {
                 await this.#host?.retireWorkspaceApp(instance);
             },
         };
+        const configEngine = new ConfigEngine({
+            configStore: options.state.configStore,
+            getConfig: () => options.state.requireConfig(),
+            getRestartControlRequired: () =>
+                options.state.restartControlRequired,
+            homeDirectory: options.state.homeDirectory,
+            markRestartControlRequired: () =>
+                options.state.markRestartControlRequired(),
+            changeHub: options.state.configChanges,
+            mutationRunner: options.state.configMutations,
+            registry: options.state.configRegistry,
+            runtimeApply: {
+                apply: async (previous, next, changes) =>
+                    await this.#applyConfig(previous, next, changes),
+            },
+            runtimePreflight: new HttpEndpointPreflight(),
+            setConfig: (config) => options.state.setConfig(config),
+        });
+        this.instanceEditor = new InstanceEditorCoordinator({
+            cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
+            engine: configEngine,
+            detachContextInstance: async (instance) => {
+                await options.contexts.detachInstance(instance);
+            },
+            reconcileContextInstanceCleanup: async (
+                instance,
+                descriptor?: InstanceDescriptor,
+            ) => {
+                await options.contexts.cleanup.reconcileInstance(instance, {
+                    releaseAlerts: async (workspace) => {
+                        if (descriptor === undefined) {
+                            throw new Error(
+                                `Instance ${instance} has pending alerts cleanup without a cleanup descriptor.`,
+                            );
+                        }
+                        if (!descriptor.worker.snapshot().ready)
+                            await descriptor.worker.start();
+                        await descriptor.worker.releaseAlerts(workspace);
+                    },
+                    releaseInstanceReference: async (ctxId) => {
+                        options.state.instances.releaseConnectionReference(
+                            instance,
+                            ctxId,
+                        );
+                    },
+                });
+            },
+            instanceRegistry: options.state.instances,
+            mcp: instanceMcp,
+        });
+        this.instanceEditor.registerInstanceDisableRetirement(async (instance) => {
+            await this.instanceDomains.retireDisabled(instance.name);
+        });
+        this.instanceEditor.registerInstanceDeleteRetirement(async (instance) => {
+            await this.instanceDomains.retireDeleted(instance.name);
+        });
+        this.instanceEditor.registerInstanceDeleted(async (instance) => {
+            this.instanceDomains.close(instance.name);
+        });
         this.instanceCreate = new InstanceCreateCoordinator({
             assertCleanupSettled: async (instance) =>
-                await this.configEditor.assertInstanceCleanupSettled(instance),
+                await this.instanceEditor.assertInstanceCleanupSettled(instance),
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
-            mcp: configMcp,
+            mcp: instanceMcp,
             mutationRunner: options.state.configMutations,
             setConfig: (config) => options.state.setConfig(config),
         });
@@ -152,55 +223,24 @@ export class McpControlModule {
         if (this.#host !== undefined)
             options.artifact.installHttpRoute(this.#host.server);
         this.configEditor = new ConfigEditorCoordinator({
-            cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
+            engine: configEngine,
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
-            detachContextInstance: async (instance) => {
-                await options.contexts.detachInstance(instance);
-            },
-            reconcileContextInstanceCleanup: async (
-                instance,
-                descriptor?: InstanceDescriptor,
-            ) => {
-                await options.contexts.cleanup.reconcileInstance(instance, {
-                    releaseAlerts: async (workspace) => {
-                        if (descriptor === undefined) {
-                            throw new Error(
-                                `Instance ${instance} has pending alerts cleanup without a cleanup descriptor.`,
-                            );
-                        }
-                        if (!descriptor.worker.snapshot().ready)
-                            await descriptor.worker.start();
-                        await descriptor.worker.releaseAlerts(workspace);
-                    },
-                    releaseInstanceReference: async (ctxId) => {
-                        options.state.instances.releaseConnectionReference(
-                            instance,
-                            ctxId,
-                        );
-                    },
-                });
-            },
             getRestartControlRequired: () =>
                 options.state.restartControlRequired,
             homeDirectory: options.state.homeDirectory,
-            instanceRegistry: options.state.instances,
-            mcp: configMcp,
+            instances: this.instanceEditor,
             markRestartControlRequired: () =>
                 options.state.markRestartControlRequired(),
             changeHub: options.state.configChanges,
             mutationRunner: options.state.configMutations,
             registry: options.state.configRegistry,
-            runtimeApply: {
-                apply: async (previous, next, changes) =>
-                    await this.#applyConfig(previous, next, changes),
-            },
             setConfig: (config) => options.state.setConfig(config),
         });
     }
 
     async prepare(): Promise<void> {
-        await this.configEditor.reconcileCleanupDebt();
+        await this.instanceEditor.reconcileCleanupDebt();
     }
 
     get host(): McpHost | undefined {

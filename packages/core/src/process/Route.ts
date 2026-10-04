@@ -6,8 +6,8 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import type {
-    ActiveTodoSummary,
     ProcessEvent,
+    InstanceSnapshot,
     JsonValue,
     ControlPortDefinition,
     ControlStreamMessage,
@@ -19,7 +19,7 @@ import type { ProcessSubscriptionManager } from "./Subscription.js";
 export interface ProcessRouteInstancePort {
     enabled: boolean;
     name: string;
-    todoSummaries(): ActiveTodoSummary[];
+    projectSnapshot?(snapshot: InstanceSnapshot): JsonValue;
     worker: Pick<
         WorkerInstance,
         | "readLogs"
@@ -42,39 +42,32 @@ export function createProcessRouteModule(
     ownership: ProcessRouteOwnershipPort,
     subscriptions: ProcessSubscriptionManager,
 ): ControlPortDefinition {
+    const projectSnapshot = (snapshot: InstanceSnapshot): JsonValue =>
+        instance.projectSnapshot?.(snapshot) ?? (snapshot as unknown as JsonValue);
     return routeModule(
         "process",
         {
             snapshot: () => {
-                const snapshot = withTodoSummaries(
-                    instance.worker.snapshot(),
-                    instance.todoSummaries(),
-                );
+                const snapshot = instance.worker.snapshot();
                 return {
                     lastSeq: snapshot.lastSeq,
-                    snapshot,
+                    snapshot: projectSnapshot(snapshot),
                 } as unknown as JsonValue;
             },
             refresh: async () => {
-                const snapshot = withTodoSummaries(
-                    await instance.worker.refreshStatus(),
-                    instance.todoSummaries(),
-                );
+                const snapshot = await instance.worker.refreshStatus();
                 return {
                     lastSeq: snapshot.lastSeq,
-                    snapshot,
+                    snapshot: projectSnapshot(snapshot),
                 } as unknown as JsonValue;
             },
             stop: async () => {
-                const result = withTodoSummaries(
-                    await instance.worker.stop(),
-                    instance.todoSummaries(),
-                );
+                const result = await instance.worker.stop();
                 ownership.clearOwned(instance.name);
                 if (!instance.enabled) {
                     ownership.delete(instance.name);
                 }
-                return result as unknown as JsonValue;
+                return projectSnapshot(result);
             },
             readLogs: async (request) => {
                 const query = readProcessLogQuery(request.payload);
@@ -106,12 +99,9 @@ export function createProcessRouteModule(
                     stream.send({ name: "output", payload: { chunk } }),
                 );
                 try {
-                    const result = withTodoSummaries(
-                        await instance.worker.startInteractive(relay),
-                        instance.todoSummaries(),
-                    );
+                    const result = await instance.worker.startInteractive(relay);
                     ownership.markOwned(instance.name);
-                    await stream.close(result as unknown as JsonValue);
+                    await stream.close(projectSnapshot(result));
                 } finally {
                     offData();
                     offClose();
@@ -133,16 +123,6 @@ export function createProcessRouteModule(
                 ),
         },
     );
-}
-
-function withTodoSummaries<T extends { lastSeq: number }>(
-    snapshot: T,
-    activeTodos: ActiveTodoSummary[],
-): T & { activeTodos?: ActiveTodoSummary[] } {
-    return {
-        ...snapshot,
-        ...(activeTodos.length === 0 ? {} : { activeTodos }),
-    };
 }
 
 const MAX_LOG_READ_LIMIT = 100;

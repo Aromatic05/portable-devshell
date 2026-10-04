@@ -8,7 +8,11 @@ import {
     type OperationalOverviewWorker,
 } from "@portable-devshell/shared";
 
-import type { InstanceDescriptor } from "@portable-devshell/core";
+import type {
+    ApprovalApi,
+    InstanceDescriptor,
+    TaskApi,
+} from "@portable-devshell/core";
 import {
     createCollectionFailure,
     createRecentFailureAlert,
@@ -27,11 +31,21 @@ export interface OperationalOverviewInstanceCollection {
     todos: OperationalOverviewTodo[];
 }
 
+export interface OperationalOverviewDomainPort {
+    approval(instance: string): ApprovalApi | undefined;
+    task(instance: string): TaskApi | undefined;
+}
+
 export class OperationalOverviewInstanceCollector {
     readonly #activityLimit: number;
+    readonly #domains?: OperationalOverviewDomainPort;
 
-    constructor(options?: { activityLimit?: number }) {
+    constructor(options?: {
+        activityLimit?: number;
+        domains?: OperationalOverviewDomainPort;
+    }) {
         this.#activityLimit = options?.activityLimit ?? 20;
+        this.#domains = options?.domains;
     }
 
     async collect(
@@ -40,9 +54,11 @@ export class OperationalOverviewInstanceCollector {
     ): Promise<OperationalOverviewInstanceCollection> {
         const snapshot = readSnapshot(descriptor);
         const alerts = createSnapshotAlerts(snapshot.name, snapshot);
+        const task = this.#domains?.task(descriptor.name);
+        const approval = this.#domains?.approval(descriptor.name);
         let todos: OperationalOverviewTodo[] = [];
         try {
-            todos = descriptor.task.todo.summaries().map((todo) => ({
+            todos = (task?.todo.summaries() ?? []).map((todo) => ({
                 ...todo,
                 instance: snapshot.name,
             }));
@@ -55,7 +71,7 @@ export class OperationalOverviewInstanceCollector {
 
         const [approvalsResult, callsResult, failureResult] =
             await Promise.allSettled([
-                descriptor.approval.listPendingApprovals(),
+                approval?.listPendingApprovals() ?? Promise.resolve([]),
                 descriptor.worker.readToolCalls({
                     includeInput: false,
                     includeOutput: false,

@@ -3,7 +3,6 @@
 // before the authoritative read and then subscribes from `lastSeq + 1`.
 // Changes racing with the read may be observed twice, but cannot be missed.
 
-import type { WorkerInstance } from "../worker/instance/Instance.js";
 import type {
     ApprovalEvent,
     ApprovalDecisionBy,
@@ -16,6 +15,7 @@ import type {
 import { isApprovalEventType } from "@portable-devshell/shared";
 
 import { routeModule } from "../Port.js";
+import type { InstanceEventSource } from "../instance/EventBuffer.js";
 import {
     readApprovalDecision,
     readApprovalId,
@@ -29,7 +29,7 @@ export interface ApprovalRouteSubscriptionPort {
         stream: MessageStream,
         context: ControlPortContext,
         instanceName: string,
-        instance: Pick<WorkerInstance, "subscribe">,
+        instance: Pick<InstanceEventSource, "subscribe">,
         fromSeq: number,
         projectEvent?: (
             event: InstanceEventRecord,
@@ -45,8 +45,8 @@ export interface ApprovalRouteInstancePort {
         | "listApprovals"
         | "listPendingApprovals"
     >;
+    events: InstanceEventSource;
     name: string;
-    worker: Pick<WorkerInstance, "snapshot" | "subscribe">;
 }
 
 export function createApprovalRouteModule(
@@ -68,7 +68,7 @@ export function createApprovalRouteModule(
                 const { pendingOnly } = readApprovalListOptions(
                     request.payload,
                 );
-                const lastSeq = instance.worker.snapshot().lastSeq;
+                const lastSeq = instance.events.cursor();
                 const approvals = await (pendingOnly
                     ? instance.approval.listPendingApprovals()
                     : instance.approval.listApprovals());
@@ -93,7 +93,7 @@ export function createApprovalRouteModule(
                     stream,
                     context,
                     instance.name,
-                    instance.worker,
+                    instance.events,
                     readApprovalSubscriptionFromSeq(request.payload),
                     (event) =>
                         isApprovalEventType(event.type)
