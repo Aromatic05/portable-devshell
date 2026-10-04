@@ -176,39 +176,6 @@ export class ContextCleanupService {
                         });
                     }
                 }
-                if (gateway.listWaits !== undefined) {
-                    const waits = await gateway
-                        .listWaits(environment.instance)
-                        .catch((error) => {
-                            failures.push(error);
-                            return [];
-                        });
-                    for (const wait of waits) {
-                        if (wait.createdByCtxId !== terminal.ctxId) continue;
-                        if (
-                            (wait.status === "waiting" ||
-                                wait.status === "detached") &&
-                            gateway.cancelWait !== undefined
-                        ) {
-                            await cleanup(async () => {
-                                await gateway.cancelWait!(
-                                    environment.instance,
-                                    wait.waitId,
-                                );
-                            });
-                        } else if (
-                            wait.status === "resolved" &&
-                            gateway.consumeWait !== undefined
-                        ) {
-                            await cleanup(async () => {
-                                await gateway.consumeWait!(
-                                    environment.instance,
-                                    wait.waitId,
-                                );
-                            });
-                        }
-                    }
-                }
                 if (gateway.contextTerminated !== undefined) {
                     await cleanup(async () => {
                         await gateway.contextTerminated!(

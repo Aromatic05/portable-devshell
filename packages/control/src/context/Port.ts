@@ -5,7 +5,6 @@ import type {
     JsonValue,
     McpContextEnvironment,
     McpContextExternalBinding,
-    WaitRecord,
 } from "@portable-devshell/shared";
 
 export interface PreparedEnvironmentFacts {
@@ -137,7 +136,4 @@ export interface ContextInstancePort {
         input: GoalManageInput,
         ctxId: string,
     ): Promise<GoalSnapshot | undefined>;
-    listWaits?(instance: string): Promise<WaitRecord[]>;
-    cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
 }

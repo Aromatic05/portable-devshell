@@ -1,4 +1,4 @@
-import type { WorkspaceAction, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../model/Contract.js";
+import type { WorkspaceAction, WorkspaceActionRequest, WorkspaceItem, WorkspaceSnapshot } from "../../model/Contract.js";
 import { actionKey, bindWorkspaceCards, renderWorkspace, type WorkspaceCardEvents } from "./Cards.js";
 
 export class WorkspaceView {
@@ -19,7 +19,7 @@ export class WorkspaceView {
             displayMode: events.displayMode,
             input: request => { this.#drafts.set(actionKey(request.itemId, request.actionId), request.input ?? ""); },
             expandChoices: request => {
-                if (!this.#findChoiceQuestion(request)) return;
+                if (!this.#findAction(request)) return;
                 this.#expanded.add(actionKey(request.itemId, request.actionId));
                 this.render();
             },
@@ -53,7 +53,7 @@ export class WorkspaceView {
         const items = [...(this.#snapshot.presentation.primary ? [this.#snapshot.presentation.primary] : []), ...this.#snapshot.presentation.work, ...this.#snapshot.presentation.background];
         const keys = new Set(items.flatMap(item => item.actions.map(action => actionKey(item.id, action.id))));
         for (const key of this.#drafts.keys()) if (!keys.has(key)) this.#drafts.delete(key);
-        const choiceKeys = new Set(items.flatMap(item => item.kind === "question" && item.input.kind === "choice" ? item.actions.map(action => actionKey(item.id, action.id)) : []));
+        const choiceKeys = new Set(items.flatMap(item => item.actions.filter(action => action.input?.kind === "choice").map(action => actionKey(item.id, action.id))));
         for (const key of this.#expanded) if (!choiceKeys.has(key)) this.#expanded.delete(key);
         if (this.#pending && !this.#findAction(this.#pending)?.confirmation) this.#pending = undefined;
         this.#root.innerHTML = renderWorkspace(this.#snapshot, this.#busy, this.#displayMode, { drafts: this.#drafts, pending: this.#pending, expanded: this.#expanded });
@@ -68,11 +68,6 @@ export class WorkspaceView {
 
     #findAction(request: WorkspaceActionRequest): WorkspaceAction | undefined {
         return this.#findItem(request.itemId)?.actions.find(action => action.id === request.actionId);
-    }
-
-    #findChoiceQuestion(request: WorkspaceActionRequest): WorkspaceQuestionItem | undefined {
-        const item = this.#findItem(request.itemId);
-        return item?.kind === "question" && item.input.kind === "choice" && item.actions[0]?.id === request.actionId ? item : undefined;
     }
 
     #requestAction(request: WorkspaceActionRequest): void {

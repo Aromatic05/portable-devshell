@@ -41,7 +41,6 @@ export interface McpWorkspaceLiveRouteOptions {
     pollMs?: number;
     presence: WorkspaceAppPresenceStore;
     publicBaseUrl?: string;
-    restoreTmuxWaits?: () => Promise<void>;
 }
 
 export function workspaceLiveRoutePath(instanceName: string): string {
@@ -120,7 +119,6 @@ function registerLiveRouteBase(
                 try {
                     const authorized = await authorize(request, options);
                     const { ctxId } = authorized;
-                    await options.restoreTmuxWaits?.();
                     options.presence.touch(options.instanceName, ctxId);
                     writeJson(
                         response,
@@ -157,7 +155,6 @@ function registerLiveRouteBase(
                 try {
                     const authorized = await authorize(request, options);
                     ctxId = authorized.ctxId;
-                    await options.restoreTmuxWaits?.();
                     let cursor = readCursor(request);
                     const startedAt = Date.now();
                     const heartbeatMs =

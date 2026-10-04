@@ -38,7 +38,7 @@ export async function readWorkspaceProjection(
         readTaskContribution(gateway, instance, ctxId, options.reentry),
         readWorkspaceBusy(gateway, ctxId, instances),
     ]);
-    const primary = [...approval.primaryOrder, ...task.primaryOrder].sort(
+    const primary = [...approval.primaryOrder].sort(
         (left, right) =>
             left.rank - right.rank ||
             left.updatedAt.localeCompare(right.updatedAt),
@@ -56,14 +56,13 @@ export async function readWorkspaceProjection(
         presentation,
         reentry: projectWorkspaceReentry(
             options.reentry,
-            task.model.waits,
             task.model.goal,
             agentBusy,
             options.directives,
         ),
     };
     const modelContext = workspaceModelContext(
-        snapshotBase as WorkspaceSnapshot,
+        snapshotBase as unknown as WorkspaceSnapshot,
         {
             goal: task.model.goal,
             tasks: task.model.tasks,

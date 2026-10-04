@@ -1,4 +1,4 @@
-import type { WorkspaceAction, WorkspaceActionInput, WorkspaceActionRequest, WorkspaceItem, WorkspaceQuestionItem, WorkspaceSnapshot } from "../../model/Contract.js";
+import type { WorkspaceAction, WorkspaceActionInput, WorkspaceActionRequest, WorkspaceItem, WorkspaceSnapshot } from "../../model/Contract.js";
 
 export interface WorkspaceCardEvents {
     action(request: { itemId: string; actionId: string; input?: string }): void;
@@ -19,15 +19,15 @@ export function renderWorkspace(snapshot: WorkspaceSnapshot, busy: ReadonlySet<s
     const items: WorkspaceItem[] = [...(snapshot.presentation.primary ? [snapshot.presentation.primary] : []), ...snapshot.presentation.work, ...snapshot.presentation.background];
     if (items.length === 0) return `<section class="card"><div class="head"><strong>Workspace</strong><span class="badge">${snapshot.agentBusy ? "Working" : "Ready"}</span></div><div class="body muted">Nothing needs attention right now.</div></section>${renderDisplayControls(displayMode)}`;
     return items.map(item => {
-        const details = item.kind === "question" ? [item.prompt] : item.kind === "work" ? [item.detail, item.current, item.note] : [item.summary, item.detail];
+        const details = item.kind === "work" ? [item.detail, item.current, item.note] : [item.summary, item.detail];
         const detail = details.filter(Boolean).map(text => `<div>${escapeHtml(text!).replaceAll("\n", "<br>")}</div>`).join("");
-        const actionRows = item.kind === "question" ? renderQuestionInput(item, busy, state) : item.actions.map(action => renderAction(item.id, action, busy.has(action.id), state)).join("");
+        const actionRows = item.actions.map(action => renderAction(item.id, action, busy.has(action.id), state)).join("");
         const actions = item.kind === "work" ? `<div class="work-actions">${actionRows}</div>` : item.kind === "background" ? "" : actionRows;
         const pending = state?.pending;
         const confirmation = pending?.itemId === item.id ? item.actions.find(action => action.id === pending.actionId)?.confirmation : undefined;
         const confirm = confirmation ? `<div class="body">${escapeHtml(confirmation.message)}</div><div class="row"><button data-confirm-action${busy.has(pending!.actionId) ? " disabled" : ""}>Confirm</button><button data-cancel-confirmation>Cancel</button></div>` : "";
         const progress = item.kind === "work" && item.progress ? `<span class="muted">${item.progress.current} / ${item.progress.total}</span>` : "";
-        const badge = item.kind === "question" ? "Needs input" : item.badge;
+        const badge = item.badge;
         return `<section class="card" data-kind="${item.kind}"><div class="head"><strong>${escapeHtml(item.title)}</strong><span class="row">${badge ? `<span class="badge">${escapeHtml(badge)}</span>` : ""}${progress}${item.kind === "background" ? `<span class="background-controls">${actionRows}</span>` : ""}</span></div>${detail ? `<div class="body">${detail}</div>` : ""}${actions}${confirm}</section>`;
     }).join("") + renderDisplayControls(displayMode);
 }
@@ -35,23 +35,6 @@ export function renderWorkspace(snapshot: WorkspaceSnapshot, busy: ReadonlySet<s
 function renderDisplayControls(displayMode: string): string {
     const options = (["inline", "pip", "fullscreen"] as const).map(mode => `<button data-mode="${mode}"${displayMode === mode ? " disabled" : ""}>${mode === "pip" ? "Picture in picture" : mode === "fullscreen" ? "Fullscreen" : "Inline"}</button>`).join("");
     return `<div class="row">${options}</div>`;
-}
-
-function renderQuestionInput(item: WorkspaceQuestionItem, busy: ReadonlySet<string>, state?: WorkspaceCardState): string {
-    const action = item.actions[0];
-    if (!action) return "";
-    const disabled = busy.has(action.id) ? " disabled" : "";
-    const value = escapeHtml(state?.drafts.get(actionKey(item.id, action.id)) ?? "");
-    if (item.input.kind === "choice") {
-        const key = actionKey(item.id, action.id);
-        const expanded = state?.expanded?.has(key) ?? false;
-        const shown = expanded ? item.input.choices : item.input.choices.slice(0, 3);
-        const choices = shown.map(choice => `<button type="button" class="choice-row" data-choice data-item="${escapeHtml(item.id)}" data-action="${escapeHtml(action.id)}" data-value="${escapeHtml(choice.id)}"${disabled}><span>${escapeHtml(choice.label)}</span><span aria-hidden="true">›</span></button>`).join("");
-        const more = !expanded && item.input.choices.length > shown.length ? `<button type="button" class="choice-row" data-choice-expand data-item="${escapeHtml(item.id)}" data-action-id="${escapeHtml(action.id)}" aria-expanded="false">Show ${item.input.choices.length - shown.length} more</button>` : "";
-        const text = item.input.allowText ? `<form class="question-input" data-action-item="${escapeHtml(item.id)}" data-action-id="${escapeHtml(action.id)}"><input name="input" value="${value}" placeholder="Type an answer" required><button${disabled}>Send</button></form>` : "";
-        return `<div class="choice-list" data-expanded="${expanded}">${choices}${more}</div>${text}`;
-    }
-    return `<form class="question-input" data-action-item="${escapeHtml(item.id)}" data-action-id="${escapeHtml(action.id)}"><input name="input" value="${value}" placeholder="${escapeHtml(item.input.placeholder ?? "Type an answer")}" required><button${disabled}>Send</button></form>`;
 }
 
 function renderAction(itemId: string, action: WorkspaceAction, disabled: boolean, state?: WorkspaceCardState): string {

@@ -3,12 +3,10 @@ import type { InstanceName, JsonValue } from "@portable-devshell/shared";
 import type { TaskApi } from "./Api.js";
 import { GoalService } from "./goal/Service.js";
 import { TodoService } from "./todo/Service.js";
-import { WaitService } from "./wait/Service.js";
 
 export interface InstanceTaskPaths {
     goalsFile: string;
     todoFile: string;
-    waitsFile: string;
 }
 
 export interface InstanceTaskServiceOptions {
@@ -30,11 +28,6 @@ export function createInstanceTaskServices(
         todo: new TodoService({
             appendEvent,
             filePath: options.paths.todoFile,
-            instanceName: options.instanceName,
-        }),
-        wait: new WaitService({
-            appendEvent,
-            filePath: options.paths.waitsFile,
             instanceName: options.instanceName,
         }),
     };

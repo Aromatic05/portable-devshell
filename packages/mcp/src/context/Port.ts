@@ -48,10 +48,7 @@ export type ContextInstancePort = Pick<
     | "touchAlerts"
     | "touchTemporaryDirectory"
 > &
-    Pick<
-        McpTaskPort,
-        "readGoal" | "manageGoal" | "listWaits" | "cancelWait" | "consumeWait"
-    > & {
+    Pick<McpTaskPort, "readGoal" | "manageGoal"> & {
         approval?: McpApprovalPort;
     };
 

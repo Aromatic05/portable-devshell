@@ -27,10 +27,6 @@ export type McpLegacyToolCompatibility =
  * @removeAt 0.7.10
  */
 const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
-    ask_question: {
-        kind: "alias",
-        replacement: "workspace_ask",
-    },
     context_message_read: {
         help: "Queued user Comments are delivered automatically with the next successful ordinary tool result. Do not poll for them.",
         kind: "tombstone",
@@ -105,30 +101,12 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         removedIn: "0.7.10",
         replacement: "workspace_action",
     },
-    workspace_question_answer: {
-        help: "Workspace question responses now use the projected workspace_action contract.",
-        kind: "tombstone",
-        removedIn: "0.7.10",
-        replacement: "workspace_action",
-    },
     workspace_reentry_control: {
         kind: "workspace-app-v0615",
         replacement: "workspace_reentry",
     },
     workspace_task_control: {
         help: "Workspace task controls now use the projected workspace_action contract.",
-        kind: "tombstone",
-        removedIn: "0.7.10",
-        replacement: "workspace_action",
-    },
-    workspace_wait_interrupt: {
-        help: "Workspace wait controls now use the projected workspace_action contract.",
-        kind: "tombstone",
-        removedIn: "0.7.10",
-        replacement: "workspace_action",
-    },
-    workspace_wait_recover: {
-        help: "Workspace wait controls now use the projected workspace_action contract.",
         kind: "tombstone",
         removedIn: "0.7.10",
         replacement: "workspace_action",

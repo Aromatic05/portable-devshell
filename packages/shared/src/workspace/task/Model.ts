@@ -1,5 +1,4 @@
 import type { InstanceEventRecord } from "../../client/Stream.js";
-import { type JsonValue } from "../../types/Json.js";
 
 export type TaskEventType =
     | "goal.updated"
@@ -242,45 +241,4 @@ export function isTodoEvent(
     type: string,
 ): type is Extract<TaskEventType, `todo.${string}`> {
     return type.startsWith("todo.");
-}
-export type WaitKind = "approval" | "question" | "tmux";
-export type WaitStatus =
-    "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
-export interface WaitCreateInput {
-    automaticRecovery?: boolean;
-    createdByCtxId: string;
-    deadlineAt?: string;
-    goalId?: string;
-    goalProgressAt?: string;
-    goalProgressEpoch?: number;
-    goalRevision?: number;
-    goalStepId?: string;
-    kind: WaitKind;
-    ownerCallId?: string;
-    payload?: JsonValue;
-    targetInstance?: string;
-    targetId: string;
-    taskId?: string;
-    taskRevision?: number;
-    todoItemId?: string;
-    workspace?: string;
-}
-export interface WaitRecord extends WaitCreateInput {
-    cancelledAt?: string;
-    consumedAt?: string;
-    createdAt: string;
-    detachedAt?: string;
-    recoveryClaimedAt?: string;
-    recoveryClaimId?: string;
-    recoveryDisabledAt?: string;
-    recoveryDismissedAt?: string;
-    recoveryGoalProgressEpoch?: number;
-    recoveryMessageAttemptedAt?: string;
-    recoveryMessageId?: string;
-    recoveryMessageSentAt?: string;
-    resolvedAt?: string;
-    result?: JsonValue;
-    status: WaitStatus;
-    updatedAt: string;
-    waitId: string;
 }

@@ -13,9 +13,6 @@ export * from "./endpoint/extension/Workspace.js";
 export * from "./endpoint/call/Port.js";
 export {
     isMcpGoalGateway,
-    isMcpTmuxWaitGateway,
-    isMcpWaitRecoveryGateway,
-    isMcpWaitTrackingGateway,
     isMcpWorkspaceActionGateway,
     isMcpWorkspaceGateway,
     requireMcpGoalGateway,
@@ -25,9 +22,6 @@ export type {
     McpApprovalPort,
     McpGoalGateway,
     McpInstanceGateway,
-    McpTmuxWaitGateway,
-    McpWaitRecoveryGateway,
-    McpWaitTrackingGateway,
     McpWorkspaceActionGateway,
     McpWorkspaceEventSlice,
     McpWorkspaceGateway,

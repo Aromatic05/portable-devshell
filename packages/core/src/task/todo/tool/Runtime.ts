@@ -8,7 +8,6 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
-    type TodoReadResult,
     type TodoWriteInput,
 } from "@portable-devshell/shared";
 
@@ -44,9 +43,6 @@ export function installTodoTools(
                 ctxId,
             );
             signal?.throwIfAborted();
-            const terminalTaskId = terminalTodoTaskId(written);
-            if (terminalTaskId !== undefined)
-                await disableTaskWaitRecoveries(task, terminalTaskId);
             return written as unknown as JsonValue;
         },
     );
@@ -78,40 +74,4 @@ function requireCtxId(ctxId: string | undefined): string {
         message: "todo_write requires a validated ctxId.",
         retryable: false,
     });
-}
-
-async function disableTaskWaitRecoveries(
-    task: TaskApi,
-    taskId: string,
-): Promise<void> {
-    const wait = task.wait;
-    if (wait === undefined) return;
-    for (const record of await wait.list(taskId)) {
-        if (
-            record.status === "consumed" ||
-            record.status === "cancelled"
-        )
-            continue;
-        if (
-            record.kind === "question" &&
-            (record.status === "waiting" || record.status === "detached")
-        ) {
-            await wait.cancel(record.waitId).catch(() => undefined);
-            continue;
-        }
-        await wait.disableRecovery(record.waitId).catch(() => undefined);
-    }
-}
-
-function terminalTodoTaskId(result: TodoReadResult): string | undefined {
-    if (typeof result.taskId !== "string") return undefined;
-    if (typeof result.cancelledAt === "string") return result.taskId;
-    if (result.items.length === 0) return undefined;
-    const active = result.items.some(
-        (item) =>
-            item.status === "pending" ||
-            item.status === "in_progress" ||
-            item.status === "blocked",
-    );
-    return active ? undefined : result.taskId;
 }

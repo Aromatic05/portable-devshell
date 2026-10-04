@@ -93,24 +93,10 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         const entry = this.#entries.get(instance);
         if (entry === undefined) return;
         const approval = this.#approval(entry);
-        const task = this.#task(entry);
         const failures: unknown[] = [];
         await approval
             .retire(`Instance ${instance} was disabled before approval.`)
             .catch((error) => failures.push(error));
-        if (task.wait !== undefined) {
-            try {
-                for (const wait of await task.wait.list()) {
-                    if (wait.status !== "waiting" && wait.status !== "detached")
-                        continue;
-                    await task.wait
-                        .cancel(wait.waitId)
-                        .catch((error) => failures.push(error));
-                }
-            } catch (error) {
-                failures.push(error);
-            }
-        }
         if (failures.length > 0)
             throw new AggregateError(
                 failures,
@@ -127,27 +113,6 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         await approval
             .retire(`Instance ${instance} was deleted.`)
             .catch((error) => failures.push(error));
-        if (task.wait !== undefined) {
-            try {
-                for (const wait of await task.wait.list()) {
-                    if (
-                        wait.status !== "waiting" &&
-                        wait.status !== "detached" &&
-                        wait.status !== "resolved"
-                    )
-                        continue;
-                    try {
-                        if (wait.status === "resolved")
-                            await task.wait.consume(wait.waitId);
-                        else await task.wait.cancel(wait.waitId);
-                    } catch (error) {
-                        failures.push(error);
-                    }
-                }
-            } catch (error) {
-                failures.push(error);
-            }
-        }
         await task.goal.stopAll().catch((error) => failures.push(error));
         await task.todo.cancelAll().catch((error) => failures.push(error));
         if (failures.length > 0)
@@ -202,7 +167,6 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         entry.taskFacade = {
             goal: lazyMethods(() => this.#task(entry).goal),
             todo: lazyMethods(() => this.#task(entry).todo),
-            wait: lazyMethods(() => this.#task(entry).wait!),
         };
         this.#entries.set(descriptor.name, entry);
         return entry;

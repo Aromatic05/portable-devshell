@@ -2,7 +2,6 @@ import type {
     GoalSnapshot,
     JsonValue,
     TodoTaskSummary,
-    WaitRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -11,24 +10,20 @@ import {
     type McpWorkspaceActionGateway,
 } from "../../instance/Gateway.js";
 import type {
-    WorkspaceBackgroundItem,
     WorkspaceResolvedAction,
     WorkspaceWorkItem,
 } from "../model/Contract.js";
 import { contributeGoal } from "./Goal.js";
 import { contributeTodo } from "./Todo.js";
-import { contributeWaits } from "./Wait.js";
 
 export interface WorkspaceTaskContribution {
     actions: WorkspaceResolvedAction[];
-    background: WorkspaceBackgroundItem[];
+    background: [];
     model: {
-        background: WaitRecord[];
+        background: [];
         goal?: GoalSnapshot;
         tasks: TodoTaskSummary[];
-        waits: WaitRecord[];
     };
-    primaryOrder: ReturnType<typeof contributeWaits>["primaryOrder"];
     work: WorkspaceWorkItem[];
 }
 
@@ -87,31 +82,14 @@ export async function readTaskContribution(
     reentry?: JsonValue,
 ): Promise<WorkspaceTaskContribution> {
     const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
-    const [todoValue, waits, goal] = await Promise.all([
+    const [todoValue, goal] = await Promise.all([
         gateway.readTodo(instance),
-        gateway.listWaits(instance),
         goalGateway?.readGoal(instance, ctxId),
     ]);
     const todo = record(todoValue);
     const tasks = Array.isArray(todo?.tasks)
         ? (todo.tasks as unknown as TodoTaskSummary[])
         : [];
-    const capability = gateway;
-    const wait = contributeWaits(waits, ctxId, instance, {
-        answer: capability.resolveWait !== undefined,
-        interrupt:
-            capability.cancelWait !== undefined &&
-            capability.reattachWait !== undefined &&
-            capability.resolveWait !== undefined,
-        dismissRecovery:
-            capability.claimWaitRecovery !== undefined &&
-            capability.completeWaitRecovery !== undefined &&
-            capability.disableWaitRecovery !== undefined &&
-            capability.dismissWaitRecovery !== undefined &&
-            capability.markWaitRecoveryAttempted !== undefined &&
-            capability.rejectWaitRecovery !== undefined &&
-            capability.releaseWaitRecovery !== undefined,
-    });
     const todoProjection = contributeTodo(
         tasks,
         ctxId,
@@ -126,19 +104,13 @@ export async function readTaskContribution(
         typeof state?.epoch === "number" ? state.epoch : 0,
     );
     return {
-        actions: [
-            ...wait.actions,
-            ...todoProjection.actions,
-            ...goalProjection.actions,
-        ],
-        background: wait.background,
+        actions: [...todoProjection.actions, ...goalProjection.actions],
+        background: [],
         model: {
-            background: wait.modelBackground,
+            background: [],
             ...(goal === undefined ? {} : { goal }),
             tasks: todoProjection.modelTasks,
-            waits: wait.modelWaits,
         },
-        primaryOrder: wait.primaryOrder,
         work: [
             ...(goalProjection.item === undefined ? [] : [goalProjection.item]),
             ...todoProjection.items,

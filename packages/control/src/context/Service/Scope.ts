@@ -404,21 +404,6 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                     `Workspace Goal ${goal.goalId} is still ${goal.status} in ${goal.workspace ?? previousWorkspace}; finish or stop it before switching workspace.`,
                 );
         }
-        const waits = (await gateway?.listWaits?.(instance)) ?? [];
-        const blocking = waits.find(
-            (wait) =>
-                wait.createdByCtxId === ctxId &&
-                (wait.workspace === undefined ||
-                    wait.workspace === previousWorkspace) &&
-                wait.automaticRecovery !== false &&
-                wait.recoveryDisabledAt === undefined &&
-                wait.status !== "consumed" &&
-                wait.status !== "cancelled",
-        );
-        if (blocking !== undefined)
-            throw new Error(
-                `Workspace wait ${blocking.waitId} is still attached to ${previousWorkspace}; finish or stop its owner before switching workspace.`,
-            );
     }
 
     async #prepareWorkspace(instance: string, workspace: string) {

@@ -2,7 +2,6 @@ import {
     bootstrapToolNamespace,
     toolNamespace,
     type ToolCallHookValue,
-    type GoalActivityKind,
     type JsonValue,
     type McpContextEnvironment,
     type McpContextRecord,
@@ -17,18 +16,15 @@ import {
     type McpContextSelector,
 } from "../../context/Selector.js";
 import type { McpInstanceGateway } from "../../instance/Gateway.js";
-import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
 import {
     presentMcpEndpointResult,
     throwIfMcpEndpointAborted,
-    requireMcpEndpointGateway,
 } from "../call/Boundary.js";
 import {
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool,
 } from "../tool/Compatibility.js";
 import type { McpEndpointCatalog } from "../tool/Catalog.js";
-import { mcpToolActivity } from "../tool/Metadata.js";
 import {
     readMcpProvenanceInput,
     readMcpRoutedInput,
@@ -54,25 +50,13 @@ export interface McpEndpointDispatchOptions {
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
-    tmuxBlockSyncMs?: number;
     toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
 }
 
 interface McpAcceptedCall {
     value: ToolCallHookValue;
-    executionEpoch?: number;
-    goalActivity?: GoalActivityKind;
     workspaceAdvice: string[];
-}
-
-// Keep one product-visible synchronous handoff window across all MCP context modes.
-const MCP_TMUX_BLOCK_SYNC_MS = 3 * 60_000;
-
-export function mcpTmuxBlockSyncMsForContextMode(
-    _mode: McpContextSelector["id"],
-): number {
-    return MCP_TMUX_BLOCK_SYNC_MS;
 }
 
 export class McpEndpointDispatch {
@@ -81,8 +65,6 @@ export class McpEndpointDispatch {
     readonly #contextSelector: McpContextSelector;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #reentry: McpWorkspaceReentryArbiter;
-    readonly #tmuxBlockSyncMs: number;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerTool;
@@ -94,14 +76,6 @@ export class McpEndpointDispatch {
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
-        this.#reentry = new McpWorkspaceReentryArbiter({
-            contextRegistry: this.#contextRegistry,
-            gateway: options.gateway,
-            instanceName: options.instanceName,
-        });
-        this.#tmuxBlockSyncMs =
-            options.tmuxBlockSyncMs ??
-            mcpTmuxBlockSyncMsForContextMode(this.#contextSelector.id);
         this.#toolProvenance = options.toolProvenance;
         this.#worker = options.worker;
         this.#workerHandler = new McpEndpointHandlerTool({
@@ -211,8 +185,7 @@ export class McpEndpointDispatch {
             );
             return accepted;
         };
-        try {
-            const result = await this.#workerHandler.call(
+        const result = await this.#workerHandler.call(
                 toolName,
                 input,
                 context,
@@ -227,21 +200,10 @@ export class McpEndpointDispatch {
                     return rewrittenInput;
                 },
             );
-            return appendWorkspaceAdvice(
-                presentMcpEndpointResult(result, presentation),
-                accepted?.workspaceAdvice ?? [],
-            );
-        } finally {
-            const finalContext = accepted?.value.context;
-            if (finalContext?.ctxId !== undefined && signal?.aborted !== true) {
-                await this.#reentry.observeExecutionActivity(finalContext.ctxId, finalContext.instance);
-            }
-            if (finalContext?.ctxId !== undefined && accepted?.goalActivity !== undefined) {
-                await this.#gateway?.touchGoal?.(
-                    finalContext.instance, finalContext.ctxId, accepted.goalActivity,
-                ).catch(() => undefined);
-            }
-        }
+        return appendWorkspaceAdvice(
+            presentMcpEndpointResult(result, presentation),
+            accepted?.workspaceAdvice ?? [],
+        );
     }
 
     async #prepareCall(
@@ -251,7 +213,6 @@ export class McpEndpointDispatch {
         provenance: ToolCallProvenance,
     ): Promise<McpAcceptedCall> {
         const { instance, ctxId } = value.context;
-        const gateway = requireMcpEndpointGateway(this.#gateway, this.#instanceName);
         const touchContext = !isPassiveWorkspaceRead(value.toolName);
         let record = await this.#contextRegistry.lookup(ctxId!, {
             principal: requestContext.principal,
@@ -266,18 +227,10 @@ export class McpEndpointDispatch {
         await this.#contextRegistry.assertInstanceAvailable(record.ctxId, instance);
         const workspaceAdvice: string[] = [];
         await this.#appendMcpToolCalled(instance, value.toolName, value.context);
-        const executionEpoch = await this.#reentry.observeExecutionStart(record.ctxId, instance);
-        const definition = this.#catalog.getTool(value.toolName, instance);
-        const goalActivity = value.toolName === "workspace_goal" ? undefined
-            : workspaceGoalActivity(value.toolName, value.payload, this.#tmuxBlockSyncMs, definition?._meta);
-        if (goalActivity !== undefined) {
-            await this.#contextRegistry.reentry.observeAutomaticReentryActivity(record.ctxId, instance, goalActivity).catch(() => undefined);
-            await gateway.touchGoal?.(instance, record.ctxId, goalActivity);
-        }
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {
             await this.#toolProvenance.record({ callId, ...provenance, instance }).catch(() => undefined);
         }
-        return { value, executionEpoch, goalActivity, workspaceAdvice };
+        return { value, workspaceAdvice };
     }
 
 
@@ -353,48 +306,6 @@ function isPassiveWorkspaceRead(toolName: string): boolean {
         toolName === "workspace_watch"
     );
 }
-
-const OBSERVATION_TOOLS = new Set([
-    "artifact_share",
-    "artifact_viewImage",
-    "file_glob",
-    "file_grep",
-    "file_read",
-    "instance_list",
-    "instance_status",
-    "tmux_inspect",
-    "todo_read",
-    "workspace_open",
-]);
-
-const MUTATION_TOOLS = new Set(["file_edit", "todo_write"]);
-
-function workspaceGoalActivity(
-    toolName: string,
-    input: JsonValue,
-    tmuxBlockSyncMs: number,
-    meta?: JsonValue,
-): GoalActivityKind {
-    const declared = mcpToolActivity(meta);
-    if (declared !== undefined) return declared;
-    if (toolName === "workspace_ask") return "wait";
-    if (toolName === "tmux_run")
-        return readTmuxBlock(input) ? "wait" : "execution";
-    if (toolName === "tmux_read")
-        return readTmuxReadTimeMs(input) >= tmuxBlockSyncMs
-            ? "wait"
-            : "observation";
-    if (
-        toolName === "tmux_manage" &&
-        isRecord(input) &&
-        input.command === "list"
-    )
-        return "observation";
-    if (OBSERVATION_TOOLS.has(toolName)) return "observation";
-    if (MUTATION_TOOLS.has(toolName)) return "mutation";
-    return "execution";
-}
-
 
 function hasToolProvenance(provenance: ToolCallProvenance): boolean {
     return (

@@ -1,7 +1,6 @@
 import type {
     GoalSnapshot,
     JsonValue,
-    WaitRecord,
 } from "@portable-devshell/shared";
 import type {
     WorkspaceReentryDirective,
@@ -16,30 +15,11 @@ export type {
 
 export function projectWorkspaceReentry(
     value: JsonValue | undefined,
-    waits: WaitRecord[],
     goal: GoalSnapshot | undefined,
     agentBusy: boolean,
     directives?: WorkspaceReentryDirective[],
 ): WorkspaceReentryView {
     const state = record(value) ?? {};
-    const wait = waits
-        .filter(
-            (candidate) =>
-                candidate.status === "resolved" &&
-                candidate.detachedAt !== undefined &&
-                candidate.recoveryDisabledAt === undefined &&
-                candidate.recoveryMessageAttemptedAt === undefined &&
-                candidate.recoveryMessageSentAt === undefined &&
-                (candidate.automaticRecovery !== false ||
-                    candidate.kind === "question" ||
-                    record(candidate.result)?.interrupted === true),
-        )
-        .sort(
-            (left, right) =>
-                (left.resolvedAt ?? left.updatedAt).localeCompare(
-                    right.resolvedAt ?? right.updatedAt,
-                ) || left.waitId.localeCompare(right.waitId),
-        )[0];
     const uncertain =
         state.uncertain === true ||
         state.attempted === true ||
@@ -59,13 +39,6 @@ export function projectWorkspaceReentry(
     const leaseIsFuture =
         Number.isFinite(executionLeaseUntil) &&
         executionLeaseUntil > Date.now();
-    const waitReadyAt =
-        wait === undefined
-            ? undefined
-            : latestTimestamp(
-                  wait.resolvedAt ?? wait.updatedAt,
-                  executionLeaseAt,
-              );
     const continuationDueAt = goal?.continuationDueAt;
     const hasDueTrigger =
         goal?.continuationDue === true ||
@@ -75,8 +48,9 @@ export function projectWorkspaceReentry(
     const goalEligible =
         goal !== undefined &&
         goal.status === "active" &&
-        goal.steps.some((step) => step.status === "active" || step.status === "pending") &&
-        !waits.some((candidate) => candidate.status === "waiting" || candidate.status === "detached") &&
+        goal.steps.some(
+            (step) => step.status === "active" || step.status === "pending",
+        ) &&
         hasDueTrigger &&
         !goal.continuationUncertain &&
         !goal.continuationPending &&
@@ -89,21 +63,13 @@ export function projectWorkspaceReentry(
           )
         : undefined;
     const source =
-        waitReadyAt === undefined && goalReadyAt === undefined
+        goalReadyAt === undefined
             ? undefined
-            : waitReadyAt !== undefined &&
-                (goalReadyAt === undefined ||
-                    Date.parse(waitReadyAt) <= Date.parse(goalReadyAt))
-              ? {
-                    readyAt: waitReadyAt,
-                    intent: "automatic" as const,
-                    sourceId: wait!.waitId,
-                }
-              : {
-                    readyAt: goalReadyAt!,
-                    intent: "automatic" as const,
-                    sourceId: goal!.goalId,
-                };
+            : {
+                  readyAt: goalReadyAt,
+                  intent: "automatic" as const,
+                  sourceId: goal!.goalId,
+              };
     const canSchedule =
         state.mode === "automatic" &&
         !paused &&

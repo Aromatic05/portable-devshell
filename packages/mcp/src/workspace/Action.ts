@@ -1,4 +1,4 @@
-import { runtimeErrorCodes, type JsonValue, type ToolCallContext, type WaitRecord } from "@portable-devshell/shared";
+import { runtimeErrorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 import type { McpWorkspaceActionGateway } from "../instance/Gateway.js";
 import { readWorkspaceProjection } from "./Projection.js";
 import type { WorkspaceActionEffect, WorkspaceActionRequest, WorkspaceResolvedAction, WorkspaceSnapshot } from "./model/Contract.js";
@@ -6,76 +6,12 @@ import { WorkspaceActionStore } from "./ActionStore.js";
 
 const contextQueues = new Map<string, Promise<void>>();
 
-export class WorkspaceActionStaleError extends Error {
-    constructor() {
-        super("Workspace action is no longer available.");
-        this.name = "WorkspaceActionStaleError";
-    }
-}
-
-export function validateWorkspaceQuestionAnswer(wait: WaitRecord, answer: string): void {
-    const payload = typeof wait.payload === "object" && wait.payload !== null && !Array.isArray(wait.payload)
-        ? wait.payload as Record<string, JsonValue>
-        : {};
-    const choices = Array.isArray(payload.choices)
-        ? payload.choices.filter((choice): choice is string => typeof choice === "string")
-        : [];
-    if (payload.allowText === false && !choices.includes(answer)) throw new Error("Answer must be one of the offered choices.");
-}
-
-export function validateWorkspaceDirectiveClaim(directiveId: string, claimId: unknown): void {
-    if (claimId !== `workspace-action-${directiveId}`) {
-        throw new Error("Workspace re-entry claim does not match its directive.");
-    }
-}
-
-export function readWorkspaceDeliveryOutcome(value: unknown): "accepted" | "rejected" | "uncertain" {
-    if (value !== "accepted" && value !== "rejected" && value !== "uncertain") {
-        throw new Error("Workspace re-entry report outcome is invalid.");
-    }
-    return value;
-}
-
-export function workspaceWaitReentryEffect(result: JsonValue, sourceId: string): WorkspaceActionEffect | undefined {
-    return isRecord(result)?.detached === true
-        ? { kind: "reentry", intent: "automatic", sourceId }
-        : undefined;
-}
-
-export async function attemptWorkspaceDelivery(
-    store: WorkspaceActionStore,
-    directiveId: string,
-    attempt: () => Promise<JsonValue>,
-): Promise<JsonValue> {
-    if (await store.beginDelivery(directiveId) === undefined) return { attempted: false, duplicate: true };
-    const result = await attempt();
-    const attempted = isRecord(result)?.attempted === true;
-    if (attempted) await store.markAttempted(directiveId);
-    else await store.restoreDelivery(directiveId);
-    return result;
-}
-
-export async function reportWorkspaceDelivery(
-    store: WorkspaceActionStore,
-    directiveId: string,
-    outcome: "accepted" | "rejected" | "uncertain",
-    report: () => Promise<JsonValue>,
-): Promise<JsonValue> {
-    const receipt = await store.get(directiveId);
-    if (receipt?.status === "settled") return { reported: true, duplicate: true, outcome: receipt.outcome ?? null };
-    if (await store.beginReport(directiveId, outcome) === undefined) return { reported: false, duplicate: true };
-    const result = await report();
-    await store.settle(directiveId, outcome);
-    return result;
-}
-
 export interface WorkspaceActionRouterOptions {
     store: WorkspaceActionStore;
     instance: string;
     contextInstances(ctxId: string): Promise<string[]>;
     reentry(ctxId: string): Promise<JsonValue | undefined>;
     snapshot(gateway: McpWorkspaceActionGateway, ctxId: string, directives: WorkspaceActionEffect[]): Promise<WorkspaceSnapshot>;
-    preflight?(action: WorkspaceResolvedAction, request: WorkspaceActionRequest, context: ToolCallContext): Promise<void>;
     mutate(action: WorkspaceResolvedAction, request: WorkspaceActionRequest, context: ToolCallContext): Promise<WorkspaceActionEffect | undefined>;
 }
 
@@ -117,13 +53,6 @@ export async function executeWorkspaceAction(
             const directives = await options.store.pendingDirectives(ctxId, options.instance);
             return { status: "stale", snapshot: await options.snapshot(gateway, ctxId, directives) } as unknown as JsonValue;
         }
-        try {
-            await options.preflight?.(action, request, context);
-        } catch (error) {
-            if (!(error instanceof WorkspaceActionStaleError)) throw error;
-            const directives = await options.store.pendingDirectives(ctxId, options.instance);
-            return { status: "stale", snapshot: await options.snapshot(gateway, ctxId, directives) } as unknown as JsonValue;
-        }
         await options.store.prepare(ctxId, options.instance, action);
         let effect: WorkspaceActionEffect | undefined;
         try {
@@ -152,10 +81,4 @@ function isKnownConflict(error: unknown): boolean {
     if (typeof error !== "object" || error === null) return false;
     const code = (error as { code?: unknown }).code;
     return code === runtimeErrorCodes.todoRevisionConflict || code === runtimeErrorCodes.approvalAlreadyDecided;
-}
-
-function isRecord(value: unknown): Record<string, JsonValue> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, JsonValue>
-        : undefined;
 }

@@ -46,7 +46,6 @@ export type {
     GoalApi as InstanceGoalPort,
     TaskApi,
     TodoApi as InstanceTodoPort,
-    WaitApi as InstanceWaitPort,
 } from "./task/Api.js";
 export type {
     TerminalProcess,

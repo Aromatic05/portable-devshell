@@ -16,7 +16,7 @@ export interface WorkspacePresentation {
     background: WorkspaceBackgroundItem[];
 }
 
-export type WorkspacePrimaryItem = WorkspaceDecisionItem | WorkspaceQuestionItem;
+export type WorkspacePrimaryItem = WorkspaceDecisionItem;
 export type WorkspaceItem = WorkspacePrimaryItem | WorkspaceWorkItem | WorkspaceBackgroundItem;
 
 export interface WorkspaceDecisionItem {
@@ -28,24 +28,6 @@ export interface WorkspaceDecisionItem {
     detail?: string;
     actions: WorkspaceAction[];
 }
-
-export interface WorkspaceQuestionItem {
-    kind: "question";
-    id: string;
-    title: string;
-    prompt: string;
-    input: WorkspaceQuestionInput;
-    actions: WorkspaceAction[];
-}
-
-export interface WorkspaceChoice {
-    id: string;
-    label: string;
-}
-
-export type WorkspaceQuestionInput =
-    | { kind: "text"; placeholder?: string }
-    | { kind: "choice"; choices: WorkspaceChoice[]; allowText?: boolean };
 
 export interface WorkspaceWorkItem {
     kind: "work";
@@ -76,6 +58,11 @@ export interface WorkspaceAction {
     tone?: "default" | "primary" | "danger";
     confirmation?: { message: string };
     input?: WorkspaceActionInput;
+}
+
+export interface WorkspaceChoice {
+    id: string;
+    label: string;
 }
 
 export type WorkspaceActionInput =
@@ -120,7 +107,6 @@ export interface WorkspaceReentryView {
 export type WorkspaceActionOperation =
     | "task-pause" | "task-resume" | "task-cancel"
     | "approval-approve" | "approval-deny"
-    | "question-answer" | "wait-interrupt" | "wait-dismiss"
     | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop";
 
 export interface WorkspaceResolvedAction {
@@ -130,5 +116,4 @@ export interface WorkspaceResolvedAction {
     operation: WorkspaceActionOperation;
     targetId: string;
     revision?: number;
-    recoveryMessageId?: string;
 }

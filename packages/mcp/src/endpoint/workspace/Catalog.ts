@@ -4,21 +4,18 @@ import { workspaceAppResourceUri } from "../../workspace/app/App.js";
 import {
     workspaceOpenOutputSchema,
     workspaceGoalResultOutputSchema,
-    workspaceReentryOutputSchema,
     workspaceSnapshotOutputSchema,
     workspaceActionOutputSchema,
     workspaceWatchOutputSchema,
 } from "./Schema.js";
 
 export type McpToolCatalogWorkspaceName =
-    | "workspace_ask"
     | "workspace_goal"
     | "workspace_open"
     | "workspace_reconnect"
     | "workspace_snapshot"
     | "workspace_watch"
-    | "workspace_action"
-    | "workspace_reentry";
+    | "workspace_action";
 
 const appOnlyMeta: JsonValue = {
     ui: { visibility: ["app"] },
@@ -43,46 +40,6 @@ const goalStepSchema: JsonValue = {
 
 export class McpToolCatalogWorkspace {
     readonly #definitions: readonly ToolDefinition[] = [
-        {
-            description:
-                "Ask the user one question in the active Live Workspace and wait for their answer without ending the current model turn. environ_info normally bootstraps the Live Workspace for the current Context; use workspace_open only if the App must be re-presented or restored. Use this only when progress genuinely requires human input. Durable Goal or Todo association is inferred automatically when available.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    allowText: {
-                        description:
-                            "Whether the user may enter a free-text answer. Defaults to true.",
-                        type: "boolean",
-                    },
-                    choices: {
-                        description:
-                            "Optional single-choice answers shown to the user.",
-                        items: { minLength: 1, type: "string" },
-                        maxItems: 12,
-                        type: "array",
-                    },
-                    question: {
-                        description: "Question shown to the user.",
-                        minLength: 1,
-                        type: "string",
-                    },
-                },
-                required: ["question"],
-                type: "object",
-            },
-            name: "workspace_ask",
-            outputSchema: {
-                additionalProperties: false,
-                properties: {
-                    answer: { type: "string" },
-                    questionId: { minLength: 1, type: "string" },
-                },
-                required: ["questionId", "answer"],
-                type: "object",
-            },
-            requiredCapabilities: [],
-        },
         {
             description:
                 "Manage optional Workspace Goal mode for the current Context. environ_info normally bootstraps the Live Workspace, so action=start does not require a separate workspace_open call while the App remains active. start creates one durable Goal with an objective and ordered steps. update revises the objective, complete step list, or one step. Completing or skipping the final remaining step completes the Goal automatically. block suspends automatic continuation with a reason; resume reactivates it. finish remains a compatibility action for an all-terminal live Goal. stop terminates Goal mode without stopping shell or tmux processes. get reads the current Goal. Use workspace_open only to re-present or restore an inactive App.",
@@ -207,53 +164,6 @@ export class McpToolCatalogWorkspace {
             },
             name: "workspace_watch",
             outputSchema: workspaceWatchOutputSchema,
-            requiredCapabilities: [],
-        },
-        {
-            _meta: appOnlyMeta,
-            description:
-                "Arbitrate one Context-wide automatic model re-entry across Goal continuation and detached-wait recovery. App-only helper; models must not call it.",
-            group: "workspace",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    action: {
-                        enum: [
-                            "get",
-                            "yield",
-                            "resume",
-                            "claim",
-                            "validate",
-                            "attempt",
-                            "report",
-                            "release",
-                        ],
-                        type: "string",
-                    },
-                    claimId: { maxLength: 128, minLength: 1, type: "string" },
-                    directiveId: { maxLength: 256, minLength: 1, type: "string" },
-                    intent: {
-                        enum: [
-                            "automatic",
-                            "goal-resume",
-                            "goal-retry",
-                            "task-resume",
-                        ],
-                        type: "string",
-                    },
-                    outcome: {
-                        enum: ["accepted", "rejected", "uncertain"],
-                        type: "string",
-                    },
-                    reason: { maxLength: 2000, minLength: 1, type: "string" },
-                    sourceId: { maxLength: 256, minLength: 1, type: "string" },
-                    token: { minLength: 1, type: "string" },
-                },
-                required: ["action", "token"],
-                type: "object",
-            },
-            name: "workspace_reentry",
-            outputSchema: workspaceReentryOutputSchema,
             requiredCapabilities: [],
         },
     ];

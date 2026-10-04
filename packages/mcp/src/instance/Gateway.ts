@@ -12,8 +12,6 @@ import type {
     ToolCallContext,
     ToolCallRecord,
     ToolCallPresentation,
-    WaitCreateInput,
-    WaitRecord,
 } from "@portable-devshell/shared";
 
 export interface McpEndpointEnvironmentHandshake {
@@ -101,55 +99,6 @@ interface McpGatewayShape {
         ctxId: string,
         kind?: GoalActivityKind,
     ): Promise<void>;
-    createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
-    cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    claimWaitRecovery?(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ): Promise<WaitRecord>;
-    completeWaitRecovery?(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ): Promise<WaitRecord>;
-    markWaitRecoveryAttempted?(
-        instance: string,
-        waitId: string,
-        claimId: string,
-        goalProgressEpoch?: number,
-    ): Promise<WaitRecord>;
-    detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    dismissWaitRecovery?(
-        instance: string,
-        waitId: string,
-        recoveryMessageId: string,
-    ): Promise<WaitRecord>;
-    reattachWait?(
-        instance: string,
-        waitId: string,
-        ownerCallId?: string,
-    ): Promise<WaitRecord>;
-    releaseWaitRecovery?(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ): Promise<WaitRecord>;
-    rejectWaitRecovery?(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ): Promise<WaitRecord>;
-    disableWaitRecovery?(instance: string, waitId: string): Promise<WaitRecord>;
-    consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    resolveWait?(
-        instance: string,
-        waitId: string,
-        result?: JsonValue,
-        options?: { consumeIfDetached?: boolean },
-    ): Promise<WaitRecord>;
-    waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    listWaits?(instance: string): Promise<WaitRecord[]>;
     readToolCalls?(
         instance: string,
         ctxId: string,
@@ -227,21 +176,6 @@ export type McpTaskPort = Pick<
     | "readGoal"
     | "recordGoalReentry"
     | "touchGoal"
-    | "createWait"
-    | "cancelWait"
-    | "claimWaitRecovery"
-    | "completeWaitRecovery"
-    | "markWaitRecoveryAttempted"
-    | "detachWait"
-    | "dismissWaitRecovery"
-    | "reattachWait"
-    | "releaseWaitRecovery"
-    | "rejectWaitRecovery"
-    | "disableWaitRecovery"
-    | "consumeWait"
-    | "resolveWait"
-    | "waitForWait"
-    | "listWaits"
     | "controlTodo"
     | "readTodo"
 >;
@@ -280,30 +214,15 @@ export interface McpInstanceGateway
     approval?: McpApprovalPort;
 }
 
-export type McpWorkspaceActionGateway = McpWorkspacePort &
-    Required<
-        Pick<
-            McpTaskPort,
-            | "createWait"
-            | "detachWait"
-            | "consumeWait"
-            | "resolveWait"
-            | "waitForWait"
-            | "listWaits"
-        >
-    > & { approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">> };
+export type McpWorkspaceActionGateway = McpWorkspacePort & {
+    approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">>;
+};
 
 export function isMcpWorkspaceActionGateway(
     gateway: McpWorkspacePort | undefined,
 ): gateway is McpWorkspaceActionGateway {
     return (
         gateway !== undefined &&
-        gateway.createWait !== undefined &&
-        gateway.detachWait !== undefined &&
-        gateway.consumeWait !== undefined &&
-        gateway.resolveWait !== undefined &&
-        gateway.waitForWait !== undefined &&
-        gateway.listWaits !== undefined &&
         gateway.approval !== undefined &&
         gateway.approval.listPendingApprovals !== undefined &&
         gateway.approval.decideApproval !== undefined
@@ -320,47 +239,6 @@ export function requireMcpWorkspaceActionGateway(
     );
 }
 
-export type McpWaitRecoveryGateway = McpWorkspaceActionGateway &
-    Required<
-        Pick<
-            McpTaskPort,
-            | "claimWaitRecovery"
-            | "completeWaitRecovery"
-            | "disableWaitRecovery"
-            | "dismissWaitRecovery"
-            | "markWaitRecoveryAttempted"
-            | "rejectWaitRecovery"
-            | "releaseWaitRecovery"
-        >
-    >;
-
-export function isMcpWaitRecoveryGateway(
-    gateway: McpWorkspacePort | undefined,
-): gateway is McpWaitRecoveryGateway {
-    return (
-        isMcpWorkspaceActionGateway(gateway) &&
-        gateway.claimWaitRecovery !== undefined &&
-        gateway.completeWaitRecovery !== undefined &&
-        gateway.dismissWaitRecovery !== undefined &&
-        gateway.markWaitRecoveryAttempted !== undefined &&
-        gateway.rejectWaitRecovery !== undefined &&
-        gateway.disableWaitRecovery !== undefined &&
-        gateway.releaseWaitRecovery !== undefined
-    );
-}
-
-export type McpWaitTrackingGateway = McpWorkspaceActionGateway &
-    Required<Pick<McpTaskPort, "cancelWait" | "reattachWait">>;
-
-export function isMcpWaitTrackingGateway(
-    gateway: McpWorkspacePort | undefined,
-): gateway is McpWaitTrackingGateway {
-    return (
-        isMcpWorkspaceActionGateway(gateway) &&
-        gateway.cancelWait !== undefined &&
-        gateway.reattachWait !== undefined
-    );
-}
 
 export type McpWorkspaceGateway = McpWorkspaceActionGateway &
     Required<Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls">> &

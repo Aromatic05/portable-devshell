@@ -27,7 +27,6 @@ const nonDestructiveMutationTools = new Set([
     "environ_info",
     "instance_create",
     "tmux_read",
-    "workspace_ask",
     "workspace_goal",
 ]);
 
@@ -48,7 +47,6 @@ const closedWorldTools = new Set([
     "tmux_read",
     "todo_read",
     "todo_write",
-    "workspace_ask",
     "workspace_goal",
     "workspace_open",
     "workspace_reconnect",
@@ -137,10 +135,6 @@ const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
         "Replace a todo plan completely. Create with revision=0 and immutable title; then reuse taskId and current revision. At most one item is in_progress; blocked/failed require detail. checkpoint stores durable handoff context. Update on state changes.",
     ],
     [
-        "workspace_ask",
-        "Ask the user one blocking question in the Live Workspace without ending the model turn. Use only when progress requires human input; Goal/Todo association is inferred.",
-    ],
-    [
         "workspace_goal",
         "Manage the durable Workspace Goal. start creates; get reads; update edits; block/resume control continuation; finish completes an all-terminal Goal; stop exits Goal mode without stopping shell/tmux. The final terminal step completes the Goal automatically.",
     ],
@@ -187,7 +181,6 @@ const titles: Readonly<Record<string, string>> = {
     tmux_run: "Run tmux task",
     todo_read: "Read task plan",
     todo_write: "Update task plan",
-    workspace_ask: "Ask user",
     workspace_action: "Apply Workspace action",
     workspace_goal: "Manage goal",
     workspace_open: "Open Workspace",
@@ -204,10 +197,6 @@ export function mcpToolTitle(toolName: string, meta?: JsonValue): string {
 const invocationStatuses: Readonly<
     Record<string, { invoked: string; invoking: string }>
 > = {
-    workspace_ask: {
-        invoked: "Answer received",
-        invoking: "Waiting for your answer…",
-    },
     workspace_open: {
         invoked: "Workspace ready",
         invoking: "Opening Workspace…",

@@ -162,106 +162,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }) as unknown as JsonValue;
     }
 
-    async createWait(
-        instance: string,
-        input: import("@portable-devshell/shared").WaitCreateInput,
-    ) {
-        return await this.#requireWait(instance).create(input);
-    }
-
-    async cancelWait(instance: string, waitId: string) {
-        return await this.#requireWait(instance).cancel(waitId);
-    }
-
-    async claimWaitRecovery(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).claimRecovery(waitId, claimId);
-    }
-
-    async completeWaitRecovery(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ) {
-        return await this.#requireWait(instance).completeRecovery(
-            waitId,
-            claimId,
-        );
-    }
-
-    async dismissWaitRecovery(
-        instance: string,
-        waitId: string,
-        recoveryMessageId: string,
-    ) {
-        return await this.#requireWait(instance).dismissRecovery(
-            waitId,
-            recoveryMessageId,
-        );
-    }
-
-    async markWaitRecoveryAttempted(
-        instance: string,
-        waitId: string,
-        claimId: string,
-        goalProgressEpoch?: number,
-    ) {
-        return await this.#requireWait(instance).markRecoveryAttempted(
-            waitId,
-            claimId,
-            goalProgressEpoch,
-        );
-    }
-
-    async detachWait(instance: string, waitId: string) {
-        return await this.#requireWait(instance).detach(waitId);
-    }
-
-    async reattachWait(instance: string, waitId: string, ownerCallId?: string) {
-        return await this.#requireWait(instance).reattach(waitId, ownerCallId);
-    }
-
-    async releaseWaitRecovery(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ) {
-        return await this.#requireWait(instance).releaseRecovery(
-            waitId,
-            claimId,
-        );
-    }
-
-    async rejectWaitRecovery(
-        instance: string,
-        waitId: string,
-        claimId: string,
-    ) {
-        return await this.#requireWait(instance).rejectRecovery(
-            waitId,
-            claimId,
-        );
-    }
-
-    async disableWaitRecovery(instance: string, waitId: string) {
-        return await this.#requireWait(instance).disableRecovery(waitId);
-    }
-
-    async consumeWait(instance: string, waitId: string) {
-        return await this.#requireWait(instance).consume(waitId);
-    }
-
-    async resolveWait(instance: string, waitId: string, result?: JsonValue) {
-        return await this.#requireWait(instance).resolve(waitId, result);
-    }
-
-    async waitForWait(instance: string, waitId: string) {
-        return await this.#requireWait(instance).waitForResolution(waitId);
-    }
-
-    async listWaits(instance: string) {
-        return await this.#requireWait(instance).list();
-    }
-
     async goalContinuation(
         instance: string,
         input: import("@portable-devshell/shared").GoalContinuationInput,
@@ -448,18 +348,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         if (task !== undefined) return task;
         this.#requireDescriptor(instance);
         throw new Error(`Instance ${instance} task runtime is unavailable.`);
-    }
-
-    #requireWait(instance: string) {
-        const wait = this.#requireTask(instance).wait;
-        if (wait === undefined) {
-            throw createRemoteError({
-                code: controlErrorCodes.methodNotFound,
-                message: `Wait service is unavailable for ${instance}.`,
-                retryable: false,
-            });
-        }
-        return wait;
     }
 
     #requireDescriptor(instance: string) {
