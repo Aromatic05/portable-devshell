@@ -1,4 +1,9 @@
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import {
+    bootstrapToolNamespace,
+    toolNamespace,
+    type JsonValue,
+    type ToolDefinition,
+} from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../../auth/Config.js";
 import {
@@ -17,7 +22,6 @@ import {
     withMcpCommentOutputSchema,
     type McpTool,
 } from "./Schema.js";
-import { isMcpEnvironmentToolName } from "../domain/context/environment/Catalog.js";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
@@ -32,6 +36,7 @@ import {
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
     contextSelector?: McpContextSelector;
+    bootstrapPresentationResourceUri?: string;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
     registry?: McpToolRegistry;
@@ -44,6 +49,7 @@ export interface McpEndpointCatalogSnapshot {
 
 export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
+    readonly #bootstrapPresentationResourceUri?: string;
     readonly #contextSelector: McpContextSelector;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #instanceName: string;
@@ -53,6 +59,8 @@ export class McpEndpointCatalog {
 
     constructor(options: McpEndpointCatalogOptions) {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
+        this.#bootstrapPresentationResourceUri =
+            options.bootstrapPresentationResourceUri;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
@@ -86,10 +94,12 @@ export class McpEndpointCatalog {
     }
 
     adapt(tool: ToolDefinition): McpTool {
-        const modelTool = hideInternalWorkerInput(tool);
+        const modelTool = withBootstrapPresentation(
+            hideInternalWorkerInput(tool),
+            this.#bootstrapPresentationResourceUri,
+        );
         const provenanceTool =
-            isMcpEnvironmentToolName(modelTool.name) ||
-            !isModelFacingTool(modelTool)
+            isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
                 ? modelTool
                 : withMcpProvenance(modelTool);
         const modelFacing = isModelFacingTool(provenanceTool);
@@ -102,7 +112,7 @@ export class McpEndpointCatalog {
                           : "Internal Context ID carried by the Workspace App.",
                   )
                 : provenanceTool;
-        const exposed = isMcpEnvironmentToolName(contextualTool.name)
+        const exposed = isBootstrapTool(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
@@ -155,6 +165,32 @@ export class McpEndpointCatalog {
             ? withMcpInstanceTarget(entry.definition)
             : entry.definition;
     }
+}
+
+function isBootstrapTool(name: string): boolean {
+    return toolNamespace(name) === bootstrapToolNamespace;
+}
+
+function withBootstrapPresentation(
+    tool: ToolDefinition,
+    resourceUri: string | undefined,
+): ToolDefinition {
+    if (resourceUri === undefined || tool.name !== `${bootstrapToolNamespace}_info`)
+        return tool;
+    return {
+        ...tool,
+        _meta: {
+            ...asRecord(tool._meta),
+            ui: {
+                ...asRecord(asRecord(tool._meta).ui),
+                resourceUri,
+                visibility: ["model", "app"],
+            },
+            "ui/resourceUri": resourceUri,
+            "openai/outputTemplate": resourceUri,
+            "openai/widgetAccessible": true,
+        },
+    };
 }
 
 function hideInternalWorkerInput(tool: ToolDefinition): ToolDefinition {

@@ -31,6 +31,9 @@
                 "./packages/control/dist/index.d.ts"
             ],
             "@portable-devshell/mcp": ["./packages/mcp/dist/index.d.ts"],
+            "@portable-devshell/mcp/tool": [
+                "./packages/mcp/dist/endpoint/tool/Public.d.ts"
+            ],
             "@portable-devshell/cli": ["./packages/cli/dist/index.d.ts"],
             "@portable-devshell/tui": ["./packages/tui/dist/index.d.ts"],
             "@portable-devshell/core/testing": [

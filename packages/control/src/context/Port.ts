@@ -61,7 +61,23 @@ export interface ContextInstanceCleanupPort {
 }
 
 export interface ContextWorkerPort {
+    readonly handshake?: {
+        platform: {
+            arch: string;
+            distribution?: { id: string; name: string; version?: string };
+            os: string;
+            packageManager?: string;
+            shell?: { kind: string };
+        };
+    };
+    prepareExtensionResource?(input: {
+        collection: string;
+        extensionId: string;
+    }): Promise<{ directory: string }>;
     prepareWorkspace?(workspace: string): Promise<PreparedEnvironmentFacts>;
+    readAlerts?(workspace: string): Promise<{
+        advice: Array<{ code: string; text: string }>;
+    }>;
     releaseAlerts?(workspace: string): Promise<void>;
     snapshot(): { ready?: boolean };
     touchAlerts?(workspace: string): Promise<

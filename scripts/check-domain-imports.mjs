@@ -31,6 +31,12 @@ const packageTarget = (name) => (candidate) =>
     !candidate.startsWith(root) &&
     (candidate === name || candidate.startsWith(`${name}/`));
 
+const packageTargetExcept = (name, ...allowed) => {
+    const matches = packageTarget(name);
+    const exceptions = new Set(allowed);
+    return (candidate) => matches(candidate) && !exceptions.has(candidate);
+};
+
 const anyTarget = (...tests) => (candidate) =>
     tests.some((test) => test(candidate));
 
@@ -80,7 +86,10 @@ const rules = [
         name: "context-does-not-depend-on-mcp",
         roots: [domain("packages/control/src/context")],
         forbidden: anyTarget(
-            packageTarget("@portable-devshell/mcp"),
+            packageTargetExcept(
+                "@portable-devshell/mcp",
+                "@portable-devshell/mcp/tool",
+            ),
             pathTarget("packages/mcp/src"),
         ),
     },

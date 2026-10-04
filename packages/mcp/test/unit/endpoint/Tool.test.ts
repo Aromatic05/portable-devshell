@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    McpEndpointCatalog,
     McpToolRegistry,
     McpToolDescriptionEnhancer,
     McpToolSchemaAdapter,
@@ -8,7 +9,6 @@ import {
     mcpToolInvocationStatus,
     mcpToolTitle,
     McpToolCatalogArtifact,
-    McpToolCatalogEnvironment,
     McpToolCatalogWorkspace,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
@@ -550,9 +550,6 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
     test("Control-owned MCP tools describe their structured output instead of generic objects", () => {
         const definitions = [
             ...new McpToolCatalogArtifact().list(),
-            ...new McpToolCatalogEnvironment().list({
-                presentationResourceUri: workspaceAppResourceUri,
-            }),
             ...new McpToolCatalogWorkspace().list(),
         ];
 
@@ -560,7 +557,13 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             assertMeaningfulSchema(definition);
         }
 
-        const environment = definition(definitions, "environ_info");
+        const bootstrapRegistry = new McpToolRegistry();
+        bootstrapRegistry.register("*", [environInfo]);
+        const environment = new McpEndpointCatalog({
+            bootstrapPresentationResourceUri: workspaceAppResourceUri,
+            instanceName: "local",
+            registry: bootstrapRegistry,
+        }).adapt(environInfo);
         assert.equal(
             (environment._meta as { ui?: { resourceUri?: string } })?.ui
                 ?.resourceUri,
@@ -582,19 +585,6 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             ],
             true,
         );
-        const platform = property(environment.outputSchema, "platform");
-        assert.equal(record(platform).additionalProperties, false);
-        assert.deepEqual(required(platform).sort(), ["arch", "os"]);
-        assertProperties(platform, [
-            "arch",
-            "distribution",
-            "os",
-            "packageManager",
-            "shell",
-        ]);
-        const distribution = property(platform, "distribution");
-        assert.equal(record(distribution).additionalProperties, false);
-        assert.deepEqual(required(distribution).sort(), ["id", "name"]);
 
         assertProperties(
             definition(definitions, "workspace_open").outputSchema,

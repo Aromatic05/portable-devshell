@@ -52,6 +52,8 @@ export class McpEndpointWorker {
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
+            bootstrapPresentationResourceUri:
+                this.#extensions.environmentPresentation()?.resourceUri,
             contextSelector,
             instanceName: options.instanceName,
             instanceRoutingEnabled: options.gateway !== undefined,

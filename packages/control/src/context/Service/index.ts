@@ -43,6 +43,10 @@ export class ContextService {
         this.cleanup.bindPresentation(presentation);
     }
 
+    worker(instance: string): ContextWorkerPort | undefined {
+        return this.#worker(instance);
+    }
+
     async initialize(): Promise<void> {
         await this.registry.initialize();
     }

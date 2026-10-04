@@ -4,11 +4,10 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-export function readMcpEnvironmentInfoInput(
+export function readEnvironmentInfoInput(
     input: JsonValue,
-    options: { allowContextId?: boolean } = {},
+    allowContextId: boolean,
 ): { ctxId?: string; workspace?: string } {
-    const allowContextId = options.allowContextId !== false;
     if (
         !isRecord(input) ||
         Object.keys(input).some(
@@ -32,11 +31,10 @@ export function readMcpEnvironmentInfoInput(
     };
 }
 
-export function readMcpRemoteEnvironmentInput(
+export function readRemoteEnvironmentInput(
     input: JsonValue,
-    options: { allowContextId?: boolean } = {},
+    allowContextId: boolean,
 ): { command: string; ctxId?: string; handle?: string; workspace?: string } {
-    const allowContextId = options.allowContextId !== false;
     if (
         !isRecord(input) ||
         Object.keys(input).some(

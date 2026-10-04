@@ -1,5 +1,7 @@
-import type { ToolCallHookValue } from "@portable-devshell/shared";
 import {
+    bootstrapToolNamespace,
+    toolNamespace,
+    type ToolCallHookValue,
     type GoalActivityKind,
     type JsonValue,
     type McpContextEnvironment,
@@ -138,6 +140,23 @@ export class McpEndpointDispatch {
 
         if (selected === undefined) {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
+        }
+
+        if (toolNamespace(toolName) === bootstrapToolNamespace) {
+            return await this.#workerHandler.call(
+                toolName,
+                input,
+                {
+                    contextMode: this.#contextSelector.id,
+                    externalBindings:
+                        this.#contextSelector.bindings(requestContext),
+                    principal: requestContext.principal,
+                    requestId: requestContext.requestId,
+                    source: "mcp",
+                },
+                snapshot.instanceRoutingEnabled,
+                signal,
+            );
         }
 
         const appOnlyInteraction = isAppOnlyInteractionTool(toolName);

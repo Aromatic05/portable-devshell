@@ -48,6 +48,7 @@ import { ExtensionWebGateway } from "../../server/web/extension/application/Gate
 import { ControlRouteComposition } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import type { ContextService } from "../../context/Service/index.js";
+import { installContextTools } from "../../context/tool/Runtime.js";
 import type { McpControlModule } from "../mcp/Control.js";
 import type { ConnectionModule } from "../../connection/Module.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
@@ -155,14 +156,20 @@ export class ControlRuntime {
                 surface: "model",
             },
         );
-        options.mcp.instanceGateway.setModelCommandCatalog((instance) => {
+        const modelCommands = (instance: string): readonly string[] => {
             const allowed =
                 options.instances.get(instance)?.modelExtensions ?? [];
             return modelCliCommands
                 .list()
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
-        });
+        };
+        options.mcp.instanceGateway.setModelCommandCatalog(modelCommands);
+        this.#toolCallHookUnregister.push(
+            installContextTools(options.contexts, toolCalls.hooks, {
+                modelCommands,
+            }),
+        );
         this.#modelDevshell = new ModelDevshellBroker({
             access: {
                 allows: ({ extensionId, instance }) =>

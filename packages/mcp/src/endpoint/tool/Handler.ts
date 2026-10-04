@@ -16,8 +16,12 @@ export class McpEndpointHandlerTool {
         context: ToolCallContext,
         instanceRoutingEnabled: boolean,
         signal: AbortSignal | undefined,
-        transformResult: (result: JsonValue, callId: string) => Promise<JsonValue>,
-        invocationInput: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue>,
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput?: (
+            input: JsonValue,
+            callId: string,
+            finalValue: ToolCallHookValue,
+        ) => Promise<JsonValue> | JsonValue,
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(input, instanceRoutingEnabled, this.options.instanceName);
         return await requireMcpEndpointGateway(this.options.gateway, this.options.instanceName).callTool(

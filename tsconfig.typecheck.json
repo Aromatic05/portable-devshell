@@ -95,6 +95,9 @@
                 "./packages/control/src/testing.ts"
             ],
             "@portable-devshell/mcp": ["./packages/mcp/src/index.ts"],
+            "@portable-devshell/mcp/tool": [
+                "./packages/mcp/src/endpoint/tool/Public.ts"
+            ],
             "@portable-devshell/mcp/testing": ["./packages/mcp/src/testing.ts"],
             "@portable-devshell/cli": ["./packages/cli/src/index.ts"],
             "@portable-devshell/tui": ["./packages/tui/src/index.ts"],

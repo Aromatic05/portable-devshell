@@ -24,11 +24,19 @@ export interface ToolDefinition {
     requiredCapabilities: readonly ToolCapability[];
 }
 
+export interface ToolCallExternalBinding {
+    kind: string;
+    value: string;
+}
+
 export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
     ctxId?: string;
     workspace?: string;
+    principal?: string;
+    externalBindings?: readonly ToolCallExternalBinding[];
+    contextMode?: "explicit" | "openai-session";
     source: ToolCallSource;
 }
 

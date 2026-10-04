@@ -34,7 +34,6 @@ export type {
     McpWorkspaceGateway,
 } from "./instance/Gateway.js";
 export * from "./endpoint/domain/artifact/Catalog.js";
-export * from "./endpoint/domain/context/environment/Catalog.js";
 export * from "./endpoint/workspace/Catalog.js";
 export * from "./endpoint/workspace/Handler.js";
 export * from "./endpoint/domain/task/Catalog.js";
