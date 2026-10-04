@@ -597,55 +597,6 @@ test("outbound progress rewritten to result becomes the terminal override", asyn
     assert.deepEqual(events, ["rewrite:progress", "review:result"]);
 });
 
-test("operation receives the final rewritten value while the ingress lease is held", async () => {
-    const rewritten: ToolCallHookValue = {
-        context: {
-            ...context,
-            instance: asInstanceName("instance-b"),
-            ctxId: "ctx-b",
-        },
-        kind: "call",
-        payload: { rewritten: true },
-        toolName: "rewritten_operation",
-    };
-    const outbound: string[] = [];
-    const harness = createHarness("instance-b", {
-        rewrites: [
-            ({ direction, value }) => {
-                if (direction === "inbound") return rewritten;
-                outbound.push(value.kind);
-                assert.deepEqual(harness.released, []);
-                return value;
-            },
-        ],
-    });
-    const result = await harness.pipeline.callOperation(
-        "unknown-instance",
-        "original_operation",
-        {},
-        context,
-        async (callId, input, value) => {
-            assert.equal(callId, harness.scheduled[0]?.callId);
-            assert.deepEqual(input, rewritten.payload);
-            assert.deepEqual(value, rewritten);
-            assert.deepEqual(harness.released, []);
-            await Promise.resolve();
-            assert.deepEqual(harness.released, []);
-            return { operated: true };
-        },
-    );
-    assert.deepEqual(result, { operated: true });
-    assert.deepEqual(outbound, ["result"]);
-    assert.deepEqual(harness.invoked, []);
-    assert.deepEqual(harness.audit, [
-        "requested",
-        "queued",
-        "running",
-        "completed",
-    ]);
-    assert.deepEqual(harness.released, ["release"]);
-});
-
 test("invocationInput prepares the final rewritten call before reservation, readiness, and invocation", async () => {
     const order: string[] = [];
     const harness = createHarness("final", {

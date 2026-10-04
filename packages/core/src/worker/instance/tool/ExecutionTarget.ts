@@ -78,7 +78,6 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             hooks,
             invocationInput,
             onProgress,
-            operation,
             recording,
             signal,
             transformResult,
@@ -104,8 +103,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                           callId,
                           hookValue,
                       );
-            if (operation === undefined && execute === undefined)
-                this.#assertReady();
+            if (execute === undefined) this.#assertReady();
         } catch (error) {
             if (hostRecorded) await this.#audit.failActive(scope, error);
             throw error;
@@ -187,8 +185,6 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             const rawResult = await reservation.run(async () => {
                 if (hostRecorded)
                     await this.#audit.running(scope, runningContext);
-                if (operation !== undefined)
-                    return await operation(callId, innerInput, hookValue);
                 if (execute !== undefined)
                     return await execute(
                         callId,

@@ -37,11 +37,6 @@ export interface ToolCallDispatchRequest {
         finalValue: ToolCallHookValue,
     ) => Promise<JsonValue> | JsonValue;
     readonly onProgress?: (progress: JsonValue) => void;
-    readonly operation?: (
-        callId: string,
-        input: JsonValue,
-        value: ToolCallHookValue,
-    ) => Promise<JsonValue>;
     readonly recording: "caller" | "host";
     readonly signal?: AbortSignal;
     readonly transformResult?: (
@@ -105,32 +100,6 @@ export class ToolCallPipeline implements ToolCallApi {
         );
     }
 
-    async callOperation<T extends JsonValue>(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (
-            callId: string,
-            input: JsonValue,
-            value: ToolCallHookValue,
-        ) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T> {
-        return (await this.#route(
-            instance,
-            toolName,
-            input,
-            context,
-            signal,
-            undefined,
-            undefined,
-            undefined,
-            "host",
-            operation,
-        )) as T;
-    }
-
     async #route(
         instance: string,
         toolName: string,
@@ -149,11 +118,6 @@ export class ToolCallPipeline implements ToolCallApi {
             | undefined,
         onProgress: ((progress: JsonValue) => void) | undefined,
         recording: "caller" | "host",
-        operation?: (
-            callId: string,
-            input: JsonValue,
-            value: ToolCallHookValue,
-        ) => Promise<JsonValue>,
     ): Promise<JsonValue> {
         throwIfToolCallAborted(signal);
 
@@ -235,17 +199,13 @@ export class ToolCallPipeline implements ToolCallApi {
             }
 
             const target = this.#resolveTarget(hookValue.context.instance);
-            const execute =
-                operation === undefined
-                    ? this.#resolveExecute?.(hookValue.toolName)
-                    : undefined;
+            const execute = this.#resolveExecute?.(hookValue.toolName);
             return await target.dispatch({
                 callId,
                 ...(execute === undefined ? {} : { execute }),
                 hooks,
                 ...(invocationInput === undefined ? {} : { invocationInput }),
                 ...(onProgress === undefined ? {} : { onProgress }),
-                ...(operation === undefined ? {} : { operation }),
                 recording,
                 ...(signal === undefined ? {} : { signal }),
                 ...(transformResult === undefined ? {} : { transformResult }),

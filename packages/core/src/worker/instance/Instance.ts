@@ -439,38 +439,6 @@ export class WorkerInstance {
         return this.#tool.target();
     }
 
-    async invokeToolInternal(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        this.#assertReady();
-        return await this.#toolInvoker.invoke(toolName, input, context, signal);
-    }
-
-    async observeTmuxTask(
-        taskId: string,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        this.#assertReady();
-        const listed = await this.#toolInvoker.invoke(
-            "tmux_manage",
-            { command: "list" },
-            context,
-            signal,
-        );
-        const active = findTmuxTask(listed, taskId);
-        if (active !== undefined) return { task: active };
-        return await this.#toolInvoker.invoke(
-            "tmux_read",
-            { task: taskId, line: 0, consumeOutput: false },
-            context,
-            signal,
-        );
-    }
-
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
         return await this.#tool.readLogs(query);
     }

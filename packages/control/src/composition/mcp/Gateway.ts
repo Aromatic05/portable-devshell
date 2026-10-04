@@ -103,28 +103,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         this.#toolCalls = ingress;
     }
 
-    async callToolOperation<T extends JsonValue>(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (
-            callId: string,
-            input: JsonValue,
-            finalValue: ToolCallHookValue,
-        ) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T> {
-        return await this.#requireToolCalls().callOperation(
-            instance,
-            toolName,
-            input,
-            context,
-            operation,
-            signal,
-        );
-    }
-
     async callTool(
         ...args: Parameters<ToolCallApi["call"]>
     ): Promise<JsonValue> {
@@ -135,18 +113,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         if (this.#toolCalls === undefined)
             throw new Error("MCP tool call ingress is not bound.");
         return this.#toolCalls;
-    }
-
-    async invokeToolInternal(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        return await this.#requireDescriptor(
-            instance,
-        ).worker.invokeToolInternal(toolName, input, context, signal);
     }
 
     async closeToolSession(sessionId: string): Promise<void> {
@@ -179,38 +145,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     listExtensionTools(instance: string): readonly ToolDefinition[] {
         this.#requireDescriptor(instance);
         return this.#extensions?.listTools() ?? [];
-    }
-
-    async callExtensionTool(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        callId: string,
-        signal?: AbortSignal,
-    ) {
-        this.#requireDescriptor(instance);
-        const extensions = this.#extensions;
-        if (extensions === undefined)
-            throw new Error("MCP Extension service is unavailable.");
-        return await extensions.callTool(
-            toolName,
-            input,
-            {
-                callId,
-                instance,
-                ...(context.ctxId === undefined
-                    ? {}
-                    : { ctxId: context.ctxId }),
-                ...(context.requestId === undefined
-                    ? {}
-                    : { requestId: context.requestId }),
-                ...(context.workspace === undefined
-                    ? {}
-                    : { workspace: context.workspace }),
-            },
-            signal,
-        );
     }
 
     async contextTerminated(
@@ -340,19 +274,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     async listWaits(instance: string) {
         return await this.#requireWait(instance).list();
-    }
-
-    async observeTmuxTask(
-        instance: string,
-        taskId: string,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue> {
-        return await this.#requireDescriptor(instance).worker.observeTmuxTask(
-            taskId,
-            context,
-            signal,
-        );
     }
 
     async goalContinuation(

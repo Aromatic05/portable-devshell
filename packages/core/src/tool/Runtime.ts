@@ -108,19 +108,6 @@ export interface ToolCallApi {
         onProgress?: (progress: JsonValue) => void,
         recording?: "caller" | "host",
     ): Promise<JsonValue>;
-
-    callOperation<T extends JsonValue>(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (
-            callId: string,
-            input: JsonValue,
-            value: ToolCallHookValue,
-        ) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T>;
 }
 
 /**

@@ -18,12 +18,6 @@ export interface McpEndpointWorkerPort {
         toolName: string,
         context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
-    invokeToolInternal?(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue>;
     prepareExtensionResource?(input: {
         collection: string;
         extensionId: string;

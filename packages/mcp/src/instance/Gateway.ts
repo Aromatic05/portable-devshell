@@ -68,22 +68,6 @@ interface McpGatewayShape {
         context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
     assertReady(instance: string): void;
-    callExtensionTool?(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        callId: string,
-        signal?: AbortSignal,
-    ): Promise<McpExtensionToolResult>;
-    callToolOperation<T extends JsonValue>(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T>;
     callTool(
         instance: string,
         toolName: string,
@@ -97,13 +81,6 @@ interface McpGatewayShape {
         invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording?: "caller" | "host",
-    ): Promise<JsonValue>;
-    invokeToolInternal?(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
     ): Promise<JsonValue>;
     closeToolSession?(sessionId: string): Promise<void>;
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
@@ -211,12 +188,6 @@ interface McpGatewayShape {
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
     listExtensionTools?(instance: string): readonly ToolDefinition[];
-    observeTmuxTask?(
-        instance: string,
-        taskId: string,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue>;
     prepareWorkspace(
         instance: string,
         workspace: string,
@@ -265,10 +236,7 @@ interface McpGatewayShape {
 export type McpToolCallPort = Pick<
     McpGatewayShape,
     | "appendMcpToolCalled"
-    | "callExtensionTool"
-    | "callToolOperation"
     | "callTool"
-    | "invokeToolInternal"
     | "closeToolSession"
     | "readToolCalls"
     | "hasActiveToolCalls"
@@ -301,7 +269,6 @@ export type McpTaskPort = Pick<
     | "controlTodo"
     | "readTodo"
     | "writeTodo"
-    | "observeTmuxTask"
 >;
 
 export type McpInstancePort = Pick<
@@ -419,18 +386,6 @@ export function isMcpWaitTrackingGateway(
         isMcpWorkspaceActionGateway(gateway) &&
         gateway.cancelWait !== undefined &&
         gateway.reattachWait !== undefined
-    );
-}
-
-export type McpTmuxWaitGateway = McpWaitTrackingGateway &
-    Required<Pick<McpTaskPort, "observeTmuxTask">>;
-
-export function isMcpTmuxWaitGateway(
-    gateway: McpWorkspacePort | undefined,
-): gateway is McpTmuxWaitGateway {
-    return (
-        isMcpWaitTrackingGateway(gateway) &&
-        gateway.observeTmuxTask !== undefined
     );
 }
 

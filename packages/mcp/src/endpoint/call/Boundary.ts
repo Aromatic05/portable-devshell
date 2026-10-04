@@ -1,5 +1,4 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import {
     createRemoteError,
     runtimeErrorCodes,
@@ -82,29 +81,6 @@ export function requireMcpEndpointGateway<T>(
         message: `Control tools are not available for ${instanceName}.`,
         retryable: false,
     });
-}
-
-export async function callMcpEndpointToolOperation<T extends JsonValue>(options: {
-    context: ToolCallContext;
-    gateway?: McpToolCallPort;
-    input: JsonValue;
-    localInstance: string;
-    operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>;
-    signal?: AbortSignal;
-    targetInstance: string;
-    toolName: string;
-}): Promise<T> {
-    return await requireMcpEndpointGateway(
-        options.gateway,
-        options.localInstance,
-    ).callToolOperation(
-        options.targetInstance,
-        options.toolName,
-        options.input,
-        options.context,
-        options.operation,
-        options.signal,
-    );
 }
 
 export function requireMcpEndpointEnvironment(
