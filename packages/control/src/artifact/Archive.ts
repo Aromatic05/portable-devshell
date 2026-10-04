@@ -11,7 +11,7 @@ import { extract, pack, type Headers, type Pack } from "tar-stream";
 
 import { createRemoteError } from "@portable-devshell/shared";
 
-import { createArtifactHasher, updateManifestHash } from "../Hash.js";
+import { createArtifactHasher, updateManifestHash } from "./host/Hash.js";
 
 interface SourceEntry {
     absolutePath: string;

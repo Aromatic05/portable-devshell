@@ -25,7 +25,7 @@ import {
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive,
-} from "../../artifact/host/storage/Archive.js";
+} from "../../artifact/Archive.js";
 import {
     resolveExtensionInstallLimits,
     type ExtensionInstallLimits,

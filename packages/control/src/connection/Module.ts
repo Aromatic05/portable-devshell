@@ -1,17 +1,39 @@
 import {
     createRemoteError,
     controlErrorCodes,
+    type ControlConfig,
 } from "@portable-devshell/shared";
+import type { InstanceRegistry } from "@portable-devshell/core";
 
 import { ReverseConnectionGateway } from "./Gateway.js";
 import { ReverseCredentialService } from "./credential/Service.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
-import type { ControlRuntimeState } from "../composition/control/State.js";
-import type { McpControlModule } from "../composition/mcp/Control.js";
+
+interface ConnectionLifecyclePort {
+    registerInstanceDeleteRetirement(
+        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void;
+    registerInstanceDisableRetirement(
+        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void;
+}
+
+interface ConnectionMcpPort {
+    readonly configEditor: ConnectionLifecyclePort;
+    readonly host?: {
+        readonly server: Parameters<ReverseConnectionGateway["install"]>[0];
+    };
+}
+
+interface ConnectionStatePort {
+    readonly homeDirectory: string;
+    readonly instances: InstanceRegistry;
+    requireConfig(): ControlConfig;
+}
 
 export interface ConnectionModuleOptions {
-    mcp: McpControlModule;
-    state: ControlRuntimeState;
+    mcp: ConnectionMcpPort;
+    state: ConnectionStatePort;
 }
 
 export class ConnectionModule {

@@ -25,7 +25,7 @@ import {
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
-import { extractArtifactDirectoryArchive } from "./Archive.js";
+import { extractArtifactDirectoryArchive } from "../../Archive.js";
 import { artifactHashFile } from "../Hash.js";
 
 const RECORD_VERSION = 1;

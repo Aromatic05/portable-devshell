@@ -31,7 +31,7 @@ import {
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
-import { createArtifactDirectoryArchive } from "./Archive.js";
+import { createArtifactDirectoryArchive } from "../../Archive.js";
 import { artifactHashFile, createArtifactHasher } from "../Hash.js";
 import type { ArtifactHostAccessContext } from "../Model.js";
 
