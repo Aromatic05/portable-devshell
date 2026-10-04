@@ -9,9 +9,11 @@ import {
     type RemoteErrorBody,
     type ToolCallContext,
     type ToolCallFailureStage,
+    type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
 import type { WorkerToolInvoker } from "../../tool/Invoker.js";
+import { PresentedToolCallResult } from "../../../tool/Presentation.js";
 import type {
     WorkerToolCallScheduler,
     WorkerToolSchedulerReservation,
@@ -182,7 +184,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         };
 
         try {
-            const rawResult = await reservation.run(async () => {
+            const executed = await reservation.run(async () => {
                 if (hostRecorded)
                     await this.#audit.running(scope, runningContext);
                 if (execute !== undefined)
@@ -205,12 +207,20 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 );
             });
             executionCompleted = true;
+            const presentation: ToolCallPresentation | undefined =
+                executed instanceof PresentedToolCallResult
+                    ? executed.presentation
+                    : undefined;
+            const rawResult =
+                executed instanceof PresentedToolCallResult
+                    ? executed.result
+                    : executed;
             let adaptedResult: JsonValue;
             try {
                 adaptedResult =
                     transformResult === undefined
                         ? rawResult
-                        : await transformResult(rawResult, callId);
+                        : await transformResult(rawResult, callId, presentation);
             } catch (error) {
                 failureStage = "postExecution";
                 throw error;

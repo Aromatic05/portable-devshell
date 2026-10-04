@@ -1,20 +1,8 @@
 import type { ToolDefinition } from "@portable-devshell/shared";
 
-export type McpToolCatalogArtifactName = "artifact_viewImage";
+export const artifactViewImageToolName = "artifact_viewImage" as const;
 
-export interface McpToolCatalogArtifactAvailability {
-    viewImage?: boolean;
-}
-
-export class McpToolCatalogArtifact {
-    list(
-        availability: McpToolCatalogArtifactAvailability = { viewImage: true },
-    ): ToolDefinition[] {
-        return availability.viewImage === true ? [artifactViewImageTool()] : [];
-    }
-}
-
-function artifactViewImageTool(): ToolDefinition {
+export function artifactViewImageDefinition(): ToolDefinition {
     return {
         description:
             "View a PNG, JPEG, GIF, or WebP source as native MCP image content. Provide exactly one of path or handle. The selected source instance is read through the existing artifact payload protocol; images larger than 10 MiB are rejected.",

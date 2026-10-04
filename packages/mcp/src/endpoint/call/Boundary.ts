@@ -3,13 +3,12 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
-    type ToolCallContext,
+    type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
 import type {
     McpEndpointEnvironmentHandshake,
     McpInstancePort,
-    McpToolCallPort,
 } from "../../instance/Gateway.js";
 
 const DEFAULT_READY_WAIT_MS = 5_000;
@@ -145,6 +144,28 @@ function mcpEndpointCancellationError(reason: unknown) {
         details: {
             reason: typeof reason === "string" ? reason : "client cancelled",
         },
+    });
+}
+
+export function presentMcpEndpointResult(
+    result: JsonValue,
+    presentation: ToolCallPresentation | undefined,
+): McpEndpointResult {
+    if (presentation === undefined) return result;
+    return new McpNativeToolResult({
+        content: (presentation.content ?? []).map((entry) =>
+            entry.type === "text"
+                ? { text: entry.text, type: "text" as const }
+                : {
+                      data: entry.data,
+                      mimeType: entry.mediaType,
+                      type: "image" as const,
+                  },
+        ),
+        ...(presentation.isError === undefined
+            ? {}
+            : { isError: presentation.isError }),
+        structuredContent: result,
     });
 }
 

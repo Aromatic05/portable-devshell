@@ -13,6 +13,7 @@ export type {
     ToolCallHooks,
 } from "./Runtime.js";
 export type { ToolCallHookValue } from "./hook/Review.js";
+export { presentToolCallResult, PresentedToolCallResult } from "./Presentation.js";
 
 export interface ToolCallRuntime {
     readonly api: ToolCallApi;

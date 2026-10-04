@@ -21,10 +21,7 @@ import { HttpEndpointPreflight } from "../../server/endpoint/Http.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";
-import {
-    decorateMcpInstanceGatewayArtifact,
-    McpInstanceGatewayControl,
-} from "./Gateway.js";
+import { McpInstanceGatewayControl } from "./Gateway.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
@@ -199,10 +196,7 @@ export class McpControlModule {
             options.state.requireConfig(),
             options.state.instances,
             {
-                gateway: decorateMcpInstanceGatewayArtifact(
-                    this.instanceGateway,
-                    options.artifact.service,
-                ),
+                gateway: this.instanceGateway,
                 storageDir: options.controlPaths.oauthDir,
                 runtimeState: this.#runtimeState,
                 toolProvenance: this.toolProvenance,
@@ -272,10 +266,7 @@ export class McpControlModule {
         config: ControlConfig,
     ): Promise<McpHost | undefined> {
         const next = this.#factory.wire(config, this.#state.instances, {
-            gateway: decorateMcpInstanceGatewayArtifact(
-                this.instanceGateway,
-                this.#artifact.service,
-            ),
+            gateway: this.instanceGateway,
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,

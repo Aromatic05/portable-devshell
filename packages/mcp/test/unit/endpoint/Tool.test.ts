@@ -8,7 +8,6 @@ import {
     mcpToolAnnotations,
     mcpToolInvocationStatus,
     mcpToolTitle,
-    McpToolCatalogArtifact,
     McpToolCatalogWorkspace,
     workspaceAppResourceUri,
 } from "@portable-devshell/mcp/testing";
@@ -547,11 +546,8 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 }
 
 {
-    test("Control-owned MCP tools describe their structured output instead of generic objects", () => {
-        const definitions = [
-            ...new McpToolCatalogArtifact().list(),
-            ...new McpToolCatalogWorkspace().list(),
-        ];
+    test("Workspace MCP tools describe their structured output instead of generic objects", () => {
+        const definitions = new McpToolCatalogWorkspace().list();
 
         for (const definition of definitions) {
             assertMeaningfulSchema(definition);

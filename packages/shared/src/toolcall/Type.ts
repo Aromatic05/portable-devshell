@@ -43,6 +43,15 @@ export interface ToolCallContext {
 export type ToolCallHookKind = "call" | "error" | "progress" | "result";
 export type ToolCallHookContext = ToolCallContext & { instance: InstanceName };
 
+export type ToolCallPresentationContent =
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mediaType: string };
+
+export interface ToolCallPresentation {
+    content?: readonly ToolCallPresentationContent[];
+    isError?: boolean;
+}
+
 export interface ToolCallHookValue {
     context: ToolCallHookContext;
     kind: ToolCallHookKind;

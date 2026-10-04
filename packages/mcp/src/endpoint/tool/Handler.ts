@@ -1,5 +1,5 @@
 import type { ToolCallHookValue } from "@portable-devshell/shared";
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext, ToolCallPresentation } from "@portable-devshell/shared";
 import type { McpToolCallPort } from "../../instance/Gateway.js";
 import { readMcpRoutedInput } from "./Input.js";
 import { requireMcpEndpointGateway } from "../call/Boundary.js";
@@ -16,7 +16,11 @@ export class McpEndpointHandlerTool {
         context: ToolCallContext,
         instanceRoutingEnabled: boolean,
         signal: AbortSignal | undefined,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+            presentation?: ToolCallPresentation,
+        ) => Promise<JsonValue>,
         invocationInput?: (
             input: JsonValue,
             callId: string,

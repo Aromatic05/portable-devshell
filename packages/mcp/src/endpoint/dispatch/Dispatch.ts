@@ -19,6 +19,7 @@ import {
 import type { McpInstanceGateway } from "../../instance/Gateway.js";
 import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
 import {
+    presentMcpEndpointResult,
     throwIfMcpEndpointAborted,
     requireMcpEndpointGateway,
 } from "../call/Boundary.js";
@@ -197,6 +198,7 @@ export class McpEndpointDispatch {
             signal,
         );
         let accepted: McpAcceptedCall | undefined;
+        let presentation: import("@portable-devshell/shared").ToolCallPresentation | undefined;
         const prepareCall = async (
             callId: string,
             finalValue: ToolCallHookValue,
@@ -210,19 +212,23 @@ export class McpEndpointDispatch {
             return accepted;
         };
         try {
+            const result = await this.#workerHandler.call(
+                toolName,
+                input,
+                context,
+                snapshot.instanceRoutingEnabled,
+                signal,
+                async (structured, _callId, nextPresentation) => {
+                    presentation = nextPresentation;
+                    return structured;
+                },
+                async (rewrittenInput, callId, value) => {
+                    await prepareCall(callId, value);
+                    return rewrittenInput;
+                },
+            );
             return appendWorkspaceAdvice(
-                await this.#workerHandler.call(
-                    toolName,
-                    input,
-                    context,
-                    snapshot.instanceRoutingEnabled,
-                    signal,
-                    undefined,
-                    async (rewrittenInput, callId, value) => {
-                        await prepareCall(callId, value);
-                        return rewrittenInput;
-                    },
-                ),
+                presentMcpEndpointResult(result, presentation),
                 accepted?.workspaceAdvice ?? [],
             );
         } finally {

@@ -9,15 +9,12 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import type {
-    ArtifactViewImageInput,
-    ArtifactViewImageResult,
     ControlConfig,
     JsonValue,
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceConnectionService } from "@portable-devshell/core";
 import type { ToolCallProvenanceStore } from "@portable-devshell/core";
-import type { ArtifactImageApi } from "../../artifact/Api.js";
 import type { McpExtensionService } from "./extension/Service.js";
 import type { InstanceDomainRuntimePort } from "../InstanceRuntime.js";
 
@@ -489,28 +486,4 @@ function withTodoSummaries<T extends object>(
         ...snapshot,
         ...(activeTodos.length === 0 ? {} : { activeTodos }),
     };
-}
-
-export function decorateMcpInstanceGatewayArtifact(
-    base: McpInstanceGateway,
-    artifactService: ArtifactImageApi,
-): McpInstanceGateway {
-    return new Proxy(base, {
-        get(target, property, receiver) {
-            if (property === "viewArtifactImage") {
-                return async (
-                    defaultInstance: string,
-                    input: ArtifactViewImageInput,
-                    signal?: AbortSignal,
-                ): Promise<ArtifactViewImageResult> =>
-                    await artifactService.viewImage(
-                        input,
-                        defaultInstance,
-                        signal,
-                    );
-            }
-            const value = Reflect.get(target, property, receiver) as unknown;
-            return typeof value === "function" ? value.bind(target) : value;
-        },
-    });
 }

@@ -50,6 +50,7 @@ import { ControlWebSocketListener } from "../../server/web/Socket.js";
 import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
 import { ControlRouteComposition } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
+import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import type { ContextService } from "../../context/Service/index.js";
 import { installContextTools } from "../../context/tool/Runtime.js";
 import type { McpControlModule } from "../mcp/Control.js";
@@ -177,6 +178,13 @@ export class ControlRuntime {
             installTodoTools(
                 toolCalls.hooks,
                 (instance) => options.mcp.instanceDomains.task(instance),
+            ),
+        );
+        this.#toolCallHookUnregister.push(
+            installArtifactTools(
+                options.artifact.service,
+                options.instances,
+                toolCalls.hooks,
             ),
         );
         this.#modelDevshell = new ModelDevshellBroker({

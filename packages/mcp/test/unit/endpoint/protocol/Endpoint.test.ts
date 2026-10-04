@@ -17,6 +17,7 @@ import {
     McpEndpointBinding,
     McpExtensionRegistry,
     McpNativeToolResult,
+    McpToolRegistry,
     createWorkspaceMcpExtension,
     workspaceAppLegacyResourceUris,
     workspaceAppResourceMeta,
@@ -1762,14 +1763,83 @@ test("artifact_viewImage returns native image content over SDK transport", async
         ready: false,
         tools: [],
     });
+    const registry = new McpToolRegistry();
+    const registration = registry.register("demo", [
+        {
+            description: "View image",
+            group: "artifact",
+            inputSchema: {
+                additionalProperties: false,
+                properties: { path: { type: "string" } },
+                required: ["path"],
+                type: "object",
+            },
+            name: "artifact_viewImage",
+            outputSchema: { type: "object" },
+            requiredCapabilities: ["read"],
+        },
+    ]);
     const gateway = {
         ...createTestCallOperationGateway(),
         assertReady() {},
-        async callTool() {
-            return {};
-        },
-        async createSshInstance() {
-            return {};
+        async callTool(
+            _instance: string,
+            _toolName: string,
+            _input: JsonValue,
+            _context: unknown,
+            _signal?: AbortSignal,
+            transformResult?: (
+                result: JsonValue,
+                callId: string,
+                presentation?: {
+                    content?: readonly {
+                        data: string;
+                        mediaType: string;
+                        type: "image";
+                    }[];
+                },
+            ) => Promise<JsonValue>,
+            invocationInput?: (
+                input: JsonValue,
+                callId: string,
+                finalValue: ToolCallHookValue,
+            ) => Promise<JsonValue> | JsonValue,
+        ) {
+            const callId = "artifact-call";
+            await invocationInput?.(
+                { path: "./pixel.png" },
+                callId,
+                {
+                    context: {
+                        ctxId: "ctx-artifact-test",
+                        instance: asInstanceName("demo"),
+                        source: "mcp",
+                        workspace: "/workspace",
+                    },
+                    kind: "call",
+                    payload: { path: "./pixel.png" },
+                    toolName: "artifact_viewImage",
+                },
+            );
+            const structured = {
+                blake3: "b".repeat(64),
+                bytes: 68,
+                imageRef: `${"b".repeat(64)}.png`,
+                mediaType: "image/png",
+                name: "pixel.png",
+                source: { instance: "demo", path: "./pixel.png", type: "file" },
+            } as JsonValue;
+            return transformResult === undefined
+                ? structured
+                : await transformResult(structured, callId, {
+                      content: [
+                          {
+                              data: pngData,
+                              mediaType: "image/png",
+                              type: "image",
+                          },
+                      ],
+                  });
         },
         async listInstances() {
             return [];
@@ -1777,46 +1847,12 @@ test("artifact_viewImage returns native image content over SDK transport", async
         async readTodo() {
             return { revision: 0, todos: [] };
         },
-        listTools() {
-            return [];
-        },
-        async connectInstance() {
-            return {};
-        },
-        async statusInstance() {
-            return {};
-        },
-        async stopInstance() {
-            return {};
-        },
-        async viewArtifactImage(
-            defaultInstance: string,
-            input: { path?: string; workspace?: string },
-        ) {
-            assert.equal(defaultInstance, "demo");
-            assert.deepEqual(input, {
-                path: "./pixel.png",
-                workspace: "/workspace",
-            });
-            return {
-                blake3: "b".repeat(64),
-                bytes: 68,
-                content: pngData,
-                encoding: "base64",
-                imageRef: `${"b".repeat(64)}.png`,
-                mediaType: "image/png",
-                name: "pixel.png",
-                source: { instance: "demo", path: "./pixel.png", type: "file" },
-            };
-        },
-        async writeTodo() {
-            return { revision: 0, todos: [] };
-        },
     } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             gateway,
             instanceName: "demo",
+            toolRegistry: registry,
             worker: harness.worker,
         }),
     );
@@ -1852,11 +1888,8 @@ test("artifact_viewImage returns native image content over SDK transport", async
             name: "pixel.png",
             source: { instance: "demo", path: "./pixel.png", type: "file" },
         });
-        assert.equal(
-            "content" in (response.body.result?.structuredContent ?? {}),
-            false,
-        );
     } finally {
+        registration.dispose();
         await server.close();
     }
 });

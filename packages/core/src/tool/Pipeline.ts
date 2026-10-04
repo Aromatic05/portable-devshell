@@ -7,6 +7,7 @@ import {
     type InstanceName,
     type JsonValue,
     type ToolCallContext,
+    type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
 import { throwIfToolCallAborted } from "./Error.js";
@@ -42,6 +43,7 @@ export interface ToolCallDispatchRequest {
     readonly transformResult?: (
         result: JsonValue,
         callId: string,
+        presentation?: ToolCallPresentation,
     ) => Promise<JsonValue>;
     readonly value: ToolCallHookValue;
 }
@@ -78,6 +80,7 @@ export class ToolCallPipeline implements ToolCallApi {
         transformResult?: (
             result: JsonValue,
             callId: string,
+            presentation?: ToolCallPresentation,
         ) => Promise<JsonValue>,
         invocationInput?: (
             input: JsonValue,
@@ -107,7 +110,11 @@ export class ToolCallPipeline implements ToolCallApi {
         context: ToolCallContext,
         signal: AbortSignal | undefined,
         transformResult:
-            | ((result: JsonValue, callId: string) => Promise<JsonValue>)
+            | ((
+                  result: JsonValue,
+                  callId: string,
+                  presentation?: ToolCallPresentation,
+              ) => Promise<JsonValue>)
             | undefined,
         invocationInput:
             | ((

@@ -1,16 +1,20 @@
 import {
     createRemoteError,
+    contextErrorCodes,
     controlErrorCodes,
     type ArtifactViewImageInput,
     type JsonValue,
 } from "@portable-devshell/shared";
 
-export function readMcpArtifactViewImageInput(
+export function readArtifactViewImageInput(
     input: JsonValue,
+    workspace: string | undefined,
 ): ArtifactViewImageInput {
     if (!isRecord(input)) {
         throw invalidArguments("artifact_viewImage requires an object input.");
     }
+    if (Object.keys(input).some((key) => key !== "handle" && key !== "path"))
+        throw invalidArguments("artifact_viewImage accepts only handle or path.");
     const handle = optionalString(input.handle, "handle");
     const path = optionalString(input.path, "path");
     if ((handle === undefined) === (path === undefined)) {
@@ -18,25 +22,25 @@ export function readMcpArtifactViewImageInput(
             "artifact_viewImage requires exactly one of handle or path.",
         );
     }
-    const instance = optionalString(input.instance, "instance");
-    const common = instance === undefined ? {} : { instance };
-    if (handle !== undefined) return { ...common, handle };
+    if (handle !== undefined) return { handle };
     if (path === undefined)
         throw invalidArguments(
             "artifact_viewImage requires path when handle is omitted.",
         );
     return {
-        ...common,
         path,
-        workspace: requiredString(input.workspace, "workspace"),
+        workspace: requireWorkspace(workspace),
     };
 }
 
-function requiredString(value: JsonValue | undefined, field: string): string {
-    const normalized = optionalString(value, field);
-    if (normalized === undefined)
-        throw invalidArguments(`${field} is required.`);
-    return normalized;
+function requireWorkspace(workspace: string | undefined): string {
+    if (workspace !== undefined && workspace.length > 0) return workspace;
+    throw createRemoteError({
+        code: contextErrorCodes.workspaceRequired,
+        message:
+            "Artifact path operations require a workspace attachment on the selected instance.",
+        retryable: false,
+    });
 }
 
 function optionalString(

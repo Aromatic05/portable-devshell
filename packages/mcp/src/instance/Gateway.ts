@@ -1,8 +1,6 @@
 import type { ToolCallHookValue } from "@portable-devshell/shared";
 import type {
     ApprovalRequest,
-    ArtifactViewImageInput,
-    ArtifactViewImageResult,
     GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
@@ -13,6 +11,7 @@ import type {
     TodoTaskControlAction,
     ToolCallContext,
     ToolCallRecord,
+    ToolCallPresentation,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
@@ -76,6 +75,7 @@ interface McpGatewayShape {
         transformResult?: (
             result: JsonValue,
             callId: string,
+            presentation?: ToolCallPresentation,
         ) => Promise<JsonValue>,
         invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
@@ -217,13 +217,6 @@ interface McpGatewayShape {
           }
     >;
     touchTemporaryDirectory(instance: string, path: string): Promise<void>;
-
-
-    viewArtifactImage?(
-        defaultInstance: string,
-        input: ArtifactViewImageInput,
-        signal?: AbortSignal,
-    ): Promise<ArtifactViewImageResult>;
 }
 
 export type McpToolCallPort = Pick<
@@ -280,7 +273,6 @@ export type McpInstancePort = Pick<
 >;
 
 export type McpWorkspaceEventPort = Pick<McpGatewayShape, "readWorkspaceEvents">;
-export type McpArtifactPort = Pick<McpGatewayShape, "viewArtifactImage">;
 export type McpWorkspacePort = McpTaskPort &
     Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls"> &
     McpWorkspaceEventPort & {
@@ -292,8 +284,7 @@ export interface McpInstanceGateway
     extends McpToolCallPort,
         McpTaskPort,
         McpInstancePort,
-        McpWorkspaceEventPort,
-        McpArtifactPort {
+        McpWorkspaceEventPort {
     approval?: McpApprovalPort;
 }
 

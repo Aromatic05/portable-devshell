@@ -44,7 +44,7 @@ export { bootstrapToolNamespace, isToolCallEvent, type ToolCallFailureStage, typ
 export { resolveToolOutput, toolCallOutcome, toolCallOutput } from "./execution/tool/Projection.js";
 export { createToolTransport, type ToolTransport } from "./execution/tool/Transport.js";
 export { ToolCallViewModel } from "./execution/tool/ViewModel.js";
-export { type ToolCallContext, type ToolCallExternalBinding, type ToolCallHookContext, type ToolCallHookKind, type ToolCallHookValue, type ToolCallRecord, type ToolDefinition } from "./toolcall/Type.js";
+export { type ToolCallContext, type ToolCallExternalBinding, type ToolCallHookContext, type ToolCallHookKind, type ToolCallHookValue, type ToolCallPresentation, type ToolCallPresentationContent, type ToolCallRecord, type ToolDefinition } from "./toolcall/Type.js";
 export { attachToolCallErrorPayload, readToolCallErrorPayload } from "./toolcall/ErrorPayload.js";
 export { snapshotJson } from "./types/JsonSnapshot.js";
 export { createRemoteError, errorMessage, RemoteError, type RemoteErrorBody, toRemoteError, toRemoteErrorBody, TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE } from "./transport/Error.js";

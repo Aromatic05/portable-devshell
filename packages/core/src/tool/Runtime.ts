@@ -1,4 +1,4 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext, ToolCallPresentation } from "@portable-devshell/shared";
 
 import {
     ToolCallHookSequence,
@@ -78,7 +78,10 @@ export interface ToolCallHooks {
             value: Readonly<ToolCallHookValue>,
             signal?: AbortSignal,
             onProgress?: (progress: JsonValue) => void,
-        ) => Promise<JsonValue> | JsonValue,
+        ) =>
+            | Promise<JsonValue | import("./Presentation.js").PresentedToolCallResult>
+            | JsonValue
+            | import("./Presentation.js").PresentedToolCallResult,
     ): () => void;
     registerReview(review: ToolCallReviewHook): () => void;
 }
@@ -99,6 +102,7 @@ export interface ToolCallApi {
         transformResult?: (
             result: JsonValue,
             callId: string,
+            presentation?: ToolCallPresentation,
         ) => Promise<JsonValue>,
         invocationInput?: (
             input: JsonValue,
