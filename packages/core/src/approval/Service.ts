@@ -11,6 +11,11 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import type { ApprovalPolicy } from "@portable-devshell/shared/config";
+import type {
+    ApprovalEvaluation,
+    ApprovalEvaluationInput,
+    ApprovalResolution,
+} from "./Api.js";
 
 type ApprovalPolicyDecision = Exclude<ApprovalPolicy["mode"], "disabled">;
 
@@ -29,32 +34,6 @@ export class ApprovalError extends Error {
         this.name = "ApprovalError";
     }
 }
-
-export interface ApprovalEvaluationInput {
-    callId: string;
-    source: ApprovalRequest["source"];
-    requestId?: string;
-    ctxId?: string;
-    workspace?: string;
-    inputSummary: string;
-    recording?: "caller" | "host";
-    required?: boolean;
-    toolName: string;
-}
-
-export type ApprovalResolution =
-    | { decision: ApprovalDecision; status: "approved" }
-    | { decision: ApprovalDecision; error: ApprovalError; status: "denied" }
-    | { error: ApprovalError; status: "expired" | "cancelled" };
-
-export type ApprovalEvaluation =
-    | { decision: "allow" }
-    | { decision: "deny"; error: ApprovalError }
-    | {
-          decision: "ask";
-          request: ApprovalRequest;
-          awaitDecision: Promise<ApprovalResolution>;
-      };
 
 export interface ApprovalStorePort {
     append(request: ApprovalRequest): Promise<void>;

@@ -5,7 +5,7 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../../../instance/Gateway.js";
+import type { McpArtifactPort } from "../../../instance/Gateway.js";
 import type { McpToolCatalogArtifactName } from "./Catalog.js";
 import { waitForMcpEndpointAbortable } from "../../call/Boundary.js";
 import { readMcpArtifactViewImageInput } from "./Input.js";
@@ -18,7 +18,7 @@ import {
 export class McpEndpointHandlerArtifact {
     constructor(
         private readonly options: {
-            gateway?: McpInstanceGateway;
+            gateway?: McpArtifactPort;
             instanceName: string;
         },
     ) {}

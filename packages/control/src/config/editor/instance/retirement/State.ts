@@ -13,9 +13,9 @@ export class InstanceRetirementState {
             .retire(reason)
             .catch((error) => failures.push(error));
 
-        if (descriptor.wait !== undefined) {
+        if (descriptor.task.wait !== undefined) {
             try {
-                for (const wait of await descriptor.wait.list()) {
+                for (const wait of await descriptor.task.wait.list()) {
                     if (
                         wait.status !== "waiting" &&
                         wait.status !== "detached" &&
@@ -24,12 +24,12 @@ export class InstanceRetirementState {
                         continue;
                     try {
                         if (wait.status === "resolved")
-                            await descriptor.wait.consume(wait.waitId);
-                        else await descriptor.wait.cancel(wait.waitId);
+                            await descriptor.task.wait.consume(wait.waitId);
+                        else await descriptor.task.wait.cancel(wait.waitId);
                     } catch (error) {
                         let current;
                         try {
-                            current = await descriptor.wait.get(wait.waitId);
+                            current = await descriptor.task.wait.get(wait.waitId);
                         } catch (readError) {
                             failures.push(error, readError);
                             continue;
@@ -45,7 +45,7 @@ export class InstanceRetirementState {
                             wait.status !== "resolved"
                         ) {
                             try {
-                                await descriptor.wait.consume(wait.waitId);
+                                await descriptor.task.wait.consume(wait.waitId);
                                 continue;
                             } catch (consumeError) {
                                 failures.push(error, consumeError);
@@ -60,8 +60,8 @@ export class InstanceRetirementState {
             }
         }
 
-        await descriptor.goal.stopAll().catch((error) => failures.push(error));
-        await descriptor.todo
+        await descriptor.task.goal.stopAll().catch((error) => failures.push(error));
+        await descriptor.task.todo
             .cancelAll()
             .catch((error) => failures.push(error));
         if (!skipRuntimeRetirement) {
@@ -88,15 +88,15 @@ export class InstanceRetirementState {
                 `Instance ${descriptor.name} was disabled before approval.`,
             )
             .catch((error) => failures.push(error));
-        if (descriptor.wait !== undefined) {
+        if (descriptor.task.wait !== undefined) {
             try {
-                for (const wait of await descriptor.wait.list()) {
+                for (const wait of await descriptor.task.wait.list()) {
                     if (
                         wait.status !== "waiting" &&
                         wait.status !== "detached"
                     )
                         continue;
-                    await descriptor.wait
+                    await descriptor.task.wait
                         .cancel(wait.waitId)
                         .catch((error) => failures.push(error));
                 }

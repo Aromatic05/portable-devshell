@@ -16,8 +16,8 @@ import {
     isMcpWorkspaceGateway,
     requireMcpGoalGateway as requireGoalGateway,
     requireMcpWorkspaceActionGateway as requireInteractionGateway,
-    type McpInstanceGateway,
     type McpWorkspaceActionGateway,
+    type McpWorkspacePort,
 } from "../../instance/Gateway.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { McpToolCatalogWorkspaceName } from "./Catalog.js";
@@ -51,7 +51,7 @@ export class McpEndpointHandlerWorkspace {
     constructor(
         private readonly options: {
             contextRegistry?: ContextRegistryPort;
-            gateway?: McpInstanceGateway;
+            gateway?: McpWorkspacePort;
             instanceName: string;
             now?: () => number;
             watchHeartbeatMs?: number;

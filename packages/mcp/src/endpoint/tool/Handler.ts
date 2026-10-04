@@ -1,12 +1,12 @@
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
-import type { McpInstanceGateway } from "../../instance/Gateway.js";
+import type { McpToolCallPort } from "../../instance/Gateway.js";
 import { readMcpRoutedInput } from "./Input.js";
 import { requireMcpEndpointGateway } from "../call/Boundary.js";
 
 export class McpEndpointHandlerTool {
     constructor(private readonly options: {
-        gateway?: McpInstanceGateway;
+        gateway?: McpToolCallPort;
         instanceName: string;
     }) {}
 

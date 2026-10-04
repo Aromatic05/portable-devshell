@@ -1,6 +1,10 @@
 import { join } from "node:path";
 
-import { ToolCallPipeline } from "@portable-devshell/core";
+import {
+    createToolCallRuntime,
+    type ToolCallApi,
+} from "@portable-devshell/core/toolcall";
+import { registerApprovalToolCallReview } from "@portable-devshell/core/approval";
 
 import {
     controlRemoteRpcPath,
@@ -87,8 +91,8 @@ export class ControlRuntime {
     readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
-    readonly #toolCallBinding: ToolCallExtensionBinding;
-    readonly #toolCalls: ToolCallPipeline;
+    readonly #toolCallHookUnregister: Array<() => void>;
+    readonly #toolCalls: ToolCallApi;
     #webListener?: ControlWebSocketListener;
     #webFlow?: ControlWebOAuthFlow;
     #webFlowUninstall?: () => void;
@@ -109,31 +113,7 @@ export class ControlRuntime {
             }),
         });
         this.#instances = options.instances;
-        this.#toolCallBinding = new ToolCallExtensionBinding(
-            this.#extensions,
-            new ToolCallSecretRewrite(options.config),
-            [
-                {
-                    hook: "510-approval",
-                    id: "approval",
-                    review: async (input, signal, recording) => {
-                        const descriptor = this.#instances.get(
-                            input.value.context.instance,
-                        );
-                        if (descriptor === undefined)
-                            return { decision: "continue" };
-                        return await descriptor.approvalReview(
-                            input,
-                            signal,
-                            recording,
-                        );
-                    },
-                },
-            ],
-        );
-        this.#toolCalls = new ToolCallPipeline({
-            hooks: (context, signal, recording) =>
-                this.#toolCallBinding.acquire(context, signal, recording),
+        const toolCalls = createToolCallRuntime({
             resolveTarget: (instance) => {
                 const lease = this.#instances.acquireGeneration(instance);
                 return {
@@ -149,6 +129,17 @@ export class ControlRuntime {
                 };
             },
         });
+        this.#toolCalls = toolCalls.api;
+        const extensionToolCalls = new ToolCallExtensionBinding(
+            this.#extensions,
+            new ToolCallSecretRewrite(options.config),
+        );
+        this.#toolCallHookUnregister = [
+            registerApprovalToolCallReview(toolCalls.hooks, (instance) =>
+                this.#instances.get(instance)?.approval,
+            ),
+            extensionToolCalls.install(toolCalls.hooks),
+        ];
         this.#mcp = options.mcp;
         this.#mcp.instanceGateway.bindToolCalls(this.#toolCalls);
         this.#mcp.instanceGateway.setExtensionService(
@@ -316,6 +307,13 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         this.#modelDevshell.dispose();
+        for (const unregister of this.#toolCallHookUnregister.splice(0).reverse()) {
+            try {
+                unregister();
+            } catch (error) {
+                failures.push(error);
+            }
+        }
         await this.#channels.close().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));

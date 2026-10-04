@@ -17,21 +17,21 @@ import type {
 } from "../../../../mcp/src/context/Port.js";
 import {
     isMcpGoalGateway,
-    type McpInstanceGateway,
+    type ContextInstancePort,
     type McpEndpointWorkerPort,
 } from "@portable-devshell/mcp";
 import { ContextCleanupService } from "./Cleanup.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
-    readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
+    readonly #gateway: (instance: string) => ContextInstancePort | undefined;
     readonly #worker: (instance: string) => McpEndpointWorkerPort | undefined;
     readonly #cleanup: ContextCleanupService;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
         contextRegistry: ContextRecordPort & ContextCleanupLedgerPort;
-        gateway(instance: string): McpInstanceGateway | undefined;
+        gateway(instance: string): ContextInstancePort | undefined;
         worker(instance: string): McpEndpointWorkerPort | undefined;
         cleanup: ContextCleanupService;
     }) {
@@ -458,7 +458,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
         });
     }
 
-    #requireGateway(instance: string): McpInstanceGateway {
+    #requireGateway(instance: string): ContextInstancePort {
         const gateway = this.#gateway(instance);
         if (gateway !== undefined) return gateway;
         throw createRemoteError({

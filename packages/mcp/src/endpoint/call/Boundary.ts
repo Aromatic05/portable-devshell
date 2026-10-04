@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import {
     createRemoteError,
     runtimeErrorCodes,
@@ -9,7 +9,8 @@ import {
 
 import type {
     McpEndpointEnvironmentHandshake,
-    McpInstanceGateway,
+    McpInstancePort,
+    McpToolCallPort,
 } from "../../instance/Gateway.js";
 
 const DEFAULT_READY_WAIT_MS = 5_000;
@@ -30,7 +31,7 @@ export function assertMcpEndpointReady(
 }
 
 export async function waitForMcpGatewayReady(
-    gateway: McpInstanceGateway,
+    gateway: Pick<McpInstancePort, "assertReady">,
     instance: string,
     signal?: AbortSignal,
     options: { timeoutMs?: number; pollMs?: number } = {},
@@ -68,10 +69,10 @@ function isNotReadyError(error: unknown): boolean {
         : false;
 }
 
-export function requireMcpEndpointGateway(
-    gateway: McpInstanceGateway | undefined,
+export function requireMcpEndpointGateway<T>(
+    gateway: T | undefined,
     instanceName: string,
-): McpInstanceGateway {
+): T {
     if (gateway !== undefined) {
         return gateway;
     }
@@ -85,7 +86,7 @@ export function requireMcpEndpointGateway(
 
 export async function callMcpEndpointToolOperation<T extends JsonValue>(options: {
     context: ToolCallContext;
-    gateway?: McpInstanceGateway;
+    gateway?: McpToolCallPort;
     input: JsonValue;
     localInstance: string;
     operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>;

@@ -1,4 +1,4 @@
-import type { McpInstanceGateway } from "@portable-devshell/mcp";
+import type { ContextInstancePort } from "@portable-devshell/mcp";
 import { ContextService } from "./Service/index.js";
 import { ContextRegistry } from "./Registry/index.js";
 import { ContextEnvironmentService } from "./Service/Scope.js";
@@ -6,11 +6,11 @@ import { ContextCleanupService } from "./Service/Cleanup.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextModule extends ContextService {
-    readonly #gatewayHolder: { value?: McpInstanceGateway };
+    readonly #gatewayHolder: { value?: ContextInstancePort };
 
     constructor(options: { contextFile: string; instances: InstanceRegistry }) {
         const registry = new ContextRegistry({ filePath: options.contextFile });
-        const gatewayHolder: { value?: McpInstanceGateway } = {};
+        const gatewayHolder: { value?: ContextInstancePort } = {};
         const gateway = () => gatewayHolder.value;
         const worker = (instance: string) =>
             options.instances.get(instance)?.worker;
@@ -38,7 +38,7 @@ export class ContextModule extends ContextService {
         this.#gatewayHolder = gatewayHolder;
     }
 
-    bindGateway(gateway: McpInstanceGateway): void {
+    bindGateway(gateway: ContextInstancePort): void {
         this.#gatewayHolder.value = gateway;
     }
 }

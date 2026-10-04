@@ -18,7 +18,6 @@ import { WaitService } from "../task/wait/Service.js";
 import { WorkerTerminalBackend } from "../terminal/Backend.js";
 import { ApprovalService } from "../approval/Service.js";
 import { InstanceApprovalStore } from "../approval/Store.js";
-import { ApprovalToolCallReview } from "../approval/ToolCallReview.js";
 
 export class InstanceFactory {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
@@ -76,15 +75,10 @@ export class InstanceFactory {
                 },
             },
         });
-        const approvalReview = new ApprovalToolCallReview({
-            service: approval,
-        });
         const terminal = new WorkerTerminalBackend({ worker });
 
         return {
             approval,
-            approvalReview: approvalReview.review,
-            goal,
             mcpContextMode: instance.mcp.contextMode,
             enabled: instance.enabled,
             mcpEnabled: instance.mcp.enabled,
@@ -93,9 +87,8 @@ export class InstanceFactory {
             name: instance.name,
             provider: instance.provider,
             ...(reverseConnection === undefined ? {} : { reverseConnection }),
+            task: { goal, todo, wait },
             terminal,
-            todo,
-            wait,
             worker,
         };
     }

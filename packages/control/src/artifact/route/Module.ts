@@ -11,10 +11,10 @@ import {
     readShareId,
     readTransferId,
 } from "./Input.js";
-import type { ArtifactService } from "../Service.js";
+import type { ArtifactRouteApi } from "../Api.js";
 
 export function createArtifactRouteModule(
-    service?: ArtifactService,
+    service?: ArtifactRouteApi,
 ): ControlPortDefinition {
     const artifact = () =>
         requirePort(service, "Artifact service is not available.");

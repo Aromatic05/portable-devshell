@@ -42,7 +42,7 @@ export class OperationalOverviewInstanceCollector {
         const alerts = createSnapshotAlerts(snapshot.name, snapshot);
         let todos: OperationalOverviewTodo[] = [];
         try {
-            todos = descriptor.todo.summaries().map((todo) => ({
+            todos = descriptor.task.todo.summaries().map((todo) => ({
                 ...todo,
                 instance: snapshot.name,
             }));

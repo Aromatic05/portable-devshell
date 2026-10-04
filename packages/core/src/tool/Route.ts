@@ -20,7 +20,7 @@ import {
     readToolCallQuery,
     readToolSessionOpen,
 } from "./Input.js";
-import type { ToolCallPipeline } from "./Pipeline.js";
+import type { ToolCallApi } from "./Runtime.js";
 import type { ToolCallProvenanceStore } from "./Provenance.js";
 
 export interface ToolRouteInstancePort {
@@ -46,7 +46,7 @@ export interface ToolRouteSubscriptionPort {
     ): Promise<void>;
 }
 
-export type ToolCallIngressPort = Pick<ToolCallPipeline, "call">;
+export type ToolCallIngressPort = Pick<ToolCallApi, "call">;
 
 export function createToolIngressRouteModule(
     ingress: ToolCallIngressPort,

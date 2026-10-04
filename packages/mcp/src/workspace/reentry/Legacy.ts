@@ -13,8 +13,8 @@ import {
     isMcpWorkspaceActionGateway,
     isMcpWaitRecoveryGateway,
     isMcpWorkspaceGateway,
-    type McpInstanceGateway,
     type McpWorkspaceActionGateway,
+    type McpWorkspacePort,
 } from "../../instance/Gateway.js";
 import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
 import { readWorkspaceContextInstances } from "../ContextScope.js";
@@ -27,7 +27,7 @@ export class McpWorkspaceLegacyV0615 {
     constructor(
         private readonly options: {
             contextRegistry?: ContextRegistryPort;
-            gateway?: McpInstanceGateway;
+            gateway?: McpWorkspacePort;
             instanceName: string;
         },
     ) {}
@@ -511,7 +511,7 @@ function requireCtxId(context: ToolCallContext): string {
 }
 
 function requireGoalGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
     instance: string,
 ) {
     if (!isMcpGoalGateway(gateway))
@@ -520,7 +520,7 @@ function requireGoalGateway(
 }
 
 function requireInteractionGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
     instance: string,
 ): McpWorkspaceActionGateway {
     if (!isMcpWorkspaceActionGateway(gateway))

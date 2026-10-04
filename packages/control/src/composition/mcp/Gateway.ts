@@ -1,7 +1,7 @@
 import type {
+    ToolCallApi,
     ToolCallHookValue,
-    ToolCallPipeline,
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/toolcall";
 import type {
     McpApprovalPort,
     McpInstanceGateway,
@@ -23,7 +23,7 @@ import type {
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceConnectionService } from "@portable-devshell/core";
 import type { ToolCallProvenanceStore } from "@portable-devshell/core";
-import type { ArtifactService } from "../../artifact/Service.js";
+import type { ArtifactImageApi } from "../../artifact/Api.js";
 import type { McpExtensionService } from "./extension/Service.js";
 
 export interface McpInstanceGatewayControlOptions {
@@ -60,7 +60,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;
     #extensions?: McpExtensionService;
-    #toolCalls?: Pick<ToolCallPipeline, "call" | "callOperation">;
+    #toolCalls?: ToolCallApi;
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
@@ -95,9 +95,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }
     }
 
-    bindToolCalls(
-        ingress: Pick<ToolCallPipeline, "call" | "callOperation">,
-    ): void {
+    bindToolCalls(ingress: ToolCallApi): void {
         if (this.#toolCalls !== undefined)
             throw new Error("MCP tool call ingress is already bound.");
         this.#toolCalls = ingress;
@@ -126,12 +124,12 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async callTool(
-        ...args: Parameters<ToolCallPipeline["call"]>
+        ...args: Parameters<ToolCallApi["call"]>
     ): Promise<JsonValue> {
         return await this.#requireToolCalls().call(...args);
     }
 
-    #requireToolCalls(): Pick<ToolCallPipeline, "call" | "callOperation"> {
+    #requireToolCalls(): ToolCallApi {
         if (this.#toolCalls === undefined)
             throw new Error("MCP tool call ingress is not bound.");
         return this.#toolCalls;
@@ -236,7 +234,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 provider: config?.provider,
                 snapshot: withTodoSummaries(
                     descriptor.worker.snapshot(),
-                    descriptor.todo.summaries(),
+                    descriptor.task.todo.summaries(),
                 ),
             };
         }) as unknown as JsonValue;
@@ -479,7 +477,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         return withTodoSummaries(
             snapshot,
-            descriptor.todo.summaries(),
+            descriptor.task.todo.summaries(),
         ) as unknown as JsonValue;
     }
 
@@ -502,7 +500,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             provider: config?.provider,
             snapshot: withTodoSummaries(
                 descriptor.worker.snapshot(),
-                descriptor.todo.summaries(),
+                descriptor.task.todo.summaries(),
             ),
         } as unknown as JsonValue;
     }
@@ -511,7 +509,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         const snapshot = withTodoSummaries(
             await descriptor.worker.stop(),
-            descriptor.todo.summaries(),
+            descriptor.task.todo.summaries(),
         );
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
@@ -539,7 +537,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         const ctxId = requireCtxId(context);
-        return (await descriptor.todo.write(
+        return (await descriptor.task.todo.write(
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
             ctxId,
         )) as unknown as JsonValue;
@@ -596,7 +594,7 @@ function requireCtxId(context: ToolCallContext): string {
 
 export function decorateMcpInstanceGatewayArtifact(
     base: McpInstanceGateway,
-    artifactService: ArtifactService,
+    artifactService: ArtifactImageApi,
 ): McpInstanceGateway {
     return new Proxy(base, {
         get(target, property, receiver) {

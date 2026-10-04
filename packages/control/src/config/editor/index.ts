@@ -1,7 +1,5 @@
-import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import { InstanceFactory, type InstanceDescriptor, type InstanceRegistry } from "@portable-devshell/core";
 import type { ControlConfig, JsonValue } from "@portable-devshell/shared";
-import { McpEndpointFactory } from "../../composition/mcp/Endpoint.js";
 import { HttpEndpointPreflight } from "../../server/endpoint/Http.js";
 import { ConfigEngine, type ConfigEngineOptions } from "../engine/index.js";
 import { ConfigDraftValidator } from "./Draft.js";
@@ -10,21 +8,20 @@ import { ConfigBatchEditor } from "./Batch.js";
 import { InstanceReconfigurationCoordinator } from "./instance/Update.js";
 import { InstanceRetirementCoordinator } from "./instance/retirement/index.js";
 import { InstanceCleanupDebt } from "./instance/retirement/Debt.js";
+import type { ConfigMcpRuntimePort } from "./Mcp.js";
 
 export type { ConfigRuntimeChangeSet } from "../engine/index.js";
 
 export interface ConfigEditorCoordinatorOptions extends ConfigEngineOptions {
     cleanupDebtFile?: string;
-    getMcpHost?: () => McpHost | undefined;
     detachContextInstance?: (instance: string) => Promise<void>;
     reconcileContextInstanceCleanup?: (
         instance: string,
         descriptor?: InstanceDescriptor,
     ) => Promise<void>;
-    getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
-    mcpEndpointConfigMapper?: McpEndpointFactory;
+    mcp?: ConfigMcpRuntimePort;
 }
 
 export class ConfigEditorCoordinator {

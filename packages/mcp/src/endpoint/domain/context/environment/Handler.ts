@@ -12,7 +12,10 @@ import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort, ContextCleanupPort } from "../../../../context/Port.js";
 import type { McpContextExternalBinding } from "@portable-devshell/shared";
 import type { McpContextSelector } from "../../../../context/Selector.js";
-import type { McpInstanceGateway } from "../../../../instance/Gateway.js";
+import type {
+    McpInstancePort,
+    McpToolCallPort,
+} from "../../../../instance/Gateway.js";
 import {
     mcpEnvironmentToolName,
     mcpRemoteEnvironmentToolName,
@@ -36,6 +39,9 @@ interface BoundContextLookup {
     record?: McpContextRecord;
 }
 
+type McpEnvironmentGateway = McpToolCallPort &
+    Pick<McpInstancePort, "modelCommands">;
+
 export interface McpEnvironmentHandlerResult {
     ctxId: string;
     structuredContent: JsonValue;
@@ -45,7 +51,7 @@ export class McpEndpointHandlerEnvironment {
     readonly #cleanup: ContextCleanupPort;
     readonly #contextRegistry: ContextRegistryPort;
     readonly #contextSelector: McpContextSelector;
-    readonly #gateway?: McpInstanceGateway;
+    readonly #gateway?: McpEnvironmentGateway;
     readonly #instanceName: string;
     readonly #environment: ContextEnvironmentPort;
     readonly #worker: McpEndpointWorkerPort;
@@ -55,7 +61,7 @@ export class McpEndpointHandlerEnvironment {
         contextRegistry: ContextRegistryPort;
         environment: ContextEnvironmentPort;
         contextSelector: McpContextSelector;
-        gateway?: McpInstanceGateway;
+        gateway?: McpEnvironmentGateway;
         instanceName: string;
         worker: McpEndpointWorkerPort;
     }) {

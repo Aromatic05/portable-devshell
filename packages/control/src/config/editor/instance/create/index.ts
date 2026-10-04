@@ -1,4 +1,3 @@
-import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     ConfigInputError,
     configInputError,
@@ -19,7 +18,7 @@ import {
 
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
-import { McpEndpointFactory } from "../../../../composition/mcp/Endpoint.js";
+import type { ConfigMcpRuntimePort } from "../../Mcp.js";
 import { ControlConfigValidator } from "../../../engine/Validator.js";
 import {
     ControlConfigMutationLock,
@@ -62,13 +61,11 @@ export interface InstanceCreateCoordinatorOptions {
     assertCleanupSettled?: (instance: string) => Promise<void>;
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
-    getMcpHost: () => McpHost | undefined;
-    getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     homeDirectory?: string;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
-    mcpEndpointConfigMapper?: McpEndpointFactory;
+    mcp?: ConfigMcpRuntimePort;
     mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
     sshHosts?: () => readonly string[];
@@ -79,12 +76,10 @@ export class InstanceCreateCoordinator {
     readonly #assertCleanupSettled: (instance: string) => Promise<void>;
     readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
-    readonly #getMcpHost: () => McpHost | undefined;
-    readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #mcpEndpointConfigMapper: McpEndpointFactory;
+    readonly #mcp?: ConfigMcpRuntimePort;
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
     readonly #setConfig: (config: ControlConfig) => void;
@@ -96,15 +91,11 @@ export class InstanceCreateCoordinator {
             options.assertCleanupSettled ?? (async () => {});
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
-        this.#getMcpHost = options.getMcpHost;
-        this.#getMcpInstanceGateway =
-            options.getMcpInstanceGateway ?? (() => undefined);
         this.#homeDirectory = options.homeDirectory;
         this.#instanceConfigMapper =
             options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
-        this.#mcpEndpointConfigMapper =
-            options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
+        this.#mcp = options.mcp;
         this.#mutationRunner =
             options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
@@ -169,13 +160,7 @@ export class InstanceCreateCoordinator {
 
             this.#instanceRegistry.add(descriptor);
             if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
-                this.#getMcpHost()?.registerInstance(
-                    this.#mcpEndpointConfigMapper.map(
-                        descriptor,
-                        this.#getMcpInstanceGateway(),
-                        normalized.mcp.auth,
-                    ),
-                );
+                this.#mcp?.registerInstance(normalized.name, normalized.mcp.auth);
             }
 
             return {
@@ -188,7 +173,7 @@ export class InstanceCreateCoordinator {
             };
         } catch (error) {
             const failures: unknown[] = [error];
-            this.#getMcpHost()?.unregisterInstance(normalized.name);
+            this.#mcp?.unregisterInstance(normalized.name);
             this.#instanceRegistry.delete(normalized.name);
             if (descriptor !== undefined) {
                 const close = (

@@ -41,7 +41,7 @@ export function createInstanceHost(
             {
                 enabled: descriptor.enabled,
                 name: descriptor.name,
-                todoSummaries: () => descriptor.todo.summaries(),
+                todoSummaries: () => descriptor.task.todo.summaries(),
                 worker: descriptor.worker,
             },
             options.registry,

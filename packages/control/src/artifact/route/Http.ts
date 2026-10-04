@@ -7,7 +7,7 @@ import {
     toRemoteErrorBody,
 } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../Service.js";
+import type { ArtifactShareHttpApi } from "../Api.js";
 
 const ROUTE_SUFFIX = "/artifacts/share";
 const HTTP_CHUNK_BYTES = 512 * 1024;
@@ -25,9 +25,9 @@ class UnsatisfiableRangeError extends Error {}
 
 export class ArtifactHttpRoute {
     readonly #routeBase: string;
-    readonly #service: ArtifactService;
+    readonly #service: ArtifactShareHttpApi;
 
-    constructor(service: ArtifactService, options?: ArtifactHttpRouteOptions) {
+    constructor(service: ArtifactShareHttpApi, options?: ArtifactHttpRouteOptions) {
         this.#service = service;
         this.#routeBase = artifactShareRoute(options?.publicBaseUrl);
     }

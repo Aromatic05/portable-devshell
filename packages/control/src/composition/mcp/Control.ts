@@ -16,12 +16,14 @@ import {
     ConfigEditorCoordinator,
     type ConfigRuntimeChangeSet,
 } from "../../config/editor/index.js";
+import type { ConfigMcpRuntimePort } from "../../config/editor/Mcp.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";
 import {
     decorateMcpInstanceGatewayArtifact,
     McpInstanceGatewayControl,
 } from "./Gateway.js";
 import { InstanceCreateCoordinator } from "../../config/editor/instance/create/index.js";
+import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";
@@ -84,25 +86,43 @@ export class McpControlModule {
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
-        const gatewayHolder: { value?: McpInstanceGatewayControl } = {};
-        this.instanceCreate = new InstanceCreateCoordinator({
-            assertCleanupSettled: async (instance) =>
-                await this.configEditor.assertInstanceCleanupSettled(instance),
-            configStore: options.state.configStore,
-            getConfig: () => options.state.requireConfig(),
-            getMcpHost: () => this.#host,
-            getMcpInstanceGateway: () => gatewayHolder.value,
-            homeDirectory: options.state.homeDirectory,
-            instanceRegistry: options.state.instances,
-            mutationRunner: options.state.configMutations,
-            setConfig: (config) => options.state.setConfig(config),
-        });
         this.instanceGateway = new McpInstanceGatewayControl({
             getConfig: () => options.state.requireConfig(),
             instanceRegistry: options.state.instances,
             toolProvenance: this.toolProvenance,
         });
-        gatewayHolder.value = this.instanceGateway;
+        const endpointFactory = new McpEndpointFactory();
+        const configMcp: ConfigMcpRuntimePort = {
+            registerInstance: (instance, auth, workspaceEnabled = true) => {
+                const descriptor = options.state.instances.get(instance);
+                if (descriptor === undefined) return;
+                this.#host?.registerInstance(
+                    endpointFactory.map(
+                        descriptor,
+                        this.instanceGateway,
+                        auth,
+                        workspaceEnabled,
+                    ),
+                );
+            },
+            unregisterInstance: (instance) => {
+                this.#host?.unregisterInstance(instance);
+            },
+            retireWorkspaceApp: async (instance) => {
+                await this.#host?.retireWorkspaceApp(instance);
+            },
+        };
+        this.instanceCreate = new InstanceCreateCoordinator({
+            assertCleanupSettled: async (instance) =>
+                await this.configEditor.assertInstanceCleanupSettled(instance),
+            configStore: options.state.configStore,
+            getConfig: () => options.state.requireConfig(),
+            homeDirectory: options.state.homeDirectory,
+            instanceRegistry: options.state.instances,
+            mcp: configMcp,
+            mutationRunner: options.state.configMutations,
+            setConfig: (config) => options.state.setConfig(config),
+        });
         options.contexts.bindGateway(this.instanceGateway);
         this.#host = factory.wire(
             options.state.requireConfig(),
@@ -135,7 +155,6 @@ export class McpControlModule {
             cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
-            getMcpHost: () => this.#host,
             detachContextInstance: async (instance) => {
                 await options.contexts.detachInstance(instance);
             },
@@ -162,11 +181,11 @@ export class McpControlModule {
                     },
                 });
             },
-            getMcpInstanceGateway: () => this.instanceGateway,
             getRestartControlRequired: () =>
                 options.state.restartControlRequired,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
+            mcp: configMcp,
             markRestartControlRequired: () =>
                 options.state.markRestartControlRequired(),
             changeHub: options.state.configChanges,

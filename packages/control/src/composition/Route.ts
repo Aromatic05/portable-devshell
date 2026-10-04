@@ -14,7 +14,7 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../artifact/Service.js";
+import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
 import {
     createCliRouteModule,
@@ -59,7 +59,7 @@ export interface ControlRouteExtensionPort {
 }
 
 export interface ControlRouteCompositionOptions {
-    artifact?: ArtifactService;
+    artifact?: ArtifactRouteApi;
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;

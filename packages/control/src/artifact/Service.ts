@@ -41,8 +41,13 @@ import { ArtifactRecordStore } from "./RecordStore.js";
 import { ArtifactImageService } from "./delivery/Image.js";
 import { ArtifactShareService } from "./delivery/Share.js";
 import { ArtifactTransferService } from "./delivery/Transfer.js";
+import type {
+    ArtifactApi,
+    ArtifactShareAccess,
+    ArtifactSnapshot,
+} from "./Api.js";
 
-export class ArtifactService {
+export class ArtifactService implements ArtifactApi {
     readonly #eventLog: ArtifactEventLog;
     readonly #imageService: ArtifactImageService;
     readonly #recordStore: ArtifactRecordStore;
@@ -431,12 +436,6 @@ export type ArtifactEventRecorder = (
     data?: JsonValue,
 ) => void;
 
-export interface ArtifactSnapshot {
-    lastSeq: number;
-    shares: ArtifactShareResult[];
-    transfers: ArtifactTransferRecord[];
-}
-
 export function requireArtifactEndpoint(
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"],
     instance: string,
@@ -474,12 +473,6 @@ export interface StoredArtifactTransfer {
     record: ArtifactTransferRecord;
     request: ArtifactTransferStartInput;
     version: number;
-}
-
-export interface ArtifactShareAccess {
-    payloadId: string;
-    share: ArtifactShareResult;
-    sourceInstance: string;
 }
 
 export type ArtifactPayloadSourceInput =

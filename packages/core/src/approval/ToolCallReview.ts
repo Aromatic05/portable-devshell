@@ -3,35 +3,25 @@ import {
     errorMessage,
     type JsonValue,
 } from "@portable-devshell/shared";
-import type {
-    ToolCallReviewInput,
-    ToolCallReviewResult,
-} from "../tool/hook/Review.js";
+import type { ToolCallHooks } from "../tool/Public.js";
+import type { ApprovalEvaluationApi } from "./Api.js";
 
-import { ApprovalService } from "./Service.js";
-
-export interface ApprovalToolCallReviewOptions {
-    service: ApprovalService;
-}
-
-export class ApprovalToolCallReview {
-    readonly #service: ApprovalService;
-
-    constructor(options: ApprovalToolCallReviewOptions) {
-        this.#service = options.service;
-    }
-
-    readonly review = async (
-        input: ToolCallReviewInput,
-        signal: AbortSignal,
-        recording: "caller" | "host",
-    ): Promise<ToolCallReviewResult> => {
+export function registerApprovalToolCallReview(
+    hooks: ToolCallHooks,
+    resolve: (instance: string) => ApprovalEvaluationApi | undefined,
+): () => void {
+    return hooks.registerReview({
+        hook: "510-approval",
+        id: "approval",
+        review: async (input, runtime) => {
         if (input.direction !== "inbound" || input.value.kind !== "call") {
             return { decision: "continue" };
         }
 
+        const service = resolve(input.value.context.instance);
+        if (service === undefined) return { decision: "continue" };
         const { source, requestId, ctxId, workspace } = input.value.context;
-        const evaluation = await this.#service.evaluate(
+        const evaluation = await service.evaluate(
             {
                 callId: input.callId,
                 source,
@@ -39,10 +29,10 @@ export class ApprovalToolCallReview {
                 ctxId,
                 workspace,
                 inputSummary: summarize(input.value.payload),
-                recording,
+                recording: runtime.recording,
                 toolName: input.value.toolName,
             },
-            signal,
+            runtime.signal,
         );
         if (evaluation.decision === "allow") return { decision: "continue" };
         if (evaluation.decision === "deny") {
@@ -63,7 +53,8 @@ export class ApprovalToolCallReview {
             );
         }
         return reject(resolution.error, runtimeErrorCodes.approvalExpired);
-    };
+        },
+    });
 }
 
 function summarize(value: JsonValue): string {
@@ -74,7 +65,7 @@ function summarize(value: JsonValue): string {
     return summary.length <= 512 ? summary : `${summary.slice(0, 511)}…`;
 }
 
-function reject(error: unknown, fallback: string): ToolCallReviewResult {
+function reject(error: unknown, fallback: string) {
     const code =
         typeof error === "object" &&
         error !== null &&
@@ -83,7 +74,7 @@ function reject(error: unknown, fallback: string): ToolCallReviewResult {
             ? error.code
             : fallback;
     return {
-        decision: "reject",
+        decision: "reject" as const,
         error: { code },
         reason: errorMessage(error),
     };

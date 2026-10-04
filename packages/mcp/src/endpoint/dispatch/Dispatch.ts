@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import {
     runtimeErrorCodes,
     toRemoteErrorBody,

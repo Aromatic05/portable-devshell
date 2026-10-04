@@ -1,0 +1,71 @@
+import type {
+    ActiveTodoSummary,
+    GoalActivityKind,
+    GoalContinuationInput,
+    GoalManageInput,
+    GoalSnapshot,
+    JsonValue,
+    TodoReadInput,
+    TodoReadResult,
+    TodoTaskControlAction,
+    TodoWriteInput,
+    WaitCreateInput,
+    WaitRecord,
+} from "@portable-devshell/shared";
+
+export interface TodoApi {
+    cancelAll(): Promise<void>;
+    control(
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string,
+        expectedRevision?: number,
+    ): Promise<TodoReadResult>;
+    delete(taskId: string): Promise<void>;
+    read(input?: TodoReadInput): Promise<TodoReadResult>;
+    summaries(): ActiveTodoSummary[];
+    write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
+}
+
+export interface GoalApi {
+    continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
+    list(): Promise<GoalSnapshot[]>;
+    stopAll(): Promise<GoalSnapshot[]>;
+    manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
+    read(ctxId: string): Promise<GoalSnapshot | undefined>;
+    recordReentry(ctxId: string, progressEpoch?: number): Promise<void>;
+    touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
+}
+
+export interface WaitApi {
+    cancel(waitId: string): Promise<WaitRecord>;
+    claimRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    completeRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    consume(waitId: string): Promise<WaitRecord>;
+    create(input: WaitCreateInput): Promise<WaitRecord>;
+    detach(waitId: string): Promise<WaitRecord>;
+    disableRecovery(waitId: string): Promise<WaitRecord>;
+    dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
+    get(waitId: string): Promise<WaitRecord | undefined>;
+    list(taskId?: string): Promise<WaitRecord[]>;
+    markRecoveryAttempted(
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ): Promise<WaitRecord>;
+    reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    resolve(
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ): Promise<WaitRecord>;
+    waitForResolution(waitId: string): Promise<WaitRecord>;
+}
+
+export interface TaskApi {
+    readonly goal: GoalApi;
+    readonly todo: TodoApi;
+    readonly wait?: WaitApi;
+}

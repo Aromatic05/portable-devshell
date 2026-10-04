@@ -3,7 +3,7 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { McpInstanceGateway } from "../../../instance/Gateway.js";
+import type { McpTaskPort } from "../../../instance/Gateway.js";
 import type { McpToolCatalogTodoName } from "./Catalog.js";
 import { readTodoInput } from "./Input.js";
 import { waitForMcpEndpointAbortable } from "../../call/Boundary.js";
@@ -13,7 +13,7 @@ import { requireMcpEndpointGateway } from "../../call/Boundary.js";
 export class McpEndpointHandlerTodo {
     constructor(
         private readonly options: {
-            gateway?: McpInstanceGateway;
+            gateway?: McpTaskPort;
             instanceName: string;
         },
     ) {}
@@ -61,7 +61,7 @@ export class McpEndpointHandlerTodo {
 }
 
 async function disableTaskWaitRecoveries(
-    gateway: McpInstanceGateway,
+    gateway: McpTaskPort,
     instance: string,
     taskId: string,
 ): Promise<void> {

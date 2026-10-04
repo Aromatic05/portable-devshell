@@ -13,6 +13,14 @@
         "./testing": {
             "types": "./dist/testing.d.ts",
             "default": "./dist/testing.js"
+        },
+        "./toolcall": {
+            "types": "./dist/tool/Public.d.ts",
+            "default": "./dist/tool/Public.js"
+        },
+        "./approval": {
+            "types": "./dist/approval/Public.d.ts",
+            "default": "./dist/approval/Public.js"
         }
     },
     "files": [

@@ -12,7 +12,13 @@ import {
     createMcpContextSelector,
     type McpContextSelector,
 } from "../../context/Selector.js";
-import { isMcpWorkspaceActionGateway, type McpInstanceGateway } from "../../instance/Gateway.js";
+import {
+    isMcpWorkspaceActionGateway,
+    type McpApprovalPort,
+    type McpArtifactPort,
+    type McpTaskPort,
+    type McpToolCallPort,
+} from "../../instance/Gateway.js";
 import {
     mcpToolAnnotations,
     mcpToolPreserveInputDescriptions,
@@ -44,10 +50,16 @@ export interface McpEndpointCatalogWorker {
     snapshot(): { ready?: boolean };
 }
 
+type McpEndpointCatalogGateway = McpTaskPort &
+    Pick<McpToolCallPort, "listExtensionTools"> &
+    McpArtifactPort & {
+        approval?: McpApprovalPort;
+    };
+
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
     contextSelector?: McpContextSelector;
-    gateway?: McpInstanceGateway;
+    gateway?: McpEndpointCatalogGateway;
     instanceName: string;
     presentationResourceUri?: string;
     worker: McpEndpointCatalogWorker;
@@ -68,7 +80,7 @@ export class McpEndpointCatalog {
     readonly #contextSelector: McpContextSelector;
     readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #environmentTools = new McpToolCatalogEnvironment();
-    readonly #gateway?: McpInstanceGateway;
+    readonly #gateway?: McpEndpointCatalogGateway;
     readonly #instanceName: string;
     readonly #workspaceTools = new McpToolCatalogWorkspace();
     readonly #presentationResourceUri?: string;

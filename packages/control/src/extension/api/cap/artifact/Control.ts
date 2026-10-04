@@ -19,22 +19,12 @@ import type {
     ArtifactTransferStartInput,
 } from "@portable-devshell/shared";
 
-import type { ArtifactService } from "../../../../artifact/Service.js";
+import type { ArtifactManagementApi } from "../../../../artifact/Api.js";
 
 export interface ExtensionArtifactCapabilityControlOptions {
     allowed: boolean;
     extensionId: string;
-    service: Pick<
-        ArtifactService,
-        | "cancelTransfer"
-        | "createShare"
-        | "getTransfer"
-        | "listShares"
-        | "listTransfers"
-        | "revokeShare"
-        | "startTransfer"
-        | "waitForTransfer"
-    >;
+    service: ArtifactManagementApi;
 }
 
 /** Public Artifact management capability backed by the Control-owned Artifact domain. */

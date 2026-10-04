@@ -40,11 +40,12 @@ export * from "./worker/transport/service/Model.js";
 export * from "./worker/protocol/Terminal.js";
 
 export * from "./instance/Registry.js";
+export type { ApprovalApi as InstanceApprovalPort } from "./approval/Api.js";
 export type {
-    InstanceApprovalPort,
-    InstanceGoalPort,
-    InstanceTodoPort,
-} from "./instance/Descriptor.js";
+    GoalApi as InstanceGoalPort,
+    TodoApi as InstanceTodoPort,
+    WaitApi as InstanceWaitPort,
+} from "./task/Api.js";
 export type {
     TerminalProcess,
     TerminalProcessExit,

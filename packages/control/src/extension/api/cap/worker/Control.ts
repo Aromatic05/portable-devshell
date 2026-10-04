@@ -8,7 +8,7 @@ import type {
     ExtensionWorkerSession,
     ExtensionWorkerToolDefinition,
 } from "@portable-devshell/extension/worker";
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "@portable-devshell/core";

@@ -7,7 +7,7 @@ import type {
 
 import {
     isMcpGoalGateway,
-    type McpInstanceGateway,
+    type McpTaskPort,
     type McpWorkspaceActionGateway,
 } from "../../instance/Gateway.js";
 import type {
@@ -43,7 +43,7 @@ export type WorkspaceTaskAssociation =
       };
 
 export async function readCurrentTaskAssociation(
-    gateway: Pick<McpInstanceGateway, "readTodo">,
+    gateway: Pick<McpTaskPort, "readTodo">,
     instance: string,
     ctxId: string,
 ): Promise<WorkspaceTaskAssociation> {

@@ -16,14 +16,14 @@ export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
 }
 
 import type { McpContextEnvironmentCleanup } from "@portable-devshell/shared";
-import type { McpInstanceGateway } from "@portable-devshell/mcp";
+import type { ContextInstancePort } from "@portable-devshell/mcp";
 import type { ContextInstanceCleanupPort } from "../../../../mcp/src/context/Port.js";
 
 export class ContextCleanupService {
     readonly #registry: ContextCleanupLedgerPort &
         Pick<ContextRecordPort, "list">;
     #presentation?: ContextPresentationPort;
-    readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
+    readonly #gateway: (instance: string) => ContextInstancePort | undefined;
     readonly #releaseLocalAlerts?: (
         instance: string,
         workspace: string,
@@ -33,7 +33,7 @@ export class ContextCleanupService {
     constructor(options: {
         contextRegistry: ContextCleanupLedgerPort &
             Pick<ContextRecordPort, "list">;
-        gateway(instance: string): McpInstanceGateway | undefined;
+        gateway(instance: string): ContextInstancePort | undefined;
         releaseLocalAlerts?(instance: string, workspace: string): Promise<void>;
     }) {
         this.#registry = options.contextRegistry;

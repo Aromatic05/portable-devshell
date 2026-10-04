@@ -7,8 +7,8 @@ import {
     isMcpWorkspaceActionGateway,
     isMcpWorkspaceGateway,
     type McpWorkspaceActionGateway,
-    type McpInstanceGateway,
     type McpWorkspaceGateway,
+    type McpWorkspacePort,
 } from "../instance/Gateway.js";
 import { readWorkspaceSnapshot } from "./Projection.js";
 import { workspaceEventBelongsTo } from "./contributor/Activity.js";
@@ -32,7 +32,7 @@ export interface McpWorkspaceLiveRouteHost {
 
 export interface McpWorkspaceLiveRouteOptions {
     contextRegistry: ContextRegistryPort;
-    gateway?: McpInstanceGateway;
+    gateway?: McpWorkspacePort;
     heartbeatMs?: number;
     host: McpWorkspaceLiveRouteHost;
     instanceName: string;

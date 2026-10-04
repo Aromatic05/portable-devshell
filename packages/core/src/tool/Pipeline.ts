@@ -37,6 +37,7 @@ import {
     type ToolCallHookProvider,
 } from "./hook/Sequence.js";
 import type { ToolCallHookContext, ToolCallHookValue } from "./hook/Review.js";
+import type { ToolCallApi } from "./Runtime.js";
 import { snapshotJson } from "./hook/Snapshot.js";
 import { attachToolCallErrorPayload } from "./ErrorPayload.js";
 
@@ -74,7 +75,7 @@ export interface ToolCallPipelineOptions {
     resolveTarget: ToolCallTargetResolver;
 }
 
-export class ToolCallPipeline {
+export class ToolCallPipeline implements ToolCallApi {
     readonly #hooks: ToolCallHookProvider;
     readonly #resolveTarget: ToolCallTargetResolver;
 

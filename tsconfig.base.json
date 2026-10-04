@@ -18,6 +18,12 @@
                 "./packages/shared/dist/toolcall/Type.d.ts"
             ],
             "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
+            "@portable-devshell/core/toolcall": [
+                "./packages/core/dist/tool/Public.d.ts"
+            ],
+            "@portable-devshell/core/approval": [
+                "./packages/core/dist/approval/Public.d.ts"
+            ],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"
             ],

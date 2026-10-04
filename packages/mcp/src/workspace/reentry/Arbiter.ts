@@ -12,8 +12,8 @@ import {
     isMcpWaitRecoveryGateway,
     requireMcpGoalGateway as requireGoalGateway,
     requireMcpWorkspaceActionGateway as requireInteractionGateway,
-    type McpInstanceGateway,
     type McpWorkspaceActionGateway,
+    type McpWorkspacePort,
 } from "../../instance/Gateway.js";
 import {
     explicitReentryDelivery,
@@ -28,7 +28,7 @@ import {
 } from "../ContextScope.js";
 
 export async function assertWorkspaceWaitRecoveryAssociationAvailable(
-    options: { gateway?: McpInstanceGateway; instanceName: string },
+    options: { gateway?: McpWorkspacePort; instanceName: string },
     wait: WaitRecord,
     context: ToolCallContext,
 ): Promise<void> {
@@ -147,7 +147,7 @@ export class McpWorkspaceReentryArbiter {
     constructor(
         private readonly options: {
             contextRegistry: ContextRegistryPort;
-            gateway?: McpInstanceGateway;
+            gateway?: McpWorkspacePort;
             instanceName: string;
         },
     ) {}
@@ -266,7 +266,7 @@ export class McpWorkspaceReentryArbiter {
     }
 
     async #executionBusy(
-        gateway: McpInstanceGateway | undefined,
+        gateway: McpWorkspacePort | undefined,
         ctxId: string,
         ownerCallId: string | undefined,
         tolerateMetadataFailure: boolean,
@@ -1274,7 +1274,7 @@ export class McpWorkspaceReentryArbiter {
     async #hasActiveToolCall(
         ctxId: string,
         ownerCallId?: string,
-        gateway: McpInstanceGateway | undefined = this.options.gateway,
+        gateway: McpWorkspacePort | undefined = this.options.gateway,
     ): Promise<boolean> {
         if (gateway === undefined) return false;
         let instances = [this.options.instanceName];
@@ -1442,7 +1442,7 @@ function readReentryControl(input: JsonValue): {
 }
 
 function requireWaitRecoveryGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
     instanceName: string,
 ) {
     if (isMcpWaitRecoveryGateway(gateway)) return gateway;

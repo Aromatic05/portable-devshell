@@ -1,4 +1,3 @@
-import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     applyConfigInstancePatch,
     createRemoteError,
@@ -14,7 +13,7 @@ import {
 
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
-import { McpEndpointFactory } from "../../../composition/mcp/Endpoint.js";
+import type { ConfigMcpRuntimePort } from "../Mcp.js";
 import { type ConfigEngine, type ConfigRuntimeChangeSet } from "../../engine/index.js";
 import {
     requiresWorkerRebuild,
@@ -41,11 +40,9 @@ export interface InstanceConfigUpdatePlan {
 
 export class InstanceReconfigurationCoordinator {
     readonly #engine: ConfigEngine;
-    readonly #getMcpHost: () => McpHost | undefined;
-    readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #mcpEndpointConfigMapper: McpEndpointFactory;
+    readonly #mcp?: ConfigMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #cleanup: InstanceCleanupDebt;
 
@@ -55,11 +52,9 @@ export class InstanceReconfigurationCoordinator {
         cleanup: InstanceCleanupDebt,
     ) {
         this.#engine = options.engine;
-        this.#getMcpHost = options.getMcpHost ?? (() => undefined);
-        this.#getMcpInstanceGateway = options.getMcpInstanceGateway ?? (() => undefined);
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
-        this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
+        this.#mcp = options.mcp;
         this.#retirement = retirement;
         this.#cleanup = cleanup;
     }
@@ -456,8 +451,7 @@ export class InstanceReconfigurationCoordinator {
     }
 
     async syncMcpEndpoint(instanceName: string): Promise<void> {
-        const host = this.#getMcpHost();
-        if (host === undefined) return;
+        if (this.#mcp === undefined) return;
         const config = this.#engine.current;
         const instance = config.instances.find(
             (entry) => entry.name === instanceName,
@@ -470,16 +464,13 @@ export class InstanceReconfigurationCoordinator {
             !instance.mcp.enabled ||
             descriptor === undefined
         ) {
-            host.unregisterInstance(instanceName);
+            this.#mcp.unregisterInstance(instanceName);
             return;
         }
-        host.registerInstance(
-            this.#mcpEndpointConfigMapper.map(
-                descriptor,
-                this.#getMcpInstanceGateway(),
-                instance.mcp.auth,
-                instance.workspace.enabled,
-            ),
+        this.#mcp.registerInstance(
+            instanceName,
+            instance.mcp.auth,
+            instance.workspace.enabled,
         );
     }
 

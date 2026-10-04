@@ -26,9 +26,9 @@ import {
     type ArtifactEventRecorder,
     type ArtifactServiceEndpoint,
     type ArtifactServiceOptions,
-    type ArtifactShareAccess,
     type StoredArtifactShare,
 } from "../Service.js";
+import type { ArtifactShareAccess } from "../Api.js";
 
 export interface ArtifactShareServiceOptions {
     recordEvent: ArtifactEventRecorder;

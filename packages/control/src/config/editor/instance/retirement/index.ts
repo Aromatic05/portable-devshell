@@ -1,4 +1,3 @@
-import type { McpHost } from "@portable-devshell/mcp";
 import {
     createRemoteError,
     controlErrorCodes,
@@ -28,7 +27,7 @@ export class InstanceRetirementCoordinator {
 
     readonly #engine: ConfigEngine;
 
-    readonly #getMcpHost: () => McpHost | undefined;
+    readonly #mcp: ConfigEditorCoordinatorOptions["mcp"];
 
     readonly #instanceConfigMapper: InstanceFactory;
 
@@ -38,7 +37,7 @@ constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }) 
         this.#detachContextInstance = options.detachContextInstance;
         this.#reconcileContextInstanceCleanup = options.reconcileContextInstanceCleanup;
         this.#engine = options.engine;
-        this.#getMcpHost = options.getMcpHost ?? (() => undefined);
+        this.#mcp = options.mcp;
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
     }
@@ -105,7 +104,7 @@ constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }) 
                 .catch((error) => cleanupFailures.push(error));
         }
         try {
-            this.#getMcpHost()?.unregisterInstance(instanceName);
+            this.#mcp?.unregisterInstance(instanceName);
         } catch (error) {
             cleanupFailures.push(error);
         }
@@ -148,7 +147,7 @@ constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }) 
             const workspaceDisabled =
                 existing.workspace.enabled && !next.workspace.enabled;
             if (workspaceDisabled || instanceDisabled) {
-                await this.#getMcpHost()
+                await this.#mcp
                     ?.retireWorkspaceApp(existing.name)
                     .catch((error) => failures.push(error));
             }

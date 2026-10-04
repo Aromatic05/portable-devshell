@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import type {
     ApprovalRequest,
     ArtifactViewImageInput,
@@ -60,7 +60,7 @@ export interface McpApprovalPort {
     cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
 }
 
-export interface McpInstanceGateway {
+interface McpGatewayShape {
     approval?: McpApprovalPort;
     appendMcpToolCalled(
         instance: string,
@@ -262,10 +262,88 @@ export interface McpInstanceGateway {
     ): Promise<ArtifactViewImageResult>;
 }
 
-export type McpWorkspaceActionGateway = McpInstanceGateway &
+export type McpToolCallPort = Pick<
+    McpGatewayShape,
+    | "appendMcpToolCalled"
+    | "callExtensionTool"
+    | "callToolOperation"
+    | "callTool"
+    | "invokeToolInternal"
+    | "closeToolSession"
+    | "readToolCalls"
+    | "hasActiveToolCalls"
+    | "listTools"
+    | "listExtensionTools"
+>;
+
+export type McpTaskPort = Pick<
+    McpGatewayShape,
+    | "goalContinuation"
+    | "manageGoal"
+    | "readGoal"
+    | "recordGoalReentry"
+    | "touchGoal"
+    | "createWait"
+    | "cancelWait"
+    | "claimWaitRecovery"
+    | "completeWaitRecovery"
+    | "markWaitRecoveryAttempted"
+    | "detachWait"
+    | "dismissWaitRecovery"
+    | "reattachWait"
+    | "releaseWaitRecovery"
+    | "rejectWaitRecovery"
+    | "disableWaitRecovery"
+    | "consumeWait"
+    | "resolveWait"
+    | "waitForWait"
+    | "listWaits"
+    | "controlTodo"
+    | "readTodo"
+    | "writeTodo"
+    | "observeTmuxTask"
+>;
+
+export type McpInstancePort = Pick<
+    McpGatewayShape,
+    | "assertReady"
+    | "environment"
+    | "modelCommands"
+    | "listInstances"
+    | "contextTerminated"
+    | "prepareWorkspace"
+    | "readAlerts"
+    | "releaseAlerts"
+    | "connectInstance"
+    | "releaseInstanceReference"
+    | "statusInstance"
+    | "stopInstance"
+    | "touchAlerts"
+    | "touchTemporaryDirectory"
+>;
+
+export type McpWorkspaceEventPort = Pick<McpGatewayShape, "readWorkspaceEvents">;
+export type McpArtifactPort = Pick<McpGatewayShape, "viewArtifactImage">;
+export type McpWorkspacePort = McpTaskPort &
+    Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls"> &
+    McpWorkspaceEventPort & {
+        approval?: McpApprovalPort;
+    };
+
+/** @deprecated Prefer the narrow domain ports above. */
+export interface McpInstanceGateway
+    extends McpToolCallPort,
+        McpTaskPort,
+        McpInstancePort,
+        McpWorkspaceEventPort,
+        McpArtifactPort {
+    approval?: McpApprovalPort;
+}
+
+export type McpWorkspaceActionGateway = McpTaskPort &
     Required<
         Pick<
-            McpInstanceGateway,
+            McpTaskPort,
             | "createWait"
             | "detachWait"
             | "consumeWait"
@@ -276,7 +354,7 @@ export type McpWorkspaceActionGateway = McpInstanceGateway &
     > & { approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">> };
 
 export function isMcpWorkspaceActionGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
 ): gateway is McpWorkspaceActionGateway {
     return (
         gateway !== undefined &&
@@ -293,7 +371,7 @@ export function isMcpWorkspaceActionGateway(
 }
 
 export function requireMcpWorkspaceActionGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
     instanceName: string,
 ): McpWorkspaceActionGateway {
     if (isMcpWorkspaceActionGateway(gateway)) return gateway;
@@ -305,7 +383,7 @@ export function requireMcpWorkspaceActionGateway(
 export type McpWaitRecoveryGateway = McpWorkspaceActionGateway &
     Required<
         Pick<
-            McpInstanceGateway,
+            McpTaskPort,
             | "claimWaitRecovery"
             | "completeWaitRecovery"
             | "disableWaitRecovery"
@@ -317,7 +395,7 @@ export type McpWaitRecoveryGateway = McpWorkspaceActionGateway &
     >;
 
 export function isMcpWaitRecoveryGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
 ): gateway is McpWaitRecoveryGateway {
     return (
         isMcpWorkspaceActionGateway(gateway) &&
@@ -332,10 +410,10 @@ export function isMcpWaitRecoveryGateway(
 }
 
 export type McpWaitTrackingGateway = McpWorkspaceActionGateway &
-    Required<Pick<McpInstanceGateway, "cancelWait" | "reattachWait">>;
+    Required<Pick<McpTaskPort, "cancelWait" | "reattachWait">>;
 
 export function isMcpWaitTrackingGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
 ): gateway is McpWaitTrackingGateway {
     return (
         isMcpWorkspaceActionGateway(gateway) &&
@@ -345,10 +423,10 @@ export function isMcpWaitTrackingGateway(
 }
 
 export type McpTmuxWaitGateway = McpWaitTrackingGateway &
-    Required<Pick<McpInstanceGateway, "observeTmuxTask">>;
+    Required<Pick<McpTaskPort, "observeTmuxTask">>;
 
 export function isMcpTmuxWaitGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
 ): gateway is McpTmuxWaitGateway {
     return (
         isMcpWaitTrackingGateway(gateway) &&
@@ -357,10 +435,11 @@ export function isMcpTmuxWaitGateway(
 }
 
 export type McpWorkspaceGateway = McpWorkspaceActionGateway &
-    Required<Pick<McpInstanceGateway, "readToolCalls" | "readWorkspaceEvents">>;
+    Required<Pick<McpToolCallPort, "readToolCalls">> &
+    Required<Pick<McpWorkspaceEventPort, "readWorkspaceEvents">>;
 
 export function isMcpWorkspaceGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpWorkspacePort | undefined,
 ): gateway is McpWorkspaceGateway {
     return (
         isMcpWorkspaceActionGateway(gateway) &&
@@ -369,13 +448,13 @@ export function isMcpWorkspaceGateway(
     );
 }
 
-export type McpGoalGateway = McpInstanceGateway &
+export type McpGoalGateway =
     Required<
-        Pick<McpInstanceGateway, "goalContinuation" | "manageGoal" | "readGoal">
+        Pick<McpTaskPort, "goalContinuation" | "manageGoal" | "readGoal">
     >;
 
 export function isMcpGoalGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpTaskPort | undefined,
 ): gateway is McpGoalGateway {
     return (
         gateway !== undefined &&
@@ -386,7 +465,7 @@ export function isMcpGoalGateway(
 }
 
 export function requireMcpGoalGateway(
-    gateway: McpInstanceGateway | undefined,
+    gateway: McpTaskPort | undefined,
     instanceName: string,
 ): McpGoalGateway {
     if (isMcpGoalGateway(gateway)) return gateway;

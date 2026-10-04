@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { McpHost } from "@portable-devshell/mcp";
 import {
     createRemoteError,
     normalizeConfigInstanceDraft,
@@ -188,7 +187,7 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
 export class InstanceCleanupDebt {
     readonly #cleanupDebts: InstanceCleanupDebtStore;
     readonly #cleanupOnlyDescriptors = new Map<string, ReturnType<InstanceRegistry["get"]>>();
-    readonly #getMcpHost: () => McpHost | undefined;
+    readonly #mcp: ConfigEditorCoordinatorOptions["mcp"];
     readonly #engine: ConfigEngine;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
@@ -198,7 +197,7 @@ export class InstanceCleanupDebt {
     constructor(options: ConfigEditorCoordinatorOptions & { engine: ConfigEngine }, retirement: InstanceRetirementCoordinator, syncMcpEndpoint: (instance: string) => Promise<void>) {
         this.#cleanupDebts = new InstanceCleanupDebtStore(options.cleanupDebtFile);
         this.#engine = options.engine;
-        this.#getMcpHost = options.getMcpHost ?? (() => undefined);
+        this.#mcp = options.mcp;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
         this.#retirement = retirement;
@@ -409,7 +408,7 @@ export class InstanceCleanupDebt {
             failures.push(error),
         );
         if (record.operation === "disable") {
-            await this.#getMcpHost()
+            await this.#mcp
                 ?.retireWorkspaceApp(record.instance.name)
                 .catch((error) => failures.push(error));
             failures.push(...await this.#retirement.notification.retireDisable(record.instance));
