@@ -677,7 +677,7 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     assert.ok(environment instanceof McpNativeToolResult);
     const environmentState = environment.structuredContent as { ctxId: string };
     const token = (
-        environment._meta?.["portable-devshell/workspace"] as
+        environment._meta?.["portable-devshell/mcpapp"] as
             { token?: string } | undefined
     )?.token;
     if (typeof token !== "string") throw new Error("workspace token missing");
@@ -695,13 +695,13 @@ test("Workspace authorization metadata never enters audit results or MCP events"
     );
 
     const opened = await dispatch.callTool(
-        "workspace_open",
+        "mcpapp_open",
         { ctxId: environmentState.ctxId },
         { principal: "tester", requestId: "workspace-open" },
     );
     assert.ok(opened instanceof McpNativeToolResult);
     const reopenedToken = (
-        opened._meta?.["portable-devshell/workspace"] as
+        opened._meta?.["portable-devshell/mcpapp"] as
             { token?: string } | undefined
     )?.token;
     assert.equal(reopenedToken, token);
@@ -710,7 +710,7 @@ test("Workspace authorization metadata never enters audit results or MCP events"
         false,
     );
     const workspaceAudit = harness.auditResults.find(
-        (entry) => entry.toolName === "workspace_open",
+        (entry) => entry.toolName === "mcpapp_open",
     );
     assert.notEqual(workspaceAudit, undefined);
     assert.equal(JSON.stringify(workspaceAudit?.result).includes(token), false);
@@ -788,14 +788,14 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
     assert.equal(ctxId, "ctx-workspace-session");
 
     const opened = await dispatch.callTool(
-        "workspace_open",
+        "mcpapp_open",
         {},
         { ...sessionContext, requestId: "workspace-session-open" },
     );
     assert.ok(opened instanceof McpNativeToolResult);
     assert.equal((opened.structuredContent as { ctxId?: string }).ctxId, ctxId);
     const token = (
-        opened._meta?.["portable-devshell/workspace"] as
+        opened._meta?.["portable-devshell/mcpapp"] as
             { token?: string } | undefined
     )?.token;
     if (typeof token !== "string") throw new Error("workspace token missing");
@@ -805,7 +805,7 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
     now += 50;
 
     const snapshot = await dispatch.callTool(
-        "workspace_snapshot",
+        "mcpapp_snapshot",
         { ctxId, token },
         { principal: "tester", requestId: "workspace-app-snapshot" },
     );
@@ -1135,13 +1135,13 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     );
 
     const opened = await dispatch.callTool(
-        "workspace_open",
+        "mcpapp_open",
         { ctxId: environment.ctxId },
         { principal: "tester", requestId: "workspace-open" },
     );
     assert.ok(opened instanceof McpNativeToolResult);
     const token = (
-        opened._meta?.["portable-devshell/workspace"] as
+        opened._meta?.["portable-devshell/mcpapp"] as
             { token?: string } | undefined
     )?.token;
     if (typeof token !== "string") throw new Error("workspace token missing");
@@ -1181,7 +1181,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         };
     }>(
         await dispatch.callTool(
-            "workspace_snapshot",
+            "mcpapp_snapshot",
             { ctxId: environment.ctxId, token },
             { principal: "tester", requestId: "snapshot-before-interrupt" },
         ),
@@ -1199,7 +1199,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     );
     assert.ok(stopWaiting);
     await dispatch.callTool(
-        "workspace_action",
+        "mcpapp_action",
         {
             actionId: stopWaiting.id,
             ctxId: environment.ctxId,

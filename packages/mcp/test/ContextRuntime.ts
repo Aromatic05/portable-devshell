@@ -189,7 +189,7 @@ export function createTestMcpRuntimeState(
     options: {
         contextFile?: string;
         storageDir?: string;
-        workspaceAppLeaseFile?: string;
+        mcpAppLeaseFile?: string;
     } = {},
 ) {
     const registry = new ContextRegistry({
@@ -229,7 +229,7 @@ export function createTestMcpRuntimeState(
     const state: McpRuntimeState = new McpRuntimeState({
         contexts,
         storageDir: options.storageDir,
-        workspaceAppLeaseFile: options.workspaceAppLeaseFile,
+        mcpAppLeaseFile: options.mcpAppLeaseFile,
     });
     stateRef.current = state;
     return state;
@@ -243,7 +243,7 @@ export class TestMcpHost extends McpHost {
         state = createTestMcpRuntimeState({
             contextFile: config.contextFile,
             storageDir: config.storageDir,
-            workspaceAppLeaseFile: config.workspaceAppLeaseFile,
+            mcpAppLeaseFile: config.mcpAppLeaseFile,
         }),
     ) {
         super(config, state);

@@ -291,19 +291,19 @@ export class McpEndpointDispatch {
 
 function isAppOnlyInteractionTool(toolName: string): boolean {
     return (
-        toolName === "workspace_reconnect" ||
-        toolName === "workspace_snapshot" ||
-        toolName === "workspace_watch" ||
-        toolName === "workspace_reentry" ||
-        toolName === "workspace_action"
+        toolName === "mcpapp_reconnect" ||
+        toolName === "mcpapp_snapshot" ||
+        toolName === "mcpapp_watch" ||
+        toolName === "mcpapp_reentry" ||
+        toolName === "mcpapp_action"
     );
 }
 
 function isPassiveWorkspaceRead(toolName: string): boolean {
     return (
-        toolName === "workspace_reconnect" ||
-        toolName === "workspace_snapshot" ||
-        toolName === "workspace_watch"
+        toolName === "mcpapp_reconnect" ||
+        toolName === "mcpapp_snapshot" ||
+        toolName === "mcpapp_watch"
     );
 }
 

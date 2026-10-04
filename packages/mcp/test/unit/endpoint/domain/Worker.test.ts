@@ -242,7 +242,7 @@ test("environment tools cross the ToolCall operation boundary before side effect
     const worker = {
         ...createWorker(),
         async prepareExtensionResource() {
-            return { directory: "/workspace/.devshell/skills" };
+            return { directory: "/mcpapp/.devshell/skills" };
         },
         async prepareWorkspace(workspace: string) {
             prepareCalls += 1;

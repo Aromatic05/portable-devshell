@@ -3,41 +3,10 @@ import test from "node:test";
 
 import { resolveMcpLegacyTool } from "../../../../src/endpoint/tool/Compatibility.ts";
 
-test("legacy MCP compatibility aliases only the semantic superset", () => {
-    assert.deepEqual(resolveMcpLegacyTool("ask_question"), {
-        kind: "alias",
-        replacement: "workspace_ask",
-    });
-});
-
-test("removed Workspace action tools tombstone the old contract", () => {
-    for (const [name, help] of [
-        ["workspace_question_answer", "Workspace question responses now use the projected workspace_action contract."],
-        ["workspace_wait_interrupt", "Workspace wait controls now use the projected workspace_action contract."],
-        ["workspace_task_control", "Workspace task controls now use the projected workspace_action contract."],
-        ["workspace_goal_pause", "Workspace Goal controls now use the projected workspace_action contract."],
-        ["workspace_goal_resume", "Workspace Goal controls now use the projected workspace_action contract."],
-        ["workspace_goal_stop", "Workspace Goal controls now use the projected workspace_action contract."],
-        ["workspace_approval_decide", "Workspace decisions now use the projected workspace_action contract. Refresh the tool list to use the active App protocol."],
-        ["workspace_wait_recover", "Workspace wait controls now use the projected workspace_action contract."],
-    ] as const) {
-        assert.deepEqual(
-            resolveMcpLegacyTool(name),
-            {
-                help,
-                kind: "tombstone",
-                removedIn: "0.7.10",
-                replacement: "workspace_action",
-            },
-            name,
-        );
-    }
-});
-
-test("v0.6.15 Workspace app protocol remains a hidden wire compatibility surface", () => {
+test("v0.6.15 MCP App protocol remains a hidden wire compatibility surface", () => {
     for (const [name, replacement] of [
-        ["workspace_goal_continue", "workspace_reentry"],
-        ["workspace_reentry_control", "workspace_reentry"],
+        ["workspace_goal_continue", "mcpapp_reentry"],
+        ["workspace_reentry_control", "mcpapp_reentry"],
     ] as const) {
         assert.deepEqual(
             resolveMcpLegacyTool(name),

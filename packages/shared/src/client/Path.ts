@@ -15,7 +15,7 @@ export class ControlPathHome {
     readonly messagePreferencesFile: string;
     readonly lifecycleCleanupFile: string;
     readonly toolProvenanceFile: string;
-    readonly workspaceAppLeasesFile: string;
+    readonly mcpAppLeasesFile: string;
     readonly instancesDir: string;
     readonly oauthDir: string;
     readonly reverseDir: string;
@@ -47,7 +47,7 @@ export class ControlPathHome {
             this.controlHomeDir,
             "tool-call-provenance.jsonl",
         );
-        this.workspaceAppLeasesFile = join(
+        this.mcpAppLeasesFile = join(
             this.controlHomeDir,
             "workspace-app-leases.json",
         );

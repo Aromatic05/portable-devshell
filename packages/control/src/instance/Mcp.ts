@@ -7,5 +7,5 @@ export interface InstanceMcpRuntimePort {
         workspaceEnabled?: boolean,
     ): void;
     unregisterInstance(instance: string): void;
-    retireWorkspaceApp(instance: string): Promise<void>;
+    retireMcpApp(instance: string): Promise<void>;
 }

@@ -5,7 +5,7 @@ interface McpLegacyToolAlias {
     replacement: string;
 }
 
-interface McpLegacyWorkspaceAppV0615 {
+interface McpLegacyMcpAppV0615 {
     kind: "workspace-app-v0615";
     replacement: string;
 }
@@ -20,7 +20,7 @@ interface McpLegacyToolTombstone {
 export type McpLegacyToolCompatibility =
     | McpLegacyToolAlias
     | McpLegacyToolTombstone
-    | McpLegacyWorkspaceAppV0615;
+    | McpLegacyMcpAppV0615;
 
 /**
  * @compat mcp-stale-tool-surface
@@ -74,42 +74,42 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
         removedIn: "0.7.1",
     },
     workspace_approval_decide: {
-        help: "Workspace decisions now use the projected workspace_action contract. Refresh the tool list to use the active App protocol.",
+        help: "MCP App decisions now use the projected mcpapp_action contract. Refresh the tool list to use the active App protocol.",
         kind: "tombstone",
         removedIn: "0.7.10",
-        replacement: "workspace_action",
+        replacement: "mcpapp_action",
     },
     workspace_goal_continue: {
         kind: "workspace-app-v0615",
-        replacement: "workspace_reentry",
+        replacement: "mcpapp_reentry",
     },
     workspace_goal_pause: {
-        help: "Workspace Goal controls now use the projected workspace_action contract.",
+        help: "MCP App Goal controls now use the projected mcpapp_action contract.",
         kind: "tombstone",
         removedIn: "0.7.10",
-        replacement: "workspace_action",
+        replacement: "mcpapp_action",
     },
     workspace_goal_resume: {
-        help: "Workspace Goal controls now use the projected workspace_action contract.",
+        help: "MCP App Goal controls now use the projected mcpapp_action contract.",
         kind: "tombstone",
         removedIn: "0.7.10",
-        replacement: "workspace_action",
+        replacement: "mcpapp_action",
     },
     workspace_goal_stop: {
-        help: "Workspace Goal controls now use the projected workspace_action contract.",
+        help: "MCP App Goal controls now use the projected mcpapp_action contract.",
         kind: "tombstone",
         removedIn: "0.7.10",
-        replacement: "workspace_action",
+        replacement: "mcpapp_action",
     },
     workspace_reentry_control: {
         kind: "workspace-app-v0615",
-        replacement: "workspace_reentry",
+        replacement: "mcpapp_reentry",
     },
     workspace_task_control: {
-        help: "Workspace task controls now use the projected workspace_action contract.",
+        help: "MCP App task controls now use the projected mcpapp_action contract.",
         kind: "tombstone",
         removedIn: "0.7.10",
-        replacement: "workspace_action",
+        replacement: "mcpapp_action",
     },
     tmux_capture: {
         help: "Use tmux_inspect for pane history. If you already have a durable task id, tmux_read reads that task instead. The old pane-scoped capture call is not translated automatically.",

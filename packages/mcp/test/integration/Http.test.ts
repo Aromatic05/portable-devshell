@@ -279,14 +279,14 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
 test("Live Workspace capability survives MCP host restart and drives the direct state route", async () => {
     const root = await createTestTempDirectory("mcp-workspace-lease-host");
     const contextFile = join(root, "contexts.json");
-    const workspaceAppLeaseFile = join(root, "workspace-app-leases.json");
+    const mcpAppLeaseFile = join(root, "workspace-app-leases.json");
     const recovery = { ctxId: "", detached: false, observed: 0, resolved: 0 };
     let first: McpHost | undefined;
     let restarted: McpHost | undefined;
     try {
         first = createWorkspaceHost(
             contextFile,
-            workspaceAppLeaseFile,
+            mcpAppLeaseFile,
             recovery,
         );
         await first.start();
@@ -302,22 +302,22 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             workspace: "/beta",
         });
         const firstEndpoint = `http://127.0.0.1:${requireTcpPort(first.server.address)}/demo/mcp`;
-        const opened = await callMcpTool(firstEndpoint, "workspace_open", {
+        const opened = await callMcpTool(firstEndpoint, "mcpapp_open", {
             ctxId: created.ctxId,
         });
         assert.equal(
             opened.error,
             undefined,
-            `workspace_open returned a JSON-RPC error: ${JSON.stringify(opened.error)}`,
+            `mcpapp_open returned a JSON-RPC error: ${JSON.stringify(opened.error)}`,
         );
-        assert.ok(opened.result, `workspace_open returned no result: ${JSON.stringify(opened)}`);
+        assert.ok(opened.result, `mcpapp_open returned no result: ${JSON.stringify(opened)}`);
         assert.equal(opened.result.isError, false);
         const token = (
-            opened.result?._meta?.["portable-devshell/workspace"] as
+            opened.result?._meta?.["portable-devshell/mcpapp"] as
                 { token?: unknown } | undefined
         )?.token;
         const liveBaseUrl = (
-            opened.result?._meta?.["portable-devshell/workspace"] as
+            opened.result?._meta?.["portable-devshell/mcpapp"] as
                 { liveBaseUrl?: unknown } | undefined
         )?.liveBaseUrl;
         assert.equal(typeof token, "string");
@@ -337,7 +337,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         );
         await new Promise((resolve) => setTimeout(resolve, 5));
         const firstLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(first.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            `http://127.0.0.1:${requireTcpPort(first.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
             { headers: { authorization: `Bearer ${token}` } },
         );
         assert.equal(firstLive.status, 200);
@@ -357,7 +357,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
 
         restarted = createWorkspaceHost(
             contextFile,
-            workspaceAppLeaseFile,
+            mcpAppLeaseFile,
             recovery,
         );
         await restarted.start();
@@ -365,7 +365,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         recovery.detached = true;
         const restartedEndpoint = `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/demo/mcp`;
         const restartedLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
             { headers: { authorization: `Bearer ${token}` } },
         );
         assert.equal(restartedLive.status, 200);
@@ -378,7 +378,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         assert.equal(recovery.detached, false);
         const reconnected = await callMcpTool(
             restartedEndpoint,
-            "workspace_reconnect",
+            "mcpapp_reconnect",
             {
                 ctxId: created.ctxId,
                 token,
@@ -387,7 +387,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         assert.notEqual(reconnected.result?.isError, true);
         assert.equal(
             (
-                reconnected.result?._meta?.["portable-devshell/workspace"] as
+                reconnected.result?._meta?.["portable-devshell/mcpapp"] as
                     { token?: unknown } | undefined
             )?.token,
             token,
@@ -395,7 +395,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
 
         const unauthenticated = await callMcpTool(
             restartedEndpoint,
-            "workspace_reconnect",
+            "mcpapp_reconnect",
             {
                 ctxId: created.ctxId,
             },
@@ -412,7 +412,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
         });
         const afterGenerationChange = await callMcpTool(
             restartedEndpoint,
-            "workspace_reconnect",
+            "mcpapp_reconnect",
             {
                 ctxId: created.ctxId,
                 token,
@@ -425,7 +425,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             /authorization is invalid/i,
         );
         const revokedLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/workspace/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
+            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
             { headers: { authorization: `Bearer ${token}` } },
         );
         assert.equal(revokedLive.status, 401);
@@ -565,7 +565,7 @@ function createToolWorker(tool: {
 
 function createWorkspaceHost(
     contextFile: string,
-    workspaceAppLeaseFile: string,
+    mcpAppLeaseFile: string,
     recovery?: {
         ctxId: string;
         detached: boolean;
@@ -690,7 +690,7 @@ function createWorkspaceHost(
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl: "https://mcp.example.test/devshell",
-        workspaceAppLeaseFile,
+        mcpAppLeaseFile,
     });
 }
 

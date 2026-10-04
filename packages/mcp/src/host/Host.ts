@@ -7,7 +7,7 @@ import type {
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextRuntimePort } from "../context/Runtime.js";
 import {
-    isMcpWorkspaceActionGateway,
+    isMcpAppActionGateway,
     type McpInstanceGateway,
 } from "../instance/Gateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
@@ -15,12 +15,12 @@ import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
 import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
-import { createWorkspaceMcpExtension } from "../endpoint/extension/Workspace.js";
+import { createMcpAppMcpExtension } from "../endpoint/extension/McpApp.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
-import { installMcpWorkspaceLiveRoute } from "../workspace/Route.js";
-import { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
-import { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
-import { WorkspaceActionStore } from "../workspace/ActionStore.js";
+import { installMcpAppLiveRoute } from "../mcpapp/Route.js";
+import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
+import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
+import { McpAppActionStore } from "../mcpapp/ActionStore.js";
 import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
@@ -75,7 +75,7 @@ export interface McpHostConfig {
     serverVersion?: string;
     storageDir?: string;
     toolProvenance?: McpToolProvenanceRecorder;
-    workspaceAppLeaseFile?: string;
+    mcpAppLeaseFile?: string;
 }
 
 export class McpRuntimeState {
@@ -84,35 +84,35 @@ export class McpRuntimeState {
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly workers = new Map<string, WorkerInstanceLike>();
-    readonly workspaceAppLeases: WorkspaceAppLeaseStore;
-    readonly workspaceActions: WorkspaceActionStore;
-    readonly workspaceAppPresence = new WorkspaceAppPresenceStore();
+    readonly mcpAppLeases: McpAppLeaseStore;
+    readonly workspaceActions: McpAppActionStore;
+    readonly mcpAppPresence = new McpAppPresenceStore();
     #initializePromise?: Promise<void>;
 
     constructor(config: {
         contexts: ContextRuntimePort;
         storageDir?: string;
-        workspaceAppLeaseFile?: string;
+        mcpAppLeaseFile?: string;
     }) {
         this.contexts = config.contexts;
-        this.workspaceAppLeases = new WorkspaceAppLeaseStore({
-            filePath: config.workspaceAppLeaseFile,
+        this.mcpAppLeases = new McpAppLeaseStore({
+            filePath: config.mcpAppLeaseFile,
         });
-        this.workspaceActions = new WorkspaceActionStore({
-            filePath: config.workspaceAppLeaseFile === undefined
+        this.workspaceActions = new McpAppActionStore({
+            filePath: config.mcpAppLeaseFile === undefined
                 ? undefined
-                : `${config.workspaceAppLeaseFile}.actions`,
+                : `${config.mcpAppLeaseFile}.actions`,
         });
         this.contexts.bindPresentation({
             revokeContext: async (ctxId) => {
-                await this.workspaceAppLeases.revokeContext(ctxId);
+                await this.mcpAppLeases.revokeContext(ctxId);
                 await this.workspaceActions.revokeContext(ctxId);
-                this.workspaceAppPresence.revokeContext(ctxId);
+                this.mcpAppPresence.revokeContext(ctxId);
             },
             revokeInstance: async (instance) => {
-                await this.workspaceAppLeases.revokeInstance(instance);
+                await this.mcpAppLeases.revokeInstance(instance);
                 await this.workspaceActions.revokeInstance(instance);
-                this.workspaceAppPresence.revokeInstance(instance);
+                this.mcpAppPresence.revokeInstance(instance);
             },
         });
         this.oauthApprovals =
@@ -126,7 +126,7 @@ export class McpRuntimeState {
             return await this.#initializePromise;
         }
         const initialize = Promise.all([
-            this.workspaceAppLeases.initialize(),
+            this.mcpAppLeases.initialize(),
             this.workspaceActions.initialize(),
         ]).then(() => undefined);
         this.#initializePromise = initialize;
@@ -174,7 +174,7 @@ export class McpRuntimeState {
             if (names.has(name)) continue;
             this.gateways.delete(name);
             this.workers.delete(name);
-            this.workspaceAppPresence.revokeInstance(name);
+            this.mcpAppPresence.revokeInstance(name);
         }
     }
 }
@@ -189,9 +189,9 @@ export class McpHost {
     readonly #liveRouteCleanups = new Map<string, () => void>();
     readonly #runtimeState: McpRuntimeState;
     readonly #workers: Map<string, WorkerInstanceLike>;
-    readonly #workspaceAppLeases: WorkspaceAppLeaseStore;
-    readonly #workspaceActions: WorkspaceActionStore;
-    readonly #workspaceAppPresence: WorkspaceAppPresenceStore;
+    readonly #mcpAppLeases: McpAppLeaseStore;
+    readonly #workspaceActions: McpAppActionStore;
+    readonly #mcpAppPresence: McpAppPresenceStore;
     #started = false;
 
     constructor(config: McpHostConfig, state: McpRuntimeState) {
@@ -200,9 +200,9 @@ export class McpHost {
         this.#contextRegistry = state.contexts.registry;
         this.#gateways = this.#runtimeState.gateways;
         this.#workers = this.#runtimeState.workers;
-        this.#workspaceAppLeases = this.#runtimeState.workspaceAppLeases;
+        this.#mcpAppLeases = this.#runtimeState.mcpAppLeases;
         this.#workspaceActions = this.#runtimeState.workspaceActions;
-        this.#workspaceAppPresence = this.#runtimeState.workspaceAppPresence;
+        this.#mcpAppPresence = this.#runtimeState.mcpAppPresence;
         this.#runtimeState.retainInstances(
             new Set(config.instances.map((instance) => instance.name)),
         );
@@ -263,14 +263,14 @@ export class McpHost {
         this.#liveRouteCleanups.delete(instance.name);
         this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
-        const workspaceApp =
+        const mcpApp =
             instance.workspaceEnabled !== false &&
-            isMcpWorkspaceActionGateway(instance.gateway);
-        if (!workspaceApp)
-            this.#workspaceAppPresence.revokeInstance(instance.name);
+            isMcpAppActionGateway(instance.gateway);
+        if (!mcpApp)
+            this.#mcpAppPresence.revokeInstance(instance.name);
         const extensions = new McpExtensionRegistry(
-            workspaceApp
-                ? [createWorkspaceMcpExtension(this.#config.publicBaseUrl)]
+            mcpApp
+                ? [createMcpAppMcpExtension(this.#config.publicBaseUrl)]
                 : [],
         );
         const binding = new McpEndpointBinding(
@@ -293,17 +293,17 @@ export class McpHost {
             binding,
             path,
         });
-        if (workspaceApp) {
+        if (mcpApp) {
             this.#liveRouteCleanups.set(
                 instance.name,
-                installMcpWorkspaceLiveRoute({
+                installMcpAppLiveRoute({
                     contextRegistry: this.#contextRegistry,
                     gateway: instance.gateway,
                     host: this.#httpServer,
                     instanceName: instance.name,
-                    leases: this.#workspaceAppLeases,
+                    leases: this.#mcpAppLeases,
                     actions: this.#workspaceActions,
-                    presence: this.#workspaceAppPresence,
+                    presence: this.#mcpAppPresence,
                     publicBaseUrl: this.#config.publicBaseUrl,
                 }),
             );
@@ -320,7 +320,7 @@ export class McpHost {
     unregisterInstance(instanceName: string): void {
         this.#liveRouteCleanups.get(instanceName)?.();
         this.#liveRouteCleanups.delete(instanceName);
-        this.#workspaceAppPresence.revokeInstance(instanceName);
+        this.#mcpAppPresence.revokeInstance(instanceName);
         this.#gateways.delete(instanceName);
         this.#workers.delete(instanceName);
         const previous = this.#registry.unregister(instanceName);
@@ -332,7 +332,7 @@ export class McpHost {
         }
     }
 
-    async retireWorkspaceApp(instanceName: string): Promise<void> {
+    async retireMcpApp(instanceName: string): Promise<void> {
         if (this.#started) {
             const route = this.#registry
                 .list()
@@ -342,8 +342,8 @@ export class McpHost {
         }
         this.#liveRouteCleanups.get(instanceName)?.();
         this.#liveRouteCleanups.delete(instanceName);
-        this.#workspaceAppPresence.revokeInstance(instanceName);
-        await this.#workspaceAppLeases.revokeInstance(instanceName);
+        this.#mcpAppPresence.revokeInstance(instanceName);
+        await this.#mcpAppLeases.revokeInstance(instanceName);
         await this.#workspaceActions.revokeInstance(instanceName);
     }
 

@@ -1643,7 +1643,7 @@ test("instance delete detaches Context before terminal resource cleanup", async 
         instanceRegistry: registry,
         mcp: {
             registerInstance() {},
-            async retireWorkspaceApp() {},
+            async retireMcpApp() {},
             unregisterInstance(instance: string) {
                 actions.push(`mcp.unregister:${instance}`);
             },
@@ -2708,7 +2708,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         instance: string;
         workspaceEnabled?: boolean;
     }> = [];
-    const retiredWorkspaceApps: string[] = [];
+    const retiredMcpApps: string[] = [];
     const unregistered: string[] = [];
     const mcp = {
         registerInstance(
@@ -2718,8 +2718,8 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         ) {
             registered.push({ auth, instance, workspaceEnabled });
         },
-        async retireWorkspaceApp(instanceName: string) {
-            retiredWorkspaceApps.push(instanceName);
+        async retireMcpApp(instanceName: string) {
+            retiredMcpApps.push(instanceName);
         },
         unregisterInstance(instanceName: string) {
             unregistered.push(instanceName);
@@ -2752,7 +2752,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
     });
 
     assert.equal(registered.length, 1);
-    assert.deepEqual(retiredWorkspaceApps, []);
+    assert.deepEqual(retiredMcpApps, []);
     assert.equal(registered[0]?.instance, "demo-local");
     assert.deepEqual(registered[0]?.auth, { mode: "none" });
     assert.deepEqual(registry.get("demo-local")?.modelExtensions, [
@@ -2771,7 +2771,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         instanceName: "demo-local",
         patch: { workspace: { enabled: false } },
     });
-    assert.deepEqual(retiredWorkspaceApps, ["demo-local"]);
+    assert.deepEqual(retiredMcpApps, ["demo-local"]);
     assert.equal(registered[2]?.workspaceEnabled, false);
     assert.equal(config.instances[0]?.workspace.enabled, false);
 
@@ -2795,7 +2795,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
 
     await service.disableInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local"]);
-    assert.deepEqual(retiredWorkspaceApps, ["demo-local", "demo-local"]);
+    assert.deepEqual(retiredMcpApps, ["demo-local", "demo-local"]);
     await service.enableInstance({ instanceName: "demo-local" });
     assert.equal(registered.length, 5);
     assert.equal(registered[4]?.workspaceEnabled, false);

@@ -78,7 +78,7 @@ export class McpControlModule {
         this.#runtimeState = new McpRuntimeState({
             contexts: options.contexts,
             storageDir: options.controlPaths.oauthDir,
-            workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile,
+            mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
         this.toolProvenance = new ToolCallProvenanceStore(
             options.controlPaths.toolProvenanceFile,
@@ -117,8 +117,8 @@ export class McpControlModule {
             unregisterInstance: (instance) => {
                 this.#host?.unregisterInstance(instance);
             },
-            retireWorkspaceApp: async (instance) => {
-                await this.#host?.retireWorkspaceApp(instance);
+            retireMcpApp: async (instance) => {
+                await this.#host?.retireMcpApp(instance);
             },
         };
         const configEngine = new ConfigEngine({
@@ -200,8 +200,8 @@ export class McpControlModule {
                 storageDir: options.controlPaths.oauthDir,
                 runtimeState: this.#runtimeState,
                 toolProvenance: this.toolProvenance,
-                workspaceAppLeaseFile:
-                    options.controlPaths.workspaceAppLeasesFile,
+                mcpAppLeaseFile:
+                    options.controlPaths.mcpAppLeasesFile,
             },
         );
         if (config.web.enabled) {
@@ -270,7 +270,7 @@ export class McpControlModule {
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,
-            workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile,
+            mcpAppLeaseFile: this.#controlPaths.mcpAppLeasesFile,
         });
         const previous = this.#host;
         const sameEndpointAsPrevious =

@@ -8,8 +8,8 @@ import {
     mcpToolAnnotations,
     mcpToolInvocationStatus,
     mcpToolTitle,
-    McpToolCatalogWorkspace,
-    workspaceAppResourceUri,
+    McpToolCatalogMcpApp,
+    mcpAppResourceUri,
 } from "@portable-devshell/mcp/testing";
 import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
@@ -106,7 +106,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
                 readOnlyHint: false,
             },
         );
-        assert.deepEqual(mcpToolAnnotations("workspace_action"), {
+        assert.deepEqual(mcpToolAnnotations("mcpapp_action"), {
             destructiveHint: true,
             idempotentHint: false,
             openWorldHint: false,
@@ -122,7 +122,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
     test("MCP tools expose concise human-readable titles with a safe fallback", () => {
         assert.equal(mcpToolTitle("bash_run"), "Run shell command");
-        assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
+        assert.equal(mcpToolTitle("mcpapp_open"), "Open Workspace");
         assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
         assert.equal(mcpToolTitle("tmux_manage"), "Manage tmux resources");
         assert.equal(
@@ -133,12 +133,12 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
     });
 
     test("ChatGPT invocation status is limited to long-lived visible tool states", () => {
-        assert.deepEqual(mcpToolInvocationStatus("workspace_ask"), {
+        assert.deepEqual(mcpToolInvocationStatus("mcpapp_ask"), {
             invoked: "Answer received",
             invoking: "Waiting for your answer…",
         });
         assert.equal(mcpToolInvocationStatus("tmux_run"), undefined);
-        assert.deepEqual(mcpToolInvocationStatus("workspace_open"), {
+        assert.deepEqual(mcpToolInvocationStatus("mcpapp_open"), {
             invoked: "Workspace ready",
             invoking: "Opening Workspace…",
         });
@@ -208,7 +208,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             /discard the earlier portion/u,
         );
         assert.match(
-            enhancer.enhance("workspace_open", "  Open workspace  "),
+            enhancer.enhance("mcpapp_open", "  Open workspace  "),
             /environ_info/u,
         );
         const extensionDescription =
@@ -547,7 +547,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
 {
     test("Workspace MCP tools describe their structured output instead of generic objects", () => {
-        const definitions = new McpToolCatalogWorkspace().list();
+        const definitions = new McpToolCatalogMcpApp().list();
 
         for (const definition of definitions) {
             assertMeaningfulSchema(definition);
@@ -556,24 +556,24 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         const bootstrapRegistry = new McpToolRegistry();
         bootstrapRegistry.register("*", [environInfo]);
         const environment = new McpEndpointCatalog({
-            bootstrapPresentationResourceUri: workspaceAppResourceUri,
+            bootstrapPresentationResourceUri: mcpAppResourceUri,
             instanceName: "local",
             registry: bootstrapRegistry,
         }).adapt(environInfo);
         assert.equal(
             (environment._meta as { ui?: { resourceUri?: string } })?.ui
                 ?.resourceUri,
-            workspaceAppResourceUri,
+            mcpAppResourceUri,
         );
         assert.equal(
             (environment._meta as Record<string, unknown>)["ui/resourceUri"],
-            workspaceAppResourceUri,
+            mcpAppResourceUri,
         );
         assert.equal(
             (environment._meta as Record<string, unknown>)[
                 "openai/outputTemplate"
             ],
-            workspaceAppResourceUri,
+            mcpAppResourceUri,
         );
         assert.equal(
             (environment._meta as Record<string, unknown>)[
@@ -583,54 +583,54 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         );
 
         assertProperties(
-            definition(definitions, "workspace_open").outputSchema,
+            definition(definitions, "mcpapp_open").outputSchema,
             ["ctxId", "instance"],
         );
         assertProperties(
-            definition(definitions, "workspace_reconnect").outputSchema,
+            definition(definitions, "mcpapp_reconnect").outputSchema,
             ["agentBusy", "ctxId", "cursor", "instance", "modelContext", "presentation", "reentry"],
         );
         assertProperties(
-            definition(definitions, "workspace_snapshot").outputSchema,
+            definition(definitions, "mcpapp_snapshot").outputSchema,
             ["agentBusy", "ctxId", "cursor", "instance", "modelContext", "presentation", "reentry"],
         );
-        const snapshotSchema = record(definition(definitions, "workspace_snapshot").outputSchema);
+        const snapshotSchema = record(definition(definitions, "mcpapp_snapshot").outputSchema);
         const presentation = record(property(snapshotSchema, "presentation"));
         assert.deepEqual(Object.keys(record(presentation.properties)).sort(), ["background", "primary", "work"]);
         const modelContext = record(property(snapshotSchema, "modelContext"));
         assertProperties(modelContext as JsonValue, ["content", "structuredContent"]);
         const structuredContext = record(property(modelContext as JsonValue, "structuredContent"));
-        assertProperties(structuredContext as JsonValue, ["portableDevshellWorkspace"]);
+        assertProperties(structuredContext as JsonValue, ["portableDevshellMcpApp"]);
         const reentry = record(property(snapshotSchema, "reentry"));
         assertProperties(reentry as JsonValue, ["pending", "delivery"]);
-        const action = record(property(definition(definitions, "workspace_action").inputSchema, "itemId"));
+        const action = record(property(definition(definitions, "mcpapp_action").inputSchema, "itemId"));
         assert.equal(action.type, "string");
-        const actionInputSchema = record(definition(definitions, "workspace_action").inputSchema);
+        const actionInputSchema = record(definition(definitions, "mcpapp_action").inputSchema);
         assert.deepEqual(required(actionInputSchema).sort(), ["actionId", "itemId", "token"]);
         assert.equal(record(property(actionInputSchema as JsonValue, "input")).type, "string");
-        for (const name of ["workspace_answer", "workspace_interrupt", "workspace_task", "workspace_recover", "workspace_pause", "workspace_resume", "workspace_stop", "workspace_approval"]) {
+        for (const name of ["mcpapp_answer", "mcpapp_interrupt", "mcpapp_task", "mcpapp_recover", "mcpapp_pause", "mcpapp_resume", "mcpapp_stop", "mcpapp_approval"]) {
             assert.equal(definitions.some((entry) => entry.name === name), false, name);
         }
         assertProperties(
-            definition(definitions, "workspace_watch").outputSchema,
+            definition(definitions, "mcpapp_watch").outputSchema,
             ["changed", "cursor", "snapshot"],
         );
         assertProperties(
-            definition(definitions, "workspace_goal").outputSchema,
+            definition(definitions, "mcpapp_goal").outputSchema,
             ["goal"],
         );
         assert.equal(
             definitions.some(
-                (entry) => entry.name === "workspace_goal_continue",
+                (entry) => entry.name === "mcpapp_goal_continue",
             ),
             false,
         );
-        const actionOutputSchema = definition(definitions, "workspace_action").outputSchema;
+        const actionOutputSchema = definition(definitions, "mcpapp_action").outputSchema;
         assertProperties(actionOutputSchema, ["effect", "snapshot", "status"]);
         assert.deepEqual(required(record(actionOutputSchema)).sort(), ["snapshot", "status"]);
 
         const adapter = new McpToolSchemaAdapter();
-        const workspaceOpen = definition(definitions, "workspace_open");
+        const workspaceOpen = definition(definitions, "mcpapp_open");
         const adaptedOpen = adapter.toMcpTool(
             workspaceOpen,
             workspaceOpen.description,

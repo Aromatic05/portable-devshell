@@ -1358,7 +1358,7 @@ test("McpContextRegistry validates attached instances without binding ctxId auth
         environments: [
             {
                 instance: "alpha",
-                workspace: "/workspace/alpha",
+                workspace: "/mcpapp/alpha",
             },
         ],
         principal: "client-alpha",

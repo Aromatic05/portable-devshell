@@ -223,7 +223,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
-    async readWorkspaceEvents(instance: string, fromSeq: number) {
+    async readMcpAppEvents(instance: string, fromSeq: number) {
         const result =
             this.#requireDescriptor(instance).worker.subscribe(fromSeq);
         return result.kind === "gap"

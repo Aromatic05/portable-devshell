@@ -409,7 +409,7 @@ export class InstanceCleanupDebt {
         );
         if (record.operation === "disable") {
             await this.#mcp
-                ?.retireWorkspaceApp(record.instance.name)
+                ?.retireMcpApp(record.instance.name)
                 .catch((error) => failures.push(error));
             failures.push(...await this.#retirement.notification.retireDisable(record.instance));
             if (descriptor.worker.managementMode !== "selfManaged") {

@@ -148,7 +148,7 @@ constructor(options: InstanceEditorCoordinatorOptions) {
                 existing.workspace.enabled && !next.workspace.enabled;
             if (workspaceDisabled || instanceDisabled) {
                 await this.#mcp
-                    ?.retireWorkspaceApp(existing.name)
+                    ?.retireMcpApp(existing.name)
                     .catch((error) => failures.push(error));
             }
             if (instanceDisabled) {

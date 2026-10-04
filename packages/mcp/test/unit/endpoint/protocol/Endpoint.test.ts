@@ -18,11 +18,11 @@ import {
     McpExtensionRegistry,
     McpNativeToolResult,
     McpToolRegistry,
-    createWorkspaceMcpExtension,
-    workspaceAppLegacyResourceUris,
-    workspaceAppResourceMeta,
-    workspaceAppResourceUri,
-    workspaceAppStableResourceUri,
+    createMcpAppMcpExtension,
+    mcpAppLegacyResourceUris,
+    mcpAppResourceMeta,
+    mcpAppResourceUri,
+    mcpAppStableResourceUri,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
 import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
@@ -171,7 +171,7 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             extensions: new McpExtensionRegistry([
-                createWorkspaceMcpExtension(),
+                createMcpAppMcpExtension(),
             ]),
             gateway,
             instanceName: "demo",
@@ -196,14 +196,14 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
                   securitySchemes?: JsonValue;
               }>
             | undefined;
-        const action = tools?.find((tool) => tool.name === "workspace_action");
+        const action = tools?.find((tool) => tool.name === "mcpapp_action");
         const environment = tools?.find((tool) => tool.name === "environ_info");
-        const open = tools?.find((tool) => tool.name === "workspace_open");
+        const open = tools?.find((tool) => tool.name === "mcpapp_open");
         assert.notEqual(environment, undefined);
         assert.deepEqual(environment?.outputSchema, { type: "object" });
         assert.equal(
             environment?._meta?.["openai/outputTemplate"],
-            workspaceAppResourceUri,
+            mcpAppResourceUri,
         );
         assert.deepEqual(
             (environment?._meta?.ui as { visibility?: JsonValue } | undefined)
@@ -253,11 +253,11 @@ test("Workspace disable removes only Workspace tools and app metadata", () => {
         gateway,
         instanceName: "demo",
         worker: harness.worker,
-        workspaceAppEnabled: false,
+        mcpAppEnabled: false,
     }).listTools();
 
     assert.equal(
-        tools.some((tool) => tool.name.startsWith("workspace_")),
+        tools.some((tool) => tool.name.startsWith("mcpapp_")),
         false,
     );
     const environment = tools.find((tool) => tool.name === "environ_info");
@@ -339,7 +339,7 @@ test("MCP endpoint serves App resources and environment presentation from a gene
             instanceName: "demo",
             gateway: harness.gateway,
             worker: harness.worker,
-            workspaceAppEnabled: false,
+            mcpAppEnabled: false,
         }),
     );
     const server = await createBindingServer(binding);
@@ -410,7 +410,7 @@ test("MCP endpoint serves App resources and environment presentation from a gene
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
     const binding = createBinding(createWorkerHarness(), {
-        workspaceApp: true,
+        mcpApp: true,
     });
     const server = await createBindingServer(binding);
 
@@ -443,11 +443,11 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             [
                 {
                     mimeType: "text/html;profile=mcp-app",
-                    uri: workspaceAppResourceUri,
+                    uri: mcpAppResourceUri,
                 },
             ],
         );
-        assert.notEqual(workspaceAppResourceUri, workspaceAppStableResourceUri);
+        assert.notEqual(mcpAppResourceUri, mcpAppStableResourceUri);
 
         const read = await postJson(
             server.url,
@@ -455,7 +455,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
                 id: "req-resource-read",
                 jsonrpc: "2.0",
                 method: "resources/read",
-                params: { uri: workspaceAppStableResourceUri },
+                params: { uri: mcpAppStableResourceUri },
             },
             session.headers,
         );
@@ -466,20 +466,20 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
         );
         assert.equal(
             read.body.result?.contents?.[0]?.uri,
-            workspaceAppStableResourceUri,
+            mcpAppStableResourceUri,
         );
         assert.deepEqual(
             read.body.result?.contents?.[0]?._meta,
-            workspaceAppResourceMeta,
+            mcpAppResourceMeta,
         );
-        assert.deepEqual(workspaceAppLegacyResourceUris, [
-            "ui://portable-devshell/workspace-651c9d0f1042c493.html",
-            "ui://portable-devshell/workspace-98410baf51f694b0.html",
-            "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
-            "ui://portable-devshell/workspace-c978585dba4e38c7.html",
-            "ui://portable-devshell/workspace-4305d70d5fdb6a12.html",
+        assert.deepEqual(mcpAppLegacyResourceUris, [
+            "ui://portable-devshell/mcpapp-651c9d0f1042c493.html",
+            "ui://portable-devshell/mcpapp-98410baf51f694b0.html",
+            "ui://portable-devshell/mcpapp-03c4911b6d185e3c.html",
+            "ui://portable-devshell/mcpapp-c978585dba4e38c7.html",
+            "ui://portable-devshell/mcpapp-4305d70d5fdb6a12.html",
         ]);
-        for (const [index, uri] of workspaceAppLegacyResourceUris.entries()) {
+        for (const [index, uri] of mcpAppLegacyResourceUris.entries()) {
             const legacy = await postJson(
                 server.url,
                 {
@@ -498,7 +498,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             );
             assert.deepEqual(
                 legacy.body.result?.contents?.[0]?._meta,
-                workspaceAppResourceMeta,
+                mcpAppResourceMeta,
             );
         }
     } finally {
@@ -509,7 +509,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
 test("Workspace MCP App uses the configured public origin as its ChatGPT component domain", async () => {
     const binding = createBinding(createWorkerHarness(), {
         publicBaseUrl: "https://devshell.example.com/prefix",
-        workspaceApp: true,
+        mcpApp: true,
     });
     const server = await createBindingServer(binding);
 
@@ -521,15 +521,15 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
                 id: "req-resource-domain",
                 jsonrpc: "2.0",
                 method: "resources/read",
-                params: { uri: workspaceAppResourceUri },
+                params: { uri: mcpAppResourceUri },
             },
             session.headers,
         );
         assert.equal(read.status, 200);
         assert.deepEqual(read.body.result?.contents?.[0]?._meta, {
-            ...workspaceAppResourceMeta,
+            ...mcpAppResourceMeta,
             ui: {
-                ...workspaceAppResourceMeta.ui,
+                ...mcpAppResourceMeta.ui,
                 csp: {
                     connectDomains: ["https://devshell.example.com"],
                     resourceDomains: [],
@@ -551,7 +551,7 @@ test("Workspace MCP App does not advertise a wildcard listener as its component 
     for (const publicBaseUrl of ["http://0.0.0.0:17890", "http://[::]:17890"]) {
         const binding = createBinding(createWorkerHarness(), {
             publicBaseUrl,
-            workspaceApp: true,
+            mcpApp: true,
         });
         const server = await createBindingServer(binding);
         try {
@@ -562,14 +562,14 @@ test("Workspace MCP App does not advertise a wildcard listener as its component 
                     id: `req-resource-wildcard-${publicBaseUrl}`,
                     jsonrpc: "2.0",
                     method: "resources/read",
-                    params: { uri: workspaceAppResourceUri },
+                    params: { uri: mcpAppResourceUri },
                 },
                 session.headers,
             );
             assert.equal(read.status, 200);
             assert.deepEqual(
                 read.body.result?.contents?.[0]?._meta,
-                workspaceAppResourceMeta,
+                mcpAppResourceMeta,
             );
         } finally {
             await server.close();
@@ -1236,7 +1236,7 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     const first = structuredResult<{ status: string; workspace: string }>(
         await endpoint.callTool(
             "environ_info",
-            { workspace: "/workspace/one" },
+            { workspace: "/mcpapp/one" },
             requestContext,
         ),
     );
@@ -1247,15 +1247,15 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     const second = structuredResult<{ status: string; workspace: string }>(
         await endpoint.callTool(
             "environ_info",
-            { workspace: "/workspace/two" },
+            { workspace: "/mcpapp/two" },
             requestContext,
         ),
     );
 
-    assert.equal(first.workspace, "/workspace/one");
+    assert.equal(first.workspace, "/mcpapp/one");
     assert.equal("ctxId" in second, false);
     assert.equal(second.status, "active");
-    assert.equal(second.workspace, "/workspace/two");
+    assert.equal(second.workspace, "/mcpapp/two");
     assert.deepEqual(
         (await registry.list()).map((record) => record.ctxId),
         [internalCtxId],
@@ -1288,7 +1288,7 @@ test("OpenAI session binding resolves one internal ctxId without making models c
     await assert.rejects(
         endpoint.callTool(
             "environ_info",
-            { ctxId: internalCtxId, workspace: "/workspace/three" },
+            { ctxId: internalCtxId, workspace: "/mcpapp/three" },
             requestContext,
         ),
         (error: unknown) =>
@@ -1343,15 +1343,15 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
               }
             | undefined;
 
-    for (const name of ["environ_info", "bash_run", "workspace_open"]) {
+    for (const name of ["environ_info", "bash_run", "mcpapp_open"]) {
         const schema = inputSchema(name);
         assert.equal(schema?.properties?.ctxId, undefined, name);
         assert.equal(schema?.required?.includes("ctxId") ?? false, false, name);
     }
     for (const name of [
-        "workspace_snapshot",
-        "workspace_watch",
-        "workspace_action",
+        "mcpapp_snapshot",
+        "mcpapp_watch",
+        "mcpapp_action",
     ]) {
         const schema = inputSchema(name);
         assert.notEqual(schema?.properties?.ctxId, undefined, name);
@@ -1370,7 +1370,7 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
     );
     assert.ok(environment instanceof McpNativeToolResult);
     const token = (
-        environment._meta?.["portable-devshell/workspace"] as
+        environment._meta?.["portable-devshell/mcpapp"] as
             { token?: unknown } | undefined
     )?.token;
     assert.equal(typeof token, "string");
@@ -1384,7 +1384,7 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         reentry?: unknown;
     }>(
         await endpoint.callTool(
-            "workspace_snapshot",
+            "mcpapp_snapshot",
             { ctxId, token: token as string },
             {
                 principal: "subject-1",
@@ -1461,7 +1461,7 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
     const first = structuredResult<{ status: string }>(
         await endpoint.callTool(
             "environ_info",
-            { workspace: "/workspace/old" },
+            { workspace: "/mcpapp/old" },
             requestContext,
         ),
     );
@@ -1479,13 +1479,13 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
     const replacement = structuredResult<{ status: string; workspace: string }>(
         await endpoint.callTool(
             "environ_info",
-            { workspace: "/workspace/new" },
+            { workspace: "/mcpapp/new" },
             requestContext,
         ),
     );
     assert.equal("ctxId" in replacement, false);
     assert.equal(replacement.status, "active");
-    assert.equal(replacement.workspace, "/workspace/new");
+    assert.equal(replacement.workspace, "/mcpapp/new");
 
     const bound = await registry.lookupExternal(
         { kind: "openai/session", value: "chat-session-disabled" },
@@ -1525,7 +1525,7 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
                 session.headers,
             );
 
-        const first = await acquire("/workspace/one");
+        const first = await acquire("/mcpapp/one");
         assert.equal(
             "ctxId" in (first.body.result?.structuredContent ?? {}),
             false,
@@ -1554,7 +1554,7 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
         const firstCtxId = harness.calls[0]?.ctxId;
         assert.equal(typeof firstCtxId, "string");
 
-        const second = await acquire("/workspace/two");
+        const second = await acquire("/mcpapp/two");
         assert.equal(
             "ctxId" in (second.body.result?.structuredContent ?? {}),
             false,
@@ -2020,14 +2020,14 @@ function createBinding(
         publicBaseUrl?: string;
         readyWaitMs?: number;
         serverVersion?: string;
-        workspaceApp?: boolean;
+        mcpApp?: boolean;
     },
 ): McpEndpointBinding {
     const unused = async () => {
         throw new Error("unused");
     };
     const gateway =
-        options?.workspaceApp === true
+        options?.mcpApp === true
             ? ({
                   ...harness.gateway,
                   consumeWait: unused,
@@ -2045,9 +2045,9 @@ function createBinding(
               } as unknown as McpInstanceGateway)
             : harness.gateway;
     const extensions =
-        options?.workspaceApp === true
+        options?.mcpApp === true
             ? new McpExtensionRegistry([
-                  createWorkspaceMcpExtension(options.publicBaseUrl),
+                  createMcpAppMcpExtension(options.publicBaseUrl),
               ])
             : undefined;
     return new McpEndpointBinding(

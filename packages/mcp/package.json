@@ -43,8 +43,8 @@
         "esbuild": "0.28.2"
     },
     "scripts": {
-        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b && node scripts/build-workspace-client.mjs",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b && node scripts/build-mcpapp-client.mjs",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
-        "test": "node scripts/build-workspace-client.mjs && node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\""
+        "test": "node scripts/build-mcpapp-client.mjs && node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\""
     }
 }

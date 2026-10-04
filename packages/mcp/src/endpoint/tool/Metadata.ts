@@ -16,10 +16,10 @@ const readOnlyTools = new Set([
     "instance_status",
     "tmux_inspect",
     "todo_read",
-    "workspace_open",
-    "workspace_reconnect",
-    "workspace_snapshot",
-    "workspace_watch",
+    "mcpapp_open",
+    "mcpapp_reconnect",
+    "mcpapp_snapshot",
+    "mcpapp_watch",
 ]);
 
 const nonDestructiveMutationTools = new Set([
@@ -27,7 +27,7 @@ const nonDestructiveMutationTools = new Set([
     "environ_info",
     "instance_create",
     "tmux_read",
-    "workspace_goal",
+    "mcpapp_goal",
 ]);
 
 const idempotentMutationTools = new Set<string>();
@@ -47,12 +47,12 @@ const closedWorldTools = new Set([
     "tmux_read",
     "todo_read",
     "todo_write",
-    "workspace_goal",
-    "workspace_open",
-    "workspace_reconnect",
-    "workspace_action",
-    "workspace_snapshot",
-    "workspace_watch",
+    "mcpapp_goal",
+    "mcpapp_open",
+    "mcpapp_reconnect",
+    "mcpapp_action",
+    "mcpapp_snapshot",
+    "mcpapp_watch",
 ]);
 
 export function mcpToolAnnotations(
@@ -80,7 +80,7 @@ export function mcpToolAnnotations(
 const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
     [
         "environ_info",
-        "Prepare the current devshell Context and workspace. Call once before other tools; it also bootstraps the Live Workspace. Use workspace to attach or switch, or ctxId to select an existing Context.",
+        "Prepare the current devshell Context and workspace. Call once before other tools; it also bootstraps the MCP App. Use workspace to attach or switch, or ctxId to select an existing Context.",
     ],
     [
         "environ_remote",
@@ -135,12 +135,12 @@ const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
         "Replace a todo plan completely. Create with revision=0 and immutable title; then reuse taskId and current revision. At most one item is in_progress; blocked/failed require detail. checkpoint stores durable handoff context. Update on state changes.",
     ],
     [
-        "workspace_goal",
-        "Manage the durable Workspace Goal. start creates; get reads; update edits; block/resume control continuation; finish completes an all-terminal Goal; stop exits Goal mode without stopping shell/tmux. The final terminal step completes the Goal automatically.",
+        "mcpapp_goal",
+        "Manage the durable MCP App Goal. start creates; get reads; update edits; block/resume control continuation; finish completes an all-terminal Goal; stop exits Goal mode without stopping shell/tmux. The final terminal step completes the Goal automatically.",
     ],
     [
-        "workspace_open",
-        "Re-present or restore the Live Workspace only when its App is inactive or dismissed. Normal startup is handled by environ_info.",
+        "mcpapp_open",
+        "Re-present or restore the MCP App only when its App is inactive or dismissed. Normal startup is handled by environ_info.",
     ],
 ]);
 
@@ -181,12 +181,12 @@ const titles: Readonly<Record<string, string>> = {
     tmux_run: "Run tmux task",
     todo_read: "Read task plan",
     todo_write: "Update task plan",
-    workspace_action: "Apply Workspace action",
-    workspace_goal: "Manage goal",
-    workspace_open: "Open Workspace",
-    workspace_reconnect: "Reconnect Workspace",
-    workspace_snapshot: "Read Workspace snapshot",
-    workspace_watch: "Watch Workspace",
+    mcpapp_action: "Apply MCP App action",
+    mcpapp_goal: "Manage goal",
+    mcpapp_open: "Open MCP App",
+    mcpapp_reconnect: "Reconnect MCP App",
+    mcpapp_snapshot: "Read MCP App snapshot",
+    mcpapp_watch: "Watch MCP App",
 };
 
 export function mcpToolTitle(toolName: string, meta?: JsonValue): string {
@@ -197,9 +197,9 @@ export function mcpToolTitle(toolName: string, meta?: JsonValue): string {
 const invocationStatuses: Readonly<
     Record<string, { invoked: string; invoking: string }>
 > = {
-    workspace_open: {
-        invoked: "Workspace ready",
-        invoking: "Opening Workspace…",
+    mcpapp_open: {
+        invoked: "MCP App ready",
+        invoking: "Opening MCP App…",
     },
 };
 

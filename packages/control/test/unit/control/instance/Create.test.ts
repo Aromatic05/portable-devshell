@@ -188,7 +188,7 @@ test("instance create restores configuration and registry when MCP registration 
             registerInstance() {
                 throw new Error("MCP registration failed");
             },
-            async retireWorkspaceApp() {},
+            async retireMcpApp() {},
             unregisterInstance() {},
         },
         setConfig: (nextConfig) => {

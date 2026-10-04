@@ -109,7 +109,7 @@ export class McpEndpointCatalog {
                       provenanceTool,
                       modelFacing
                           ? undefined
-                          : "Internal Context ID carried by the Workspace App.",
+                          : "Internal Context ID carried by the MCP App.",
                   )
                 : provenanceTool;
         const exposed = isBootstrapTool(contextualTool.name)

@@ -34,7 +34,7 @@ export interface McpEndpointEnvironmentHandshake {
     };
 }
 
-export interface McpWorkspaceEventSlice {
+export interface McpAppEventSlice {
     events: InstanceEventRecord[];
     gap: boolean;
     lastSeq: number;
@@ -109,10 +109,10 @@ interface McpGatewayShape {
         ctxId: string,
         excludeCallId?: string,
     ): boolean;
-    readWorkspaceEvents?(
+    readMcpAppEvents?(
         instance: string,
         fromSeq: number,
-    ): Promise<McpWorkspaceEventSlice>;
+    ): Promise<McpAppEventSlice>;
     controlTodo?(
         instance: string,
         taskId: string,
@@ -198,10 +198,10 @@ export type McpInstancePort = Pick<
     | "touchTemporaryDirectory"
 >;
 
-export type McpWorkspaceEventPort = Pick<McpGatewayShape, "readWorkspaceEvents">;
-export type McpWorkspacePort = McpTaskPort &
+export type McpAppEventPort = Pick<McpGatewayShape, "readMcpAppEvents">;
+export type McpAppPort = McpTaskPort &
     Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls"> &
-    McpWorkspaceEventPort & {
+    McpAppEventPort & {
         approval?: McpApprovalPort;
     };
 
@@ -210,17 +210,17 @@ export interface McpInstanceGateway
     extends McpToolCallPort,
         McpTaskPort,
         McpInstancePort,
-        McpWorkspaceEventPort {
+        McpAppEventPort {
     approval?: McpApprovalPort;
 }
 
-export type McpWorkspaceActionGateway = McpWorkspacePort & {
+export type McpAppActionGateway = McpAppPort & {
     approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">>;
 };
 
-export function isMcpWorkspaceActionGateway(
-    gateway: McpWorkspacePort | undefined,
-): gateway is McpWorkspaceActionGateway {
+export function isMcpAppActionGateway(
+    gateway: McpAppPort | undefined,
+): gateway is McpAppActionGateway {
     return (
         gateway !== undefined &&
         gateway.approval !== undefined &&
@@ -229,28 +229,28 @@ export function isMcpWorkspaceActionGateway(
     );
 }
 
-export function requireMcpWorkspaceActionGateway(
-    gateway: McpWorkspacePort | undefined,
+export function requireMcpAppActionGateway(
+    gateway: McpAppPort | undefined,
     instanceName: string,
-): McpWorkspaceActionGateway {
-    if (isMcpWorkspaceActionGateway(gateway)) return gateway;
+): McpAppActionGateway {
+    if (isMcpAppActionGateway(gateway)) return gateway;
     throw new Error(
-        `Workspace interaction backend is unavailable for ${instanceName}.`,
+        `MCP App interaction backend is unavailable for ${instanceName}.`,
     );
 }
 
 
-export type McpWorkspaceGateway = McpWorkspaceActionGateway &
+export type McpAppGateway = McpAppActionGateway &
     Required<Pick<McpToolCallPort, "readToolCalls" | "hasActiveToolCalls">> &
-    Required<Pick<McpWorkspaceEventPort, "readWorkspaceEvents">>;
+    Required<Pick<McpAppEventPort, "readMcpAppEvents">>;
 
-export function isMcpWorkspaceGateway(
-    gateway: McpWorkspacePort | undefined,
-): gateway is McpWorkspaceGateway {
+export function isMcpAppGateway(
+    gateway: McpAppPort | undefined,
+): gateway is McpAppGateway {
     return (
-        isMcpWorkspaceActionGateway(gateway) &&
+        isMcpAppActionGateway(gateway) &&
         gateway.readToolCalls !== undefined &&
-        gateway.readWorkspaceEvents !== undefined
+        gateway.readMcpAppEvents !== undefined
     );
 }
 
@@ -279,6 +279,6 @@ export function requireMcpGoalGateway(
 ): McpGoalGateway {
     if (isMcpGoalGateway(gateway)) return gateway;
     throw new Error(
-        `Workspace Goal backend is unavailable for ${instanceName}.`,
+        `MCP App Goal backend is unavailable for ${instanceName}.`,
     );
 }

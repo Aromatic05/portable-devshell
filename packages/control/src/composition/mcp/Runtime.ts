@@ -31,7 +31,7 @@ export class McpRuntimeFactory {
             runtimeState?: McpRuntimeState;
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
-            workspaceAppLeaseFile?: string;
+            mcpAppLeaseFile?: string;
         },
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
@@ -77,10 +77,10 @@ export class McpRuntimeFactory {
                 ...(options?.toolProvenance === undefined
                     ? {}
                     : { toolProvenance: options.toolProvenance }),
-                ...(options?.workspaceAppLeaseFile === undefined
+                ...(options?.mcpAppLeaseFile === undefined
                     ? {}
                     : {
-                          workspaceAppLeaseFile: options.workspaceAppLeaseFile,
+                          mcpAppLeaseFile: options.mcpAppLeaseFile,
                       }),
             },
             options.runtimeState,
