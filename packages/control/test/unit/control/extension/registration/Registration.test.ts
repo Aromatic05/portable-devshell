@@ -12,7 +12,7 @@ import { nativeCommands } from "@portable-devshell/extension/cli";
 import { tools as mcpTools } from "@portable-devshell/extension/mcp";
 import { applications } from "@portable-devshell/extension/web";
 
-import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
+import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 import { ExtensionRegistrationBuilder } from "../../../../../src/extension/registration/Registration.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 

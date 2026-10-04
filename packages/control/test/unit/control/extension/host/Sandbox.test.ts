@@ -54,7 +54,7 @@ import {
 import {
     createWebApplicationSandboxBinding,
     createWebPageSandboxBinding,
-} from "../../../../../src/server/web/extension/Sandbox.ts";
+} from "../../../../../src/extension/api/point/web/Sandbox.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 const noopLogger: ExtensionLogger = {

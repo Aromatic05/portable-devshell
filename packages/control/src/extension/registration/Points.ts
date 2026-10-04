@@ -1,21 +1,35 @@
 import {
     cliModelCommandsExtensionPointDefinition,
     cliNativeCommandsExtensionPointDefinition,
-} from "../extension/api/point/cli/Declaration.js";
-import { controlRoutesExtensionPointDefinition } from "../extension/api/point/control/Declaration.js";
-import { mcpToolsExtensionPointDefinition } from "./mcp/extension/Point.js";
-import { tuiPagesExtensionPointDefinition } from "../extension/api/point/tui/Declaration.js";
+} from "../api/point/cli/Declaration.js";
+import {
+    cliModelCommandsSandboxCodec,
+    cliNativeCommandsSandboxCodec,
+} from "../api/point/cli/Sandbox.js";
+import { controlRoutesExtensionPointDefinition } from "../api/point/control/Declaration.js";
+import { controlRoutesSandboxCodec } from "../api/point/control/Sandbox.js";
+import { mcpToolsExtensionPointDefinition } from "../api/point/mcp/Declaration.js";
+import { mcpToolsSandboxCodec } from "../api/point/mcp/Sandbox.js";
 import {
     toolCallReviewExtensionPointDefinition,
     toolCallRewriteExtensionPointDefinition,
-} from "../extension/api/point/toolcall/Declaration.js";
-import { ExtensionPointRegistry } from "../extension/registration/PointRegistry.js";
-import type { ExtensionSandboxPointCodecRegistry } from "../extension/sandbox/bridge/PointCodec.js";
+} from "../api/point/toolcall/Declaration.js";
+import {
+    toolCallReviewSandboxCodec,
+    toolCallRewriteSandboxCodec,
+} from "../api/point/toolcall/Sandbox.js";
+import { tuiPagesExtensionPointDefinition } from "../api/point/tui/Declaration.js";
+import { tuiPagesSandboxCodec } from "../api/point/tui/Sandbox.js";
 import {
     webApplicationsExtensionPointDefinition,
     webPagesExtensionPointDefinition,
-} from "../server/web/extension/Point.js";
-import { createControlExtensionSandboxPointRegistry } from "./Sandbox.js";
+} from "../api/point/web/Declaration.js";
+import {
+    webApplicationsSandboxCodec,
+    webPagesSandboxCodec,
+} from "../api/point/web/Sandbox.js";
+import { ExtensionSandboxPointCodecRegistry } from "../sandbox/bridge/PointCodec.js";
+import { ExtensionPointRegistry } from "./PointRegistry.js";
 
 export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
     const points = new ExtensionPointRegistry([
@@ -34,6 +48,20 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
         createControlExtensionSandboxPointRegistry(),
     );
     return points;
+}
+
+export function createControlExtensionSandboxPointRegistry(): ExtensionSandboxPointCodecRegistry {
+    return new ExtensionSandboxPointCodecRegistry([
+        cliModelCommandsSandboxCodec,
+        cliNativeCommandsSandboxCodec,
+        controlRoutesSandboxCodec,
+        mcpToolsSandboxCodec,
+        tuiPagesSandboxCodec,
+        toolCallReviewSandboxCodec,
+        toolCallRewriteSandboxCodec,
+        webApplicationsSandboxCodec,
+        webPagesSandboxCodec,
+    ]);
 }
 
 export function assertControlExtensionPointRegistryParity(

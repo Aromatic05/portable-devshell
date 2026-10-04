@@ -11,7 +11,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { createControlExtensionPointRegistry } from "../../../src/composition/Extension.ts";
+import { createControlExtensionPointRegistry } from "../../../src/extension/registration/Points.ts";
 import { CliExtensionCommandService } from "../../../src/extension/api/point/cli/command/Service.ts";
 import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/api/cap/context/Control.ts";
 import { ExtensionLoader } from "../../../src/extension/discovery/Loader.ts";

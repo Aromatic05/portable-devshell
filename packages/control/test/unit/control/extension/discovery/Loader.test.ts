@@ -14,7 +14,7 @@ import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker
 import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
-import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
+import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 
 import {
     ExtensionLoader,

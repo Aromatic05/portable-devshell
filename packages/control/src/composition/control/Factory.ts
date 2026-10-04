@@ -25,7 +25,7 @@ import { ExtensionLoader } from "../../extension/discovery/Loader.js";
 import { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../../extension/state/Store.js";
 import { ExtensionConfigControl } from "../../extension/api/cap/config/Control.js";
-import { createControlExtensionPointRegistry } from "../Extension.js";
+import { createControlExtensionPointRegistry } from "../../extension/registration/Points.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ArtifactModule } from "../../artifact/Module.js";
 import { ControlRuntime } from "./Runtime.js";

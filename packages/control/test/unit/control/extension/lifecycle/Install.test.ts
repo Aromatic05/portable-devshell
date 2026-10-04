@@ -18,7 +18,7 @@ import {
 } from "@portable-devshell/extension";
 import { controlErrorCodes } from "@portable-devshell/shared";
 
-import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
+import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/artifact/Archive.ts";
 import { ExtensionHost } from "../../../../../src/extension/host/Host.ts";
 import { ExtensionControlService } from "../../../../../src/extension/manager/Operations.ts";

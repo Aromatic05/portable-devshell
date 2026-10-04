@@ -10,17 +10,14 @@ import {
     presentToolCallResult,
     type ToolCallHooks,
 } from "@portable-devshell/core/toolcall";
-import {
-    mcpAllInstances,
-    mcpTools,
-} from "@portable-devshell/mcp/tool";
+import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
 import type {
     JsonValue,
     ToolCallPresentation,
     ToolDefinition,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../extension/host/Host.js";
+import type { ExtensionHost } from "../../../host/Host.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<
@@ -73,10 +70,16 @@ export class McpExtensionService {
                                     instance: value.context.instance,
                                     ...(value.context.requestId === undefined
                                         ? {}
-                                        : { requestId: value.context.requestId }),
+                                        : {
+                                              requestId:
+                                                  value.context.requestId,
+                                          }),
                                     ...(value.context.workspace === undefined
                                         ? {}
-                                        : { workspace: value.context.workspace }),
+                                        : {
+                                              workspace:
+                                                  value.context.workspace,
+                                          }),
                                 },
                                 signal,
                             );

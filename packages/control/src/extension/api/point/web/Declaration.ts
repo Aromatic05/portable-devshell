@@ -15,7 +15,7 @@ import type {
 import type {
     ExtensionPointDefinition,
     ExtensionPointValidationContext,
-} from "../../../extension/registration/PointRegistry.js";
+} from "../../../registration/PointRegistry.js";
 import {
     createWebApplicationSandboxBinding,
     createWebPageSandboxBinding,

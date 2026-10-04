@@ -4,8 +4,8 @@ import test from "node:test";
 import {
     assertControlExtensionPointRegistryParity,
     createControlExtensionPointRegistry,
-} from "../../../../src/composition/Extension.ts";
-import { createControlExtensionSandboxPointRegistry } from "../../../../src/composition/Sandbox.ts";
+} from "../../../../src/extension/registration/Points.ts";
+import { createControlExtensionSandboxPointRegistry } from "../../../../src/extension/registration/Points.ts";
 
 test("Control composes the same Extension Point ids for host validation and sandbox codecs", () => {
     const points = createControlExtensionPointRegistry();
