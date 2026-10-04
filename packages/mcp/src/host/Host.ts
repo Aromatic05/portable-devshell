@@ -6,18 +6,11 @@ import type {
 } from "../auth/Config.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { ContextRuntimePort } from "../context/Runtime.js";
-import {
-    isMcpAppActionGateway,
-    type McpInstanceGateway,
-} from "../instance/Gateway.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
-import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
-import { createMcpAppMcpExtension } from "../endpoint/extension/McpApp.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
-import { installMcpAppLiveRoute } from "../mcpapp/Route.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
 import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
 import { McpAppActionStore } from "../mcpapp/ActionStore.js";
@@ -59,7 +52,6 @@ export interface WorkerInstanceLike {
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
     contextMode?: ControlMcpContextMode;
-    gateway?: McpInstanceGateway;
     name: string;
     path?: string;
     worker: WorkerInstanceLike;
@@ -80,7 +72,6 @@ export interface McpHostConfig {
 
 export class McpRuntimeState {
     readonly contexts: ContextRuntimePort;
-    readonly gateways = new Map<string, McpInstanceGateway | undefined>();
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly workers = new Map<string, WorkerInstanceLike>();
@@ -170,12 +161,6 @@ export class McpRuntimeState {
     }
 
     retainInstances(names: ReadonlySet<string>): void {
-        for (const name of this.gateways.keys()) {
-            if (names.has(name)) continue;
-            this.gateways.delete(name);
-            this.workers.delete(name);
-            this.mcpAppPresence.revokeInstance(name);
-        }
     }
 }
 
@@ -185,7 +170,6 @@ export class McpHost {
     readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
-    readonly #gateways: Map<string, McpInstanceGateway | undefined>;
     readonly #liveRouteCleanups = new Map<string, () => void>();
     readonly #runtimeState: McpRuntimeState;
     readonly #workers: Map<string, WorkerInstanceLike>;
@@ -198,7 +182,6 @@ export class McpHost {
         this.#config = config;
         this.#runtimeState = state;
         this.#contextRegistry = state.contexts.registry;
-        this.#gateways = this.#runtimeState.gateways;
         this.#workers = this.#runtimeState.workers;
         this.#mcpAppLeases = this.#runtimeState.mcpAppLeases;
         this.#workspaceActions = this.#runtimeState.workspaceActions;
@@ -261,25 +244,12 @@ export class McpHost {
     registerInstance(instance: McpHostInstanceConfig): void {
         this.#liveRouteCleanups.get(instance.name)?.();
         this.#liveRouteCleanups.delete(instance.name);
-        this.#gateways.set(instance.name, instance.gateway);
         this.#workers.set(instance.name, instance.worker);
-        const mcpApp =
-            instance.workspaceEnabled !== false &&
-            isMcpAppActionGateway(instance.gateway);
-        if (!mcpApp)
-            this.#mcpAppPresence.revokeInstance(instance.name);
-        const extensions = new McpExtensionRegistry(
-            mcpApp
-                ? [createMcpAppMcpExtension(this.#config.publicBaseUrl)]
-                : [],
-        );
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
-                extensions,
-                gateway: instance.gateway,
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
                 worker: instance.worker,
@@ -293,22 +263,6 @@ export class McpHost {
             binding,
             path,
         });
-        if (mcpApp) {
-            this.#liveRouteCleanups.set(
-                instance.name,
-                installMcpAppLiveRoute({
-                    contextRegistry: this.#contextRegistry,
-                    gateway: instance.gateway,
-                    host: this.#httpServer,
-                    instanceName: instance.name,
-                    leases: this.#mcpAppLeases,
-                    actions: this.#workspaceActions,
-                    presence: this.#mcpAppPresence,
-                    publicBaseUrl: this.#config.publicBaseUrl,
-                }),
-            );
-        }
-
         if (this.#started) {
             if (previous !== undefined && previous.path !== path) {
                 this.#httpServer.unregisterBinding(previous.path);
@@ -321,7 +275,6 @@ export class McpHost {
         this.#liveRouteCleanups.get(instanceName)?.();
         this.#liveRouteCleanups.delete(instanceName);
         this.#mcpAppPresence.revokeInstance(instanceName);
-        this.#gateways.delete(instanceName);
         this.#workers.delete(instanceName);
         const previous = this.#registry.unregister(instanceName);
         if (previous === undefined) {

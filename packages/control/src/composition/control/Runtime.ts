@@ -4,7 +4,6 @@ import {
     createToolCallRuntime,
     type ToolCallApi,
 } from "@portable-devshell/core/toolcall";
-import { registerApprovalToolCallReview } from "@portable-devshell/core/approval";
 
 import {
     controlRemoteRpcPath,
@@ -24,8 +23,6 @@ import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.
 import { ModelDevshellBroker } from "../../extension/api/point/cli/command/ModelBroker.js";
 import {
     ProcessSubscriptionManager,
-    installTodoTools,
-    installWaitToolCallRewrite,
 } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
@@ -141,15 +138,10 @@ export class ControlRuntime {
             new ToolCallSecretRewrite(options.config),
         );
         this.#toolCallHookUnregister = [
-            registerApprovalToolCallReview(toolCalls.hooks, (instance) =>
-                options.mcp.instanceDomains.approval(instance),
-            ),
             extensionToolCalls.install(toolCalls.hooks),
         ];
         this.#mcp = options.mcp;
-        this.#mcp.instanceGateway.bindToolCalls(this.#toolCalls);
         const extensionMcpTools = new McpExtensionService(this.#extensions);
-        this.#mcp.instanceGateway.setExtensionService(extensionMcpTools);
         this.#toolCallHookUnregister.push(
             extensionMcpTools.install(toolCalls.hooks),
         );
@@ -171,31 +163,11 @@ export class ControlRuntime {
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
         };
-        options.mcp.instanceGateway.setModelCommandCatalog(modelCommands);
         this.#toolCallHookUnregister.push(
             installContextTools(options.contexts, toolCalls.hooks, {
                 modelCommands,
             }),
         );
-        this.#toolCallHookUnregister.push(
-            installTodoTools(
-                toolCalls.hooks,
-                (instance) => options.mcp.instanceDomains.task(instance),
-            ),
-        );
-        this.#toolCallHookUnregister.push(
-            installWaitToolCallRewrite(
-                toolCalls.hooks,
-                (instance) => options.mcp.instanceDomains.task(instance)?.wait,
-            ),
-        );
-        const resumeWaits = () => {
-            for (const instance of options.instances.list())
-                options.mcp.instanceDomains.task(instance.name)?.wait.resume();
-        };
-        resumeWaits();
-        const stopWaitResume = options.instances.onChange(resumeWaits);
-        this.#toolCallHookUnregister.push(stopWaitResume);
         this.#toolCallHookUnregister.push(
             installArtifactTools(
                 options.artifact.service,
@@ -229,13 +201,11 @@ export class ControlRuntime {
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
             instanceCreate: options.mcp.instanceCreate,
-            instanceDomains: options.mcp.instanceDomains,
             instanceEditor: options.mcp.instanceEditor,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: new OperationalOverviewService({
-                instanceDomains: options.mcp.instanceDomains,
                 instances: options.instances,
                 oauthApprovals: () => options.mcp.oauthApprovals,
             }),

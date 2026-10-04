@@ -11,21 +11,6 @@ export * from "./endpoint/extension/Contract.js";
 export * from "./endpoint/extension/Registry.js";
 export * from "./endpoint/extension/McpApp.js";
 export * from "./endpoint/call/Port.js";
-export {
-    isMcpGoalGateway,
-    isMcpAppActionGateway,
-    isMcpAppGateway,
-    requireMcpGoalGateway,
-    requireMcpAppActionGateway,
-} from "./instance/Gateway.js";
-export type {
-    McpApprovalPort,
-    McpGoalGateway,
-    McpInstanceGateway,
-    McpAppActionGateway,
-    McpAppEventSlice,
-    McpAppGateway,
-} from "./instance/Gateway.js";
 export * from "./endpoint/mcpapp/Catalog.js";
 export * from "./endpoint/mcpapp/Handler.js";
 export * from "./endpoint/tool/Catalog.js";

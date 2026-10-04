@@ -21,7 +21,6 @@ import { HttpEndpointPreflight } from "../../server/endpoint/Http.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";
-import { McpInstanceGatewayControl } from "./Gateway.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
@@ -30,7 +29,6 @@ import type { ArtifactModule } from "../../artifact/Module.js";
 import type { ContextModule } from "../../context/Module.js";
 import type { ControlRuntimeState } from "../control/State.js";
 import type { InstanceDescriptor } from "@portable-devshell/core";
-import { InstanceDomainRuntime } from "../InstanceRuntime.js";
 
 export interface McpControlModuleOptions {
     contexts: ContextModule;
@@ -42,10 +40,8 @@ export interface McpControlModuleOptions {
 
 export class McpControlModule {
     readonly configEditor: ConfigEditorCoordinator;
-    readonly instanceDomains: InstanceDomainRuntime;
     readonly instanceEditor: InstanceEditorCoordinator;
     readonly instanceCreate: InstanceCreateCoordinator;
-    readonly instanceGateway: McpInstanceGatewayControl;
     readonly toolProvenance: ToolCallProvenanceStore;
     #publicBaseUrl?: string;
     #oauthApproval: ControlConfig["mcp"]["oauth2"];
@@ -89,17 +85,6 @@ export class McpControlModule {
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
-        this.instanceDomains = new InstanceDomainRuntime({
-            getConfig: () => options.state.requireConfig(),
-            homeDirectory: options.state.homeDirectory,
-            instances: options.state.instances,
-        });
-        this.instanceGateway = new McpInstanceGatewayControl({
-            getConfig: () => options.state.requireConfig(),
-            instanceDomains: this.instanceDomains,
-            instanceRegistry: options.state.instances,
-            toolProvenance: this.toolProvenance,
-        });
         const endpointFactory = new McpEndpointFactory();
         const instanceMcp: InstanceMcpRuntimePort = {
             registerInstance: (instance, auth, workspaceEnabled = true) => {
@@ -108,7 +93,6 @@ export class McpControlModule {
                 this.#host?.registerInstance(
                     endpointFactory.map(
                         descriptor,
-                        this.instanceGateway,
                         auth,
                         workspaceEnabled,
                     ),
@@ -171,15 +155,6 @@ export class McpControlModule {
             instanceRegistry: options.state.instances,
             mcp: instanceMcp,
         });
-        this.instanceEditor.registerInstanceDisableRetirement(async (instance) => {
-            await this.instanceDomains.retireDisabled(instance.name);
-        });
-        this.instanceEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.instanceDomains.retireDeleted(instance.name);
-        });
-        this.instanceEditor.registerInstanceDeleted(async (instance) => {
-            this.instanceDomains.close(instance.name);
-        });
         this.instanceCreate = new InstanceCreateCoordinator({
             assertCleanupSettled: async (instance) =>
                 await this.instanceEditor.assertInstanceCleanupSettled(instance),
@@ -191,12 +166,10 @@ export class McpControlModule {
             mutationRunner: options.state.configMutations,
             setConfig: (config) => options.state.setConfig(config),
         });
-        options.contexts.bindGateway(this.instanceGateway);
         this.#host = factory.wire(
             options.state.requireConfig(),
             options.state.instances,
             {
-                gateway: this.instanceGateway,
                 storageDir: options.controlPaths.oauthDir,
                 runtimeState: this.#runtimeState,
                 toolProvenance: this.toolProvenance,
@@ -266,7 +239,6 @@ export class McpControlModule {
         config: ControlConfig,
     ): Promise<McpHost | undefined> {
         const next = this.#factory.wire(config, this.#state.instances, {
-            gateway: this.instanceGateway,
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,

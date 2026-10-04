@@ -54,7 +54,6 @@ export * from "./context/Module.js";
 
 import type {
     ApprovalApi,
-    InstanceDescriptor,
     InstanceRegistry,
     TaskApi,
 } from "@portable-devshell/core";
@@ -67,14 +66,6 @@ import {
     InstanceEditorCoordinator,
     type InstanceEditorCoordinatorOptions,
 } from "./instance/editor/index.js";
-import type {
-    InstanceDomainRuntimePort,
-    InstanceDomainServices,
-} from "./composition/InstanceRuntime.js";
-import {
-    ControlRuntime as ProductionControlRuntime,
-    type ControlRuntimeOptions,
-} from "./composition/control/Runtime.js";
 
 export function createTestApprovalApi(
     overrides: Partial<ApprovalApi> = {},
@@ -167,73 +158,6 @@ export function createTestTaskApi(
             resume() {},
         },
         ...overrides,
-    };
-}
-
-export function createTestInstanceDomainRuntime(options: {
-    approval?: (instance: string) => ApprovalApi | undefined;
-    services?: (descriptor: InstanceDescriptor) => Partial<InstanceDomainServices>;
-    task?: (instance: string) => TaskApi | undefined;
-} = {}): InstanceDomainRuntimePort {
-    const fallbackApproval = createTestApprovalApi();
-    const fallbackTask = createTestTaskApi();
-    const approval = (instance: string) =>
-        options.approval?.(instance) ?? fallbackApproval;
-    const task = (instance: string) => options.task?.(instance) ?? fallbackTask;
-    return {
-        approval,
-        task,
-        services(descriptor) {
-            const overrides = options.services?.(descriptor) ?? {};
-            return {
-                approval: overrides.approval ?? approval(descriptor.name)!,
-                task: overrides.task ?? task(descriptor.name)!,
-                ...(overrides.terminal === undefined
-                    ? {}
-                    : { terminal: overrides.terminal }),
-            };
-        },
-    };
-}
-
-/**
- * Test-only adapter for legacy ControlRuntime fixtures. Production requires
- * explicit Instance-domain wiring; this surface only fills omitted test ports.
- */
-export class ControlRuntime extends ProductionControlRuntime {
-    constructor(options: ControlRuntimeOptions) {
-        const mcp = options.mcp as unknown as {
-            configEditor?: unknown;
-            instanceDomains?: InstanceDomainRuntimePort;
-            instanceEditor?: unknown;
-        };
-        if (
-            mcp.instanceDomains !== undefined &&
-            mcp.instanceEditor !== undefined
-        ) {
-            super(options);
-            return;
-        }
-        super({
-            ...options,
-            mcp: {
-                ...mcp,
-                instanceDomains:
-                    mcp.instanceDomains ?? createTestInstanceDomainRuntime(),
-                instanceEditor:
-                    mcp.instanceEditor ??
-                    mcp.configEditor ??
-                    createTestInstanceEditor(),
-            } as never,
-        });
-    }
-}
-
-function createTestInstanceEditor() {
-    return {
-        registerInstanceGenerationRetirement() {
-            return () => undefined;
-        },
     };
 }
 

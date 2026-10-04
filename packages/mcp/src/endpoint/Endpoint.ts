@@ -7,7 +7,6 @@ import type {
 import type { McpAuthConfig } from "../auth/Config.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import { createMcpContextSelector } from "../context/Selector.js";
-import type { McpInstanceGateway } from "../instance/Gateway.js";
 import type { McpTool } from "./tool/Schema.js";
 import type { McpToolRegistry } from "./tool/Registry.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
@@ -24,14 +23,12 @@ export type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
 } from "./call/Port.js";
-export type { McpEndpointEnvironmentHandshake } from "../instance/Gateway.js";
 
 export interface McpEndpointWorkerOptions {
     auth?: McpAuthConfig;
     contextRegistry: ContextRegistryPort;
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
-    gateway?: McpInstanceGateway;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
     toolRegistry?: McpToolRegistry;
@@ -56,14 +53,12 @@ export class McpEndpointWorker {
                 this.#extensions.environmentPresentation()?.resourceUri,
             contextSelector,
             instanceName: options.instanceName,
-            instanceRoutingEnabled: options.gateway !== undefined,
             registry: options.toolRegistry,
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
             contextRegistry: options.contextRegistry,
             contextSelector,
-            gateway: options.gateway,
             instanceName: options.instanceName,
             toolProvenance: options.toolProvenance,
             worker: options.worker,

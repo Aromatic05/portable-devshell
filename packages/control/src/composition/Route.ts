@@ -40,7 +40,6 @@ import {
     type InstanceConfigRouteModuleOptions,
 } from "../instance/Route.js";
 import { InstanceChangeHub } from "../instance/Change.js";
-import type { InstanceDomainRuntimePort } from "./InstanceRuntime.js";
 import {
     createContextRouteModule,
     type ContextAdminPort,
@@ -73,7 +72,6 @@ export interface ControlRouteCompositionOptions {
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
-    instanceDomains: InstanceDomainRuntimePort;
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
@@ -250,18 +248,14 @@ export class ControlRouteComposition {
         }
 
         for (const descriptor of descriptors) {
-            const domains = this.#options.instanceDomains.services(descriptor);
             definitions.push(
                 createInstanceHost({
-                    approval: domains.approval,
                     descriptor,
                     extensionModules:
                         this.#options.extensionRoutes?.modules("instance") ??
                         [],
                     registry: this.#options.instances,
                     subscriptions: this.#subscriptions,
-                    task: domains.task,
-                    terminal: domains.terminal,
                     terminalMaxUnackedBytes:
                         this.#options.terminalMaxUnackedBytes,
                     terminals: this.#terminals,

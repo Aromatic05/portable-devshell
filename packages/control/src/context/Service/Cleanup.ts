@@ -6,7 +6,6 @@ import type {
 import type {
     ContextCleanupPort,
     ContextInstanceCleanupPort,
-    ContextInstancePort,
 } from "../Port.js";
 export interface ContextPresentationPort {
     revokeContext(ctxId: string): Promise<void>;
@@ -24,7 +23,6 @@ export class ContextCleanupService {
     readonly #registry: ContextCleanupLedgerPort &
         Pick<ContextRecordPort, "list">;
     #presentation?: ContextPresentationPort;
-    readonly #gateway: (instance: string) => ContextInstancePort | undefined;
     readonly #releaseLocalAlerts?: (
         instance: string,
         workspace: string,
@@ -34,11 +32,9 @@ export class ContextCleanupService {
     constructor(options: {
         contextRegistry: ContextCleanupLedgerPort &
             Pick<ContextRecordPort, "list">;
-        gateway(instance: string): ContextInstancePort | undefined;
         releaseLocalAlerts?(instance: string, workspace: string): Promise<void>;
     }) {
         this.#registry = options.contextRegistry;
-        this.#gateway = options.gateway;
         this.#releaseLocalAlerts = options.releaseLocalAlerts;
     }
 
@@ -144,88 +140,6 @@ export class ContextCleanupService {
             await this.#presentation?.revokeContext(terminal.ctxId);
         });
 
-        const reconciledInstances = new Set<string>();
-        for (const environment of terminal.environments) {
-            const gateway = this.#gateway(environment.instance);
-            if (
-                gateway !== undefined &&
-                !reconciledInstances.has(environment.instance)
-            ) {
-                reconciledInstances.add(environment.instance);
-                if (
-                    gateway.readGoal !== undefined &&
-                    gateway.manageGoal !== undefined
-                ) {
-                    const manageGoal = gateway.manageGoal;
-                    const goal = await gateway
-                        .readGoal(environment.instance, terminal.ctxId)
-                        .catch((error) => {
-                            failures.push(error);
-                            return undefined;
-                        });
-                    if (
-                        goal?.status === "active" ||
-                        goal?.status === "blocked"
-                    ) {
-                        await cleanup(async () => {
-                            await manageGoal(
-                                environment.instance,
-                                { action: "stop" },
-                                terminal.ctxId,
-                            );
-                        });
-                    }
-                }
-                if (gateway.contextTerminated !== undefined) {
-                    await cleanup(async () => {
-                        await gateway.contextTerminated!(
-                            environment.instance,
-                            terminal.ctxId,
-                            terminalReason,
-                        );
-                    });
-                }
-                if (gateway.approval !== undefined) {
-                    const approvals = await gateway.approval
-                        .listApprovals(environment.instance)
-                        .catch((error) => {
-                            failures.push(error);
-                            return [];
-                        });
-                    for (const approval of approvals) {
-                        if (
-                            approval.ctxId !== terminal.ctxId ||
-                            approval.status !== "pending"
-                        ) {
-                            continue;
-                        }
-                        if (gateway.approval.cancelApproval !== undefined) {
-                            await cleanup(async () => {
-                                await gateway.approval!.cancelApproval!(
-                                    environment.instance,
-                                    approval.approvalId,
-                                    "Context " +
-                                        terminal.ctxId +
-                                        " was " +
-                                        terminalReason +
-                                        ".",
-                                );
-                            });
-                        } else if (
-                            gateway.approval.decideApproval !== undefined
-                        ) {
-                            await cleanup(async () => {
-                                await gateway.approval!.decideApproval!(
-                                    environment.instance,
-                                    approval.approvalId,
-                                    "deny",
-                                );
-                            });
-                        }
-                    }
-                }
-            }
-
             if (environment.workspace !== undefined) {
                 await cleanup(async () => {
                     await this.#registry.recordEnvironmentCleanup(
@@ -295,10 +209,6 @@ export class ContextCleanupService {
                 `Instance ${cleanup.instance} still has active Context associations during retirement cleanup.`,
             );
         }
-        const gateway =
-            retirement === undefined
-                ? this.#gateway(cleanup.instance)
-                : undefined;
         if (cleanup.kind === "instance_reference") {
             if (
                 contexts.some(
@@ -317,12 +227,6 @@ export class ContextCleanupService {
                 await retirement.releaseInstanceReference(ctxId);
                 return true;
             }
-            if (gateway?.releaseInstanceReference === undefined)
-                throw new Error(
-                    `Instance ${cleanup.instance} is unavailable for Context reference cleanup.`,
-                );
-            await gateway.releaseInstanceReference(cleanup.instance, ctxId);
-            return true;
         }
         const ownsActiveScope = contexts.some(
             (context) =>
@@ -353,10 +257,6 @@ export class ContextCleanupService {
             throw new Error("Alert cleanup requires a workspace.");
         if (retirement !== undefined) {
             await retirement.releaseAlerts(cleanup.workspace);
-            return true;
-        }
-        if (gateway !== undefined) {
-            await gateway.releaseAlerts(cleanup.instance, cleanup.workspace);
             return true;
         }
         if (this.#releaseLocalAlerts !== undefined) {

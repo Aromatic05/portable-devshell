@@ -164,14 +164,12 @@ export class ControlRuntimeFactory {
                             ...input,
                             authority: "worker.delegate",
                             instances: options.state.instances,
-                            toolCalls: mcp.instanceGateway,
                         }),
                     workerExecuteFactory: (input) =>
                         new ExtensionWorkerCapabilityControl({
                             ...input,
                             authority: "worker.execute",
                             instances: options.state.instances,
-                            toolCalls: mcp.instanceGateway,
                         }),
                 }),
                 registry: new ExtensionRegistryStore(

@@ -4,20 +4,16 @@ import {
     OperationalOverviewActivity,
     OperationalOverviewAlert,
     OperationalOverviewInstance,
-    OperationalOverviewTodo,
     type OperationalOverviewWorker,
 } from "@portable-devshell/shared";
 
 import type {
-    ApprovalApi,
     InstanceDescriptor,
-    TaskApi,
 } from "@portable-devshell/core";
 import {
     createCollectionFailure,
     createRecentFailureAlert,
     createSnapshotAlerts,
-    createTodoAlerts,
     selectOperationalActivity,
 } from "./Policy.js";
 
@@ -28,24 +24,15 @@ export interface OperationalOverviewInstanceCollection {
     alerts: OperationalOverviewAlert[];
     failedCalls24h: number;
     instance: OperationalOverviewInstance;
-    todos: OperationalOverviewTodo[];
-}
-
-export interface OperationalOverviewDomainPort {
-    approval(instance: string): ApprovalApi | undefined;
-    task(instance: string): TaskApi | undefined;
 }
 
 export class OperationalOverviewInstanceCollector {
     readonly #activityLimit: number;
-    readonly #domains?: OperationalOverviewDomainPort;
 
     constructor(options?: {
         activityLimit?: number;
-        domains?: OperationalOverviewDomainPort;
     }) {
         this.#activityLimit = options?.activityLimit ?? 20;
-        this.#domains = options?.domains;
     }
 
     async collect(
@@ -54,24 +41,6 @@ export class OperationalOverviewInstanceCollector {
     ): Promise<OperationalOverviewInstanceCollection> {
         const snapshot = readSnapshot(descriptor);
         const alerts = createSnapshotAlerts(snapshot.name, snapshot);
-        const task = this.#domains?.task(descriptor.name);
-        const approval = this.#domains?.approval(descriptor.name);
-        let todos: OperationalOverviewTodo[] = [];
-        try {
-            todos = (task?.todo.summaries() ?? []).map((todo) => ({
-                ...todo,
-                instance: snapshot.name,
-            }));
-        } catch (error) {
-            alerts.push(
-                createCollectionFailure(snapshot.name, "todo summaries", error),
-            );
-        }
-        alerts.push(...createTodoAlerts(snapshot.name, todos));
-
-        const [approvalsResult, callsResult, failureResult] =
-            await Promise.allSettled([
-                approval?.listPendingApprovals() ?? Promise.resolve([]),
                 descriptor.worker.readToolCalls({
                     includeInput: false,
                     includeOutput: false,
@@ -82,31 +51,6 @@ export class OperationalOverviewInstanceCollector {
                     now.getTime() - failureWindowMs,
                     now.getTime(),
                 ),
-            ]);
-        const pendingApprovals =
-            approvalsResult.status === "fulfilled"
-                ? approvalsResult.value.length
-                : 0;
-        if (pendingApprovals > 0) {
-            alerts.push({
-                detail: `${pendingApprovals} tool call approval${pendingApprovals === 1 ? "" : "s"} waiting.`,
-                id: `approval.pending:${descriptor.name}`,
-                instance: snapshot.name,
-                kind: "approval.pending",
-                severity: "attention",
-                title: "Tool approval required",
-            });
-        }
-        if (approvalsResult.status === "rejected") {
-            alerts.push(
-                createCollectionFailure(
-                    snapshot.name,
-                    "tool approvals",
-                    approvalsResult.reason,
-                ),
-            );
-        }
-
         const calls =
             callsResult.status === "fulfilled" ? callsResult.value : [];
         const toolCallFailure =
@@ -141,7 +85,6 @@ export class OperationalOverviewInstanceCollector {
             instance: {
                 mcpEnabled: descriptor.mcpEnabled,
                 name: snapshot.name,
-                pendingApprovals,
                 provider: descriptor.provider,
                 snapshot,
                 ...(descriptor.worker.handshake === undefined
@@ -152,7 +95,6 @@ export class OperationalOverviewInstanceCollector {
                           ),
                       }),
             },
-            todos,
         };
     }
 }

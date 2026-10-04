@@ -15,7 +15,6 @@ import {
     readMcpContextInput,
     type McpContextSelector,
 } from "../../context/Selector.js";
-import type { McpInstanceGateway } from "../../instance/Gateway.js";
 import {
     presentMcpEndpointResult,
     throwIfMcpEndpointAborted,
@@ -42,13 +41,11 @@ export type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
 } from "../call/Port.js";
-export type { McpEndpointEnvironmentHandshake } from "../../instance/Gateway.js";
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
     contextRegistry: ContextRegistryPort;
     contextSelector?: McpContextSelector;
-    gateway?: McpInstanceGateway;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
@@ -63,7 +60,6 @@ export class McpEndpointDispatch {
     readonly #catalog: McpEndpointCatalog;
     readonly #contextRegistry: ContextRegistryPort;
     readonly #contextSelector: McpContextSelector;
-    readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
@@ -74,12 +70,10 @@ export class McpEndpointDispatch {
         this.#contextRegistry = options.contextRegistry;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
-        this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#toolProvenance = options.toolProvenance;
         this.#worker = options.worker;
         this.#workerHandler = new McpEndpointHandlerTool({
-            gateway: options.gateway,
             instanceName: options.instanceName,
         });
     }
@@ -277,13 +271,6 @@ export class McpEndpointDispatch {
         if (instance === this.#instanceName) {
             await this.#worker.appendMcpToolCalled(toolName, context);
             return;
-        }
-        if (this.#gateway !== undefined) {
-            await this.#gateway.appendMcpToolCalled(
-                instance,
-                toolName,
-                context,
-            );
         }
     }
 

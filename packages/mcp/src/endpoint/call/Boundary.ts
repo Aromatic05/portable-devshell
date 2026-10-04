@@ -6,11 +6,6 @@ import {
     type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
-import type {
-    McpEndpointEnvironmentHandshake,
-    McpInstancePort,
-} from "../../instance/Gateway.js";
-
 const DEFAULT_READY_WAIT_MS = 5_000;
 const DEFAULT_READY_POLL_MS = 50;
 
@@ -28,73 +23,10 @@ export function assertMcpEndpointReady(
     }
 }
 
-export async function waitForMcpGatewayReady(
-    gateway: Pick<McpInstancePort, "assertReady">,
-    instance: string,
-    signal?: AbortSignal,
-    options: { timeoutMs?: number; pollMs?: number } = {},
-): Promise<void> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_READY_WAIT_MS;
-    const pollMs = options.pollMs ?? DEFAULT_READY_POLL_MS;
-    const deadline = Date.now() + timeoutMs;
-
-    for (;;) {
-        try {
-            gateway.assertReady(instance);
-            return;
-        } catch (error) {
-            if (isNotReadyError(error)) {
-                throwIfMcpEndpointAborted(signal);
-                if (Date.now() >= deadline) {
-                    throw createRemoteError({
-                        code: runtimeErrorCodes.instanceNotReady,
-                        details: { instance, waitedMs: timeoutMs },
-                        message: `Instance ${instance} is not ready.`,
-                        retryable: false,
-                    });
-                }
-                await new Promise((resolve) => setTimeout(resolve, pollMs));
-                continue;
-            }
-            throw error;
-        }
-    }
-}
-
 function isNotReadyError(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error
         ? (error as { code?: unknown }).code === runtimeErrorCodes.instanceNotReady
         : false;
-}
-
-export function requireMcpEndpointGateway<T>(
-    gateway: T | undefined,
-    instanceName: string,
-): T {
-    if (gateway !== undefined) {
-        return gateway;
-    }
-    throw createRemoteError({
-        code: runtimeErrorCodes.toolSchemaUnavailable,
-        details: { instance: instanceName },
-        message: `Control tools are not available for ${instanceName}.`,
-        retryable: false,
-    });
-}
-
-export function requireMcpEndpointEnvironment(
-    worker: { readonly handshake?: McpEndpointEnvironmentHandshake },
-    instanceName: string,
-): McpEndpointEnvironmentHandshake {
-    if (worker.handshake !== undefined) {
-        return worker.handshake;
-    }
-    throw createRemoteError({
-        code: runtimeErrorCodes.workerHandshakeFailed,
-        details: { instance: instanceName },
-        message: `Environment information is unavailable for ${instanceName}.`,
-        retryable: true,
-    });
 }
 
 export function mcpEndpointToolNotExposed(

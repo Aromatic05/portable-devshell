@@ -1,10 +1,5 @@
 import type { JsonValue, McpContextEnvironment, McpContextExternalBinding } from "@portable-devshell/shared";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type {
-    McpApprovalPort,
-    McpInstancePort,
-    McpTaskPort,
-} from "../instance/Gateway.js";
 
 export interface PreparedEnvironmentFacts {
     projectMemoryAgentFile: string;
@@ -35,21 +30,5 @@ export interface ContextInstanceCleanupPort {
     releaseAlerts(workspace: string): Promise<void>;
     releaseInstanceReference(ctxId: string): Promise<void>;
 }
-
-export type ContextInstancePort = Pick<
-    McpInstancePort,
-    | "assertReady"
-    | "connectInstance"
-    | "contextTerminated"
-    | "prepareWorkspace"
-    | "readAlerts"
-    | "releaseAlerts"
-    | "releaseInstanceReference"
-    | "touchAlerts"
-    | "touchTemporaryDirectory"
-> &
-    Pick<McpTaskPort, "readGoal" | "manageGoal"> & {
-        approval?: McpApprovalPort;
-    };
 
 export type { ContextRegistryPort };

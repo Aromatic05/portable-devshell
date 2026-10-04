@@ -2,7 +2,6 @@ import {
     McpHost,
     McpRuntimeState,
     resolvePortableDevshellApplicationVersion,
-    type McpInstanceGateway,
     type McpOAuthApprovalConfig,
     type McpToolProvenanceRecorder,
 } from "@portable-devshell/mcp";
@@ -27,7 +26,6 @@ export class McpRuntimeFactory {
         config: ControlConfig,
         registry: InstanceRegistry,
         options?: {
-            gateway?: McpInstanceGateway;
             runtimeState?: McpRuntimeState;
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
@@ -52,7 +50,6 @@ export class McpRuntimeFactory {
                           );
                       return this.#mapper.map(
                           descriptor,
-                          options?.gateway,
                           instance.mcp.auth,
                           instance.workspace.enabled,
                       );
