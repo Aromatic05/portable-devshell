@@ -134,58 +134,16 @@ export class ArtifactModule {
         }
     }
 
-    async projectExtensionAsset(
-        extensionId: string,
-        input: {
-            overwrite?: boolean;
-            signal?: AbortSignal;
-            sourcePath: string;
-            target: ExtensionAssetProjectionInput["target"];
-        },
-    ): Promise<ExtensionAssetProjectionResult> {
-        input.signal?.throwIfAborted();
-        const descriptor = this.#instances.get(input.target.instance);
-        if (descriptor === undefined) {
-            throw new Error(
-                `Unknown Extension asset projection instance: ${input.target.instance}.`,
-            );
-        }
-        const resource = await descriptor.worker.prepareExtensionResource({
-            collection: input.target.collection,
-            extensionId,
-        });
-        return await this.transferExtensionAsset(extensionId, {
-            ...(input.overwrite === undefined
-                ? {}
-                : { overwrite: input.overwrite }),
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-            sourcePath: input.sourcePath,
-            target: {
-                instance: input.target.instance,
-                path: `./${input.target.key}`,
-                workspace: resource.directory,
-            },
-        });
-    }
-
     #resolveEndpoint(name: string, authorityInstance?: string) {
-        if (name !== "host") return this.#instances.get(name)?.worker;
+        if (name !== "host") return undefined;
         if (authorityInstance === undefined || this.#bridge === undefined)
             return undefined;
-        if (this.#extensionAssetAuthorities.has(authorityInstance)) {
-            return this.#bridge.endpointFor({
-                authorityInstance,
-                provider: "local",
-                securityMode: "disabled",
-            });
-        }
-        const authority = this.#instances.get(authorityInstance);
-        if (authority === undefined) return undefined;
-        const snapshot = authority.worker.snapshot();
+        if (!this.#extensionAssetAuthorities.has(authorityInstance))
+            return undefined;
         return this.#bridge.endpointFor({
             authorityInstance,
-            provider: authority.provider,
-            securityMode: snapshot.effectiveSecurityMode ?? "disabled",
+            provider: "local",
+            securityMode: "disabled",
         });
     }
 }

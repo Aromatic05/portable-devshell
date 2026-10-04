@@ -15,7 +15,10 @@ import {
 
 import { requirePort, routeModule } from "../server/Route.js";
 import type { InstanceChange, InstanceChangeHub } from "./Change.js";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import {
+    InstanceConnectionService,
+    type InstanceRegistry,
+} from "@portable-devshell/core";
 
 export interface InstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
@@ -45,6 +48,7 @@ export interface InstanceConfigRouteModuleOptions {
 export function createInstanceConfigRouteModule(
     options: InstanceConfigRouteModuleOptions,
 ): ControlPortDefinition {
+    const connections = new InstanceConnectionService(options.registry);
     const create = () =>
         requirePort(options.create, "Instance creation is not available.");
     const editor = () =>
@@ -52,6 +56,14 @@ export function createInstanceConfigRouteModule(
     return routeModule(
         "instance",
         {
+            acquireInstanceReference: async (request) => {
+                const input = readInstanceReference(request.payload);
+                const lease = await connections.acquire(
+                    input.instanceName,
+                    input.reference,
+                );
+                return lease.snapshot as unknown as JsonValue;
+            },
             listInstances: () => readInstances(options) as never,
             snapshotInstances: () => {
                 // Stable read: the envelope's revision must label exactly the
@@ -75,6 +87,11 @@ export function createInstanceConfigRouteModule(
                 await editor().disableInstance(request.payload),
             deleteInstance: async (request) =>
                 await editor().deleteInstance(request.payload),
+            releaseInstanceReference: async (request) => {
+                const input = readInstanceReference(request.payload);
+                await connections.release(input.instanceName, input.reference);
+                return {};
+            },
             updateInstance: async (request) =>
                 await editor().updateInstanceConfig(request.payload),
         },
@@ -145,6 +162,32 @@ export function createInstanceConfigRouteModule(
     );
 }
 
+function readInstanceReference(payload?: JsonValue): {
+    instanceName: string;
+    reference: string;
+} {
+    if (!isRecord(payload))
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
+            message: "instance reference operation requires an object payload.",
+            retryable: false,
+        });
+    const instanceName = payload.instanceName;
+    const reference = payload.reference;
+    if (
+        typeof instanceName !== "string" ||
+        instanceName.trim().length === 0 ||
+        typeof reference !== "string" ||
+        reference.trim().length === 0
+    )
+        throw createRemoteError({
+            code: controlErrorCodes.invalidTarget,
+            message: "instanceName and reference must be non-empty strings.",
+            retryable: false,
+        });
+    return { instanceName: instanceName.trim(), reference: reference.trim() };
+}
+
 function readInstances(
     options: InstanceConfigRouteModuleOptions,
 ): InstanceListEntry[] {
@@ -156,19 +199,11 @@ function readInstances(
             name: descriptor.name,
         }));
     return configured.map((instance): InstanceListEntry => {
-        const descriptor = options.registry.get(instance.name);
         return {
             enabled: instance.enabled,
-            ...(descriptor?.worker.handshake?.homeDirectory === undefined
-                ? {}
-                : {
-                      homeDirectory: descriptor.worker.handshake.homeDirectory,
-                  }),
             mcpEnabled: instance.mcp.enabled,
             name: instance.name,
-            snapshot:
-                descriptor?.worker.snapshot() ??
-                inactiveSnapshot(instance.name),
+            snapshot: inactiveSnapshot(instance.name),
         };
     });
 }

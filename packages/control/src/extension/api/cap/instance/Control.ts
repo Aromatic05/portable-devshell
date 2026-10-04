@@ -71,73 +71,13 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
     async list(): Promise<readonly ExtensionInstanceRecord[]> {
         this.#assertAllowed();
         return this.#listConfigured().map((configured) => {
-            const descriptor = this.#instances.get(configured.name);
             return {
                 enabled: configured.enabled,
                 mcpEnabled: configured.mcpEnabled,
                 name: configured.name,
                 provider: configured.provider,
-                ...(descriptor === undefined
-                    ? {}
-                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
             };
         });
-    }
-
-    async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        return toSnapshot(this.#require(name).worker.snapshot());
-    }
-
-    async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        return toSnapshot(await this.#require(name).worker.refreshStatus());
-    }
-
-    async readLogs(
-        name: string,
-        query?: ExtensionInstanceLogQuery,
-    ): Promise<readonly ExtensionInstanceLogEntry[]> {
-        this.#assertAllowed();
-        return (await this.#require(name).worker.readLogs(query)).map(
-            toLogEntry,
-        );
-    }
-
-    async watchEvents(
-        name: string,
-        watch: ExtensionInstanceEventWatch,
-    ): Promise<void> {
-        this.#assertAllowed();
-        if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 1) {
-            throw new TypeError(
-                "Extension instance.observe watchEvents fromSeq must be a positive safe integer.",
-            );
-        }
-        const eventTypes =
-            watch.eventTypes === undefined
-                ? undefined
-                : new Set(watch.eventTypes.map(requireEventType));
-        const descriptor = this.#require(name);
-        await this.#subscriptions.watch(
-            descriptor.name,
-            descriptor.worker,
-            watch.fromSeq,
-            watch.signal,
-            {
-                ...(eventTypes === undefined
-                    ? {}
-                    : {
-                          projectEvent: (event) =>
-                              eventTypes.has(event.type) ? event : undefined,
-                      }),
-                onEvent: async (event) => await watch.onEvent(toEvent(event)),
-                onGap: async (gap) => {
-                    await watch.onGap?.({ ...gap });
-                    return gap.nextSeq;
-                },
-            },
-        );
     }
 
     #require(name: string) {
@@ -212,31 +152,6 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
         await this.#editor.deleteInstance({ instanceName: requireName(name) });
     }
 
-    async start(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        const descriptor = this.#require(name);
-        if (!descriptor.enabled) {
-            throw createRemoteError({
-                code: runtimeErrorCodes.instanceConflict,
-                details: { instance: descriptor.name, operation: "start" },
-                message: `Instance ${descriptor.name} is disabled.`,
-                retryable: false,
-            });
-        }
-        const snapshot = await descriptor.worker.start();
-        this.#instances.markOwned(descriptor.name);
-        return toSnapshot(snapshot);
-    }
-
-    async stop(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        const descriptor = this.#require(name);
-        const snapshot = await descriptor.worker.stop();
-        this.#instances.clearOwned(descriptor.name);
-        if (!descriptor.enabled) this.#instances.delete(descriptor.name);
-        return toSnapshot(snapshot);
-    }
-
     #require(name: string) {
         return requireInstance(this.#instances, name);
     }
@@ -245,42 +160,6 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
         if (this.#allowed) return;
         throw new Error(
             `Extension ${this.#extensionId} did not declare the instance.manage capability.`,
-        );
-    }
-}
-
-/** Write-only publication into the host-owned Instance event stream. */
-export class ExtensionInstanceEventPublishCapabilityControl implements ExtensionInstanceEventPublishCapability {
-    readonly #allowed: boolean;
-    readonly #extensionId: string;
-    readonly #instances: InstanceRegistry;
-
-    constructor(options: {
-        allowed: boolean;
-        extensionId: string;
-        instances: InstanceRegistry;
-    }) {
-        this.#allowed = options.allowed;
-        this.#extensionId = options.extensionId;
-        this.#instances = options.instances;
-    }
-
-    async appendEvent(
-        name: string,
-        type: string,
-        data?: ExtensionJsonValue,
-    ): Promise<void> {
-        this.#assertAllowed();
-        await requireInstance(this.#instances, name).worker.appendControlEvent(
-            requireEventType(type),
-            data as JsonValue | undefined,
-        );
-    }
-
-    #assertAllowed(): void {
-        if (this.#allowed) return;
-        throw new Error(
-            `Extension ${this.#extensionId} did not declare the instance.events.publish capability.`,
         );
     }
 }

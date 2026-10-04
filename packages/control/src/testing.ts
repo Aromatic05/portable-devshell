@@ -9,7 +9,10 @@ export {
     type ConfigEditorCoordinatorOptions,
     type ConfigRuntimeChangeSet,
 } from "./config/editor/index.js";
-export { ConfigEngine, type ConfigEngineOptions } from "./config/engine/index.js";
+export {
+    ConfigEngine,
+    type ConfigEngineOptions,
+} from "./config/engine/index.js";
 export {
     InstanceEditorCoordinator,
     type InstanceEditorCoordinatorOptions,
@@ -34,8 +37,10 @@ export * from "./composition/mcp/Gateway.js";
 export * from "./composition/mcp/Endpoint.js";
 export * from "./composition/mcp/Runtime.js";
 export * from "./connection/Gateway.js";
-export * from "./connection/credential/Service.js";
-export * from "./connection/credential/Store.js";
+export {
+    ReverseCredentialService,
+    ReverseCredentialStore,
+} from "@portable-devshell/core";
 export * from "./connection/SseChannel.js";
 export * from "./composition/Route.js";
 export * from "./composition/InstanceRuntime.js";
@@ -60,7 +65,10 @@ import type {
 import { InstanceRegistry as CoreInstanceRegistry } from "@portable-devshell/core";
 import type { JsonValue, TodoReadResult } from "@portable-devshell/shared";
 import { ConfigEditorCoordinator as ProductionConfigEditorCoordinator } from "./config/editor/index.js";
-import { ConfigEngine, type ConfigEngineOptions } from "./config/engine/index.js";
+import {
+    ConfigEngine,
+    type ConfigEngineOptions,
+} from "./config/engine/index.js";
 import type { ConfigBatchInstancePort } from "./config/editor/Batch.js";
 import {
     InstanceEditorCoordinator,
@@ -96,9 +104,7 @@ export function createTestApprovalApi(
     };
 }
 
-export function createTestTaskApi(
-    overrides: Partial<TaskApi> = {},
-): TaskApi {
+export function createTestTaskApi(overrides: Partial<TaskApi> = {}): TaskApi {
     const empty: TodoReadResult = {
         items: [],
         revision: 0,
@@ -162,7 +168,9 @@ export function createTestTaskApi(
 }
 
 export type TestConfigEditorCoordinatorOptions = Partial<ConfigEngineOptions> &
-    Partial<Omit<InstanceEditorCoordinatorOptions, "engine" | "instanceRegistry">> & {
+    Partial<
+        Omit<InstanceEditorCoordinatorOptions, "engine" | "instanceRegistry">
+    > & {
         engine?: ConfigEngine;
         instanceRegistry?: InstanceRegistry;
         instances?: ConfigBatchInstancePort;
@@ -174,17 +182,28 @@ export class ConfigEditorCoordinator {
     readonly #instance: InstanceEditorCoordinator;
 
     constructor(options: TestConfigEditorCoordinatorOptions) {
-        const engine = options.engine ?? new ConfigEngine(requireEngineOptions(options));
+        const engine =
+            options.engine ?? new ConfigEngine(requireEngineOptions(options));
         this.#instance = new InstanceEditorCoordinator({
             engine,
-            instanceRegistry: options.instanceRegistry ?? new CoreInstanceRegistry([]),
-            ...(options.cleanupDebtFile === undefined ? {} : { cleanupDebtFile: options.cleanupDebtFile }),
-            ...(options.detachContextInstance === undefined ? {} : { detachContextInstance: options.detachContextInstance }),
-            ...(options.instanceConfigMapper === undefined ? {} : { instanceConfigMapper: options.instanceConfigMapper }),
+            instanceRegistry:
+                options.instanceRegistry ?? new CoreInstanceRegistry([]),
+            ...(options.cleanupDebtFile === undefined
+                ? {}
+                : { cleanupDebtFile: options.cleanupDebtFile }),
+            ...(options.detachContextInstance === undefined
+                ? {}
+                : { detachContextInstance: options.detachContextInstance }),
+            ...(options.instanceConfigMapper === undefined
+                ? {}
+                : { instanceConfigMapper: options.instanceConfigMapper }),
             ...(options.mcp === undefined ? {} : { mcp: options.mcp }),
             ...(options.reconcileContextInstanceCleanup === undefined
                 ? {}
-                : { reconcileContextInstanceCleanup: options.reconcileContextInstanceCleanup }),
+                : {
+                      reconcileContextInstanceCleanup:
+                          options.reconcileContextInstanceCleanup,
+                  }),
         });
         this.#config = new ProductionConfigEditorCoordinator({
             ...requireEngineOptions(options, engine),
@@ -193,32 +212,78 @@ export class ConfigEditorCoordinator {
         });
     }
 
-    getConfigView(): JsonValue { return this.#config.getConfigView(); }
-    validateConfigDraft(params?: JsonValue): JsonValue { return this.#config.validateConfigDraft(params); }
-    async updateCorePaths(patch: Readonly<Record<string, JsonValue>>): Promise<void> { await this.#config.updateCorePaths(patch); }
-    async updateConfig(params?: JsonValue): Promise<JsonValue> { return await this.#config.updateConfig(params); }
-    async updateMcpConfig(params?: JsonValue): Promise<JsonValue> { return await this.#config.updateMcpConfig(params); }
-    async updateWebConfig(params?: JsonValue): Promise<JsonValue> { return await this.#config.updateWebConfig(params); }
-    async updateInstanceConfig(params?: JsonValue): Promise<JsonValue> { return await this.#instance.updateInstanceConfig(params); }
-    async deleteInstance(params?: JsonValue): Promise<JsonValue> { return await this.#instance.deleteInstance(params); }
-    async enableInstance(params?: JsonValue): Promise<JsonValue> { return await this.#instance.enableInstance(params); }
-    async disableInstance(params?: JsonValue): Promise<JsonValue> { return await this.#instance.disableInstance(params); }
-    async assertInstanceCleanupSettled(instance: string): Promise<void> { await this.#instance.assertInstanceCleanupSettled(instance); }
-    async reconcileCleanupDebt(instance?: string): Promise<void> { await this.#instance.reconcileCleanupDebt(instance); }
+    getConfigView(): JsonValue {
+        return this.#config.getConfigView();
+    }
+    validateConfigDraft(params?: JsonValue): JsonValue {
+        return this.#config.validateConfigDraft(params);
+    }
+    async updateCorePaths(
+        patch: Readonly<Record<string, JsonValue>>,
+    ): Promise<void> {
+        await this.#config.updateCorePaths(patch);
+    }
+    async updateConfig(params?: JsonValue): Promise<JsonValue> {
+        return await this.#config.updateConfig(params);
+    }
+    async updateMcpConfig(params?: JsonValue): Promise<JsonValue> {
+        return await this.#config.updateMcpConfig(params);
+    }
+    async updateWebConfig(params?: JsonValue): Promise<JsonValue> {
+        return await this.#config.updateWebConfig(params);
+    }
+    async updateInstanceConfig(params?: JsonValue): Promise<JsonValue> {
+        return await this.#instance.updateInstanceConfig(params);
+    }
+    async deleteInstance(params?: JsonValue): Promise<JsonValue> {
+        return await this.#instance.deleteInstance(params);
+    }
+    async enableInstance(params?: JsonValue): Promise<JsonValue> {
+        return await this.#instance.enableInstance(params);
+    }
+    async disableInstance(params?: JsonValue): Promise<JsonValue> {
+        return await this.#instance.disableInstance(params);
+    }
+    async assertInstanceCleanupSettled(instance: string): Promise<void> {
+        await this.#instance.assertInstanceCleanupSettled(instance);
+    }
+    async reconcileCleanupDebt(instance?: string): Promise<void> {
+        await this.#instance.reconcileCleanupDebt(instance);
+    }
 
-    registerInstanceDeleteRetirement(listener: Parameters<InstanceEditorCoordinator["registerInstanceDeleteRetirement"]>[0]): () => void {
+    registerInstanceDeleteRetirement(
+        listener: Parameters<
+            InstanceEditorCoordinator["registerInstanceDeleteRetirement"]
+        >[0],
+    ): () => void {
         return this.#instance.registerInstanceDeleteRetirement(listener);
     }
-    registerInstanceDisableRetirement(listener: Parameters<InstanceEditorCoordinator["registerInstanceDisableRetirement"]>[0]): () => void {
+    registerInstanceDisableRetirement(
+        listener: Parameters<
+            InstanceEditorCoordinator["registerInstanceDisableRetirement"]
+        >[0],
+    ): () => void {
         return this.#instance.registerInstanceDisableRetirement(listener);
     }
-    registerInstanceGenerationRetirement(listener: Parameters<InstanceEditorCoordinator["registerInstanceGenerationRetirement"]>[0]): () => void {
+    registerInstanceGenerationRetirement(
+        listener: Parameters<
+            InstanceEditorCoordinator["registerInstanceGenerationRetirement"]
+        >[0],
+    ): () => void {
         return this.#instance.registerInstanceGenerationRetirement(listener);
     }
-    registerInstanceDisabled(listener: Parameters<InstanceEditorCoordinator["registerInstanceDisabled"]>[0]): () => void {
+    registerInstanceDisabled(
+        listener: Parameters<
+            InstanceEditorCoordinator["registerInstanceDisabled"]
+        >[0],
+    ): () => void {
         return this.#instance.registerInstanceDisabled(listener);
     }
-    registerInstanceDeleted(listener: Parameters<InstanceEditorCoordinator["registerInstanceDeleted"]>[0]): () => void {
+    registerInstanceDeleted(
+        listener: Parameters<
+            InstanceEditorCoordinator["registerInstanceDeleted"]
+        >[0],
+    ): () => void {
         return this.#instance.registerInstanceDeleted(listener);
     }
 }
@@ -227,28 +292,62 @@ function requireEngineOptions(
     options: TestConfigEditorCoordinatorOptions,
     fallback?: ConfigEngine,
 ): ConfigEngineOptions {
-    if (options.configStore !== undefined && options.getConfig !== undefined && options.setConfig !== undefined) {
+    if (
+        options.configStore !== undefined &&
+        options.getConfig !== undefined &&
+        options.setConfig !== undefined
+    ) {
         return {
             configStore: options.configStore,
             getConfig: options.getConfig,
             setConfig: options.setConfig,
-            ...(options.changeHub === undefined ? {} : { changeHub: options.changeHub }),
-            ...(options.getRestartControlRequired === undefined ? {} : { getRestartControlRequired: options.getRestartControlRequired }),
-            ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),
-            ...(options.markRestartControlRequired === undefined ? {} : { markRestartControlRequired: options.markRestartControlRequired }),
-            ...(options.mutationRunner === undefined ? {} : { mutationRunner: options.mutationRunner }),
-            ...(options.registry === undefined ? {} : { registry: options.registry }),
-            ...(options.runtimeApply === undefined ? {} : { runtimeApply: options.runtimeApply }),
-            ...(options.runtimePreflight === undefined ? {} : { runtimePreflight: options.runtimePreflight }),
-            ...(options.validator === undefined ? {} : { validator: options.validator }),
+            ...(options.changeHub === undefined
+                ? {}
+                : { changeHub: options.changeHub }),
+            ...(options.getRestartControlRequired === undefined
+                ? {}
+                : {
+                      getRestartControlRequired:
+                          options.getRestartControlRequired,
+                  }),
+            ...(options.homeDirectory === undefined
+                ? {}
+                : { homeDirectory: options.homeDirectory }),
+            ...(options.markRestartControlRequired === undefined
+                ? {}
+                : {
+                      markRestartControlRequired:
+                          options.markRestartControlRequired,
+                  }),
+            ...(options.mutationRunner === undefined
+                ? {}
+                : { mutationRunner: options.mutationRunner }),
+            ...(options.registry === undefined
+                ? {}
+                : { registry: options.registry }),
+            ...(options.runtimeApply === undefined
+                ? {}
+                : { runtimeApply: options.runtimeApply }),
+            ...(options.runtimePreflight === undefined
+                ? {}
+                : { runtimePreflight: options.runtimePreflight }),
+            ...(options.validator === undefined
+                ? {}
+                : { validator: options.validator }),
         };
     }
     if (fallback !== undefined) {
         return {
             configStore: { async write() {} },
-            getConfig: () => { throw new Error("Testing ConfigEngine owns configuration access."); },
+            getConfig: () => {
+                throw new Error(
+                    "Testing ConfigEngine owns configuration access.",
+                );
+            },
             setConfig() {},
         };
     }
-    throw new Error("Testing ConfigEditorCoordinator requires engine or configStore/getConfig/setConfig.");
+    throw new Error(
+        "Testing ConfigEditorCoordinator requires engine or configStore/getConfig/setConfig.",
+    );
 }

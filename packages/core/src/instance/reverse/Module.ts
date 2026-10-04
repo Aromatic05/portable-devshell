@@ -6,8 +6,8 @@ import {
 import type { InstanceRegistry } from "@portable-devshell/core";
 
 import { ReverseConnectionGateway } from "./Gateway.js";
-import { ReverseCredentialService } from "./credential/Service.js";
-import { ReverseCredentialStore } from "./credential/Store.js";
+import { ReverseCredentialService } from "@portable-devshell/core";
+import { ReverseCredentialStore } from "@portable-devshell/core";
 
 interface ConnectionLifecyclePort {
     registerInstanceDeleteRetirement(

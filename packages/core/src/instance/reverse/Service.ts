@@ -49,7 +49,6 @@ export class ReverseConnectionService {
             body.deviceCode,
         );
         const descriptor = this.#requireReverseInstance(credential.instance);
-        await descriptor.worker.setReverseEnrollmentState("enrolled");
         this.disconnect(descriptor.name);
         return {
             controllerUrl: this.#publicBaseUrl,
@@ -108,29 +107,6 @@ export class ReverseConnectionService {
                 if (!authenticated || active === undefined) {
                     throw invalidDeviceToken(identity.descriptor.name);
                 }
-
-                try {
-                    await identity.descriptor.worker.acceptReverseChannel(
-                        channel,
-                        {
-                            generation: identity.generation,
-                            transport,
-                        },
-                    );
-                    if (this.#active.get(identity.descriptor.name) !== active) {
-                        throw createRemoteError({
-                            code: runtimeErrorCodes.reverseConnectionSuperseded,
-                            message:
-                                "Reverse connection was superseded during activation.",
-                            retryable: true,
-                        });
-                    }
-                } catch (error) {
-                    if (this.#active.get(identity.descriptor.name) === active) {
-                        this.#active.delete(identity.descriptor.name);
-                    }
-                    throw error;
-                }
             });
         } catch (error) {
             channel.close();
@@ -146,10 +122,7 @@ export class ReverseConnectionService {
         channel: Channel,
     ): ActiveReverseConnection {
         const previous = this.#active.get(identity.descriptor.name);
-        const previousGeneration = Math.max(
-            previous?.generation ?? 0,
-            identity.descriptor.worker.snapshot().reverse?.generation ?? 0,
-        );
+        const previousGeneration = previous?.generation ?? 0;
 
         if (
             !Number.isSafeInteger(identity.generation) ||

@@ -36,9 +36,8 @@ export class ReverseCredentialService {
     }
 
     async createDeviceCode(instance: string): Promise<ReverseDeviceCodeResult> {
-        const descriptor = this.#requireReverseInstance(instance);
+        this.#requireReverseInstance(instance);
         const result = await this.#credentialStore.createDeviceCode(instance);
-        await descriptor.worker.setReverseEnrollmentState("pending");
         return {
             controllerUrl: this.#publicBaseUrl,
             ...result,
@@ -60,20 +59,17 @@ export class ReverseCredentialService {
     async revokeDeviceToken(
         instance: string,
     ): Promise<{ instance: string; revoked: true }> {
-        const descriptor = this.#requireReverseInstance(instance);
+        this.#requireReverseInstance(instance);
         await this.#credentialStore.revoke(instance);
         this.#disconnect?.(instance);
-        await descriptor.worker.setReverseEnrollmentState("revoked");
         return { instance, revoked: true };
     }
 
     async retireInstance(instance: string): Promise<void> {
-        const descriptor = this.#instanceRegistry.get(instance);
         await this.#credentialStore.retire(instance);
         this.#disconnect?.(instance);
         if (descriptor?.provider === "reverse")
-            await descriptor.worker.setReverseEnrollmentState("revoked");
-    }
+        }
 
     #requireReverseInstance(instance: string): ReverseInstancePort {
         const descriptor = this.#instanceRegistry.get(instance);

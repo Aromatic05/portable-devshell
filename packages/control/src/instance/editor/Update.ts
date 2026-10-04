@@ -14,7 +14,10 @@ import {
 import { InstanceFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { InstanceMcpRuntimePort } from "../Mcp.js";
-import { type ConfigEngine, type ConfigRuntimeChangeSet } from "../../config/engine/index.js";
+import {
+    type ConfigEngine,
+    type ConfigRuntimeChangeSet,
+} from "../../config/engine/index.js";
 import {
     requiresWorkerRebuild,
     toWorkerReconfigureInput,
@@ -52,7 +55,8 @@ export class InstanceReconfigurationCoordinator {
         cleanup: InstanceCleanupDebt,
     ) {
         this.#engine = options.engine;
-        this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceConfigMapper =
+            options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcp = options.mcp;
         this.#retirement = retirement;
@@ -367,9 +371,6 @@ export class InstanceReconfigurationCoordinator {
                         current,
                     );
                 }
-                await descriptor.worker.reconfigure(
-                    toWorkerReconfigureInput(existing),
-                );
                 descriptor.mcpContextMode = existing.mcp.contextMode;
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
@@ -439,7 +440,6 @@ export class InstanceReconfigurationCoordinator {
             );
             return;
         }
-        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.enabled = true;
         descriptor.mcpEnabled = instance.mcp.enabled;
@@ -470,26 +470,6 @@ export class InstanceReconfigurationCoordinator {
             instance.mcp.auth,
             instance.workspace.enabled,
         );
-    }
-
-    #assertInstanceStopped(
-        instanceName: string,
-        operation: "disable" | "update",
-    ): void {
-        const descriptor = this.#instanceRegistry.get(instanceName);
-        if (descriptor === undefined) return;
-        const snapshot = descriptor.worker.snapshot();
-        if (snapshot.daemonState === "stopped") return;
-        throw createRemoteError({
-            code: runtimeErrorCodes.instanceConflict,
-            details: {
-                instance: instanceName,
-                operation,
-                status: snapshot.status,
-            },
-            message: `Instance ${instanceName} must be stopped before ${operation}.`,
-            retryable: false,
-        });
     }
 
     async #persistInstanceConfig(
@@ -524,7 +504,11 @@ export class InstanceReconfigurationCoordinator {
         preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
         rebuildRequired: boolean,
     ): Promise<unknown[]> {
-        const failures = await this.#retirement.cleanupCommittedInstanceChange(existing, next, descriptor);
+        const failures = await this.#retirement.cleanupCommittedInstanceChange(
+            existing,
+            next,
+            descriptor,
+        );
 
         if (
             rebuildRequired &&
@@ -534,14 +518,12 @@ export class InstanceReconfigurationCoordinator {
             descriptor !== preparedDescriptor
         ) {
             let generationCleanupFailed = false;
-            await this.#retirement.notification.retireGenerationResources(existing).catch((error) => {
-                generationCleanupFailed = true;
-                failures.push(error);
-            });
-            this.#instanceRegistry.retireConnectionReferences(
-                descriptor.name,
-                descriptor.worker,
-            );
+            await this.#retirement.notification
+                .retireGenerationResources(existing)
+                .catch((error) => {
+                    generationCleanupFailed = true;
+                    failures.push(error);
+                });
             if (!generationCleanupFailed) {
                 try {
                     this.#instanceRegistry.add(preparedDescriptor);
@@ -557,10 +539,6 @@ export class InstanceReconfigurationCoordinator {
                             .catch((cleanupError) =>
                                 failures.push(cleanupError),
                             );
-                        this.#instanceRegistry.retireConnectionReferences(
-                            preparedDescriptor.name,
-                            preparedDescriptor.worker,
-                        );
                         await this.syncMcpEndpoint(existing.name).catch(
                             (cleanupError) => failures.push(cleanupError),
                         );
@@ -589,8 +567,19 @@ export class InstanceReconfigurationCoordinator {
         rebuildRequired: boolean,
     ): Promise<void> {
         await this.#cleanup.cleanupCommittedInstanceChangeWithDebt(
-            existing, next, descriptor, preparedDescriptor, rebuildRequired,
-            () => this.#cleanupCommittedInstanceChange(existing, next, descriptor, preparedDescriptor, rebuildRequired),
+            existing,
+            next,
+            descriptor,
+            preparedDescriptor,
+            rebuildRequired,
+            () =>
+                this.#cleanupCommittedInstanceChange(
+                    existing,
+                    next,
+                    descriptor,
+                    preparedDescriptor,
+                    rebuildRequired,
+                ),
         );
     }
 }

@@ -8,7 +8,10 @@ import {
 import {
     controlRemoteRpcPath,
     controlWebBasePath,
+    type ContextTransport,
     type ControlConfig,
+    type Endpoint,
+    type ServiceTransport,
 } from "@portable-devshell/shared";
 
 import {
@@ -20,10 +23,7 @@ import type { ConfigChangeHub } from "../../config/change/Config.js";
 import { DebugPatchService } from "../../debug/Service.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
-import { ModelDevshellBroker } from "../../extension/api/point/cli/command/ModelBroker.js";
-import {
-    ProcessSubscriptionManager,
-} from "@portable-devshell/core";
+import { ProcessSubscriptionManager } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
@@ -49,8 +49,11 @@ import { ExtensionWebGateway } from "../../server/web/extension/application/Gate
 import { ControlRouteComposition } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
-import type { ContextService } from "../../context/Service/index.js";
-import { installContextTools } from "../../context/tool/Runtime.js";
+import {
+    createContextRouteModule,
+    installContextTools,
+    type ContextService,
+} from "@portable-devshell/core/context";
 import type { McpControlModule } from "../mcp/Control.js";
 import type { ConnectionModule } from "../../connection/Module.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
@@ -58,6 +61,11 @@ import { McpExtensionService } from "../mcp/extension/Service.js";
 
 export interface ControlRuntimeOptions {
     contexts: ContextService;
+    contextTransport: ContextTransport;
+    internalControl: {
+        endpoint: Endpoint;
+        service: ServiceTransport;
+    };
     artifact: ArtifactModule;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
@@ -89,8 +97,9 @@ export class ControlRuntime {
     readonly #extensionPaths: ExtensionPathLayout;
     readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
+    readonly #internalControlEndpoint: Endpoint;
+    readonly #internalControlService: ServiceTransport;
     readonly #mcp: McpControlModule;
-    readonly #modelDevshell: ModelDevshellBroker;
     readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
@@ -116,22 +125,9 @@ export class ControlRuntime {
             }),
         });
         this.#instances = options.instances;
-        const toolCalls = createToolCallRuntime({
-            resolveTarget: (instance) => {
-                const lease = this.#instances.acquireGeneration(instance);
-                return {
-                    dispatch: async (request) => {
-                        try {
-                            return await lease.descriptor.worker
-                                .toolCallTarget()
-                                .dispatch(request);
-                        } finally {
-                            lease.release();
-                        }
-                    },
-                };
-            },
-        });
+        this.#internalControlEndpoint = options.internalControl.endpoint;
+        this.#internalControlService = options.internalControl.service;
+        const toolCalls = createToolCallRuntime({});
         this.#toolCalls = toolCalls.api;
         const extensionToolCalls = new ToolCallExtensionBinding(
             this.#extensions,
@@ -175,17 +171,6 @@ export class ControlRuntime {
                 toolCalls.hooks,
             ),
         );
-        this.#modelDevshell = new ModelDevshellBroker({
-            access: {
-                allows: ({ extensionId, instance }) =>
-                    options.instances
-                        .get(instance)
-                        ?.modelExtensions.includes(extensionId) === true,
-            },
-            commands: modelCliCommands,
-            contextAdmin: () => options.contexts,
-            instances: options.instances,
-        });
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, {
@@ -196,7 +181,7 @@ export class ControlRuntime {
             ...(options.config === undefined
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
-            contextAdmin: () => options.contexts,
+            controlPorts: [createContextRouteModule(options.contexts)],
             debug: this.#debug,
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
@@ -293,6 +278,8 @@ export class ControlRuntime {
                 this.#webFlowUninstall = this.#webFlow.install(webHost);
             }
             await this.#contexts.initialize();
+            await this.#channels.start();
+            await this.#internalControlService.hello();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
                 await this.#extensionControl.installBuiltin(
@@ -303,7 +290,6 @@ export class ControlRuntime {
             await this.#mcp.prepare();
             await this.#mcp.start();
             await this.#contexts.reconcile();
-            await this.#channels.start();
         } catch (error) {
             try {
                 await this.stop();
@@ -319,13 +305,19 @@ export class ControlRuntime {
 
     async stop(): Promise<void> {
         const failures: unknown[] = [];
-        this.#modelDevshell.dispose();
-        for (const unregister of this.#toolCallHookUnregister.splice(0).reverse()) {
+        for (const unregister of this.#toolCallHookUnregister
+            .splice(0)
+            .reverse()) {
             try {
                 unregister();
             } catch (error) {
                 failures.push(error);
             }
+        }
+        try {
+            this.#internalControlEndpoint.close();
+        } catch (error) {
+            failures.push(error);
         }
         await this.#channels.close().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));

@@ -1,3 +1,7 @@
+export { ReverseConnectionService, type ReverseConnectionIdentity } from "./instance/reverse/Service.js";
+export type { ReverseInstanceLookupPort, ReverseInstancePort } from "./instance/reverse/Port.js";
+export { ReverseCredentialService } from "./instance/reverse/credential/Service.js";
+export { ReverseCredentialStore, type ReverseEnrollmentCredential, type StoredReverseDeviceCode } from "./instance/reverse/credential/Store.js";
 export { type InstanceConnectionLease, InstanceConnectionService } from "./instance/Connection.js";
 export { type InstanceDescriptor } from "./instance/Descriptor.js";
 export { InstanceFactory } from "./instance/Factory.js";

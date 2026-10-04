@@ -17,7 +17,6 @@ export class McpEndpointFactory {
             contextMode: descriptor.mcpContextMode ?? "explicit",
             name: descriptor.name,
             path: descriptor.mcpPath,
-            worker: descriptor.worker,
             workspaceEnabled,
         };
     }

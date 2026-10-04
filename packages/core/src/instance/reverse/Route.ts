@@ -2,7 +2,7 @@ import type { ControlPortDefinition } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../server/Route.js";
 import { readReverseInstanceName } from "./Input.js";
-import type { ReverseCredentialService } from "./credential/Service.js";
+import type { ReverseCredentialService } from "@portable-devshell/core";
 
 export function createConnectionRouteModule(
     service?: ReverseCredentialService,

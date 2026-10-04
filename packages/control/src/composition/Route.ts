@@ -40,15 +40,11 @@ import {
     type InstanceConfigRouteModuleOptions,
 } from "../instance/Route.js";
 import { InstanceChangeHub } from "../instance/Change.js";
-import {
-    createContextRouteModule,
-    type ContextAdminPort,
-} from "../context/Route.js";
 import { createAuthRouteModule } from "../auth/Route.js";
 import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
 import { OperationalOverviewService } from "../overview/Service.js";
-import type { ReverseCredentialService } from "../connection/credential/Service.js";
+import type { ReverseCredentialService } from "@portable-devshell/core";
 import { createConnectionRouteModule } from "../connection/Route.js";
 import { createServiceRouteModule } from "../service/Route.js";
 import {
@@ -67,7 +63,7 @@ export interface ControlRouteCompositionOptions {
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;
-    contextAdmin?: () => ContextAdminPort | undefined;
+    controlPorts?: readonly ControlPortDefinition[];
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
@@ -219,7 +215,7 @@ export class ControlRouteComposition {
                                 reason: "MCP runtime is disabled.",
                             },
                     }),
-                    createContextRouteModule(this.#options.contextAdmin),
+                    ...(this.#options.controlPorts ?? []),
                     ...(this.#options.extensionRoutes?.modules("control") ??
                         []),
                     createOperationalOverviewRouteModule(this.#overview),
@@ -229,8 +225,7 @@ export class ControlRouteComposition {
                     ),
                     createInstanceConfigRouteModule({
                         changes: this.#instanceChanges,
-                        configuredInstances:
-                            this.#options.configuredInstances,
+                        configuredInstances: this.#options.configuredInstances,
                         create: this.#options.instanceCreate,
                         editor: this.#options.instanceEditor,
                         registry: this.#options.instances,

@@ -15,10 +15,10 @@ import { WebSocketServer } from "ws";
 
 import {
     ReverseConnectionService,
+    ReverseCredentialStore,
     type ReverseConnectionIdentity,
-} from "./Service.js";
-import { ReverseCredentialStore } from "./credential/Store.js";
-import type { ReverseInstanceLookupPort } from "./Port.js";
+    type ReverseInstanceLookupPort,
+} from "@portable-devshell/core";
 import { ReverseSseChannel } from "./SseChannel.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";

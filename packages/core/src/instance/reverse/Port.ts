@@ -1,16 +1,9 @@
-import type {
-    WorkerInstance,
-    WorkerTransportConnection,
-} from "@portable-devshell/core";
+import type { WorkerTransportConnection } from "@portable-devshell/core";
 
 export interface ReverseInstancePort {
     name: string;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     reverseConnection?: WorkerTransportConnection;
-    worker: Pick<
-        WorkerInstance,
-        "acceptReverseChannel" | "setReverseEnrollmentState" | "snapshot"
-    >;
 }
 
 export interface ReverseInstanceLookupPort {

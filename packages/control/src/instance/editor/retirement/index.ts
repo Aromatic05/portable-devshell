@@ -6,12 +6,21 @@ import {
     type JsonValue,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
-import { InstanceFactory, type InstanceRegistry } from "@portable-devshell/core";
+import {
+    InstanceFactory,
+    type InstanceRegistry,
+} from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceRetirementNotification } from "./Notification.js";
-import { InstanceRetirementState, closeDescriptorResourcesBestEffort } from "./State.js";
-import { warnCommittedCleanupFailures, type InstanceCleanupDebt } from "./Debt.js";
+import {
+    InstanceRetirementState,
+    closeDescriptorResourcesBestEffort,
+} from "./State.js";
+import {
+    warnCommittedCleanupFailures,
+    type InstanceCleanupDebt,
+} from "./Debt.js";
 
 type InstanceDescriptor = ReturnType<InstanceRegistry["get"]>;
 
@@ -33,22 +42,30 @@ export class InstanceRetirementCoordinator {
 
     readonly #instanceRegistry: InstanceRegistry;
 
-constructor(options: InstanceEditorCoordinatorOptions) {
+    constructor(options: InstanceEditorCoordinatorOptions) {
         this.#detachContextInstance = options.detachContextInstance;
-        this.#reconcileContextInstanceCleanup = options.reconcileContextInstanceCleanup;
+        this.#reconcileContextInstanceCleanup =
+            options.reconcileContextInstanceCleanup;
         this.#engine = options.engine;
         this.#mcp = options.mcp;
-        this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceConfigMapper =
+            options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
     }
 
-    async deleteInstance(params: JsonValue | undefined, cleanup: InstanceCleanupDebt): Promise<JsonValue> {
+    async deleteInstance(
+        params: JsonValue | undefined,
+        cleanup: InstanceCleanupDebt,
+    ): Promise<JsonValue> {
         return await this.#engine.runExclusive(
             async () => await this.#deleteInstance(params, cleanup),
         );
     }
 
-    async #deleteInstance(params: JsonValue | undefined, cleanup: InstanceCleanupDebt): Promise<JsonValue> {
+    async #deleteInstance(
+        params: JsonValue | undefined,
+        cleanup: InstanceCleanupDebt,
+    ): Promise<JsonValue> {
         const { instanceName } = this.#engine.readInput(() =>
             parseConfigInstanceTargetRequest(params),
         );
@@ -121,11 +138,7 @@ constructor(options: InstanceEditorCoordinatorOptions) {
                 .clearDebt(instanceName)
                 .catch((error) => cleanupFailures.push(error));
         }
-        warnCommittedCleanupFailures(
-            instanceName,
-            "delete",
-            cleanupFailures,
-        );
+        warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
         return this.#engine.finalizeApplyResult(currentConfig, nextConfig, [
             { kind: "instance.deleted", target: instanceName },
         ]);
@@ -152,23 +165,15 @@ constructor(options: InstanceEditorCoordinatorOptions) {
                     .catch((error) => failures.push(error));
             }
             if (instanceDisabled) {
-                await this.notification.retireGenerationResources(existing).catch((error) =>
-                    failures.push(error),
+                await this.notification
+                    .retireGenerationResources(existing)
+                    .catch((error) => failures.push(error));
+                failures.push(
+                    ...(await this.notification.retireDisable(existing)),
                 );
-                this.#instanceRegistry.retireConnectionReferences(
-                    descriptor.name,
-                    descriptor.worker,
-                );
-                if (
-                    descriptor.worker.managementMode !== "selfManaged" &&
-                    descriptor.worker.snapshot().daemonState !== "stopped"
-                ) {
-                    await descriptor.worker
-                        .stop()
-                        .catch((error) => failures.push(error));
-                }
-                failures.push(...await this.notification.retireDisable(existing));
-                await this.notification.notifyDisabled(existing).catch((error) => failures.push(error));
+                await this.notification
+                    .notifyDisabled(existing)
+                    .catch((error) => failures.push(error));
             }
         }
 
@@ -205,14 +210,13 @@ constructor(options: InstanceEditorCoordinatorOptions) {
             failures.push(error);
             return failures;
         }
-        await this.notification.retireGenerationResources(existing).catch((error) =>
-            failures.push(error),
-        );
-        failures.push(...await this.notification.retireDelete(existing));
-        await this.#state.retireForDelete(
-            cleanupDescriptor,
-            skipRuntimeRetirement,
-        ).catch((error) => failures.push(error));
+        await this.notification
+            .retireGenerationResources(existing)
+            .catch((error) => failures.push(error));
+        failures.push(...(await this.notification.retireDelete(existing)));
+        await this.#state
+            .retireForDelete(cleanupDescriptor, skipRuntimeRetirement)
+            .catch((error) => failures.push(error));
         if (cleanupDescriptor !== undefined) {
             await closeDescriptorResourcesBestEffort(cleanupDescriptor).catch(
                 (error) => failures.push(error),
@@ -220,39 +224,16 @@ constructor(options: InstanceEditorCoordinatorOptions) {
             cleanup.releaseDescriptor(existing.name);
         }
 
-        await this.notification.notifyDeleted(existing).catch((error) => failures.push(error));
-        if (cleanupDescriptor !== undefined) {
-            this.#instanceRegistry.retireConnectionReferences(
-                cleanupDescriptor.name,
-                cleanupDescriptor.worker,
-            );
-        }
+        await this.notification
+            .notifyDeleted(existing)
+            .catch((error) => failures.push(error));
         return failures;
     }
 
-    #assertInstanceDeletable(instanceName: string): boolean {
-        const descriptor = this.#instanceRegistry.get(instanceName);
-        if (descriptor === undefined) return false;
-        const snapshot = descriptor.worker.snapshot();
-        if (snapshot.daemonState === "stopped") return false;
-        if (
-            snapshot.daemonState === "failed" ||
-            snapshot.daemonState === "stale"
-        )
-            return true;
-        throw createRemoteError({
-            code: runtimeErrorCodes.instanceConflict,
-            details: {
-                instance: instanceName,
-                operation: "delete",
-                status: snapshot.status,
-            },
-            message: `Instance ${instanceName} must be stopped before delete.`,
-            retryable: false,
-        });
-    }
-
-    async prepareContextCleanup(instance: string, descriptor: InstanceDescriptor): Promise<void> {
+    async prepareContextCleanup(
+        instance: string,
+        descriptor: InstanceDescriptor,
+    ): Promise<void> {
         await this.#detachContextInstance?.(instance);
         await this.#reconcileContextInstanceCleanup?.(instance, descriptor);
     }

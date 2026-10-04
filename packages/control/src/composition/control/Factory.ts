@@ -1,6 +1,13 @@
 import { homedir } from "node:os";
 
-import { ControlPathHome } from "@portable-devshell/shared";
+import {
+    ControlPathHome,
+    Endpoint,
+    connectControlChannel,
+    createContextTransport,
+    createInstanceTransport,
+    createServiceTransport,
+} from "@portable-devshell/shared";
 import { ExtensionHost } from "../../extension/host/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
 import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/Control.js";
@@ -9,7 +16,6 @@ import {
     ExtensionInstanceObserveCapabilityControl,
 } from "../../extension/api/cap/instance/Control.js";
 import { ExtensionContextObserveCapabilityControl } from "../../extension/api/cap/context/Control.js";
-import { ExtensionWorkerCapabilityControl } from "../../extension/api/cap/worker/Control.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
@@ -24,7 +30,7 @@ import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ArtifactModule } from "../../artifact/Module.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
-import { ContextModule } from "../../context/Module.js";
+import { ContextModule } from "@portable-devshell/core/context";
 import { McpControlModule } from "../mcp/Control.js";
 import { ConnectionModule } from "../../connection/Module.js";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";
@@ -68,12 +74,24 @@ export class ControlRuntimeFactory {
             });
             const extensionPoints = createControlExtensionPointRegistry();
             const processSubscriptions = new ProcessSubscriptionManager();
+            const internalEndpoint = new Endpoint({
+                connectChannel: (signal) =>
+                    connectControlChannel(
+                        { socketPath: options.socketPath },
+                        signal,
+                    ),
+            });
+            const contextTransport = createContextTransport(internalEndpoint);
+            const instanceTransport = createInstanceTransport(internalEndpoint);
+            const serviceTransport = createServiceTransport(internalEndpoint, {
+                clientKind: "cli",
+            });
             const contexts = new ContextModule({
                 contextFile: controlPaths.contextsFile,
-                instances: options.state.instances,
+                instances: instanceTransport,
             });
             const mcp = new McpControlModule({
-                contexts,
+                contextTransport,
                 artifact,
                 controlPaths,
                 factory: this.#mcpFactory,
@@ -125,7 +143,7 @@ export class ControlRuntimeFactory {
                             allowed,
                             extensionId,
                             listContexts: async (query) =>
-                                await contexts.registry.list(query),
+                                await contextTransport.list(query),
                         }),
                     instanceFactory: ({
                         extensionId,
@@ -159,18 +177,6 @@ export class ControlRuntimeFactory {
                     paths: extensionPaths,
                     points: extensionPoints,
                     toolCallDecorator: mcp.toolProvenance,
-                    workerDelegateFactory: (input) =>
-                        new ExtensionWorkerCapabilityControl({
-                            ...input,
-                            authority: "worker.delegate",
-                            instances: options.state.instances,
-                        }),
-                    workerExecuteFactory: (input) =>
-                        new ExtensionWorkerCapabilityControl({
-                            ...input,
-                            authority: "worker.execute",
-                            instances: options.state.instances,
-                        }),
                 }),
                 registry: new ExtensionRegistryStore(
                     extensionPaths.registryFile,
@@ -187,6 +193,11 @@ export class ControlRuntimeFactory {
             );
             return new ControlRuntime({
                 contexts,
+                contextTransport,
+                internalControl: {
+                    endpoint: internalEndpoint,
+                    service: serviceTransport,
+                },
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
                 config: () => options.state.requireConfig(),

@@ -7,6 +7,7 @@ import {
     type McpOAuthApprovalService,
 } from "@portable-devshell/mcp";
 import type {
+    ContextTransport,
     ControlConfig,
     ControlWebAuthConfig,
     JsonValue,
@@ -26,12 +27,10 @@ import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";
-import type { ContextModule } from "../../context/Module.js";
 import type { ControlRuntimeState } from "../control/State.js";
-import type { InstanceDescriptor } from "@portable-devshell/core";
 
 export interface McpControlModuleOptions {
-    contexts: ContextModule;
+    contextTransport: ContextTransport;
     artifact: ArtifactModule;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
@@ -72,7 +71,7 @@ export class McpControlModule {
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         this.#runtimeState = new McpRuntimeState({
-            contexts: options.contexts,
+            context: options.contextTransport,
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
@@ -127,30 +126,10 @@ export class McpControlModule {
             cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
             engine: configEngine,
             detachContextInstance: async (instance) => {
-                await options.contexts.detachInstance(instance);
+                await options.contextTransport.detachInstance(instance);
             },
-            reconcileContextInstanceCleanup: async (
-                instance,
-                descriptor?: InstanceDescriptor,
-            ) => {
-                await options.contexts.cleanup.reconcileInstance(instance, {
-                    releaseAlerts: async (workspace) => {
-                        if (descriptor === undefined) {
-                            throw new Error(
-                                `Instance ${instance} has pending alerts cleanup without a cleanup descriptor.`,
-                            );
-                        }
-                        if (!descriptor.worker.snapshot().ready)
-                            await descriptor.worker.start();
-                        await descriptor.worker.releaseAlerts(workspace);
-                    },
-                    releaseInstanceReference: async (ctxId) => {
-                        options.state.instances.releaseConnectionReference(
-                            instance,
-                            ctxId,
-                        );
-                    },
-                });
+            reconcileContextInstanceCleanup: async (instance) => {
+                await options.contextTransport.reconcileInstance(instance);
             },
             instanceRegistry: options.state.instances,
             mcp: instanceMcp,

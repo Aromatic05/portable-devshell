@@ -160,7 +160,10 @@ export class InstanceCreateCoordinator {
 
             this.#instanceRegistry.add(descriptor);
             if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
-                this.#mcp?.registerInstance(normalized.name, normalized.mcp.auth);
+                this.#mcp?.registerInstance(
+                    normalized.name,
+                    normalized.mcp.auth,
+                );
             }
 
             return {
@@ -169,21 +172,11 @@ export class InstanceCreateCoordinator {
                     ? normalized.mcp.path
                     : undefined,
                 name: normalized.name,
-                snapshot: descriptor.worker.snapshot(),
             };
         } catch (error) {
             const failures: unknown[] = [error];
             this.#mcp?.unregisterInstance(normalized.name);
             this.#instanceRegistry.delete(normalized.name);
-            if (descriptor !== undefined) {
-                const close = (
-                    descriptor.worker as { close?: () => Promise<void> }
-                ).close;
-                if (close !== undefined)
-                    await close
-                        .call(descriptor.worker)
-                        .catch((closeError) => failures.push(closeError));
-            }
             if (persisted) {
                 try {
                     await this.#configStore.write(
