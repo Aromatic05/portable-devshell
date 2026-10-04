@@ -15,8 +15,8 @@ const WEB_SOCKET_MAX_MESSAGE_SIZE = 16 * 1024 * 1024;
 
 import type {
     ControlAcceptedChannel,
-    ControlChannelListener,
-} from "../endpoint/Channel.js";
+    ControlTransportListener,
+} from "../transport/channel/Listener.js";
 import { ControlWebSessionService } from "./auth/Session.js";
 import {
     ControlWebSocketSessionAccess,
@@ -38,7 +38,7 @@ export interface ControlWebSocketListenerOptions {
     sessions: ControlWebSessionService;
 }
 
-export class ControlWebSocketListener implements ControlChannelListener {
+export class ControlWebSocketListener implements ControlTransportListener {
     readonly #access: ControlWebSocketAccessAuthorizer;
     readonly #assetDirectory?: string;
     readonly #basePath: string;

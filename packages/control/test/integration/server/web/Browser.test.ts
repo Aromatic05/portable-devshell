@@ -25,7 +25,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
+import { ControlTransportServer } from "../../../../src/server/transport/endpoint/Server.ts";
 import { ControlWebOAuthFlow } from "../../../../src/server/web/auth/OAuth.ts";
 import { ControlWebSessionService } from "../../../../src/server/web/auth/Session.ts";
 import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";
@@ -317,7 +317,7 @@ async function startBrowserRuntime(options: {
         basePath,
     });
     const calls = { hello: 0, overview: 0, preferences: 0 };
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 assetDirectory,

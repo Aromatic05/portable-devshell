@@ -18,7 +18,7 @@ import {
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
 import { createTestInstanceDomainRuntime } from "../../../../src/testing.ts";
-import { ControlSocketServer } from "../../../../src/server/endpoint/Socket.ts";
+import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";

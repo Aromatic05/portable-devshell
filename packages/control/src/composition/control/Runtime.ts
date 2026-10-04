@@ -36,10 +36,10 @@ import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../overview/Service.js";
 import {
-    ControlChannelServer,
-    type ControlChannelListener,
-} from "../../server/endpoint/Channel.js";
-import { ControlSocketListener } from "../../server/endpoint/Socket.js";
+    ControlTransportServer,
+    type ControlTransportListener,
+} from "../../server/transport/endpoint/Server.js";
+import { ControlSocketListener } from "../../server/transport/channel/Socket.js";
 import { resolveControlWebAssetsDirectory } from "../../server/web/Assets.js";
 import { ControlWebOAuthFlow } from "../../server/web/auth/OAuth.js";
 import { ControlWebSessionService } from "../../server/web/auth/Session.js";
@@ -90,7 +90,7 @@ export class ControlRuntime {
     readonly #contexts: ContextService;
     readonly #artifact: ArtifactModule;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
-    readonly #channels: ControlChannelServer;
+    readonly #transport: ControlTransportServer;
     readonly #debug: DebugPatchService;
     readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
@@ -221,12 +221,12 @@ export class ControlRuntime {
         this.#socketListener = new ControlSocketListener({
             socketPath: options.socketPath,
         });
-        const listeners: ControlChannelListener[] = [this.#socketListener];
+        const listeners: ControlTransportListener[] = [this.#socketListener];
         const webRuntime = this.#createWebRuntime();
         if (webRuntime !== undefined) listeners.push(webRuntime.listener);
         this.#webListener = webRuntime?.listener;
         this.#webFlow = webRuntime?.flow;
-        this.#channels = new ControlChannelServer({
+        this.#transport = new ControlTransportServer({
             listeners,
             routes: this.#routes,
         });
@@ -277,7 +277,7 @@ export class ControlRuntime {
                 this.#webFlowUninstall = this.#webFlow.install(webHost);
             }
             await this.#contexts.initialize();
-            await this.#channels.start();
+            await this.#transport.start();
             await this.#internalControlServer.hello();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
@@ -318,7 +318,7 @@ export class ControlRuntime {
         } catch (error) {
             failures.push(error);
         }
-        await this.#channels.close().catch((error) => failures.push(error));
+        await this.#transport.close().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));
@@ -471,7 +471,7 @@ export class ControlRuntime {
                 previousFlowRemoved = true;
             }
             nextFlowUninstall = nextRuntime.flow?.install(nextRuntime.host);
-            await this.#channels.replaceListener(
+            await this.#transport.replaceListener(
                 previousListener,
                 nextRuntime.listener,
             );

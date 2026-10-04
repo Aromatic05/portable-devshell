@@ -19,8 +19,8 @@ import {
 } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
-import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
+import { ControlTransportServer } from "../../../../src/server/transport/endpoint/Server.ts";
+import { negotiateControlProtocol } from "../../../../src/server/Protocol.ts";
 import { ControlWebSessionService } from "../../../../src/server/web/auth/Session.ts";
 import { ControlWebSocketAccessService } from "../../../../src/server/web/auth/Access.ts";
 import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";
@@ -39,7 +39,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     const sessions = new ControlWebSessionService();
     const provider = new ControlWebSocketListener({ http, sessions });
     const closedConnections: string[] = [];
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed: (connectionId) =>
@@ -171,7 +171,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
         storageDir: storage,
     });
     const sessions = new ControlWebSessionService();
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({ http: host.server, sessions }),
         ],
@@ -228,7 +228,7 @@ test("web token auth exchanges the configured web bearer token for a session coo
     const sessions = new ControlWebSessionService({
         auth: { mode: "token", token: webToken },
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
             connectionClosed() {},
@@ -298,7 +298,7 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
     const sessions = new ControlWebSessionService({
         auth: { mode: "token", token: webToken },
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
             connectionClosed() {},
@@ -347,7 +347,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
         publicBaseUrl: "https://controller.example/devshell",
     });
     const sessions = new ControlWebSessionService({ basePath });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 assetDirectory,
@@ -418,7 +418,7 @@ test("web session expiry closes its active channel", async (t) => {
         listenHost: "127.0.0.1",
         listenPort: 0,
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 http,
@@ -468,7 +468,7 @@ test("web RPC requires the canonical subprotocol", async (t) => {
         listenHost: "127.0.0.1",
         listenPort: 0,
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 http,
@@ -512,7 +512,7 @@ test("web session capacity evicts the oldest browser session and closes its chan
         listenHost: "127.0.0.1",
         listenPort: 0,
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 http,
@@ -585,7 +585,7 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     const sessions = new ControlWebSessionService({
         auth: { mode: "token", token: remoteToken },
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [
             new ControlWebSocketListener({
                 access: new ControlWebSocketAccessService({ sessions }),
@@ -668,7 +668,7 @@ test("native OAuth bearer expiry closes an active Control WebSocket", async (t) 
             scopes: ["control"],
         }),
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
         routes: {
             connectionClosed() {},
@@ -722,7 +722,7 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
             scopes: ["control"],
         }),
     });
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
         routes: {
             connectionClosed() {},

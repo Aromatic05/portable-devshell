@@ -18,7 +18,7 @@ import {
     type ConfigRuntimeChangeSet,
 } from "../../config/editor/index.js";
 import { ConfigEngine } from "../../config/engine/index.js";
-import { HttpEndpointPreflight } from "../../server/endpoint/Http.js";
+import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { ToolCallProvenanceStore } from "@portable-devshell/core";

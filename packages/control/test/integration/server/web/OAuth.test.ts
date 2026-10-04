@@ -18,8 +18,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
+import { ControlTransportServer } from "../../../../src/server/transport/endpoint/Server.ts";
+import { negotiateControlProtocol } from "../../../../src/server/Protocol.ts";
 import { ControlWebOAuthFlow } from "../../../../src/server/web/auth/OAuth.ts";
 import { ControlWebSessionService } from "../../../../src/server/web/auth/Session.ts";
 import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";
@@ -64,7 +64,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         sessions,
     });
     const uninstall = flow.install(http);
-    const channels = new ControlChannelServer({
+    const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
             connectionClosed() {},

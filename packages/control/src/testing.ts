@@ -1,5 +1,5 @@
 export * from "./server/Daemon.js";
-export * from "./server/endpoint/Http.js";
+export * from "./config/engine/Http.js";
 export * from "./artifact/Service.js";
 export * from "./artifact/route/Http.js";
 export * from "./artifact/host/Bridge.js";
@@ -46,7 +46,7 @@ export {
     ControlRuntime as ProductionControlRuntime,
     type ControlRuntimeOptions,
 } from "./composition/control/Runtime.js";
-export * from "./server/endpoint/Socket.js";
+export * from "./server/transport/endpoint/Socket.js";
 
 export * from "./context/Registry/index.js";
 export * from "./context/Service/Scope.js";

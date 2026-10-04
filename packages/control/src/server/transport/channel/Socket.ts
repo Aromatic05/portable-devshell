@@ -1,9 +1,3 @@
-import { ControlChannelServer } from "./Channel.js";
-import type {
-    ControlAcceptedChannel,
-    ControlChannelListener,
-    ControlChannelRouteProvider,
-} from "./Channel.js";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { chmod } from "node:fs/promises";
@@ -16,45 +10,10 @@ import type {
     ControlClientKind,
     ControlPeerSubject,
 } from "@portable-devshell/shared";
-
-export type ControlRouteProvider = ControlChannelRouteProvider;
-
-export interface ControlSocketServerOptions {
-    routes: ControlRouteProvider;
-    socketPath: string;
-}
-
-export class ControlSocketServer {
-    readonly #listener: ControlSocketListener;
-    readonly #server: ControlChannelServer;
-
-    constructor(options: ControlSocketServerOptions) {
-        this.#listener = new ControlSocketListener({
-            socketPath: options.socketPath,
-        });
-        this.#server = new ControlChannelServer({
-            listeners: [this.#listener],
-            routes: options.routes,
-        });
-    }
-
-    async start(): Promise<void> {
-        await this.#server.start();
-    }
-
-    async stop(): Promise<void> {
-        await this.close();
-        await this.removeEndpoint();
-    }
-
-    async close(): Promise<void> {
-        await this.#server.close();
-    }
-
-    async removeEndpoint(): Promise<void> {
-        await this.#listener.removeEndpoint();
-    }
-}
+import type {
+    ControlAcceptedChannel,
+    ControlTransportListener,
+} from "./Listener.js";
 
 export interface ControlSocketListenerOptions {
     allowedPeers?: readonly ControlClientKind[];
@@ -62,7 +21,7 @@ export interface ControlSocketListenerOptions {
     subject?: ControlPeerSubject;
 }
 
-export class ControlSocketListener implements ControlChannelListener {
+export class ControlSocketListener implements ControlTransportListener {
     readonly #allowedPeers: readonly ControlClientKind[];
     readonly #socketPath: string;
     readonly #subject: ControlPeerSubject;

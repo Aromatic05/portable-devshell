@@ -3,8 +3,8 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControlServer } from "../../../../src/server/Server.ts";
-import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { ControlServer } from "../../../src/server/Server.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {
     const xdgRuntimeDir = await createTestTempDirectory("control-server");

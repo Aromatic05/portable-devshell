@@ -43,7 +43,7 @@ import { ControlConfigStore } from "../../../../src/config/store/index.ts";
 import { DebugPatchService } from "../../../../src/debug/Service.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceRegistryFactory } from "@portable-devshell/core";
-import { ControlSocketServer } from "../../../../src/server/endpoint/Socket.ts";
+import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";

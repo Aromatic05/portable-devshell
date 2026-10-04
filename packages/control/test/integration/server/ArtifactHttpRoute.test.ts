@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
-import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
+import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import type {
     ArtifactPayloadDescriptor,
     JsonValue,
@@ -16,7 +16,7 @@ import {
     artifactShareRoute,
     type ArtifactServiceEndpoint,
 } from "@portable-devshell/control/testing";
-import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 class MemoryShareEndpoint implements ArtifactServiceEndpoint {
     readonly closed: string[] = [];

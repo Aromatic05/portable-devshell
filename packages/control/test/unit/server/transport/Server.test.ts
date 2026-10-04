@@ -12,13 +12,13 @@ import {
     type ControlHostDefinition,
 } from "@portable-devshell/shared";
 
-import {
-    ControlChannelServer,
-    type ControlAcceptedChannel,
-    type ControlChannelAdmission,
-    type ControlChannelListener,
-} from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
+import { ControlTransportServer } from "../../../../src/server/transport/endpoint/Server.ts";
+import type {
+    ControlAcceptedChannel,
+    ControlTransportAdmission,
+    ControlTransportListener,
+} from "../../../../src/server/transport/channel/Listener.ts";
+import { negotiateControlProtocol } from "../../../../src/server/Protocol.ts";
 
 class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -98,14 +98,14 @@ class MemoryChannel implements Channel {
     }
 }
 
-class MemoryControlChannelListener implements ControlChannelListener {
-    readonly #admission: ControlChannelAdmission;
+class MemoryControlTransportListener implements ControlTransportListener {
+    readonly #admission: ControlTransportAdmission;
     #accept?: (connection: ControlAcceptedChannel) => void;
     closed = false;
     started = false;
 
     constructor(
-        admission: ControlChannelAdmission = {
+        admission: ControlTransportAdmission = {
             allowedPeers: ["cli", "tui"],
             subject: { id: "uid:test", kind: "local-owner" },
         },
@@ -140,7 +140,7 @@ class MemoryControlChannelListener implements ControlChannelListener {
     }
 }
 
-class BlockingControlChannelListener implements ControlChannelListener {
+class BlockingControlTransportListener implements ControlTransportListener {
     readonly started: Promise<void>;
     closeCount = 0;
     startCount = 0;
@@ -170,7 +170,7 @@ class BlockingControlChannelListener implements ControlChannelListener {
     }
 }
 
-class RetryCloseControlChannelListener implements ControlChannelListener {
+class RetryCloseControlTransportListener implements ControlTransportListener {
     readonly events: string[] = [];
     closeCount = 0;
     startCount = 0;
@@ -195,7 +195,7 @@ class RetryCloseControlChannelListener implements ControlChannelListener {
     }
 }
 
-class BlockingRetryCloseControlChannelListener implements ControlChannelListener {
+class BlockingRetryCloseControlTransportListener implements ControlTransportListener {
     readonly cleanupStarted: Promise<void>;
     readonly events: string[] = [];
     closeCount = 0;
@@ -233,12 +233,12 @@ class BlockingRetryCloseControlChannelListener implements ControlChannelListener
     }
 }
 
-test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
-    const socketProvider = new MemoryControlChannelListener({
+test("ControlTransportServer serves the same routes through multiple channel providers", async (t) => {
+    const socketProvider = new MemoryControlTransportListener({
         allowedPeers: ["cli", "tui"],
         subject: { id: "uid:1000", kind: "local-owner" },
     });
-    const webProvider = new MemoryControlChannelListener({
+    const webProvider = new MemoryControlTransportListener({
         allowedPeers: ["web"],
         subject: { id: "session:abc", kind: "web-session" },
     });
@@ -250,7 +250,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
         hosts: createRouteHosts,
         onChange: () => () => undefined,
     };
-    const server = new ControlChannelServer({
+    const server = new ControlTransportServer({
         listeners: [socketProvider, webProvider],
         routes,
     });
@@ -311,12 +311,12 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     );
 });
 
-test("ControlChannelServer rejects a self-asserted peer outside transport admission", async (t) => {
-    const provider = new MemoryControlChannelListener({
+test("ControlTransportServer rejects a self-asserted peer outside transport admission", async (t) => {
+    const provider = new MemoryControlTransportListener({
         allowedPeers: ["web"],
         subject: { id: "session:abc", kind: "web-session" },
     });
-    const server = new ControlChannelServer({
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: createRouteProvider(),
     });
@@ -333,9 +333,9 @@ test("ControlChannelServer rejects a self-asserted peer outside transport admiss
     );
 });
 
-test("ControlChannelServer rejects unsupported protocol ranges during first request", async (t) => {
-    const provider = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer rejects unsupported protocol ranges during first request", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: createRouteProvider(),
     });
@@ -354,9 +354,9 @@ test("ControlChannelServer rejects unsupported protocol ranges during first requ
     );
 });
 
-test("ControlChannelServer rejects unsafe semantic protocol components as invalid hello", async (t) => {
-    const provider = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer rejects unsafe semantic protocol components as invalid hello", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: createRouteProvider(),
     });
@@ -379,9 +379,9 @@ test("ControlChannelServer rejects unsafe semantic protocol components as invali
     );
 });
 
-test("ControlChannelServer negotiates semantic protocol ranges", async (t) => {
-    const provider = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer negotiates semantic protocol ranges", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: createRouteProvider(),
     });
@@ -402,9 +402,9 @@ test("ControlChannelServer negotiates semantic protocol ranges", async (t) => {
     );
 });
 
-test("ControlChannelServer does not authenticate a connection when hello handling fails", async (t) => {
-    const provider = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer does not authenticate a connection when hello handling fails", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: createRouteProvider(() => [
             {
@@ -443,9 +443,9 @@ test("ControlChannelServer does not authenticate a connection when hello handlin
     );
 });
 
-test("ControlChannelServer closes earlier providers when a later provider fails to start", async () => {
-    const first = new MemoryControlChannelListener();
-    const failure: ControlChannelListener = {
+test("ControlTransportServer closes earlier providers when a later provider fails to start", async () => {
+    const first = new MemoryControlTransportListener();
+    const failure: ControlTransportListener = {
         async start() {
             throw new Error("provider failed to start");
         },
@@ -453,7 +453,7 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
             throw new Error("provider that did not start must not be closed");
         },
     };
-    const server = new ControlChannelServer({
+    const server = new ControlTransportServer({
         listeners: [first, failure],
         routes: {
             connectionClosed() {},
@@ -466,9 +466,9 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
     assert.equal(first.closed, true);
 });
 
-test("ControlChannelServer coalesces concurrent start calls", async (t) => {
-    const provider = new BlockingControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer coalesces concurrent start calls", async (t) => {
+    const provider = new BlockingControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed() {},
@@ -489,9 +489,9 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
     assert.equal(provider.startCount, 1);
 });
 
-test("ControlChannelServer waits for an active start before closing providers", async () => {
-    const provider = new BlockingControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer waits for an active start before closing providers", async () => {
+    const provider = new BlockingControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed() {},
@@ -512,9 +512,9 @@ test("ControlChannelServer waits for an active start before closing providers", 
     assert.equal(provider.closeCount, 1);
 });
 
-test("ControlChannelServer retries providers that failed to close", async () => {
-    const provider = new RetryCloseControlChannelListener(1);
-    const server = new ControlChannelServer({
+test("ControlTransportServer retries providers that failed to close", async () => {
+    const provider = new RetryCloseControlTransportListener(1);
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed() {},
@@ -531,9 +531,9 @@ test("ControlChannelServer retries providers that failed to close", async () => 
     assert.equal(provider.closeCount, 2);
 });
 
-test("ControlChannelServer finishes failed cleanup before restarting providers", async () => {
-    const provider = new RetryCloseControlChannelListener(1);
-    const server = new ControlChannelServer({
+test("ControlTransportServer finishes failed cleanup before restarting providers", async () => {
+    const provider = new RetryCloseControlTransportListener(1);
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed() {},
@@ -555,9 +555,9 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
     await server.close();
 });
 
-test("ControlChannelServer coalesces restarts while failed cleanup is retried", async () => {
-    const provider = new BlockingRetryCloseControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer coalesces restarts while failed cleanup is retried", async () => {
+    const provider = new BlockingRetryCloseControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
             connectionClosed() {},
@@ -587,11 +587,11 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
     await server.close();
 });
 
-test("ControlChannelServer replaces one started provider without closing others", async () => {
-    const socket = new MemoryControlChannelListener();
-    const web = new MemoryControlChannelListener();
-    const replacement = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
+test("ControlTransportServer replaces one started provider without closing others", async () => {
+    const socket = new MemoryControlTransportListener();
+    const web = new MemoryControlTransportListener();
+    const replacement = new MemoryControlTransportListener();
+    const server = new ControlTransportServer({
         listeners: [socket, web],
         routes: createRouteProvider(),
     });
@@ -606,11 +606,11 @@ test("ControlChannelServer replaces one started provider without closing others"
     await server.close();
 });
 
-test("ControlChannelServer rolls back a replacement when the previous provider fails to close", async () => {
-    const socket = new MemoryControlChannelListener();
-    const previous = new RetryCloseControlChannelListener(1);
-    const replacement = new RetryCloseControlChannelListener(0);
-    const server = new ControlChannelServer({
+test("ControlTransportServer rolls back a replacement when the previous provider fails to close", async () => {
+    const socket = new MemoryControlTransportListener();
+    const previous = new RetryCloseControlTransportListener(1);
+    const replacement = new RetryCloseControlTransportListener(0);
+    const server = new ControlTransportServer({
         listeners: [socket, previous],
         routes: createRouteProvider(),
     });
@@ -646,7 +646,7 @@ interface TestClient {
 }
 
 function createClient(
-    provider: MemoryControlChannelListener,
+    provider: MemoryControlTransportListener,
     _peer: "tui" | "web",
 ): TestClient {
     const endpoint = new Endpoint({
