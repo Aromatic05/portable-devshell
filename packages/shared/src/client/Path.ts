@@ -12,7 +12,7 @@ export class ControlPathHome {
     readonly artifactsDir: string;
     readonly configFile: string;
     readonly contextsFile: string;
-    readonly conversationPreferencesFile: string;
+    readonly messagePreferencesFile: string;
     readonly lifecycleCleanupFile: string;
     readonly toolProvenanceFile: string;
     readonly workspaceAppLeasesFile: string;
@@ -35,9 +35,9 @@ export class ControlPathHome {
         this.artifactsDir = join(this.controlHomeDir, "artifacts");
         this.configFile = join(this.controlHomeDir, "config.toml");
         this.contextsFile = join(this.controlHomeDir, "contexts.json");
-        this.conversationPreferencesFile = join(
+        this.messagePreferencesFile = join(
             this.controlHomeDir,
-            "conversation-preferences.json",
+            "message-preferences.json",
         );
         this.lifecycleCleanupFile = join(
             this.controlHomeDir,

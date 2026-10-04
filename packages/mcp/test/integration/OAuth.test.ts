@@ -184,9 +184,9 @@ test(
                 list: () => [
                     {
                         appendEvent: async () => undefined,
-                        conversationDatabaseFile: join(
+                        messageDatabaseFile: join(
                             contextRoot,
-                            "conversation.sqlite3",
+                            "message.sqlite3",
                         ),
                         enabled: true,
                         key: commentKey,
@@ -200,7 +200,7 @@ test(
                 ],
                 onChange: () => () => undefined,
             },
-            preferencesFile: join(contextRoot, "conversation-preferences.json"),
+            preferencesFile: join(contextRoot, "message-preferences.json"),
         });
         let sequence = new ToolCallHookSequence({});
         const pipeline = new ToolCallPipeline({

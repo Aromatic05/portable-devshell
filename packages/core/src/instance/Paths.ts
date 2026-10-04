@@ -7,7 +7,7 @@ export class InstancePaths {
     readonly auditDatabaseFile: string;
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
-    readonly conversationDatabaseFile: string;
+    readonly messageDatabaseFile: string;
     /**
      * @compat comment-json-v1-path
      * @removeAt 0.7.10
@@ -31,9 +31,9 @@ export class InstancePaths {
     constructor(instanceName: InstanceName, homeDirectory = homedir()) {
         this.instanceRootDir = join(homeDirectory, ".devshell", instanceName);
         this.controlWorkerDir = join(this.instanceRootDir, "control-worker");
-        this.conversationDatabaseFile = join(
+        this.messageDatabaseFile = join(
             this.controlWorkerDir,
-            "conversation.sqlite3",
+            "message.sqlite3",
         );
         this.contextMessagesFile = join(
             this.controlWorkerDir,

@@ -13,8 +13,8 @@ import { randomUUID } from "node:crypto";
 import {
     CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
     parseContextMessageDirective,
-} from "../conversation/ConversationControl.js";
-import { ConversationStore } from "../conversation/store/ConversationStore.js";
+} from "../message/MessageControl.js";
+import { MessageStore } from "../message/store/MessageStore.js";
 import { CommentState } from "./CommentState.js";
 
 export interface CommentServiceOptions {
@@ -23,14 +23,14 @@ export interface CommentServiceOptions {
         data: JsonValue,
     ): Promise<void>;
     instanceName: string;
-    store: ConversationStore;
+    store: MessageStore;
 }
 
 export class CommentService {
     readonly #appendEvent: CommentServiceOptions["appendEvent"];
     readonly #instanceName: string;
     readonly #state = new CommentState();
-    readonly #store: ConversationStore;
+    readonly #store: MessageStore;
     #operation: Promise<void> = Promise.resolve();
     #retired = false;
     #retirement?: Promise<void>;
@@ -133,7 +133,7 @@ export class CommentService {
                         };
                     }
                     throw new Error(
-                        "Conversation Stop state cleared without a delivered #resume Comment.",
+                        "Message Stop state cleared without a delivered #resume Comment.",
                     );
                 }
                 return { commentId: stoppedByCommentId, kind: "stop" };
@@ -150,7 +150,7 @@ export class CommentService {
             if (remaining <= 0) {
                 if (state.pushMessage === undefined) {
                     throw new Error(
-                        "Conversation Push deadline has no push message.",
+                        "Message Push deadline has no push message.",
                     );
                 }
                 return {
@@ -175,7 +175,7 @@ export class CommentService {
             const hasPushId = state.pendingPushCommentId !== undefined;
             const hasPushMessage = state.pushMessage !== undefined;
             if (hasPushId !== hasPushMessage) {
-                throw new Error("Conversation Push state is incomplete.");
+                throw new Error("Message Push state is incomplete.");
             }
             const push =
                 state.pendingPushCommentId === undefined ||

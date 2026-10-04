@@ -3,7 +3,7 @@ import { parseContextMessageDirective } from "@portable-devshell/shared";
 
 import type { WebMessageEntry } from "../Model.js";
 
-export const ConversationHistory = memo(function ConversationHistory({
+export const MessageHistory = memo(function MessageHistory({
     entries,
     threadKey,
 }: {
@@ -45,7 +45,7 @@ export const ConversationHistory = memo(function ConversationHistory({
 
     return (
         <div
-            aria-label="Conversation history"
+            aria-label="Message history"
             className="message-history"
             role="log"
         >

@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     asInstanceName,
     type ApprovalRequest,
-    type ConversationEntry,
+    type MessageEntry,
     type InstanceSnapshot,
     type JsonValue,
     type McpContextRecord,
@@ -125,12 +125,12 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.deepEqual(worker.logReadQueries, []);
     });
 
-    test("TuiControlSession loads exact Conversation report history", async (t) => {
+    test("TuiControlSession loads exact Message report history", async (t) => {
         const runtimeDir = await createTestTempDirectory("tui-report-history");
         const socketPath = createTestIpcPath("tui-report-history", runtimeDir);
         const worker = new FakeWorker("alpha");
         const server = createServer(socketPath, worker, () => 7, {
-            conversationEntries: () => [
+            messageHistoryEntries: () => [
                 {
                     callId: "report-call",
                     createdAt: new Date(20).toISOString(),
@@ -155,7 +155,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await refreshTuiAudit(session.domains, "alpha");
 
         assert.deepEqual(
-            session.domains.conversation.state.instances.alpha?.entries,
+            session.domains.messageHistory.state.instances.alpha?.entries,
             [
                 {
                     callId: "report-call",
@@ -729,7 +729,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         worker: FakeWorker,
         getConfigVersion: () => number,
         options: {
-            conversationEntries?: () => ConversationEntry[];
+            messageHistoryEntries?: () => MessageEntry[];
             contextRecords?: () => McpContextRecord[];
             onTodoRead?: () => void;
             restartable?: boolean;
@@ -846,7 +846,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     return scope === "control"
                         ? [
                               {
-                                  name: "conversation",
+                                  name: "message",
                                   operations: [
                                       {
                                           name: "preferences",
@@ -871,11 +871,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                                   name: "message",
                                   operations: [
                                       {
-                                          name: "listConversationEntries",
+                                          name: "listMessageEntries",
                                           handle: async () =>
                                               ({
                                                   entries:
-                                                      options.conversationEntries?.() ??
+                                                      options.messageHistoryEntries?.() ??
                                                       [],
                                                   lastSeq:
                                                       worker.snapshot().lastSeq,
@@ -1394,11 +1394,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             [{ text: paste, type: "search.append" }],
         );
         assert.deepEqual(
-            dispatcher.dispatch("contextConversation", {
+            dispatcher.dispatch("contextMessage", {
                 input: paste,
                 key: {},
             }),
-            [{ text: paste, type: "contextConversation.append" }],
+            [{ text: paste, type: "contextMessage.append" }],
         );
         assert.deepEqual(
             dispatcher.dispatch("toolForm", { input: paste, key: {} }),
@@ -1445,7 +1445,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                         throw new Error("audit refresh failed");
                     },
                 },
-                conversation: { async refreshInstance() {} },
+                messageHistory: { async refreshInstance() {} },
                 messages: {
                     async queue() {
                         domains.messages.mergeMessage("alpha", queued);

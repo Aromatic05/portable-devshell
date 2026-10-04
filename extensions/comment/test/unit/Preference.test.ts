@@ -1,14 +1,35 @@
 import assert from "node:assert/strict";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ConversationPreferenceStore } from "../../src/conversation/preference/Store.ts";
+import { MessagePreferenceStore } from "../../src/message/preference/Store.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-test("ConversationPreferenceStore persists titles and ordering across reopen", async () => {
-    const root = await createTestTempDirectory("conversation-preferences");
-    const filePath = join(root, "conversation-preferences.json");
-    const first = new ConversationPreferenceStore(filePath);
+test("MessagePreferenceStore migrates the legacy conversation preferences file once", async () => {
+    const root = await createTestTempDirectory("message-preferences-v1-migration");
+    const legacyFile = join(root, "conversation-preferences.json");
+    const filePath = join(root, "message-preferences.json");
+    const legacy = {
+        hiddenContexts: { "ctx-a": true },
+        orderByWorkspace: { "/work/a": ["alpha\u0000ctx-a"] },
+        titles: { "alpha\u0000ctx-a": "Legacy title" },
+        version: 1 as const,
+        workspaceOrder: ["/work/a"],
+    };
+    writeFileSync(legacyFile, `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+
+    const store = new MessagePreferenceStore(filePath, legacyFile);
+    assert.deepEqual(await store.read(), legacy);
+    assert.equal(existsSync(filePath), true);
+    assert.equal(existsSync(legacyFile), false);
+    assert.deepEqual(await new MessagePreferenceStore(filePath).read(), legacy);
+});
+
+test("MessagePreferenceStore persists titles and ordering across reopen", async () => {
+    const root = await createTestTempDirectory("message-preferences");
+    const filePath = join(root, "message-preferences.json");
+    const first = new MessagePreferenceStore(filePath);
 
     assert.deepEqual(await first.read(), {
         hiddenContexts: {},
@@ -30,7 +51,7 @@ test("ConversationPreferenceStore persists titles and ordering across reopen", a
         workspaceOrder: ["/work/portable-devshell", "/work/efilinux"],
     });
 
-    const reopened = new ConversationPreferenceStore(filePath);
+    const reopened = new MessagePreferenceStore(filePath);
     assert.deepEqual(await reopened.read(), {
         hiddenContexts: {
             "ctx-hidden": true,
@@ -46,12 +67,12 @@ test("ConversationPreferenceStore persists titles and ordering across reopen", a
     });
 });
 
-test("ConversationPreferenceStore applies incremental patches without clobbering unrelated browser changes", async () => {
+test("MessagePreferenceStore applies incremental patches without clobbering unrelated browser changes", async () => {
     const root = await createTestTempDirectory(
-        "conversation-preferences-merge",
+        "message-preferences-merge",
     );
-    const store = new ConversationPreferenceStore(
-        join(root, "conversation-preferences.json"),
+    const store = new MessagePreferenceStore(
+        join(root, "message-preferences.json"),
     );
 
     await store.update({
@@ -86,12 +107,12 @@ test("ConversationPreferenceStore applies incremental patches without clobbering
     });
 });
 
-test("ConversationPreferenceStore imports only preference fields that are still missing on the server", async () => {
+test("MessagePreferenceStore imports only preference fields that are still missing on the server", async () => {
     const root = await createTestTempDirectory(
-        "conversation-preferences-initialize",
+        "message-preferences-initialize",
     );
-    const store = new ConversationPreferenceStore(
-        join(root, "conversation-preferences.json"),
+    const store = new MessagePreferenceStore(
+        join(root, "message-preferences.json"),
     );
     await store.update({
         orderByWorkspace: { "/work/a": ["alpha\u0000ctx-server"] },

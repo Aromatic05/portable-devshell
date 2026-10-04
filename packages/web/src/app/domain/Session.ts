@@ -2,9 +2,9 @@ import {
     ApprovalViewModel,
     ArtifactViewModel,
     ConfigViewModel,
-    ConversationPreferenceViewModel,
+    MessagePreferenceViewModel,
     ContextViewModel,
-    ConversationViewModel,
+    MessageHistoryViewModel,
     Endpoint,
     ExtensionViewModel,
     GoalViewModel,
@@ -19,7 +19,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
-    createConversationPreferenceTransport,
+    createMessagePreferenceTransport,
     createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
@@ -51,8 +51,8 @@ export class WebDomainSession {
     readonly artifactTransport;
     readonly config: ConfigViewModel;
     readonly context: ContextViewModel;
-    readonly conversation: ConversationViewModel;
-    readonly conversationPreferences: ConversationPreferenceViewModel;
+    readonly messageHistory: MessageHistoryViewModel;
+    readonly messagePreferences: MessagePreferenceViewModel;
     readonly extension: ExtensionViewModel;
     readonly goals: GoalViewModel;
     readonly instances: InstanceConfigViewModel;
@@ -85,8 +85,8 @@ export class WebDomainSession {
             createServiceTransport(this.#endpoint, { clientKind: "web" }),
         );
         this.config = new ConfigViewModel(createConfigTransport(this.#endpoint));
-        this.conversationPreferences = new ConversationPreferenceViewModel(
-            createConversationPreferenceTransport(this.#endpoint),
+        this.messagePreferences = new MessagePreferenceViewModel(
+            createMessagePreferenceTransport(this.#endpoint),
         );
         this.overview = new OverviewViewModel(
             createOverviewTransport(this.#endpoint),
@@ -106,7 +106,7 @@ export class WebDomainSession {
         this.artifactTransport = createArtifactTransport(this.#endpoint);
         this.artifact = new ArtifactViewModel(this.artifactTransport);
         this.context = new ContextViewModel(createContextTransport(this.#endpoint));
-        this.conversation = new ConversationViewModel({
+        this.messageHistory = new MessageHistoryViewModel({
             transport: this.#messageTransport,
         });
         this.messages = new MessageViewModel({
@@ -169,8 +169,8 @@ export class WebDomainSession {
             this.overview.refresh(),
             this.mcp.load(),
             this.extension.refreshCatalogs(),
-            this.conversation.load(),
-            this.conversationPreferences.refresh(),
+            this.messageHistory.load(),
+            this.messagePreferences.refresh(),
         ]);
         this.overview.start();
         this.mcp.start();
@@ -186,7 +186,7 @@ export class WebDomainSession {
             this.overview.refresh(),
             this.mcp.refresh(),
             this.extension.refreshCatalogs(),
-            this.conversationPreferences.refresh(),
+            this.messagePreferences.refresh(),
         ]);
     }
 
@@ -200,8 +200,8 @@ export class WebDomainSession {
         this.goals.close();
         this.toolCalls.close();
         this.messages.close();
-        this.conversation.close();
-        this.conversationPreferences.close();
+        this.messageHistory.close();
+        this.messagePreferences.close();
         this.context.close();
         this.artifact.close();
         this.instances.close();

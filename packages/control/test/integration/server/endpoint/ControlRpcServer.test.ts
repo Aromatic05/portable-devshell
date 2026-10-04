@@ -431,12 +431,12 @@ test("config RPC masks the Web token across get, validate, and update responses"
     });
 });
 
-test("ControlSocketServer exposes server-backed Conversation preferences through the control route", async (t) => {
+test("ControlSocketServer exposes server-backed Message preferences through the control route", async (t) => {
     const directory = await createTestTempDirectory(
-        "conversation-preference-rpc",
+        "message-preference-rpc",
     );
     const socketPath = createTestIpcPath(
-        "conversation-preference-rpc",
+        "message-preference-rpc",
         directory,
     );
     const comment = new CommentExtension({
@@ -444,7 +444,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             list: () => [],
             onChange: () => () => undefined,
         },
-        preferencesFile: join(directory, "conversation-preferences.json"),
+        preferencesFile: join(directory, "message-preferences.json"),
     });
     const routes = new ControlRouteComposition({
         extensionRoutes: {
@@ -473,7 +473,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
     const initialPreferences = await request(
         socketPath,
         "@control",
-        "conversation.preferences",
+        "message.preferences",
         undefined,
         "tui",
     );
@@ -494,7 +494,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         await request(
             socketPath,
             "@control",
-            "conversation.updatePreferences",
+            "message.updatePreferences",
             {
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -522,7 +522,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "conversation.preferences",
+                "message.preferences",
                 undefined,
                 "tui",
             )
@@ -534,7 +534,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "conversation.updatePreferences",
+                "message.updatePreferences",
                 { unknown: true },
                 "tui",
             )

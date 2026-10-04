@@ -10,7 +10,7 @@ import {
     type CommentServiceOptions,
 } from "../../src/comment/CommentService.ts";
 import { CommentState } from "../../src/comment/CommentState.ts";
-import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
+import { MessageStore } from "../../src/message/store/MessageStore.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 function createCommentService(
@@ -20,8 +20,8 @@ function createCommentService(
     return new CommentService({
         appendEvent,
         instanceName: "alpha",
-        store: new ConversationStore({
-            filePath: join(root, "conversation.sqlite3"),
+        store: new MessageStore({
+            filePath: join(root, "message.sqlite3"),
             instanceName: "alpha",
             legacyContextMessagesFile: join(root, "context-messages.json"),
         }),
@@ -284,8 +284,8 @@ test("CommentService retirement permanently fences stale service references", as
         await assert.rejects(operation, /not found or is disabled/u);
     }
 
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
     assert.deepEqual(

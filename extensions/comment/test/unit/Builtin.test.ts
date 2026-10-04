@@ -87,10 +87,10 @@ test("Comment Extension activates from observe, event-publish, and history capab
             { id: "todo-invalid", pointId: "toolcall.rewrite" },
             { id: "context-message-list", pointId: "control.routes" },
             { id: "context-message-queue", pointId: "control.routes" },
-            { id: "conversation-list", pointId: "control.routes" },
-            { id: "conversation-preferences", pointId: "control.routes" },
+            { id: "message-list", pointId: "control.routes" },
+            { id: "message-preferences", pointId: "control.routes" },
             {
-                id: "conversation-update-preferences",
+                id: "message-update-preferences",
                 pointId: "control.routes",
             },
             { id: "todo_report", pointId: "mcp.tools" },

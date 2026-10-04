@@ -1,7 +1,7 @@
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
-    ConversationPreferencesPatch,
+    MessagePreferencesPatch,
     InstanceCreateDraft,
     InstanceCreateSchema,
 } from "@portable-devshell/shared";
@@ -23,7 +23,7 @@ export class WebStore {
     readonly #listeners = new Set<() => void>();
     readonly #operations: WebOperationCoordinator;
     readonly #requestTimeoutMs: number;
-    #conversationPreferenceQueue = Promise.resolve();
+    #messagePreferenceQueue = Promise.resolve();
     #controlRestartPromise?: Promise<boolean>;
     #generation = 0;
     #stopped = false;
@@ -89,14 +89,14 @@ export class WebStore {
         }
     }
 
-    async updateConversationPreferences(
-        patch: ConversationPreferencesPatch,
+    async updateMessagePreferences(
+        patch: MessagePreferencesPatch,
     ): Promise<boolean> {
         const generation = this.#generation;
         const run = async (): Promise<boolean> => {
             if (!this.#current(generation)) return false;
             try {
-                await this.domains.conversationPreferences.update(patch);
+                await this.domains.messagePreferences.update(patch);
                 return this.#current(generation);
             } catch (error) {
                 if (this.#current(generation))
@@ -108,8 +108,8 @@ export class WebStore {
                 return false;
             }
         };
-        const request = this.#conversationPreferenceQueue.then(run, run);
-        this.#conversationPreferenceQueue = request.then(
+        const request = this.#messagePreferenceQueue.then(run, run);
+        this.#messagePreferenceQueue = request.then(
             () => undefined,
             () => undefined,
         );
@@ -139,7 +139,7 @@ export class WebStore {
                     runtime.load(instance).then(() => runtime.readLogs()),
                     this.domains.approval(instance).load(instance),
                     this.domains.toolCalls.load(instance),
-                    this.domains.conversation.refreshInstance(instance),
+                    this.domains.messageHistory.refreshInstance(instance),
                     this.domains.messages.refreshInstance(instance),
                 ]);
             }),
@@ -155,8 +155,8 @@ export class WebStore {
             ({ name }) => name,
         );
         await Promise.all([
-            this.domains.conversation.load(instances),
-            this.domains.conversationPreferences.refresh(),
+            this.domains.messageHistory.load(instances),
+            this.domains.messagePreferences.refresh(),
             this.domains.messages.load(instances),
         ]);
     }

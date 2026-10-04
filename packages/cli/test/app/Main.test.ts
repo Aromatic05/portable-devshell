@@ -1965,11 +1965,11 @@ function testClients(client: Record<string, unknown>) {
         },
         config: {
             get: (...args: unknown[]) => invoke("getConfig", args),
-            getConversationPreferences: (...args: unknown[]) =>
-                invoke("getConversationPreferences", args),
+            getMessagePreferences: (...args: unknown[]) =>
+                invoke("getMessagePreferences", args),
             update: (...args: unknown[]) => invoke("updateConfig", args),
-            updateConversationPreferences: (...args: unknown[]) =>
-                invoke("updateConversationPreferences", args),
+            updateMessagePreferences: (...args: unknown[]) =>
+                invoke("updateMessagePreferences", args),
             validate: (...args: unknown[]) => invoke("validateConfig", args),
         },
         context: {
@@ -1980,8 +1980,8 @@ function testClients(client: Record<string, unknown>) {
         contextMessage: {
             listContextMessages: (...args: unknown[]) =>
                 invoke("listContextMessages", args),
-            listConversationEntries: (...args: unknown[]) =>
-                invoke("listConversationEntries", args),
+            listMessageEntries: (...args: unknown[]) =>
+                invoke("listMessageEntries", args),
             queueContextMessage: (...args: unknown[]) =>
                 invoke("createContextMessage", args),
         },

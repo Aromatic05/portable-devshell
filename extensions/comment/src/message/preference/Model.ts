@@ -1,28 +1,28 @@
 import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
+    MessagePreferencesPatch,
+    MessagePreferencesSnapshot,
 } from "@portable-devshell/shared";
 
-export const CONVERSATION_PREFERENCES_VERSION = 1 as const;
+export const MESSAGE_PREFERENCES_VERSION = 1 as const;
 
 const MAX_KEYS = 10_000;
 const MAX_KEY_LENGTH = 8_192;
 const MAX_TITLE_LENGTH = 120;
 
-export function createEmptyConversationPreferences(): ConversationPreferencesSnapshot {
+export function createEmptyMessagePreferences(): MessagePreferencesSnapshot {
     return {
         hiddenContexts: {},
         orderByWorkspace: {},
         titles: {},
-        version: CONVERSATION_PREFERENCES_VERSION,
+        version: MESSAGE_PREFERENCES_VERSION,
         workspaceOrder: [],
     };
 }
 
-export function parseConversationPreferencesPatch(
+export function parseMessagePreferencesPatch(
     value: unknown,
-): ConversationPreferencesPatch {
-    const record = object(value, "Conversation preferences patch");
+): MessagePreferencesPatch {
+    const record = object(value, "Message preferences patch");
     only(record, [
         "hiddenContexts",
         "ifMissing",
@@ -32,7 +32,7 @@ export function parseConversationPreferencesPatch(
     ]);
     if (record.ifMissing !== undefined && typeof record.ifMissing !== "boolean")
         throw new TypeError(
-            "Conversation preferences ifMissing must be a boolean.",
+            "Message preferences ifMissing must be a boolean.",
         );
     return {
         ...(record.hiddenContexts === undefined
@@ -53,10 +53,10 @@ export function parseConversationPreferencesPatch(
     };
 }
 
-export function parseConversationPreferencesSnapshot(
+export function parseMessagePreferencesSnapshot(
     value: unknown,
-): ConversationPreferencesSnapshot {
-    const record = object(value, "Conversation preferences");
+): MessagePreferencesSnapshot {
+    const record = object(value, "Message preferences");
     only(record, [
         "hiddenContexts",
         "orderByWorkspace",
@@ -64,9 +64,9 @@ export function parseConversationPreferencesSnapshot(
         "version",
         "workspaceOrder",
     ]);
-    if (record.version !== CONVERSATION_PREFERENCES_VERSION)
+    if (record.version !== MESSAGE_PREFERENCES_VERSION)
         throw new TypeError(
-            `Unsupported Conversation preferences version: ${String(record.version)}.`,
+            `Unsupported Message preferences version: ${String(record.version)}.`,
         );
     return {
         hiddenContexts:
@@ -75,15 +75,15 @@ export function parseConversationPreferencesSnapshot(
                 : (hidden(record.hiddenContexts, false) as Record<string, true>),
         orderByWorkspace: orders(record.orderByWorkspace),
         titles: titles(record.titles, false) as Record<string, string>,
-        version: CONVERSATION_PREFERENCES_VERSION,
+        version: MESSAGE_PREFERENCES_VERSION,
         workspaceOrder: list(record.workspaceOrder, "workspaceOrder"),
     };
 }
 
 export function applyPatch(
-    current: ConversationPreferencesSnapshot,
-    patch: ConversationPreferencesPatch,
-): ConversationPreferencesSnapshot {
+    current: MessagePreferencesSnapshot,
+    patch: MessagePreferencesPatch,
+): MessagePreferencesSnapshot {
     const missing = patch.ifMissing === true;
     const hiddenContexts = { ...current.hiddenContexts };
     for (const [key, value] of Object.entries(patch.hiddenContexts ?? {})) {
@@ -122,33 +122,33 @@ export function applyPatch(
         hiddenContexts,
         orderByWorkspace,
         titles: nextTitles,
-        version: CONVERSATION_PREFERENCES_VERSION,
+        version: MESSAGE_PREFERENCES_VERSION,
         workspaceOrder,
     };
 }
 
 export function clonePreferences(
-    value: ConversationPreferencesSnapshot,
-): ConversationPreferencesSnapshot {
+    value: MessagePreferencesSnapshot,
+): MessagePreferencesSnapshot {
     return structuredClone(value);
 }
 
 export function samePreferences(
-    left: ConversationPreferencesSnapshot,
-    right: ConversationPreferencesSnapshot,
+    left: MessagePreferencesSnapshot,
+    right: MessagePreferencesSnapshot,
 ): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function hidden(value: unknown, nullable: boolean): Record<string, true | null> {
-    const record = entries(value, "Conversation preferences hiddenContexts");
+    const record = entries(value, "Message preferences hiddenContexts");
     return Object.fromEntries(
         record.map(([key, item]) => {
             keyOf(key, "Context id");
             if (nullable && item === null) return [key, null];
             if (item !== true)
                 throw new TypeError(
-                    "Conversation hidden Context values must be true or null.",
+                    "Message hidden Context values must be true or null.",
                 );
             return [key, true];
         }),
@@ -157,7 +157,7 @@ function hidden(value: unknown, nullable: boolean): Record<string, true | null> 
 
 function orders(value: unknown): Record<string, string[]> {
     return Object.fromEntries(
-        entries(value, "Conversation preferences orderByWorkspace").map(
+        entries(value, "Message preferences orderByWorkspace").map(
             ([workspace, order]) => {
                 keyOf(workspace, "workspace");
                 return [
@@ -174,8 +174,8 @@ function titles(
     nullable: boolean,
 ): Record<string, string | null> {
     return Object.fromEntries(
-        entries(value, "Conversation preferences titles").map(([key, title]) => {
-            keyOf(key, "conversation key");
+        entries(value, "Message preferences titles").map(([key, title]) => {
+            keyOf(key, "message key");
             if (nullable && title === null) return [key, null];
             if (
                 typeof title !== "string" ||
@@ -183,7 +183,7 @@ function titles(
                 title.length > MAX_TITLE_LENGTH
             )
                 throw new TypeError(
-                    `Conversation title must contain 1-${MAX_TITLE_LENGTH} characters.`,
+                    `Message title must contain 1-${MAX_TITLE_LENGTH} characters.`,
                 );
             return [key, title];
         }),
@@ -193,13 +193,13 @@ function titles(
 function list(value: unknown, label: string): string[] {
     if (!Array.isArray(value) || value.length > MAX_KEYS)
         throw new TypeError(
-            `Conversation preferences ${label} must be an array with at most ${MAX_KEYS} items.`,
+            `Message preferences ${label} must be an array with at most ${MAX_KEYS} items.`,
         );
     const output: string[] = [];
     for (const item of value) {
         if (typeof item !== "string")
             throw new TypeError(
-                `Conversation preferences ${label} items must be strings.`,
+                `Message preferences ${label} items must be strings.`,
             );
         keyOf(item, label);
         if (!output.includes(item)) output.push(item);
@@ -223,7 +223,7 @@ function object(value: unknown, label: string): Record<string, unknown> {
 function keyOf(value: string, label: string): void {
     if (value.length < 1 || value.length > MAX_KEY_LENGTH)
         throw new TypeError(
-            `Conversation preferences ${label} must contain 1-${MAX_KEY_LENGTH} characters.`,
+            `Message preferences ${label} must contain 1-${MAX_KEY_LENGTH} characters.`,
         );
 }
 
@@ -231,6 +231,6 @@ function only(record: Record<string, unknown>, allowed: readonly string[]): void
     const unknown = Object.keys(record).find((key) => !allowed.includes(key));
     if (unknown !== undefined)
         throw new TypeError(
-            `Unknown Conversation preferences field: ${unknown}.`,
+            `Unknown Message preferences field: ${unknown}.`,
         );
 }

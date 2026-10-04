@@ -13,11 +13,6 @@ import {
     type ConfigUpdateWebRequest,
     type ConfigView,
 } from "./Model.js";
-import {
-    createEmptyConversationPreferences,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
-} from "./Preference.js";
 import type { ConfigTransport } from "./Transport.js";
 
 const REFRESH_COALESCE_MS = 100;
@@ -251,96 +246,4 @@ function sameConfigView(left: ConfigView, right: ConfigView): boolean {
 }
 function toError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
-}
-
-export interface ConversationPreferenceViewModelState {
-    failure?: Error;
-    loading: boolean;
-    preferences: ConversationPreferencesSnapshot;
-}
-
-interface ConversationPreferencePort {
-    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
-    updateConversationPreferences(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot>;
-}
-
-export class ConversationPreferenceViewModel {
-    readonly #listeners = new Set<() => void>();
-    readonly #transport: ConversationPreferencePort;
-    #generation = 0;
-    #published: ConversationPreferenceViewModelState =
-        emptyConversationPreferenceViewModelState();
-    #state: ConversationPreferenceViewModelState =
-        emptyConversationPreferenceViewModelState();
-
-    constructor(transport: ConversationPreferencePort) {
-        this.#transport = transport;
-    }
-
-    get state(): Readonly<ConversationPreferenceViewModelState> {
-        return this.#published;
-    }
-
-    subscribe(listener: () => void): () => void {
-        this.#listeners.add(listener);
-        return () => this.#listeners.delete(listener);
-    }
-
-    async refresh(): Promise<ConversationPreferencesSnapshot | undefined> {
-        const generation = ++this.#generation;
-        this.#state = { ...this.#state, loading: true };
-        this.#emit();
-        try {
-            const preferences =
-                await this.#transport.getConversationPreferences();
-            if (generation !== this.#generation) return undefined;
-            this.#state = { loading: false, preferences };
-            this.#emit();
-            return preferences;
-        } catch (error) {
-            if (generation !== this.#generation) return undefined;
-            this.#state = {
-                ...this.#state,
-                failure: toError(error),
-                loading: false,
-            };
-            this.#emit();
-            return undefined;
-        }
-    }
-
-    async update(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot> {
-        const generation = ++this.#generation;
-        const preferences =
-            await this.#transport.updateConversationPreferences(patch);
-        if (generation === this.#generation) {
-            this.#state = { loading: false, preferences };
-            this.#emit();
-        }
-        return preferences;
-    }
-
-    close(): void {
-        this.#generation += 1;
-        this.#listeners.clear();
-        this.#state = emptyConversationPreferenceViewModelState();
-        this.#published = this.#state;
-    }
-
-    #emit(): void {
-        this.#published = this.#state;
-        this.#state = { ...this.#state };
-        for (const listener of this.#listeners) listener();
-    }
-}
-
-function emptyConversationPreferenceViewModelState(): ConversationPreferenceViewModelState {
-    return {
-        loading: false,
-        preferences: createEmptyConversationPreferences(),
-    };
 }

@@ -701,7 +701,7 @@ describe("authenticated application shell", () => {
 });
 
 describe("application chrome", () => {
-    it("sets the document title from the active route and conversation context", async () => {
+    it("sets the document title from the active route and message context", async () => {
         window.location.hash = "#/overview";
         const domains = new WebTestDomains();
         domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);

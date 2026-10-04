@@ -1,25 +1,25 @@
 import { ExtensionError } from "@portable-devshell/extension";
 import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
+    MessagePreferencesPatch,
+    MessagePreferencesSnapshot,
     JsonValue,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { parseConversationPreferencesPatch } from "./Model.js";
+import { parseMessagePreferencesPatch } from "./Model.js";
 
-export interface ConversationPreferencePort {
-    read(): Promise<ConversationPreferencesSnapshot>;
+export interface MessagePreferencePort {
+    read(): Promise<MessagePreferencesSnapshot>;
     update(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot>;
+        patch: MessagePreferencesPatch,
+    ): Promise<MessagePreferencesSnapshot>;
 }
 
-export function createConversationPreferenceRouteModule(
-    port: ConversationPreferencePort,
+export function createMessagePreferenceRouteModule(
+    port: MessagePreferencePort,
 ): ControlPortDefinition {
     return {
-        name: "conversation",
+        name: "message",
         operations: [
             {
                 name: "preferences",
@@ -29,7 +29,7 @@ export function createConversationPreferenceRouteModule(
                 name: "updatePreferences",
                 handle: async (request) =>
                     (await port.update(
-                        readConversationPreferencesPatch(
+                        readMessagePreferencesPatch(
                             request.payload ?? {},
                         ),
                     )) as unknown as JsonValue,
@@ -38,11 +38,11 @@ export function createConversationPreferenceRouteModule(
     };
 }
 
-function readConversationPreferencesPatch(
+function readMessagePreferencesPatch(
     value: JsonValue,
-): ConversationPreferencesPatch {
+): MessagePreferencesPatch {
     try {
-        return parseConversationPreferencesPatch(value);
+        return parseMessagePreferencesPatch(value);
     } catch (error) {
         if (!(error instanceof TypeError)) throw error;
         throw new ExtensionError({

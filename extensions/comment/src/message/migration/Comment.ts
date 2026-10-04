@@ -25,7 +25,7 @@ export function migrateLegacyComments(
     database.exec("BEGIN IMMEDIATE");
     try {
         const insert = database.prepare(`
-            INSERT INTO conversation_entries(
+            INSERT INTO message_entries(
                 kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
             ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(kind, id) DO NOTHING
@@ -62,7 +62,7 @@ function readLegacyComments(filePath: string | undefined): ContextMessageRecord[
 
 function readMetadata(database: DatabaseSync, key: string): string | undefined {
     const row = database
-        .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+        .prepare("SELECT value FROM message_metadata WHERE key = ?")
         .get(key) as { value: string } | undefined;
     return row?.value;
 }
@@ -71,7 +71,7 @@ function writeMetadata(database: DatabaseSync, key: string, value: string): void
     database
         .prepare(
             `
-            INSERT INTO conversation_metadata(key, value) VALUES (?, ?)
+            INSERT INTO message_metadata(key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `,
         )

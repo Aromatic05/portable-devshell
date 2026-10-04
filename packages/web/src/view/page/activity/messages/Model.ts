@@ -1,12 +1,12 @@
 import {
     compactContextId,
-    humanConversationTitle,
+    humanMessageTitle,
     parseContextMessageDirective,
     type ContextMessageStatus,
-    type ConversationEntry,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
-    type ConversationViewModelState,
+    type MessageEntry,
+    type MessagePreferencesPatch,
+    type MessagePreferencesSnapshot,
+    type MessageHistoryViewModelState,
     type InstanceListEntry,
     type McpContextRecord,
     type MessageViewModelState,
@@ -33,18 +33,18 @@ export interface WebMessageSession {
 }
 
 const activeSessionWindowMs = 30 * 60 * 1_000;
-const emptyConversationEntries = Object.freeze(
+const emptyMessageEntries = Object.freeze(
     [],
-) as readonly ConversationEntry[];
+) as readonly MessageEntry[];
 
 /**
- * Explicit domain state used to project Conversation sessions. Keeping the
+ * Explicit domain state used to project Message sessions. Keeping the
  * inputs as plain values lets the model stay pure without reaching into a
  * WebState or a shared read-model snapshot.
  */
 export interface WebMessageProjection {
     contexts: readonly McpContextRecord[];
-    conversation: ConversationViewModelState;
+    message: MessageHistoryViewModelState;
     instances: readonly InstanceListEntry[];
     messages: MessageViewModelState;
 }
@@ -111,13 +111,13 @@ function projectWebMessageSessions(
         }
     }
     for (const { name } of input.instances) {
-        for (const entry of input.conversation.instances[name]?.entries ?? []) {
+        for (const entry of input.message.instances[name]?.entries ?? []) {
             touch(name, entry.ctxId, {
                 latestAt: entry.createdAt,
                 startedAt: entry.createdAt,
             });
             if (entry.kind !== "comment") continue;
-            const text = conversationSummary(entry.text);
+            const text = messageSummary(entry.text);
             if (text === undefined) continue;
             const key = `${name}\u0000${entry.ctxId}`;
             const current = summaries.get(key);
@@ -140,7 +140,7 @@ function projectWebMessageSessions(
     const baseTitles = values.map(
         (session) =>
             summaries.get(`${session.instance}\u0000${session.ctxId}`)?.text ??
-            humanConversationTitle(session),
+            humanMessageTitle(session),
     );
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles)
@@ -148,7 +148,7 @@ function projectWebMessageSessions(
     return values
         .map((session, index): WebMessageSession => {
             const baseTitle =
-                baseTitles[index] ?? humanConversationTitle(session);
+                baseTitles[index] ?? humanMessageTitle(session);
             return {
                 ...session,
                 title:
@@ -170,8 +170,8 @@ export function selectWebMessageEntries(
     ctxId: string,
 ): WebMessageEntry[] {
     const source =
-        input.conversation.instances[instance]?.entries ??
-        emptyConversationEntries;
+        input.message.instances[instance]?.entries ??
+        emptyMessageEntries;
     return source
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): WebMessageEntry => ({
@@ -230,7 +230,7 @@ function earlierTimestamp(
     return left.localeCompare(right) <= 0 ? left : right;
 }
 
-function conversationSummary(text: string): string | undefined {
+function messageSummary(text: string): string | undefined {
     const compact = parseContextMessageDirective(text)
         .body.replace(/\s+/gu, " ")
         .trim();
@@ -276,22 +276,22 @@ export function groupMessageSessionsByWorkspace(
     return [...groups.values()];
 }
 
-export function isConversationHidden(
-    preferences: ConversationPreferencesSnapshot,
+export function isMessageHidden(
+    preferences: MessagePreferencesSnapshot,
     session: Pick<WebMessageSession, "ctxId">,
 ): boolean {
     return preferences.hiddenContexts?.[session.ctxId] === true;
 }
 
-export interface LegacyConversationPreferences {
+export interface LegacyMessagePreferences {
     legacyOrder: string[];
-    preferences: ConversationPreferencesSnapshot;
+    preferences: MessagePreferencesSnapshot;
 }
 
-const conversationPreferencesStorageKey =
+const legacyMessagePreferencesStorageKey =
     "portable-devshell:web:conversation-preferences:v1";
 
-export function conversationKey(
+export function messageKey(
     session: Pick<WebMessageSession, "ctxId" | "instance">,
 ): string {
     return `${session.instance}\u0000${session.ctxId}`;
@@ -304,15 +304,15 @@ export function workspacePreferenceKey(
 }
 
 /**
- * @compat web-conversation-preferences-v1
+ * @compat web-message-preferences-v1
  * @removeAt 0.7.10
  */
-export function readLegacyConversationPreferences():
-    LegacyConversationPreferences | undefined {
+export function readLegacyMessagePreferences():
+    LegacyMessagePreferences | undefined {
     if (typeof window === "undefined") return undefined;
     try {
         const raw = window.localStorage.getItem(
-            conversationPreferencesStorageKey,
+            legacyMessagePreferencesStorageKey,
         );
         if (raw === null) return undefined;
         const parsed = JSON.parse(raw) as {
@@ -378,23 +378,23 @@ export function readLegacyConversationPreferences():
     }
 }
 
-export function removeLegacyConversationPreferences(): void {
+export function removeLegacyMessagePreferences(): void {
     if (typeof window === "undefined") return;
     try {
-        window.localStorage.removeItem(conversationPreferencesStorageKey);
+        window.localStorage.removeItem(legacyMessagePreferencesStorageKey);
     } catch {
         // Migration cleanup is best-effort after the server has accepted the preferences.
     }
 }
 
-export function applyConversationPreferences(
+export function applyMessagePreferences(
     sessions: readonly WebMessageSession[],
-    preferences: ConversationPreferencesSnapshot,
+    preferences: MessagePreferencesSnapshot,
 ): WebMessageSession[] {
     const workspaceRank = new Map(
         preferences.workspaceOrder.map((key, index) => [key, index]),
     );
-    const conversationRanks = new Map(
+    const messageRanks = new Map(
         Object.entries(preferences.orderByWorkspace).map(([workspace, order]) => [
             workspace,
             new Map(order.map((key, index) => [key, index])),
@@ -404,7 +404,7 @@ export function applyConversationPreferences(
         .map((session) => ({
             ...session,
             title:
-                preferences.titles[conversationKey(session)] ?? session.title,
+                preferences.titles[messageKey(session)] ?? session.title,
         }))
         .sort((left, right) => {
             const leftWorkspace = workspacePreferenceKey(left);
@@ -422,9 +422,9 @@ export function applyConversationPreferences(
                 }
                 return leftWorkspace.localeCompare(rightWorkspace);
             }
-            const rank = conversationRanks.get(leftWorkspace);
-            const leftRank = rank?.get(conversationKey(left));
-            const rightRank = rank?.get(conversationKey(right));
+            const rank = messageRanks.get(leftWorkspace);
+            const leftRank = rank?.get(messageKey(left));
+            const rightRank = rank?.get(messageKey(right));
             if (leftRank === undefined && rightRank === undefined)
                 return (
                     right.startedAt.localeCompare(left.startedAt) ||
@@ -436,11 +436,11 @@ export function applyConversationPreferences(
         });
 }
 
-export function ensureConversationPreferenceOrder(
-    preferences: ConversationPreferencesSnapshot,
+export function ensureMessagePreferenceOrder(
+    preferences: MessagePreferencesSnapshot,
     sessions: readonly WebMessageSession[],
     legacyOrder: readonly string[] = [],
-): ConversationPreferencesSnapshot {
+): MessagePreferencesSnapshot {
     const workspaceSessions = new Map<string, WebMessageSession[]>();
     for (const session of sessions) {
         const workspace = workspacePreferenceKey(session);
@@ -463,7 +463,7 @@ export function ensureConversationPreferenceOrder(
                 workspace !== preferences.workspaceOrder[index],
         );
     for (const [workspace, values] of workspaceSessions) {
-        const loadedKeys = values.map(conversationKey);
+        const loadedKeys = values.map(messageKey);
         const loaded = new Set(loadedKeys);
         const previous =
             orderByWorkspace[workspace] ??
@@ -486,10 +486,10 @@ export function ensureConversationPreferenceOrder(
     return { ...preferences, orderByWorkspace, workspaceOrder };
 }
 
-export function conversationOrderPatch(
-    current: ConversationPreferencesSnapshot,
-    next: ConversationPreferencesSnapshot,
-): ConversationPreferencesPatch | undefined {
+export function messageOrderPatch(
+    current: MessagePreferencesSnapshot,
+    next: MessagePreferencesSnapshot,
+): MessagePreferencesPatch | undefined {
     const orderByWorkspace = Object.fromEntries(
         Object.entries(next.orderByWorkspace).filter(([workspace, order]) => {
             const previous = current.orderByWorkspace[workspace];
@@ -517,13 +517,13 @@ export function conversationOrderPatch(
     };
 }
 
-export function reorderConversationKeys(
+export function reorderMessageKeys(
     sessions: readonly WebMessageSession[],
     sourceKey: string,
     targetKey: string,
     previousOrder: readonly string[],
 ): string[] {
-    const keys = sessions.map(conversationKey);
+    const keys = sessions.map(messageKey);
     const sourceIndex = keys.indexOf(sourceKey);
     const targetIndex = keys.indexOf(targetKey);
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)

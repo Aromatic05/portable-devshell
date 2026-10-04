@@ -1,5 +1,5 @@
 import {
-    createEmptyConversationPreferences,
+    createEmptyMessagePreferences,
     type ApprovalRequest,
     type ConfigView,
     type ContextMessageRecord,
@@ -89,13 +89,13 @@ export class TuiTestDomains {
     readonly context = new TestDomainSource({
         contexts: [] as any[],
     });
-    readonly conversation = new TestDomainSource({
+    readonly messageHistory = new TestDomainSource({
         failures: {} as Record<string, Error>,
         instances: {} as Record<string, any>,
     });
-    readonly conversationPreferences = new TestDomainSource({
+    readonly messagePreferences = new TestDomainSource({
         loading: false,
-        preferences: createEmptyConversationPreferences(),
+        preferences: createEmptyMessagePreferences(),
     });
     readonly messages = new TestDomainSource({
         failures: {} as Record<string, Error>,
@@ -128,8 +128,8 @@ export class TuiTestDomains {
             instances: this.instances,
             artifact: this.artifact,
             context: this.context,
-            conversation: this.conversation,
-            conversationPreferences: this.conversationPreferences,
+            messageHistory: this.messageHistory,
+            messagePreferences: this.messagePreferences,
             messages: this.messages,
             goals: this.goals,
             toolCalls: this.toolCalls,
@@ -209,22 +209,22 @@ export class TuiTestDomains {
         });
     }
 
-    setConversation(instance: string, entries: readonly any[]): void {
-        const current = this.conversation.state.instances[instance] ?? {
+    setMessageHistory(instance: string, entries: readonly any[]): void {
+        const current = this.messageHistory.state.instances[instance] ?? {
             entries: [],
             lastSeq: 0,
             status: "stopped",
         };
-        this.conversation.patch({
+        this.messageHistory.patch({
             instances: {
-                ...this.conversation.state.instances,
+                ...this.messageHistory.state.instances,
                 [instance]: { ...current, entries: [...entries] },
             },
         });
     }
 
-    setConversationPreferences(preferences: any): void {
-        this.conversationPreferences.patch({ preferences });
+    setMessagePreferences(preferences: any): void {
+        this.messagePreferences.patch({ preferences });
     }
 
     setMessages(instance: string, messages: readonly any[]): void {
@@ -546,7 +546,7 @@ export class TuiDomainHarness {
                 renew: async (ctxId: string) => ({ ctxId }),
             },
         );
-        const conversation = Object.assign(
+        const messageHistory = Object.assign(
             new TestDomainSource({
                 failures: {} as Record<string, Error>,
                 instances: {} as Record<string, any>,
@@ -557,20 +557,20 @@ export class TuiDomainHarness {
                 refreshInstance: async () => 0,
             },
         );
-        const conversationPreferences = Object.assign(
+        const messagePreferences = Object.assign(
             new TestDomainSource({
                 loading: false,
-                preferences: createEmptyConversationPreferences(),
+                preferences: createEmptyMessagePreferences(),
             }),
             {
                 close: () => undefined,
-                refresh: async () => conversationPreferences.state.preferences,
+                refresh: async () => messagePreferences.state.preferences,
                 update: async (patch: Record<string, unknown>) => {
                     const next = {
-                        ...conversationPreferences.state.preferences,
+                        ...messagePreferences.state.preferences,
                         ...patch,
                     };
-                    conversationPreferences.patch({ preferences: next as any });
+                    messagePreferences.patch({ preferences: next as any });
                     return next;
                 },
             },
@@ -718,8 +718,8 @@ export class TuiDomainHarness {
         };
         const configTransport = {
             get: async () => self.#configView as unknown as ConfigView,
-            getConversationPreferences: async () =>
-                conversationPreferences.state.preferences,
+            getMessagePreferences: async () =>
+                messagePreferences.state.preferences,
             snapshot: async () =>
                 ({
                     revision: 0,
@@ -729,9 +729,9 @@ export class TuiDomainHarness {
                 throw new Error("Config subscription is not supported.");
             },
             update: config.update,
-            updateConversationPreferences: async (
+            updateMessagePreferences: async (
                 patch: Record<string, unknown>,
-            ) => await conversationPreferences.update(patch),
+            ) => await messagePreferences.update(patch),
             updateMcpEndpoint: config.updateMcpEndpoint,
             updateWeb: config.updateWeb,
             validate: config.validate,
@@ -839,8 +839,8 @@ export class TuiDomainHarness {
             toolTransport,
             reverse,
             context,
-            conversation,
-            conversationPreferences,
+            messageHistory,
+            messagePreferences,
             messages,
             goals,
             toolCalls,
@@ -862,8 +862,8 @@ export class TuiDomainHarness {
                     overview.refresh(),
                     mcp.load(),
                     extension.refreshCatalogs(),
-                    conversation.load(),
-                    conversationPreferences.refresh(),
+                    messageHistory.load(),
+                    messagePreferences.refresh(),
                 ]);
                 overview.start();
                 mcp.start();
@@ -878,7 +878,7 @@ export class TuiDomainHarness {
                     overview.refresh(),
                     mcp.refresh(),
                     extension.refreshCatalogs(),
-                    conversationPreferences.refresh(),
+                    messagePreferences.refresh(),
                 ]);
             },
             close: () => {

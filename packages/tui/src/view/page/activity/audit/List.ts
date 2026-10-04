@@ -6,7 +6,7 @@ import { compactSummary, formatField, makeBox } from "../../Support.js";
 import { projectAuditContexts } from "./projection/Context.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
 import { buildAuditContextBoxes } from "./Context.js";
-import { buildAuditConversationBoxes } from "./Conversation.js";
+import { buildAuditMessageBoxes } from "./Message.js";
 
 export function buildAuditContextListBoxes(
     state: TuiAppState,
@@ -110,8 +110,8 @@ export function buildAuditPageBoxes(
     if (route.page !== "audit") return [];
     if (route.view === "contexts")
         return buildAuditContextListBoxes(state, reader, instanceName);
-    if (route.view === "conversation") {
-        return buildAuditConversationBoxes(
+    if (route.view === "message") {
+        return buildAuditMessageBoxes(
             state,
             reader,
             instanceName,

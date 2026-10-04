@@ -15,15 +15,15 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
-import { ConversationStore } from "../../../../../extensions/comment/src/conversation/store/ConversationStore.ts";
-import { ConversationPreferenceStore } from "../../../../../extensions/comment/src/conversation/preference/Store.ts";
+import { MessageStore } from "../../../../../extensions/comment/src/message/store/MessageStore.ts";
+import { MessagePreferenceStore } from "../../../../../extensions/comment/src/message/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
 import { createTuiDomainSession } from "../../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.js";
 import {
     currentTuiRoute,
     currentTuiRouteScrollKey,
-    readContextConversationDraft,
+    readContextMessageDraft,
     selectSidebarModel,
 } from "../../../src/testing.ts";
 import { renderExpandableBoxLines } from "../../../src/view/component/content/Box.js";
@@ -63,52 +63,52 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(
             () =>
                 currentTuiRoute(harness.runtime.store.getState()).view ===
-                "conversation",
+                "message",
         );
         await waitUntil(
             () =>
                 harness.runtime.store.getState().ui.mainFocusId ===
-                "conversation-composer",
+                "message-composer",
         );
         await waitUntil(() =>
-            conversationText(harness.runtime).includes("alpha seed comment"),
+            messageText(harness.runtime).includes("alpha seed comment"),
         );
-        const conversation = conversationText(harness.runtime);
-        assert.match(conversation, /alpha seed comment/u);
-        assert.equal(conversation.includes("beta seed comment"), false);
+        const message = messageText(harness.runtime);
+        assert.match(message, /alpha seed comment/u);
+        assert.equal(message.includes("beta seed comment"), false);
 
         harness.terminal.write("\u001b[A");
         await waitUntil(
             () =>
                 harness.runtime.store.getState().ui.mainFocusId ===
-                "conversation-pending",
+                "message-pending",
         );
         harness.terminal.write(" ");
         await waitUntil(
             () =>
-                box(harness.runtime, "conversation-pending")?.expanded === true,
+                box(harness.runtime, "message-pending")?.expanded === true,
         );
         harness.terminal.write(" ");
         await waitUntil(
             () =>
-                box(harness.runtime, "conversation-pending")?.expanded ===
+                box(harness.runtime, "message-pending")?.expanded ===
                 false,
         );
         harness.terminal.write("\u001b[B");
         await waitUntil(
             () =>
                 harness.runtime.store.getState().ui.mainFocusId ===
-                "conversation-composer",
+                "message-composer",
         );
 
         harness.terminal.write(" ");
         await waitUntil(
             () =>
-                box(harness.runtime, "conversation-composer")?.expanded ===
+                box(harness.runtime, "message-composer")?.expanded ===
                 true,
         );
         const browseDraft = renderExpandableBoxLines(
-            box(harness.runtime, "conversation-composer")!,
+            box(harness.runtime, "message-composer")!,
             80,
         ).find((line) =>
             line.segments?.some((segment) => segment.text.includes("<empty>")),
@@ -125,21 +125,21 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         harness.terminal.write("\u001b[B");
         await waitUntil(
             () =>
-                box(harness.runtime, "conversation-composer")
-                    ?.selectedDetailLineId === "conversation-composer:Delivery",
+                box(harness.runtime, "message-composer")
+                    ?.selectedDetailLineId === "message-composer:Delivery",
         );
         harness.terminal.write("\u001b[B");
         await waitUntil(
             () =>
-                box(harness.runtime, "conversation-composer")
-                    ?.selectedDetailLineId === "conversation-composer:draft",
+                box(harness.runtime, "message-composer")
+                    ?.selectedDetailLineId === "message-composer:draft",
         );
 
         harness.terminal.write("\r");
         await waitUntil(
             () =>
                 harness.runtime.store.getState().interaction.focusScope ===
-                "contextConversation",
+                "contextMessage",
         );
         harness.terminal.write("abcd");
         await waitUntil(() => draft(harness.runtime, "ctx-alpha") === "abcd");
@@ -238,7 +238,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(
             () =>
                 harness.runtime.store.getState().interaction.focusScope ===
-                "contextConversation",
+                "contextMessage",
         );
         await waitUntil(() => {
             const editor = harness.runtime.store.getState().interaction.editor;
@@ -386,7 +386,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(
             () =>
                 harness.runtime.store.getState().interaction.focusScope ===
-                "contextConversation",
+                "contextMessage",
         );
 
         harness.terminal.write("\u001b");
@@ -411,7 +411,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         await waitUntil(
             () =>
                 harness.runtime.store.getState().interaction.focusScope ===
-                "contextConversation",
+                "contextMessage",
         );
     });
 
@@ -561,8 +561,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     ): Promise<Harness> {
         const root = await createTestTempDirectory("tui-context-rpc");
         const socketPath = createTestIpcPath("tui-context-rpc", root);
-        const commentStore = new ConversationStore({
-            filePath: join(root, "conversation.sqlite3"),
+        const commentStore = new MessageStore({
+            filePath: join(root, "message.sqlite3"),
             instanceName: "alpha",
             legacyContextMessagesFile: join(root, "context-messages.json"),
         });
@@ -589,8 +589,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 text: call.input.message,
             });
         }
-        const preferences = new ConversationPreferenceStore(
-            join(root, "conversation-preferences.json"),
+        const preferences = new MessagePreferenceStore(
+            join(root, "message-preferences.json"),
         );
         const routeCalls = { contextQueue: 0 };
         const server = new ControlSocketServer({
@@ -659,8 +659,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
 
     function createRoutes(
         messages: CommentService,
-        conversationStore: ConversationStore,
-        preferences: ConversationPreferenceStore,
+        messageStore: MessageStore,
+        preferences: MessagePreferenceStore,
         toolCalls: readonly ToolCallRecord[],
         routeCalls: { contextQueue: number },
     ): readonly ControlHostDefinition[] {
@@ -746,6 +746,14 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                     view: configView,
                                 }),
                             },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
+                        ],
+                    },
+                    {
+                        name: "instance",
+                        operations: [
                             {
                                 name: "snapshotInstances",
                                 handle: () => ({
@@ -763,7 +771,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                             },
                         ],
                         streams: [
-                            { name: "subscribe", handle: emptySubscription },
                             {
                                 name: "subscribeInstances",
                                 handle: emptySubscription,
@@ -771,7 +778,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         ],
                     },
                     {
-                        name: "conversation",
+                        name: "message",
                         operations: [
                             {
                                 name: "preferences",
@@ -902,10 +909,10 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         name: "message",
                         operations: [
                             {
-                                name: "listConversationEntries",
+                                name: "listMessageEntries",
                                 handle: (request) =>
                                     ({
-                                        entries: conversationStore.list(
+                                        entries: messageStore.list(
                                             (request.payload ?? {}) as never,
                                         ),
                                         lastSeq: 1,
@@ -1088,14 +1095,14 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     }
 
     function draft(runtime: TuiRuntime, ctxId: string): string {
-        return readContextConversationDraft(
+        return readContextMessageDraft(
             runtime.store.getState(),
             "alpha",
             ctxId,
         );
     }
 
-    function conversationText(runtime: TuiRuntime): string {
+    function messageText(runtime: TuiRuntime): string {
         return selectMainScreenModel(runtime.store.getState(), runtime.reader)
             .boxes.flatMap((candidate) => [
                 candidate.title,

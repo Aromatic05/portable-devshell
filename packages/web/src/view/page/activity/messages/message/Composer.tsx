@@ -13,13 +13,13 @@ import {
 import type { WebRoute } from "../../../../../app/Route.js";
 import type { WebStore } from "../../../../../state/Store.js";
 import {
-    buildConversationMarkdown,
+    buildMessageMarkdown,
     downloadMarkdown,
     markdownExportFilename,
 } from "../Export.js";
 import type { WebMessageEntry } from "../Model.js";
 
-export function ConversationComposer({
+export function MessageComposer({
     entries,
     onActivity,
     route,
@@ -101,7 +101,7 @@ export function ConversationComposer({
     function exportMarkdown(): void {
         downloadMarkdown(
             markdownExportFilename(title, route.instance, route.ctxId),
-            buildConversationMarkdown({
+            buildMessageMarkdown({
                 ctxId: route.ctxId,
                 entries,
                 instance: route.instance,

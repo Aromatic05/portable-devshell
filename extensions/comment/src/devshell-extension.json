@@ -15,31 +15,31 @@
         "control.routes": [
             {
                 "id": "context-message-list",
-                "module": "contextMessage",
-                "operation": "list",
+                "module": "message",
+                "operation": "listContextMessages",
                 "scope": "instance"
             },
             {
                 "id": "context-message-queue",
-                "module": "contextMessage",
-                "operation": "queue",
+                "module": "message",
+                "operation": "queueContextMessage",
                 "scope": "instance"
             },
             {
-                "id": "conversation-list",
-                "module": "conversation",
-                "operation": "list",
+                "id": "message-list",
+                "module": "message",
+                "operation": "listMessageEntries",
                 "scope": "instance"
             },
             {
-                "id": "conversation-preferences",
-                "module": "conversation",
+                "id": "message-preferences",
+                "module": "message",
                 "operation": "preferences",
                 "scope": "control"
             },
             {
-                "id": "conversation-update-preferences",
-                "module": "conversation",
+                "id": "message-update-preferences",
+                "module": "message",
                 "operation": "updatePreferences",
                 "scope": "control"
             }

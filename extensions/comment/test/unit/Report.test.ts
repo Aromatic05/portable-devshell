@@ -30,7 +30,7 @@ function createHarness() {
                 };
             },
         },
-        conversation: {
+        messageHistory: {
             async list(input = {}) {
                 const filtered = entries.filter(
                     (entry) =>

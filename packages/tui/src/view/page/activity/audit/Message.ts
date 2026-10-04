@@ -1,15 +1,15 @@
 import type {
     ContextMessageRecord,
-    ConversationEntry,
+    MessageEntry,
 } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../../component/content/Box.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import type { TuiDomainReader } from "../../../domain/Reader.js";
-import { readContextConversationDraft } from "../messages/Draft.js";
+import { readContextMessageDraft } from "../messages/Draft.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
 
-export function buildAuditConversationBoxes(
+export function buildAuditMessageBoxes(
     state: TuiAppState,
     reader: TuiDomainReader,
     instance: string,
@@ -18,7 +18,7 @@ export function buildAuditConversationBoxes(
     const messages = (reader.messages.instances[instance]?.messages ?? [])
         .filter((message) => message.ctxId === ctxId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    const delivered = (reader.conversation.instances[instance]?.entries ?? [])
+    const delivered = (reader.messageHistory.instances[instance]?.entries ?? [])
         .filter(
             (entry) =>
                 entry.ctxId === ctxId &&
@@ -49,7 +49,7 @@ function deliveredCommentBox(
     state: TuiAppState,
     reader: TuiDomainReader,
     instance: string,
-    entry: ConversationEntry,
+    entry: MessageEntry,
 ): BoxModel {
     const call = reader.toolCalls.instances[instance]?.calls.find(
         (candidate) => candidate.callId === entry.callId,
@@ -66,7 +66,7 @@ function deliveredCommentBox(
             formatField("Completed", completedAt),
             formatField("Comment", comment),
         ],
-        id: `conversation-call:${callId}`,
+        id: `message-call:${callId}`,
         searchText: `${callId} ${toolName} ${comment}`,
         status: "ready",
         summaryLines: [
@@ -94,7 +94,7 @@ function pendingCommentBox(
             formatField("Comments", String(messages.length)),
             formatField("Comment", comment),
         ],
-        id: "conversation-pending",
+        id: "message-pending",
         searchText: `pending next call ${comment}`,
         status: "pending",
         summaryLines: [
@@ -127,7 +127,7 @@ function failedCommentBox(
                 errors.length === 0 ? "delivery failed" : errors,
             ),
         ],
-        id: "conversation-failed",
+        id: "message-failed",
         searchText: `failed ${comment} ${errors}`,
         status: "failed",
         summaryLines: [
@@ -146,7 +146,7 @@ function composerBox(
     instance: string,
     ctxId: string,
 ): BoxModel {
-    const draft = readContextConversationDraft(state, instance, ctxId);
+    const draft = readContextMessageDraft(state, instance, ctxId);
     const prefix = "Draft              ";
     const display = draft.length === 0 ? "<empty>" : draft;
     return makeBox(state, "audit", instance, {
@@ -167,9 +167,9 @@ function composerBox(
             "Enter queues this Comment for the next tool call.",
             "Esc or Ctrl+[ returns to the Audit Context.",
         ],
-        expandedKey: `audit-conversation:${instance}:${ctxId}:composer`,
+        expandedKey: `audit-message:${instance}:${ctxId}:composer`,
         editable: true,
-        id: "conversation-composer",
+        id: "message-composer",
         status: draft.length === 0 ? "normal" : "running",
         summaryLines: [
             draft.length === 0 ? "draft=<empty>" : `draft=${draft}`,

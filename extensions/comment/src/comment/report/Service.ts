@@ -1,6 +1,6 @@
 import type {
-    ConversationEntry,
-    ConversationListInput,
+    MessageEntry,
+    MessageListInput,
 } from "@portable-devshell/shared";
 
 import {
@@ -15,8 +15,8 @@ export interface CommentReportPending {
     replyCommentId?: string;
 }
 
-export interface CommentReportConversationPort {
-    list(input?: ConversationListInput): Promise<ConversationEntry[]>;
+export interface CommentReportMessageHistoryPort {
+    list(input?: MessageListInput): Promise<MessageEntry[]>;
     recordReport(input: {
         callId: string;
         createdAt?: string;
@@ -33,18 +33,18 @@ export interface CommentReportCommentPort {
 
 export class CommentReportService {
     readonly #comment: CommentReportCommentPort;
-    readonly #conversation: CommentReportConversationPort;
+    readonly #messageHistory: CommentReportMessageHistoryPort;
     readonly #now: () => number;
     readonly #state: CommentReportState;
 
     constructor(options: {
         comment: CommentReportCommentPort;
-        conversation: CommentReportConversationPort;
+        messageHistory: CommentReportMessageHistoryPort;
         now?: () => number;
         state?: CommentReportState;
     }) {
         this.#comment = options.comment;
-        this.#conversation = options.conversation;
+        this.#messageHistory = options.messageHistory;
         this.#now = options.now ?? Date.now;
         this.#state = options.state ?? new CommentReportState();
     }
@@ -63,7 +63,7 @@ export class CommentReportService {
 
     async report(ctxId: string, message: string, callId: string): Promise<void> {
         await this.#state.withReport(ctxId, this.#now, async (state) => {
-            const entries = await this.#conversation.list({
+            const entries = await this.#messageHistory.list({
                 ctxId,
                 limit: COMMENT_REPORT_CONVERSATION_WINDOW,
             });
@@ -85,7 +85,7 @@ export class CommentReportService {
                 }
             }
 
-            await this.#conversation.recordReport({
+            await this.#messageHistory.recordReport({
                 callId,
                 ctxId,
                 ...(pending.push === undefined ? {} : { push: pending.push }),

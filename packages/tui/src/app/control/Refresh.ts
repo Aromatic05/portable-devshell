@@ -25,7 +25,7 @@ export async function refreshTuiAudit(
         runtime.load(instance).then(() => runtime.readLogs()),
         domains.approval(instance).load(instance),
         domains.toolCalls.load(instance),
-        domains.conversation.refreshInstance(instance),
+        domains.messageHistory.refreshInstance(instance),
         domains.messages.refreshInstance(instance),
     ]);
 }
@@ -36,8 +36,8 @@ export async function refreshTuiMessages(
     await Promise.all([domains.instances.refresh(), domains.context.refresh()]);
     const instances = domains.instances.state.instances.map(({ name }) => name);
     await Promise.all([
-        domains.conversation.load(instances),
-        domains.conversationPreferences.refresh(),
+        domains.messageHistory.load(instances),
+        domains.messagePreferences.refresh(),
         domains.messages.load(instances),
     ]);
 }
@@ -62,6 +62,6 @@ export async function refreshTuiAll(domains: TuiDomainSession): Promise<void> {
         domains.overview.refresh(),
         domains.mcp.refresh(),
         domains.extension.refreshCatalogs(),
-        domains.conversationPreferences.refresh(),
+        domains.messagePreferences.refresh(),
     ]);
 }

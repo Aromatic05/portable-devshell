@@ -18,8 +18,8 @@ import {
 import type { WebRoute } from "../../../src/app/Route.js";
 import type { WebState } from "../../../src/state/Model.js";
 import { WebStore } from "../../../src/state/Store.js";
-import { buildConversationMarkdown } from "../../../src/view/page/activity/messages/Export.js";
-import { formatMessageDate } from "../../../src/view/page/activity/messages/conversation/History.js";
+import { buildMessageMarkdown } from "../../../src/view/page/activity/messages/Export.js";
+import { formatMessageDate } from "../../../src/view/page/activity/messages/message/History.js";
 import { Messages } from "../../../src/view/page/activity/messages/Page.js";
 
 import { WebTestDomains, withWebDomains } from "../../support/DomainHarness.js";
@@ -44,7 +44,7 @@ const baseInstances = [
     },
 ];
 
-const baseConversationEntries = [
+const baseMessageEntries = [
     {
         createdAt: "2026-09-02T10:00:00Z",
         ctxId: "ctx-old-active",
@@ -103,7 +103,7 @@ function alphaDomains(): WebTestDomains {
     const domains = new WebTestDomains();
     domains.setInstances(baseInstances);
     domains.setContexts([alphaContext()]);
-    domains.setConversation("alpha", baseConversationEntries);
+    domains.setMessageHistory("alpha", baseMessageEntries);
     domains.setMessages("alpha", baseMessages);
     return domains;
 }
@@ -125,7 +125,7 @@ function twoActiveDomains(): WebTestDomains {
             lastAccessedAt: secondAt,
         }),
     ]);
-    domains.setConversation("alpha", [
+    domains.setMessageHistory("alpha", [
         {
             createdAt: firstAt,
             ctxId: "ctx-first",
@@ -149,7 +149,7 @@ function twoActiveDomains(): WebTestDomains {
 function projection(domains: WebTestDomains) {
     return {
         contexts: domains.context.state.contexts,
-        conversation: domains.conversation.state,
+        message: domains.messageHistory.state,
         instances: domains.instances.state.instances,
         messages: domains.messages.state,
     };
@@ -165,7 +165,7 @@ function messageStore(overrides: Record<string, unknown> = {}): WebStore {
         refreshMessages: vi.fn(async () => undefined),
         state,
         subscribe: vi.fn(() => () => undefined),
-        updateConversationPreferences: vi.fn(async () => true),
+        updateMessagePreferences: vi.fn(async () => true),
         ...overrides,
     } as unknown as WebStore;
 }
@@ -221,26 +221,26 @@ describe("Messages", () => {
         domains.setContexts([
             alphaContext({ lastAccessedAt: "2026-09-02T09:20:00Z" }),
         ]);
-        domains.setConversation("alpha", []);
+        domains.setMessageHistory("alpha", []);
         domains.setMessages("alpha", []);
         expect(selectWebMessageSessions(projection(domains), now)).toEqual([]);
     });
 
-    it("partitions loaded conversations into active and history sessions", () => {
+    it("partitions loaded messages into active and history sessions", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
         const domains = alphaDomains();
         domains.setContexts([
             alphaContext({ lastAccessedAt: "2026-09-02T10:00:00Z" }),
         ]);
-        domains.setConversation("alpha", [
-            ...baseConversationEntries,
+        domains.setMessageHistory("alpha", [
+            ...baseMessageEntries,
             {
                 createdAt: "2026-09-02T09:00:00Z",
                 ctxId: "ctx-history",
                 id: "comment-history",
                 kind: "comment",
                 status: "delivered",
-                text: "Older conversation.",
+                text: "Older message.",
             },
         ]);
 
@@ -256,7 +256,7 @@ describe("Messages", () => {
         ).toEqual(["ctx-history"]);
     });
 
-    it("uses the first Comment as the conversation summary and keeps positions stable as activity changes", () => {
+    it("uses the first Comment as the message summary and keeps positions stable as activity changes", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
         const domains = alphaDomains();
         domains.setContexts([
@@ -272,7 +272,7 @@ describe("Messages", () => {
             }),
         ]);
         domains.setMessages("alpha", []);
-        domains.setConversation("alpha", [
+        domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-02T09:00:00Z",
                 ctxId: "ctx-first",
@@ -286,7 +286,7 @@ describe("Messages", () => {
                 ctxId: "ctx-first",
                 id: "first-report",
                 kind: "report",
-                text: "A later report must not move this conversation.",
+                text: "A later report must not move this message.",
             },
             {
                 createdAt: "2026-09-02T09:30:00Z",
@@ -311,7 +311,7 @@ describe("Messages", () => {
         ]);
     });
 
-    it("projects canonical Conversation entries into one chronological conversation", () => {
+    it("projects canonical Message entries into one chronological message", () => {
         const domains = alphaDomains();
         expect(
             selectWebMessageEntries(
@@ -331,10 +331,10 @@ describe("Messages", () => {
         ]);
     });
 
-    it("exports the current conversation as readable Markdown", () => {
+    it("exports the current message as readable Markdown", () => {
         const domains = alphaDomains();
         expect(
-            buildConversationMarkdown({
+            buildMessageMarkdown({
                 ctxId: "ctx-old-active",
                 entries: selectWebMessageEntries(
                     projection(domains),
@@ -367,7 +367,7 @@ describe("Messages", () => {
         );
     });
 
-    it("downloads the current conversation from the composer", async () => {
+    it("downloads the current message from the composer", async () => {
         const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(
             URL,
             "createObjectURL",
@@ -376,7 +376,7 @@ describe("Messages", () => {
             URL,
             "revokeObjectURL",
         );
-        const createObjectURL = vi.fn(() => "blob:conversation");
+        const createObjectURL = vi.fn(() => "blob:message");
         const revokeObjectURL = vi.fn();
         const click = vi
             .spyOn(HTMLAnchorElement.prototype, "click")
@@ -384,7 +384,7 @@ describe("Messages", () => {
                 expect(this.download).toBe(
                     "Check-the-route-model.-alpha-ctx-old-active.md",
                 );
-                expect(this.href).toBe("blob:conversation");
+                expect(this.href).toBe("blob:message");
             });
         Object.defineProperty(URL, "createObjectURL", {
             configurable: true,
@@ -405,7 +405,7 @@ describe("Messages", () => {
 
             expect(createObjectURL).toHaveBeenCalledTimes(1);
             expect(createObjectURL.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
-            expect(revokeObjectURL).toHaveBeenCalledWith("blob:conversation");
+            expect(revokeObjectURL).toHaveBeenCalledWith("blob:message");
             expect(click).toHaveBeenCalledTimes(1);
         } finally {
             click.mockRestore();
@@ -430,16 +430,16 @@ describe("Messages", () => {
         }
     });
 
-    it("renders conversation history, a floating Comment composer, and deep-links to Audit", async () => {
+    it("renders message history, a floating Comment composer, and deep-links to Audit", async () => {
         const domains = alphaDomains();
         const queueContextMessage = vi.spyOn(domains.messages, "queue");
         await renderMessages(domains, threadRoute, webStore(domains));
 
         expect(
-            screen.getByRole("log", { name: "Conversation history" }),
+            screen.getByRole("log", { name: "Message history" }),
         ).toHaveTextContent("Check the route model.");
         expect(
-            screen.getByRole("log", { name: "Conversation history" }),
+            screen.getByRole("log", { name: "Message history" }),
         ).toHaveTextContent("Route model is now green.");
         const composer = screen.getByRole("textbox", { name: "Comment" });
         expect(composer.closest("form")).toHaveClass("messages-composer");
@@ -447,7 +447,7 @@ describe("Messages", () => {
             screen.getByRole("button", { name: "Export Markdown" }),
         ).toBeEnabled();
         fireEvent.click(
-            screen.getByRole("button", { name: "Open conversations" }),
+            screen.getByRole("button", { name: "Open messages" }),
         );
         expect(document.querySelector(".messages-sidebar")).toHaveClass("open");
         fireEvent.focus(composer);
@@ -550,7 +550,7 @@ describe("Messages", () => {
         expect(composer).toHaveValue("Keep this draft.");
     });
 
-    it("scrolls to the newest message whenever a conversation is entered or switched", async () => {
+    it("scrolls to the newest message whenever a message is entered or switched", async () => {
         const scrollIntoView = vi.fn();
         const original = Element.prototype.scrollIntoView;
         Object.defineProperty(Element.prototype, "scrollIntoView", {
@@ -647,7 +647,7 @@ describe("Messages", () => {
             view.container.querySelector(".messages-sidebar"),
         ).not.toHaveClass("open");
         const trigger = screen.getByRole("button", {
-            name: "Open conversations",
+            name: "Open messages",
         });
         fireEvent.click(trigger);
         expect(view.container.querySelector(".messages-sidebar")).toHaveClass(
@@ -663,11 +663,11 @@ describe("Messages", () => {
         await waitFor(() => expect(trigger).toHaveFocus());
     });
 
-    it("renames a conversation through server preferences and restores it in a new browser", async () => {
+    it("renames a message through server preferences and restores it in a new browser", async () => {
         localStorage.clear();
         const domains = twoActiveDomains();
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
         const first = await renderMessages(
@@ -681,12 +681,12 @@ describe("Messages", () => {
                 name: /Review the Messages navigation/u,
             }),
         );
-        fireEvent.change(screen.getByLabelText("Conversation title"), {
+        fireEvent.change(screen.getByLabelText("Message title"), {
             target: { value: "Messages navigation review" },
         });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 titles: {
                     "alpha\u0000ctx-second": "Messages navigation review",
                 },
@@ -694,9 +694,9 @@ describe("Messages", () => {
         );
 
         first.unmount();
-        domains.conversationPreferences.patch({
+        domains.messagePreferences.patch({
             preferences: {
-                ...domains.conversationPreferences.state.preferences,
+                ...domains.messagePreferences.state.preferences,
                 titles: {
                     "alpha\u0000ctx-second": "Messages navigation review",
                 },
@@ -720,8 +720,8 @@ describe("Messages", () => {
     it("persists manual ordering through server preferences instead of browser storage", async () => {
         localStorage.clear();
         const domains = twoActiveDomains();
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
         const first = await renderMessages(
@@ -729,8 +729,8 @@ describe("Messages", () => {
             { page: "messages", view: "contexts" },
             webStore(domains),
         );
-        const list = screen.getByRole("navigation", { name: "Conversations" });
-        const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
+        const list = screen.getByRole("navigation", { name: "Messages" });
+        const rows = list.querySelectorAll<HTMLElement>(".message-row");
         expect(rows).toHaveLength(2);
         expect(rows[0]).toHaveTextContent("Review the Messages navigation.");
         expect(rows[1]).toHaveTextContent(
@@ -747,7 +747,7 @@ describe("Messages", () => {
         ).not.toBeInTheDocument();
 
         const handles = list.querySelectorAll<HTMLElement>(
-            ".conversation-drag-handle",
+            ".message-drag-handle",
         );
         const originalElementFromPoint = document.elementFromPoint;
         Object.defineProperty(document, "elementFromPoint", {
@@ -765,7 +765,7 @@ describe("Messages", () => {
             value: originalElementFromPoint,
         });
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
@@ -775,13 +775,13 @@ describe("Messages", () => {
             }),
         );
         expect(
-            list.querySelectorAll<HTMLElement>(".conversation-row")[0],
+            list.querySelectorAll<HTMLElement>(".message-row")[0],
         ).toHaveTextContent("Investigate the first regression in Audit.");
 
         first.unmount();
-        domains.conversationPreferences.patch({
+        domains.messagePreferences.patch({
             preferences: {
-                ...domains.conversationPreferences.state.preferences,
+                ...domains.messagePreferences.state.preferences,
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
@@ -798,8 +798,8 @@ describe("Messages", () => {
         );
         expect(
             screen
-                .getByRole("navigation", { name: "Conversations" })
-                .querySelectorAll<HTMLElement>(".conversation-row")[0],
+                .getByRole("navigation", { name: "Messages" })
+                .querySelectorAll<HTMLElement>(".message-row")[0],
         ).toHaveTextContent("Investigate the first regression in Audit.");
         expect(
             localStorage.getItem(
@@ -808,10 +808,10 @@ describe("Messages", () => {
         ).toBeNull();
     });
 
-    it("soft-hides conversations and whole projects and restores them from Hidden", async () => {
+    it("soft-hides messages and whole projects and restores them from Hidden", async () => {
         const domains = twoActiveDomains();
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
         const navigate = vi.fn();
@@ -824,14 +824,14 @@ describe("Messages", () => {
 
         const reviewRow = screen
             .getByRole("button", { name: /Review the Messages navigation/u })
-            .closest(".conversation-row")!;
+            .closest(".message-row")!;
         fireEvent.click(
             within(reviewRow).getByRole("button", {
-                name: "Hide conversation",
+                name: "Hide message",
             }),
         );
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 hiddenContexts: { "ctx-second": true },
             }),
         );
@@ -849,14 +849,14 @@ describe("Messages", () => {
         ).toBeInTheDocument();
         const hiddenReviewRow = screen
             .getByRole("button", { name: /Review the Messages navigation/u })
-            .closest(".conversation-row")!;
+            .closest(".message-row")!;
         fireEvent.click(
             within(hiddenReviewRow).getByRole("button", {
-                name: "Restore conversation",
+                name: "Restore message",
             }),
         );
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenLastCalledWith({
+            expect(updateMessagePreferences).toHaveBeenLastCalledWith({
                 hiddenContexts: { "ctx-second": null },
             }),
         );
@@ -868,7 +868,7 @@ describe("Messages", () => {
             ).getByRole("button", { name: "Hide project" }),
         );
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenLastCalledWith({
+            expect(updateMessagePreferences).toHaveBeenLastCalledWith({
                 hiddenContexts: {
                     "ctx-first": true,
                     "ctx-second": true,
@@ -898,8 +898,8 @@ describe("Messages", () => {
                 workspaceOrder: ["/work/portable-devshell"],
             }),
         );
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
 
@@ -910,7 +910,7 @@ describe("Messages", () => {
         );
 
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 ifMissing: true,
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -940,8 +940,8 @@ describe("Messages", () => {
             "portable-devshell:web:conversation-preferences:v1",
             legacy,
         );
-        const updateConversationPreferences = vi
-            .spyOn(domains.conversationPreferences, "update")
+        const updateMessagePreferences = vi
+            .spyOn(domains.messagePreferences, "update")
             .mockRejectedValueOnce(new Error("server migration failed"));
 
         await renderMessages(
@@ -951,7 +951,7 @@ describe("Messages", () => {
         );
 
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith(
+            expect(updateMessagePreferences).toHaveBeenCalledWith(
                 expect.objectContaining({
                     ifMissing: true,
                     titles: { "alpha\u0000ctx-second": "Legacy title" },
@@ -967,7 +967,7 @@ describe("Messages", () => {
 
     it("discovers new server ordering entries without pruning unloaded workspaces or overwriting existing order", async () => {
         const domains = twoActiveDomains();
-        domains.conversationPreferences.patch({
+        domains.messagePreferences.patch({
             preferences: {
                 hiddenContexts: {},
                 orderByWorkspace: {
@@ -979,8 +979,8 @@ describe("Messages", () => {
                 workspaceOrder: ["/work/hidden", "/work/portable-devshell"],
             },
         });
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
 
@@ -991,7 +991,7 @@ describe("Messages", () => {
         );
 
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 ifMissing: true,
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -1001,14 +1001,14 @@ describe("Messages", () => {
                 },
             }),
         );
-        expect(updateConversationPreferences).not.toHaveBeenCalledWith(
+        expect(updateMessagePreferences).not.toHaveBeenCalledWith(
             expect.objectContaining({
                 workspaceOrder: ["/work/portable-devshell"],
             }),
         );
     });
 
-    it("keeps an idle Current conversation in place until the user archives idle conversations", async () => {
+    it("keeps an idle Current message in place until the user archives idle messages", async () => {
         const domains = twoActiveDomains();
         const store = webStore(domains);
         const view = await renderMessages(
@@ -1029,9 +1029,9 @@ describe("Messages", () => {
                 lastAccessedAt: idleAt,
             })),
         );
-        domains.setConversation(
+        domains.setMessageHistory(
             "alpha",
-            domains.conversation.state.instances.alpha.entries.map((entry) => ({
+            domains.messageHistory.state.instances.alpha.entries.map((entry) => ({
                 ...entry,
                 createdAt: idleAt,
             })),
@@ -1069,7 +1069,7 @@ describe("Messages", () => {
         ).toBeInTheDocument();
     });
 
-    it("refreshes Context activity and ages Current conversations every 20 seconds", async () => {
+    it("refreshes Context activity and ages Current messages every 20 seconds", async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
         const domains = twoActiveDomains();
@@ -1087,9 +1087,9 @@ describe("Messages", () => {
                     : context,
             ),
         );
-        domains.setConversation(
+        domains.setMessageHistory(
             "alpha",
-            domains.conversation.state.instances.alpha.entries.map((entry) =>
+            domains.messageHistory.state.instances.alpha.entries.map((entry) =>
                 entry.ctxId === "ctx-first"
                     ? { ...entry, createdAt: almostIdleAt }
                     : entry,
@@ -1102,17 +1102,17 @@ describe("Messages", () => {
             store,
         );
         const contextRefresh = vi.spyOn(domains.context, "refresh");
-        const conversation = screen.getByRole("button", {
+        const message = screen.getByRole("button", {
             name: /Investigate the first regression/u,
         });
-        expect(conversation).toHaveTextContent("active");
+        expect(message).toHaveTextContent("active");
 
         await act(async () => {
             await vi.advanceTimersByTimeAsync(20_000);
         });
 
         expect(contextRefresh).toHaveBeenCalledOnce();
-        expect(conversation).toHaveTextContent("idle");
+        expect(message).toHaveTextContent("idle");
     });
 
     it("closes the message control disclosure with Escape and restores focus", async () => {
@@ -1130,17 +1130,17 @@ describe("Messages", () => {
         await waitFor(() => expect(trigger).toHaveFocus());
     });
 
-    it("switches the sidebar between active and history conversations", async () => {
+    it("switches the sidebar between active and history messages", async () => {
         const domains = alphaDomains();
-        domains.setConversation("alpha", [
-            ...baseConversationEntries,
+        domains.setMessageHistory("alpha", [
+            ...baseMessageEntries,
             {
                 createdAt: "2026-09-01T08:00:00Z",
                 ctxId: "ctx-history",
                 id: "comment-history",
                 kind: "comment",
                 status: "delivered",
-                text: "Historical conversation.",
+                text: "Historical message.",
             },
         ]);
         await renderMessages(
@@ -1159,7 +1159,7 @@ describe("Messages", () => {
             screen.getByRole("button", { name: /Check the route model/u }),
         ).toBeInTheDocument();
         expect(
-            screen.queryByRole("button", { name: /Historical conversation/u }),
+            screen.queryByRole("button", { name: /Historical message/u }),
         ).not.toBeInTheDocument();
 
         fireEvent.click(history);
@@ -1172,11 +1172,11 @@ describe("Messages", () => {
         const groupToggle = screen.getByRole("button", { name: /alpha/u });
         fireEvent.click(groupToggle);
         expect(
-            screen.getByRole("button", { name: /Historical conversation/u }),
+            screen.getByRole("button", { name: /Historical message/u }),
         ).toBeInTheDocument();
     });
 
-    it("groups history conversations by workspace and lets each workspace collapse", async () => {
+    it("groups history messages by workspace and lets each workspace collapse", async () => {
         const domains = alphaDomains();
         domains.setContexts([
             alphaContext(),
@@ -1231,10 +1231,10 @@ describe("Messages", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "History" }));
 
-        const conversationList = screen.getByRole("navigation", {
-            name: "Conversations",
+        const messageList = screen.getByRole("navigation", {
+            name: "Messages",
         });
-        const groups = within(conversationList).getAllByRole("group");
+        const groups = within(messageList).getAllByRole("group");
         expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(
             ["portable-devshell", "efilinux"],
         );
@@ -1277,17 +1277,17 @@ describe("Messages", () => {
         );
         await act(async () => undefined);
         const stableGroups = within(
-            screen.getByRole("navigation", { name: "Conversations" }),
+            screen.getByRole("navigation", { name: "Messages" }),
         ).getAllByRole("group");
         expect(
             stableGroups.map((group) => group.getAttribute("aria-label")),
         ).toEqual(["portable-devshell", "efilinux"]);
     });
 
-    it("renames a conversation from the row action menu", async () => {
+    it("renames a message from the row action menu", async () => {
         const domains = twoActiveDomains();
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
         await renderMessages(
@@ -1298,10 +1298,10 @@ describe("Messages", () => {
 
         const reviewRow = screen
             .getByRole("button", { name: /Review the Messages navigation/u })
-            .closest(".conversation-row")!;
+            .closest(".message-row")!;
         fireEvent.click(
             within(reviewRow).getByRole("button", {
-                name: "Conversation actions",
+                name: "Message actions",
             }),
         );
         fireEvent.click(
@@ -1310,18 +1310,18 @@ describe("Messages", () => {
         expect(
             screen.queryByLabelText(/^Actions for Review/u),
         ).not.toBeInTheDocument();
-        fireEvent.change(screen.getByLabelText("Conversation title"), {
+        fireEvent.change(screen.getByLabelText("Message title"), {
             target: { value: "Renamed from the menu" },
         });
         fireEvent.click(screen.getByRole("button", { name: "Save title" }));
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 titles: { "alpha\u0000ctx-second": "Renamed from the menu" },
             }),
         );
     });
 
-    it("closes the conversation action menu with Escape and keeps the sidebar open", async () => {
+    it("closes the message action menu with Escape and keeps the sidebar open", async () => {
         const domains = twoActiveDomains();
         await renderMessages(
             domains,
@@ -1329,13 +1329,13 @@ describe("Messages", () => {
             webStore(domains),
         );
         fireEvent.click(
-            screen.getByRole("button", { name: "Open conversations" }),
+            screen.getByRole("button", { name: "Open messages" }),
         );
         const reviewRow = screen
             .getByRole("button", { name: /Review the Messages navigation/u })
-            .closest(".conversation-row")!;
+            .closest(".message-row")!;
         const trigger = within(reviewRow).getByRole("button", {
-            name: "Conversation actions",
+            name: "Message actions",
         });
         fireEvent.click(trigger);
         expect(
@@ -1351,10 +1351,10 @@ describe("Messages", () => {
         await waitFor(() => expect(trigger).toHaveFocus());
     });
 
-    it("reorders conversations from the row action menu and disables boundary moves", async () => {
+    it("reorders messages from the row action menu and disables boundary moves", async () => {
         const domains = twoActiveDomains();
-        const updateConversationPreferences = vi.spyOn(
-            domains.conversationPreferences,
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
             "update",
         );
         await renderMessages(
@@ -1362,13 +1362,13 @@ describe("Messages", () => {
             { page: "messages", view: "contexts" },
             webStore(domains),
         );
-        const list = screen.getByRole("navigation", { name: "Conversations" });
-        const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
+        const list = screen.getByRole("navigation", { name: "Messages" });
+        const rows = list.querySelectorAll<HTMLElement>(".message-row");
         expect(rows[0]).toHaveTextContent("Review the Messages navigation.");
 
         fireEvent.click(
             within(rows[0]!).getByRole("button", {
-                name: "Conversation actions",
+                name: "Message actions",
             }),
         );
         expect(screen.getByRole("button", { name: "Move up" })).toBeDisabled();
@@ -1377,7 +1377,7 @@ describe("Messages", () => {
 
         fireEvent.click(
             within(rows[1]!).getByRole("button", {
-                name: "Conversation actions",
+                name: "Message actions",
             }),
         );
         expect(screen.getByRole("button", { name: "Move up" })).toBeEnabled();
@@ -1387,7 +1387,7 @@ describe("Messages", () => {
         fireEvent.click(screen.getByRole("button", { name: "Move up" }));
 
         await waitFor(() =>
-            expect(updateConversationPreferences).toHaveBeenCalledWith({
+            expect(updateMessagePreferences).toHaveBeenCalledWith({
                 orderByWorkspace: {
                     "/work/portable-devshell": [
                         "alpha\u0000ctx-first",
@@ -1397,7 +1397,7 @@ describe("Messages", () => {
             }),
         );
         expect(
-            list.querySelectorAll<HTMLElement>(".conversation-row")[0],
+            list.querySelectorAll<HTMLElement>(".message-row")[0],
         ).toHaveTextContent("Investigate the first regression in Audit.");
     });
 

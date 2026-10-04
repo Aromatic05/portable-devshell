@@ -13,8 +13,8 @@ import {
     currentTuiRouteScrollKey,
 } from "../../../state/route/State.js";
 import {
-    contextConversationDraftKey,
-    readContextConversationDraft,
+    contextMessageDraftKey,
+    readContextMessageDraft,
 } from "../../../view/page/activity/messages/Draft.js";
 import {
     nextTuiGraphemeCursor,
@@ -113,18 +113,18 @@ export class TuiCommandDispatcherNavigation {
                     undefined,
                 );
                 return true;
-            case "contextConversation.openCurrent":
-                return this.#openContextConversation();
-            case "contextConversation.edit":
-                return this.#startContextConversationEditing();
-            case "contextConversation.append":
-                return this.#editContextConversationDraft(intent.text, false);
-            case "contextConversation.backspace":
-                return this.#editContextConversationDraft("", true);
-            case "contextConversation.cursorMove":
-                return this.#moveContextConversationCursor(intent.direction);
-            case "contextConversation.submit":
-                return await this.#submitContextConversation();
+            case "contextMessage.openCurrent":
+                return this.#openContextMessage();
+            case "contextMessage.edit":
+                return this.#startContextMessageEditing();
+            case "contextMessage.append":
+                return this.#editContextMessageDraft(intent.text, false);
+            case "contextMessage.backspace":
+                return this.#editContextMessageDraft("", true);
+            case "contextMessage.cursorMove":
+                return this.#moveContextMessageCursor(intent.direction);
+            case "contextMessage.submit":
+                return await this.#submitContextMessage();
             default:
                 break;
         }
@@ -162,7 +162,7 @@ export class TuiCommandDispatcherNavigation {
                     this.#store.setSidebarCursor(cursor);
                     this.#store.setFocusScope("sidebarContext");
                     return true;
-                case "messageConversation": {
+                case "messageSession": {
                     const current = currentTuiRoute(this.#store.getState());
                     if (current.page !== "messages") return false;
                     if (current.view === "contexts") {
@@ -176,7 +176,7 @@ export class TuiCommandDispatcherNavigation {
                         Number.MAX_SAFE_INTEGER,
                     );
                     this.#store.setFocusScope("sidebarContext");
-                    this.#startContextConversationEditing();
+                    this.#startContextMessageEditing();
                     return true;
                 }
                 case "route": {
@@ -197,7 +197,7 @@ export class TuiCommandDispatcherNavigation {
                             Number.MAX_SAFE_INTEGER,
                         );
                         this.#store.setFocusScope("sidebarContext");
-                        this.#startContextConversationEditing();
+                        this.#startContextMessageEditing();
                         return true;
                     }
                     this.#store.setFocusScope("sidebarContext");
@@ -342,7 +342,7 @@ export class TuiCommandDispatcherNavigation {
         );
     }
 
-    #openContextConversation(): boolean {
+    #openContextMessage(): boolean {
         const state = this.#store.getState();
         const route = currentTuiRoute(state);
         const instance = state.ui.selectedInstance;
@@ -358,22 +358,22 @@ export class TuiCommandDispatcherNavigation {
             ctxId: route.ctxId,
             page: "audit",
             scope: "context",
-            view: "conversation",
+            view: "message",
         });
-        const key = contextConversationDraftKey(instance, route.ctxId);
+        const key = contextMessageDraftKey(instance, route.ctxId);
         if (typeof this.#store.getState().ui.formDrafts[key] !== "string") {
             this.#store.setFormDraft(key, "", false);
         }
-        this.#store.setMainFocusId("conversation-composer");
+        this.#store.setMainFocusId("message-composer");
         this.#store.setFocusScope("mainBoxes");
         return true;
     }
 
-    #startContextConversationEditing(): boolean {
-        const target = this.#contextConversationTarget();
+    #startContextMessageEditing(): boolean {
+        const target = this.#contextMessageTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
-        const draft = readContextConversationDraft(
+        const draft = readContextMessageDraft(
             state,
             target.instance,
             target.ctxId,
@@ -381,15 +381,15 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setEditor({
             cursor: draft.length,
             editing: true,
-            key: contextConversationDraftKey(target.instance, target.ctxId),
+            key: contextMessageDraftKey(target.instance, target.ctxId),
             kind: "comment",
         });
-        this.#store.setFocusScope("contextConversation");
+        this.#store.setFocusScope("contextMessage");
         return true;
     }
 
-    #editContextConversationDraft(input: string, backspace: boolean): boolean {
-        const target = this.#contextConversationTarget();
+    #editContextMessageDraft(input: string, backspace: boolean): boolean {
+        const target = this.#contextMessageTarget();
         const editor = this.#store.getState().interaction.editor;
         if (
             target === undefined ||
@@ -397,7 +397,7 @@ export class TuiCommandDispatcherNavigation {
             editor.editing !== true
         )
             return false;
-        const draft = readContextConversationDraft(
+        const draft = readContextMessageDraft(
             this.#store.getState(),
             target.instance,
             target.ctxId,
@@ -411,7 +411,7 @@ export class TuiCommandDispatcherNavigation {
             ? `${draft.slice(0, previous)}${draft.slice(cursor)}`
             : `${draft.slice(0, cursor)}${input}${draft.slice(cursor)}`;
         this.#store.setFormDraft(
-            contextConversationDraftKey(target.instance, target.ctxId),
+            contextMessageDraftKey(target.instance, target.ctxId),
             next,
             true,
         );
@@ -423,8 +423,8 @@ export class TuiCommandDispatcherNavigation {
         return true;
     }
 
-    #moveContextConversationCursor(direction: "left" | "right"): boolean {
-        const target = this.#contextConversationTarget();
+    #moveContextMessageCursor(direction: "left" | "right"): boolean {
+        const target = this.#contextMessageTarget();
         const editor = this.#store.getState().interaction.editor;
         if (
             target === undefined ||
@@ -432,7 +432,7 @@ export class TuiCommandDispatcherNavigation {
             editor.editing !== true
         )
             return false;
-        const draft = readContextConversationDraft(
+        const draft = readContextMessageDraft(
             this.#store.getState(),
             target.instance,
             target.ctxId,
@@ -451,11 +451,11 @@ export class TuiCommandDispatcherNavigation {
         return true;
     }
 
-    async #submitContextConversation(): Promise<boolean> {
-        const target = this.#contextConversationTarget();
+    async #submitContextMessage(): Promise<boolean> {
+        const target = this.#contextMessageTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
-        const text = readContextConversationDraft(
+        const text = readContextMessageDraft(
             state,
             target.instance,
             target.ctxId,
@@ -477,18 +477,18 @@ export class TuiCommandDispatcherNavigation {
         try {
             await this.#onContextMessage(target.instance, target.ctxId, text);
             this.#store.setFormDraft(
-                contextConversationDraftKey(target.instance, target.ctxId),
+                contextMessageDraftKey(target.instance, target.ctxId),
                 "",
                 false,
             );
             this.#store.setEditor({
                 cursor: 0,
                 editing: true,
-                key: contextConversationDraftKey(target.instance, target.ctxId),
+                key: contextMessageDraftKey(target.instance, target.ctxId),
                 kind: "comment",
             });
             this.#store.setScreenStatus(target.page, "Comment queued.");
-            this.#store.setFocusScope("contextConversation");
+            this.#store.setFocusScope("contextMessage");
             return true;
         } catch (error) {
             this.#store.setScreenStatus(
@@ -499,7 +499,7 @@ export class TuiCommandDispatcherNavigation {
         }
     }
 
-    #contextConversationTarget():
+    #contextMessageTarget():
         | {
               ctxId: string;
               instance: string;
@@ -518,7 +518,7 @@ export class TuiCommandDispatcherNavigation {
         if (state.ui.selectedInstance === undefined) return undefined;
         if (
             route.page === "audit" &&
-            route.view === "conversation" &&
+            route.view === "message" &&
             route.scope === "context"
         ) {
             return {

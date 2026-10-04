@@ -490,7 +490,7 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     ]);
 });
 
-test("conversation control errors use dedicated cross-tool guidance instead of Todo invariants", () => {
+test("message control errors use dedicated cross-tool guidance instead of Todo invariants", () => {
     const stopped = resolveErrorHints(
         "todo_write",
         body("control.modelStopped"),

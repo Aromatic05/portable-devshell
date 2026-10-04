@@ -15,7 +15,7 @@ export type TuiRoute =
     | { page: "audit"; view: "contexts" }
     | { page: "audit"; scope: "unscoped"; view: "context" }
     | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
-    | { ctxId: string; page: "audit"; scope: "context"; view: "conversation" }
+    | { ctxId: string; page: "audit"; scope: "context"; view: "message" }
     | { page: "todo"; view: "overview" }
     | { page: "todo"; todoId: string; view: "detail" }
     | { page: "extensions"; view: "list" }
@@ -75,7 +75,7 @@ export function tuiRouteIdentity(route: TuiRoute): string {
             if (route.view === "context") {
                 return `audit/context/${encodeURIComponent(route.ctxId)}`;
             }
-            return `audit/context/${encodeURIComponent(route.ctxId)}/conversation`;
+            return `audit/context/${encodeURIComponent(route.ctxId)}/message`;
         case "todo":
             return route.view === "overview"
                 ? "todo/overview"

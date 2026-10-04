@@ -2,12 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type {
     ContextMessageRecord,
-    ConversationEntry,
-    ConversationEntryKind,
-    ConversationListInput,
+    MessageEntry,
+    MessageEntryKind,
+    MessageListInput,
 } from "@portable-devshell/shared";
 
-export interface ConversationRow {
+export interface MessageRow {
     callId: string | null;
     createdAt: string;
     ctxId: string;
@@ -15,17 +15,17 @@ export interface ConversationRow {
     error: string | null;
     failedAt: string | null;
     id: string;
-    kind: ConversationEntryKind;
+    kind: MessageEntryKind;
     seq: number;
     status: ContextMessageRecord["status"] | null;
     text: string;
 }
 
-export function listConversationRows(
+export function listMessageRows(
     database: DatabaseSync,
-    input: Pick<ConversationListInput, "before" | "ctxId" | "limit">,
-    kind: ConversationEntryKind | undefined,
-): ConversationRow[] {
+    input: Pick<MessageListInput, "before" | "ctxId" | "limit">,
+    kind: MessageEntryKind | undefined,
+): MessageRow[] {
     const predicates: string[] = [];
     const parameters: Array<number | string> = [];
     if (kind !== undefined) {
@@ -41,7 +41,7 @@ export function listConversationRows(
             .prepare(
                 `
                 SELECT created_at AS createdAt, id, kind, seq
-                FROM conversation_entries
+                FROM message_entries
                 WHERE id = ? ${kind === undefined ? "" : "AND kind = ?"}
                 ORDER BY created_at ASC, seq ASC
                 LIMIT 1
@@ -51,7 +51,7 @@ export function listConversationRows(
             | {
                   createdAt: string;
                   id: string;
-                  kind: ConversationEntryKind;
+                  kind: MessageEntryKind;
                   seq: number;
               }
             | undefined;
@@ -83,7 +83,7 @@ export function listConversationRows(
                 seq,
                 status,
                 text
-            FROM conversation_entries
+            FROM message_entries
             ${predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`}
             ORDER BY created_at DESC, seq DESC
             ${limit === undefined ? "" : "LIMIT ?"}
@@ -91,7 +91,7 @@ export function listConversationRows(
         )
         .all(
             ...(limit === undefined ? parameters : [...parameters, limit]),
-        ) as unknown as ConversationRow[];
+        ) as unknown as MessageRow[];
     return rows.reverse();
 }
 
@@ -115,7 +115,7 @@ export function pendingCommentRecords(
                 seq,
                 status,
                 text
-            FROM conversation_entries
+            FROM message_entries
             WHERE kind = 'comment'
               AND status IN ('pending', 'sent')
               ${ctxId === undefined ? "" : "AND ctx_id = ?"}
@@ -124,11 +124,11 @@ export function pendingCommentRecords(
         )
         .all(
             ...(ctxId === undefined ? [] : [ctxId]),
-        ) as unknown as ConversationRow[];
+        ) as unknown as MessageRow[];
     return rows.map((row) => toCommentRecord(row, instance));
 }
 
-export function toConversationEntry(row: ConversationRow): ConversationEntry {
+export function toMessageEntry(row: MessageRow): MessageEntry {
     return {
         ...(row.callId === null ? {} : { callId: row.callId }),
         createdAt: row.createdAt,
@@ -144,11 +144,11 @@ export function toConversationEntry(row: ConversationRow): ConversationEntry {
 }
 
 export function toCommentRecord(
-    row: ConversationRow,
+    row: MessageRow,
     instance: string,
 ): ContextMessageRecord {
     if (row.kind !== "comment" || row.status === null) {
-        throw new Error("Conversation row is not a Context Comment.");
+        throw new Error("Message row is not a Context Comment.");
     }
     return {
         ...(row.callId === null ? {} : { callId: row.callId }),
@@ -182,28 +182,28 @@ export function applyByteBudget<T>(
     return accepted;
 }
 
-export function readConversationPayloadBytes(database: DatabaseSync): number {
+export function readMessagePayloadBytes(database: DatabaseSync): number {
     const row = database
         .prepare(
             `
-            SELECT COALESCE(SUM(${conversationPayloadBytesSql()}), 0) AS payloadBytes
-            FROM conversation_entries
+            SELECT COALESCE(SUM(${messagePayloadBytesSql()}), 0) AS payloadBytes
+            FROM message_entries
         `,
         )
         .get() as { payloadBytes: number };
     return row.payloadBytes;
 }
 
-export function readConversationEntryPayloadBytes(
+export function readMessageEntryPayloadBytes(
     database: DatabaseSync,
-    kind: ConversationEntryKind,
+    kind: MessageEntryKind,
     id: string,
 ): number {
     const row = database
         .prepare(
             `
-            SELECT ${conversationPayloadBytesSql()} AS payloadBytes
-            FROM conversation_entries
+            SELECT ${messagePayloadBytesSql()} AS payloadBytes
+            FROM message_entries
             WHERE kind = ? AND id = ?
         `,
         )
@@ -211,7 +211,7 @@ export function readConversationEntryPayloadBytes(
     return row?.payloadBytes ?? 0;
 }
 
-export function conversationPayloadBytesSql(): string {
+export function messagePayloadBytesSql(): string {
     return [
         "64",
         "length(CAST(kind AS BLOB))",

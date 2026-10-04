@@ -2,9 +2,9 @@ import {
     ApprovalViewModel,
     ArtifactViewModel,
     ConfigViewModel,
-    ConversationPreferenceViewModel,
+    MessagePreferenceViewModel,
     ContextViewModel,
-    ConversationViewModel,
+    MessageHistoryViewModel,
     Endpoint,
     ExtensionViewModel,
     GoalViewModel,
@@ -20,7 +20,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
-    createConversationPreferenceTransport,
+    createMessagePreferenceTransport,
     createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
@@ -66,8 +66,8 @@ export class TuiDomainSession {
     readonly instances: InstanceConfigViewModel;
     readonly artifact: ArtifactViewModel;
     readonly context: ContextViewModel;
-    readonly conversation: ConversationViewModel;
-    readonly conversationPreferences: ConversationPreferenceViewModel;
+    readonly messageHistory: MessageHistoryViewModel;
+    readonly messagePreferences: MessagePreferenceViewModel;
     readonly messages: MessageViewModel;
     readonly goals: GoalViewModel;
     readonly toolCalls: ToolCallViewModel;
@@ -104,8 +104,8 @@ export class TuiDomainSession {
         this.configTransport = createConfigTransport(endpoint);
         this.instanceTransport = createInstanceTransport(endpoint);
         this.config = new ConfigViewModel(this.configTransport);
-        this.conversationPreferences = new ConversationPreferenceViewModel(
-            createConversationPreferenceTransport(endpoint),
+        this.messagePreferences = new MessagePreferenceViewModel(
+            createMessagePreferenceTransport(endpoint),
         );
         this.overview = new OverviewViewModel(createOverviewTransport(endpoint));
         this.mcp = new AuthViewModel(createAuthTransport(endpoint));
@@ -120,7 +120,7 @@ export class TuiDomainSession {
         this.artifact = new ArtifactViewModel(this.artifactTransport);
         this.context = new ContextViewModel(createContextTransport(endpoint));
         this.messageTransport = createMessageTransport(endpoint);
-        this.conversation = new ConversationViewModel({
+        this.messageHistory = new MessageHistoryViewModel({
             transport: this.messageTransport,
         });
         this.messages = new MessageViewModel({
@@ -185,8 +185,8 @@ export class TuiDomainSession {
             this.overview.refresh(),
             this.mcp.load(),
             this.extension.refreshCatalogs(),
-            this.conversation.load(),
-            this.conversationPreferences.refresh(),
+            this.messageHistory.load(),
+            this.messagePreferences.refresh(),
         ]);
         this.overview.start();
         this.mcp.start();
@@ -202,7 +202,7 @@ export class TuiDomainSession {
             this.overview.refresh(),
             this.mcp.refresh(),
             this.extension.refreshCatalogs(),
-            this.conversationPreferences.refresh(),
+            this.messagePreferences.refresh(),
         ]);
     }
 
@@ -216,8 +216,8 @@ export class TuiDomainSession {
         this.goals.close();
         this.toolCalls.close();
         this.messages.close();
-        this.conversation.close();
-        this.conversationPreferences.close();
+        this.messageHistory.close();
+        this.messagePreferences.close();
         this.context.close();
         this.artifact.close();
         this.instances.close();

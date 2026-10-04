@@ -283,7 +283,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 status: "active",
             },
         ]);
-        domains.setConversation("alpha", [
+        domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-10T10:03:00.000Z",
                 ctxId: "ctx-alpha",
@@ -379,10 +379,10 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 status: "active",
             },
         ]);
-        domains.setConversationPreferences({
-            ...domains.conversationPreferences.state.preferences,
+        domains.setMessagePreferences({
+            ...domains.messagePreferences.state.preferences,
             hiddenContexts: { "ctx-hidden": true },
-            titles: { "alpha\u0000ctx-visible": "Pinned conversation" },
+            titles: { "alpha\u0000ctx-visible": "Pinned message" },
         });
         store.setSelectedPage("messages");
 
@@ -391,7 +391,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 session.ctxId,
                 session.title,
             ]),
-            [["ctx-visible", "Pinned conversation"]],
+            [["ctx-visible", "Pinned message"]],
         );
         assert.deepEqual(
             selectTuiMessageHiddenSessions(domains.reader).map(
@@ -408,7 +408,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                     id: "messages:back",
                     kind: "context",
                 },
-            ).some((entry) => entry.label === "  Pinned conversation"),
+            ).some((entry) => entry.label === "  Pinned message"),
             true,
         );
 
@@ -508,7 +508,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         );
     });
 
-    test("Messages empty state explains the selected Conversation scope", () => {
+    test("Messages empty state explains the selected Message scope", () => {
         const domains = new TuiTestDomains();
         const store = new TuiAppStore();
         domains.setInstances([
@@ -525,7 +525,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         assert.match(
             String(view.props.children[1].props.children),
-            /No current conversations/u,
+            /No current messages/u,
         );
         assert.match(String(view.props.children[1].props.children), /Hidden/u);
 
@@ -538,7 +538,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         assert.match(
             String(view.props.children[1].props.children),
-            /No conversation history/u,
+            /No message history/u,
         );
 
         store.setMessageScope("hidden");
@@ -550,14 +550,14 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         assert.match(
             String(view.props.children[1].props.children),
-            /No hidden conversations/u,
+            /No hidden messages/u,
         );
     });
 
     test("Messages keeps a fixed history viewport so the frame and composer do not move", () => {
         const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        domains.setConversation("alpha", [
+        domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-10T10:03:00.000Z",
                 ctxId: "ctx-alpha",
@@ -608,10 +608,10 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.equal(mainPanel.props.alignSelf, undefined);
     });
 
-    test("Messages Ink frame reserves one physical separator row per conversation entry", async () => {
+    test("Messages Ink frame reserves one physical separator row per message entry", async () => {
         const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        domains.setConversation(
+        domains.setMessageHistory(
             "alpha",
             Array.from({ length: 8 }, (_, index) => ({
                 createdAt: `2026-09-10T10:${String(index).padStart(2, "0")}:00.000Z`,
@@ -690,7 +690,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
     test("Messages reuses wrapped history while only editor state changes", () => {
         const domains = new TuiTestDomains();
         const store = new TuiAppStore();
-        domains.setConversation("alpha", [
+        domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-10T10:03:00.000Z",
                 ctxId: "ctx-alpha",
@@ -716,7 +716,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         assert.equal(
             second,
             first,
-            "editing must not re-wrap unchanged conversation history",
+            "editing must not re-wrap unchanged message history",
         );
     });
 }

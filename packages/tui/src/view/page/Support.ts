@@ -115,7 +115,7 @@ export function makeBox(
                 state.interaction.focusScope === "boxDetail" ||
                 state.interaction.focusScope === "form" ||
                 state.interaction.focusScope === "wizard" ||
-                state.interaction.focusScope === "contextConversation"),
+                state.interaction.focusScope === "contextMessage"),
         id: input.id,
         primaryAction:
             input.primaryRoute === undefined

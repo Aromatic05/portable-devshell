@@ -8,52 +8,52 @@ import {
     useState,
 } from "react";
 import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
+    MessagePreferencesPatch,
+    MessagePreferencesSnapshot,
 } from "@portable-devshell/shared";
 
 import type { WebRoute } from "../../../../../app/Route.js";
 import {
-    applyConversationPreferences,
-    conversationKey,
+    applyMessagePreferences,
+    messageKey,
     filterWebMessageSessions,
     groupMessageSessionsByWorkspace,
-    isConversationHidden,
-    reorderConversationKeys,
+    isMessageHidden,
+    reorderMessageKeys,
     workspacePreferenceKey,
     type WebMessageSession,
 } from "../Model.js";
 
-export function ConversationSidebar({
+export function MessageSidebar({
     activeSessions,
     allBaseSessions,
-    conversationPreferences,
-    currentConversationKeys,
+    messagePreferences,
+    currentMessageKeys,
     navigate,
     onClose,
     persistPreferences,
     preferenceError,
     preferencesAvailable,
     route,
-    setCurrentConversationKeys,
+    setCurrentMessageKeys,
     threadKey,
     triggerRef,
     open,
 }: {
     activeSessions: readonly WebMessageSession[];
     allBaseSessions: readonly WebMessageSession[];
-    conversationPreferences: ConversationPreferencesSnapshot;
-    currentConversationKeys: Set<string>;
+    messagePreferences: MessagePreferencesSnapshot;
+    currentMessageKeys: Set<string>;
     navigate(route: WebRoute): void;
     onClose(): void;
     persistPreferences(
-        next: ConversationPreferencesSnapshot,
-        patch: ConversationPreferencesPatch,
+        next: MessagePreferencesSnapshot,
+        patch: MessagePreferencesPatch,
     ): void;
     preferenceError?: string;
     preferencesAvailable: boolean;
     route: Extract<WebRoute, { page: "messages" }>;
-    setCurrentConversationKeys: Dispatch<SetStateAction<Set<string>>>;
+    setCurrentMessageKeys: Dispatch<SetStateAction<Set<string>>>;
     threadKey?: string;
     triggerRef: RefObject<HTMLButtonElement | null>;
     open: boolean;
@@ -65,13 +65,13 @@ export function ConversationSidebar({
     const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<
         Set<string>
     >(() => new Set());
-    const [editingConversationKey, setEditingConversationKey] =
+    const [editingMessageKey, setEditingMessageKey] =
         useState<string>();
     const [editingTitle, setEditingTitle] = useState("");
     const [openMenuKey, setOpenMenuKey] = useState<string>();
-    const [draggingConversationKey, setDraggingConversationKey] =
+    const [draggingMessageKey, setDraggingMessageKey] =
         useState<string>();
-    const draggingConversationKeyRef = useRef<string>();
+    const draggingMessageKeyRef = useRef<string>();
     const openMenuKeyRef = useRef<string>();
     const rowMenuRef = useRef<HTMLDivElement>(null);
     const lastMenuTriggerRef = useRef<HTMLButtonElement>();
@@ -82,39 +82,39 @@ export function ConversationSidebar({
         () =>
             allBaseSessions.filter(
                 (session) =>
-                    !isConversationHidden(conversationPreferences, session) &&
-                    currentConversationKeys.has(conversationKey(session)),
+                    !isMessageHidden(messagePreferences, session) &&
+                    currentMessageKeys.has(messageKey(session)),
             ),
-        [allBaseSessions, conversationPreferences, currentConversationKeys],
+        [allBaseSessions, messagePreferences, currentMessageKeys],
     );
     const historySessions = useMemo(
         () =>
             allBaseSessions.filter(
                 (session) =>
-                    !isConversationHidden(conversationPreferences, session) &&
-                    !currentConversationKeys.has(conversationKey(session)),
+                    !isMessageHidden(messagePreferences, session) &&
+                    !currentMessageKeys.has(messageKey(session)),
             ),
-        [allBaseSessions, conversationPreferences, currentConversationKeys],
+        [allBaseSessions, messagePreferences, currentMessageKeys],
     );
     const hiddenSessions = useMemo(
         () =>
             allBaseSessions.filter((session) =>
-                isConversationHidden(conversationPreferences, session),
+                isMessageHidden(messagePreferences, session),
             ),
-        [allBaseSessions, conversationPreferences],
+        [allBaseSessions, messagePreferences],
     );
     const sessions = useMemo(
         () =>
-            applyConversationPreferences(
+            applyMessagePreferences(
                 sessionScope === "current"
                     ? currentSessions
                     : sessionScope === "history"
                       ? historySessions
                       : hiddenSessions,
-                conversationPreferences,
+                messagePreferences,
             ),
         [
-            conversationPreferences,
+            messagePreferences,
             currentSessions,
             hiddenSessions,
             historySessions,
@@ -123,14 +123,14 @@ export function ConversationSidebar({
     );
     const allSessions = useMemo(
         () =>
-            applyConversationPreferences(
+            applyMessagePreferences(
                 allBaseSessions,
-                conversationPreferences,
+                messagePreferences,
             ),
-        [allBaseSessions, conversationPreferences],
+        [allBaseSessions, messagePreferences],
     );
-    const activeConversationKeys = useMemo(
-        () => new Set(activeSessions.map(conversationKey)),
+    const activeMessageKeys = useMemo(
+        () => new Set(activeSessions.map(messageKey)),
         [activeSessions],
     );
     const visibleSessions = useMemo(
@@ -147,8 +147,8 @@ export function ConversationSidebar({
     );
     const idleCurrentCount = currentSessions.filter(
         (session) =>
-            !activeConversationKeys.has(conversationKey(session)) &&
-            conversationKey(session) !== threadKey,
+            !activeMessageKeys.has(messageKey(session)) &&
+            messageKey(session) !== threadKey,
     ).length;
 
     useEffect(() => {
@@ -237,27 +237,27 @@ export function ConversationSidebar({
         }
     }
 
-    function saveConversationTitle(session: WebMessageSession): void {
-        const key = conversationKey(session);
+    function saveMessageTitle(session: WebMessageSession): void {
+        const key = messageKey(session);
         const nextTitle = editingTitle.trim();
-        const titles = { ...conversationPreferences.titles };
+        const titles = { ...messagePreferences.titles };
         if (nextTitle.length === 0) delete titles[key];
         else titles[key] = nextTitle;
         persistPreferences(
-            { ...conversationPreferences, titles },
+            { ...messagePreferences, titles },
             { titles: { [key]: nextTitle.length === 0 ? null : nextTitle } },
         );
-        setEditingConversationKey(undefined);
+        setEditingMessageKey(undefined);
         setEditingTitle("");
     }
 
-    function moveConversation(sourceKey: string, targetKey: string): void {
+    function moveMessage(sourceKey: string, targetKey: string): void {
         if (sourceKey === targetKey || !preferencesAvailable) return;
         const source = allSessions.find(
-            (session) => conversationKey(session) === sourceKey,
+            (session) => messageKey(session) === sourceKey,
         );
         const target = allSessions.find(
-            (session) => conversationKey(session) === targetKey,
+            (session) => messageKey(session) === targetKey,
         );
         if (
             source === undefined ||
@@ -266,19 +266,19 @@ export function ConversationSidebar({
         )
             return;
         const workspace = workspacePreferenceKey(source);
-        const order = reorderConversationKeys(
+        const order = reorderMessageKeys(
             allSessions.filter(
                 (session) => workspacePreferenceKey(session) === workspace,
             ),
             sourceKey,
             targetKey,
-            conversationPreferences.orderByWorkspace[workspace] ?? [],
+            messagePreferences.orderByWorkspace[workspace] ?? [],
         );
         persistPreferences(
             {
-                ...conversationPreferences,
+                ...messagePreferences,
                 orderByWorkspace: {
-                    ...conversationPreferences.orderByWorkspace,
+                    ...messagePreferences.orderByWorkspace,
                     [workspace]: order,
                 },
             },
@@ -286,7 +286,7 @@ export function ConversationSidebar({
         );
     }
 
-    function moveConversationBy(
+    function moveMessageBy(
         session: WebMessageSession,
         direction: -1 | 1,
     ): void {
@@ -297,32 +297,32 @@ export function ConversationSidebar({
         );
         const index = group.findIndex(
             (candidate) =>
-                conversationKey(candidate) === conversationKey(session),
+                messageKey(candidate) === messageKey(session),
         );
         const target = group[index + direction];
         if (target === undefined) return;
-        moveConversation(conversationKey(session), conversationKey(target));
+        moveMessage(messageKey(session), messageKey(target));
     }
 
-    function finishConversationDrag(clientX: number, clientY: number): void {
-        const sourceKey = draggingConversationKeyRef.current;
-        draggingConversationKeyRef.current = undefined;
-        setDraggingConversationKey(undefined);
+    function finishMessageDrag(clientX: number, clientY: number): void {
+        const sourceKey = draggingMessageKeyRef.current;
+        draggingMessageKeyRef.current = undefined;
+        setDraggingMessageKey(undefined);
         if (sourceKey === undefined) return;
         const target = document
             .elementFromPoint(clientX, clientY)
-            ?.closest<HTMLElement>(".conversation-row");
-        const targetKey = target?.dataset.conversationKey;
-        if (targetKey !== undefined) moveConversation(sourceKey, targetKey);
+            ?.closest<HTMLElement>(".message-row");
+        const targetKey = target?.dataset.messageKey;
+        if (targetKey !== undefined) moveMessage(sourceKey, targetKey);
     }
 
     function archiveIdle(): void {
-        setCurrentConversationKeys(
+        setCurrentMessageKeys(
             (current) =>
                 new Set(
                     [...current].filter(
                         (key) =>
-                            activeConversationKeys.has(key) ||
+                            activeMessageKeys.has(key) ||
                             key === threadKey,
                     ),
                 ),
@@ -337,7 +337,7 @@ export function ConversationSidebar({
         if (!preferencesAvailable) return;
         const uniqueIds = [...new Set(ctxIds)];
         if (uniqueIds.length === 0) return;
-        const hiddenContexts = { ...conversationPreferences.hiddenContexts };
+        const hiddenContexts = { ...messagePreferences.hiddenContexts };
         const patch: Record<string, true | null> = {};
         for (const ctxId of uniqueIds) {
             if (hidden) hiddenContexts[ctxId] = true;
@@ -345,7 +345,7 @@ export function ConversationSidebar({
             patch[ctxId] = hidden ? true : null;
         }
         persistPreferences(
-            { ...conversationPreferences, hiddenContexts },
+            { ...messagePreferences, hiddenContexts },
             { hiddenContexts: patch },
         );
         if (
@@ -371,8 +371,8 @@ export function ConversationSidebar({
             route.view === "thread" &&
             route.instance === session.instance &&
             route.ctxId === session.ctxId;
-        const key = conversationKey(session);
-        const editing = editingConversationKey === key;
+        const key = messageKey(session);
+        const editing = editingMessageKey === key;
         const menuOpen = openMenuKey === key;
         const group = allSessions.filter(
             (candidate) =>
@@ -380,7 +380,7 @@ export function ConversationSidebar({
                 workspacePreferenceKey(session),
         );
         const groupIndex = group.findIndex(
-            (candidate) => conversationKey(candidate) === key,
+            (candidate) => messageKey(candidate) === key,
         );
         const canMoveUp = preferencesAvailable && groupIndex > 0;
         const canMoveDown =
@@ -389,17 +389,17 @@ export function ConversationSidebar({
             groupIndex < group.length - 1;
         return (
             <div
-                className={`conversation-row${active ? " selected" : ""}${draggingConversationKey === key ? " dragging" : ""}`}
-                data-conversation-key={key}
+                className={`message-row${active ? " selected" : ""}${draggingMessageKey === key ? " dragging" : ""}`}
+                data-message-key={key}
                 key={key}
                 ref={menuOpen ? rowMenuRef : undefined}
             >
                 <span
                     aria-hidden="true"
-                    className="conversation-drag-handle"
+                    className="message-drag-handle"
                     onPointerCancel={() => {
-                        draggingConversationKeyRef.current = undefined;
-                        setDraggingConversationKey(undefined);
+                        draggingMessageKeyRef.current = undefined;
+                        setDraggingMessageKey(undefined);
                     }}
                     onPointerDown={(event) => {
                         if (
@@ -408,8 +408,8 @@ export function ConversationSidebar({
                             event.button !== 0
                         )
                             return;
-                        draggingConversationKeyRef.current = key;
-                        setDraggingConversationKey(key);
+                        draggingMessageKeyRef.current = key;
+                        setDraggingMessageKey(key);
                         if (
                             typeof event.currentTarget.setPointerCapture ===
                             "function"
@@ -421,18 +421,18 @@ export function ConversationSidebar({
                         event.preventDefault();
                     }}
                     onPointerUp={(event) =>
-                        finishConversationDrag(event.clientX, event.clientY)
+                        finishMessageDrag(event.clientX, event.clientY)
                     }
                     title="Drag to reorder"
                 >
                     ⋮⋮
                 </span>
                 {editing ? (
-                    <div className="conversation-rename-editor">
+                    <div className="message-rename-editor">
                         <label>
-                            <span className="sr-only">Conversation title</span>
+                            <span className="sr-only">Message title</span>
                             <input
-                                aria-label="Conversation title"
+                                aria-label="Message title"
                                 autoFocus
                                 maxLength={120}
                                 onChange={(event) =>
@@ -440,20 +440,20 @@ export function ConversationSidebar({
                                 }
                                 onKeyDown={(event) => {
                                     if (event.key === "Escape") {
-                                        setEditingConversationKey(undefined);
+                                        setEditingMessageKey(undefined);
                                         setEditingTitle("");
                                     } else if (event.key === "Enter") {
                                         event.preventDefault();
-                                        saveConversationTitle(session);
+                                        saveMessageTitle(session);
                                     }
                                 }}
                                 value={editingTitle}
                             />
                         </label>
-                        <div className="conversation-rename-actions">
+                        <div className="message-rename-actions">
                             <button
                                 aria-label="Save title"
-                                onClick={() => saveConversationTitle(session)}
+                                onClick={() => saveMessageTitle(session)}
                                 type="button"
                             >
                                 Save
@@ -461,7 +461,7 @@ export function ConversationSidebar({
                             <button
                                 aria-label="Cancel rename"
                                 onClick={() => {
-                                    setEditingConversationKey(undefined);
+                                    setEditingMessageKey(undefined);
                                     setEditingTitle("");
                                 }}
                                 type="button"
@@ -474,7 +474,7 @@ export function ConversationSidebar({
                     <>
                         <button
                             aria-current={active ? "page" : undefined}
-                            className="conversation-open"
+                            className="message-open"
                             onClick={() => {
                                 onClose();
                                 navigate({
@@ -486,7 +486,7 @@ export function ConversationSidebar({
                             }}
                             onDoubleClick={(event) => {
                                 event.preventDefault();
-                                setEditingConversationKey(key);
+                                setEditingMessageKey(key);
                                 setEditingTitle(session.title);
                             }}
                             type="button"
@@ -495,7 +495,7 @@ export function ConversationSidebar({
                             <span>
                                 {session.instance} ·{" "}
                                 {sessionScope === "current"
-                                    ? activeConversationKeys.has(key)
+                                    ? activeMessageKeys.has(key)
                                         ? "active"
                                         : "idle"
                                     : sessionScope === "hidden"
@@ -503,17 +503,17 @@ export function ConversationSidebar({
                                       : (session.status ?? "history")}
                             </span>
                             <time dateTime={session.latestAt}>
-                                {formatConversationDate(session.latestAt)}
+                                {formatMessageDate(session.latestAt)}
                             </time>
                         </button>
-                        <div className="conversation-row-actions">
+                        <div className="message-row-actions">
                             <button
                                 aria-label={
                                     sessionScope === "hidden"
-                                        ? "Restore conversation"
-                                        : "Hide conversation"
+                                        ? "Restore message"
+                                        : "Hide message"
                                 }
-                                className="conversation-visibility-action"
+                                className="message-visibility-action"
                                 disabled={!preferencesAvailable}
                                 onClick={() =>
                                     setContextsHidden(
@@ -532,12 +532,12 @@ export function ConversationSidebar({
                             </button>
                             <button
                                 aria-expanded={menuOpen}
-                                aria-label="Conversation actions"
-                                className="conversation-menu-trigger"
+                                aria-label="Message actions"
+                                className="message-menu-trigger"
                                 onClick={(event) =>
                                     toggleRowMenu(key, event.currentTarget)
                                 }
-                                title="Conversation actions"
+                                title="Message actions"
                                 type="button"
                             >
                                 ⋯
@@ -546,12 +546,12 @@ export function ConversationSidebar({
                         {menuOpen ? (
                             <div
                                 aria-label={`Actions for ${session.title}`}
-                                className="conversation-row-menu"
+                                className="message-row-menu"
                             >
                                 <button
                                     onClick={() => {
                                         closeRowMenu();
-                                        setEditingConversationKey(key);
+                                        setEditingMessageKey(key);
                                         setEditingTitle(session.title);
                                     }}
                                     type="button"
@@ -562,7 +562,7 @@ export function ConversationSidebar({
                                     disabled={!canMoveUp}
                                     onClick={() => {
                                         closeRowMenu();
-                                        moveConversationBy(session, -1);
+                                        moveMessageBy(session, -1);
                                     }}
                                     type="button"
                                 >
@@ -572,7 +572,7 @@ export function ConversationSidebar({
                                     disabled={!canMoveDown}
                                     onClick={() => {
                                         closeRowMenu();
-                                        moveConversationBy(session, 1);
+                                        moveMessageBy(session, 1);
                                     }}
                                     type="button"
                                 >
@@ -603,7 +603,7 @@ export function ConversationSidebar({
     return (
         <>
             <button
-                aria-label="Close conversations"
+                aria-label="Close messages"
                 className={`messages-backdrop${open ? " open" : ""}`}
                 onClick={onClose}
                 tabIndex={open ? 0 : -1}
@@ -614,9 +614,9 @@ export function ConversationSidebar({
                 ref={sidebarRef}
             >
                 <div className="messages-sidebar-heading">
-                    <strong>Conversations</strong>
+                    <strong>Messages</strong>
                     <div
-                        aria-label="Conversation scope"
+                        aria-label="Message scope"
                         className="messages-session-scope"
                         role="group"
                     >
@@ -643,7 +643,7 @@ export function ConversationSidebar({
                         </button>
                     </div>
                     <button
-                        aria-label="Close conversations"
+                        aria-label="Close messages"
                         className="messages-sidebar-close"
                         onClick={onClose}
                         type="button"
@@ -662,23 +662,23 @@ export function ConversationSidebar({
                 ) : null}
                 {preferenceError === undefined ? null : (
                     <p className="messages-preference-error error" role="alert">
-                        Conversation preferences are not being persisted:{" "}
+                        Message preferences are not being persisted:{" "}
                         {preferenceError}
                     </p>
                 )}
                 <label className="messages-search">
-                    <span className="sr-only">Search conversations</span>
+                    <span className="sr-only">Search messages</span>
                     <input
                         onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search conversations"
+                        placeholder="Search messages"
                         ref={searchRef}
                         type="search"
                         value={query}
                     />
                 </label>
-                <nav aria-label="Conversations" className="conversation-list">
+                <nav aria-label="Messages" className="message-list">
                     {visibleSessions.length === 0 ? (
-                        <p className="empty">No conversations found.</p>
+                        <p className="empty">No messages found.</p>
                     ) : (
                         visibleGroups.map((group) => {
                             const containsSelected =
@@ -696,14 +696,14 @@ export function ConversationSidebar({
                             return (
                                 <section
                                     aria-label={group.label}
-                                    className="conversation-workspace-group"
+                                    className="message-workspace-group"
                                     key={group.key}
                                     role="group"
                                 >
-                                    <div className="conversation-workspace-header">
+                                    <div className="message-workspace-header">
                                         <button
                                             aria-expanded={expanded}
-                                            className="conversation-workspace-heading"
+                                            className="message-workspace-heading"
                                             onClick={() =>
                                                 setExpandedHistoryGroups(
                                                     (current) => {
@@ -735,7 +735,7 @@ export function ConversationSidebar({
                                                     ? "Restore project"
                                                     : "Hide project"
                                             }
-                                            className="conversation-workspace-action"
+                                            className="message-workspace-action"
                                             disabled={!preferencesAvailable}
                                             onClick={() =>
                                                 setContextsHidden(
@@ -752,8 +752,8 @@ export function ConversationSidebar({
                                             }
                                             title={
                                                 sessionScope === "hidden"
-                                                    ? `Restore ${group.label} conversations`
-                                                    : `Hide ${group.label} conversations`
+                                                    ? `Restore ${group.label} messages`
+                                                    : `Hide ${group.label} messages`
                                             }
                                             type="button"
                                         >
@@ -763,7 +763,7 @@ export function ConversationSidebar({
                                         </button>
                                     </div>
                                     {expanded ? (
-                                        <div className="conversation-workspace-sessions">
+                                        <div className="message-workspace-sessions">
                                             {group.sessions.map(renderSession)}
                                         </div>
                                     ) : null}
@@ -777,7 +777,7 @@ export function ConversationSidebar({
     );
 }
 
-function formatConversationDate(value: string, now = new Date()): string {
+function formatMessageDate(value: string, now = new Date()): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     const sameYear = date.getFullYear() === now.getFullYear();

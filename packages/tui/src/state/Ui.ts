@@ -27,7 +27,7 @@ export type TuiFocusScope =
     | "wizard"
     | "search"
     | "toolForm"
-    | "contextConversation"
+    | "contextMessage"
     | "confirm"
     | "approvalDetail"
     | "denyConfirm"
@@ -128,7 +128,7 @@ export type TuiSidebarContextTarget =
     | { ctxIds: string[]; kind: "messageProject"; workspaceKey: string }
     | {
           instance: string;
-          kind: "messageConversation";
+          kind: "messageSession";
           route: Extract<TuiRoute, { page: "messages"; view: "thread" }>;
       }
     | { kind: "route"; route: TuiRoute };

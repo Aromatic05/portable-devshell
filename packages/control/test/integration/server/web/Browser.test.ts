@@ -70,7 +70,7 @@ test(
         assert.equal(
             runtime.calls.preferences > 0,
             true,
-            "the SPA must load server-backed Conversation preferences",
+            "the SPA must load server-backed Message preferences",
         );
         assert.equal(
             (await page.context().cookies()).some(
@@ -452,7 +452,7 @@ function createRouteHosts(calls: {
                     ],
                 },
                 {
-                    name: "conversation",
+                    name: "message",
                     operations: [
                         {
                             name: "preferences",

@@ -11,19 +11,19 @@ import {
 } from "@portable-devshell/shared";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
+import { MessageStore } from "../../src/message/store/MessageStore.ts";
 import {
-    CONVERSATION_DATABASE_SCHEMA_VERSION,
-    defaultConversationStorageLimits,
-} from "../../src/conversation/store/Schema.ts";
-import { ConversationService } from "../../src/conversation/ConversationService.ts";
+    MESSAGE_DATABASE_SCHEMA_VERSION,
+    defaultMessageStorageLimits,
+} from "../../src/message/store/Schema.ts";
+import { MessageService } from "../../src/message/MessageService.ts";
 
-test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the source as a backup", async () => {
+test("MessageStore migrates legacy Comments to current SQLite and preserves the source as a backup", async () => {
     const root = await createTestTempDirectory(
-        "conversation-comment-migration",
+        "message-comment-migration",
     );
     const legacyFile = join(root, "context-messages.json");
-    const databaseFile = join(root, "conversation.sqlite3");
+    const databaseFile = join(root, "message.sqlite3");
     const legacy: ContextMessageRecord = {
         callId: "call-comment",
         createdAt: "2026-09-10T10:00:00.000Z",
@@ -37,7 +37,7 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
     const source = `${JSON.stringify({ messages: [legacy], version: 1 })}\n`;
     writeFileSync(legacyFile, source, { mode: 0o600 });
 
-    const store = new ConversationStore({
+    const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
         legacyContextMessagesFile: legacyFile,
@@ -45,13 +45,13 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
     assert.deepEqual(store.listComments(), [legacy]);
     assert.equal(
         readUserVersion(databaseFile),
-        CONVERSATION_DATABASE_SCHEMA_VERSION,
+        MESSAGE_DATABASE_SCHEMA_VERSION,
     );
     assert.equal(existsSync(legacyFile), false);
     assert.equal(readFileSync(`${legacyFile}.migrated-v1.bak`, "utf8"), source);
     store.close();
 
-    const reopened = new ConversationStore({
+    const reopened = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
         legacyContextMessagesFile: legacyFile,
@@ -60,10 +60,31 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
     reopened.close();
 });
 
-test("ConversationStore backfills durable control state from pre-metadata history once", async () => {
-    const root = await createTestTempDirectory("conversation-control-backfill");
-    const databaseFile = join(root, "conversation.sqlite3");
-    const store = new ConversationStore({
+test("MessageStore migrates the legacy conversation database file and v1 table names once", async () => {
+    const root = await createTestTempDirectory("message-database-v1-migration");
+    const legacyDatabaseFile = join(root, "conversation.sqlite3");
+    const databaseFile = join(root, "message.sqlite3");
+    createLegacyMessageDatabaseV1(legacyDatabaseFile);
+
+    const store = new MessageStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+        legacyDatabaseFile,
+    });
+    assert.deepEqual(
+        store.listComments().map(({ ctxId, id, text }) => ({ ctxId, id, text })),
+        [{ ctxId: "ctx-legacy", id: "legacy-comment", text: "Legacy message" }],
+    );
+    assert.equal(existsSync(legacyDatabaseFile), false);
+    assert.equal(existsSync(databaseFile), true);
+    assert.equal(readUserVersion(databaseFile), MESSAGE_DATABASE_SCHEMA_VERSION);
+    store.close();
+});
+
+test("MessageStore backfills durable control state from pre-metadata history once", async () => {
+    const root = await createTestTempDirectory("message-control-backfill");
+    const databaseFile = join(root, "message.sqlite3");
+    const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -77,15 +98,15 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         text: "#stop Preserve this fence",
     });
     store.close();
-    mutateConversationDatabase(
+    mutateMessageDatabase(
         databaseFile,
         `
-        DELETE FROM conversation_metadata
+        DELETE FROM message_metadata
         WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v3'
     `,
     );
 
-    const backfilled = new ConversationStore({
+    const backfilled = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -93,11 +114,11 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         stoppedByCommentId: "legacy-stop",
     });
     backfilled.close();
-    mutateConversationDatabase(
+    mutateMessageDatabase(
         databaseFile,
-        "DELETE FROM conversation_entries WHERE ctx_id = 'ctx-a'",
+        "DELETE FROM message_entries WHERE ctx_id = 'ctx-a'",
     );
-    const withoutHistory = new ConversationStore({
+    const withoutHistory = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -107,10 +128,10 @@ test("ConversationStore backfills durable control state from pre-metadata histor
     withoutHistory.close();
 });
 
-test("ConversationStore v3 control migration rebuilds push_message from history", async () => {
-    const root = await createTestTempDirectory("conversation-control-v2-push");
-    const databaseFile = join(root, "conversation.sqlite3");
-    const store = new ConversationStore({
+test("MessageStore v3 control migration rebuilds push_message from history", async () => {
+    const root = await createTestTempDirectory("message-control-v2-push");
+    const databaseFile = join(root, "message.sqlite3");
+    const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -133,15 +154,15 @@ test("ConversationStore v3 control migration rebuilds push_message from history"
         text: "还要说明阻塞点",
     });
     store.close();
-    mutateConversationDatabase(
+    mutateMessageDatabase(
         databaseFile,
         `
-        DELETE FROM conversation_metadata
+        DELETE FROM message_metadata
         WHERE key = 'migration:context-control-v3';
-        INSERT INTO conversation_metadata(key, value)
+        INSERT INTO message_metadata(key, value)
         VALUES ('migration:context-control-v2', 'complete')
         ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        INSERT INTO conversation_metadata(key, value)
+        INSERT INTO message_metadata(key, value)
         VALUES (
             'context-control:v1:ctx-a',
             '{"pendingPushCommentId":"push-1","pendingReplyCommentId":"push-1","pushToolCallsRemaining":0}'
@@ -150,7 +171,7 @@ test("ConversationStore v3 control migration rebuilds push_message from history"
     `,
     );
 
-    const migrated = new ConversationStore({
+    const migrated = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -163,10 +184,10 @@ test("ConversationStore v3 control migration rebuilds push_message from history"
     migrated.close();
 });
 
-test("ConversationStore clears only the #push snapshot acknowledged by a report", async () => {
-    const root = await createTestTempDirectory("conversation-report-push-cas");
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+test("MessageStore clears only the #push snapshot acknowledged by a report", async () => {
+    const root = await createTestTempDirectory("message-report-push-cas");
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
     store.insertComment({
@@ -224,12 +245,12 @@ test("ConversationStore clears only the #push snapshot acknowledged by a report"
     store.close();
 });
 
-test("ConversationStore v3 control migration restores standalone #push", async () => {
+test("MessageStore v3 control migration restores standalone #push", async () => {
     const root = await createTestTempDirectory(
-        "conversation-control-v3-standalone-push",
+        "message-control-v3-standalone-push",
     );
-    const databaseFile = join(root, "conversation.sqlite3");
-    const store = new ConversationStore({
+    const databaseFile = join(root, "message.sqlite3");
+    const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -243,20 +264,20 @@ test("ConversationStore v3 control migration restores standalone #push", async (
         text: "#push 报告进度",
     });
     store.close();
-    mutateConversationDatabase(
+    mutateMessageDatabase(
         databaseFile,
         `
-        DELETE FROM conversation_metadata
+        DELETE FROM message_metadata
         WHERE key = 'migration:context-control-v3';
-        INSERT INTO conversation_metadata(key, value)
+        INSERT INTO message_metadata(key, value)
         VALUES ('migration:context-control-v2', 'complete')
         ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        DELETE FROM conversation_metadata
+        DELETE FROM message_metadata
         WHERE key = 'context-control:v1:ctx-push-only';
     `,
     );
 
-    const migrated = new ConversationStore({
+    const migrated = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -268,15 +289,15 @@ test("ConversationStore v3 control migration restores standalone #push", async (
     migrated.close();
 });
 
-test("ConversationStore rejects a newer schema without modifying it", async () => {
-    const root = await createTestTempDirectory("conversation-future-schema");
-    const databaseFile = join(root, "conversation.sqlite3");
+test("MessageStore rejects a newer schema without modifying it", async () => {
+    const root = await createTestTempDirectory("message-future-schema");
+    const databaseFile = join(root, "message.sqlite3");
     createFutureDatabase(
         databaseFile,
-        CONVERSATION_DATABASE_SCHEMA_VERSION + 1,
+        MESSAGE_DATABASE_SCHEMA_VERSION + 1,
     );
     const before = readFutureDatabase(databaseFile);
-    const store = new ConversationStore({
+    const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
     });
@@ -294,17 +315,17 @@ test("ConversationStore rejects a newer schema without modifying it", async () =
     assert.deepEqual(readFutureDatabase(databaseFile), before);
 });
 
-test("ConversationStore defaults to a 512 MiB fuse and 90 day retention", () => {
-    assert.deepEqual(defaultConversationStorageLimits, {
+test("MessageStore defaults to a 512 MiB fuse and 90 day retention", () => {
+    assert.deepEqual(defaultMessageStorageLimits, {
         maxBytes: 512 * 1024 * 1024,
         retentionDays: 90,
     });
 });
 
-test("ConversationStore retention removes old terminal history but never old pending or sent Comments", async () => {
-    const root = await createTestTempDirectory("conversation-retention");
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+test("MessageStore retention removes old terminal history but never old pending or sent Comments", async () => {
+    const root = await createTestTempDirectory("message-retention");
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
         retentionDays: 30,
@@ -356,12 +377,12 @@ test("ConversationStore retention removes old terminal history but never old pen
     store.close();
 });
 
-test("ConversationStore preserves a delivered Comment while control state still needs it as the reply target", async () => {
+test("MessageStore preserves a delivered Comment while control state still needs it as the reply target", async () => {
     const root = await createTestTempDirectory(
-        "conversation-reply-target-retention",
+        "message-reply-target-retention",
     );
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
         maxBytes: 1_024,
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
@@ -393,11 +414,11 @@ test("ConversationStore preserves a delivered Comment while control state still 
     store.close();
 });
 
-test("ConversationStore capacity evicts oldest terminal history before protected Comments", async () => {
-    const root = await createTestTempDirectory("conversation-capacity");
+test("MessageStore capacity evicts oldest terminal history before protected Comments", async () => {
+    const root = await createTestTempDirectory("message-capacity");
     const maxBytes = 12_000;
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
         maxBytes,
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
@@ -440,10 +461,10 @@ test("ConversationStore capacity evicts oldest terminal history before protected
     store.close();
 });
 
-test("ConversationService imports historical todo_report calls and records new reports idempotently", async () => {
-    const root = await createTestTempDirectory("conversation-report-migration");
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+test("MessageService imports historical todo_report calls and records new reports idempotently", async () => {
+    const root = await createTestTempDirectory("message-report-migration");
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
     let migrations = 0;
@@ -459,7 +480,7 @@ test("ConversationService imports historical todo_report calls and records new r
         status: "completed",
         toolName: "todo_report",
     };
-    const service = new ConversationService({
+    const service = new MessageService({
         instanceName: "alpha",
         legacyReports: async () => {
             migrations += 1;
@@ -501,10 +522,10 @@ test("ConversationService imports historical todo_report calls and records new r
     service.close();
 });
 
-test("ConversationService retirement fences new work and drains an in-flight legacy migration before close", async () => {
-    const root = await createTestTempDirectory("conversation-retirement-drain");
-    const store = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+test("MessageService retirement fences new work and drains an in-flight legacy migration before close", async () => {
+    const root = await createTestTempDirectory("message-retirement-drain");
+    const store = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
     let releaseMigration!: () => void;
@@ -527,7 +548,7 @@ test("ConversationService retirement fences new work and drains an in-flight leg
         status: "completed",
         toolName: "todo_report",
     };
-    const service = new ConversationService({
+    const service = new MessageService({
         instanceName: "alpha",
         legacyReports: async () => {
             markMigrationStarted();
@@ -561,8 +582,8 @@ test("ConversationService retirement fences new work and drains an in-flight leg
     assert.equal(retirementFinished, true);
     service.close();
 
-    const reopened = new ConversationStore({
-        filePath: join(root, "conversation.sqlite3"),
+    const reopened = new MessageStore({
+        filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
     assert.deepEqual(
@@ -588,7 +609,46 @@ function createFutureDatabase(filePath: string, version: number): void {
     }
 }
 
-function mutateConversationDatabase(filePath: string, sql: string): void {
+function createLegacyMessageDatabaseV1(filePath: string): void {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(filePath);
+    try {
+        database.exec(`
+            CREATE TABLE conversation_entries (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                id TEXT NOT NULL,
+                ctx_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT,
+                call_id TEXT,
+                delivered_at TEXT,
+                failed_at TEXT,
+                error TEXT,
+                UNIQUE(kind, id)
+            ) STRICT;
+            CREATE TABLE conversation_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            INSERT INTO conversation_entries(
+                kind, id, ctx_id, created_at, text, status, delivered_at
+            ) VALUES (
+                'comment', 'legacy-comment', 'ctx-legacy',
+                '2026-09-10T10:00:00.000Z', 'Legacy message', 'delivered',
+                '2026-09-10T10:00:01.000Z'
+            );
+            PRAGMA user_version = 1;
+        `);
+    } finally {
+        database.close();
+    }
+}
+
+function mutateMessageDatabase(filePath: string, sql: string): void {
     const require = createRequire(import.meta.url);
     const { DatabaseSync } =
         require("node:sqlite") as typeof import("node:sqlite");

@@ -5,7 +5,7 @@ import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
     ArtifactViewImageResult,
-    ConversationPreferencesPatch,
+    MessagePreferencesPatch,
     JsonValue,
     ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -67,8 +67,8 @@ export interface TuiCommandDispatcherOptions {
     ): Promise<void>;
     onContextDisable?(instance: string, ctxId: string): Promise<void>;
     onContextRenew?(instance: string, ctxId: string): Promise<void>;
-    onConversationPreferencesUpdate?(
-        patch: ConversationPreferencesPatch,
+    onMessagePreferencesUpdate?(
+        patch: MessagePreferencesPatch,
     ): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
@@ -422,7 +422,7 @@ export class TuiCommandDispatcher {
 
     #cancel(): boolean {
         const scope = this.#store.getState().interaction.focusScope;
-        if (scope === "contextConversation") {
+        if (scope === "contextMessage") {
             this.#store.setEditor(undefined);
             this.#store.setFocusScope(
                 this.#store.getState().ui.selectedPage === "messages"
@@ -517,13 +517,13 @@ export class TuiCommandDispatcher {
             .context.items.find((candidate) => candidate.id === cursor.id);
         if (entry === undefined) return false;
         const ctxIds =
-            entry.target.kind === "messageConversation"
+            entry.target.kind === "messageSession"
                 ? [entry.target.route.ctxId]
                 : entry.target.kind === "messageProject"
                   ? entry.target.ctxIds
                   : [];
         if (ctxIds.length === 0) return false;
-        await (this.#options.onConversationPreferencesUpdate ?? unavailable)({
+        await (this.#options.onMessagePreferencesUpdate ?? unavailable)({
             hiddenContexts: Object.fromEntries(
                 ctxIds.map((ctxId) => [ctxId, hidden ? true : null]),
             ),
@@ -543,7 +543,7 @@ export class TuiCommandDispatcher {
         });
         this.#store.setScreenStatus(
             "messages",
-            `${ctxIds.length === 1 ? "Conversation" : `${ctxIds.length} conversations`} ${hidden ? "hidden" : "restored"}.`,
+            `${ctxIds.length === 1 ? "Message" : `${ctxIds.length} messages`} ${hidden ? "hidden" : "restored"}.`,
         );
         return true;
     }

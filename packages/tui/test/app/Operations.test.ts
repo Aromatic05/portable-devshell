@@ -208,17 +208,17 @@ import {
                     calls.push(`context.renew:${ctxId}`);
                 },
             },
-            conversation: {
+            messageHistory: {
                 async load() {
-                    refreshed.push("conversation");
+                    refreshed.push("message");
                 },
                 async refreshInstance() {
-                    refreshed.push("conversation:instance");
+                    refreshed.push("message:instance");
                 },
             },
-            conversationPreferences: {
+            messagePreferences: {
                 async refresh() {
-                    refreshed.push("conversationPreferences");
+                    refreshed.push("messagePreferences");
                 },
             },
             extension: {
@@ -409,7 +409,7 @@ import {
             "overview",
             "oauth",
             "extension",
-            "conversationPreferences",
+            "messagePreferences",
         ]);
     });
 
@@ -516,7 +516,7 @@ import {
             "overview",
             "oauth",
             "extension",
-            "conversationPreferences",
+            "messagePreferences",
             "reconnect",
             "todo:alpha",
             "goals:alpha",
@@ -525,7 +525,7 @@ import {
             "config",
             "context",
             "toolCalls",
-            "conversation:instance",
+            "message:instance",
             "messages:instance",
             "todo:alpha",
             "goals:alpha",

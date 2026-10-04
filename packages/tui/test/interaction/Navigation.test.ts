@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     asInstanceName,
-    type ConversationPreferencesPatch,
+    type MessagePreferencesPatch,
     createRemoteError,
     type ContextMessageRecord,
     type InstanceCreateDraft,
@@ -20,7 +20,7 @@ import {
     TuiCommandDispatcherNavigation,
     TuiFocusManager,
     buildTuiHitRegions,
-    contextConversationDraftKey,
+    contextMessageDraftKey,
     TuiCommandDispatcher,
     TuiKeyDispatcher,
     selectSidebarModel,
@@ -28,7 +28,7 @@ import {
     isTerminalSizeSupported,
     mainBoxInnerWidth,
     renderExpandableBoxLines,
-    readContextConversationDraft,
+    readContextMessageDraft,
     type TuiHitTarget,
     selectMainScrollKey,
     tuiPageEntries,
@@ -678,7 +678,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         assert.equal(
             selectSidebarModel(harness.store.getState(), harness.domains.reader).context.items.some(
                 (entry) =>
-                    entry.target.kind === "messageConversation" &&
+                    entry.target.kind === "messageSession" &&
                     entry.target.route.ctxId === "ctx-message-search",
             ),
             true,
@@ -745,7 +745,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             ["audit-context:ctx-alpha"],
         );
     });
-    test("Audit opens Comment conversation only from a concrete context route", async () => {
+    test("Audit opens Comment message only from a concrete context route", async () => {
         const root = createHarness();
         root.store.setSelectedPage("audit");
         await root.press("m");
@@ -785,7 +785,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             ctxId: "ctx-alpha",
             page: "audit",
             scope: "context",
-            view: "conversation",
+            view: "message",
         } as never);
         assert.equal(
             topTuiOverlay(context.store.getState().interaction.overlays),
@@ -863,7 +863,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         assert.deepEqual(disabled, [{ ctxId: "ctx-alpha", instance: "alpha" }]);
     });
 
-    test("Comment conversation shows exact history and keeps the route open after send", async () => {
+    test("Comment message shows exact history and keeps the route open after send", async () => {
         const sent: string[] = [];
         const harness = createHarness({
             onContextMessage: async (instance, ctxId, text) => {
@@ -900,7 +900,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             toolName: "bash_run",
         };
         harness.domains.setToolCalls("alpha", [commentCall]);
-        harness.domains.setConversation("alpha", [
+        harness.domains.setMessageHistory("alpha", [
             {
                 callId: "call-comment",
                 createdAt: "2026-08-02T00:01:00.000Z",
@@ -913,7 +913,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             },
         ]);
         assert.equal(
-            harness.domains.conversation.state.instances.alpha?.entries?.length,
+            harness.domains.messageHistory.state.instances.alpha?.entries?.length,
             1,
         );
         harness.domains.setMessages("alpha", [
@@ -939,7 +939,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         enterAuditContext(harness, "ctx-alpha");
         await harness.press("m");
 
-        let text = conversationScreenText(harness);
+        let text = messageScreenText(harness);
         assert.equal(text.includes("other context comment"), false);
         assert.ok(
             text.indexOf("first comment") < text.indexOf("second comment"),
@@ -950,7 +950,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         assert.match(text, /delivery failed/i);
         assert.match(text, /2026-08-02T00:01:30.000Z/);
 
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         await harness.press("new guidance");
         await harness.press("", { return: true });
         assert.deepEqual(sent, ["new guidance"]);
@@ -958,9 +958,9 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             ctxId: "ctx-alpha",
             page: "audit",
             scope: "context",
-            view: "conversation",
+            view: "message",
         } as never);
-        text = conversationScreenText(harness);
+        text = messageScreenText(harness);
         assert.match(text, /new guidance/);
         assert.match(text, /next call/i);
 
@@ -978,13 +978,13 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         harness.domains.setContexts([tuiContextRecord("ctx-alpha", "active")]);
         enterAuditContext(harness, "ctx-alpha");
         await harness.press("m");
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         await harness.press("A👩‍💻éB");
 
         await harness.press("", { leftArrow: true });
         await harness.press("", { backspace: true });
         assert.equal(
-            readContextConversationDraft(
+            readContextMessageDraft(
                 harness.store.getState(),
                 "alpha",
                 "ctx-alpha",
@@ -994,7 +994,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
 
         await harness.press("", { backspace: true });
         assert.equal(
-            readContextConversationDraft(
+            readContextMessageDraft(
                 harness.store.getState(),
                 "alpha",
                 "ctx-alpha",
@@ -1039,7 +1039,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         ]);
     });
 
-    test("Comment conversation can queue to any active Context on the selected instance", async () => {
+    test("Comment message can queue to any active Context on the selected instance", async () => {
         const sent: Array<{ ctxId: string; text: string }> = [];
         const harness = createHarness({
             onContextMessage: async (_instance, ctxId, text) => {
@@ -1081,7 +1081,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         ]);
         enterAuditContext(harness, "ctx-old");
         await harness.press("m");
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         await harness.press("must reach this active chat");
         await harness.press("", { return: true });
 
@@ -1089,7 +1089,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             { ctxId: "ctx-old", text: "must reach this active chat" },
         ]);
         assert.equal(
-            readContextConversationDraft(
+            readContextMessageDraft(
                 harness.store.getState(),
                 "alpha",
                 "ctx-old",
@@ -1102,13 +1102,13 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         );
         assert.equal(
             selectMainScreenModel(harness.store.getState(), harness.domains.reader).boxes.find(
-                (box) => box.id === "conversation-composer",
+                (box) => box.id === "message-composer",
             )?.status,
             "normal",
         );
     });
 
-    test("Comment conversation remains writable for a disabled Context", async () => {
+    test("Comment message remains writable for a disabled Context", async () => {
         const sent: Array<{ ctxId: string; text: string }> = [];
         const harness = createHarness({
             onContextMessage: async (_instance, ctxId, text) => {
@@ -1137,16 +1137,16 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         const composer = selectMainScreenModel(
             harness.store.getState(),
             harness.domains.reader,
-        ).boxes.find((box) => box.id === "conversation-composer");
+        ).boxes.find((box) => box.id === "message-composer");
         assert.notEqual(composer?.status, "disabled");
         assert.doesNotMatch(
-            conversationScreenText(harness),
+            messageScreenText(harness),
             /blocked|read-only|unavailable/iu,
         );
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         assert.equal(
             harness.store.getState().interaction.focusScope,
-            "contextConversation",
+            "contextMessage",
         );
         await harness.press("message after disable");
         await harness.press("", { return: true });
@@ -1183,19 +1183,19 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         });
         harness.store.setSelectedInstance("beta");
 
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         assert.equal(
             harness.store.getState().interaction.focusScope,
-            "contextConversation",
+            "contextMessage",
         );
-        await harness.press("continue this conversation");
+        await harness.press("continue this message");
         await harness.press("", { return: true });
 
         assert.deepEqual(sent, [
             {
                 ctxId: "ctx-history-only",
                 instance: "alpha",
-                text: "continue this conversation",
+                text: "continue this message",
             },
         ]);
         assert.doesNotMatch(
@@ -1206,9 +1206,9 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
     });
 
     test("Messages project soft hide and restore patch every current ctxId across instances", async () => {
-        const patches: ConversationPreferencesPatch[] = [];
+        const patches: MessagePreferencesPatch[] = [];
         const harness = createHarness({
-            onConversationPreferencesUpdate: async (patch) => {
+            onMessagePreferencesUpdate: async (patch) => {
                 patches.push(patch);
             },
         });
@@ -1268,8 +1268,8 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             },
         ]);
 
-        harness.domains.setConversationPreferences({
-            ...harness.domains.conversationPreferences.state.preferences,
+        harness.domains.setMessagePreferences({
+            ...harness.domains.messagePreferences.state.preferences,
             hiddenContexts: {
                 "ctx-project-a": true,
                 "ctx-project-b": true,
@@ -1317,12 +1317,12 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
                 id: "message-race-history",
                 instance: "alpha",
                 status: "delivered",
-                text: "existing conversation",
+                text: "existing message",
             },
         ]);
         enterAuditContext(harness, "ctx-race");
         await harness.press("m");
-        await harness.dispatch({ type: "contextConversation.edit" });
+        await harness.dispatch({ type: "contextMessage.edit" });
         await harness.press("send across lifecycle change");
 
         harness.domains.setContexts([tuiContextRecord("ctx-race", "disabled")]);
@@ -1332,7 +1332,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             { ctxId: "ctx-race", text: "send across lifecycle change" },
         ]);
         assert.equal(
-            readContextConversationDraft(
+            readContextMessageDraft(
                 harness.store.getState(),
                 "alpha",
                 "ctx-race",
@@ -3880,7 +3880,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
     });
     test("Messages scrolling measures wrapped history with the actual main viewport width", async () => {
         const harness = createHarness({ mainContentColumns: 20 });
-        harness.domains.setConversation("alpha", [
+        harness.domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-10T10:00:00.000Z",
                 ctxId: "ctx-alpha",
@@ -3939,7 +3939,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
 
     test("scrolling at main viewport boundaries is a true no-op", async () => {
         const harness = createHarness({ mainContentColumns: 20 });
-        harness.domains.setConversation("alpha", [
+        harness.domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-10T10:00:00.000Z",
                 ctxId: "ctx-alpha",
@@ -4322,7 +4322,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         });
     }
 
-    function conversationScreenText(
+    function messageScreenText(
         harness: ReturnType<typeof createHarness>,
     ): string {
         return selectMainScreenModel(harness.store.getState(), harness.domains.reader)
@@ -4542,8 +4542,8 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
                 instance: string,
                 ctxId: string,
             ) => Promise<void>;
-            onConversationPreferencesUpdate?: (
-                patch: ConversationPreferencesPatch,
+            onMessagePreferencesUpdate?: (
+                patch: MessagePreferencesPatch,
             ) => Promise<void>;
             onTodoDelete?: (instance: string, taskId: string) => Promise<void>;
             onToolCall?: (
@@ -4645,8 +4645,8 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
                 (async () => ({}))) as never,
             onContextMessage: options.onContextMessage,
             onContextDisable: options.onContextDisable,
-            onConversationPreferencesUpdate:
-                options.onConversationPreferencesUpdate,
+            onMessagePreferencesUpdate:
+                options.onMessagePreferencesUpdate,
             onTodoDelete: options.onTodoDelete,
             onQuit: async () => undefined,
             onRedraw: () => undefined,

@@ -1,6 +1,6 @@
 import type { WebMessageEntry } from "./Model.js";
 
-export function buildConversationMarkdown({
+export function buildMessageMarkdown({
     ctxId,
     entries,
     instance,
@@ -43,7 +43,7 @@ export function markdownExportFilename(
         .replace(/-+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 120);
-    return `${stem || "conversation"}.md`;
+    return `${stem || "message"}.md`;
 }
 
 export function downloadMarkdown(filename: string, markdown: string): void {

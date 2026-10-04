@@ -3,22 +3,22 @@ import test from "node:test";
 
 import {
     compactContextId,
-    humanConversationTitle,
+    humanMessageTitle,
     resolveToolOutput,
 } from "@portable-devshell/shared";
 
-test("human presentation keeps conversation identity concise and consistent", () => {
+test("human presentation keeps message identity concise and consistent", () => {
     assert.equal(compactContextId("ctx-1234567890abcdef"), "ctx-12345678…");
     assert.equal(compactContextId("ctx-short"), "ctx-short");
     assert.equal(
-        humanConversationTitle({
+        humanMessageTitle({
             ctxId: "ctx-long-1234567890",
             workspace: "/work/portable-devshell",
         }),
         "portable-devshell",
     );
     assert.equal(
-        humanConversationTitle({ ctxId: "ctx-long-1234567890" }),
+        humanMessageTitle({ ctxId: "ctx-long-1234567890" }),
         "ctx-long-123…",
     );
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
-    createEmptyConversationPreferences,
+    createEmptyMessagePreferences,
     type ContextMessageRecord,
     type InstanceCreateDraft,
     type InstanceSnapshot,
@@ -51,7 +51,7 @@ describe("WebStore", () => {
         expect(store.state.error).toBeUndefined();
     });
 
-    it("updates server-backed Conversation preferences", async () => {
+    it("updates server-backed Message preferences", async () => {
         const domains = new WebTestDomains();
         const server = {
             hiddenContexts: {},
@@ -60,21 +60,21 @@ describe("WebStore", () => {
             version: 1 as const,
             workspaceOrder: ["/work/demo"],
         };
-        domains.conversationPreferences.patch({ preferences: server });
+        domains.messagePreferences.patch({ preferences: server });
         const updatePreferences = vi.spyOn(
-            domains.domains.conversationPreferences,
+            domains.domains.messagePreferences,
             "update",
         );
         const store = new WebStore(domains.domains);
 
         await store.load();
         expect(
-            domains.domains.conversationPreferences.state.preferences.titles[
+            domains.domains.messagePreferences.state.preferences.titles[
                 "demo\u0000ctx-a"
             ],
         ).toBe("Server title");
         expect(
-            await store.updateConversationPreferences({
+            await store.updateMessagePreferences({
                 titles: { "demo\u0000ctx-b": "Second browser" },
             }),
         ).toBe(true);
@@ -82,15 +82,15 @@ describe("WebStore", () => {
             titles: { "demo\u0000ctx-b": "Second browser" },
         });
         expect(
-            domains.domains.conversationPreferences.state.preferences.titles[
+            domains.domains.messagePreferences.state.preferences.titles[
                 "demo\u0000ctx-b"
             ],
         ).toBe("Second browser");
     });
 
-    it("does not replay queued Conversation preference mutations after the store generation changes", async () => {
+    it("does not replay queued Message preference mutations after the store generation changes", async () => {
         const domains = new WebTestDomains();
-        const preferences = createEmptyConversationPreferences();
+        const preferences = createEmptyMessagePreferences();
         let releaseFirst!: () => void;
         const updatePreferences = vi
             .fn()
@@ -101,14 +101,14 @@ describe("WebStore", () => {
                     }),
             )
             .mockResolvedValue(preferences);
-        domains.domains.conversationPreferences.update = updatePreferences;
+        domains.domains.messagePreferences.update = updatePreferences;
         const store = new WebStore(domains.domains);
         await store.load();
 
-        const first = store.updateConversationPreferences({
+        const first = store.updateMessagePreferences({
             titles: { "demo\u0000ctx-a": "A" },
         });
-        const second = store.updateConversationPreferences({
+        const second = store.updateMessagePreferences({
             titles: { "demo\u0000ctx-b": "B" },
         });
         await Promise.resolve();
@@ -121,10 +121,10 @@ describe("WebStore", () => {
         expect(updatePreferences).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the service online while exposing a Conversation preference load failure", async () => {
+    it("keeps the service online while exposing a Message preference load failure", async () => {
         const domains = new WebTestDomains();
         domains.domains.load = vi.fn(async () => {
-            domains.conversationPreferences.patch({
+            domains.messagePreferences.patch({
                 failure: new Error("Preference store unavailable"),
             });
         });
@@ -133,7 +133,7 @@ describe("WebStore", () => {
         await store.load();
 
         expect(domains.service.state.status).toBe("online");
-        expect(domains.conversationPreferences.state.failure?.message).toBe(
+        expect(domains.messagePreferences.state.failure?.message).toBe(
             "Preference store unavailable",
         );
         expect(store.state.error).toBeUndefined();
@@ -181,8 +181,8 @@ describe("WebStore", () => {
         );
         domains.domains.toolCalls.load = loadToolCalls;
         domains.domains.messages.queue = queue;
-        const conversationRefresh = vi.spyOn(
-            domains.domains.conversation,
+        const messageRefresh = vi.spyOn(
+            domains.domains.messageHistory,
             "refreshInstance",
         );
         const messagesRefresh = vi.spyOn(
@@ -195,14 +195,14 @@ describe("WebStore", () => {
 
         await store.load();
         expect(loadToolCalls).not.toHaveBeenCalled();
-        expect(conversationRefresh).not.toHaveBeenCalled();
+        expect(messageRefresh).not.toHaveBeenCalled();
         expect(runtimeLoad).not.toHaveBeenCalled();
 
         await store.refreshAudit();
 
         expect(loadToolCalls).toHaveBeenCalledWith("demo");
         expect(domains.toolCalls.state.instances.demo?.calls).toEqual([call]);
-        expect(conversationRefresh).toHaveBeenCalledWith("demo");
+        expect(messageRefresh).toHaveBeenCalledWith("demo");
         expect(messagesRefresh).toHaveBeenCalledWith("demo");
         expect(contextRefresh).toHaveBeenCalledOnce();
 
@@ -215,13 +215,13 @@ describe("WebStore", () => {
     it("refreshes Messages without materializing Audit logs or Tool Calls", async () => {
         const domains = new WebTestDomains();
         domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
-        const conversationLoad = vi.fn(
+        const messageLoad = vi.fn(
             async (_instances: readonly string[]) => undefined,
         );
         const messagesLoad = vi.fn(
             async (_instances: readonly string[]) => undefined,
         );
-        domains.domains.conversation.load = conversationLoad;
+        domains.domains.messageHistory.load = messageLoad;
         domains.domains.messages.load = messagesLoad;
         const readLogs = vi.spyOn(domains.domains.runtime("demo"), "readLogs");
         const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
@@ -230,7 +230,7 @@ describe("WebStore", () => {
         await store.load();
         await store.refreshMessages();
 
-        expect(conversationLoad).toHaveBeenCalledWith(["demo"]);
+        expect(messageLoad).toHaveBeenCalledWith(["demo"]);
         expect(messagesLoad).toHaveBeenCalledWith(["demo"]);
         expect(readLogs).not.toHaveBeenCalled();
         expect(loadToolCalls).not.toHaveBeenCalled();
@@ -312,8 +312,8 @@ describe("WebStore", () => {
         domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
         const contextRefresh = vi.spyOn(domains.domains.context, "refresh");
         const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
-        const conversationRefresh = vi.spyOn(
-            domains.domains.conversation,
+        const messageRefresh = vi.spyOn(
+            domains.domains.messageHistory,
             "refreshInstance",
         );
         const messagesRefresh = vi.spyOn(
@@ -330,7 +330,7 @@ describe("WebStore", () => {
 
         expect(contextRefresh).toHaveBeenCalledOnce();
         expect(loadToolCalls).toHaveBeenCalledWith("demo");
-        expect(conversationRefresh).toHaveBeenCalledWith("demo");
+        expect(messageRefresh).toHaveBeenCalledWith("demo");
         expect(messagesRefresh).toHaveBeenCalledWith("demo");
         expect(runtimeLoad).toHaveBeenCalledWith("demo");
         expect(readLogs).toHaveBeenCalledOnce();

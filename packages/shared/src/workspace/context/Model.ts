@@ -5,7 +5,7 @@
  * vocabulary used to bind, validate, and re-enter Contexts: its status,
  * environment attachments, external bindings, remote instance references,
  * cleanup obligations, automatic-reentry state, and query shape. Context
- * messages and the Conversation surface live in their own subdomains.
+ * messages and the Message surface live in their own subdomains.
  *
  * The record carries only the authoritative environment list; an "initial"
  * environment is whichever entry the authority attached first, not a second

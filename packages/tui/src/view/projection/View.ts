@@ -351,7 +351,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             if (state.ui.selectedPage === "overview") {
                 return ["← sidebar", "enter instance", "r", "/", "esc back"];
             }
-            if (route.page === "audit" && route.view === "conversation") {
+            if (route.page === "audit" && route.view === "message") {
                 return ["space expand", "↑↓ draft", "enter edit", "esc back"];
             }
             if (route.page === "audit" && route.view === "contexts") {
@@ -395,7 +395,7 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
             return ["type", "bs", "enter", "esc"];
         case "toolForm":
             return ["type JSON", "bs", "enter", "esc"];
-        case "contextConversation":
+        case "contextMessage":
             return ["type", "enter send", "pgup/pgdn", "esc"];
         case "form":
         case "wizard":

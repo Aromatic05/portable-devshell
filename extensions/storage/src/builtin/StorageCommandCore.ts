@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 
 import {
     downgradeAuditDatabase,
-    downgradeConversationDatabase,
+    downgradeMessageDatabase,
     inspectStorageDatabase,
 } from "./StorageDowngrade.js";
 
@@ -10,7 +10,7 @@ export const STORAGE_USAGE = [
     "Usage:",
     "  devshell storage inspect <database>",
     "  devshell storage downgrade audit <database> --to 1 --output <audit-v1.sqlite3>",
-    "  devshell storage downgrade conversation <database> --to 0 --output <context-messages.json> [--instance <name>]",
+    "  devshell storage downgrade message <database> --to 0 --output <context-messages.json> [--instance <name>]",
     "",
     "Downgrade never modifies or overwrites the source database or an existing output.",
     "If Control cannot start because the database is newer, use the plugin-owned offline executable: devshell-storage ...",
@@ -44,8 +44,8 @@ export function executeStorageArguments(
     if (argv[0] !== "downgrade")
         throw usageError(`Unknown storage command: ${argv[0]}`);
     const kind = argv[1];
-    if (kind !== "audit" && kind !== "conversation") {
-        throw usageError("storage downgrade requires audit or conversation");
+    if (kind !== "audit" && kind !== "message") {
+        throw usageError("storage downgrade requires audit or message");
     }
     const parsed = parseDowngradeArgs(argv.slice(2), context.workingDirectory);
     const value =
@@ -56,7 +56,7 @@ export function executeStorageArguments(
                   source: parsed.source,
                   toVersion: parsed.toVersion,
               })
-            : downgradeConversationDatabase({
+            : downgradeMessageDatabase({
                   ...(parsed.instance === undefined
                       ? {}
                       : { instance: parsed.instance }),

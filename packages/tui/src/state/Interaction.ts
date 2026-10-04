@@ -132,12 +132,12 @@ export type TuiUiIntent =
     | { shareId: string; type: "artifact.revokeShare" }
     | { transferId: string; type: "artifact.cancelTransfer" }
     | { approvalId: string; instance: string; type: "approval.open" }
-    | { type: "contextConversation.openCurrent" }
-    | { type: "contextConversation.edit" }
-    | { text: string; type: "contextConversation.append" }
-    | { type: "contextConversation.backspace" }
-    | { direction: "left" | "right"; type: "contextConversation.cursorMove" }
-    | { type: "contextConversation.submit" }
+    | { type: "contextMessage.openCurrent" }
+    | { type: "contextMessage.edit" }
+    | { text: string; type: "contextMessage.append" }
+    | { type: "contextMessage.backspace" }
+    | { direction: "left" | "right"; type: "contextMessage.cursorMove" }
+    | { type: "contextMessage.submit" }
     | {
           approvalId: string;
           decision: "approve" | "deny";

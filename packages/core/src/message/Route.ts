@@ -60,7 +60,7 @@ function projectMessageEvent(
         isRecord(event.data) &&
         event.data.toolName === "todo_report"
     ) {
-        return { ...event, type: "conversation.changed" };
+        return { ...event, type: "message.changed" };
     }
     return undefined;
 }

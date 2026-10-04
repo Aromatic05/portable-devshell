@@ -13,7 +13,7 @@ import {
     type CommentExtensionInstance,
     type CommentInstanceSource,
 } from "../../src/index.ts";
-import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
+import { MessageStore } from "../../src/message/store/MessageStore.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const routeContext = {
@@ -50,8 +50,8 @@ class TestCommentInstances implements CommentInstanceSource {
 
 test("CommentExtension owns instance state, routes, preferences, and replacement persistence", async () => {
     const root = await createTestTempDirectory("comment-extension-owner");
-    const preferencesFile = join(root, "conversation-preferences.json");
-    const conversationDatabaseFile = join(root, "conversation.sqlite3");
+    const preferencesFile = join(root, "message-preferences.json");
+    const messageDatabaseFile = join(root, "message.sqlite3");
     const legacyContextMessagesFile = join(root, "context-messages.json");
     const events: Array<{ data: JsonValue; type: string }> = [];
     const firstKey = {};
@@ -60,7 +60,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             appendEvent: async (type, data) => {
                 events.push({ data, type });
             },
-            conversationDatabaseFile,
+            messageDatabaseFile,
             enabled: true,
             key: firstKey,
             legacyContextMessagesFile,
@@ -72,17 +72,17 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
 
     assert.deepEqual(
         extension.routes.instance("alpha").map((route) => route.name),
-        ["message", "message"],
+        ["message"],
     );
     assert.deepEqual(
         extension.routes.control().map((route) => route.name),
-        ["conversation"],
+        ["message"],
     );
 
-    const message = extension.routes
+    const messageRoute = extension.routes
         .instance("alpha")
         .find((route) => route.name === "message");
-    const queue = message?.operations.find(
+    const queue = messageRoute?.operations.find(
         (operation) => operation.name === "queueContextMessage",
     );
     if (queue === undefined)
@@ -101,7 +101,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             appendEvent: async (type, data) => {
                 events.push({ data, type });
             },
-            conversationDatabaseFile,
+            messageDatabaseFile,
             enabled: true,
             key: {},
             legacyContextMessagesFile,
@@ -110,23 +110,17 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
         },
     ]);
 
-    const conversation = extension.routes
+    const list = extension.routes
         .instance("alpha")
-        .find(
-            (route) =>
-                route.name === "message" &&
-                route.operations.some(
-                    (operation) => operation.name === "listConversationEntries",
-                ),
+        .find((route) => route.name === "message")
+        ?.operations.find(
+            (operation) => operation.name === "listMessageEntries",
         );
-    const list = conversation?.operations.find(
-        (operation) => operation.name === "listConversationEntries",
-    );
-    if (list === undefined) throw new Error("conversation.list is missing");
+    if (list === undefined) throw new Error("message.list is missing");
     const history = (await list.handle(
         {
             id: "list-1",
-            name: "listConversationEntries",
+            name: "listMessageEntries",
             payload: { ctxId: "ctx-alpha" },
         },
         routeContext,
@@ -144,7 +138,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
         (operation) => operation.name === "preferences",
     );
     if (updatePreferences === undefined || preferences === undefined)
-        throw new Error("Conversation preference routes are missing");
+        throw new Error("Message preference routes are missing");
     await updatePreferences.handle(
         {
             id: "preferences-update",
@@ -180,10 +174,10 @@ test("CommentExtension preserves state across a transient disable until committe
         "comment-extension-disable-rollback",
     );
     const key = {};
-    const conversationDatabaseFile = join(root, "conversation.sqlite3");
+    const messageDatabaseFile = join(root, "message.sqlite3");
     const source = (enabled: boolean): CommentExtensionInstance => ({
         appendEvent: async () => undefined,
-        conversationDatabaseFile,
+        messageDatabaseFile,
         enabled,
         key,
         legacyReports: async () => [],
@@ -192,7 +186,7 @@ test("CommentExtension preserves state across a transient disable until committe
     const instances = new TestCommentInstances([source(true)]);
     const extension = new CommentExtension({
         instances,
-        preferencesFile: join(root, "conversation-preferences.json"),
+        preferencesFile: join(root, "message-preferences.json"),
     });
 
     const message = extension.routes
@@ -215,12 +209,12 @@ test("CommentExtension preserves state across a transient disable until committe
     instances.replace([source(false)]);
     assert.deepEqual(extension.routes.instance("alpha"), []);
     await assert.rejects(
-        extension.conversation.list("alpha", { ctxId: "ctx-alpha" }),
+        extension.messageHistory.list("alpha", { ctxId: "ctx-alpha" }),
         /not found or is disabled/u,
     );
 
     instances.replace([source(true)]);
-    const history = await extension.conversation.list("alpha", {
+    const history = await extension.messageHistory.list("alpha", {
         ctxId: "ctx-alpha",
     });
     assert.deepEqual(
@@ -234,7 +228,7 @@ test("CommentExtension fences a captured route before committed retirement drain
     const root = await createTestTempDirectory(
         "comment-extension-retire-fence",
     );
-    const conversationDatabaseFile = join(root, "conversation.sqlite3");
+    const messageDatabaseFile = join(root, "message.sqlite3");
     let releaseQueued!: () => void;
     const queuedGate = new Promise<void>((resolve) => {
         releaseQueued = resolve;
@@ -253,7 +247,7 @@ test("CommentExtension fences a captured route before committed retirement drain
                 markQueuedStarted();
                 await queuedGate;
             },
-            conversationDatabaseFile,
+            messageDatabaseFile,
             enabled: true,
             key: {},
             legacyReports: async () => [],
@@ -262,7 +256,7 @@ test("CommentExtension fences a captured route before committed retirement drain
     ]);
     const extension = new CommentExtension({
         instances,
-        preferencesFile: join(root, "conversation-preferences.json"),
+        preferencesFile: join(root, "message-preferences.json"),
     });
     const message = extension.routes
         .instance("alpha")
@@ -311,8 +305,8 @@ test("CommentExtension fences a captured route before committed retirement drain
     await retiring;
     assert.deepEqual(extension.routes.instance("alpha"), []);
 
-    const store = new ConversationStore({
-        filePath: conversationDatabaseFile,
+    const store = new MessageStore({
+        filePath: messageDatabaseFile,
         instanceName: "alpha",
     });
     assert.deepEqual(

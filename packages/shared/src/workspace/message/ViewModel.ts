@@ -5,15 +5,16 @@ import {
 import {
     type ContextMessageListInput,
     type ContextMessageRecord,
-    type ConversationEntry,
+    type MessageEntry,
     type MessageEvent,
     isContextMessageEvent,
-    isConversationEvent,
+    isMessageHistoryEvent,
     mergeContextMessage,
     mergeContextMessageList,
-    mergeConversationEntryList,
+    mergeMessageEntryList,
 } from "./Model.js";
-import type { MessageTransport } from "./Transport.js";
+import type { MessagePreferenceTransport, MessageTransport } from "./Transport.js";
+import { createEmptyMessagePreferences, type MessagePreferencesPatch, type MessagePreferencesSnapshot } from "./Preference.js";
 
 interface MessageInstanceState {
     lastSeq: number;
@@ -324,23 +325,23 @@ function createInitialMessageInstanceState(): MessageInstanceState {
         status: "stopped",
     };
 }
-interface ConversationInstanceState {
-    entries: ConversationEntry[];
+interface MessageHistoryInstanceState {
+    entries: MessageEntry[];
     lastSeq: number;
     status: InstanceEventSubscriptionStatus;
 }
-export interface ConversationViewModelState {
+export interface MessageHistoryViewModelState {
     failures: Record<string, Error>;
-    instances: Record<string, ConversationInstanceState>;
+    instances: Record<string, MessageHistoryInstanceState>;
 }
-interface ConversationViewModelOptions {
+interface MessageHistoryViewModelOptions {
     transport: MessageTransport;
     onEvent?(event: MessageEvent): void;
 }
-const CONVERSATION_REFRESH_DELAY_MS = 100;
-const CONVERSATION_LIST_LIMIT = 400;
-const CONVERSATION_LIST_MAX_BYTES = 1024 * 1024;
-export class ConversationViewModel {
+const MESSAGE_HISTORY_REFRESH_DELAY_MS = 100;
+const MESSAGE_HISTORY_LIST_LIMIT = 400;
+const MESSAGE_HISTORY_LIST_MAX_BYTES = 1024 * 1024;
+export class MessageHistoryViewModel {
     readonly #transport: MessageTransport;
     readonly #listeners = new Set<() => void>();
     readonly #onEvent?: (event: MessageEvent) => void;
@@ -351,17 +352,17 @@ export class ConversationViewModel {
         InstanceEventSubscription<MessageEvent>
     >();
     #epoch = 0;
-    #publishedState: ConversationViewModelState =
-        createInitialConversationViewModelState();
-    #state: ConversationViewModelState =
-        createInitialConversationViewModelState();
+    #publishedState: MessageHistoryViewModelState =
+        createInitialMessageHistoryViewModelState();
+    #state: MessageHistoryViewModelState =
+        createInitialMessageHistoryViewModelState();
 
-    constructor(options: ConversationViewModelOptions) {
+    constructor(options: MessageHistoryViewModelOptions) {
         this.#transport = options.transport;
         this.#onEvent = options.onEvent;
     }
 
-    get state(): Readonly<ConversationViewModelState> {
+    get state(): Readonly<MessageHistoryViewModelState> {
         return this.#publishedState;
     }
 
@@ -386,7 +387,7 @@ export class ConversationViewModel {
     }
 
     /**
-     * Reads the authoritative Conversation snapshot. Returns the read-time
+     * Reads the authoritative Message snapshot. Returns the read-time
      * instance sequence so the caller can resume from lastSeq + 1.
      */
     async refreshInstance(instance: string): Promise<number | undefined> {
@@ -394,17 +395,17 @@ export class ConversationViewModel {
         const epoch = this.#epoch;
         const version = this.#nextVersion(key);
         try {
-            const result = await this.#transport.listConversationEntries(
+            const result = await this.#transport.listMessageEntries(
                 instance,
                 {
-                    limit: CONVERSATION_LIST_LIMIT,
-                    maxBytes: CONVERSATION_LIST_MAX_BYTES,
+                    limit: MESSAGE_HISTORY_LIST_LIMIT,
+                    maxBytes: MESSAGE_HISTORY_LIST_MAX_BYTES,
                 },
             );
             if (!this.#valid(key, version, epoch)) return undefined;
             this.#updateInstance(instance, (state) => ({
                 ...state,
-                entries: mergeConversationEntryList(
+                entries: mergeMessageEntryList(
                     state.entries,
                     result.entries,
                 ),
@@ -433,7 +434,7 @@ export class ConversationViewModel {
         this.#refreshTimers.clear();
         this.#versions.clear();
         this.#closeSubscriptions();
-        this.#state = createInitialConversationViewModelState();
+        this.#state = createInitialMessageHistoryViewModelState();
         this.#emit();
     }
 
@@ -468,7 +469,7 @@ export class ConversationViewModel {
     }
 
     #applyEvent(event: MessageEvent): void {
-        if (!isConversationEvent(event)) return;
+        if (!isMessageHistoryEvent(event)) return;
         this.#updateInstance(event.instanceName, (state) => ({
             ...state,
             lastSeq: Math.max(state.lastSeq, event.seq),
@@ -492,7 +493,7 @@ export class ConversationViewModel {
         const timer = setTimeout(() => {
             this.#refreshTimers.delete(instance);
             if (this.#current(epoch)) void this.refreshInstance(instance);
-        }, CONVERSATION_REFRESH_DELAY_MS);
+        }, MESSAGE_HISTORY_REFRESH_DELAY_MS);
         this.#refreshTimers.set(instance, timer);
     }
 
@@ -512,19 +513,19 @@ export class ConversationViewModel {
 
     #updateInstance(
         instance: string,
-        update: (state: ConversationInstanceState) => ConversationInstanceState,
+        update: (state: MessageHistoryInstanceState) => MessageHistoryInstanceState,
     ): void {
         this.#state.instances = {
             ...this.#state.instances,
             [instance]: update(
                 this.#state.instances[instance] ??
-                    createInitialConversationInstanceState(),
+                    createInitialMessageHistoryInstanceState(),
             ),
         };
     }
 
     #instanceVersionKey(instance: string): string {
-        return `conversation:${instance}`;
+        return `message-history:${instance}`;
     }
 
     #setFailure(key: string, error: unknown): void {
@@ -565,16 +566,99 @@ export class ConversationViewModel {
         for (const listener of this.#listeners) listener();
     }
 }
-function createInitialConversationViewModelState(): ConversationViewModelState {
+function createInitialMessageHistoryViewModelState(): MessageHistoryViewModelState {
     return {
         failures: {},
         instances: {},
     };
 }
-function createInitialConversationInstanceState(): ConversationInstanceState {
+function createInitialMessageHistoryInstanceState(): MessageHistoryInstanceState {
     return {
         entries: [],
         lastSeq: 0,
         status: "stopped",
     };
+}
+
+export interface MessagePreferenceViewModelState {
+    failure?: Error;
+    loading: boolean;
+    preferences: MessagePreferencesSnapshot;
+}
+
+export class MessagePreferenceViewModel {
+    readonly #listeners = new Set<() => void>();
+    readonly #transport: MessagePreferenceTransport;
+    #generation = 0;
+    #published: MessagePreferenceViewModelState = emptyMessagePreferenceViewModelState();
+    #state: MessagePreferenceViewModelState = emptyMessagePreferenceViewModelState();
+
+    constructor(transport: MessagePreferenceTransport) {
+        this.#transport = transport;
+    }
+
+    get state(): Readonly<MessagePreferenceViewModelState> {
+        return this.#published;
+    }
+
+    subscribe(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    async refresh(): Promise<MessagePreferencesSnapshot | undefined> {
+        const generation = ++this.#generation;
+        this.#state = { ...this.#state, loading: true };
+        this.#emit();
+        try {
+            const preferences = await this.#transport.getMessagePreferences();
+            if (generation !== this.#generation) return undefined;
+            this.#state = { loading: false, preferences };
+            this.#emit();
+            return preferences;
+        } catch (error) {
+            if (generation !== this.#generation) return undefined;
+            this.#state = {
+                ...this.#state,
+                failure: messageError(error),
+                loading: false,
+            };
+            this.#emit();
+            return undefined;
+        }
+    }
+
+    async update(patch: MessagePreferencesPatch): Promise<MessagePreferencesSnapshot> {
+        const generation = ++this.#generation;
+        const preferences = await this.#transport.updateMessagePreferences(patch);
+        if (generation === this.#generation) {
+            this.#state = { loading: false, preferences };
+            this.#emit();
+        }
+        return preferences;
+    }
+
+    close(): void {
+        this.#generation += 1;
+        this.#listeners.clear();
+        this.#state = emptyMessagePreferenceViewModelState();
+        this.#published = this.#state;
+    }
+
+    #emit(): void {
+        this.#published = this.#state;
+        this.#state = { ...this.#state };
+        for (const listener of this.#listeners) listener();
+    }
+}
+
+function emptyMessagePreferenceViewModelState(): MessagePreferenceViewModelState {
+    return {
+        loading: false,
+        preferences: createEmptyMessagePreferences(),
+    };
+}
+
+function messageError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
 }

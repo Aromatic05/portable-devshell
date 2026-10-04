@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { createEmptyConversationPreferences, type ArtifactStoredImageResult } from "@portable-devshell/shared";
+import { createEmptyMessagePreferences, type ArtifactStoredImageResult } from "@portable-devshell/shared";
 import { type ServiceSessionStatus } from "@portable-devshell/shared/testing";
 
 import { WebDomainProvider } from "../../src/app/domain/Context.js";
@@ -149,7 +149,7 @@ export class WebTestDomains {
             renew: async (ctxId: string) => ({ ctxId }),
         },
     );
-    readonly conversation = Object.assign(
+    readonly messageHistory = Object.assign(
         new TestDomainSource({
             failures: {} as Record<string, Error>,
             instances: {} as Record<string, any>,
@@ -159,20 +159,20 @@ export class WebTestDomains {
             refreshInstance: async (_instance: string) => 0,
         },
     );
-    readonly conversationPreferences = Object.assign(
+    readonly messagePreferences = Object.assign(
         new TestDomainSource({
             failure: undefined as Error | undefined,
             loading: false,
-            preferences: createEmptyConversationPreferences(),
+            preferences: createEmptyMessagePreferences(),
         }),
         {
-            refresh: async () => this.conversationPreferences.state.preferences,
+            refresh: async () => this.messagePreferences.state.preferences,
             update: async (patch: any) => {
                 const next = {
-                    ...this.conversationPreferences.state.preferences,
+                    ...this.messagePreferences.state.preferences,
                     ...patch,
                 };
-                this.conversationPreferences.patch({ preferences: next });
+                this.messagePreferences.patch({ preferences: next });
                 return next;
             },
         },
@@ -231,8 +231,8 @@ export class WebTestDomains {
             artifact: this.artifact,
             artifactTransport: this.artifactTransport,
             context: this.context,
-            conversation: this.conversation,
-            conversationPreferences: this.conversationPreferences,
+            messageHistory: this.messageHistory,
+            messagePreferences: this.messagePreferences,
             messages: this.messages,
             goals: this.goals,
             toolCalls: this.toolCalls,
@@ -340,15 +340,15 @@ export class WebTestDomains {
         });
     }
 
-    setConversation(instance: string, entries: readonly any[]): void {
-        const current = this.conversation.state.instances[instance] ?? {
+    setMessageHistory(instance: string, entries: readonly any[]): void {
+        const current = this.messageHistory.state.instances[instance] ?? {
             entries: [],
             lastSeq: 0,
             status: "stopped",
         };
-        this.conversation.patch({
+        this.messageHistory.patch({
             instances: {
-                ...this.conversation.state.instances,
+                ...this.messageHistory.state.instances,
                 [instance]: { ...current, entries: [...entries] },
             },
         });

@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 
-import { readContextConversationDraft } from "./Draft.js";
+import { readContextMessageDraft } from "./Draft.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import {
     currentTuiRoute,
@@ -25,20 +25,20 @@ export function TuiMessagesView(props: {
     const route = currentTuiRoute(props.state);
     if (route.page !== "messages" || route.view === "contexts") {
         const scope = props.state.ui.messageScope;
-        const conversations =
+        const messages =
             scope === "active"
                 ? selectTuiMessageSessions(props.reader)
                 : scope === "history"
                   ? selectTuiMessageHistorySessions(props.reader)
                   : selectTuiMessageHiddenSessions(props.reader);
         const message =
-            conversations.length === 0
+            messages.length === 0
                 ? scope === "active"
-                    ? "No current conversations. Open History or Hidden."
+                    ? "No current messages. Open History or Hidden."
                     : scope === "history"
-                      ? "No conversation history."
-                      : "No hidden conversations."
-                : "Select a Conversation from the sidebar.";
+                      ? "No message history."
+                      : "No hidden messages."
+                : "Select a Message from the sidebar.";
         return (
             <Box flexDirection="column">
                 <Text bold>Messages</Text>
@@ -61,14 +61,14 @@ export function TuiMessagesView(props: {
         props.state.ui.scrollOffsets[scrollKey] ?? maxOffset;
     const offset = Math.min(Math.max(0, requestedOffset), maxOffset);
     const visible = history.slice(offset, offset + historyRows);
-    const draft = readContextConversationDraft(
+    const draft = readContextMessageDraft(
         props.state,
         instance,
         route.ctxId,
     );
     const editor = props.state.interaction.editor;
     const editing =
-        props.state.interaction.focusScope === "contextConversation" &&
+        props.state.interaction.focusScope === "contextMessage" &&
         editor?.kind === "comment" &&
         editor.editing === true;
     const status = props.state.interaction.screenStatusByPage.messages;

@@ -1106,21 +1106,21 @@ pre {
     color: inherit;
     background: #10151f;
 }
-.conversation-list {
+.message-list {
     min-height: 0;
     overflow: auto;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
 }
-.conversation-row {
+.message-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.2rem;
     border-radius: 9px;
 }
-.conversation-visibility-action {
+.message-visibility-action {
     min-width: 30px;
     min-height: 30px;
     padding: 0.2rem 0.45rem;
@@ -1128,18 +1128,18 @@ pre {
     background: transparent;
     font-size: 0.7rem;
 }
-.conversation-visibility-action:hover:not(:disabled) {
+.message-visibility-action:hover:not(:disabled) {
     color: #dce7f7;
     background: #34445c;
 }
-.conversation-row:hover,
-.conversation-row.selected {
+.message-row:hover,
+.message-row.selected {
     background: #263247;
 }
-.conversation-row.dragging {
+.message-row.dragging {
     opacity: 0.55;
 }
-.conversation-drag-handle {
+.message-drag-handle {
     padding-left: 0.35rem;
     color: #6f819d;
     cursor: grab;
@@ -1148,10 +1148,10 @@ pre {
     touch-action: none;
     user-select: none;
 }
-.conversation-row.dragging .conversation-drag-handle {
+.message-row.dragging .message-drag-handle {
     cursor: grabbing;
 }
-.conversation-open {
+.message-open {
     display: grid;
     gap: 0.12rem;
     width: 100%;
@@ -1161,29 +1161,29 @@ pre {
     text-align: left;
     background: transparent;
 }
-.conversation-open:hover {
+.message-open:hover {
     background: transparent;
 }
-.conversation-open strong {
+.message-open strong {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.conversation-open span,
-.conversation-open time {
+.message-open span,
+.message-open time {
     color: #93a4bd;
     font-size: 0.75rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.conversation-rename-editor {
+.message-rename-editor {
     grid-column: 2 / -1;
     display: grid;
     gap: 0.35rem;
     padding: 0.35rem 0.35rem 0.35rem 0;
 }
-.conversation-rename-editor input {
+.message-rename-editor input {
     width: 100%;
     min-height: 38px;
     border: 1px solid #52647d;
@@ -1192,11 +1192,11 @@ pre {
     color: inherit;
     background: #10151f;
 }
-.conversation-rename-actions {
+.message-rename-actions {
     display: flex;
     gap: 0.35rem;
 }
-.conversation-rename-actions button {
+.message-rename-actions button {
     width: auto;
     min-width: 0;
     min-height: 30px;
@@ -1342,20 +1342,20 @@ pre {
 .messages-composer button.messages-export {
     font-size: 1.05rem;
 }
-.conversation-workspace-group {
+.message-workspace-group {
     display: grid;
     gap: 0.15rem;
 }
-.conversation-workspace-group + .conversation-workspace-group {
+.message-workspace-group + .message-workspace-group {
     margin-top: 0.35rem;
 }
-.conversation-workspace-header {
+.message-workspace-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.2rem;
 }
-.conversation-workspace-heading {
+.message-workspace-heading {
     display: flex;
     width: 100%;
     min-height: 34px;
@@ -1370,26 +1370,26 @@ pre {
     font-weight: 650;
     text-align: left;
 }
-.conversation-workspace-heading:hover {
+.message-workspace-heading:hover {
     background: #1b2535;
 }
-.conversation-workspace-heading span {
+.message-workspace-heading span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.conversation-workspace-heading span:last-child {
+.message-workspace-heading span:last-child {
     color: #71839f;
     font-weight: 500;
 }
-.conversation-workspace-action {
+.message-workspace-action {
     min-height: 30px;
     padding: 0.2rem 0.45rem;
     color: #91a1b8;
     background: transparent;
     font-size: 0.7rem;
 }
-.conversation-workspace-sessions {
+.message-workspace-sessions {
     display: grid;
     gap: 0.15rem;
     padding-left: 0.2rem;
@@ -1611,10 +1611,10 @@ pre {
     .messages-audit-link {
         font-size: 0.78rem;
     }
-    .conversation-row {
+    .message-row {
         grid-template-columns: auto minmax(0, 1fr) auto;
     }
-    .conversation-rename-editor {
+    .message-rename-editor {
         grid-column: 2 / -1;
         padding-left: 0;
     }
@@ -1680,30 +1680,30 @@ pre {
         animation-duration: 0.01ms !important;
     }
 }
-.conversation-row-actions {
+.message-row-actions {
     display: flex;
     align-items: center;
     gap: 0.15rem;
 }
-.conversation-menu-trigger {
+.message-menu-trigger {
     min-width: 30px;
     min-height: 30px;
     padding: 0.2rem 0.45rem;
     color: #91a1b8;
     background: transparent;
 }
-.conversation-menu-trigger:hover:not(:disabled),
-.conversation-menu-trigger[aria-expanded="true"] {
+.message-menu-trigger:hover:not(:disabled),
+.message-menu-trigger[aria-expanded="true"] {
     color: #dce7f7;
     background: #34445c;
 }
-.conversation-row-menu {
+.message-row-menu {
     grid-column: 2 / -1;
     display: grid;
     gap: 0.1rem;
     padding: 0 0.35rem 0.45rem 0;
 }
-.conversation-row-menu button {
+.message-row-menu button {
     width: 100%;
     min-height: 32px;
     padding: 0.3rem 0.6rem;
@@ -1713,7 +1713,7 @@ pre {
     font-size: 0.78rem;
     text-align: left;
 }
-.conversation-row-menu button:hover:not(:disabled) {
+.message-row-menu button:hover:not(:disabled) {
     background: #34445c;
 }
 .messages-composer-length {

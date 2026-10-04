@@ -4,11 +4,11 @@ export type MessageEventType =
     | "context.message.queued"
     | "context.message.delivered"
     | "context.message.failed"
-    | "conversation.changed";
+    | "message.changed";
 export type MessageEvent = InstanceEventRecord<MessageEventType>;
 export function isMessageEventType(type: string): type is MessageEventType {
     return (
-        type.startsWith("context.message.") || type === "conversation.changed"
+        type.startsWith("context.message.") || type === "message.changed"
     );
 }
 
@@ -112,8 +112,8 @@ function statusRank(status: ContextMessageStatus): number {
             return 2;
     }
 }
-export type ConversationEntryKind = "comment" | "report";
-export interface ConversationEntry {
+export type MessageEntryKind = "comment" | "report";
+export interface MessageEntry {
     callId?: string;
     createdAt: string;
     ctxId: string;
@@ -121,23 +121,23 @@ export interface ConversationEntry {
     error?: string;
     failedAt?: string;
     id: string;
-    kind: ConversationEntryKind;
+    kind: MessageEntryKind;
     status?: ContextMessageStatus;
     text: string;
 }
-export interface ConversationListInput {
+export interface MessageListInput {
     before?: string;
     ctxId?: string;
     limit?: number;
     maxBytes?: number;
 }
-export interface ConversationListResult {
-    entries: ConversationEntry[];
+export interface MessageListResult {
+    entries: MessageEntry[];
     /** Instance event sequence at read time. Subscribe from lastSeq + 1. */
     lastSeq: number;
 }
 /**
- * Conversation identity semantics shared by every interaction surface. These
+ * Message identity semantics shared by every interaction surface. These
  * are domain rules (prefer the workspace folder over an opaque Context id), not
  * UI formatting such as relative time.
  */
@@ -146,7 +146,7 @@ export function compactContextId(ctxId: string, prefixLength = 12): string {
         ? ctxId
         : `${ctxId.slice(0, prefixLength)}…`;
 }
-export function humanConversationTitle(
+export function humanMessageTitle(
     input: {
         ctxId: string;
         workspace?: string;
@@ -158,14 +158,14 @@ export function humanConversationTitle(
         : workspaceFolderName(input.workspace);
 }
 /**
- * Conversation projection. Merges a freshly observed Conversation entry,
+ * Message projection. Merges a freshly observed Message entry,
  * keeping the newest identity while preserving messages that are still in
  * flight (`pending`/`sent`) when a server list no longer reports them.
  */
-function mergeConversationEntry(
-    current: readonly ConversationEntry[],
-    incoming: ConversationEntry,
-): ConversationEntry[] {
+function mergeMessageEntry(
+    current: readonly MessageEntry[],
+    incoming: MessageEntry,
+): MessageEntry[] {
     return [
         ...current.filter(
             (entry) =>
@@ -178,13 +178,13 @@ function mergeConversationEntry(
             left.id.localeCompare(right.id),
     );
 }
-export function mergeConversationEntryList(
-    current: readonly ConversationEntry[],
-    incoming: readonly ConversationEntry[],
-): ConversationEntry[] {
+export function mergeMessageEntryList(
+    current: readonly MessageEntry[],
+    incoming: readonly MessageEntry[],
+): MessageEntry[] {
     let result = [...current];
     for (const entry of incoming)
-        result = mergeConversationEntry(result, entry);
+        result = mergeMessageEntry(result, entry);
     const incomingKeys = new Set(
         incoming.map((entry) => `${entry.kind}:${entry.id}`),
     );
@@ -195,8 +195,8 @@ export function mergeConversationEntryList(
                 (entry.status === "pending" || entry.status === "sent")),
     );
 }
-/** Instance activity events that change the Conversation projection. */
-export function isConversationEvent(_event: MessageEvent): boolean {
+/** Instance activity events that change the Message projection. */
+export function isMessageHistoryEvent(_event: MessageEvent): boolean {
     return true;
 }
 function workspaceFolderName(workspace: string): string {

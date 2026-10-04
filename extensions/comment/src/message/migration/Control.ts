@@ -3,13 +3,13 @@ import type { DatabaseSync } from "node:sqlite";
 import {
     applyDeliveredControls,
     applyQueuedControl,
-    clearConversationControlStates,
+    clearMessageControlStates,
     parseContextMessageDirective,
-    type ConversationControlState,
-    normalizeConversationControlState,
-    writeConversationControlState,
-} from "../ConversationControl.js";
-import { type ConversationRow, toCommentRecord } from "../store/Query.js";
+    type MessageControlState,
+    normalizeMessageControlState,
+    writeMessageControlState,
+} from "../MessageControl.js";
+import { type MessageRow, toCommentRecord } from "../store/Query.js";
 
 const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v3";
 
@@ -17,7 +17,7 @@ const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v3";
  * @compat comment-control-v3
  * @removeAt 0.7.10
  */
-export function migrateConversationControlState(database: DatabaseSync): void {
+export function migrateMessageControlState(database: DatabaseSync): void {
     if (readMetadata(database, CONTROL_STATE_MIGRATION_KEY) === "complete")
         return;
     const rows = database
@@ -35,17 +35,17 @@ export function migrateConversationControlState(database: DatabaseSync): void {
                 seq,
                 status,
                 text
-            FROM conversation_entries
+            FROM message_entries
             ORDER BY seq ASC
         `,
         )
-        .all() as unknown as ConversationRow[];
+        .all() as unknown as MessageRow[];
     const states = deriveControlStatesFromHistory(rows);
     database.exec("BEGIN IMMEDIATE");
     try {
-        clearConversationControlStates(database);
+        clearMessageControlStates(database);
         for (const [ctxId, state] of states)
-            writeConversationControlState(database, ctxId, state);
+            writeMessageControlState(database, ctxId, state);
         writeMetadata(database, CONTROL_STATE_MIGRATION_KEY, "complete");
         database.exec("COMMIT");
     } catch (error) {
@@ -55,9 +55,9 @@ export function migrateConversationControlState(database: DatabaseSync): void {
 }
 
 function deriveControlStatesFromHistory(
-    rows: readonly ConversationRow[],
-): Map<string, ConversationControlState> {
-    const states = new Map<string, ConversationControlState>();
+    rows: readonly MessageRow[],
+): Map<string, MessageControlState> {
+    const states = new Map<string, MessageControlState>();
     for (const row of rows) {
         const state = states.get(row.ctxId) ?? {};
         if (row.kind === "report") {
@@ -84,7 +84,7 @@ function deriveControlStatesFromHistory(
         states.set(row.ctxId, state);
     }
     for (const [ctxId, state] of states) {
-        const normalized = normalizeConversationControlState(state);
+        const normalized = normalizeMessageControlState(state);
         if (Object.keys(normalized).length === 0) states.delete(ctxId);
         else states.set(ctxId, normalized);
     }
@@ -93,7 +93,7 @@ function deriveControlStatesFromHistory(
 
 function readMetadata(database: DatabaseSync, key: string): string | undefined {
     const row = database
-        .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+        .prepare("SELECT value FROM message_metadata WHERE key = ?")
         .get(key) as { value: string } | undefined;
     return row?.value;
 }
@@ -106,7 +106,7 @@ function writeMetadata(
     database
         .prepare(
             `
-            INSERT INTO conversation_metadata(key, value) VALUES (?, ?)
+            INSERT INTO message_metadata(key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `,
         )

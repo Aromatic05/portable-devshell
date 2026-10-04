@@ -3,35 +3,37 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
+    MessagePreferencesPatch,
+    MessagePreferencesSnapshot,
 } from "@portable-devshell/shared";
 
 import {
     applyPatch,
     clonePreferences,
-    createEmptyConversationPreferences,
-    parseConversationPreferencesPatch,
-    parseConversationPreferencesSnapshot,
+    createEmptyMessagePreferences,
+    parseMessagePreferencesPatch,
+    parseMessagePreferencesSnapshot,
     samePreferences,
 } from "./Model.js";
 
-export class ConversationPreferenceStore {
+export class MessagePreferenceStore {
     readonly #filePath: string;
+    readonly #legacyFilePath?: string;
     #operationQueue = Promise.resolve();
 
-    constructor(filePath: string) {
+    constructor(filePath: string, legacyFilePath?: string) {
         this.#filePath = filePath;
+        this.#legacyFilePath = legacyFilePath;
     }
 
-    async read(): Promise<ConversationPreferencesSnapshot> {
+    async read(): Promise<MessagePreferencesSnapshot> {
         return await this.#exclusive(async () => await this.#read());
     }
 
     async update(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot> {
-        const normalized = parseConversationPreferencesPatch(patch);
+        patch: MessagePreferencesPatch,
+    ): Promise<MessagePreferencesSnapshot> {
+        const normalized = parseMessagePreferencesPatch(patch);
         return await this.#exclusive(async () => {
             const current = await this.#read();
             const next = applyPatch(current, normalized);
@@ -41,21 +43,39 @@ export class ConversationPreferenceStore {
         });
     }
 
-    async #read(): Promise<ConversationPreferencesSnapshot> {
+    async #read(): Promise<MessagePreferencesSnapshot> {
         const source = await readFile(this.#filePath, "utf8").catch(
             (error: unknown) => {
                 if (isMissing(error)) return undefined;
                 throw error;
             },
         );
-        if (source === undefined) return createEmptyConversationPreferences();
-        return parseConversationPreferencesSnapshot(
+        if (source === undefined) return await this.#readLegacy();
+        return parseMessagePreferencesSnapshot(
             JSON.parse(source) as unknown,
         );
     }
 
-    async #write(snapshot: ConversationPreferencesSnapshot): Promise<void> {
-        const validated = parseConversationPreferencesSnapshot(snapshot);
+    async #readLegacy(): Promise<MessagePreferencesSnapshot> {
+        if (this.#legacyFilePath === undefined)
+            return createEmptyMessagePreferences();
+        const source = await readFile(this.#legacyFilePath, "utf8").catch(
+            (error: unknown) => {
+                if (isMissing(error)) return undefined;
+                throw error;
+            },
+        );
+        if (source === undefined) return createEmptyMessagePreferences();
+        const preferences = parseMessagePreferencesSnapshot(
+            JSON.parse(source) as unknown,
+        );
+        await this.#write(preferences);
+        await unlink(this.#legacyFilePath).catch(() => undefined);
+        return preferences;
+    }
+
+    async #write(snapshot: MessagePreferencesSnapshot): Promise<void> {
+        const validated = parseMessagePreferencesSnapshot(snapshot);
         const directory = dirname(this.#filePath);
         await mkdir(directory, { mode: 0o700, recursive: true });
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;

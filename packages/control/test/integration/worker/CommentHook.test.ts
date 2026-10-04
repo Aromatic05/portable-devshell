@@ -48,9 +48,9 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             list: () => [
                 {
                     appendEvent: async () => undefined,
-                    conversationDatabaseFile: join(
+                    messageDatabaseFile: join(
                         root,
-                        "conversation.sqlite3",
+                        "message.sqlite3",
                     ),
                     enabled: true,
                     key: instanceKey,
@@ -60,7 +60,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             ],
             onChange: () => () => undefined,
         },
-        preferencesFile: join(root, "conversation-preferences.json"),
+        preferencesFile: join(root, "message-preferences.json"),
     });
     const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
@@ -256,7 +256,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         instanceName,
         ctxId,
     );
-    await comment.conversation.recordReport(instanceName, {
+    await comment.messageHistory.recordReport(instanceName, {
         callId: "push-report",
         ctxId,
         ...pendingReport,

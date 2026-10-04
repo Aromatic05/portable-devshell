@@ -36,8 +36,8 @@ import {
 import type {
     ContextMessageReadResult,
     ContextMessageRecord,
-    ConversationEntry,
-    ConversationListInput,
+    MessageEntry,
+    MessageListInput,
     JsonValue,
     ControlPortDefinition,
     MessageEventType,
@@ -49,12 +49,12 @@ import {
     createCommentRouteModule,
 } from "./comment/CommentService.js";
 import {
-    ConversationService,
-    createConversationRouteModule,
-} from "./conversation/ConversationService.js";
-import { createConversationPreferenceRouteModule } from "./conversation/preference/Route.js";
-import { ConversationPreferenceStore } from "./conversation/preference/Store.js";
-import { ConversationStore } from "./conversation/store/ConversationStore.js";
+    MessageService,
+    createMessageHistoryRouteModule,
+} from "./message/MessageService.js";
+import { createMessagePreferenceRouteModule } from "./message/preference/Route.js";
+import { MessagePreferenceStore } from "./message/preference/Store.js";
+import { MessageStore } from "./message/store/MessageStore.js";
 import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
@@ -83,13 +83,14 @@ export interface CommentExtensionInstance {
         type: Extract<MessageEventType, `context.message.${string}`>,
         data: JsonValue,
     ): Promise<void>;
-    conversationDatabaseFile: string;
+    messageDatabaseFile: string;
     enabled: boolean;
     key: object;
     /**
      * @compat comment-legacy-migration-inputs
      * @removeAt 0.7.10
      */
+    legacyDatabaseFile?: string;
     legacyContextMessagesFile?: string;
     legacyReports?: () => Promise<ToolCallRecord[]>;
     name: string;
@@ -138,11 +139,11 @@ export interface CommentPort {
     ): Promise<CommentControlDecision>;
 }
 
-export interface ConversationPort {
+export interface MessageHistoryPort {
     list(
         instance: string,
-        input?: ConversationListInput,
-    ): Promise<ConversationEntry[]>;
+        input?: MessageListInput,
+    ): Promise<MessageEntry[]>;
     recordReport(
         instance: string,
         input: {
@@ -163,7 +164,7 @@ export interface CommentRoutePort {
 
 interface CommentExtensionInstanceState {
     readonly comment: CommentService;
-    readonly conversation: ConversationService;
+    readonly messageHistory: MessageService;
     enabled: boolean;
     readonly key: object;
     readonly report: CommentReportService;
@@ -172,7 +173,7 @@ interface CommentExtensionInstanceState {
 
 export class CommentExtension {
     readonly comment: CommentPort;
-    readonly conversation: ConversationPort;
+    readonly messageHistory: MessageHistoryPort;
     readonly routes: CommentRoutePort;
     readonly #instances = new Map<string, CommentExtensionInstanceState>();
     readonly #retirements = new Set<Promise<void>>();
@@ -181,11 +182,13 @@ export class CommentExtension {
 
     constructor(options: {
         instances: CommentInstanceSource;
+        legacyPreferencesFile?: string;
         preferencesFile: string;
     }) {
         this.#source = options.instances;
-        const preferences = new ConversationPreferenceStore(
+        const preferences = new MessagePreferenceStore(
             options.preferencesFile,
+            options.legacyPreferencesFile,
         );
         const comment: CommentPort = {
             beforeTodoToolCall: async (instance, ctxId, toolName) =>
@@ -221,39 +224,39 @@ export class CommentExtension {
                 ),
         };
         this.comment = Object.freeze(comment);
-        const conversation: ConversationPort = {
+        const messageHistory: MessageHistoryPort = {
             list: async (instance, input = {}) =>
-                await this.#require(instance).conversation.list(input),
+                await this.#require(instance).messageHistory.list(input),
             recordReport: async (instance, input) =>
-                await this.#require(instance).conversation.recordReport(input),
+                await this.#require(instance).messageHistory.recordReport(input),
         };
-        this.conversation = Object.freeze(conversation);
+        this.messageHistory = Object.freeze(messageHistory);
         const routes: CommentRoutePort = {
             control: () => [
-                createConversationPreferenceRouteModule(preferences),
+                createMessagePreferenceRouteModule(preferences),
             ],
             instance: (instance) => {
                 const state = this.#instances.get(instance);
-                return state === undefined || !state.enabled
-                    ? []
-                    : [
-                          createCommentRouteModule({
-                              list: async (input) =>
-                                  await this.#require(instance).comment.list(
-                                      input,
-                                  ),
-                              queue: async (input) =>
-                                  await this.#require(instance).comment.queue(
-                                      input,
-                                  ),
-                          }),
-                          createConversationRouteModule({
-                              list: async (input) =>
-                                  await this.#require(
-                                      instance,
-                                  ).conversation.list(input),
-                          }),
-                      ];
+                if (state === undefined || !state.enabled) return [];
+                const contextMessages = createCommentRouteModule({
+                    list: async (input) =>
+                        await this.#require(instance).comment.list(input),
+                    queue: async (input) =>
+                        await this.#require(instance).comment.queue(input),
+                });
+                const history = createMessageHistoryRouteModule({
+                    list: async (input) =>
+                        await this.#require(instance).messageHistory.list(input),
+                });
+                return [
+                    {
+                        name: "message",
+                        operations: [
+                            ...contextMessages.operations,
+                            ...history.operations,
+                        ],
+                    },
+                ];
             },
         };
         this.routes = Object.freeze(routes);
@@ -304,9 +307,12 @@ export class CommentExtension {
                 if (current !== undefined) current.enabled = false;
                 continue;
             }
-            const store = new ConversationStore({
-                filePath: instance.conversationDatabaseFile,
+            const store = new MessageStore({
+                filePath: instance.messageDatabaseFile,
                 instanceName: instance.name,
+                ...(instance.legacyDatabaseFile === undefined
+                    ? {}
+                    : { legacyDatabaseFile: instance.legacyDatabaseFile }),
                 ...(instance.legacyContextMessagesFile === undefined
                     ? {}
                     : {
@@ -319,19 +325,19 @@ export class CommentExtension {
                 instanceName: instance.name,
                 store,
             });
-            const conversationService = new ConversationService({
+            const messageService = new MessageService({
                 instanceName: instance.name,
                 legacyReports: instance.legacyReports,
                 store,
             });
             const next: CommentExtensionInstanceState = {
                 comment: commentService,
-                conversation: conversationService,
+                messageHistory: messageService,
                 enabled: true,
                 key: instance.key,
                 report: new CommentReportService({
                     comment: commentService,
-                    conversation: conversationService,
+                    messageHistory: messageService,
                 }),
             };
             this.#instances.set(instance.name, next);
@@ -369,9 +375,9 @@ export class CommentExtension {
         if (state.retirement !== undefined) return state.retirement;
         state.enabled = false;
         const comment = state.comment.retire(reason);
-        const conversation = state.conversation.retire();
+        const messageHistory = state.messageHistory.retire();
         const retirement = (async () => {
-            const settled = await Promise.allSettled([comment, conversation]);
+            const settled = await Promise.allSettled([comment, messageHistory]);
             const failures = settled
                 .filter(
                     (result): result is PromiseRejectedResult =>
@@ -379,7 +385,7 @@ export class CommentExtension {
                 )
                 .map((result) => result.reason);
             try {
-                state.conversation.close();
+                state.messageHistory.close();
             } catch (error) {
                 failures.push(error);
             }
@@ -436,8 +442,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await source.refresh();
     const comment = new CommentExtension({
         instances: source,
-        preferencesFile: legacyConversationPreferencesFile(
+        legacyPreferencesFile: legacyMessagePreferencesFile(
             context.paths.stateDirectory,
+        ),
+        preferencesFile: join(
+            context.paths.stateDirectory,
+            "message-preferences.json",
         ),
     });
     const gate = createCommentToolCallGate(comment.comment);
@@ -658,21 +668,21 @@ function registerCommentRoutes(
             scope: "instance",
         },
         {
-            id: "conversation-list",
+            id: "message-list",
             module: "message",
-            operation: "listConversationEntries",
+            operation: "listMessageEntries",
             scope: "instance",
         },
         {
-            id: "conversation-preferences",
-            module: "conversation",
-            operation: "getConversationPreferences",
+            id: "message-preferences",
+            module: "message",
+            operation: "preferences",
             scope: "control",
         },
         {
-            id: "conversation-update-preferences",
-            module: "conversation",
-            operation: "updateConversationPreferences",
+            id: "message-update-preferences",
+            module: "message",
+            operation: "updatePreferences",
             scope: "control",
         },
     ] as const) {
@@ -824,10 +834,11 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
                         type,
                         data as unknown as ExtensionJsonValue,
                     ),
-                conversationDatabaseFile: join(
+                messageDatabaseFile: join(
                     root,
-                    "conversation.sqlite3",
+                    "message.sqlite3",
                 ),
+                legacyDatabaseFile: join(root, "conversation.sqlite3"),
                 enabled: record.enabled,
                 key: this.#requireKey(record.name),
                 legacyContextMessagesFile: join(
@@ -963,7 +974,7 @@ function instanceSignature(
  * @compat comment-control-storage-v1
  * @removeAt 0.7.10
  */
-function legacyConversationPreferencesFile(stateDirectory: string): string {
+function legacyMessagePreferencesFile(stateDirectory: string): string {
     return resolve(stateDirectory, "../../..", "conversation-preferences.json");
 }
 

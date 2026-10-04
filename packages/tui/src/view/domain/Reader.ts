@@ -29,8 +29,8 @@ export class TuiDomainReader {
         this.#attachSource(domains.instances);
         this.#attachSource(domains.artifact);
         this.#attachSource(domains.context);
-        this.#attachSource(domains.conversation);
-        this.#attachSource(domains.conversationPreferences);
+        this.#attachSource(domains.messageHistory);
+        this.#attachSource(domains.messagePreferences);
         this.#attachSource(domains.messages);
         this.#attachSource(domains.goals);
         this.#attachSource(domains.toolCalls);
@@ -68,12 +68,12 @@ export class TuiDomainReader {
         return this.domains.context.state;
     }
 
-    get conversation() {
-        return this.domains.conversation.state;
+    get messageHistory() {
+        return this.domains.messageHistory.state;
     }
 
-    get conversationPreferences() {
-        return this.domains.conversationPreferences.state;
+    get messagePreferences() {
+        return this.domains.messagePreferences.state;
     }
 
     get messages() {

@@ -352,7 +352,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     return scope === "control"
                         ? [
                               {
-                                  name: "conversation",
+                                  name: "message",
                                   operations: [
                                       {
                                           name: "preferences",

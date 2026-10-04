@@ -10,7 +10,7 @@ import { zstdCompressSync } from "node:zlib";
 import { executeStorageCommand } from "../../src/builtin/StorageCommand.ts";
 import {
     downgradeAuditDatabase,
-    downgradeConversationDatabase,
+    downgradeMessageDatabase,
     inspectStorageDatabase,
 } from "../../src/builtin/StorageDowngrade.ts";
 
@@ -149,19 +149,19 @@ test("Audit downgrade refuses to overwrite an existing output and preserves both
     }
 });
 
-test("Conversation downgrade v1 exports legacy Context Comments and preserves Reports in the source", async () => {
+test("Message downgrade v1 exports legacy Context Comments and preserves Reports in the source", async () => {
     const root = await mkdtemp(
-        join(tmpdir(), "devshell-storage-conversation-"),
+        join(tmpdir(), "devshell-storage-message-"),
     );
     try {
         const controlWorker = join(root, "alpha", "control-worker");
         await mkdir(controlWorker, { recursive: true });
-        const source = join(controlWorker, "conversation.sqlite3");
+        const source = join(controlWorker, "legacy-message-v1.sqlite3");
         const output = join(root, "context-messages.json");
-        createConversationV1(source);
+        createLegacyMessageV1(source);
         const sourceBefore = readFileSync(source);
 
-        const result = downgradeConversationDatabase({
+        const result = downgradeMessageDatabase({
             output,
             source,
             toVersion: 0,
@@ -171,7 +171,7 @@ test("Conversation downgrade v1 exports legacy Context Comments and preserves Re
             comments: 1,
             fromVersion: 1,
             instance: "alpha",
-            kind: "conversation",
+            kind: "message",
             output,
             reports: 1,
             source,
@@ -195,7 +195,7 @@ test("Conversation downgrade v1 exports legacy Context Comments and preserves Re
         });
         assert.deepEqual(inspectStorageDatabase(source), {
             filePath: source,
-            kind: "conversation",
+            kind: "message",
             schemaVersion: 1,
         });
     } finally {
@@ -291,7 +291,7 @@ function createAuditV2(filePath: string): void {
     }
 }
 
-function createConversationV1(filePath: string): void {
+function createLegacyMessageV1(filePath: string): void {
     const database = openDatabase(filePath);
     try {
         database.exec(`

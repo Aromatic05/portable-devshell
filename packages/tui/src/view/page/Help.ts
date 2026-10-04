@@ -37,12 +37,12 @@ export function buildContextualHelpLines(state: TuiAppState): string[] {
             "Editable connection fields use Ctrl+S to save.",
         ],
         messages: [
-            "Use Active / History in the upper sidebar to choose Conversations.",
-            "Enter opens a Conversation; type in the composer and Enter sends.",
+            "Use Active / History in the upper sidebar to choose Messages.",
+            "Enter opens a Message; type in the composer and Enter sends.",
         ],
         audit: [
             "Enter opens the focused Context or Tool Call; Space expands details.",
-            "M opens the Conversation for a concrete Context; / searches Audit.",
+            "M opens the Message for a concrete Context; / searches Audit.",
         ],
         todo: [
             "Enter opens the focused Todo; Space expands details.",
@@ -87,7 +87,7 @@ export function buildHelpPageBoxes(state: TuiAppState): BoxModel[] {
                 "Terminal: drag selects and copies with OSC 52; hold Shift when the application owns mouse input.",
                 "Terminal: Shift+PgUp/PgDn and Shift+Home/End browse scrollback; Esc closes the current tmux pane view; bracketed paste is preserved.",
                 "Kitty and Sixel images are replayed when the host terminal advertises support; DEVSHELL_TUI_GRAPHICS overrides detection.",
-                "On an Audit Context, M/m opens the Comment conversation; expand Write Comment, select Draft, Enter edits, and Enter sends.",
+                "On an Audit Context, M/m opens the Comment message; expand Write Comment, select Draft, Enter edits, and Enter sends.",
                 "r reloads the current page and / opens search where available.",
                 "? opens contextual help without leaving the current page; Ctrl+[ returns from detail, search, menus, and main focus.",
             ],

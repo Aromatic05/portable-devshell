@@ -56,7 +56,7 @@ export class TuiCommandDispatcherDetail {
         }
 
         if (box?.editable === true && selectedLine?.editable === true) {
-            return await this.#dispatch({ type: "contextConversation.edit" });
+            return await this.#dispatch({ type: "contextMessage.edit" });
         }
 
 

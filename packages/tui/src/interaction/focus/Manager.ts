@@ -93,7 +93,7 @@ export class TuiFocusManager {
         if (scope === "toolForm") {
             return { id: "toolForm.input", kind: "field" };
         }
-        if (scope === "contextConversation") {
+        if (scope === "contextMessage") {
             return undefined;
         }
         if (scope === "form" || scope === "wizard") {

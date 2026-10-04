@@ -57,7 +57,7 @@ export const LEGACY_REPORT_MIGRATION_KEY = "migration:todo-report-audit-v1";
 
 export function isLegacyReportMigrationComplete(database: import("node:sqlite").DatabaseSync): boolean {
     const row = database
-        .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+        .prepare("SELECT value FROM message_metadata WHERE key = ?")
         .get(LEGACY_REPORT_MIGRATION_KEY) as { value: string } | undefined;
     return row?.value === "complete";
 }
@@ -66,7 +66,7 @@ export function completeLegacyReportMigration(database: import("node:sqlite").Da
     database
         .prepare(
             `
-            INSERT INTO conversation_metadata(key, value) VALUES (?, 'complete')
+            INSERT INTO message_metadata(key, value) VALUES (?, 'complete')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `,
         )

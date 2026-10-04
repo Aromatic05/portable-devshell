@@ -278,7 +278,7 @@ export function buildFocusGraphForState(
             ]);
         }
         case "mainBoxes":
-        case "contextConversation":
+        case "contextMessage":
             if (state.ui.selectedPage === "overview") {
                 return buildLinearGraph(
                     selectMainBoxIds(state, reader).map((id) => ({

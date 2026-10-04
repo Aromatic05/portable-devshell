@@ -263,11 +263,11 @@ function isTuiRouteResourceValid(
                 (environment) => environment.instance === resolved,
             ),
         );
-        const conversationEntries =
-            domains.conversation.instances[resolved]?.entries ?? [];
+        const messageEntries =
+            domains.messageHistory.instances[resolved]?.entries ?? [];
         return (
             registered ||
-            conversationEntries.some((entry) => entry.ctxId === route.ctxId)
+            messageEntries.some((entry) => entry.ctxId === route.ctxId)
         );
     }
     if (route.page === "audit" && route.view !== "contexts") {
@@ -303,15 +303,15 @@ export function selectBreadcrumbSegments(
             }
             break;
         case "audit":
-            if (route.view === "context" || route.view === "conversation") {
+            if (route.view === "context" || route.view === "message") {
                 segments.push(
                     route.scope === "unscoped"
                         ? "unscoped"
                         : truncateTuiBreadcrumbSegment(route.ctxId),
                 );
             }
-            if (route.view === "conversation") {
-                segments.push("conversation");
+            if (route.view === "message") {
+                segments.push("message");
             }
             break;
         case "todo":

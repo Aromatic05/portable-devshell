@@ -173,7 +173,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
 
     test("Messages enters a thread at the sticky bottom instead of restoring an old scroll position", () => {
         const { domains, store } = createStore();
-        domains.setConversation("alpha", [
+        domains.setMessageHistory("alpha", [
             {
                 createdAt: "2026-09-11T06:00:00.000Z",
                 ctxId: "ctx-a",
@@ -202,7 +202,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
         assert.equal(
             store.getState().ui.scrollOffsets[key],
             Number.MAX_SAFE_INTEGER,
-            "re-entering a conversation must start at its newest content",
+            "re-entering a message must start at its newest content",
         );
     });
 
@@ -329,7 +329,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             ctxId: "ctx-a",
             page: "audit",
             scope: "context",
-            view: "conversation",
+            view: "message",
         });
         store.setFocusScope("mainBoxes");
 
@@ -340,7 +340,7 @@ import { TuiTestDomains } from "../support/DomainHarness.js";
             "esc back",
         ]);
 
-        store.setFocusScope("contextConversation");
+        store.setFocusScope("contextMessage");
         assert.deepEqual(selectFooterShortcuts(store.getState()), [
             "type",
             "enter send",

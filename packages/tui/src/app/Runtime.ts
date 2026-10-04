@@ -357,8 +357,8 @@ export class TuiRuntime {
             onContextRenew: async (instance, ctxId) => {
                 await this.#operations.renewContext(instance, ctxId);
             },
-            onConversationPreferencesUpdate: async (patch) => {
-                await domains.conversationPreferences.update(patch);
+            onMessagePreferencesUpdate: async (patch) => {
+                await domains.messagePreferences.update(patch);
             },
             onOpenTerminal: async (instance) => {
                 this.store.setSelectedInstance(instance);
@@ -871,7 +871,7 @@ export class TuiRuntime {
     async #handleHitTarget(target: TuiHitTarget): Promise<void> {
         if (target.kind === "messagesViewport") {
             await this.commandDispatcher.dispatch({
-                type: "contextConversation.edit",
+                type: "contextMessage.edit",
             });
             return;
         }

@@ -18,7 +18,7 @@ export function parseContextMessageDirective(text: string): {
     };
 }
 
-export interface ConversationControlState {
+export interface MessageControlState {
     pendingPushCommentId?: string;
     pendingReplyCommentId?: string;
     pendingResumeCommentId?: string;
@@ -27,55 +27,55 @@ export interface ConversationControlState {
     stoppedByCommentId?: string;
 }
 
-export function readConversationControlState(
+export function readMessageControlState(
     database: DatabaseSync,
     ctxId: string,
-): ConversationControlState {
+): MessageControlState {
     const row = database
-        .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+        .prepare("SELECT value FROM message_metadata WHERE key = ?")
         .get(controlStateMetadataKey(ctxId)) as { value: string } | undefined;
     if (row === undefined) return {};
-    return normalizeConversationControlState(JSON.parse(row.value) as unknown);
+    return normalizeMessageControlState(JSON.parse(row.value) as unknown);
 }
 
-export function writeConversationControlState(
+export function writeMessageControlState(
     database: DatabaseSync,
     ctxId: string,
-    state: ConversationControlState,
+    state: MessageControlState,
 ): void {
-    const normalized = normalizeConversationControlState(state);
+    const normalized = normalizeMessageControlState(state);
     const key = controlStateMetadataKey(ctxId);
     if (Object.keys(normalized).length === 0) {
         database
-            .prepare("DELETE FROM conversation_metadata WHERE key = ?")
+            .prepare("DELETE FROM message_metadata WHERE key = ?")
             .run(key);
         return;
     }
     database
         .prepare(
             `
-            INSERT INTO conversation_metadata(key, value) VALUES (?, ?)
+            INSERT INTO message_metadata(key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `,
         )
         .run(key, JSON.stringify(normalized));
 }
 
-export function clearConversationControlStates(database: DatabaseSync): void {
+export function clearMessageControlStates(database: DatabaseSync): void {
     database
-        .prepare("DELETE FROM conversation_metadata WHERE key LIKE ?")
+        .prepare("DELETE FROM message_metadata WHERE key LIKE ?")
         .run(`${CONTROL_STATE_METADATA_PREFIX}%`);
 }
 
-export function readConversationControlCommentIds(
+export function readMessageControlCommentIds(
     database: DatabaseSync,
 ): ReadonlySet<string> {
     const rows = database
-        .prepare("SELECT value FROM conversation_metadata WHERE key LIKE ?")
+        .prepare("SELECT value FROM message_metadata WHERE key LIKE ?")
         .all(`${CONTROL_STATE_METADATA_PREFIX}%`) as Array<{ value: string }>;
     const ids = new Set<string>();
     for (const row of rows) {
-        const state = normalizeConversationControlState(
+        const state = normalizeMessageControlState(
             JSON.parse(row.value) as unknown,
         );
         for (const id of [
@@ -91,7 +91,7 @@ export function readConversationControlCommentIds(
 }
 
 export function applyQueuedControl(
-    state: ConversationControlState,
+    state: MessageControlState,
     record: ContextMessageRecord,
 ): void {
     const directive = parseContextMessageDirective(record.text).directive;
@@ -121,7 +121,7 @@ export function applyQueuedControl(
 }
 
 export function applyDeliveredControls(
-    state: ConversationControlState,
+    state: MessageControlState,
     records: readonly ContextMessageRecord[],
 ): void {
     for (const record of records) {
@@ -145,11 +145,11 @@ export function applyDeliveredControls(
     }
 }
 
-export function normalizeConversationControlState(
+export function normalizeMessageControlState(
     value: unknown,
-): ConversationControlState {
+): MessageControlState {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new Error("conversation control state must be an object");
+        throw new Error("message control state must be an object");
     }
     const state = value as Record<string, unknown>;
     const remaining = state.pushToolCallsRemaining;
@@ -157,7 +157,7 @@ export function normalizeConversationControlState(
         remaining !== undefined &&
         (!Number.isSafeInteger(remaining) || (remaining as number) < 0)
     ) {
-        throw new Error("conversation control push budget is invalid");
+        throw new Error("message control push budget is invalid");
     }
     return {
         ...(typeof state.pendingPushCommentId === "string"

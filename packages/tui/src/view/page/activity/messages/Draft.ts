@@ -1,18 +1,18 @@
 import type { TuiAppState } from "../../../../state/store/Model.js";
 
-export function contextConversationDraftKey(
+export function contextMessageDraftKey(
     instance: string,
     ctxId: string,
 ): string {
-    return `contextConversation:${instance}:${ctxId}`;
+    return `contextMessage:${instance}:${ctxId}`;
 }
 
-export function readContextConversationDraft(
+export function readContextMessageDraft(
     state: TuiAppState,
     instance: string,
     ctxId: string,
 ): string {
     const value =
-        state.ui.formDrafts[contextConversationDraftKey(instance, ctxId)];
+        state.ui.formDrafts[contextMessageDraftKey(instance, ctxId)];
     return typeof value === "string" ? value : "";
 }

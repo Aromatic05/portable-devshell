@@ -53,8 +53,8 @@ export class TuiKeyDispatcher {
                 return this.#forSearch(press);
             case "toolForm":
                 return this.#forToolForm(press);
-            case "contextConversation":
-                return this.#forContextConversation(press);
+            case "contextMessage":
+                return this.#forContextMessage(press);
             case "form":
             case "wizard":
                 return this.#forEditor(press, mode);
@@ -154,21 +154,21 @@ export class TuiKeyDispatcher {
         return [];
     }
 
-    #forContextConversation(press: TuiKeyPress): TuiUiIntent[] {
+    #forContextMessage(press: TuiKeyPress): TuiUiIntent[] {
         if (press.key.backspace || press.key.delete) {
-            return [{ type: "contextConversation.backspace" }];
+            return [{ type: "contextMessage.backspace" }];
         }
         if (press.key.return) {
-            return [{ type: "contextConversation.submit" }];
+            return [{ type: "contextMessage.submit" }];
         }
         if (press.key.leftArrow) {
             return [
-                { direction: "left", type: "contextConversation.cursorMove" },
+                { direction: "left", type: "contextMessage.cursorMove" },
             ];
         }
         if (press.key.rightArrow) {
             return [
-                { direction: "right", type: "contextConversation.cursorMove" },
+                { direction: "right", type: "contextMessage.cursorMove" },
             ];
         }
         if (press.key.pageUp) return [{ type: "screen.pageUp" }];
@@ -176,7 +176,7 @@ export class TuiKeyDispatcher {
         if (press.key.home) return [{ type: "screen.home" }];
         if (press.key.end) return [{ type: "screen.end" }];
         if (press.input.length > 0 && !press.key.ctrl) {
-            return [{ text: press.input, type: "contextConversation.append" }];
+            return [{ text: press.input, type: "contextMessage.append" }];
         }
         return [];
     }
@@ -289,7 +289,7 @@ export class TuiKeyDispatcher {
             return [{ type: "messages.restoreFocused" }];
         }
         if (press.input === "m" || press.input === "M") {
-            return [{ type: "contextConversation.openCurrent" }];
+            return [{ type: "contextMessage.openCurrent" }];
         }
         if (press.input === "/") {
             return [{ type: "search.open" }];

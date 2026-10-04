@@ -58,7 +58,7 @@ test("route dispatch preserves scope, request context, change notifications, and
                 {
                     declaration: {
                         id: "preferences-get",
-                        module: "conversationPreferences",
+                        module: "messagePreferences",
                         operation: "get",
                         scope: "control",
                     },
@@ -77,7 +77,7 @@ test("route dispatch preserves scope, request context, change notifications, and
 
     assert.deepEqual(
         service.modules("control").map((module) => module.name),
-        ["conversationPreferences"],
+        ["messagePreferences"],
     );
     const modules = service.modules("instance");
     assert.deepEqual(

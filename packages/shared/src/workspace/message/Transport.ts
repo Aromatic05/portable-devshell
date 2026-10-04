@@ -4,9 +4,9 @@ import {
 } from "../../client/Stream.js";
 import { CONTROL_HOST } from "../../client/Control.js";
 import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
-} from "../../control/config/Preference.js";
+    MessagePreferencesPatch,
+    MessagePreferencesSnapshot,
+} from "./Preference.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import {
     createPortClient,
@@ -18,8 +18,8 @@ import type {
     ContextMessageListResult,
     ContextMessageQueueInput,
     ContextMessageRecord,
-    ConversationListInput,
-    ConversationListResult,
+    MessageListInput,
+    MessageListResult,
     MessageEvent,
 } from "./Model.js";
 
@@ -28,10 +28,10 @@ export interface MessageTransport {
         instance: string,
         input?: ContextMessageListInput,
     ): Promise<ContextMessageListResult>;
-    listConversationEntries(
+    listMessageEntries(
         instance: string,
-        input?: ConversationListInput,
-    ): Promise<ConversationListResult>;
+        input?: MessageListInput,
+    ): Promise<MessageListResult>;
     queueContextMessage(
         instance: string,
         input: ContextMessageQueueInput,
@@ -42,22 +42,22 @@ export interface MessageTransport {
     ): Promise<InstanceEventStreamPort<MessageEvent>>;
 }
 
-export interface ConversationPreferenceTransport {
-    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
-    updateConversationPreferences(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot>;
+export interface MessagePreferenceTransport {
+    getMessagePreferences(): Promise<MessagePreferencesSnapshot>;
+    updateMessagePreferences(
+        patch: MessagePreferencesPatch,
+    ): Promise<MessagePreferencesSnapshot>;
 }
 
-export function createConversationPreferenceTransport(
+export function createMessagePreferenceTransport(
     endpoint: Endpoint,
-): ConversationPreferenceTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "conversation");
+): MessagePreferenceTransport {
+    const port = createPortClient(endpoint, CONTROL_HOST, "message");
     return {
-        getConversationPreferences: () =>
-            port.request<ConversationPreferencesSnapshot>("preferences"),
-        updateConversationPreferences: (patch) =>
-            port.request<ConversationPreferencesSnapshot>(
+        getMessagePreferences: () =>
+            port.request<MessagePreferencesSnapshot>("preferences"),
+        updateMessagePreferences: (patch) =>
+            port.request<MessagePreferencesSnapshot>(
                 "updatePreferences",
                 patch,
             ),
@@ -73,9 +73,9 @@ export function createMessageTransport(endpoint: Endpoint): MessageTransport {
                 "listContextMessages",
                 input ?? {},
             ),
-        listConversationEntries: (instance, input) =>
-            port(instance).request<ConversationListResult>(
-                "listConversationEntries",
+        listMessageEntries: (instance, input) =>
+            port(instance).request<MessageListResult>(
+                "listMessageEntries",
                 input ?? {},
             ),
         queueContextMessage: (instance, input) =>

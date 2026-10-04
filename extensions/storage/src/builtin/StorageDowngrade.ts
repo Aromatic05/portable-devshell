@@ -16,11 +16,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { zstdDecompressSync } from "node:zlib";
 
 const SUPPORTED_AUDIT_SOURCE_VERSION = 2;
-const SUPPORTED_CONVERSATION_SOURCE_VERSION = 1;
+const SUPPORTED_MESSAGE_SOURCE_VERSION = 2;
 
 export interface StorageDatabaseInspection {
     filePath: string;
-    kind: "audit" | "conversation" | "unknown";
+    kind: "audit" | "message" | "unknown";
     schemaVersion: number;
 }
 
@@ -33,11 +33,11 @@ export interface AuditDowngradeResult {
     toVersion: 1;
 }
 
-export interface ConversationDowngradeResult {
+export interface MessageDowngradeResult {
     comments: number;
-    fromVersion: 1;
+    fromVersion: 1 | 2;
     instance: string;
-    kind: "conversation";
+    kind: "message";
     output: string;
     reports: number;
     source: string;
@@ -64,8 +64,9 @@ export function inspectStorageDatabase(
             filePath: source,
             kind: tables.has("audit_records")
                 ? "audit"
-                : tables.has("conversation_entries")
-                  ? "conversation"
+                : tables.has("message_entries") ||
+                    tables.has("conversation_entries")
+                  ? "message"
                   : "unknown",
             schemaVersion: readUserVersion(database),
         };
@@ -160,17 +161,17 @@ export function downgradeAuditDatabase(options: {
     };
 }
 
-export function downgradeConversationDatabase(options: {
+export function downgradeMessageDatabase(options: {
     instance?: string;
     output: string;
     source: string;
     signal?: AbortSignal;
     toVersion: number;
-}): ConversationDowngradeResult {
+}): MessageDowngradeResult {
     options.signal?.throwIfAborted();
     if (options.toVersion !== 0)
         throw new TypeError(
-            "Conversation downgrade currently supports only --to 0 (legacy JSON).",
+            "Message downgrade currently supports only --to 0 (legacy JSON).",
         );
     const source = resolve(options.source);
     const output = resolve(options.output);
@@ -181,13 +182,16 @@ export function downgradeConversationDatabase(options: {
     const input = openReadOnlyDatabase(source);
     try {
         const fromVersion = readUserVersion(input);
-        if (fromVersion !== SUPPORTED_CONVERSATION_SOURCE_VERSION) {
+        if (fromVersion < 1 || fromVersion > SUPPORTED_MESSAGE_SOURCE_VERSION) {
             throw unsupportedSourceVersion(
-                "Conversation",
+                "Message",
                 fromVersion,
-                SUPPORTED_CONVERSATION_SOURCE_VERSION,
+                SUPPORTED_MESSAGE_SOURCE_VERSION,
             );
         }
+        const sourceVersion = fromVersion as 1 | 2;
+        const entriesTable =
+            sourceVersion === 1 ? "conversation_entries" : "message_entries";
         const instance = options.instance ?? inferInstanceName(source);
         const comments = (
             input
@@ -203,7 +207,7 @@ export function downgradeConversationDatabase(options: {
                 id,
                 status,
                 text
-            FROM conversation_entries
+            FROM ${entriesTable}
             WHERE kind = 'comment'
             ORDER BY created_at ASC, seq ASC
         `,
@@ -222,7 +226,7 @@ export function downgradeConversationDatabase(options: {
         ).map((row) => {
             if (row.status === null)
                 throw new Error(
-                    `Conversation Comment ${row.id} has no status.`,
+                    `Message Comment ${row.id} has no status.`,
                 );
             return {
                 ...(row.callId === null ? {} : { callId: row.callId }),
@@ -243,7 +247,7 @@ export function downgradeConversationDatabase(options: {
             (
                 input
                     .prepare(
-                        "SELECT COUNT(*) AS count FROM conversation_entries WHERE kind = 'report'",
+                        `SELECT COUNT(*) AS count FROM ${entriesTable} WHERE kind = 'report'`,
                     )
                     .get() as { count: number }
             ).count,
@@ -263,9 +267,9 @@ export function downgradeConversationDatabase(options: {
         }
         return {
             comments: comments.length,
-            fromVersion: 1,
+            fromVersion: sourceVersion,
             instance,
-            kind: "conversation",
+            kind: "message",
             output,
             reports,
             source,
@@ -344,7 +348,7 @@ function decodeAuditPayload(row: AuditRow): string {
 function inferInstanceName(source: string): string {
     if (basename(dirname(source)) !== "control-worker") {
         throw new TypeError(
-            "Conversation downgrade requires --instance when the database is not inside <instance>/control-worker/.",
+            "Message downgrade requires --instance when the database is not inside <instance>/control-worker/.",
         );
     }
     const instance = basename(dirname(dirname(source)));

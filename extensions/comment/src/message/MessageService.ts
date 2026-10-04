@@ -1,19 +1,19 @@
 import { ExtensionError } from "@portable-devshell/extension";
 import type {
-    ConversationEntry,
-    ConversationListInput,
+    MessageEntry,
+    MessageListInput,
     JsonValue,
     ControlPortDefinition,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import { migrateLegacyReports } from "./migration/Report.js";
-import { ConversationStore } from "./store/ConversationStore.js";
+import { MessageStore } from "./store/MessageStore.js";
 
-export class ConversationService {
+export class MessageService {
     readonly #instanceName: string;
     readonly #legacyReports?: () => Promise<ToolCallRecord[]>;
-    readonly #store: ConversationStore;
+    readonly #store: MessageStore;
     #migration?: Promise<void>;
     #operation: Promise<void> = Promise.resolve();
     #retired = false;
@@ -22,7 +22,7 @@ export class ConversationService {
     constructor(options: {
         instanceName: string;
         legacyReports?: () => Promise<ToolCallRecord[]>;
-        store: ConversationStore;
+        store: MessageStore;
     }) {
         this.#instanceName = options.instanceName;
         this.#legacyReports = options.legacyReports;
@@ -30,8 +30,8 @@ export class ConversationService {
     }
 
     async list(
-        input: ConversationListInput = {},
-    ): Promise<ConversationEntry[]> {
+        input: MessageListInput = {},
+    ): Promise<MessageEntry[]> {
         return await this.#runExclusive(async () => {
             await this.#ensureLegacyReportsMigrated();
             return this.#store.list(input);
@@ -88,7 +88,7 @@ export class ConversationService {
         allowRetired = false,
     ): Promise<T> {
         if (this.#retired && !allowRetired)
-            throw retiredConversationService(this.#instanceName);
+            throw retiredMessageService(this.#instanceName);
         const previous = this.#operation;
         let release!: () => void;
         this.#operation = new Promise<void>((resolve) => {
@@ -103,7 +103,7 @@ export class ConversationService {
     }
 }
 
-function retiredConversationService(instance: string): Error {
+function retiredMessageService(instance: string): Error {
     return new ExtensionError({
         code: "control.instanceNotFound",
         details: { instance },
@@ -112,24 +112,24 @@ function retiredConversationService(instance: string): Error {
     });
 }
 
-export function createConversationRouteModule(
-    service: Pick<ConversationService, "list">,
+export function createMessageHistoryRouteModule(
+    service: Pick<MessageService, "list">,
 ): ControlPortDefinition {
     return {
         name: "message",
         operations: [
             {
-                name: "listConversationEntries",
+                name: "listMessageEntries",
                 handle: async (request) =>
                     (await service.list(
-                        readConversationListInput(request.payload ?? {}),
+                        readMessageListInput(request.payload ?? {}),
                     )) as unknown as JsonValue,
             },
         ],
     };
 }
 
-function readConversationListInput(value: JsonValue): ConversationListInput {
+function readMessageListInput(value: JsonValue): MessageListInput {
     if (
         !isRecord(value) ||
         Object.keys(value).some(
@@ -137,22 +137,22 @@ function readConversationListInput(value: JsonValue): ConversationListInput {
         )
     )
         throw invalidRouteInput(
-            "message.listConversationEntries accepts only before, ctxId, limit, and maxBytes.",
+            "message.listMessageEntries accepts only before, ctxId, limit, and maxBytes.",
         );
     if (value.before !== undefined && typeof value.before !== "string")
         throw invalidRouteInput(
-            "message.listConversationEntries before must be a string.",
+            "message.listMessageEntries before must be a string.",
         );
     if (value.ctxId !== undefined && typeof value.ctxId !== "string")
         throw invalidRouteInput(
-            "message.listConversationEntries ctxId must be a string.",
+            "message.listMessageEntries ctxId must be a string.",
         );
     if (
         value.limit !== undefined &&
         (typeof value.limit !== "number" || !Number.isSafeInteger(value.limit))
     )
         throw invalidRouteInput(
-            "message.listConversationEntries limit must be an integer.",
+            "message.listMessageEntries limit must be an integer.",
         );
     if (
         value.maxBytes !== undefined &&
@@ -160,7 +160,7 @@ function readConversationListInput(value: JsonValue): ConversationListInput {
             !Number.isSafeInteger(value.maxBytes))
     )
         throw invalidRouteInput(
-            "message.listConversationEntries maxBytes must be an integer.",
+            "message.listMessageEntries maxBytes must be an integer.",
         );
     return {
         ...(value.before === undefined ? {} : { before: value.before }),
