@@ -9,7 +9,7 @@ import {
     type ControlPortContext,
 } from "@portable-devshell/shared";
 
-import { createToolIngressRouteModule } from "../../../src/tool/Route.ts";
+import { createToolIngressRouteModule } from "../../../src/toolcall/Route.ts";
 import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
 
 function routeContext(connectionId: string): ControlPortContext {

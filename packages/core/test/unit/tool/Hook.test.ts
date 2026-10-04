@@ -3,12 +3,12 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
+import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
 import type {
     ToolCallHookValue,
     ToolCallReviewInput,
-} from "../../../src/tool/hook/Review.ts";
-import type { ToolCallRewrite } from "../../../src/tool/hook/Rewrite.ts";
+} from "../../../src/toolcall/hook/Review.ts";
+import type { ToolCallRewrite } from "../../../src/toolcall/hook/Rewrite.ts";
 
 function value(payload: unknown = { command: "echo ok" }): ToolCallHookValue {
     return {

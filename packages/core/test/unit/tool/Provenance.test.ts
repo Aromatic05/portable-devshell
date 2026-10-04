@@ -13,7 +13,7 @@ import test from "node:test";
 
 import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 
-import { ToolCallProvenanceStore } from "../../../src/tool/Provenance.ts";
+import { ToolCallProvenanceStore } from "../../../src/toolcall/Provenance.ts";
 import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 

@@ -81,7 +81,7 @@ const workspacePackages = new Map([
     ],
     [
         "@portable-devshell/shared/toolcall",
-        new URL("../../shared/src/toolcall/Type.ts", import.meta.url).href,
+        new URL("../../shared/src/execution/toolcall/Type.ts", import.meta.url).href,
     ],
 ]);
 

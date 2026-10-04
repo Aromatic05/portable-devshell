@@ -16,12 +16,12 @@ import {
     limitToolCallResponse,
     readToolCallQuery,
     readToolSessionOpen,
-} from "../../../tool/Input.js";
-import type { ToolCallProvenanceStore } from "../../../tool/Provenance.js";
+} from "../../../toolcall/Input.js";
+import type { ToolCallProvenanceStore } from "../../../toolcall/Provenance.js";
 import {
     createToolIngressRouteModule,
     type ToolCallIngressPort,
-} from "../../../tool/Route.js";
+} from "../../../toolcall/Route.js";
 
 export interface ToolRouteInstancePort {
     name?: string;

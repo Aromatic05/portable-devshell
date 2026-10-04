@@ -3,7 +3,7 @@ import {
     errorMessage,
     type JsonValue,
 } from "@portable-devshell/shared";
-import type { ToolCallHooks } from "../tool/Public.js";
+import type { ToolCallHooks } from "../toolcall/Public.js";
 import type { ApprovalEvaluationApi } from "./Api.js";
 
 export function registerApprovalToolCallReview(

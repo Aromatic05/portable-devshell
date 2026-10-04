@@ -54,11 +54,11 @@
                 "./packages/shared/src/control/config/Type.ts"
             ],
             "@portable-devshell/shared/toolcall": [
-                "./packages/shared/src/toolcall/Type.ts"
+                "./packages/shared/src/execution/toolcall/Type.ts"
             ],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/core/toolcall": [
-                "./packages/core/src/tool/Public.ts"
+                "./packages/core/src/toolcall/Public.ts"
             ],
             "@portable-devshell/core/approval": [
                 "./packages/core/src/approval/Public.ts"

@@ -18,9 +18,9 @@ import { TerminalSessionService } from "../../../terminal/Service.js";
 import {
     createToolIngressRouteModule,
     type ToolCallIngressPort,
-} from "../../../tool/Route.js";
+} from "../../../toolcall/Route.js";
 import { createToolRouteModule } from "../packet/ToolRoute.js";
-import type { ToolCallProvenanceStore } from "../../../tool/Provenance.js";
+import type { ToolCallProvenanceStore } from "../../../toolcall/Provenance.js";
 import type { InstanceDescriptor } from "../../Descriptor.js";
 import type { InstanceRegistry } from "../../Registry.js";
 import type { InstanceEventSource } from "../../EventBuffer.js";

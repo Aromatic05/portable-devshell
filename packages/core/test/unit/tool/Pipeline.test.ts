@@ -8,19 +8,19 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { createToolCallScope } from "../../../src/tool/Context.ts";
+import { createToolCallScope } from "../../../src/toolcall/Context.ts";
 import {
     ToolCallPipeline,
     type ToolCallTargetResolver,
-} from "../../../src/tool/Pipeline.ts";
-import { ToolCallHookRegistry } from "../../../src/tool/Runtime.ts";
+} from "../../../src/toolcall/Pipeline.ts";
+import { ToolCallHookRegistry } from "../../../src/toolcall/Runtime.ts";
 import { ToolCallExecutionTarget } from "../../../src/worker/instance/tool/ExecutionTarget.ts";
-import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
+import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
 import type {
     ToolCallReview,
     ToolCallHookValue,
-} from "../../../src/tool/hook/Review.ts";
-import type { ToolCallRewrite } from "../../../src/tool/hook/Rewrite.ts";
+} from "../../../src/toolcall/hook/Review.ts";
+import type { ToolCallRewrite } from "../../../src/toolcall/hook/Rewrite.ts";
 
 const context = {
     ctxId: "ctx-1",

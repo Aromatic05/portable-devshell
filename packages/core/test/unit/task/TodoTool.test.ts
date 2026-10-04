@@ -56,7 +56,7 @@ test("task domain keeps todo as the operation namespace", () => {
     assert.equal(catalog.isTodoTool("task_read"), false);
 });
 
-import type { ToolCallHooks } from "../../../src/tool/Runtime.ts";
+import type { ToolCallHooks } from "../../../src/toolcall/Runtime.ts";
 import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { TaskApi } from "../../../src/task/Api.ts";
 import { installTodoTools } from "../../../src/task/todo/tool/Runtime.ts";

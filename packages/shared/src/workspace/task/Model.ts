@@ -1,7 +1,7 @@
 import type { InstanceEventRecord } from "../../client/Stream.js";
 import type { InstanceName } from "../../types/Instance.js";
 import type { JsonValue } from "../../types/Json.js";
-import type { ToolCallContext } from "../../toolcall/Type.js";
+import type { ToolCallContext } from "../../execution/toolcall/Type.js";
 
 export type TaskEventType =
     | "goal.updated"

@@ -38,8 +38,8 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { ToolCallPipeline } from "../../../src/tool/Pipeline.ts";
-import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
+import { ToolCallPipeline } from "../../../src/toolcall/Pipeline.ts";
+import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);

@@ -4,7 +4,7 @@ import type { ActiveTodoSummary } from "../../workspace/task/Model.js";
 import type {
     ToolCallSource,
     ToolCallStatus,
-} from "../../execution/tool/Model.js";
+} from "../../execution/toolcall/Model.js";
 
 export type OperationalHealth = "healthy" | "attention" | "critical";
 export type OperationalAlertSeverity = "attention" | "critical";

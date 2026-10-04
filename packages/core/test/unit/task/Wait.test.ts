@@ -10,7 +10,7 @@ import {
     WaitService,
 } from "../../../src/task/wait/Service.ts";
 import { installWaitToolCallRewrite } from "../../../src/task/wait/Runtime.ts";
-import { ToolCallHookRegistry } from "../../../src/tool/Runtime.ts";
+import { ToolCallHookRegistry } from "../../../src/toolcall/Runtime.ts";
 
 test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async () => {
     const detached: WaitDetachInput[] = [];

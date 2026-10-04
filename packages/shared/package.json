@@ -23,8 +23,8 @@
             "default": "./dist/control/config/Type.js"
         },
         "./toolcall": {
-            "types": "./dist/toolcall/Type.d.ts",
-            "default": "./dist/toolcall/Type.js"
+            "types": "./dist/execution/toolcall/Type.d.ts",
+            "default": "./dist/execution/toolcall/Type.js"
         }
     },
     "files": [
