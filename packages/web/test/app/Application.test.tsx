@@ -60,12 +60,12 @@ function operationalOverview(
     };
 }
 
-function setServiceStatus(
+function setServerStatus(
     domains: WebTestDomains,
     status: "connecting" | "offline" | "online",
 ): void {
-    Object.assign(domains.service, {
-        state: { ...domains.service.state, status },
+    Object.assign(domains.server, {
+        state: { ...domains.server.state, status },
     });
 }
 
@@ -318,7 +318,7 @@ describe("authenticated application shell", () => {
     it("returns to login when reconnect finds an expired session", async () => {
         const session = fakeSession({ check: true });
         const domains = new WebTestDomains();
-        setServiceStatus(domains, "offline");
+        setServerStatus(domains, "offline");
         const close = vi.spyOn(domains.domains, "close");
 
         render(
@@ -342,7 +342,7 @@ describe("authenticated application shell", () => {
         let releaseCheck!: (available: boolean) => void;
         const session = fakeSession({ check: true });
         const domains = new WebTestDomains();
-        setServiceStatus(domains, "offline");
+        setServerStatus(domains, "offline");
         render(
             <App createDomains={() => domains.domains} session={session} />,
         );
@@ -506,7 +506,7 @@ describe("authenticated application shell", () => {
     it("shows a session verification error when reconnect checking fails", async () => {
         const session = fakeSession({ check: true });
         const domains = new WebTestDomains();
-        setServiceStatus(domains, "offline");
+        setServerStatus(domains, "offline");
         render(
             <App createDomains={() => domains.domains} session={session} />,
         );

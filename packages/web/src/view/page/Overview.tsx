@@ -14,12 +14,12 @@ import {
 export function Overview() {
     const domains = useWebDomains();
     const overviewState = useDomainSnapshot(domains.overview);
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const overview = overviewState.overview;
     if (overview === undefined) {
         const failure = overviewState.failure;
         const message =
-            service.status === "offline"
+            server.status === "offline"
                 ? "Overview is unavailable while offline."
                 : failure === undefined
                   ? "Loading operational overview…"

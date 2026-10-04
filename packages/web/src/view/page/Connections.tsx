@@ -34,7 +34,7 @@ export function Connections({
     const config = useDomainSnapshot(domains.config);
     const instancesState = useDomainSnapshot(domains.instances);
     const mcp = useDomainSnapshot(domains.mcp);
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const configView = config.view;
     const instances = useMemo(
         () => configInstances(configView),
@@ -78,7 +78,7 @@ export function Connections({
               )?.snapshot;
     const dirty = JSON.stringify(drafts) !== JSON.stringify(base);
     const pending = store.state.operations["config:update"] !== undefined;
-    const interactive = service.status === "online" && !disabled && !pending;
+    const interactive = server.status === "online" && !disabled && !pending;
     const mcpStatus = mcp.status;
     const oauthApproval = globalOAuthApproval(configView);
     const controlRestartRequired = configView?.restartControlRequired === true;

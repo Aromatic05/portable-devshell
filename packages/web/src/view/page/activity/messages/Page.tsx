@@ -40,7 +40,7 @@ export function Messages({
     store: WebStore;
 }) {
     const domains = useWebDomains();
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const instancesState = useDomainSnapshot(domains.instances);
     const contextState = useDomainSnapshot(domains.context);
     const messageHistoryState = useDomainSnapshot(domains.messageHistory);
@@ -110,7 +110,7 @@ export function Messages({
             : undefined;
 
     useEffect(() => {
-        if (service.status !== "online") return;
+        if (server.status !== "online") return;
         let cancelled = false;
         void store.refreshMessages().finally(() => {
             if (!cancelled) setPreferencesReady(true);
@@ -118,7 +118,7 @@ export function Messages({
         return () => {
             cancelled = true;
         };
-    }, [service.status, store]);
+    }, [server.status, store]);
 
     useEffect(() => {
         let refreshPending = false;

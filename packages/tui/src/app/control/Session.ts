@@ -20,7 +20,7 @@ export interface TuiControlSessionOptions {
 export class TuiControlSession {
     readonly domains: TuiDomainSession;
     readonly #store: TuiAppStore;
-    readonly #offService: () => void;
+    readonly #offServer: () => void;
     #started = false;
 
     constructor(options: TuiControlSessionOptions = {}) {
@@ -33,7 +33,7 @@ export class TuiControlSession {
                     () => () => undefined,
                 ),
             });
-        this.#offService = this.domains.service.subscribe(() =>
+        this.#offServer = this.domains.server.subscribe(() =>
             this.#syncConnection(),
         );
         this.#syncConnection();
@@ -58,7 +58,7 @@ export class TuiControlSession {
     async stop(): Promise<void> {
         if (!this.#started) return;
         this.#started = false;
-        this.#offService();
+        this.#offServer();
         this.domains.close();
     }
 
@@ -75,17 +75,17 @@ export class TuiControlSession {
     }
 
     #syncConnection(): void {
-        const service = this.domains.service.state;
-        if (service.status === "online") {
+        const server = this.domains.server.state;
+        if (server.status === "online") {
             this.#store.setConnectionState("connected");
             return;
         }
-        if (service.status === "connecting") {
+        if (server.status === "connecting") {
             this.#store.setConnectionState("connecting");
             return;
         }
-        if (service.failure !== undefined) {
-            const error = toRemoteError(service.failure);
+        if (server.failure !== undefined) {
+            const error = toRemoteError(server.failure);
             this.#store.setConnectionState("error", {
                 code: error.code,
                 message: error.message,

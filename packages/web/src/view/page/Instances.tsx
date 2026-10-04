@@ -35,7 +35,7 @@ export function Instances({
     const state = store.state;
     const domains = useWebDomains();
     const instances = useDomainSnapshot(domains.instances);
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const overviewState = useDomainSnapshot(domains.overview);
     const config = useDomainSnapshot(domains.config);
     const artifact = useDomainSnapshot(domains.artifact);
@@ -57,7 +57,7 @@ export function Instances({
         ({ name }) => name === entry?.name,
     )?.worker;
     const operation = confirmationOperation(confirmation);
-    const interactive = service.status === "online" && !disabled;
+    const interactive = server.status === "online" && !disabled;
     const selfManaged =
         entry?.snapshot.reverse?.managementMode === "selfManaged";
     const lifecycleAction =

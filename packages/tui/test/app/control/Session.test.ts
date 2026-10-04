@@ -564,7 +564,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         });
 
         await server.start();
-        await domains.service.connect();
+        await domains.server.connect();
 
         const runtime = domains.runtime("alpha");
         await runtime.load("alpha");
@@ -611,7 +611,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 config: domains.configTransport,
                 instance: domains.instanceTransport,
                 reverse: domains.reverse,
-                service: domains.serviceTransport,
+                server: domains.serverTransport,
                 task: domains.taskTransport,
                 tool: domains.toolTransport,
             },
@@ -634,7 +634,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 
         assert.equal(server.restartCount(), 1);
         assert.equal(session.store.getState().connection.status, "connected");
-        assert.deepEqual(await domains.serviceTransport.ping(), {
+        assert.deepEqual(await domains.serverTransport.ping(), {
             pong: true,
         });
     });
@@ -687,7 +687,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             routes.dispose();
             await rm(runtimeDir, { force: true, recursive: true });
         });
-        await domains.service.connect();
+        await domains.server.connect();
         await domains.mcp.load();
 
         assert.equal(domains.mcp.state.approvals[0]?.approvalId, "oauth-1");

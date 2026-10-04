@@ -4,7 +4,7 @@ import type { Channel } from "../transport/endpoint/channel/Channel.js";
 import { resolveControlSocketPath } from "./Path.js";
 
 // Control transport routing constants. These describe how a client reaches the
-// control host; the handshake vocabulary lives in ../service/Model.ts.
+// control host; the handshake vocabulary lives in ../control/server/Model.ts.
 export const CONTROL_HOST = "@control";
 export const CONTROL_WEB_BASE_PATH = "/web";
 export const CONTROL_WEB_RPC_PATH = "/web/rpc";

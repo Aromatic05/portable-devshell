@@ -121,9 +121,9 @@ import {
                     };
                 },
             },
-            service: {
+            server: {
                 async restart() {
-                    calls.push("service.restart");
+                    calls.push("server.restart");
                 },
             },
             task: {
@@ -442,7 +442,7 @@ import {
         await harness.operations.restartControl();
 
         assert.equal(harness.reconnectAttempts(), 3);
-        assert.deepEqual(harness.calls, ["service.restart"]);
+        assert.deepEqual(harness.calls, ["server.restart"]);
         assert.deepEqual(harness.refreshed, [
             "reconnect",
             "reconnect",
@@ -497,7 +497,7 @@ import {
             true,
         );
         assert.equal(harness.calls.includes("reverse.code:remote-one"), true);
-        assert.equal(harness.calls.includes("service.restart"), true);
+        assert.equal(harness.calls.includes("server.restart"), true);
         assert.equal(
             harness.calls.includes("approval.approve:alpha:approval-1"),
             true,

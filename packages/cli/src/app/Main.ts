@@ -14,7 +14,7 @@ import {
     type CliOutputFormat,
 } from "../command/Dispatch.js";
 import { renderCliUsage } from "../command/Usage.js";
-import type { CliLifecycleManagerLike } from "../command/control/service/Lifecycle.js";
+import type { CliLifecycleManagerLike } from "../command/control/server/Lifecycle.js";
 import { cliBuiltinExtensionSources } from "../command/extension/Builtin.js";
 import {
     createCliClients,
@@ -28,7 +28,7 @@ import {
     renderCliError,
 } from "./Failure.js";
 
-export type { CliLifecycleManagerLike } from "../command/control/service/Lifecycle.js";
+export type { CliLifecycleManagerLike } from "../command/control/server/Lifecycle.js";
 
 export interface CliMainOptions {
     createCliClients?: () => CliClients;

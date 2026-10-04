@@ -19,7 +19,7 @@ import {
 import {
     negotiateControlProtocol,
     readControlHelloRequest,
-} from "../../service/Protocol.js";
+} from "../Protocol.js";
 
 export interface ControlChannelRouteProvider {
     connectionClosed(connectionId: string): void;
@@ -392,7 +392,7 @@ export class ControlChannelServer {
         const session = this.#sessions.get(rpc.peer.host)!;
         if (
             host === "@control" &&
-            port === "service" &&
+            port === "server" &&
             operation === "hello"
         ) {
             if (session.peer !== undefined)
@@ -451,7 +451,7 @@ export class ControlChannelServer {
             throw createRemoteError({
                 code: controlErrorCodes.clientIdentityRequired,
                 message:
-                    "service.hello must be the first request on a Control connection.",
+                    "server.hello must be the first request on a Control connection.",
                 retryable: false,
             });
         }
@@ -483,7 +483,7 @@ export class ControlChannelServer {
             throw createRemoteError({
                 code: controlErrorCodes.clientIdentityRequired,
                 message:
-                    "service.hello must be the first request on a Control connection.",
+                    "server.hello must be the first request on a Control connection.",
                 retryable: false,
             });
         return {

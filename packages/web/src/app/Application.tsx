@@ -62,7 +62,7 @@ function ApplicationBody({
         () => store.state,
     );
     const domains = useWebDomains();
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const overviewState = useDomainSnapshot(domains.overview);
     const extension = useDomainSnapshot(domains.extension);
     const config = useDomainSnapshot(domains.config);
@@ -83,10 +83,10 @@ function ApplicationBody({
     }, [route.page, domains]);
 
     useEffect(() => {
-        if (service.status !== "online") return;
+        if (server.status !== "online") return;
         if (route.page === "audit") void store.refreshAudit();
         else if (route.page === "messages") void store.refreshMessages();
-    }, [route.page, service.status, store]);
+    }, [route.page, server.status, store]);
 
     useEffect(() => {
         if (state.notice === undefined) return;
@@ -129,9 +129,9 @@ function ApplicationBody({
                     counts={counts}
                     navigate={navigate}
                 />
-                <div className={`connection ${service.status}`}>
-                    <span>{connectionLabel(service.status)}</span>
-                    {service.status === "online" ? null : (
+                <div className={`connection ${server.status}`}>
+                    <span>{connectionLabel(server.status)}</span>
+                    {server.status === "online" ? null : (
                         <button
                             disabled={busy !== undefined}
                             onClick={() => void onReconnect()}

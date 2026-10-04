@@ -9,7 +9,7 @@ import type {
     InstanceTransport,
     ConnectionTransport,
     ProcessStartOptions,
-    ServiceTransport,
+    ServerTransport,
     TaskTransport,
     ToolTransport,
 } from "@portable-devshell/shared";
@@ -108,7 +108,7 @@ export interface TuiRuntimeOperationClients {
     config: ConfigTransport;
     instance: InstanceTransport;
     reverse: ConnectionTransport;
-    service: ServiceTransport;
+    server: ServerTransport;
     task: TaskTransport;
     tool: ToolTransport;
 }

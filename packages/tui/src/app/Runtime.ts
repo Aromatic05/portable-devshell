@@ -241,7 +241,7 @@ export class TuiRuntime {
             config: domains.configTransport,
             instance: domains.instanceTransport,
             reverse: domains.reverse,
-            service: domains.serviceTransport,
+            server: domains.serverTransport,
             task: domains.taskTransport,
             tool: domains.toolTransport,
         };

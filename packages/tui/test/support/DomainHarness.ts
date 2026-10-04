@@ -43,7 +43,7 @@ export class TestDomainSource<State extends object> {
 }
 
 export class TuiTestDomains {
-    readonly service = new TestDomainSource({
+    readonly server = new TestDomainSource({
         capabilities: [],
         status: "online" as const,
     });
@@ -120,7 +120,7 @@ export class TuiTestDomains {
         attach: (source: TuiRenderSource) => () => void = () => () => undefined,
     ) {
         this.domains = {
-            service: this.service,
+            server: this.server,
             config: this.config,
             overview: this.overview,
             mcp: this.mcp,
@@ -398,10 +398,10 @@ export class TuiDomainHarness {
         this.#toolCallRecords = options.toolCallRecords ?? [];
         const self = this;
 
-        let runServiceHandshake!: (
+        let runServerHandshake!: (
             source: TestDomainSource<any>,
         ) => Promise<void>;
-        const service = Object.assign(
+        const server = Object.assign(
             new TestDomainSource({
                 capabilities: [] as any[],
                 status: "online" as any,
@@ -409,13 +409,13 @@ export class TuiDomainHarness {
             {
                 close: () => undefined,
                 connect: async () => {
-                    await runServiceHandshake(service);
+                    await runServerHandshake(server);
                 },
                 getSnapshot() {
-                    return service.state;
+                    return server.state;
                 },
                 reconnect: async () => {
-                    await runServiceHandshake(service);
+                    await runServerHandshake(server);
                 },
                 restart: async () => ({}) as Record<string, JsonValue>,
             },
@@ -746,7 +746,7 @@ export class TuiDomainHarness {
             revokeToken: async () => undefined,
             rotateToken: async (instance: string) => ({ instance }),
         };
-        const serviceTransport = {
+        const serverTransport = {
             hello: async () => ({
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: "1.0.0",
@@ -760,16 +760,16 @@ export class TuiDomainHarness {
             restart: async () => ({}) as Record<string, JsonValue>,
             status: async () => ({ running: true }) as any,
         };
-        runServiceHandshake = async (source) => {
+        runServerHandshake = async (source) => {
             source.patch({
                 capabilities: [],
                 failure: undefined,
                 status: "connecting",
             } as any);
             try {
-                const hello = await serviceTransport.hello();
-                await serviceTransport.status();
-                await serviceTransport.ping();
+                const hello = await serverTransport.hello();
+                await serverTransport.status();
+                await serverTransport.ping();
                 source.patch({
                     capabilities: [...hello.capabilities],
                     failure: undefined,
@@ -823,7 +823,7 @@ export class TuiDomainHarness {
         const terminalTransport = {} as any;
 
         this.domains = {
-            service,
+            server,
             config,
             overview,
             mcp,
@@ -833,7 +833,7 @@ export class TuiDomainHarness {
             artifactTransport,
             configTransport,
             instanceTransport,
-            serviceTransport,
+            serverTransport,
             taskTransport,
             terminalTransport,
             toolTransport,
@@ -853,7 +853,7 @@ export class TuiDomainHarness {
                 this.#todos.delete(instance);
             },
             load: async () => {
-                await service.connect();
+                await server.connect();
                 await Promise.all([
                     config.refresh(),
                     instances.refresh(),
@@ -869,7 +869,7 @@ export class TuiDomainHarness {
                 mcp.start();
             },
             reconnect: async () => {
-                await service.reconnect();
+                await server.reconnect();
                 await Promise.all([
                     config.refresh(),
                     instances.refresh(),

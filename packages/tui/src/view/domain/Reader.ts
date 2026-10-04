@@ -21,7 +21,7 @@ export class TuiDomainReader {
     ) {
         this.domains = domains;
         this.#attach = attach;
-        this.#attachSource(domains.service);
+        this.#attachSource(domains.server);
         this.#attachSource(domains.config);
         this.#attachSource(domains.overview);
         this.#attachSource(domains.mcp);
@@ -36,8 +36,8 @@ export class TuiDomainReader {
         this.#attachSource(domains.toolCalls);
     }
 
-    get service() {
-        return this.domains.service.state;
+    get server() {
+        return this.domains.server.state;
     }
 
     get config() {

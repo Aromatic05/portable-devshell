@@ -81,8 +81,8 @@ export class TuiRuntimeControlOperations {
 
     async restartControl(): Promise<void> {
         await this.#request(
-            this.options.clients.service.restart(),
-            "service.restart",
+            this.options.clients.server.restart(),
+            "server.restart",
         );
         const errorKey = `${this.#panelKey("connections")}:operationRefresh`;
         const deadline = Date.now() + this.options.operationTimeoutMs;

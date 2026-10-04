@@ -1,6 +1,6 @@
-// Control service handshake model. The protocol version, negotiated
+// Control server handshake model. The protocol version, negotiated
 // capabilities, and the client surfaces that establish a control session are
-// owned by the service subdomain; the service status summary is the control
+// owned by the server surface; the server status summary is the control
 // host's own health report.
 
 export const CONTROL_PROTOCOL_VERSION = "1.0.0";
@@ -20,7 +20,7 @@ export interface ControlProtocolHelloResponse {
     protocolVersion: string;
 }
 
-export interface ControlServiceStatus {
+export interface ControlServerStatus {
     instanceCount: number;
     ok: boolean;
     pid?: number;

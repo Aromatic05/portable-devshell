@@ -121,7 +121,7 @@ describe("WebStore", () => {
         expect(updatePreferences).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the service online while exposing a Message preference load failure", async () => {
+    it("keeps the server online while exposing a Message preference load failure", async () => {
         const domains = new WebTestDomains();
         domains.domains.load = vi.fn(async () => {
             domains.messagePreferences.patch({
@@ -132,7 +132,7 @@ describe("WebStore", () => {
 
         await store.load();
 
-        expect(domains.service.state.status).toBe("online");
+        expect(domains.server.state.status).toBe("online");
         expect(domains.messagePreferences.state.failure?.message).toBe(
             "Preference store unavailable",
         );
@@ -361,9 +361,9 @@ describe("WebStore", () => {
 
     it("reconnects the domain session and clears previous feedback", async () => {
         const domains = new WebTestDomains();
-        domains.service.patch({ status: "offline" });
+        domains.server.patch({ status: "offline" });
         const reconnect = vi.fn(async () => {
-            domains.service.patch({ status: "online" });
+            domains.server.patch({ status: "online" });
         });
         domains.domains.reconnect = reconnect;
         const store = new WebStore(domains.domains);
@@ -373,7 +373,7 @@ describe("WebStore", () => {
 
         expect(reconnect).toHaveBeenCalledOnce();
         expect(store.state.error).toBeUndefined();
-        expect(domains.service.state.status).toBe("online");
+        expect(domains.server.state.status).toBe("online");
     });
 
     it("does not let an old mutation clear a new connection operation", async () => {
@@ -566,7 +566,7 @@ describe("WebStore operation and transport boundaries", () => {
         const domains = new WebTestDomains();
         const restart = vi.fn(async () => ({}));
         const reconnect = vi.fn(async () => undefined);
-        domains.domains.service.restart = restart;
+        domains.domains.server.restart = restart;
         domains.domains.reconnect = reconnect;
         const store = new WebStore(domains.domains);
         await store.load();
@@ -575,7 +575,7 @@ describe("WebStore operation and transport boundaries", () => {
 
         expect(restart).toHaveBeenCalledOnce();
         expect(reconnect).toHaveBeenCalledOnce();
-        expect(domains.service.state.status).toBe("online");
+        expect(domains.server.state.status).toBe("online");
         expect(store.state.notice).toBe("Control runtime restarted.");
     });
 

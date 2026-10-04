@@ -11,7 +11,7 @@ import {
     type ContextTransport,
     type ControlConfig,
     type Endpoint,
-    type ServiceTransport,
+    type ServerTransport,
 } from "@portable-devshell/shared";
 
 import {
@@ -63,7 +63,7 @@ export interface ControlRuntimeOptions {
     contextTransport: ContextTransport;
     internalControl: {
         endpoint: Endpoint;
-        service: ServiceTransport;
+        server: ServerTransport;
     };
     artifact: ArtifactModule;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -97,7 +97,7 @@ export class ControlRuntime {
     readonly #extensions: ExtensionHost;
     readonly #instances: InstanceRegistry;
     readonly #internalControlEndpoint: Endpoint;
-    readonly #internalControlService: ServiceTransport;
+    readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
     readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteComposition;
@@ -125,7 +125,7 @@ export class ControlRuntime {
         });
         this.#instances = options.instances;
         this.#internalControlEndpoint = options.internalControl.endpoint;
-        this.#internalControlService = options.internalControl.service;
+        this.#internalControlServer = options.internalControl.server;
         const toolCalls = createToolCallRuntime({});
         this.#toolCalls = toolCalls.api;
         const extensionToolCalls = new ToolCallExtensionBinding(
@@ -278,7 +278,7 @@ export class ControlRuntime {
             }
             await this.#contexts.initialize();
             await this.#channels.start();
-            await this.#internalControlService.hello();
+            await this.#internalControlServer.hello();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
                 await this.#extensionControl.installBuiltin(

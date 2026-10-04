@@ -510,7 +510,7 @@ export class WebStore {
     async #restartControl(): Promise<boolean> {
         try {
             await withRequestTimeout(
-                this.domains.service.restart(),
+                this.domains.server.restart(),
                 this.#requestTimeoutMs,
                 "control.restart",
             );
@@ -528,7 +528,7 @@ export class WebStore {
             await new Promise((resolve) => setTimeout(resolve, 100));
             try {
                 await this.domains.reconnect();
-                if (this.domains.service.state.status === "online") {
+                if (this.domains.server.state.status === "online") {
                     this.#set({
                         ...this.#state,
                         error: undefined,

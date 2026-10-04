@@ -71,7 +71,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
         { pong: true },
     );
     assert.deepEqual(
-        (await request(harness.socketPath, "@control", "service.status"))
+        (await request(harness.socketPath, "@control", "server.status"))
             .payload,
         {
             instanceCount: 1,
@@ -84,7 +84,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
             await request(
                 harness.socketPath,
                 "@control",
-                "service.hello",
+                "server.hello",
                 {
                     clientKind: "tui",
                     protocolRange: CONTROL_PROTOCOL_RANGE,
@@ -102,7 +102,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
             await request(
                 harness.socketPath,
                 "@control",
-                "service.hello",
+                "server.hello",
                 {
                     clientKind: "tui",
                     protocolRange: { max: "2.0.0", min: "2.0.0" },
@@ -117,7 +117,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
             await request(
                 harness.socketPath,
                 "@control",
-                "service.hello",
+                "server.hello",
                 {
                     clientKind: "web",
                     protocolRange: CONTROL_PROTOCOL_RANGE,
@@ -1033,7 +1033,7 @@ async function request(
     const [port, operation] = name.split(".");
     const connection = createClient(socketPath, peer);
     try {
-        if (name !== "service.hello") await negotiateClient(connection, peer);
+        if (name !== "server.hello") await negotiateClient(connection, peer);
         return {
             payload: (await connection.request(
                 destination,

@@ -9,7 +9,7 @@ import {
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
 
-import { ControlPathHome, Endpoint, LocalChannel, ServiceSession, type JsonValue, createDefaultControlConfig, createEmptyMessagePreferences, createServiceTransport, createToolTransport, type ControlConfig } from "@portable-devshell/shared";
+import { ControlPathHome, Endpoint, LocalChannel, ServerSession, type JsonValue, createDefaultControlConfig, createEmptyMessagePreferences, createServerTransport, createToolTransport, type ControlConfig } from "@portable-devshell/shared";
 import { CONTROL_WEB_RPC_PATH, CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/testing";
 
 import { ControlRuntime } from "../../../../src/testing.ts";
@@ -1190,9 +1190,9 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         connectChannel: (signal) =>
             LocalChannel.connect(socketPath, { signal }),
     });
-    const service = new ServiceSession(
+    const service = new ServerSession(
         endpoint,
-        createServiceTransport(endpoint, { clientKind: "cli" }),
+        createServerTransport(endpoint, { clientKind: "cli" }),
     );
     const tools = createToolTransport(endpoint);
     t.after(() => service.close());

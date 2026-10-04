@@ -25,7 +25,7 @@ export function negotiateControlProtocol(
     if (request.clientKind !== peer) {
         throw createRemoteError({
             code: controlErrorCodes.clientIdentityInvalid,
-            message: `service.hello clientKind ${request.clientKind} does not match ${peer}.`,
+            message: `server.hello clientKind ${request.clientKind} does not match ${peer}.`,
             retryable: false,
         });
     }
@@ -64,17 +64,17 @@ export function readControlHelloRequest(
         payload === null ||
         Array.isArray(payload)
     )
-        throw invalidHello("service.hello requires an object payload.");
+        throw invalidHello("server.hello requires an object payload.");
     const clientKind = payload.clientKind;
     if (clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web")
         throw invalidHello(
-            "service.hello clientKind must be cli, tui, or web.",
+            "server.hello clientKind must be cli, tui, or web.",
         );
     if (
         payload.clientVersion !== undefined &&
         typeof payload.clientVersion !== "string"
     )
-        throw invalidHello("service.hello clientVersion must be a string.");
+        throw invalidHello("server.hello clientVersion must be a string.");
     const base: Pick<ControlHelloRequest, "clientKind" | "clientVersion"> = {
         clientKind,
         ...(payload.clientVersion === undefined
@@ -83,7 +83,7 @@ export function readControlHelloRequest(
     };
     if (payload.protocolRange === undefined)
         throw invalidHello(
-            "service.hello requires protocolRange with semantic versions.",
+            "server.hello requires protocolRange with semantic versions.",
         );
     return {
         ...base,
@@ -93,18 +93,18 @@ export function readControlHelloRequest(
 
 function readProtocolRange(value: JsonValue): { max: string; min: string } {
     if (typeof value !== "object" || value === null || Array.isArray(value))
-        throw invalidHello("service.hello protocolRange must be an object.");
+        throw invalidHello("server.hello protocolRange must be an object.");
     const min = value.min;
     const max = value.max;
     if (typeof min !== "string" || typeof max !== "string")
         throw invalidHello(
-            "service.hello protocolRange min and max must be semantic versions.",
+            "server.hello protocolRange min and max must be semantic versions.",
         );
     parseProtocolVersion(min);
     parseProtocolVersion(max);
     if (compareProtocolVersion(min, max) > 0)
         throw invalidHello(
-            "service.hello protocolRange min must not exceed max.",
+            "server.hello protocolRange min must not exceed max.",
         );
     return { max, min };
 }

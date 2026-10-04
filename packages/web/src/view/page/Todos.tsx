@@ -18,7 +18,7 @@ export function Todos({
     const domains = useWebDomains();
     const instances = useDomainSnapshot(domains.instances).instances;
     const goalsState = useDomainSnapshot(domains.goals);
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const state = useSyncExternalStore(
         store.subscribe,
         () => store.state,
@@ -26,7 +26,7 @@ export function Todos({
     );
     const [selected, setSelected] = useState<TodoSummary>();
     const [failure, setFailure] = useState<string>();
-    const interactive = service.status === "online" && !disabled;
+    const interactive = server.status === "online" && !disabled;
 
     useEffect(() => {
         for (const instance of instances)

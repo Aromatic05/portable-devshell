@@ -27,11 +27,11 @@ describe("WebChannel", () => {
         socket.open();
 
         await channel.write(
-            new TextEncoder().encode('{"name":"service.status"}'),
+            new TextEncoder().encode('{"name":"server.status"}'),
         );
 
         expect(new TextDecoder().decode(socket.sent[0]!)).toBe(
-            '{"name":"service.status"}',
+            '{"name":"server.status"}',
         );
         socket.serverClose();
         socket.serverClose();
@@ -231,20 +231,20 @@ describe("web domain transport", () => {
         });
         const domains = createWebDomainSession(async () => clientChannel);
         const closed = new Promise<string>((resolve) => {
-            const unsubscribe = domains.service.subscribe(() => {
-                const state = domains.service.state;
+            const unsubscribe = domains.server.subscribe(() => {
+                const state = domains.server.state;
                 if (state.status !== "offline") return;
                 unsubscribe();
                 resolve(state.failure?.message ?? "closed");
             });
         });
-        await domains.service.connect();
+        await domains.server.connect();
         await accepting;
 
         serverChannel.close(new Error("transport lost"));
 
         expect(await closed).toBe("transport lost");
-        service.close();
+        serverRpc.close();
         server.close();
         domains.close();
     });

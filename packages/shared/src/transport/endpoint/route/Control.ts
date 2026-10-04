@@ -1,7 +1,7 @@
 // Shared route-definition vocabulary used by provider-side host/port routing.
 // Request and response semantics stay in the owning domain Contract.
 
-import type { ControlClientKind } from "../../../control/service/Model.js";
+import type { ControlClientKind } from "../../../control/server/Model.js";
 import type { JsonValue } from "../../../types/Json.js";
 import type { MessageStream } from "../../packet/Stream.js";
 

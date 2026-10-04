@@ -25,9 +25,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     const server = createServer((socket) => {
         const endpoint = new Endpoint();
         const protocols = [
-            new Rpc(endpoint.bind("service", "@control"), {
+            new Rpc(endpoint.bind("server", "@control"), {
                 hello: () => {
-                    methods.push("service.hello");
+                    methods.push("server.hello");
                     return {
                         capabilities: ["request", "stream", "streamResume"],
                         protocolVersion: CONTROL_PROTOCOL_VERSION,
@@ -97,7 +97,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     assert.equal(instances[0]?.snapshot.status, "stopped");
     assert.equal(logs[0]?.message, "ready\n");
     assert.deepEqual(methods, [
-        "service.hello",
+        "server.hello",
         "config.listInstances",
         "process.readLogs",
     ]);
@@ -116,9 +116,9 @@ test("CliMain negotiates Control before a control-plane business request", async
     const server = createServer((socket) => {
         const endpoint = new Endpoint();
         const protocols = [
-            new Rpc(endpoint.bind("service", "@control"), {
+            new Rpc(endpoint.bind("server", "@control"), {
                 hello: () => {
-                    methods.push("service.hello");
+                    methods.push("server.hello");
                     return {
                         capabilities: ["request", "stream", "streamResume"],
                         protocolVersion: CONTROL_PROTOCOL_VERSION,
@@ -164,7 +164,7 @@ test("CliMain negotiates Control before a control-plane business request", async
 
     assert.equal(await cli.run(["overview"]), 0);
     assert.deepEqual(methods, [
-        "service.hello",
+        "server.hello",
         "extension.cliCommands",
         "overview.get",
     ]);

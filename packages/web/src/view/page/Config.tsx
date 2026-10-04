@@ -25,7 +25,7 @@ export function Config({
     const domains = useWebDomains();
     const config = useDomainSnapshot(domains.config);
     const instancesState = useDomainSnapshot(domains.instances);
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const configView = config.view;
     const instances = useMemo(
         () => configInstances(configView),
@@ -81,7 +81,7 @@ export function Config({
     const operationPending =
         store.state.operations["config:update"] !== undefined;
     const interactive =
-        service.status === "online" && !disabled && !operationPending;
+        server.status === "online" && !disabled && !operationPending;
 
     function updateDraft(path: string, value: JsonValue | undefined): void {
         if (parsed.value === undefined) return;

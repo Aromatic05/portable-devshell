@@ -16,7 +16,7 @@ import {
     createRemoteError,
     createConnectionTransport,
     createProcessTransport,
-    createServiceTransport,
+    createServerTransport,
     createTaskTransport,
     createToolTransport,
     type ApprovalTransport,
@@ -34,7 +34,7 @@ import {
     type OverviewTransport,
     type ConnectionTransport,
     type ProcessTransport,
-    type ServiceTransport,
+    type ServerTransport,
     type StreamMessage,
     type TaskEvent,
     type TaskTransport,
@@ -72,7 +72,7 @@ export interface CliClients {
     overview: OverviewTransport;
     reverse: ConnectionTransport;
     runtime: CliClientRuntime;
-    service: ServiceTransport;
+    server: ServerTransport;
     todo: CliClientTodo;
     tool: ToolTransport;
     close(): void;
@@ -101,7 +101,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
         overview: createOverviewTransport(endpoint),
         reverse: createConnectionTransport(endpoint),
         runtime: createCliRuntimeAdapter(endpoint, runtime),
-        service: createServiceTransport(endpoint, { clientKind: "cli" }),
+        server: createServerTransport(endpoint, { clientKind: "cli" }),
         todo: {
             deleteTodo: task.deleteTodo,
             getTodo: task.getTodo,
@@ -117,7 +117,7 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
 }
 
 export async function negotiateCliControl(clients: CliClients): Promise<void> {
-    const hello = await clients.service.hello();
+    const hello = await clients.server.hello();
     if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
         throw new CliRenderError(
             "control.protocolVersionMismatch",

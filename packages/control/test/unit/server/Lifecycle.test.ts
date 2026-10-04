@@ -16,7 +16,7 @@ import {
     ControlPathHome,
     ControlPathRuntime,
     createInstanceTransport,
-    createServiceTransport,
+    createServerTransport,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -665,7 +665,7 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
         }
 
         const endpoint = new Endpoint();
-        const rpc = new Rpc(endpoint.bind("service", "@control"), {
+        const rpc = new Rpc(endpoint.bind("server", "@control"), {
             hello: () => ({
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: CONTROL_PROTOCOL_VERSION,
@@ -896,7 +896,7 @@ async function listInstances(socketPath: string) {
             LocalChannel.connect(socketPath, { signal }),
     });
     try {
-        await createServiceTransport(endpoint, { clientKind: "cli" }).hello();
+        await createServerTransport(endpoint, { clientKind: "cli" }).hello();
         return await createInstanceTransport(endpoint).listInstances();
     } finally {
         endpoint.close();

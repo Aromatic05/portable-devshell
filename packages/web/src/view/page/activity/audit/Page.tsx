@@ -53,7 +53,7 @@ export function Audit({
 }) {
     const domains = useWebDomains();
     const now = useNow();
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const instancesState = useDomainSnapshot(domains.instances);
     const contextState = useDomainSnapshot(domains.context);
     const toolCallsState = useDomainSnapshot(domains.toolCalls);
@@ -145,7 +145,7 @@ export function Audit({
         );
     }, [filters, now, route, scopedCalls, toolCallPage]);
     const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
-    const interactive = service.status === "online" && !disabled;
+    const interactive = server.status === "online" && !disabled;
     const countText =
         route.view === "call"
             ? selection.total === 0
@@ -156,9 +156,9 @@ export function Audit({
               : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
 
     useEffect(() => {
-        if (service.status !== "online") return;
+        if (server.status !== "online") return;
         void store.refreshAudit();
-    }, [service.status, store]);
+    }, [server.status, store]);
 
     function changeFilters(next: Filters): void {
         setToolCallPage(0);
@@ -256,11 +256,11 @@ export function Audit({
                     }
                 />
             ) : null}
-            {service.status === "offline" && allCalls.length === 0 ? (
+            {server.status === "offline" && allCalls.length === 0 ? (
                 <p className="empty">
                     Tool calls are unavailable while offline.
                 </p>
-            ) : service.status === "connecting" && allCalls.length === 0 ? (
+            ) : server.status === "connecting" && allCalls.length === 0 ? (
                 <p className="empty">Loading tool calls…</p>
             ) : selection.items.length === 0 ? (
                 <p className="empty">

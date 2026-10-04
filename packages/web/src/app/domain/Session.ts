@@ -13,7 +13,7 @@ import {
     MessageViewModel,
     OverviewViewModel,
     ProcessViewModel,
-    ServiceSession,
+    ServerSession,
     TodoViewModel,
     ToolCallViewModel,
     createApprovalTransport,
@@ -29,7 +29,7 @@ import {
     createOverviewTransport,
     createConnectionTransport,
     createProcessTransport,
-    createServiceTransport,
+    createServerTransport,
     createToolTransport,
     createTuiPageTransport,
     createWebPageTransport,
@@ -60,7 +60,7 @@ export class WebDomainSession {
     readonly messages: MessageViewModel;
     readonly overview: OverviewViewModel;
     readonly reverse: ConnectionTransport;
-    readonly service: ServiceSession;
+    readonly server: ServerSession;
     readonly toolCalls: ToolCallViewModel;
 
     readonly #approvals = new Map<string, ApprovalViewModel>();
@@ -80,9 +80,9 @@ export class WebDomainSession {
         this.#taskTransport = createTaskTransport(this.#endpoint);
         const toolTransport = createToolTransport(this.#endpoint);
 
-        this.service = new ServiceSession(
+        this.server = new ServerSession(
             this.#endpoint,
-            createServiceTransport(this.#endpoint, { clientKind: "web" }),
+            createServerTransport(this.#endpoint, { clientKind: "web" }),
         );
         this.config = new ConfigViewModel(createConfigTransport(this.#endpoint));
         this.messagePreferences = new MessagePreferenceViewModel(
@@ -160,7 +160,7 @@ export class WebDomainSession {
     }
 
     async load(): Promise<void> {
-        await this.service.connect();
+        await this.server.connect();
         await Promise.all([
             this.config.get(),
             this.instances.list(),
@@ -177,7 +177,7 @@ export class WebDomainSession {
     }
 
     async reconnect(): Promise<void> {
-        await this.service.reconnect();
+        await this.server.reconnect();
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -209,6 +209,6 @@ export class WebDomainSession {
         this.mcp.close();
         this.overview.close();
         this.config.close();
-        this.service.close();
+        this.server.close();
     }
 }

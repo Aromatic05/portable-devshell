@@ -620,7 +620,7 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
         attach(socket: Socket) {
             const endpoint = new Endpoint();
             const protocols: Array<Rpc | Stream> = [
-                new Rpc(endpoint.bind("service", "@control"), {
+                new Rpc(endpoint.bind("server", "@control"), {
                     hello: () => ({
                         capabilities: ["request", "stream", "streamResume"],
                         protocolVersion: CONTROL_PROTOCOL_VERSION,

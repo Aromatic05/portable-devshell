@@ -20,7 +20,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { Endpoint } from "../transport/endpoint/Endpoint.js";
 import { LocalChannel } from "../transport/endpoint/channel/Local.js";
-import { createServiceTransport } from "../control/service/Transport.js";
+import { createServerTransport } from "../control/server/Transport.js";
 import {
     ControlPathHome,
     ControlSocketFile,
@@ -583,11 +583,11 @@ function createSocketControlLifecycleRpcClient(
                     }),
             });
             try {
-                const service = createServiceTransport(endpoint, {
+                const server = createServerTransport(endpoint, {
                     clientKind: "cli",
                 });
-                await service.hello();
-                return await service[operation]();
+                await server.hello();
+                return await server[operation]();
             } finally {
                 endpoint.close();
             }

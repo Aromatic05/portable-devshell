@@ -6,7 +6,7 @@ import {
     connectControlChannel,
     createContextTransport,
     createInstanceTransport,
-    createServiceTransport,
+    createServerTransport,
 } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../extension/host/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
@@ -82,7 +82,7 @@ export class ControlRuntimeFactory {
             });
             const contextTransport = createContextTransport(internalEndpoint);
             const instanceTransport = createInstanceTransport(internalEndpoint);
-            const serviceTransport = createServiceTransport(internalEndpoint, {
+            const serverTransport = createServerTransport(internalEndpoint, {
                 clientKind: "cli",
             });
             const contexts = new ContextModule({
@@ -195,7 +195,7 @@ export class ControlRuntimeFactory {
                 contextTransport,
                 internalControl: {
                     endpoint: internalEndpoint,
-                    service: serviceTransport,
+                    server: serverTransport,
                 },
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,

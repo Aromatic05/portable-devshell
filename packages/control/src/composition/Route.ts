@@ -13,7 +13,7 @@ import type {
     ControlPortDefinition,
     JsonValue,
 } from "@portable-devshell/shared";
-import { routeModule } from "../server/Route.js";
+import { createServerRouteModule, routeModule } from "../server/Route.js";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
@@ -45,7 +45,6 @@ import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
 import { OperationalOverviewService } from "../overview/Service.js";
 import type { ReverseCredentialService } from "@portable-devshell/core";
-import { createServiceRouteModule } from "../service/Route.js";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,
@@ -167,7 +166,7 @@ export class ControlRouteComposition {
             {
                 host: "@control",
                 ports: mergePortDefinitionsByName([
-                    createServiceRouteModule({
+                    createServerRouteModule({
                         instanceCount: () =>
                             this.#options.instances.list().length,
                         restart: this.#options.restart,

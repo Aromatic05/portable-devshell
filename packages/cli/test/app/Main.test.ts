@@ -51,7 +51,7 @@ test("CliMain runs migrate locally without contacting or creating Control state"
                     close() {
                         closeCalls += 1;
                     },
-                    service: {
+                    server: {
                         async hello() {
                             helloCalls += 1;
                             throw new Error("migrate must not contact Control");
@@ -85,7 +85,7 @@ test("CliMain runs update locally without contacting Control", async () => {
                 close() {
                     closeCalls += 1;
                 },
-                service: {
+                server: {
                     async hello() {
                         helloCalls += 1;
                         throw new Error("update must not contact Control");
@@ -1709,7 +1709,7 @@ test("CliMain rejects an incompatible protocol before a business request", async
     const cli = new CliMain({
         createCliClients: () =>
             ({
-                service: {
+                server: {
                     async hello() {
                         return { capabilities: [], protocolVersion: 0 };
                     },
@@ -1928,7 +1928,7 @@ function testClients(client: Record<string, unknown>) {
             typeof client.reconnect === "function"
                 ? await invoke("reconnect", [])
                 : undefined,
-        service: {
+        server: {
             async hello() {
                 if (typeof client.hello === "function") {
                     return await invoke("hello", []);

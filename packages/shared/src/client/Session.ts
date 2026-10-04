@@ -1,4 +1,4 @@
-// Control service session. Owns only the control-plane connection and service
+// Control server session. Owns only the control-plane connection and server
 // handshake lifecycle for one shared Endpoint: connect/hello/status, protocol
 // version verification, connection state publication, transport-open
 // re-handshake, explicit reconnect, and the restart action. It carries no
@@ -9,20 +9,20 @@ import type { JsonValue } from "../types/Json.js";
 import {
     CONTROL_PROTOCOL_RANGE,
     type ControlProtocolCapability,
-    type ControlServiceStatus,
-} from "../control/service/Model.js";
-import type { ServiceTransport } from "../control/service/Transport.js";
+    type ControlServerStatus,
+} from "../control/server/Model.js";
+import type { ServerTransport } from "../control/server/Transport.js";
 
 const protocolVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
-export type ServiceSessionStatus = "connecting" | "online" | "offline";
+export type ServerSessionStatus = "connecting" | "online" | "offline";
 
-export interface ServiceSessionSnapshot {
+export interface ServerSessionSnapshot {
     readonly capabilities: readonly ControlProtocolCapability[];
     readonly failure?: Error;
     readonly protocolVersion?: string;
-    readonly service?: ControlServiceStatus;
-    readonly status: ServiceSessionStatus;
+    readonly server?: ControlServerStatus;
+    readonly status: ServerSessionStatus;
 }
 
 interface ParsedProtocolVersion {
@@ -31,21 +31,21 @@ interface ParsedProtocolVersion {
     readonly patch: number;
 }
 
-export class ServiceSession {
+export class ServerSession {
     readonly #endpoint: Endpoint;
     readonly #listeners = new Set<() => void>();
     readonly #offTransportClose: () => void;
     readonly #offTransportOpen: () => void;
-    readonly #transport: ServiceTransport;
+    readonly #transport: ServerTransport;
     #closed = false;
     #generation = 0;
     #handshake?: Promise<void>;
-    #published: ServiceSessionSnapshot = emptySnapshot();
+    #published: ServerSessionSnapshot = emptySnapshot();
     #reconnect?: Promise<void>;
-    #state: ServiceSessionSnapshot = emptySnapshot();
+    #state: ServerSessionSnapshot = emptySnapshot();
     #suppressTransportOpen = false;
 
-    constructor(endpoint: Endpoint, transport: ServiceTransport) {
+    constructor(endpoint: Endpoint, transport: ServerTransport) {
         this.#endpoint = endpoint;
         this.#transport = transport;
         this.#offTransportClose = endpoint.onTransportClose((error) =>
@@ -56,11 +56,11 @@ export class ServiceSession {
         );
     }
 
-    get state(): Readonly<ServiceSessionSnapshot> {
+    get state(): Readonly<ServerSessionSnapshot> {
         return this.#published;
     }
 
-    getSnapshot(): Readonly<ServiceSessionSnapshot> {
+    getSnapshot(): Readonly<ServerSessionSnapshot> {
         return this.#published;
     }
 
@@ -90,7 +90,7 @@ export class ServiceSession {
         return pending;
     }
 
-    /** Delegates the service restart without refreshing any other domain. */
+    /** Delegates the server restart without refreshing any other domain. */
     async restart(): Promise<Record<string, JsonValue>> {
         if (this.#closed) throw closedError();
         return await this.#transport.restart();
@@ -171,12 +171,12 @@ export class ServiceSession {
             if (!isProtocolVersionSupported(hello.protocolVersion)) {
                 throw protocolVersionError(hello.protocolVersion);
             }
-            const service = await this.#transport.status();
+            const server = await this.#transport.status();
             if (generation !== this.#generation || this.#closed) return;
             this.#state = {
                 capabilities: [...hello.capabilities],
                 protocolVersion: hello.protocolVersion,
-                service,
+                server,
                 status: "online",
             };
             this.#emit();
@@ -199,12 +199,12 @@ export class ServiceSession {
     }
 }
 
-function emptySnapshot(): ServiceSessionSnapshot {
+function emptySnapshot(): ServerSessionSnapshot {
     return { capabilities: [], status: "offline" };
 }
 
 function closedError(): Error {
-    return new Error("Service session is closed.");
+    return new Error("Server session is closed.");
 }
 
 function protocolVersionError(version: string): Error {

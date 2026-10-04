@@ -13,7 +13,7 @@ export {
     CONTROL_WEB_SESSION_PATH,
     controlWebSocketProtocols,
 } from "./client/Control.js";
-export type { ServiceSessionStatus } from "./client/Session.js";
+export type { ServerSessionStatus } from "./client/Session.js";
 export type { TerminalStreamCommandIdentity } from "./execution/terminal/Model.js";
 export { isRemoteErrorBody } from "./transport/Error.js";
 export { EnvelopeCodec } from "./transport/envelope/Codec.js";

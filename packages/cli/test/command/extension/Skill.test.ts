@@ -17,7 +17,7 @@ test("skill cli.commands binding is dispatched with caller cwd", async () => {
         createCliClients: () =>
             ({
                 close() {},
-                service: {
+                server: {
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],

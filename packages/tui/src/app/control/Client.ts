@@ -13,7 +13,7 @@ import {
     MessageViewModel,
     OverviewViewModel,
     ProcessViewModel,
-    ServiceSession,
+    ServerSession,
     TodoViewModel,
     ToolCallViewModel,
     connectControlChannel,
@@ -30,7 +30,7 @@ import {
     createOverviewTransport,
     createConnectionTransport,
     createProcessTransport,
-    createServiceTransport,
+    createServerTransport,
     createTerminalTransport,
     createToolTransport,
     createTuiPageTransport,
@@ -43,7 +43,7 @@ import {
     type MessageTransport,
     type ConnectionTransport,
     type ProcessTransport,
-    type ServiceTransport,
+    type ServerTransport,
     type TerminalTransport,
     type TaskTransport,
     type ToolTransport,
@@ -58,7 +58,7 @@ export interface TuiClientOptions extends ControlChannelOptions {}
  * combined subscription surface.
  */
 export class TuiDomainSession {
-    readonly service: ServiceSession;
+    readonly server: ServerSession;
     readonly config: ConfigViewModel;
     readonly overview: OverviewViewModel;
     readonly mcp: AuthViewModel;
@@ -77,7 +77,7 @@ export class TuiDomainSession {
     readonly instanceTransport: InstanceTransport;
     readonly messageTransport: MessageTransport;
     readonly reverse: ConnectionTransport;
-    readonly serviceTransport: ServiceTransport;
+    readonly serverTransport: ServerTransport;
     readonly terminalTransport: TerminalTransport;
     readonly taskTransport: TaskTransport;
     readonly toolTransport: ToolTransport;
@@ -96,10 +96,10 @@ export class TuiDomainSession {
         this.#approvalTransport = createApprovalTransport(endpoint);
         this.terminalTransport = createTerminalTransport(endpoint);
 
-        this.serviceTransport = createServiceTransport(endpoint, {
+        this.serverTransport = createServerTransport(endpoint, {
             clientKind: "tui",
         });
-        this.service = new ServiceSession(endpoint, this.serviceTransport);
+        this.server = new ServerSession(endpoint, this.serverTransport);
 
         this.configTransport = createConfigTransport(endpoint);
         this.instanceTransport = createInstanceTransport(endpoint);
@@ -176,7 +176,7 @@ export class TuiDomainSession {
     }
 
     async load(): Promise<void> {
-        await this.service.connect();
+        await this.server.connect();
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -193,7 +193,7 @@ export class TuiDomainSession {
     }
 
     async reconnect(): Promise<void> {
-        await this.service.reconnect();
+        await this.server.reconnect();
         await Promise.all([
             this.config.refresh(),
             this.instances.refresh(),
@@ -225,7 +225,7 @@ export class TuiDomainSession {
         this.mcp.close();
         this.overview.close();
         this.config.close();
-        this.service.close();
+        this.server.close();
     }
 }
 

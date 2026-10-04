@@ -407,7 +407,7 @@ export function ContextIntervention({
     store: WebStore;
 }) {
     const domains = useWebDomains();
-    const service = useDomainSnapshot(domains.service);
+    const server = useDomainSnapshot(domains.server);
     const contextState = useDomainSnapshot(domains.context);
     const storeState = useSyncExternalStore(
         store.subscribe,
@@ -426,7 +426,7 @@ export function ContextIntervention({
             : (
                   context.environments
               ).find((candidate) => candidate.instance === instance);
-    const interactive = service.status === "online" && !disabled;
+    const interactive = server.status === "online" && !disabled;
     const renewOperation = `context-renew:${ctxId}`;
     const disableOperation = `context-disable:${ctxId}`;
 

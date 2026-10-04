@@ -17,7 +17,7 @@ test("secret cli.commands binding is dispatched with caller cwd", async () => {
         createCliClients: () =>
             ({
                 close() {},
-                service: {
+                server: {
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],
@@ -62,7 +62,7 @@ test("Extension json command result uses text rendering only in text output mode
         createCliClients: () =>
             ({
                 close() {},
-                service: {
+                server: {
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],

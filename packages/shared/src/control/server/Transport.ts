@@ -6,22 +6,22 @@ import {
     CONTROL_PROTOCOL_RANGE,
     type ControlClientKind,
     type ControlProtocolHelloResponse,
-    type ControlServiceStatus,
+    type ControlServerStatus,
 } from "./Model.js";
 
-export interface ServiceTransport {
+export interface ServerTransport {
     hello(): Promise<ControlProtocolHelloResponse>;
     ping(): Promise<{ pong: boolean }>;
     restart(): Promise<Record<string, JsonValue>>;
     shutdown(): Promise<Record<string, JsonValue>>;
-    status(): Promise<ControlServiceStatus>;
+    status(): Promise<ControlServerStatus>;
 }
 
-export function createServiceTransport(
+export function createServerTransport(
     endpoint: Endpoint,
     options: { clientKind: ControlClientKind },
-): ServiceTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "service");
+): ServerTransport {
+    const port = createPortClient(endpoint, CONTROL_HOST, "server");
     return {
         hello: () =>
             port.request<ControlProtocolHelloResponse>("hello", {
@@ -31,6 +31,6 @@ export function createServiceTransport(
         ping: () => port.request<{ pong: boolean }>("ping"),
         restart: () => port.request<Record<string, JsonValue>>("restart"),
         shutdown: () => port.request<Record<string, JsonValue>>("shutdown"),
-        status: () => port.request<ControlServiceStatus>("status"),
+        status: () => port.request<ControlServerStatus>("status"),
     };
 }

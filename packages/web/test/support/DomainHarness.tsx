@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { createEmptyMessagePreferences, type ArtifactStoredImageResult } from "@portable-devshell/shared";
-import { type ServiceSessionStatus } from "@portable-devshell/shared/testing";
+import { type ServerSessionStatus } from "@portable-devshell/shared/testing";
 
 import { WebDomainProvider } from "../../src/app/domain/Context.js";
 import type { WebDomainSession } from "../../src/app/domain/Session.js";
@@ -38,10 +38,10 @@ function asyncVoid(): Promise<void> {
 }
 
 export class WebTestDomains {
-    readonly service = Object.assign(
+    readonly server = Object.assign(
         new TestDomainSource({
             capabilities: [] as any[],
-            status: "online" as ServiceSessionStatus,
+            status: "online" as ServerSessionStatus,
         }),
         { restart: async () => ({}) },
     );
@@ -222,7 +222,7 @@ export class WebTestDomains {
 
     constructor() {
         this.domains = {
-            service: this.service,
+            server: this.server,
             config: this.config,
             overview: this.overview,
             mcp: this.mcp,
