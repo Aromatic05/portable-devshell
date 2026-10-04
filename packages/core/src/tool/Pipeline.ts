@@ -23,10 +23,13 @@ import {
     type ToolCallHookProvider,
 } from "./hook/Sequence.js";
 import { snapshotJson } from "./hook/Snapshot.js";
-import type { ToolCallApi } from "./Runtime.js";
+import type { ToolCallApi, ToolCallHooks } from "./Runtime.js";
+
+type ToolCallExecutor = Parameters<ToolCallHooks["registerExecute"]>[1];
 
 export interface ToolCallDispatchRequest {
     readonly callId: string;
+    readonly execute?: ToolCallExecutor;
     readonly hooks: ToolCallHookSequence;
     readonly invocationInput?: (
         input: JsonValue,
@@ -56,15 +59,18 @@ export type ToolCallTargetResolver = (instance: InstanceName) => ToolCallTarget;
 
 export interface ToolCallPipelineOptions {
     hooks: ToolCallHookProvider;
+    resolveExecute?: (toolName: string) => ToolCallExecutor | undefined;
     resolveTarget: ToolCallTargetResolver;
 }
 
 export class ToolCallPipeline implements ToolCallApi {
     readonly #hooks: ToolCallHookProvider;
+    readonly #resolveExecute?: ToolCallPipelineOptions["resolveExecute"];
     readonly #resolveTarget: ToolCallTargetResolver;
 
     constructor(options: ToolCallPipelineOptions) {
         this.#hooks = options.hooks;
+        this.#resolveExecute = options.resolveExecute;
         this.#resolveTarget = options.resolveTarget;
     }
 
@@ -229,8 +235,13 @@ export class ToolCallPipeline implements ToolCallApi {
             }
 
             const target = this.#resolveTarget(hookValue.context.instance);
+            const execute =
+                operation === undefined
+                    ? this.#resolveExecute?.(hookValue.toolName)
+                    : undefined;
             return await target.dispatch({
                 callId,
+                ...(execute === undefined ? {} : { execute }),
                 hooks,
                 ...(invocationInput === undefined ? {} : { invocationInput }),
                 ...(onProgress === undefined ? {} : { onProgress }),

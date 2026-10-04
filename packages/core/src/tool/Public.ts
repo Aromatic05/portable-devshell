@@ -26,6 +26,7 @@ export function createToolCallRuntime(options: {
     return {
         api: new ToolCallPipeline({
             hooks: hooks.provider(),
+            resolveExecute: (toolName) => hooks.lookupExecute(toolName),
             resolveTarget: options.resolveTarget,
         }),
         hooks,

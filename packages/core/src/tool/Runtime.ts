@@ -70,8 +70,20 @@ export type ToolCallHookContributor = (
 
 export interface ToolCallHooks {
     registerContributor(contributor: ToolCallHookContributor): () => void;
+    registerExecute(
+        toolName: string,
+        execute: (
+            callId: string,
+            input: JsonValue,
+            value: Readonly<ToolCallHookValue>,
+            signal?: AbortSignal,
+            onProgress?: (progress: JsonValue) => void,
+        ) => Promise<JsonValue> | JsonValue,
+    ): () => void;
     registerReview(review: ToolCallReviewHook): () => void;
 }
+
+type ToolCallExecutor = Parameters<ToolCallHooks["registerExecute"]>[1];
 
 /**
  * Cross-domain surface for issuing ToolCalls. Consumers depend on this instead
@@ -119,7 +131,18 @@ export interface ToolCallApi {
  */
 export class ToolCallHookRegistry implements ToolCallHooks {
     readonly #contributors: ToolCallHookContributor[] = [];
+    readonly #executes = new Map<string, ToolCallExecutor>();
     readonly #reviews: ToolCallReviewHook[] = [];
+
+    registerExecute(toolName: string, execute: ToolCallExecutor): () => void {
+        if (this.#executes.has(toolName))
+            throw new Error(`ToolCall execute already registered: ${toolName}`);
+        this.#executes.set(toolName, execute);
+        return () => {
+            if (this.#executes.get(toolName) === execute)
+                this.#executes.delete(toolName);
+        };
+    }
 
     /** Register a long-lived review hook and return an unregister function. */
     registerReview(review: ToolCallReviewHook): () => void {
@@ -143,6 +166,10 @@ export class ToolCallHookRegistry implements ToolCallHooks {
     provider(): ToolCallHookProvider {
         return async (context, signal, recording) =>
             await this.#acquire(context, Object.freeze({ recording, signal }));
+    }
+
+    lookupExecute(toolName: string): ToolCallExecutor | undefined {
+        return this.#executes.get(toolName);
     }
 
     async #acquire(

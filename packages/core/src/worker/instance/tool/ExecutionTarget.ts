@@ -74,6 +74,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     async dispatch(request: ToolCallDispatchRequest): Promise<JsonValue> {
         const {
             callId,
+            execute,
             hooks,
             invocationInput,
             onProgress,
@@ -103,7 +104,8 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                           callId,
                           hookValue,
                       );
-            if (operation === undefined) this.#assertReady();
+            if (operation === undefined && execute === undefined)
+                this.#assertReady();
         } catch (error) {
             if (hostRecorded) await this.#audit.failActive(scope, error);
             throw error;
@@ -187,6 +189,14 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     await this.#audit.running(scope, runningContext);
                 if (operation !== undefined)
                     return await operation(callId, innerInput, hookValue);
+                if (execute !== undefined)
+                    return await execute(
+                        callId,
+                        innerInput,
+                        hookValue,
+                        signal,
+                        hookProgress,
+                    );
                 return await this.#toolInvoker.invoke(
                     hookValue.toolName,
                     innerInput,

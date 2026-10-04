@@ -13,6 +13,7 @@ import {
     ToolCallPipeline,
     type ToolCallTargetResolver,
 } from "../../../src/tool/Pipeline.ts";
+import { ToolCallHookRegistry } from "../../../src/tool/Runtime.ts";
 import { ToolCallExecutionTarget } from "../../../src/worker/instance/tool/ExecutionTarget.ts";
 import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
 import type {
@@ -246,6 +247,68 @@ test("unknown original instance rewrites to a valid target resolved exactly once
         ["instance-b"],
     );
     assert.deepEqual(source.released, ["release"]);
+});
+
+test("registered execute handles the rewritten tool through the target lifecycle", async () => {
+    const target = createHarness("instance-a", {
+        assertReady() {
+            assert.fail("registered execute must not require worker readiness");
+        },
+    });
+    const hooks = new ToolCallHookRegistry();
+    const executed: Array<{ input: JsonValue; toolName: string }> = [];
+    hooks.registerContributor(() => ({
+        rewrites: [
+            {
+                hook: "500-route",
+                id: "rewrite",
+                rewrite: async (input) =>
+                    input.direction === "inbound"
+                        ? {
+                              ...input.value,
+                              payload: { value: 2 },
+                              toolName: "virtual_execute",
+                          }
+                        : input.value,
+            },
+        ],
+        release() {},
+    }));
+    hooks.registerExecute(
+        "virtual_execute",
+        async (_callId, input, value) => {
+            executed.push({ input, toolName: value.toolName });
+            return { handled: true };
+        },
+    );
+    const pipeline = new ToolCallPipeline({
+        hooks: hooks.provider(),
+        resolveExecute: (toolName) => hooks.lookupExecute(toolName),
+        resolveTarget: () => target.target,
+    });
+
+    const result = await pipeline.call(
+        "instance-a",
+        "bash_run",
+        { command: "echo original" },
+        context,
+    );
+
+    assert.deepEqual(result, { handled: true });
+    assert.deepEqual(executed, [
+        { input: { value: 2 }, toolName: "virtual_execute" },
+    ]);
+    assert.deepEqual(target.invoked, []);
+    assert.deepEqual(
+        target.scheduled.map((entry) => entry.toolName),
+        ["virtual_execute"],
+    );
+    assert.deepEqual(target.audit, [
+        "requested",
+        "queued",
+        "running",
+        "completed",
+    ]);
 });
 
 test("outbound progress and result run rewrite then review in forward order", async () => {
