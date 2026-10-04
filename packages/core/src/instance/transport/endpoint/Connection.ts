@@ -15,7 +15,7 @@ import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 import type {
     WorkerProtocolClient,
     WorkerHandshakeResult,
-} from "../../protocol/Client.js";
+} from "../packet/Client.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../../tool/Catalog.js";
 import type { WorkerTransportConnection } from "../../transport/Transport.js";

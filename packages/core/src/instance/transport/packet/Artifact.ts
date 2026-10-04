@@ -9,14 +9,14 @@ import type {
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
     WorkerProtocolClient,
-} from "../../protocol/Client.js";
-import { WorkerTransportServiceClient } from "../../transport/service/Client.js";
+} from "./Client.js";
+import { WorkerTransportServiceClient } from "./service/Client.js";
 import type {
     WorkerArtifactPayloadReadInput,
     WorkerArtifactPayloadReadResult,
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult,
-} from "../../transport/service/Model.js";
+} from "./service/Model.js";
 interface WorkerInstanceArtifactOptions {
     assertReady(): void;
     protocolClient: WorkerProtocolClient;

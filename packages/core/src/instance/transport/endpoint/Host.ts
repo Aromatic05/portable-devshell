@@ -4,26 +4,26 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import type { ApprovalApi } from "../approval/Api.js";
-import { createApprovalRouteModule } from "../approval/Route.js";
-import { createMessageRouteModule } from "../message/Route.js";
-import { createProcessRouteModule } from "../process/Route.js";
-import { ProcessSubscriptionManager } from "../process/Subscription.js";
-import type { TaskApi } from "../task/Api.js";
-import { createGoalTaskRouteModule } from "../task/goal/Route.js";
-import { createTodoTaskRouteModule } from "../task/todo/Route.js";
-import type { TerminalBackend } from "../terminal/Backend.js";
-import { createTerminalRouteModule } from "../terminal/Route.js";
-import { TerminalSessionService } from "../terminal/Service.js";
+import type { ApprovalApi } from "../../../approval/Api.js";
+import { createApprovalRouteModule } from "../../../approval/Route.js";
+import { createMessageRouteModule } from "../../../message/Route.js";
+import { createProcessRouteModule } from "../../runtime/process/Route.js";
+import { ProcessSubscriptionManager } from "../../runtime/process/Subscription.js";
+import type { TaskApi } from "../../../task/Api.js";
+import { createGoalTaskRouteModule } from "../../../task/goal/Route.js";
+import { createTodoTaskRouteModule } from "../../../task/todo/Route.js";
+import type { TerminalBackend } from "../../../terminal/Backend.js";
+import { createTerminalRouteModule } from "../../../terminal/Route.js";
+import { TerminalSessionService } from "../../../terminal/Service.js";
 import {
     createToolIngressRouteModule,
     type ToolCallIngressPort,
-} from "../tool/Route.js";
-import { createToolRouteModule } from "./ToolRoute.js";
-import type { ToolCallProvenanceStore } from "../tool/Provenance.js";
-import type { InstanceDescriptor } from "../instance/Descriptor.js";
-import type { InstanceRegistry } from "../instance/Registry.js";
-import type { InstanceEventSource } from "../instance/EventBuffer.js";
+} from "../../../tool/Route.js";
+import { createToolRouteModule } from "../packet/ToolRoute.js";
+import type { ToolCallProvenanceStore } from "../../../tool/Provenance.js";
+import type { InstanceDescriptor } from "../../Descriptor.js";
+import type { InstanceRegistry } from "../../Registry.js";
+import type { InstanceEventSource } from "../../EventBuffer.js";
 
 export interface InstanceHostOptions {
     approval: ApprovalApi;

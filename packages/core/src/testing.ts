@@ -1,7 +1,7 @@
 export * from "./storage/audit/database/Database.js";
 export * from "./storage/audit/RecordStore.js";
 export * from "./storage/audit/database/Limits.js";
-export * from "./instance/Paths.js";
+export * from "./instance/tmp/Paths.js";
 export * from "./instance/state/Machine.js";
 export * from "./instance/state/Status.js";
 export * from "./instance/state/Snapshot.js";
@@ -21,7 +21,7 @@ export * from "./worker/instance/Instance.js";
 export * from "./worker/instance/Config.js";
 export * from "./worker/instance/Factory.js";
 export * from "./worker/provision/HomeDirectory.js";
-export * from "./worker/protocol/Client.js";
+export * from "./instance/transport/packet/Client.js";
 export * from "./worker/provision/target/Target.js";
 export * from "./worker/provision/target/Mapper.js";
 export * from "./worker/provision/target/Probe.js";
@@ -34,10 +34,10 @@ export * from "./worker/transport/provider/Local.js";
 export * from "./worker/transport/provider/container/Podman.js";
 export * from "./worker/transport/provider/Ssh.js";
 export * from "./worker/transport/Factory.js";
-export * from "./worker/transport/service/Client.js";
-export * from "./worker/transport/service/Model.js";
+export * from "./instance/transport/packet/service/Client.js";
+export * from "./instance/transport/packet/service/Model.js";
 
-export * from "./worker/protocol/Terminal.js";
+export * from "./instance/transport/packet/Terminal.js";
 
 export * from "./instance/Registry.js";
 export type { InstanceDescriptor } from "./instance/Descriptor.js";

@@ -4,7 +4,7 @@ import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
-} from "../worker/protocol/Terminal.js";
+} from "../instance/transport/packet/Terminal.js";
 
 export type WorkerTerminalPort = Pick<
     WorkerInstance,

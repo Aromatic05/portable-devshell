@@ -10,18 +10,18 @@ import {
     type ToolEvent,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
-import type { WorkerInstance } from "../worker/instance/Instance.js";
+import { routeModule } from "../../../Port.js";
+import type { WorkerInstance } from "../../index.js";
 import {
     limitToolCallResponse,
     readToolCallQuery,
     readToolSessionOpen,
-} from "../tool/Input.js";
-import type { ToolCallProvenanceStore } from "../tool/Provenance.js";
+} from "../../../tool/Input.js";
+import type { ToolCallProvenanceStore } from "../../../tool/Provenance.js";
 import {
     createToolIngressRouteModule,
     type ToolCallIngressPort,
-} from "../tool/Route.js";
+} from "../../../tool/Route.js";
 
 export interface ToolRouteInstancePort {
     name?: string;
