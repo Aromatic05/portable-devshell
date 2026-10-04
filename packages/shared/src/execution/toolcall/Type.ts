@@ -1,5 +1,6 @@
-import type { InstanceName } from "../types/Instance.js";
-import type { JsonValue } from "../types/Json.js";
+import type { InstanceName } from "../../types/Instance.js";
+import type { JsonValue } from "../../types/Json.js";
+import { snapshotJson } from "../../types/JsonSnapshot.js";
 
 type ToolCapability = "read" | "write" | "execute" | "manage";
 type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "extension";
@@ -83,4 +84,22 @@ export interface ToolCallRecord {
     termination?: ToolTermination;
     toolName: string;
     workspace?: string;
+}
+
+const payloads = new WeakMap<object, JsonValue>();
+
+export function attachToolCallErrorPayload<T extends Error>(
+    error: T,
+    payload: JsonValue,
+): T {
+    payloads.set(error, snapshotJson(payload));
+    return error;
+}
+
+export function readToolCallErrorPayload(
+    error: unknown,
+): JsonValue | undefined {
+    return typeof error === "object" && error !== null
+        ? payloads.get(error)
+        : undefined;
 }

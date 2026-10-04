@@ -9,13 +9,13 @@ import type {
     ToolCallContext,
     ToolCallRecord,
     ToolDefinition,
-} from "../../toolcall/Type.js";
+} from "./Type.js";
 
 export type {
     ToolCallContext,
     ToolCallRecord,
     ToolDefinition,
-} from "../../toolcall/Type.js";
+} from "./Type.js";
 
 export type ToolCapability = ToolDefinition["requiredCapabilities"][number];
 export type ToolCallSource = ToolCallContext["source"];
