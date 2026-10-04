@@ -2,40 +2,26 @@ import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
     tools,
     type McpToolBinding,
-    type McpToolDeclaration,
     type McpToolInvocationContext,
     type McpToolResult,
 } from "@portable-devshell/extension/mcp";
-import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../../../extension/host/Host.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<
         ExtensionHost,
-        "acquireRegistration" | "contextEnvironmentRetired" | "listDeclarations"
+        "acquireRegistration" | "contextEnvironmentRetired"
     >;
 
     constructor(
         extensions: Pick<
             ExtensionHost,
-            | "acquireRegistration"
-            | "contextEnvironmentRetired"
-            | "listDeclarations"
+            "acquireRegistration" | "contextEnvironmentRetired"
         >,
     ) {
         this.#extensions = extensions;
-    }
-
-    listTools(): readonly ToolDefinition[] {
-        return this.#extensions
-            .listDeclarations(tools.id)
-            .map((registration) =>
-                toolDefinition(
-                    registration.extensionId,
-                    registration.declaration as McpToolDeclaration,
-                ),
-            );
     }
 
     async callTool(
@@ -79,42 +65,6 @@ export class McpExtensionService {
             reason,
         });
     }
-}
-
-function toolDefinition(
-    extensionId: string,
-    declaration: McpToolDeclaration,
-): ToolDefinition {
-    const annotations = compact({
-        destructiveHint: declaration.destructiveHint,
-        idempotentHint: declaration.idempotentHint,
-        openWorldHint: declaration.openWorldHint,
-        readOnlyHint: declaration.readOnlyHint,
-    });
-    const mcp = compact({
-        activity: declaration.activity,
-        annotations:
-            Object.keys(annotations).length === 0 ? undefined : annotations,
-        extensionTool: true,
-        invoked: declaration.invoked,
-        invoking: declaration.invoking,
-        preserveInputDescriptions: true,
-        title: declaration.title,
-    });
-    return {
-        _meta: {
-            devshell: {
-                extensionId,
-                mcp,
-            },
-        },
-        description: declaration.description,
-        group: declaration.id.slice(0, declaration.id.indexOf("_")),
-        inputSchema: declaration.inputSchema as JsonValue,
-        name: declaration.id,
-        outputSchema: declaration.outputSchema as JsonValue,
-        requiredCapabilities: [],
-    };
 }
 
 function validateToolResult(value: unknown, toolName: string): McpToolResult {
@@ -163,15 +113,4 @@ function validateToolResult(value: unknown, toolName: string): McpToolResult {
         ...(result.isError === undefined ? {} : { isError: result.isError }),
         structuredContent: result.structuredContent as ExtensionJsonValue,
     });
-}
-
-function compact(
-    value: Record<string, ExtensionJsonValue | undefined>,
-): Record<string, ExtensionJsonValue> {
-    return Object.fromEntries(
-        Object.entries(value).filter(
-            (entry): entry is [string, ExtensionJsonValue] =>
-                entry[1] !== undefined,
-        ),
-    );
 }

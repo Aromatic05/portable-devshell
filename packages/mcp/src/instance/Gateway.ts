@@ -13,7 +13,6 @@ import type {
     TodoTaskControlAction,
     ToolCallContext,
     ToolCallRecord,
-    ToolDefinition,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
@@ -186,8 +185,6 @@ interface McpGatewayShape {
         reason: "disabled" | "expired",
     ): Promise<void>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
-    listTools(instance: string): ToolDefinition[];
-    listExtensionTools?(instance: string): readonly ToolDefinition[];
     prepareWorkspace(
         instance: string,
         workspace: string,
@@ -240,8 +237,6 @@ export type McpToolCallPort = Pick<
     | "closeToolSession"
     | "readToolCalls"
     | "hasActiveToolCalls"
-    | "listTools"
-    | "listExtensionTools"
 >;
 
 export type McpTaskPort = Pick<

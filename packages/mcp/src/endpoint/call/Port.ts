@@ -3,14 +3,11 @@ import type {
     ToolCallContext,
     ToolCallQuery,
     ToolCallRecord,
-    ToolDefinition,
 } from "@portable-devshell/shared";
 
 import type { McpEndpointEnvironmentHandshake } from "../../instance/Gateway.js";
 
 export interface McpEndpointWorkerPort {
-    hasToolSchemaCache?(): boolean;
-    listTools(): ToolDefinition[];
     snapshot(): { ready?: boolean };
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;

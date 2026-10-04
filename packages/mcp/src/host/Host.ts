@@ -1,7 +1,4 @@
-import type {
-    ControlMcpContextMode,
-    ToolDefinition,
-} from "@portable-devshell/shared";
+import type { ControlMcpContextMode } from "@portable-devshell/shared";
 import type {
     McpAuthConfig,
     McpOAuth2Config,
@@ -37,8 +34,6 @@ export interface WorkerInstanceLike {
         toolName: string,
         context: { ctxId?: string; requestId?: string },
     ): Promise<void>;
-    hasToolSchemaCache?(): boolean;
-    listTools(): ToolDefinition[];
     prepareExtensionResource?(input: {
         collection: string;
         extensionId: string;

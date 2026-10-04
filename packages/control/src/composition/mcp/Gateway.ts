@@ -18,7 +18,6 @@ import type {
     ControlConfig,
     JsonValue,
     ToolCallContext,
-    ToolDefinition,
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceConnectionService } from "@portable-devshell/core";
@@ -140,11 +139,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     setExtensionService(service: McpExtensionService): void {
         this.#extensions = service;
-    }
-
-    listExtensionTools(instance: string): readonly ToolDefinition[] {
-        this.#requireDescriptor(instance);
-        return this.#extensions?.listTools() ?? [];
     }
 
     async contextTerminated(
@@ -367,10 +361,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return (await this.#requireTask(instance).todo.read(
             input,
         )) as unknown as JsonValue;
-    }
-
-    listTools(instance: string): ToolDefinition[] {
-        return this.#requireDescriptor(instance).worker.listTools();
     }
 
     async prepareWorkspace(instance: string, workspace: string) {
