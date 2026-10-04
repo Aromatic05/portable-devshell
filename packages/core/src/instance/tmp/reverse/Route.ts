@@ -2,10 +2,10 @@ import type { ControlPortDefinition } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../server/Route.js";
 import { readReverseInstanceName } from "./Input.js";
-import type { ReverseCredentialService } from "@portable-devshell/core";
+import type { ReverseCredentials } from "@portable-devshell/core";
 
 export function createConnectionRouteModule(
-    service?: ReverseCredentialService,
+    service?: ReverseCredentials,
 ): ControlPortDefinition {
     const connection = () =>
         requirePort(service, "Connection management is not available.");

@@ -14,7 +14,11 @@ export interface PortClient {
         payload?: unknown,
         signal?: AbortSignal,
     ): Promise<T>;
-    open(operation: string, payload?: unknown): Promise<MessageStream>;
+    open(
+        operation: string,
+        payload?: unknown,
+        signal?: AbortSignal,
+    ): Promise<MessageStream>;
 }
 
 export function createPortClient(
@@ -25,8 +29,8 @@ export function createPortClient(
     return {
         request: (operation, payload, signal) =>
             request(endpoint, host, port, operation, payload, signal),
-        open: (operation, payload) =>
-            open(endpoint, host, port, operation, payload),
+        open: (operation, payload, signal) =>
+            open(endpoint, host, port, operation, payload, signal),
     };
 }
 
@@ -69,11 +73,19 @@ async function open(
     port: PortName,
     operation: string,
     payload?: unknown,
+    signal?: AbortSignal,
 ): Promise<MessageStream> {
-    const protocol = new Stream(await endpoint.connect(host, port));
+    signal?.throwIfAborted();
+    const protocol = new Stream(await endpoint.connect(host, port, signal));
     const stream = await protocol.open(operation, payload);
     const close = () => protocol.close();
     stream.onClose(close);
     stream.onCancel(close);
+    if (signal !== undefined)
+        signal.addEventListener(
+            "abort",
+            () => void stream.cancel({ message: String(signal.reason) }),
+            { once: true },
+        );
     return stream;
 }

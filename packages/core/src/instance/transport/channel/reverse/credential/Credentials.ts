@@ -6,20 +6,20 @@ import {
 } from "@portable-devshell/shared";
 
 import type {
-    ReverseInstanceLookupPort,
-    ReverseInstancePort,
-} from "../Port.js";
+    ReverseInstanceLookup,
+    ReverseInstance,
+} from "../Instance.js";
 import { ReverseCredentialStore } from "./Store.js";
 
-export class ReverseCredentialService {
+export class ReverseCredentials {
     readonly #credentialStore: ReverseCredentialStore;
-    readonly #instanceRegistry: ReverseInstanceLookupPort;
+    readonly #instanceRegistry: ReverseInstanceLookup;
     #publicBaseUrl: string;
     #disconnect?: (instance: string) => void;
 
     constructor(options: {
         credentialStore: ReverseCredentialStore;
-        instanceRegistry: ReverseInstanceLookupPort;
+        instanceRegistry: ReverseInstanceLookup;
         publicBaseUrl: string;
     }) {
         this.#credentialStore = options.credentialStore;
@@ -70,7 +70,7 @@ export class ReverseCredentialService {
         this.#disconnect?.(instance);
     }
 
-    #requireReverseInstance(instance: string): ReverseInstancePort {
+    #requireReverseInstance(instance: string): ReverseInstance {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
             throw createRemoteError({

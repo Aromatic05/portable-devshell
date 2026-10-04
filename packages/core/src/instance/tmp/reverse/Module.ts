@@ -5,8 +5,8 @@ import {
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "@portable-devshell/core";
 
-import { ReverseConnectionGateway } from "../../transport/channel/reverse/Gateway.js";
-import { ReverseCredentialService } from "@portable-devshell/core";
+import { ReverseIngress } from "../../transport/channel/reverse/Ingress.js";
+import { ReverseCredentials } from "@portable-devshell/core";
 import { ReverseCredentialStore } from "@portable-devshell/core";
 
 interface ConnectionLifecyclePort {
@@ -21,7 +21,7 @@ interface ConnectionLifecyclePort {
 interface ConnectionMcpPort {
     readonly instanceEditor: ConnectionLifecyclePort;
     readonly host?: {
-        readonly server: Parameters<ReverseConnectionGateway["install"]>[0];
+        readonly server: Parameters<ReverseIngress["install"]>[0];
     };
 }
 
@@ -37,8 +37,8 @@ export interface ConnectionModuleOptions {
 }
 
 export class ConnectionModule {
-    readonly service?: ReverseCredentialService;
-    readonly #gateway?: ReverseConnectionGateway;
+    readonly service?: ReverseCredentials;
+    readonly #gateway?: ReverseIngress;
 
     constructor(options: ConnectionModuleOptions) {
         const config = options.state.requireConfig();
@@ -60,12 +60,12 @@ export class ConnectionModule {
         const credentialStore = new ReverseCredentialStore(
             options.state.homeDirectory,
         );
-        this.service = new ReverseCredentialService({
+        this.service = new ReverseCredentials({
             credentialStore,
             instanceRegistry: options.state.instances,
             publicBaseUrl: config.mcp.publicBaseUrl,
         });
-        this.#gateway = new ReverseConnectionGateway({
+        this.#gateway = new ReverseIngress({
             credentialStore,
             instanceRegistry: options.state.instances,
             publicBaseUrl: config.mcp.publicBaseUrl,
@@ -93,7 +93,7 @@ export class ConnectionModule {
     }
 
     install(
-        server: Parameters<ReverseConnectionGateway["install"]>[0],
+        server: Parameters<ReverseIngress["install"]>[0],
         publicBaseUrl?: string,
     ): void {
         if (publicBaseUrl !== undefined) {

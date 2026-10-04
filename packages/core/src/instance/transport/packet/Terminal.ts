@@ -1,7 +1,8 @@
 import {
     Endpoint,
     Event,
-    Rpc,
+    createPortClient,
+    type PortClient,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -63,14 +64,16 @@ export type WorkerTerminalNotification =
           };
       };
 
-export class WorkerTerminalClient {
+export class WorkerTerminal {
     readonly #endpoint: Endpoint;
+    readonly #port: PortClient;
     readonly #events: Event;
     readonly #workerHost: string;
 
     constructor(endpoint: Endpoint, workerHost: string) {
         this.#endpoint = endpoint;
         this.#workerHost = workerHost;
+        this.#port = createPortClient(endpoint, workerHost, "terminal");
         this.#events = new Event(endpoint.bind("terminal"));
     }
 
@@ -134,14 +137,7 @@ export class WorkerTerminalClient {
     }
 
     async #request<T>(method: string, message: unknown): Promise<T> {
-        const rpc = new Rpc(
-            await this.#endpoint.connect(this.#workerHost, "terminal"),
-        );
-        try {
-            return (await rpc.request(method, message)) as T;
-        } finally {
-            rpc.close();
-        }
+        return await this.#port.request<T>(method, message);
     }
 }
 

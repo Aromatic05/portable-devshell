@@ -9,7 +9,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ReverseCredentialStore } from "./credential/Store.js";
-import type { ReverseInstanceLookupPort, ReverseInstancePort } from "./Port.js";
+import type { ReverseInstanceLookup, ReverseInstance } from "./Instance.js";
 import { ReverseSseChannel } from "./SseChannel.js";
 
 interface ActiveReverseConnection {
@@ -20,25 +20,25 @@ interface ActiveReverseConnection {
 
 export interface ReverseConnectionIdentity {
     credentialToken: string;
-    descriptor: ReverseInstancePort;
+    descriptor: ReverseInstance;
     generation: number;
 }
 
-export interface ReverseConnectionServiceOptions {
+export interface ReverseConnectionsOptions {
     credentialStore: ReverseCredentialStore;
-    instanceRegistry: ReverseInstanceLookupPort;
+    instanceRegistry: ReverseInstanceLookup;
     publicBaseUrl: string;
 }
 
-export class ReverseConnectionService {
+export class ReverseConnections {
     readonly #credentialStore: ReverseCredentialStore;
-    readonly #instanceRegistry: ReverseInstanceLookupPort;
+    readonly #instanceRegistry: ReverseInstanceLookup;
     readonly #publicBaseUrl: string;
     readonly #active = new Map<string, ActiveReverseConnection>();
     readonly #activationQueues = new Map<string, Promise<unknown>>();
     #stopped = false;
 
-    constructor(options: ReverseConnectionServiceOptions) {
+    constructor(options: ReverseConnectionsOptions) {
         this.#credentialStore = options.credentialStore;
         this.#instanceRegistry = options.instanceRegistry;
         this.#publicBaseUrl = options.publicBaseUrl;
@@ -84,7 +84,7 @@ export class ReverseConnectionService {
         channel: Channel,
     ): Promise<void> {
         let generation:
-            | ReturnType<ReverseInstanceLookupPort["acquireGeneration"]>
+            | ReturnType<ReverseInstanceLookup["acquireGeneration"]>
             | undefined;
         try {
             generation = this.#acquireIdentityGeneration(identity);
@@ -203,9 +203,9 @@ export class ReverseConnectionService {
 
     #acquireIdentityGeneration(
         identity: ReverseConnectionIdentity,
-    ): ReturnType<ReverseInstanceLookupPort["acquireGeneration"]> {
+    ): ReturnType<ReverseInstanceLookup["acquireGeneration"]> {
         let generation: ReturnType<
-            ReverseInstanceLookupPort["acquireGeneration"]
+            ReverseInstanceLookup["acquireGeneration"]
         >;
         try {
             generation = this.#instanceRegistry.acquireGeneration(
@@ -248,7 +248,7 @@ export class ReverseConnectionService {
         });
     }
 
-    #requireReverseInstance(instance: string): ReverseInstancePort {
+    #requireReverseInstance(instance: string): ReverseInstance {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
             throw createRemoteError({

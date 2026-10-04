@@ -44,7 +44,7 @@ import { createAuthRouteModule } from "../auth/Route.js";
 import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
 import { OperationalOverviewService } from "../overview/Service.js";
-import type { ReverseCredentialService } from "@portable-devshell/core";
+import type { ReverseCredentials } from "@portable-devshell/core";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,
@@ -73,7 +73,7 @@ export interface ControlRouteCompositionOptions {
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
     overview?: OperationalOverviewPort;
     restart?: () => Promise<void> | void;
-    reverse?: ReverseCredentialService;
+    reverse?: ReverseCredentials;
     processSubscriptions?: ProcessSubscriptionManager;
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;

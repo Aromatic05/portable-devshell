@@ -49,6 +49,7 @@ export { attachToolCallErrorPayload, readToolCallErrorPayload } from "./toolcall
 export { snapshotJson } from "./types/JsonSnapshot.js";
 export { createRemoteError, errorMessage, RemoteError, type RemoteErrorBody, toRemoteError, toRemoteErrorBody, TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE } from "./transport/Error.js";
 export { Endpoint } from "./transport/endpoint/Endpoint.js";
+export { createPortClient, type PortClient } from "./transport/endpoint/PortClient.js";
 export { type Channel, ChannelBase, StreamChannel } from "./transport/endpoint/channel/Channel.js";
 export { LocalChannel } from "./transport/endpoint/channel/Local.js";
 export { WebChannel, WebServerChannel, type WebSocketClientLike } from "./transport/endpoint/channel/Web.js";

@@ -1,9 +1,4 @@
-import {
-    createHash,
-    randomBytes,
-    randomUUID,
-    timingSafeEqual,
-} from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
     access,
     mkdir,
@@ -25,21 +20,18 @@ import { ControlPathHome } from "@portable-devshell/shared";
 import {
     createReverseCredentialFileSecurity,
     type ReverseCredentialFileSecurity,
-} from "./Security.js";
+} from "./FileSecurity.js";
+import {
+    credentialMatches,
+    formatDeviceCode,
+    hashSecret,
+    normalizeDeviceCode,
+    parseCredentialRecord,
+    safeHashEquals,
+    type ReverseCredentialRecord,
+} from "./Record.js";
 
 const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
-
-interface ReverseCredentialRecord {
-    consumedAt?: string;
-    consumedDeviceCodeHash?: string;
-    deviceCodeExpiresAt?: string;
-    deviceCodeHash?: string;
-    enrollmentState: ReverseEnrollmentState;
-    instance: string;
-    revokedAt?: string;
-    tokenHash?: string;
-    version: 1;
-}
 
 export interface ReverseEnrollmentCredential {
     deviceToken: string;
@@ -254,7 +246,7 @@ export class ReverseCredentialStore {
         instance: string,
     ): Promise<ReverseCredentialRecord | undefined> {
         try {
-            return parseRecord(
+            return parseCredentialRecord(
                 await readFile(
                     this.#paths.reverseCredentialFile(instance),
                     "utf8",
@@ -279,7 +271,7 @@ export class ReverseCredentialStore {
                     continue;
                 }
                 records.push(
-                    parseRecord(
+                    parseCredentialRecord(
                         await readFile(
                             `${this.#paths.reverseDir}/${entry.name}`,
                             "utf8",
@@ -354,56 +346,6 @@ async function pathExists(path: string): Promise<boolean> {
         if (isMissingFile(error)) return false;
         throw error;
     }
-}
-
-function parseRecord(raw: string): ReverseCredentialRecord {
-    const value = JSON.parse(raw) as Partial<ReverseCredentialRecord>;
-    if (
-        value.version !== 1 ||
-        typeof value.instance !== "string" ||
-        (value.enrollmentState !== "pending" &&
-            value.enrollmentState !== "enrolled" &&
-            value.enrollmentState !== "revoked")
-    ) {
-        throw new Error("Invalid reverse credential record.");
-    }
-    return value as ReverseCredentialRecord;
-}
-
-function normalizeDeviceCode(value: string): string {
-    return value.replaceAll("-", "").trim().toUpperCase();
-}
-
-function formatDeviceCode(bytes: Buffer): string {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let value = "";
-    for (const byte of bytes) {
-        value += alphabet[byte % alphabet.length];
-    }
-    return `${value.slice(0, 5)}-${value.slice(5, 10)}`;
-}
-
-function hashSecret(value: string): string {
-    return createHash("sha256").update(value).digest("hex");
-}
-
-function safeHashEquals(left: string | undefined, right: string): boolean {
-    if (left === undefined || left.length !== right.length) {
-        return false;
-    }
-    return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
-}
-
-function credentialMatches(
-    record: ReverseCredentialRecord | undefined,
-    deviceToken: string,
-): boolean {
-    return (
-        record !== undefined &&
-        record.revokedAt === undefined &&
-        record.tokenHash !== undefined &&
-        safeHashEquals(record.tokenHash, hashSecret(deviceToken))
-    );
 }
 
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException {

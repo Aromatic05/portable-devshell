@@ -14,12 +14,12 @@ import {
 import { WebSocketServer } from "ws";
 
 import {
-    ReverseConnectionService,
-    ReverseCredentialStore,
+    ReverseConnections,
     type ReverseConnectionIdentity,
-    type ReverseInstanceLookupPort,
-} from "@portable-devshell/core";
+} from "./Connections.js";
+import type { ReverseInstanceLookup } from "./Instance.js";
 import { ReverseSseChannel } from "./SseChannel.js";
+import { ReverseCredentialStore } from "./credential/Store.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";
@@ -27,23 +27,23 @@ const SSE_SUFFIX = "/reverse/v1/events";
 const UPSTREAM_SUFFIX = "/reverse/v1/frames";
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
-export interface ReverseConnectionGatewayOptions {
+export interface ReverseIngressOptions {
     credentialStore: ReverseCredentialStore;
-    instanceRegistry: ReverseInstanceLookupPort;
+    instanceRegistry: ReverseInstanceLookup;
     publicBaseUrl: string;
 }
 
-export class ReverseConnectionGateway {
-    readonly #connectionService: ReverseConnectionService;
+export class ReverseIngress {
+    readonly #connections: ReverseConnections;
     #publicBaseUrl: string;
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
         noServer: true,
     });
 
-    constructor(options: ReverseConnectionGatewayOptions) {
+    constructor(options: ReverseIngressOptions) {
         this.#publicBaseUrl = options.publicBaseUrl;
-        this.#connectionService = new ReverseConnectionService(options);
+        this.#connections = new ReverseConnections(options);
     }
 
     setPublicBaseUrl(publicBaseUrl: string): void {
@@ -82,11 +82,11 @@ export class ReverseConnectionGateway {
     }
 
     disconnect(instance: string): void {
-        this.#connectionService.disconnect(instance);
+        this.#connections.disconnect(instance);
     }
 
     stop(): void {
-        this.#connectionService.stop();
+        this.#connections.stop();
         this.#webSocketServer.close();
     }
 
@@ -96,7 +96,7 @@ export class ReverseConnectionGateway {
     ): Promise<void> {
         try {
             const body = asEnrollmentRequest(await readJsonBody(request));
-            sendJson(response, 200, await this.#connectionService.enroll(body));
+            sendJson(response, 200, await this.#connections.enroll(body));
         } catch (error) {
             sendGatewayError(response, error);
         }
@@ -126,7 +126,7 @@ export class ReverseConnectionGateway {
                 head,
                 (webSocket) => {
                     const channel = new WebServerChannel(webSocket as never);
-                    void this.#connectionService
+                    void this.#connections
                         .activate(identity, "wss", channel)
                         .catch(() => channel.close());
                 },
@@ -153,7 +153,7 @@ export class ReverseConnectionGateway {
                 response,
                 readLastEventId(request),
             );
-            await this.#connectionService.activate(identity, "sse", channel);
+            await this.#connections.activate(identity, "sse", channel);
         } catch (error) {
             if (!response.headersSent) {
                 sendGatewayError(response, error);
@@ -177,7 +177,7 @@ export class ReverseConnectionGateway {
             sendJson(
                 response,
                 200,
-                this.#connectionService.acceptUpstream(identity, batch),
+                this.#connections.acceptUpstream(identity, batch),
             );
         } catch (error) {
             sendGatewayError(response, error);
@@ -192,7 +192,7 @@ export class ReverseConnectionGateway {
             readRequiredHeader(request, "x-devshell-generation"),
         );
         const token = readBearerToken(request.headers.authorization);
-        return await this.#connectionService.authenticate(
+        return await this.#connections.authenticate(
             instance,
             generation,
             token,
