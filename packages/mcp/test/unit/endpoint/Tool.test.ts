@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    McpToolCatalogEndpoint,
+    McpToolRegistry,
     McpToolDescriptionEnhancer,
     McpToolSchemaAdapter,
     mcpToolAnnotations,
@@ -146,45 +146,48 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         assert.equal(mcpToolInvocationStatus("file_read"), undefined);
     });
 
-    test("McpToolCatalogEndpoint enforces namespace groups and reserves environ bootstrap", () => {
-        const catalog = new McpToolCatalogEndpoint();
-        const environmentEntries = catalog.merge([
-            { owner: "environment", tools: [environInfo] },
-        ]);
+    test("McpToolRegistry merges wildcard and instance scopes", () => {
+        const registry = new McpToolRegistry();
+        const control = registry.register("*", [environInfo]);
+        const worker = registry.register("local", [bashRun]);
+
         assert.deepEqual(
-            environmentEntries.map((entry) => entry.definition.name),
+            registry.list("local").map((entry) => [entry.scope, entry.definition.name]),
+            [["*", "environ_info"], ["local", "bash_run"]],
+        );
+        assert.deepEqual(
+            registry.list("remote").map((entry) => entry.definition.name),
             ["environ_info"],
         );
 
-        assert.throws(
-            () =>
-                catalog.merge([
-                    { owner: "worker", tools: [{ ...bashRun, group: "file" }] },
-                ]),
-            /namespace/iu,
+        worker.replace([fileSync]);
+        assert.deepEqual(
+            registry.list("local").map((entry) => entry.definition.name),
+            ["environ_info", "file_sync"],
         );
-        assert.throws(
-            () => catalog.merge([{ owner: "worker", tools: [environInfo] }]),
-            /reserved.*environ/iu,
+        control.dispose();
+        assert.deepEqual(
+            registry.list("local").map((entry) => entry.definition.name),
+            ["file_sync"],
         );
     });
 
-    test("McpToolCatalogEndpoint rejects duplicate names across providers", () => {
-        const catalog = new McpToolCatalogEndpoint();
+    test("McpToolRegistry rejects overlapping duplicate names atomically", () => {
+        const registry = new McpToolRegistry();
+        registry.register("*", [todoRead]);
+        assert.throws(() => registry.register("local", [todoRead]), /more than once/iu);
 
+        const local = registry.register("local", [bashRun]);
+        registry.register("remote", [bashRun]);
+        assert.throws(() => local.replace([todoRead]), /more than once/iu);
+        assert.equal(registry.get("local", "bash_run")?.definition.name, "bash_run");
+    });
+
+    test("McpToolRegistry validates tool namespace groups", () => {
+        const registry = new McpToolRegistry();
         assert.throws(
-            () =>
-                catalog.merge([
-                    { owner: "worker", tools: [todoRead] },
-                    { owner: "todo", tools: [todoRead] },
-                ]),
-            (error: unknown) => {
-                assert.equal(
-                    (error as { code?: string }).code,
-                    "core.toolSchemaUnavailable",
-                );
-                return true;
-            },
+            () => registry.register("local", [{ ...bashRun, group: "file" }]),
+            /namespace/iu,
         );
     });
 

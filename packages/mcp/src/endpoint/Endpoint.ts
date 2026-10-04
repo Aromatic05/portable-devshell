@@ -6,14 +6,11 @@ import type {
 
 import type { McpAuthConfig } from "../auth/Config.js";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { ContextEnvironmentPort, ContextCleanupPort } from "../context/Port.js";
 import { createMcpContextSelector } from "../context/Selector.js";
 import type { McpInstanceGateway } from "../instance/Gateway.js";
 import type { McpTool } from "./tool/Schema.js";
+import type { McpToolRegistry } from "./tool/Registry.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
-import type { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
-import type { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
-import type { WorkspaceActionStore } from "../workspace/ActionStore.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
@@ -32,20 +29,13 @@ export type { McpEndpointEnvironmentHandshake } from "../instance/Gateway.js";
 export interface McpEndpointWorkerOptions {
     auth?: McpAuthConfig;
     contextRegistry: ContextRegistryPort;
-    environmentService: ContextEnvironmentPort;
-    cleanup: ContextCleanupPort;
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     gateway?: McpInstanceGateway;
     instanceName: string;
-    readyWaitMs?: number;
     toolProvenance?: McpToolProvenanceRecorder;
+    toolRegistry?: McpToolRegistry;
     worker: McpEndpointWorkerPort;
-    workspaceAppEnabled?: boolean;
-    workspaceAppLeases?: WorkspaceAppLeaseStore;
-    workspaceAppPresence?: WorkspaceAppPresenceStore;
-    workspaceActionStore?: WorkspaceActionStore;
-    workspaceLiveBaseUrl?: string;
 }
 
 export class McpEndpointWorker {
@@ -63,28 +53,18 @@ export class McpEndpointWorker {
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
             contextSelector,
-            gateway: options.gateway,
             instanceName: options.instanceName,
-            presentationResourceUri:
-                this.#extensions.environmentPresentation()?.resourceUri,
-            worker: options.worker,
-            workspaceAppEnabled: options.workspaceAppEnabled,
+            instanceRoutingEnabled: options.gateway !== undefined,
+            registry: options.toolRegistry,
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
-            environmentService: options.environmentService,
-            cleanup: options.cleanup,
             contextRegistry: options.contextRegistry,
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
-            readyWaitMs: options.readyWaitMs,
             toolProvenance: options.toolProvenance,
             worker: options.worker,
-            workspaceAppLeases: options.workspaceAppLeases,
-            workspaceAppPresence: options.workspaceAppPresence,
-            workspaceActionStore: options.workspaceActionStore,
-            workspaceLiveBaseUrl: options.workspaceLiveBaseUrl,
         });
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -107,10 +87,6 @@ export class McpEndpointWorker {
 
     getTool(toolName: string): ToolDefinition | undefined {
         return this.#catalog.getTool(toolName);
-    }
-
-    hasWorkerSchema(): boolean {
-        return this.#catalog.snapshot().hasWorkerSchema;
     }
 
     hasAppResources(): boolean {

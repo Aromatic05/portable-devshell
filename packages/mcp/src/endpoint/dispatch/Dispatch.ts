@@ -1,7 +1,5 @@
 import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
 import {
-    runtimeErrorCodes,
-    toRemoteErrorBody,
     type GoalActivityKind,
     type JsonValue,
     type McpContextEnvironment,
@@ -11,29 +9,15 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { ContextEnvironmentPort, ContextCleanupPort } from "../../context/Port.js";
 import {
     createMcpContextSelector,
     readMcpContextInput,
     type McpContextSelector,
 } from "../../context/Selector.js";
-import {
-    isMcpGoalGateway,
-    type McpInstanceGateway,
-} from "../../instance/Gateway.js";
-import type { McpToolCatalogArtifactName } from "../domain/artifact/Catalog.js";
-import { mcpEnvironmentToolName } from "../domain/context/environment/Catalog.js";
-import type { McpToolCatalogWorkspaceName } from "../workspace/Catalog.js";
-import type { McpToolCatalogTodoName } from "../domain/task/Catalog.js";
-import type { WorkspaceAppLeaseStore } from "../../workspace/app/Lease.js";
-import type { WorkspaceAppPresenceStore } from "../../workspace/app/Presence.js";
-import type { WorkspaceActionStore } from "../../workspace/ActionStore.js";
-import { readCurrentTaskAssociation } from "../../workspace/contributor/Task.js";
+import type { McpInstanceGateway } from "../../instance/Gateway.js";
 import { McpWorkspaceReentryArbiter } from "../../workspace/reentry/Arbiter.js";
 import {
     throwIfMcpEndpointAborted,
-    waitForMcpEndpointAbortable,
-    waitForMcpGatewayReady,
     requireMcpEndpointGateway,
 } from "../call/Boundary.js";
 import {
@@ -49,10 +33,6 @@ import {
 import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../call/Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../call/Boundary.js";
 import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
-import { McpEndpointHandlerArtifact } from "../domain/artifact/Handler.js";
-import { McpEndpointHandlerEnvironment } from "../domain/context/environment/Handler.js";
-import { McpEndpointHandlerWorkspace } from "../workspace/Handler.js";
-import { McpEndpointHandlerTodo } from "../domain/task/Handler.js";
 import { McpEndpointHandlerTool } from "../tool/Handler.js";
 import {
     assertMcpEndpointReady,
@@ -67,21 +47,13 @@ export type { McpEndpointEnvironmentHandshake } from "../../instance/Gateway.js"
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
-    cleanup: ContextCleanupPort;
     contextRegistry: ContextRegistryPort;
-    environmentService: ContextEnvironmentPort;
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
-    readyWaitMs?: number;
     tmuxBlockSyncMs?: number;
-    tmuxWaitPollMs?: number;
     toolProvenance?: McpToolProvenanceRecorder;
     worker: McpEndpointWorkerPort;
-    workspaceAppLeases?: WorkspaceAppLeaseStore;
-    workspaceAppPresence?: WorkspaceAppPresenceStore;
-    workspaceActionStore?: WorkspaceActionStore;
-    workspaceLiveBaseUrl?: string;
 }
 
 interface McpAcceptedCall {
@@ -101,28 +73,20 @@ export function mcpTmuxBlockSyncMsForContextMode(
 }
 
 export class McpEndpointDispatch {
-    readonly #artifact: McpEndpointHandlerArtifact;
     readonly #catalog: McpEndpointCatalog;
     readonly #contextRegistry: ContextRegistryPort;
-    readonly #environmentService: ContextEnvironmentPort;
     readonly #contextSelector: McpContextSelector;
-    readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #workspace: McpEndpointHandlerWorkspace;
     readonly #reentry: McpWorkspaceReentryArbiter;
     readonly #tmuxBlockSyncMs: number;
-    readonly #readyWaitMs?: number;
-    readonly #todo: McpEndpointHandlerTodo;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
     readonly #workerHandler: McpEndpointHandlerTool;
 
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
-        this.#readyWaitMs = options.readyWaitMs;
         this.#contextRegistry = options.contextRegistry;
-        this.#environmentService = options.environmentService;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
@@ -137,28 +101,6 @@ export class McpEndpointDispatch {
             mcpTmuxBlockSyncMsForContextMode(this.#contextSelector.id);
         this.#toolProvenance = options.toolProvenance;
         this.#worker = options.worker;
-        const controlOptions = {
-            contextRegistry: this.#contextRegistry,
-            gateway: options.gateway,
-            instanceName: options.instanceName,
-            workspaceAppLeases: options.workspaceAppLeases,
-            workspaceAppPresence: options.workspaceAppPresence,
-            workspaceActionStore: options.workspaceActionStore,
-            workspaceLiveBaseUrl: options.workspaceLiveBaseUrl,
-            workspaceReentryArbiter: this.#reentry,
-        };
-        this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
-        this.#environment = new McpEndpointHandlerEnvironment({
-            cleanup: options.cleanup,
-            contextRegistry: this.#contextRegistry,
-            contextSelector: this.#contextSelector,
-            environment: options.environmentService,
-            gateway: options.gateway,
-            instanceName: options.instanceName,
-            worker: options.worker,
-        });
-        this.#workspace = new McpEndpointHandlerWorkspace(controlOptions);
-        this.#todo = new McpEndpointHandlerTodo(controlOptions);
         this.#workerHandler = new McpEndpointHandlerTool({
             gateway: options.gateway,
             instanceName: options.instanceName,
@@ -179,15 +121,10 @@ export class McpEndpointDispatch {
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
-        const requestedToolName = toolName;
         const compatibility = resolveMcpLegacyTool(toolName);
         if (compatibility?.kind === "tombstone") {
             return mcpLegacyToolTombstone(toolName, compatibility);
         }
-        const legacyWorkspaceAppTool =
-            compatibility?.kind === "workspace-app-v0615"
-                ? requestedToolName
-                : undefined;
         if (
             compatibility?.kind === "alias" ||
             compatibility?.kind === "workspace-app-v0615"
@@ -195,10 +132,7 @@ export class McpEndpointDispatch {
             toolName = compatibility.replacement;
         }
         const snapshot = this.#catalog.snapshot();
-        const known = snapshot.merged.find(
-            (entry) => entry.definition.name === toolName,
-        );
-        const selected = snapshot.exposed.find(
+        const selected = snapshot.entries.find(
             (entry) => entry.definition.name === toolName,
         );
 
@@ -206,9 +140,7 @@ export class McpEndpointDispatch {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
         }
 
-        const appOnlyInteraction =
-            selected.owner === "workspace" &&
-            isAppOnlyInteractionTool(toolName);
+        const appOnlyInteraction = isAppOnlyInteractionTool(toolName);
         const provenanceInput = readMcpProvenanceInput(input);
         input = provenanceInput.input;
         const touchContext = !isPassiveWorkspaceRead(toolName);
@@ -232,7 +164,7 @@ export class McpEndpointDispatch {
               );
         input = resolvedContext.input;
         const routed =
-            selected.owner === "worker" || selected.owner === "artifact"
+            selected.scope !== "*"
                 ? readMcpRoutedInput(
                       input,
                       snapshot.instanceRoutingEnabled,
@@ -251,8 +183,10 @@ export class McpEndpointDispatch {
             finalValue: ToolCallHookValue,
         ): Promise<McpAcceptedCall> => {
             accepted = await this.#prepareCall(
-                callId, finalValue, selected.owner, requestContext,
-                provenanceInput.provenance, signal,
+                callId,
+                finalValue,
+                requestContext,
+                provenanceInput.provenance,
             );
             return accepted;
         };
@@ -288,10 +222,8 @@ export class McpEndpointDispatch {
     async #prepareCall(
         callId: string,
         value: ToolCallHookValue,
-        owner: string,
         requestContext: McpEndpointCallContext,
         provenance: ToolCallProvenance,
-        signal?: AbortSignal,
     ): Promise<McpAcceptedCall> {
         const { instance, ctxId } = value.context;
         const gateway = requireMcpEndpointGateway(this.#gateway, this.#instanceName);
@@ -307,25 +239,10 @@ export class McpEndpointDispatch {
             record = await this.#contextRegistry.validate(record.ctxId, { principal: requestContext.principal });
         }
         await this.#contextRegistry.assertInstanceAvailable(record.ctxId, instance);
-        let workspaceAdvice: string[] = [];
-        if (owner === "worker") {
-            await waitForMcpGatewayReady(gateway, instance, signal, { timeoutMs: this.#readyWaitMs });
-            const definition = gateway.listTools(instance).find((tool) => tool.name === value.toolName);
-            if (definition === undefined) throw mcpEndpointToolNotExposed(value.toolName, instance);
-            this.#catalog.assertAdaptable(definition);
-            const prepared = await this.#environmentService.ensurePrepared(
-                record.ctxId,
-                instance,
-                value.context.workspace,
-            );
-            const alerts = await this.#touchAlerts(instance, prepared.workspace!);
-            workspaceAdvice = alerts.advice.map((advice) => advice.text);
-        }
+        const workspaceAdvice: string[] = [];
         await this.#appendMcpToolCalled(instance, value.toolName, value.context);
         const executionEpoch = await this.#reentry.observeExecutionStart(record.ctxId, instance);
-        const definition = owner === "worker"
-            ? gateway.listTools(instance).find((tool) => tool.name === value.toolName)
-            : this.#catalog.getTool(value.toolName);
+        const definition = this.#catalog.getTool(value.toolName, instance);
         const goalActivity = value.toolName === "workspace_goal" ? undefined
             : workspaceGoalActivity(value.toolName, value.payload, this.#tmuxBlockSyncMs, definition?._meta);
         if (goalActivity !== undefined) {
@@ -390,18 +307,6 @@ export class McpEndpointDispatch {
                 context,
             );
         }
-    }
-
-    async #touchAlerts(
-        instance: string,
-        workspace: string,
-    ): Promise<{ advice: Array<{ code: string; text: string }> }> {
-        if (instance === this.#instanceName) {
-            const result = await this.#worker.touchAlerts?.(workspace);
-            return result === undefined ? { advice: [] } : result;
-        }
-        const result = await this.#gateway?.touchAlerts(instance, workspace);
-        return result === undefined ? { advice: [] } : result;
     }
 
 }

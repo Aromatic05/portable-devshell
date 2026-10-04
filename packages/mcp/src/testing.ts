@@ -39,6 +39,7 @@ export * from "./endpoint/workspace/Catalog.js";
 export * from "./endpoint/workspace/Handler.js";
 export * from "./endpoint/domain/task/Catalog.js";
 export * from "./endpoint/tool/Catalog.js";
+export * from "./endpoint/tool/Registry.js";
 export * from "./endpoint/tool/Metadata.js";
 export * from "./endpoint/tool/Schema.js";
 

@@ -17,10 +17,7 @@ import { McpEndpointWorker } from "../endpoint/Endpoint.js";
 import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
 import { createWorkspaceMcpExtension } from "../endpoint/extension/Workspace.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
-import {
-    installMcpWorkspaceLiveRoute,
-    workspaceLiveBaseUrl,
-} from "../workspace/Route.js";
+import { installMcpWorkspaceLiveRoute } from "../workspace/Route.js";
 import { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
 import { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
 import { WorkspaceActionStore } from "../workspace/ActionStore.js";
@@ -271,9 +268,6 @@ export class McpHost {
             isMcpWorkspaceActionGateway(instance.gateway);
         if (!workspaceApp)
             this.#workspaceAppPresence.revokeInstance(instance.name);
-        const liveBaseUrl = workspaceApp
-            ? workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name)
-            : undefined;
         const extensions = new McpExtensionRegistry(
             workspaceApp
                 ? [createWorkspaceMcpExtension(this.#config.publicBaseUrl)]
@@ -282,8 +276,6 @@ export class McpHost {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
-                environmentService: this.#runtimeState.contexts.environment,
-                cleanup: this.#runtimeState.contexts.cleanup,
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
                 extensions,
@@ -291,17 +283,6 @@ export class McpHost {
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
                 worker: instance.worker,
-                workspaceAppEnabled: workspaceApp,
-                ...(workspaceApp
-                    ? {
-                          workspaceAppLeases: this.#workspaceAppLeases,
-                          workspaceActionStore: this.#workspaceActions,
-                          workspaceAppPresence: this.#workspaceAppPresence,
-                      }
-                    : {}),
-                ...(liveBaseUrl === undefined
-                    ? {}
-                    : { workspaceLiveBaseUrl: liveBaseUrl }),
             }),
             this.#config.serverVersion,
         );
