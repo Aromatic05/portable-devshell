@@ -9,6 +9,7 @@ import { WorkerCommandClient } from "../transport/command/Client.js";
 import { WorkerProtocolClient } from "../protocol/Client.js";
 import { WorkerToolCatalog } from "../tool/Catalog.js";
 import { WorkerToolInvoker } from "../tool/Invoker.js";
+import { WorkerMcpToolRegistration } from "../tool/Mcp.js";
 import { WorkerToolCallScheduler } from "../tool/Scheduler.js";
 import { WorkerTerminalClient } from "../protocol/Terminal.js";
 import { WorkerTransportConnection } from "../transport/Transport.js";
@@ -71,6 +72,7 @@ export class WorkerInstanceFactory {
                 eventStore,
             ),
             logStore: new LogStoreInstance(resolved.name, logStore),
+            mcpTools: new WorkerMcpToolRegistration(resolved.name),
             protocolClient,
             endpoint,
             stateMachine: new InstanceStateMachine(resolved.name),

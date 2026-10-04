@@ -1,11 +1,9 @@
 import {
     type Endpoint,
-    type InstanceName,
     type MessageStream,
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
-    type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
     type ReverseEnrollmentState,
@@ -57,6 +55,7 @@ import type {
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../tool/Catalog.js";
 import type { WorkerToolInvoker } from "../tool/Invoker.js";
+import type { WorkerMcpToolRegistration } from "../tool/Mcp.js";
 import type { WorkerToolCallScheduler } from "../tool/Scheduler.js";
 import type {
     WorkerTerminalAttachResult,
@@ -87,6 +86,7 @@ interface WorkerInstanceDependencies {
     config: ResolvedWorkerInstanceConfig;
     eventBuffer: InstanceEventBuffer;
     logStore: LogStoreInstance;
+    mcpTools: WorkerMcpToolRegistration;
     protocolClient: WorkerProtocolClient;
     endpoint: Endpoint;
     stateMachine: InstanceStateMachine;
@@ -105,16 +105,17 @@ export class WorkerInstance {
     readonly #connection: WorkerInstanceConnection;
     readonly #commandSessions: WorkerCommandSessionBridge;
     readonly #lifecycle: WorkerInstanceLifecycle;
+    readonly #mcpTools: WorkerMcpToolRegistration;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #state: WorkerInstanceState;
     readonly #services: WorkerTransportServiceClient;
     readonly #terminalClient: WorkerTerminalClient;
     readonly #tool: WorkerInstanceTool;
-    readonly #toolInvoker: WorkerToolInvoker;
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#catalog = dependencies.catalog;
         this.#config = dependencies.config;
+        this.#mcpTools = dependencies.mcpTools;
         this.#protocolClient = dependencies.protocolClient;
         this.#state = new WorkerInstanceState({
             config: this.#config,
@@ -127,6 +128,7 @@ export class WorkerInstance {
                 this.#state.apply(update, this.#connection.snapshotReverse()),
             catalog: this.#catalog,
             config: this.#config,
+            publishTools: (definitions) => this.#mcpTools.replace(definitions),
             protocolClient: dependencies.protocolClient,
             endpoint: dependencies.endpoint,
             snapshot: () => this.snapshot(),
@@ -171,7 +173,6 @@ export class WorkerInstance {
             toolCallScheduler: dependencies.toolCallScheduler,
             toolInvoker: dependencies.toolInvoker,
         });
-        this.#toolInvoker = dependencies.toolInvoker;
     }
 
     snapshot(): InstanceSnapshot {
@@ -495,6 +496,7 @@ export class WorkerInstance {
         try {
             await this.#lifecycle.closeConnection();
         } finally {
+            this.#mcpTools.dispose();
             this.#commandSessions.close();
             this.#audit.close();
         }
@@ -519,27 +521,4 @@ export class WorkerInstance {
             details: { instanceName: this.#config.name },
         });
     }
-}
-
-function findTmuxTask(
-    result: JsonValue,
-    taskId: string,
-): Record<string, JsonValue> | undefined {
-    if (
-        typeof result !== "object" ||
-        result === null ||
-        Array.isArray(result) ||
-        !Array.isArray(result.panes)
-    ) {
-        return undefined;
-    }
-    for (const pane of result.panes) {
-        if (typeof pane !== "object" || pane === null || Array.isArray(pane))
-            continue;
-        const task = pane.task;
-        if (typeof task !== "object" || task === null || Array.isArray(task))
-            continue;
-        if (task.id === taskId) return task;
-    }
-    return undefined;
 }

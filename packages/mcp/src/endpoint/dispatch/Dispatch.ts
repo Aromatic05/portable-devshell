@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import {
     type GoalActivityKind,
     type JsonValue,

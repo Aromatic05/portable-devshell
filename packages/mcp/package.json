@@ -13,6 +13,10 @@
         "./testing": {
             "types": "./dist/testing.d.ts",
             "default": "./dist/testing.js"
+        },
+        "./tool": {
+            "types": "./dist/endpoint/tool/Public.d.ts",
+            "default": "./dist/endpoint/tool/Public.js"
         }
     },
     "files": [
@@ -35,7 +39,6 @@
     "devDependencies": {
         "@modelcontextprotocol/client": "2.0.0",
         "@portable-devshell/comment-extension": "workspace:*",
-        "@portable-devshell/core": "workspace:*",
         "@types/express": "^5.0.6",
         "esbuild": "0.28.2"
     },

@@ -15,8 +15,6 @@ import {
 } from "@modelcontextprotocol/server";
 import {
     readToolCallErrorPayload,
-} from "@portable-devshell/core";
-import {
     toRemoteErrorBody,
     type RemoteErrorBody,
     type JsonValue,

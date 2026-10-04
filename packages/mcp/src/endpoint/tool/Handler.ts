@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core/toolcall";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import type { McpToolCallPort } from "../../instance/Gateway.js";
 import { readMcpRoutedInput } from "./Input.js";

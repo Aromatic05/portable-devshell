@@ -32,6 +32,16 @@ export interface ToolCallContext {
     source: ToolCallSource;
 }
 
+export type ToolCallHookKind = "call" | "error" | "progress" | "result";
+export type ToolCallHookContext = ToolCallContext & { instance: InstanceName };
+
+export interface ToolCallHookValue {
+    context: ToolCallHookContext;
+    kind: ToolCallHookKind;
+    payload: JsonValue;
+    toolName: string;
+}
+
 export interface ToolCallRecord {
     callId: string;
     completedAt?: string;

@@ -234,6 +234,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@portable-devshell/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -295,9 +298,6 @@ importers:
       '@portable-devshell/comment-extension':
         specifier: workspace:*
         version: link:../../extensions/comment
-      '@portable-devshell/core':
-        specifier: workspace:*
-        version: link:../core
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -3568,7 +3568,7 @@ snapshots:
 
   '@portable-devshell/control@file:packages/control(react@18.3.1)':
     dependencies:
-      '@portable-devshell/core': file:packages/core
+      '@portable-devshell/core': file:packages/core(react@18.3.1)
       '@portable-devshell/extension': file:packages/extension
       '@portable-devshell/mcp': file:packages/mcp(react@18.3.1)
       '@portable-devshell/shared': file:packages/shared
@@ -3589,15 +3589,20 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@portable-devshell/core@file:packages/core':
+  '@portable-devshell/core@file:packages/core(react@18.3.1)':
     dependencies:
+      '@portable-devshell/mcp': file:packages/mcp(react@18.3.1)
       '@portable-devshell/shared': file:packages/shared
       string-argv: 0.3.2
       tar-stream: 3.2.0
     transitivePeerDependencies:
+      - '@cfworker/json-schema'
       - bare-abort-controller
       - bare-buffer
+      - react
+      - react-dom
       - react-native-b4a
+      - supports-color
 
   '@portable-devshell/extension@file:packages/extension': {}
 

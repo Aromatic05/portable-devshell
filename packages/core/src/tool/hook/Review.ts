@@ -1,20 +1,13 @@
 import type {
-    InstanceName,
     JsonValue,
-    ToolCallContext,
+    ToolCallHookContext,
+    ToolCallHookKind,
+    ToolCallHookValue,
 } from "@portable-devshell/shared";
 import { snapshotJson } from "./Snapshot.js";
 
 export type ToolCallHookDirection = "inbound" | "outbound";
-export type ToolCallHookKind = "call" | "error" | "progress" | "result";
-export type ToolCallHookContext = ToolCallContext & { instance: InstanceName };
-
-export interface ToolCallHookValue {
-    context: ToolCallHookContext;
-    kind: ToolCallHookKind;
-    payload: JsonValue;
-    toolName: string;
-}
+export type { ToolCallHookContext, ToolCallHookKind, ToolCallHookValue } from "@portable-devshell/shared";
 
 export interface ToolCallReviewValue {
     readonly context: Readonly<ToolCallHookContext>;

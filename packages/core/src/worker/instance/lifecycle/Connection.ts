@@ -3,6 +3,7 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
+    type ToolDefinition,
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
     type ReverseTransport,
@@ -39,6 +40,7 @@ interface WorkerInstanceConnectionOptions {
     config: ResolvedWorkerInstanceConfig;
     protocolClient: WorkerProtocolClient;
     endpoint: Endpoint;
+    publishTools(definitions: readonly ToolDefinition[]): void;
     snapshot(): InstanceSnapshot;
     transportConnection: WorkerTransportConnection;
 }
@@ -50,6 +52,7 @@ export class WorkerInstanceConnection {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #endpoint: Endpoint;
+    readonly #publishTools: WorkerInstanceConnectionOptions["publishTools"];
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
     readonly #transportConnection: WorkerTransportConnection;
     #closed = false;
@@ -65,6 +68,7 @@ export class WorkerInstanceConnection {
         this.#config = options.config;
         this.#protocolClient = options.protocolClient;
         this.#endpoint = options.endpoint;
+        this.#publishTools = options.publishTools;
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
         if (this.#config.managementMode === "selfManaged") {
@@ -108,6 +112,7 @@ export class WorkerInstanceConnection {
             );
             const tools = await this.#protocolClient.listTools();
             const refreshedTools = this.#catalog.refresh(tools.tools);
+            this.#publishTools(refreshedTools);
             await this.#appendEvent("worker.transportConnected");
             await this.#appendEvent(
                 "worker.schemaRefreshed",
@@ -295,6 +300,7 @@ export class WorkerInstanceConnection {
             );
             const tools = await this.#protocolClient.listTools();
             const refreshedTools = this.#catalog.refresh(tools.tools);
+            this.#publishTools(refreshedTools);
             if (this.#reverseStatus !== undefined) {
                 this.#reverseStatus = {
                     ...this.#reverseStatus,
