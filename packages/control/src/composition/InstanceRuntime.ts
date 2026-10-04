@@ -94,6 +94,7 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         if (entry === undefined) return;
         const approval = this.#approval(entry);
         const failures: unknown[] = [];
+        entry.task?.wait.close();
         await approval
             .retire(`Instance ${instance} was disabled before approval.`)
             .catch((error) => failures.push(error));
@@ -110,6 +111,7 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         const approval = this.#approval(entry);
         const task = this.#task(entry);
         const failures: unknown[] = [];
+        task.wait.close();
         await approval
             .retire(`Instance ${instance} was deleted.`)
             .catch((error) => failures.push(error));
@@ -126,6 +128,7 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         const entry = this.#entries.get(instance);
         if (entry === undefined) return;
         entry.approval?.close();
+        entry.task?.wait.close();
         this.#entries.delete(instance);
     }
 
@@ -167,6 +170,7 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
         entry.taskFacade = {
             goal: lazyMethods(() => this.#task(entry).goal),
             todo: lazyMethods(() => this.#task(entry).todo),
+            wait: lazyMethods(() => this.#task(entry).wait),
         };
         this.#entries.set(descriptor.name, entry);
         return entry;
@@ -191,6 +195,13 @@ export class InstanceDomainRuntime implements InstanceDomainRuntimePort {
                 await entry.worker.appendControlEvent(type, data);
             },
             instanceName: asInstanceName(entry.name),
+            invokeTool: async (toolName, input, context, signal) =>
+                await entry.worker.invokeToolInternal(
+                    toolName,
+                    input,
+                    context,
+                    signal,
+                ),
             paths: entry.paths,
         });
         return entry.task;

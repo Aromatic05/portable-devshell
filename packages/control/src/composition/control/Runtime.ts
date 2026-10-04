@@ -25,6 +25,7 @@ import { ModelDevshellBroker } from "../../extension/api/point/cli/command/Model
 import {
     ProcessSubscriptionManager,
     installTodoTools,
+    installWaitToolCallRewrite,
 } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
@@ -182,6 +183,19 @@ export class ControlRuntime {
                 (instance) => options.mcp.instanceDomains.task(instance),
             ),
         );
+        this.#toolCallHookUnregister.push(
+            installWaitToolCallRewrite(
+                toolCalls.hooks,
+                (instance) => options.mcp.instanceDomains.task(instance)?.wait,
+            ),
+        );
+        const resumeWaits = () => {
+            for (const instance of options.instances.list())
+                options.mcp.instanceDomains.task(instance.name)?.wait.resume();
+        };
+        resumeWaits();
+        const stopWaitResume = options.instances.onChange(resumeWaits);
+        this.#toolCallHookUnregister.push(stopWaitResume);
         this.#toolCallHookUnregister.push(
             installArtifactTools(
                 options.artifact.service,

@@ -4,6 +4,7 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type JsonValue,
+    type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
     type ReverseEnrollmentState,
@@ -434,6 +435,16 @@ export class WorkerInstance {
 
     async refreshStatus(): Promise<InstanceSnapshot> {
         return await this.#lifecycle.refreshStatus();
+    }
+
+    async invokeToolInternal(
+        toolName: string,
+        input: JsonValue,
+        context?: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        this.#assertReady();
+        return await this.#tool.invokeInternal(toolName, input, context, signal);
     }
 
     toolCallTarget(): ToolCallTarget {

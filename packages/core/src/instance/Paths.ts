@@ -23,6 +23,7 @@ export class InstancePaths {
     readonly legacyLogsFile: string;
     readonly legacyToolCallsFile: string;
     readonly todoFile: string;
+    readonly waitsFile: string;
     readonly workerConfigFile: string;
     readonly workerLogFile: string;
     readonly workerPidFile: string;
@@ -51,6 +52,7 @@ export class InstancePaths {
             "tool-calls.jsonl",
         );
         this.todoFile = join(this.controlWorkerDir, "todo.json");
+        this.waitsFile = join(this.controlWorkerDir, "detached-waits.json");
         this.workerConfigFile = join(this.instanceRootDir, "config.toml");
         this.workerLogFile = join(this.instanceRootDir, "logs", "worker.log");
         this.workerPidFile = join(this.instanceRootDir, "state", "worker.pid");

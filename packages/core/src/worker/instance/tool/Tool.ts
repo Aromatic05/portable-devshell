@@ -1,6 +1,7 @@
 import {
     type InstanceName,
     type JsonValue,
+    type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -36,12 +37,14 @@ export class WorkerInstanceTool {
     readonly #audit: WorkerInstanceToolAudit;
     readonly #target: ToolCallExecutionTarget;
     readonly #log: WorkerInstanceToolLog;
+    readonly #toolInvoker: WorkerToolInvoker;
 
     constructor(options: WorkerToolOptions) {
         this.#audit = new WorkerInstanceToolAudit({
             appendEvent: options.appendEvent,
             toolCallHistory: options.toolCallHistory,
         });
+        this.#toolInvoker = options.toolInvoker;
         this.#log = new WorkerInstanceToolLog({
             appendEvent: options.appendEvent,
             logStore: options.logStore,
@@ -58,6 +61,20 @@ export class WorkerInstanceTool {
 
     target(): ToolCallTarget {
         return this.#target;
+    }
+
+    async invokeInternal(
+        toolName: string,
+        input: JsonValue,
+        context?: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        return await this.#toolInvoker.invoke(
+            toolName,
+            input,
+            context,
+            signal,
+        );
     }
 
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {

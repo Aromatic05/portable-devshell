@@ -9,6 +9,8 @@ import type {
     TodoReadResult,
     TodoTaskControlAction,
     TodoWriteInput,
+    WaitDetachInput,
+    WaitRecord,
 } from "@portable-devshell/shared";
 
 export interface TodoApi {
@@ -35,7 +37,15 @@ export interface GoalApi {
     touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
 }
 
+export interface WaitApi {
+    close(): void;
+    detach(input: WaitDetachInput): Promise<WaitRecord>;
+    list(ctxId?: string): Promise<WaitRecord[]>;
+    resume(): void;
+}
+
 export interface TaskApi {
     readonly goal: GoalApi;
     readonly todo: TodoApi;
+    readonly wait: WaitApi;
 }

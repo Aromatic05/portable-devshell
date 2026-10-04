@@ -149,6 +149,23 @@ export function createTestTaskApi(
                 return empty;
             },
         },
+        wait: {
+            close() {},
+            async detach(input) {
+                const now = new Date(0).toISOString();
+                return {
+                    ...input,
+                    createdAt: now,
+                    status: "detached" as const,
+                    updatedAt: now,
+                    waitId: "wait-test",
+                };
+            },
+            async list() {
+                return [];
+            },
+            resume() {},
+        },
         ...overrides,
     };
 }

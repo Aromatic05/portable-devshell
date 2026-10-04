@@ -1,7 +1,13 @@
 import type { InstanceEventRecord } from "../../client/Stream.js";
+import type { InstanceName } from "../../types/Instance.js";
+import type { JsonValue } from "../../types/Json.js";
+import type { ToolCallContext } from "../../toolcall/Type.js";
 
 export type TaskEventType =
     | "goal.updated"
+    | "wait.detached"
+    | "wait.resolved"
+    | "wait.failed"
     | "todo.created"
     | "todo.updated"
     | "todo.completed"
@@ -9,7 +15,7 @@ export type TaskEventType =
     | "todo.deleted";
 export type TaskEvent = InstanceEventRecord<TaskEventType>;
 export function isTaskEventType(type: string): type is TaskEventType {
-    return isGoalEvent(type) || isTodoEvent(type);
+    return isGoalEvent(type) || isTodoEvent(type) || isWaitEvent(type);
 }
 
 // Workspace goal records. Goals are read as an authoritative snapshot plus the
@@ -241,4 +247,32 @@ export function isTodoEvent(
     type: string,
 ): type is Extract<TaskEventType, `todo.${string}`> {
     return type.startsWith("todo.");
+}
+
+export function isWaitEvent(
+    type: string,
+): type is Extract<TaskEventType, `wait.${string}`> {
+    return type.startsWith("wait.");
+}
+
+export type WaitStatus = "detached" | "resolved" | "failed";
+
+export interface WaitDetachInput {
+    callId: string;
+    ctxId?: string;
+    instance: InstanceName;
+    source: ToolCallContext["source"];
+    targetId: string;
+    toolName: string;
+    workspace?: string;
+}
+
+export interface WaitRecord extends WaitDetachInput {
+    createdAt: string;
+    error?: string;
+    resolvedAt?: string;
+    result?: JsonValue;
+    status: WaitStatus;
+    updatedAt: string;
+    waitId: string;
 }
