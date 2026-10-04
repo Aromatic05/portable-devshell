@@ -50,7 +50,7 @@ export function createInstanceConfigRouteModule(
     const editor = () =>
         requirePort(options.editor, "Config editing is not available.");
     return routeModule(
-        "config",
+        "instance",
         {
             listInstances: () => readInstances(options) as never,
             snapshotInstances: () => {
@@ -187,7 +187,7 @@ function readSubscribeFromRevision(payload?: JsonValue): number {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
             message:
-                "config.subscribeInstances requires a non-negative integer fromRevision.",
+                "instance.subscribeInstances requires a non-negative integer fromRevision.",
             retryable: false,
         });
     }

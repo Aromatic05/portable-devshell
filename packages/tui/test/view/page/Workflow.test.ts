@@ -11,6 +11,7 @@ import {
 import {
     ControlRouteComposition,
     ControlSocketServer,
+    createTestInstanceDomainRuntime,
 } from "@portable-devshell/control/testing";
 import {
     createTuiDomainSession,
@@ -266,80 +267,65 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const todoReadTaskIds: Array<string | undefined> = [];
         const instances = new InstanceRegistry([
             {
-                approval: {
-                    async cancel() {
-                        throw new Error("Approval cancellation is not used.");
-                    },
-                    close() {},
-                    async decideApproval() {
-                        throw new Error("Approval decisions are not used.");
-                    },
-                    async getApproval() {
-                        throw new Error("Approval lookup is not used.");
-                    },
-                    async listApprovals() {
-                        return [];
-                    },
-                    async listPendingApprovals() {
-                        return [];
-                    },
-                    async retire() {},
-                    setPolicy() {},
-                },
-                approvalReview: () => ({ decision: "continue" }),
                 enabled: true,
-                goal: {
-                    async continuation() {
-                        return {};
-                    },
-                    async list() {
-                        return [];
-                    },
-                    async manage() {
-                        return undefined;
-                    },
-                    async read() {
-                        return undefined;
-                    },
-                    async recordReentry() {},
-                    async stopAll() {
-                        return [];
-                    },
-                    async touch() {},
-                },
                 mcpEnabled: false,
                 mcpPath: "",
                 modelExtensions: [],
                 name: "alpha",
                 provider: "local",
-                todo: {
-                    async cancelAll() {},
-                    async control() {
-                        return todoFixture;
-                    },
-                    async delete() {},
-                    async read(input) {
-                        const taskId = input?.taskId;
-                        todoReadTaskIds.push(taskId);
-                        return taskId === todoFixture.taskId
-                            ? todoFixture
-                            : {
-                                  items: [],
-                                  revision: 0,
-                                  summary: { completed: 0, total: 0 },
-                                  tasks: todoFixture.tasks,
-                              };
-                    },
-                    summaries() {
-                        return todoFixture.tasks ?? [];
-                    },
-                    async write() {
-                        return todoFixture;
-                    },
-                },
                 worker: worker as unknown as WorkerInstance,
             },
         ]);
+        const instanceDomains = createTestInstanceDomainRuntime({
+            services: () => ({
+                task: {
+                    goal: {
+                        async continuation() {
+                            return {};
+                        },
+                        async list() {
+                            return [];
+                        },
+                        async manage() {
+                            return undefined;
+                        },
+                        async read() {
+                            return undefined;
+                        },
+                        async recordReentry() {},
+                        async stopAll() {
+                            return [];
+                        },
+                        async touch() {},
+                    },
+                    todo: {
+                        async cancelAll() {},
+                        async control() {
+                            return todoFixture;
+                        },
+                        async delete() {},
+                        async read(input) {
+                            const taskId = input?.taskId;
+                            todoReadTaskIds.push(taskId);
+                            return taskId === todoFixture.taskId
+                                ? todoFixture
+                                : {
+                                      items: [],
+                                      revision: 0,
+                                      summary: { completed: 0, total: 0 },
+                                      tasks: todoFixture.tasks,
+                                  };
+                        },
+                        summaries() {
+                            return todoFixture.tasks ?? [];
+                        },
+                        async write() {
+                            return todoFixture;
+                        },
+                    },
+                },
+            }),
+        });
         const routes = new ControlRouteComposition({
             config: {
                 getConfigView() {
@@ -361,6 +347,38 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     };
                 },
             } as never,
+            extensionRoutes: {
+                modules(scope) {
+                    return scope === "control"
+                        ? [
+                              {
+                                  name: "conversation",
+                                  operations: [
+                                      {
+                                          name: "preferences",
+                                          handle: () => ({
+                                              hiddenContexts: {},
+                                              orderByWorkspace: {},
+                                              titles: {},
+                                              version: 1,
+                                              workspaceOrder: [],
+                                          }),
+                                      },
+                                      {
+                                          name: "updatePreferences",
+                                          handle: (request) =>
+                                              request.payload ?? {},
+                                      },
+                                  ],
+                              },
+                          ]
+                        : [];
+                },
+                onChange() {
+                    return () => undefined;
+                },
+            },
+            instanceDomains,
             instances,
             tuiPages: {
                 async invoke() {

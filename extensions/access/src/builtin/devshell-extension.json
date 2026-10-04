@@ -6,9 +6,9 @@
     "name": "portable-devshell Access",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": ["processes"],
+    "capabilities": ["processes", "config.core"],
     "config": {
-        "access": {
+        "coreAccess": {
             "mcp.enabled": "read",
             "mcp.listenHost": "read",
             "mcp.listenPort": "read",

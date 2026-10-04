@@ -13,6 +13,7 @@ import type {
     ControlPortDefinition,
     JsonValue,
 } from "@portable-devshell/shared";
+import { routeModule } from "../server/Route.js";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
@@ -39,7 +40,7 @@ import {
     type InstanceConfigRouteModuleOptions,
 } from "../instance/Route.js";
 import { InstanceChangeHub } from "../instance/Change.js";
-import type { InstanceDomainRuntime } from "./InstanceRuntime.js";
+import type { InstanceDomainRuntimePort } from "./InstanceRuntime.js";
 import {
     createContextRouteModule,
     type ContextAdminPort,
@@ -72,7 +73,7 @@ export interface ControlRouteCompositionOptions {
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
-    instanceDomains: InstanceDomainRuntime;
+    instanceDomains: InstanceDomainRuntimePort;
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
@@ -213,24 +214,29 @@ export class ControlRouteComposition {
                                 reason: "MCP runtime is disabled.",
                             })),
                     }),
+                    routeModule("mcp", {
+                        status: () =>
+                            this.#options.mcpStatus?.() ?? {
+                                running: false,
+                                reason: "MCP runtime is disabled.",
+                            },
+                    }),
                     createContextRouteModule(this.#options.contextAdmin),
                     ...(this.#options.extensionRoutes?.modules("control") ??
                         []),
                     createOperationalOverviewRouteModule(this.#overview),
-                    mergePortDefinitions(
-                        createConfigRouteModule(
-                            this.#options.config,
-                            this.#configChanges,
-                        ),
-                        createInstanceConfigRouteModule({
-                            changes: this.#instanceChanges,
-                            configuredInstances:
-                                this.#options.configuredInstances,
-                            create: this.#options.instanceCreate,
-                            editor: this.#options.instanceEditor,
-                            registry: this.#options.instances,
-                        }),
+                    createConfigRouteModule(
+                        this.#options.config,
+                        this.#configChanges,
                     ),
+                    createInstanceConfigRouteModule({
+                        changes: this.#instanceChanges,
+                        configuredInstances:
+                            this.#options.configuredInstances,
+                        create: this.#options.instanceCreate,
+                        editor: this.#options.instanceEditor,
+                        registry: this.#options.instances,
+                    }),
                     createConnectionRouteModule(this.#options.reverse),
                     createArtifactRouteModule(this.#options.artifact),
                 ]),

@@ -20,20 +20,11 @@ import type {
     ConfigUpdateWebRequest,
     ConfigView,
 } from "./Model.js";
-import type {
-    ConversationPreferencesPatch,
-    ConversationPreferencesSnapshot,
-} from "./Preference.js";
-
 export interface ConfigTransport {
     get(): Promise<ConfigView>;
-    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
     snapshot(): Promise<ConfigSnapshot>;
     subscribe(fromRevision: number): Promise<EventStreamPort<ConfigChangeEvent>>;
     update(request: ConfigBatchUpdateRequest): Promise<ConfigView>;
-    updateConversationPreferences(
-        patch: ConversationPreferencesPatch,
-    ): Promise<ConversationPreferencesSnapshot>;
     updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<ConfigView>;
     updateWeb(request: ConfigUpdateWebRequest): Promise<ConfigView>;
     validate(draft: ConfigDraft): Promise<ConfigView>;
@@ -43,10 +34,6 @@ export function createConfigTransport(endpoint: Endpoint): ConfigTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "config");
     return {
         get: () => port.request<ConfigView>("get"),
-        getConversationPreferences: () =>
-            port.request<ConversationPreferencesSnapshot>(
-                "getConversationPreferences",
-            ),
         snapshot: async () =>
             readConfigSnapshot(await port.request<JsonValue>("snapshot")),
         subscribe: async (fromRevision) =>
@@ -58,11 +45,6 @@ export function createConfigTransport(endpoint: Endpoint): ConfigTransport {
                 },
             ),
         update: (request) => port.request<ConfigView>("update", request),
-        updateConversationPreferences: (patch) =>
-            port.request<ConversationPreferencesSnapshot>(
-                "updateConversationPreferences",
-                patch,
-            ),
         updateMcpEndpoint: (request) =>
             port.request<ConfigView>("updateMcpEndpoint", request),
         updateWeb: (request) => port.request<ConfigView>("updateWeb", request),

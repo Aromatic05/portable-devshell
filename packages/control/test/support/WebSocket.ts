@@ -1,8 +1,5 @@
-import {
-    controlWebSocketProtocols,
-    CONTROL_REMOTE_RPC_SUBPROTOCOL,
-    type Channel,
-} from "@portable-devshell/shared";
+import { CONTROL_REMOTE_RPC_SUBPROTOCOL, type Channel } from "@portable-devshell/shared";
+import { controlWebSocketProtocols } from "@portable-devshell/shared/testing";
 import WebSocket, { type RawData } from "ws";
 
 export class NodeWebSocketChannel implements Channel {

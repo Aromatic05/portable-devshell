@@ -665,13 +665,13 @@ function registerCommentRoutes(
         },
         {
             id: "conversation-preferences",
-            module: "config",
+            module: "conversation",
             operation: "getConversationPreferences",
             scope: "control",
         },
         {
             id: "conversation-update-preferences",
-            module: "config",
+            module: "conversation",
             operation: "updateConversationPreferences",
             scope: "control",
         },

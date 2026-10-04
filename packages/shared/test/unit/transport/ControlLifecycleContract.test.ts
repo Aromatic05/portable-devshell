@@ -5,15 +5,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 
-import {
-    ControlDaemonLauncher,
-    ControlLifecycleManager,
-    ControlLogger,
-    ControlPidFile,
-    type ControlLifecycleRpcClient,
-    type ControlPidFilePort,
-    type ControlSocketFilePort,
-} from "@portable-devshell/shared";
+import { ControlLifecycleManager, ControlLogger, ControlPidFile } from "@portable-devshell/shared";
+import { ControlDaemonLauncher, type ControlLifecycleRpcClient, type ControlPidFilePort, type ControlSocketFilePort } from "@portable-devshell/shared/testing";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("control logger and pid file persist below the selected home and tolerate missing files", async () => {

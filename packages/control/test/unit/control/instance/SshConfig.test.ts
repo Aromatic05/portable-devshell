@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
-import { discoverSshConfigHosts } from "../../../../src/config/editor/instance/create/SshConfig.ts";
+import { discoverSshConfigHosts } from "../../../../src/instance/editor/create/SshConfig.ts";
 
 test("SSH config discovery lists concrete Host aliases and follows Include", async () => {
     const directory = await createTestTempDirectory("ssh-config-hosts");

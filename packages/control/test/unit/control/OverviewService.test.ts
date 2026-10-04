@@ -9,11 +9,12 @@ import {
 } from "@portable-devshell/shared";
 
 import { OperationalOverviewService } from "../../../src/overview/Service.ts";
+import { createTestInstanceDescriptor } from "../../support/ControlFixtures.ts";
 import {
-    createTestApprovalPort,
-    createTestInstanceDescriptor,
-    createTestTodoPort,
-} from "../../support/ControlFixtures.ts";
+    createTestApprovalApi,
+    createTestInstanceDomainRuntime,
+    createTestTaskApi,
+} from "../../../src/testing.ts";
 
 const now = new Date("2026-07-31T00:00:00.000Z");
 const healthySystemCollector = {
@@ -90,18 +91,9 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
             }),
         } as never,
         {
-            approval: createTestApprovalPort({
-                listApprovals: async () => [],
-                listPendingApprovals: async () =>
-                    [{ id: "approval-1" }] as never,
-            }),
             mcpEnabled: true,
             name: "ready-one",
             provider: "local",
-            todo: {
-                ...createTestTodoPort(),
-                summaries: () => [blockedTodo],
-            },
         },
     );
     const failed = createTestInstanceDescriptor(
@@ -124,6 +116,25 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         },
     );
     const overview = await new OperationalOverviewService({
+        instanceDomains: createTestInstanceDomainRuntime({
+            approval: (instance) =>
+                instance === "ready-one"
+                    ? createTestApprovalApi({
+                          listApprovals: async () => [],
+                          listPendingApprovals: async () =>
+                              [{ id: "approval-1" }] as never,
+                      })
+                    : undefined,
+            task: (instance) =>
+                instance === "ready-one"
+                    ? createTestTaskApi({
+                          todo: {
+                              ...createTestTaskApi().todo,
+                              summaries: () => [blockedTodo],
+                          },
+                      })
+                    : undefined,
+        }),
         instances: { list: () => [ready, failed] },
         now: () => now,
         oauthApprovals: () => ({
@@ -482,16 +493,23 @@ test("operational overview isolates snapshot and todo collection failures per in
         } as never,
         {
             name: "todo-broken",
-            todo: {
-                ...createTestTodoPort(),
-                summaries: () => {
-                    throw new Error("todo store unavailable");
-                },
-            },
         },
     );
 
     const overview = await new OperationalOverviewService({
+        instanceDomains: createTestInstanceDomainRuntime({
+            task: (instance) =>
+                instance === "todo-broken"
+                    ? createTestTaskApi({
+                          todo: {
+                              ...createTestTaskApi().todo,
+                              summaries: () => {
+                                  throw new Error("todo store unavailable");
+                              },
+                          },
+                      })
+                    : undefined,
+        }),
         instances: { list: () => [snapshotBroken, todoBroken] },
         now: () => now,
         systemCollector: healthySystemCollector,
@@ -540,16 +558,21 @@ test("operational overview remains available when one collection source fails", 
             }),
         } as never,
         {
-            approval: createTestApprovalPort({
-                listPendingApprovals: async () => {
-                    throw new Error("approval store unavailable");
-                },
-            }),
             name: "local-one",
         },
     );
 
     const overview = await new OperationalOverviewService({
+        instanceDomains: createTestInstanceDomainRuntime({
+            approval: (instance) =>
+                instance === "local-one"
+                    ? createTestApprovalApi({
+                          listPendingApprovals: async () => {
+                              throw new Error("approval store unavailable");
+                          },
+                      })
+                    : undefined,
+        }),
         instances: { list: () => [descriptor] },
         now: () => now,
         systemCollector: healthySystemCollector,

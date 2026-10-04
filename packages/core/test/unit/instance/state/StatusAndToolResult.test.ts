@@ -13,8 +13,8 @@ import {
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
-    throwIfToolCallAborted,
 } from "../../../../src/worker/instance/tool/Error.ts";
+import { throwIfToolCallAborted } from "../../../../src/tool/Error.ts";
 import {
     asBashToolResult,
     asCommandResult,

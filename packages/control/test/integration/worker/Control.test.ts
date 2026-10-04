@@ -111,7 +111,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
             const listed = await request(
                 runtimePaths.socketFile,
-                "instance.list",
+                "instance.listInstances",
                 "@control",
             );
             assert.equal(Array.isArray(listed), true);
@@ -121,14 +121,14 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
             const instanceStarted = await request(
                 runtimePaths.socketFile,
-                "runtime.start",
+                "process.start",
                 asInstanceName("aromatic-pc"),
             );
             assert.equal(instanceStarted.ready, true);
 
             const snapshot = await request(
                 runtimePaths.socketFile,
-                "runtime.snapshot",
+                "process.snapshot",
                 asInstanceName("aromatic-pc"),
             );
             assert.equal(snapshot.snapshot.ready, true);
@@ -159,7 +159,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
             const logs = await request(
                 runtimePaths.socketFile,
-                "runtime.readLogs",
+                "process.readLogs",
                 asInstanceName("aromatic-pc"),
                 { fromSeq: 1 },
             );
@@ -190,7 +190,7 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
 
             const instanceStopped = await request(
                 runtimePaths.socketFile,
-                "runtime.stop",
+                "process.stop",
                 asInstanceName("aromatic-pc"),
             );
             assert.equal(instanceStopped.ready, false);
@@ -516,7 +516,7 @@ async function request(
             clientKind,
             protocolRange: CONTROL_PROTOCOL_RANGE,
         });
-        if (operation === "runtime.start") {
+        if (operation === "process.start") {
             const stream = await client.open(
                 destination,
                 port!,

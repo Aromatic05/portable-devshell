@@ -6,6 +6,7 @@ import type { ControlPortContext } from "@portable-devshell/shared";
 import type { ArtifactService } from "../../../src/artifact/Service.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { ControlRouteComposition } from "../../../src/composition/Route.ts";
+import { createTestInstanceDomainRuntime } from "../../../src/testing.ts";
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
@@ -28,6 +29,7 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
     } as unknown as ArtifactService;
     const routes = new ControlRouteComposition({
         artifact: artifactService,
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
         shutdown() {},
     });
@@ -87,6 +89,7 @@ function createContext(host: string): ControlPortContext {
 test("native control tool.call admits a nonexistent original instance to host ingress", async () => {
     const calls: string[] = [];
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
         shutdown() {},
         toolCalls: {

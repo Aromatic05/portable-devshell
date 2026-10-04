@@ -49,7 +49,6 @@ test("instance creation and endpoint updates share one configuration mutation bo
     });
     const creator = new InstanceCreateCoordinator({
         ...common,
-        getMcpHost: () => undefined,
     });
 
     const endpointUpdate = editor.updateWebConfig({

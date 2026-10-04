@@ -19,14 +19,11 @@ import {
 import WebSocket from "ws";
 
 import {
-    GoalService,
     InstanceRegistry,
     ReverseConnectionGateway,
     ReverseCredentialService,
     ReverseCredentialStore,
-    TodoService,
 } from "../../src/testing.ts";
-import { createTestApprovalPort } from "../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
@@ -38,20 +35,8 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         name: asInstanceName("reverse-test"),
         transportConnection: connection,
     });
-    const todo = new TodoService({
-        appendEvent: async () => undefined,
-        filePath: join(home, "todo.json"),
-        instanceName: "reverse-test",
-    });
-    const goal = new GoalService({
-        appendEvent: async () => undefined,
-        filePath: join(home, "goals.json"),
-        instanceName: "reverse-test",
-    });
     const registry = new InstanceRegistry([
         {
-            approval: createTestApprovalPort(),
-            approvalReview: () => ({ decision: "continue" }),
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/reverse-test/mcp",
@@ -59,8 +44,6 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             name: "reverse-test",
             provider: "reverse",
             reverseConnection: connection,
-            goal,
-            todo,
             worker,
         },
     ]);
@@ -182,8 +165,6 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
     });
     const registry = new InstanceRegistry([
         {
-            approval: createTestApprovalPort(),
-            approvalReview: () => ({ decision: "continue" }),
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/reverse-test/mcp",
@@ -191,16 +172,6 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             name: "reverse-test",
             provider: "reverse",
             reverseConnection: connection,
-            goal: new GoalService({
-                appendEvent: async () => undefined,
-                filePath: join(home, "goals.json"),
-                instanceName: "reverse-test",
-            }),
-            todo: new TodoService({
-                appendEvent: async () => undefined,
-                filePath: join(home, "todo.json"),
-                instanceName: "reverse-test",
-            }),
             worker,
         },
     ]);

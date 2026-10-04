@@ -2,6 +2,11 @@ import {
     InstanceEventStream,
     type InstanceEventStreamPort,
 } from "../../client/Stream.js";
+import { CONTROL_HOST } from "../../client/Control.js";
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
+} from "../../control/config/Preference.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import {
     createPortClient,
@@ -35,6 +40,28 @@ export interface MessageTransport {
         instance: string,
         fromSeq: number,
     ): Promise<InstanceEventStreamPort<MessageEvent>>;
+}
+
+export interface ConversationPreferenceTransport {
+    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
+    updateConversationPreferences(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot>;
+}
+
+export function createConversationPreferenceTransport(
+    endpoint: Endpoint,
+): ConversationPreferenceTransport {
+    const port = createPortClient(endpoint, CONTROL_HOST, "conversation");
+    return {
+        getConversationPreferences: () =>
+            port.request<ConversationPreferencesSnapshot>("preferences"),
+        updateConversationPreferences: (patch) =>
+            port.request<ConversationPreferencesSnapshot>(
+                "updatePreferences",
+                patch,
+            ),
+    };
 }
 
 export function createMessageTransport(endpoint: Endpoint): MessageTransport {

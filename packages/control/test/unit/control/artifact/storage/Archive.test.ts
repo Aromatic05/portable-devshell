@@ -6,7 +6,7 @@ import test from "node:test";
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive,
-} from "../../../../../src/artifact/host/storage/Archive.ts";
+} from "../../../../../src/artifact/Archive.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 test("directory archive treats absolute, relative, and trailing-separator roots identically", async (t) => {

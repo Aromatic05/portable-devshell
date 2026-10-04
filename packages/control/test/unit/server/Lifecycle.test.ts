@@ -8,7 +8,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     Endpoint,
     LocalChannel,
@@ -16,7 +15,8 @@ import {
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
-    type InstanceListEntry,
+    createInstanceTransport,
+    createServiceTransport,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -777,7 +777,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     assert.equal(started.running, true);
     assert.equal(started.instanceCount, 1);
 
-    const listed = await request(runtimePaths.socketFile, "instance.list");
+    const listed = await listInstances(runtimePaths.socketFile);
     assert.equal(Array.isArray(listed), true);
     assert.equal(listed[0]?.name, "demo-local");
     assert.equal(listed[0]?.snapshot.ready, false);
@@ -890,29 +890,14 @@ function isProcessRunning(pid: number): boolean {
     }
 }
 
-async function request(
-    socketPath: string,
-    operation: string,
-    params?: JsonValue,
-): Promise<InstanceListEntry[]> {
-    const [port, method] = operation.split(".");
+async function listInstances(socketPath: string) {
     const endpoint = new Endpoint({
         connectChannel: (signal) =>
             LocalChannel.connect(socketPath, { signal }),
     });
     try {
-        const service = new Rpc(await endpoint.connect("@control", "service"));
-        await service.request("hello", {
-            clientKind: "cli",
-            protocolRange: CONTROL_PROTOCOL_RANGE,
-        });
-        service.close();
-        const rpc = new Rpc(await endpoint.connect("@control", port!));
-        try {
-            return (await rpc.request(method!, params)) as InstanceListEntry[];
-        } finally {
-            rpc.close();
-        }
+        await createServiceTransport(endpoint, { clientKind: "cli" }).hello();
+        return await createInstanceTransport(endpoint).listInstances();
     } finally {
         endpoint.close();
     }

@@ -8,6 +8,7 @@ import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import type {
     ArtifactPayloadDescriptor,
     JsonValue,
+    MessageStream,
 } from "@portable-devshell/shared";
 import {
     ArtifactHttpRoute,
@@ -18,16 +19,11 @@ import {
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryShareEndpoint implements ArtifactServiceEndpoint {
-    readonly events: Array<{ type: string; data?: JsonValue }> = [];
     readonly closed: string[] = [];
     readonly #bytes: Buffer;
 
     constructor(bytes: Buffer) {
         this.#bytes = bytes;
-    }
-
-    async appendControlEvent(type: string, data?: JsonValue): Promise<void> {
-        this.events.push({ type, data });
     }
 
     async openArtifactPayload(): Promise<{
@@ -136,7 +132,7 @@ async function fixture(
 }
 
 test("artifact HTTP route serves GET and HEAD with safe download headers", async (t) => {
-    const { downloadUrl, endpoint } = await fixture(t);
+    const { downloadUrl, service } = await fixture(t);
 
     const head = await fetch(downloadUrl, { method: "HEAD" });
     assert.equal(head.status, 200);
@@ -151,16 +147,55 @@ test("artifact HTTP route serves GET and HEAD with safe download headers", async
     );
     assert.equal(await head.text(), "");
 
+    const fromSeq = service.snapshot().lastSeq + 1;
     const get = await fetch(downloadUrl);
     assert.equal(get.status, 200);
     assert.equal(await get.text(), "0123456789abcdef");
+
+    const events = await readArtifactEvents(service, fromSeq);
     assert.equal(
-        endpoint.events.filter(
+        events.filter(
             (event) => event.type === "artifact.shareDownloaded",
         ).length,
         1,
     );
 });
+
+async function readArtifactEvents(
+    service: ArtifactService,
+    fromSeq: number,
+): Promise<Array<{ type?: string }>> {
+    const messages: Array<{ name?: string; payload?: JsonValue }> = [];
+    let closed = false;
+    const stream = {
+        async send(message?: { name?: string; payload?: JsonValue }) {
+            messages.push(message ?? {});
+            closed = true;
+        },
+        onClose(listener: () => void) {
+            if (closed) queueMicrotask(listener);
+            return () => undefined;
+        },
+        onCancel() {
+            return () => undefined;
+        },
+    } as unknown as MessageStream;
+
+    await service.subscribe(stream, fromSeq);
+    const seed = messages.find((message) => message.name === "seed");
+    if (
+        typeof seed?.payload !== "object" ||
+        seed.payload === null ||
+        Array.isArray(seed.payload) ||
+        !Array.isArray(seed.payload.events)
+    ) {
+        return [];
+    }
+    return seed.payload.events.filter(
+        (event): event is { type?: string } =>
+            typeof event === "object" && event !== null && !Array.isArray(event),
+    );
+}
 
 test("artifact HTTP route supports one byte range and rejects invalid or multiple ranges", async (t) => {
     const { downloadUrl } = await fixture(t);

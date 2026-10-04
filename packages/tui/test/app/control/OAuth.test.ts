@@ -9,6 +9,7 @@ import {
     ControlRouteComposition,
     ControlSocketServer,
     InstanceRegistry,
+    createTestInstanceDomainRuntime,
 } from "@portable-devshell/control/testing";
 import { type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
@@ -88,6 +89,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     };
                 },
             } as never,
+            instanceDomains: createTestInstanceDomainRuntime(),
             instances: new InstanceRegistry([]),
             tuiPages: {
                 async invoke() {

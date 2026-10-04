@@ -9,20 +9,8 @@ import {
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
 
-import {
-    ControlPathHome,
-    Endpoint,
-    LocalChannel,
-    ServiceSession,
-    type JsonValue,
-    CONTROL_WEB_RPC_PATH,
-    CONTROL_WEB_SESSION_PATH,
-    createDefaultControlConfig,
-    createEmptyConversationPreferences,
-    createServiceTransport,
-    createToolTransport,
-    type ControlConfig,
-} from "@portable-devshell/shared";
+import { ControlPathHome, Endpoint, LocalChannel, ServiceSession, type JsonValue, createDefaultControlConfig, createEmptyConversationPreferences, createServiceTransport, createToolTransport, type ControlConfig } from "@portable-devshell/shared";
+import { CONTROL_WEB_RPC_PATH, CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/testing";
 
 import { ControlRuntime } from "../../../../src/testing.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";

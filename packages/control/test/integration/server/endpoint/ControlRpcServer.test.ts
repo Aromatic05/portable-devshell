@@ -10,7 +10,7 @@ import type {
 import type {
     TerminalProcess,
     TerminalProcessExit,
-} from "@portable-devshell/core";
+} from "@portable-devshell/core/testing";
 import {
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
@@ -33,6 +33,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
+import {
+    createTestInstanceDomainRuntime,
+    createTestTaskApi,
+} from "../../../../src/testing.ts";
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
 import { ControlConfigStore } from "../../../../src/config/store/index.ts";
@@ -266,6 +270,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     const debug = new DebugPatchService(registry);
     const routes = new ControlRouteComposition({
         debug,
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
     });
@@ -351,7 +356,6 @@ test("config RPC masks the Web token across get, validate, and update responses"
         configStore,
         getConfig: () => config,
         homeDirectory,
-        instanceRegistry: registry,
         runtimePreflight: { async assertAvailable() {} },
         setConfig: (next) => {
             config = next;
@@ -359,6 +363,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
     });
     const routes = new ControlRouteComposition({
         config: editor,
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
     });
@@ -450,6 +455,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
                 return () => undefined;
             },
         },
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
         shutdown() {},
     });
@@ -467,7 +473,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
     const initialPreferences = await request(
         socketPath,
         "@control",
-        "config.getConversationPreferences",
+        "conversation.preferences",
         undefined,
         "tui",
     );
@@ -488,7 +494,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         await request(
             socketPath,
             "@control",
-            "config.updateConversationPreferences",
+            "conversation.updatePreferences",
             {
                 orderByWorkspace: {
                     "/work/portable-devshell": [
@@ -516,7 +522,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "config.getConversationPreferences",
+                "conversation.preferences",
                 undefined,
                 "tui",
             )
@@ -528,7 +534,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
             await request(
                 socketPath,
                 "@control",
-                "config.updateConversationPreferences",
+                "conversation.updatePreferences",
                 { unknown: true },
                 "tui",
             )
@@ -542,6 +548,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
     });
@@ -635,10 +642,14 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         new FakeWorker("alpha") as unknown as WorkerInstance,
         {
             name: "alpha",
-            terminal: { open: async () => process },
         },
     );
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime({
+            services: () => ({
+                terminal: { open: async () => process },
+            }),
+        }),
         instances: new InstanceRegistry([descriptor]),
         shutdown() {},
     });
@@ -778,9 +789,14 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
     const process = new FakeTerminalProcess();
     const descriptor = createTestInstanceDescriptor(
         new FakeWorker("alpha") as unknown as WorkerInstance,
-        { name: "alpha", terminal: { open: async () => process } },
+        { name: "alpha" },
     );
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime({
+            services: () => ({
+                terminal: { open: async () => process },
+            }),
+        }),
         instances: new InstanceRegistry([descriptor]),
         shutdown() {},
         terminalMaxUnackedBytes: 8,
@@ -853,6 +869,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     const socketPath = createTestIpcPath("control-rpc", directory);
     let shutdownRequested = false;
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
         shutdown() {
             shutdownRequested = true;
@@ -879,10 +896,11 @@ async function createHarness(
     const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
-    const registry = new InstanceRegistry([
-        createDescriptor(worker, activeTodos),
-    ]);
+    const registry = new InstanceRegistry([createDescriptor(worker)]);
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime({
+            services: () => ({ task: createActiveTodosTask(activeTodos) }),
+        }),
         instances: registry,
         shutdown() {},
         toolCalls: {
@@ -913,23 +931,19 @@ async function createHarness(
     };
 }
 
-function createDescriptor(
-    worker: FakeWorker,
-    activeTodos: ActiveTodoSummary[] = [],
-) {
-    const descriptor = createTestInstanceDescriptor(
-        worker as unknown as WorkerInstance,
-        {
-            name: "alpha",
-        },
-    );
-    return {
-        ...descriptor,
+function createDescriptor(worker: FakeWorker) {
+    return createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
+        name: "alpha",
+    });
+}
+
+function createActiveTodosTask(activeTodos: ActiveTodoSummary[]) {
+    return createTestTaskApi({
         todo: {
-            ...descriptor.todo,
+            ...createTestTaskApi().todo,
             summaries: () => activeTodos,
         },
-    };
+    });
 }
 
 interface TestClient {

@@ -20,7 +20,7 @@ import {
 import WebSocket from "ws";
 
 import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/server/endpoint/Channel.ts";
+import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
 import { ControlWebSessionService } from "../../../../src/server/web/auth/Session.ts";
 import { ControlWebSocketAccessService } from "../../../../src/server/web/auth/Access.ts";
 import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";

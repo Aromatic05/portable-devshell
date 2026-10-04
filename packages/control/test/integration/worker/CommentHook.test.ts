@@ -12,19 +12,14 @@ import {
     type CommentPort,
 } from "@portable-devshell/comment-extension";
 import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
-import {
-    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
-    asInstanceName,
-    type JsonValue,
-    type ToolCallContext,
-    type ToolDefinition,
-} from "@portable-devshell/shared";
+import { asInstanceName, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
+import { CONTEXT_MESSAGE_PUSH_TOOL_BUDGET } from "@portable-devshell/shared/testing";
 
-import { createToolCallScope } from "@portable-devshell/core";
 import {
-    ToolCallPipeline,
-    ToolCallExecutionTarget,
-} from "@portable-devshell/core";
+    createToolCallScope,
+    ToolCallHookRegistry,
+} from "@portable-devshell/core/testing";
+import { ToolCallPipeline, ToolCallExecutionTarget } from "@portable-devshell/core/testing";
 import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/Binding.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
@@ -67,9 +62,12 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         },
         preferencesFile: join(root, "conversation-preferences.json"),
     });
+    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         commentReviewRegistrationHost(comment.comment),
     );
+    const uninstall = binding.install(registry);
+    t.after(uninstall);
     let executions = 0;
     const target = new ToolCallExecutionTarget({
         assertReady() {},
@@ -114,8 +112,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         },
     } as never);
     const execution = new ToolCallPipeline({
-        hooks: async (context, signal, recording) =>
-            await binding.acquire(context, signal, recording),
+        hooks: registry.provider(),
         resolveTarget: () => target,
     });
     const worker = createWorker(workspace);

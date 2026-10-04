@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type {
-    WorkerTerminalAttachResult,
-    WorkerTerminalDescriptor,
-    WorkerTerminalIdentity,
-    WorkerTerminalNotification,
-} from "@portable-devshell/core";
+import type { WorkerTerminalAttachResult, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification } from "@portable-devshell/core/testing";
 
 import {
     WorkerTerminalBackend,

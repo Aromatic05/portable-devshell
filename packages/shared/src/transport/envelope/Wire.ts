@@ -1,8 +1,7 @@
-import protobuf from "protobufjs/light.js";
+import protobuf from "protobufjs/minimal.js";
 
 import type { Address } from "../endpoint/Address.js";
 import type { Packet } from "../packet/Packet.js";
-import { envelopeSchema } from "./Schema.js";
 
 export interface Envelope {
     readonly source: Address;
@@ -14,26 +13,15 @@ export const ENVELOPE_MAX_SIZE = 16 * 1024 * 1024;
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
-const root = protobuf.Root.fromJSON(
-    envelopeSchema as unknown as protobuf.INamespace,
-);
-const envelopeType = root.lookupType("devshell.transport.Envelope");
 
 export function encodeWireEnvelope(envelope: Envelope): Uint8Array {
-    const encoded = envelopeType
-        .encodeDelimited(
-            envelopeType.create({
-                source: envelope.source,
-                dest: envelope.dest,
-                packet: encodePacket(envelope.packet),
-            }),
-        )
-        .finish();
-    const reader = protobuf.Reader.create(encoded);
-    const length = reader.uint32();
-    if (length > ENVELOPE_MAX_SIZE)
+    const message = encodeEnvelope(
+        protobuf.Writer.create(),
+        envelope,
+    ).finish();
+    if (message.byteLength > ENVELOPE_MAX_SIZE)
         throw new Error(`Envelope exceeds ${ENVELOPE_MAX_SIZE} bytes.`);
-    return encoded;
+    return protobuf.Writer.create().bytes(message).finish();
 }
 
 export function decodeWireEnvelope(
@@ -50,15 +38,8 @@ export function decodeWireEnvelope(
     if (length > ENVELOPE_MAX_SIZE)
         throw new Error(`Envelope exceeds ${ENVELOPE_MAX_SIZE} bytes.`);
     if (reader.len - reader.pos < length) return undefined;
-    const message = envelopeType.decode(reader, length);
-    const value = asRecord(
-        envelopeType.toObject(message, {
-            defaults: false,
-            longs: Number,
-            oneofs: true,
-        }),
-        "Envelope",
-    );
+    const end = reader.pos + length;
+    const value = decodeEnvelope(reader, end);
     return {
         bytesRead: reader.pos,
         envelope: {
@@ -69,7 +50,23 @@ export function decodeWireEnvelope(
     };
 }
 
-function encodePacket(value: Packet): Record<string, unknown> {
+function encodeEnvelope(
+    writer: protobuf.Writer,
+    value: Envelope,
+): protobuf.Writer {
+    encodeAddress(writer.uint32(10).fork(), value.source).ldelim();
+    encodeAddress(writer.uint32(18).fork(), value.dest).ldelim();
+    encodePacket(writer.uint32(26).fork(), value.packet).ldelim();
+    return writer;
+}
+
+function encodeAddress(writer: protobuf.Writer, value: Address): protobuf.Writer {
+    writer.uint32(10).string(requiredString(value.host, "Envelope address.host"));
+    writer.uint32(18).string(requiredString(value.port, "Envelope address.port"));
+    return writer;
+}
+
+function encodePacket(writer: protobuf.Writer, value: Packet): protobuf.Writer {
     const packet = asRecord(value, "Packet");
     if (
         packet.protocol === "stream" &&
@@ -80,17 +77,120 @@ function encodePacket(value: Packet): Record<string, unknown> {
             throw new Error(
                 "Stream DATA cannot contain both bytes and message.",
             );
-        return {
-            streamData: {
-                id: requiredString(packet.id, "Stream id"),
-                seq: requiredInteger(packet.seq, "Stream seq"),
-                data: requiredBytes(packet.bytes, "Stream bytes"),
-            },
-        };
+        const stream = writer.uint32(18).fork();
+        stream.uint32(10).string(requiredString(packet.id, "Stream id"));
+        stream.uint32(16).uint64(requiredInteger(packet.seq, "Stream seq"));
+        stream.uint32(26).bytes(requiredBytes(packet.bytes, "Stream bytes"));
+        stream.ldelim();
+        return writer;
     }
     const json = JSON.stringify(value);
     if (json === undefined) throw new Error("Packet is not JSON serializable.");
-    return { json: encoder.encode(json) };
+    writer.uint32(10).bytes(encoder.encode(json));
+    return writer;
+}
+
+function decodeEnvelope(
+    reader: protobuf.Reader,
+    end: number,
+): Record<string, unknown> {
+    const value: Record<string, unknown> = {};
+    while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+            case 1:
+                value.source = decodeWireAddress(reader, readEnd(reader));
+                break;
+            case 2:
+                value.dest = decodeWireAddress(reader, readEnd(reader));
+                break;
+            case 3:
+                value.packet = decodePacketMessage(reader, readEnd(reader));
+                break;
+            default:
+                reader.skipType(tag & 7);
+        }
+    }
+    return value;
+}
+
+function decodeWireAddress(
+    reader: protobuf.Reader,
+    end: number,
+): Record<string, unknown> {
+    const value: Record<string, unknown> = {};
+    while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+            case 1:
+                value.host = reader.string();
+                break;
+            case 2:
+                value.port = reader.string();
+                break;
+            default:
+                reader.skipType(tag & 7);
+        }
+    }
+    return value;
+}
+
+function decodePacketMessage(
+    reader: protobuf.Reader,
+    end: number,
+): Record<string, unknown> {
+    const value: Record<string, unknown> = {};
+    while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+            case 1:
+                value.json = reader.bytes();
+                value.value = "json";
+                break;
+            case 2:
+                value.streamData = decodeStreamData(reader, readEnd(reader));
+                value.value = "streamData";
+                break;
+            default:
+                reader.skipType(tag & 7);
+        }
+    }
+    return value;
+}
+
+function decodeStreamData(
+    reader: protobuf.Reader,
+    end: number,
+): Record<string, unknown> {
+    const value: Record<string, unknown> = {};
+    while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+            case 1:
+                value.id = reader.string();
+                break;
+            case 2:
+                value.seq = uint64Number(reader.uint64());
+                break;
+            case 3:
+                value.data = reader.bytes();
+                break;
+            default:
+                reader.skipType(tag & 7);
+        }
+    }
+    return value;
+}
+
+function readEnd(reader: protobuf.Reader): number {
+    const length = reader.uint32();
+    const end = reader.pos + length;
+    if (end > reader.len) throw new RangeError("index out of range");
+    return end;
+}
+
+function uint64Number(value: number | { toString(): string }): number {
+    return typeof value === "number" ? value : Number(value.toString());
 }
 
 function decodePacket(value: unknown): Packet {

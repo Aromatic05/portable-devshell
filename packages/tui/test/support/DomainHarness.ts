@@ -659,7 +659,7 @@ export class TuiDomainHarness {
                 return self.#options.image;
             },
         };
-        const configTransport = {
+        const instanceTransport = {
             createInstance: async (draft: { name: string }) =>
                 ({
                     enabled: true,
@@ -690,33 +690,15 @@ export class TuiDomainHarness {
             deleteInstance: async () => ({}) as Record<string, JsonValue>,
             disableInstance: async () => ({}) as Record<string, JsonValue>,
             enableInstance: async () => ({}) as Record<string, JsonValue>,
-            get: async () => self.#configView as unknown as ConfigView,
-            getConversationPreferences: async () =>
-                conversationPreferences.state.preferences,
             listInstances: async () => self.#normalizedInstances(),
-            snapshot: async () =>
-                ({
-                    revision: 0,
-                    view: self.#configView,
-                }) as any,
             snapshotInstances: async () => ({
                 instances: self.#normalizedInstances(),
                 revision: 0,
             }),
-            subscribe: async () => {
-                throw new Error("Config subscription is not supported.");
-            },
             subscribeInstances: async () => {
                 throw new Error("Instance subscription is not supported.");
             },
-            update: config.update,
-            updateConversationPreferences: async (
-                patch: Record<string, unknown>,
-            ) => await conversationPreferences.update(patch),
             updateInstance: config.updateInstance,
-            updateMcpEndpoint: config.updateMcpEndpoint,
-            updateWeb: config.updateWeb,
-            validate: config.validate,
             validateInstanceCreate: async (draft: {
                 name: string;
                 provider: string;
@@ -733,6 +715,26 @@ export class TuiDomainHarness {
                     provider: draft.provider,
                     security: { mode: "disabled" as const },
                 }) as any,
+        };
+        const configTransport = {
+            get: async () => self.#configView as unknown as ConfigView,
+            getConversationPreferences: async () =>
+                conversationPreferences.state.preferences,
+            snapshot: async () =>
+                ({
+                    revision: 0,
+                    view: self.#configView,
+                }) as any,
+            subscribe: async () => {
+                throw new Error("Config subscription is not supported.");
+            },
+            update: config.update,
+            updateConversationPreferences: async (
+                patch: Record<string, unknown>,
+            ) => await conversationPreferences.update(patch),
+            updateMcpEndpoint: config.updateMcpEndpoint,
+            updateWeb: config.updateWeb,
+            validate: config.validate,
         };
         const reverse = {
             createCode: async (instance: string) => ({
@@ -830,6 +832,7 @@ export class TuiDomainHarness {
             artifact,
             artifactTransport,
             configTransport,
+            instanceTransport,
             serviceTransport,
             taskTransport,
             terminalTransport,

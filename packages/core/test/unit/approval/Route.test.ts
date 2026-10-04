@@ -8,6 +8,14 @@ import type {
 } from "@portable-devshell/shared";
 
 import { createApprovalRouteModule } from "../../../src/approval/Route.ts";
+import type { InstanceEventSource } from "../../../src/instance/EventBuffer.ts";
+
+function eventSource(lastSeq = 7): InstanceEventSource {
+    return {
+        cursor: () => lastSeq,
+        subscribe: () => ({ events: [], kind: "events", lastSeq }),
+    };
+}
 
 function context(): ControlPortContext {
     return {
@@ -35,10 +43,8 @@ test("approval routes list pending requests through the approval port", async ()
                     return [{ approvalId: "pending-1" } as never];
                 },
             } as never,
+            events: eventSource(),
             name: "demo",
-            worker: {
-                snapshot: () => ({ lastSeq: 7 }),
-            } as never,
         },
         {
             async subscribe() {},
@@ -66,10 +72,8 @@ test("approval snapshot pairs the pending list with a replay cursor", async () =
                     return [{ approvalId: "pending-1" } as never];
                 },
             } as never,
+            events: eventSource(),
             name: "demo",
-            worker: {
-                snapshot: () => ({ lastSeq: 7 }),
-            } as never,
         },
         { async subscribe() {} },
     );
@@ -97,8 +101,8 @@ test("approval routes expose legacy reads plus snapshot and subscribe", () => {
     const module = createApprovalRouteModule(
         {
             approval: {} as never,
+            events: eventSource(),
             name: "demo",
-            worker: {} as never,
         },
         { async subscribe() {} },
     );
@@ -120,15 +124,15 @@ test("approval subscribe uses the shared runtime stream with approval filter", a
     const module = createApprovalRouteModule(
         {
             approval: {} as never,
+            events: eventSource(),
             name: "demo",
-            worker: {} as never,
         },
         {
             async subscribe(
                 _stream,
                 _context,
                 nextInstanceName,
-                _worker,
+                _events,
                 nextFromSeq,
                 nextProject,
             ) {

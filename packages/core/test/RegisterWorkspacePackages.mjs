@@ -63,6 +63,10 @@ const workspacePackages = new Map([
         new URL("../../shared/src/index.ts", import.meta.url).href,
     ],
     [
+        "@portable-devshell/shared/testing",
+        new URL("../../shared/src/testing.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/shared/transport/frame",
         new URL("../../shared/src/transport/frame/Protocol.ts", import.meta.url)
             .href,

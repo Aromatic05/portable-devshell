@@ -19,14 +19,14 @@ export function createConversationPreferenceRouteModule(
     port: ConversationPreferencePort,
 ): ControlPortDefinition {
     return {
-        name: "config",
+        name: "conversation",
         operations: [
             {
-                name: "getConversationPreferences",
+                name: "preferences",
                 handle: async () => (await port.read()) as unknown as JsonValue,
             },
             {
-                name: "updateConversationPreferences",
+                name: "updatePreferences",
                 handle: async (request) =>
                     (await port.update(
                         readConversationPreferencesPatch(

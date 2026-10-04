@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
-import type { ToolCallReviewInput } from "@portable-devshell/core";
+import {
+    ToolCallHookRegistry,
+    type ToolCallReviewInput,
+} from "@portable-devshell/core/testing";
 
+import type {
+    ApprovalEvaluation,
+    ApprovalResolution,
+} from "../../../src/approval/Api.ts";
 import {
     ApprovalError,
     ApprovalService,
-    type ApprovalEvaluation,
-    type ApprovalResolution,
 } from "../../../src/approval/Service.ts";
-import { ApprovalToolCallReview } from "../../../src/approval/ToolCallReview.ts";
+import { registerApprovalToolCallReview } from "../../../src/approval/ToolCallReview.ts";
 
 const input: ToolCallReviewInput = {
     callId: "call-1",
@@ -53,11 +58,38 @@ function fixture() {
             },
         },
     });
-    return { service, review: new ApprovalToolCallReview({ service }) };
+    const hooks = new ToolCallHookRegistry();
+    registerApprovalToolCallReview(hooks, (instance) =>
+        instance === "dev" ? service : undefined,
+    );
+    return { hooks, service };
+}
+
+async function acquire(
+    hooks: ToolCallHookRegistry,
+    reviewInput: ToolCallReviewInput,
+    signal: AbortSignal,
+    recording: "caller" | "host",
+) {
+    return await hooks.provider()(reviewInput.value.context, signal, recording);
+}
+
+async function runReview(
+    hooks: ToolCallHookRegistry,
+    reviewInput: ToolCallReviewInput,
+    signal: AbortSignal,
+    recording: "caller" | "host",
+) {
+    const lease = await acquire(hooks, reviewInput, signal, recording);
+    try {
+        return await lease.sequence.review(reviewInput);
+    } finally {
+        lease.release();
+    }
 }
 
 test("review maps explicit ToolCall fields, forwards signal and holds until resolution", async (t) => {
-    const { service, review } = fixture();
+    const { hooks, service } = fixture();
     let resolve!: (resolution: ApprovalResolution) => void;
     const outcome = new Promise<ApprovalResolution>((done) => {
         resolve = done;
@@ -89,13 +121,12 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
     const cancel = t.mock.method(service, "cancel", async () => {
         assert.fail("review must not cancel directly");
     });
+    const lease = await acquire(hooks, input, controller.signal, "caller");
     let settled = false;
-    const pending = review
-        .review(input, controller.signal, "caller")
-        .then((result) => {
-            settled = true;
-            return result;
-        });
+    const pending = lease.sequence.review(input).then((result) => {
+        settled = true;
+        return result;
+    });
     await Promise.resolve();
     assert.equal(settled, false);
     assert.deepEqual(evaluate.mock.calls[0].arguments, [
@@ -124,6 +155,7 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
         },
     });
     assert.deepEqual(await pending, { decision: "continue" });
+    lease.release();
 });
 
 for (const [direction, kind] of [
@@ -136,12 +168,13 @@ for (const [direction, kind] of [
     ["outbound", "progress"],
 ] as const) {
     test(`review skips ${direction} ${kind}`, async (t) => {
-        const { service, review } = fixture();
+        const { hooks, service } = fixture();
         const evaluate = t.mock.method(service, "evaluate", async () => {
             assert.fail("non-inbound calls must not request approval");
         });
         assert.deepEqual(
-            await review.review(
+            await runReview(
+                hooks,
                 {
                     ...input,
                     direction,
@@ -158,14 +191,19 @@ for (const [direction, kind] of [
 
 for (const decision of ["allow", "deny"] as const) {
     test(`review maps policy ${decision}`, async (t) => {
-        const { service, review } = fixture();
+        const { hooks, service } = fixture();
         const error = new ApprovalError(
             runtimeErrorCodes.approvalDenied,
             "policy denied",
         );
         t.mock.method(service, "evaluate", async () => ({ decision, error }));
         assert.deepEqual(
-            await review.review(input, new AbortController().signal, "host"),
+            await runReview(
+                hooks,
+                input,
+                new AbortController().signal,
+                "host",
+            ),
             decision === "allow"
                 ? { decision: "continue" }
                 : {
@@ -179,7 +217,7 @@ for (const decision of ["allow", "deny"] as const) {
 
 for (const status of ["denied", "cancelled", "expired"] as const) {
     test(`review maps ${status} resolution without reading persistence`, async (t) => {
-        const { service, review } = fixture();
+        const { hooks, service } = fixture();
         const code = {
             denied: runtimeErrorCodes.approvalDenied,
             cancelled: runtimeErrorCodes.toolCallCancelled,
@@ -201,7 +239,12 @@ for (const status of ["denied", "cancelled", "expired"] as const) {
             awaitDecision: Promise.resolve(resolution),
         }));
         assert.deepEqual(
-            await review.review(input, new AbortController().signal, "host"),
+            await runReview(
+                hooks,
+                input,
+                new AbortController().signal,
+                "host",
+            ),
             {
                 decision: "reject",
                 error: { code },

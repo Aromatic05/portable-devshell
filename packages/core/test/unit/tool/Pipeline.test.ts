@@ -11,9 +11,9 @@ import {
 import { createToolCallScope } from "../../../src/tool/Context.ts";
 import {
     ToolCallPipeline,
-    ToolCallExecutionTarget,
     type ToolCallTargetResolver,
 } from "../../../src/tool/Pipeline.ts";
+import { ToolCallExecutionTarget } from "../../../src/worker/instance/tool/ExecutionTarget.ts";
 import { ToolCallHookSequence } from "../../../src/tool/hook/Sequence.ts";
 import type {
     ToolCallReview,

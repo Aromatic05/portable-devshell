@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceChangeHub } from "../../../../src/config/change/Instance.ts";
-import { createInstanceConfigRouteModule } from "../../../../src/config/route/Instance.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
+import { createInstanceConfigRouteModule } from "../../../../src/instance/Route.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 
 test("config instance route exposes list and revisioned snapshot", async () => {

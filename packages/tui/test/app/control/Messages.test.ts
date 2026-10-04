@@ -761,24 +761,29 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                     revision: 1,
                                 }),
                             },
-                            {
-                                name: "getConversationPreferences",
-                                handle: async () =>
-                                    (await preferences.read()) as unknown as JsonValue,
-                            },
-                            {
-                                name: "updateConversationPreferences",
-                                handle: async (request) =>
-                                    (await preferences.update(
-                                        (request.payload ?? {}) as never,
-                                    )) as unknown as JsonValue,
-                            },
                         ],
                         streams: [
                             { name: "subscribe", handle: emptySubscription },
                             {
                                 name: "subscribeInstances",
                                 handle: emptySubscription,
+                            },
+                        ],
+                    },
+                    {
+                        name: "conversation",
+                        operations: [
+                            {
+                                name: "preferences",
+                                handle: async () =>
+                                    (await preferences.read()) as unknown as JsonValue,
+                            },
+                            {
+                                name: "updatePreferences",
+                                handle: async (request) =>
+                                    (await preferences.update(
+                                        (request.payload ?? {}) as never,
+                                    )) as unknown as JsonValue,
                             },
                         ],
                     },

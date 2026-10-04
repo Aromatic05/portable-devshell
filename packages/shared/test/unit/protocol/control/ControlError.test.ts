@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    isRemoteErrorBody,
-    RemoteError,
-    toRemoteErrorBody,
-} from "@portable-devshell/shared";
+import { RemoteError, toRemoteErrorBody } from "@portable-devshell/shared";
+import { isRemoteErrorBody } from "@portable-devshell/shared/testing";
 
 test("remote error serializes nested causes and structured details", () => {
     const cause = new RemoteError({

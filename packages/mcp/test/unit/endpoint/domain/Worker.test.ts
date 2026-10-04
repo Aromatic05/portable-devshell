@@ -1,9 +1,5 @@
 import { asInstanceName } from "@portable-devshell/shared";
-import {
-    ToolCallPipeline,
-    ToolCallHookSequence,
-    type ToolCallHookValue,
-} from "@portable-devshell/core";
+import { ToolCallPipeline, ToolCallHookSequence, type ToolCallHookValue } from "@portable-devshell/core/testing";
 import assert from "node:assert/strict";
 import test from "node:test";
 

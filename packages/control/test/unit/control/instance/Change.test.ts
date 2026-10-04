@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceChangeHub } from "../../../../src/config/change/Instance.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 
 test("instance change hub replays registry and config revisions", () => {
     const hub = new InstanceChangeHub({ replayLimit: 4 });

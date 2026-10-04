@@ -5,7 +5,7 @@ import {
     InstanceRegistry,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-import { InstanceCreateCoordinator } from "../../../../src/config/editor/instance/create/index.ts";
+import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import {
     normalizeConfigInstanceDraft,
     type ControlConfig,
@@ -118,7 +118,6 @@ function createService(platform?: NodeJS.Platform) {
             },
         },
         getConfig: () => config,
-        getMcpHost: () => undefined,
         instanceRegistry: new InstanceRegistry([]),
         platform,
         setConfig: (nextConfig) => {
@@ -138,7 +137,6 @@ test("instance create prepares the runtime descriptor before persisting configur
             },
         },
         getConfig: () => config,
-        getMcpHost: () => undefined,
         instanceConfigMapper: {
             map() {
                 throw new Error("runtime descriptor failed");
@@ -184,15 +182,15 @@ test("instance create restores configuration and registry when MCP registration 
             },
         },
         getConfig: () => config,
-        getMcpHost: () =>
-            ({
-                registerInstance() {
-                    throw new Error("MCP registration failed");
-                },
-                unregisterInstance() {},
-            }) as never,
         instanceConfigMapper: { map: () => descriptor } as never,
         instanceRegistry: registry,
+        mcp: {
+            registerInstance() {
+                throw new Error("MCP registration failed");
+            },
+            async retireWorkspaceApp() {},
+            unregisterInstance() {},
+        },
         setConfig: (nextConfig) => {
             config = nextConfig;
         },
@@ -225,7 +223,6 @@ test("instance create defaults to SSH after a local instance already exists", ()
     const service = new InstanceCreateCoordinator({
         configStore: { async write() {} },
         getConfig: () => config,
-        getMcpHost: () => undefined,
         instanceRegistry: new InstanceRegistry([]),
         setConfig: (nextConfig) => {
             config = nextConfig;

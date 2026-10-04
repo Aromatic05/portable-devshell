@@ -14,7 +14,7 @@ import test from "node:test";
 import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 
 import { ToolCallProvenanceStore } from "../../../src/tool/Provenance.ts";
-import { createToolRouteModule } from "../../../src/tool/Route.ts";
+import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("tool call provenance persists in Control and decorates matching Worker audit records", async () => {

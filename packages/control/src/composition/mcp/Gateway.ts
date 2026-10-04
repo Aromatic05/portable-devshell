@@ -25,11 +25,11 @@ import { InstanceConnectionService } from "@portable-devshell/core";
 import type { ToolCallProvenanceStore } from "@portable-devshell/core";
 import type { ArtifactImageApi } from "../../artifact/Api.js";
 import type { McpExtensionService } from "./extension/Service.js";
-import type { InstanceDomainRuntime } from "../InstanceRuntime.js";
+import type { InstanceDomainRuntimePort } from "../InstanceRuntime.js";
 
 export interface McpInstanceGatewayControlOptions {
     getConfig: () => ControlConfig;
-    instanceDomains: InstanceDomainRuntime;
+    instanceDomains: InstanceDomainRuntimePort;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
     toolProvenance?: ToolCallProvenanceStore;
@@ -56,7 +56,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             ),
     };
     readonly #getConfig: () => ControlConfig;
-    readonly #instanceDomains: InstanceDomainRuntime;
+    readonly #instanceDomains: InstanceDomainRuntimePort;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;

@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ToolCallPipeline } from "@portable-devshell/core";
-import { ToolCallHookSequence } from "@portable-devshell/core";
+import { ToolCallPipeline } from "@portable-devshell/core/testing";
+import { ToolCallHookSequence } from "@portable-devshell/core/testing";
 
 import {
     InstanceRegistry,
     McpInstanceGatewayControl,
     createDefaultControlConfig,
+    createTestApprovalApi,
+    createTestInstanceDomainRuntime,
+    createTestTaskApi,
 } from "../../../../src/testing.ts";
 import { McpExtensionService } from "../../../../src/composition/mcp/extension/Service.ts";
 
-function createGateway(ready: boolean): McpInstanceGatewayControl {
+function createGateway(
+    ready: boolean,
+    instanceDomains = createTestInstanceDomainRuntime(),
+): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([
         {
             enabled: true,
@@ -28,6 +34,7 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
 
     return new McpInstanceGatewayControl({
         getConfig: () => createDefaultControlConfig(),
+        instanceDomains,
         instanceRegistry: registry,
     });
 }
@@ -56,46 +63,45 @@ test("cross-instance readiness check accepts a ready target", () => {
     assert.doesNotThrow(() => gateway.assertReady("remote-server"));
 });
 
-test("MCP approval adapter delegates through the descriptor approval port", async () => {
+test("MCP approval adapter delegates through the instance domain approval port", async () => {
     const pending = {
         approvalId: "approval-1",
         ctxId: "ctx-1",
         status: "pending",
     };
     const decided = { ...pending, status: "approved" };
-    const registry = new InstanceRegistry([
-        {
-            name: "alpha",
-            approval: {
-                async listApprovals() {
-                    return [pending];
-                },
-                async listPendingApprovals(ctxId?: string) {
-                    return ctxId === "ctx-1" ? [pending] : [];
-                },
-                async decideApproval(approvalId: string, input: unknown) {
-                    assert.equal(approvalId, "approval-1");
-                    assert.deepEqual(input, {
-                        decidedBy: "web",
-                        decision: "approve",
-                    });
-                    return decided;
-                },
-                async cancel() {
-                    return pending;
-                },
-            },
-            worker: {
-                async listApprovals() {
-                    throw new Error("worker approval API must not be used");
-                },
-            },
-        } as never,
-    ]);
-    const gateway = new McpInstanceGatewayControl({
-        getConfig: () => createDefaultControlConfig(),
-        instanceRegistry: registry,
-    });
+    const gateway = createGateway(
+        true,
+        createTestInstanceDomainRuntime({
+            approval: (instance) =>
+                instance === "alpha"
+                    ? createTestApprovalApi({
+                          async listApprovals() {
+                              return [pending] as never;
+                          },
+                          async listPendingApprovals(ctxId?: string) {
+                              return (
+                                  ctxId === "ctx-1" ? [pending] : []
+                              ) as never;
+                          },
+                          async decideApproval(
+                              approvalId: string,
+                              input: unknown,
+                          ) {
+                              assert.equal(approvalId, "approval-1");
+                              assert.deepEqual(input, {
+                                  decidedBy: "web",
+                                  decision: "approve",
+                              });
+                              return decided as never;
+                          },
+                          async cancel() {
+                              return pending as never;
+                          },
+                      })
+                    : undefined,
+        }),
+    );
 
     assert.deepEqual(await gateway.approval.listApprovals("alpha"), [pending]);
     assert.deepEqual(
@@ -227,6 +233,7 @@ test("closing an MCP tool session releases worker-owned session state", async ()
     );
     const gateway = new McpInstanceGatewayControl({
         getConfig: () => createDefaultControlConfig(),
+        instanceDomains: createTestInstanceDomainRuntime(),
         instanceRegistry: registry,
     });
 
@@ -267,7 +274,6 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
             mcpPath: "/remote-server/mcp",
             modelExtensions: ["instance"],
             name: "remote-server",
-            todo: { summaries: () => activeTodos },
             worker: {
                 managementMode: "controllerManaged",
                 snapshot() {
@@ -292,6 +298,17 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
     ]);
     const gateway = new McpInstanceGatewayControl({
         getConfig: () => createDefaultControlConfig(),
+        instanceDomains: createTestInstanceDomainRuntime({
+            task: (instance) =>
+                instance === "remote-server"
+                    ? createTestTaskApi({
+                          todo: {
+                              ...createTestTaskApi().todo,
+                              summaries: () => activeTodos,
+                          },
+                      })
+                    : undefined,
+        }),
         instanceRegistry: registry,
     });
 
@@ -326,7 +343,6 @@ test("MCP instance connect lifecycle uses Context references without adopting an
             mcpPath: "/managed/mcp",
             modelExtensions: ["instance"],
             name: "managed",
-            todo: { summaries: () => [] },
             worker: {
                 managementMode: "controllerManaged",
                 snapshot: () => ({ ready }),
@@ -348,7 +364,6 @@ test("MCP instance connect lifecycle uses Context references without adopting an
             mcpPath: "/external/mcp",
             modelExtensions: ["instance"],
             name: "external",
-            todo: { summaries: () => [] },
             worker: {
                 managementMode: "controllerManaged",
                 snapshot: () => ({ ready: true }),
@@ -361,6 +376,7 @@ test("MCP instance connect lifecycle uses Context references without adopting an
     ]);
     const gateway = new McpInstanceGatewayControl({
         getConfig: () => createDefaultControlConfig(),
+        instanceDomains: createTestInstanceDomainRuntime(),
         instanceRegistry: registry,
     });
 

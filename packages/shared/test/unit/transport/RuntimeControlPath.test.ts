@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import {
-    ControlPathHome,
-    resolveControlRuntimeDirectory,
-    resolveControlSocketPath,
-} from "@portable-devshell/shared";
+import { ControlPathHome } from "@portable-devshell/shared";
+import { resolveControlRuntimeDirectory, resolveControlSocketPath } from "@portable-devshell/shared/testing";
 
 test("Control home honors PORTABLE_DEVSHELL_HOME unless an explicit homeDirectory is supplied", () => {
     const configured = join("custom", "devshell-home");

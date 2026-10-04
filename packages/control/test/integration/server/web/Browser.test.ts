@@ -480,8 +480,73 @@ function createRouteHosts(calls: {
                     ],
                 },
                 {
+                    name: "config",
+                    operations: [
+                        {
+                            name: "snapshot",
+                            handle: () => ({
+                                revision: 0,
+                                view: { restartControlRequired: false },
+                            }),
+                        },
+                    ],
+                },
+                {
                     name: "instance",
-                    operations: [{ name: "list", handle: () => [] }],
+                    operations: [
+                        {
+                            name: "snapshotInstances",
+                            handle: () => ({ instances: [], revision: 0 }),
+                        },
+                    ],
+                },
+                {
+                    name: "context",
+                    operations: [
+                        {
+                            name: "snapshot",
+                            handle: () => ({ contexts: [], revision: 0 }),
+                        },
+                    ],
+                },
+                {
+                    name: "artifact",
+                    operations: [
+                        {
+                            name: "snapshot",
+                            handle: () => ({
+                                lastSeq: 0,
+                                shares: [],
+                                transfers: [],
+                            }),
+                        },
+                    ],
+                },
+                {
+                    name: "auth",
+                    operations: [
+                        {
+                            name: "status",
+                            handle: () => ({ authMode: "none", running: false }),
+                        },
+                    ],
+                },
+                {
+                    name: "extension",
+                    operations: [
+                        {
+                            name: "snapshot",
+                            handle: () => ({
+                                extensions: [],
+                                revision: 0,
+                                tuiPages: [],
+                                tuiSupported: true,
+                                webApplications: [],
+                                webPages: [],
+                                webSupported: true,
+                            }),
+                        },
+                    ],
                 },
                 {
                     name: "mcp",

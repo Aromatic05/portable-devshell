@@ -1,9 +1,6 @@
 import { type ReactNode } from "react";
-import {
-    createEmptyConversationPreferences,
-    type ArtifactStoredImageResult,
-    type ServiceSessionStatus,
-} from "@portable-devshell/shared";
+import { createEmptyConversationPreferences, type ArtifactStoredImageResult } from "@portable-devshell/shared";
+import { type ServiceSessionStatus } from "@portable-devshell/shared/testing";
 
 import { WebDomainProvider } from "../../src/app/domain/Context.js";
 import type { WebDomainSession } from "../../src/app/domain/Session.js";

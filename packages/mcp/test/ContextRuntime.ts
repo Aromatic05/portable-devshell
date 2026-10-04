@@ -22,12 +22,7 @@ import { McpHost, McpRuntimeState } from "../src/host/Host.ts";
 import type { McpHostConfig } from "../src/host/Host.ts";
 import type { McpEndpointWorkerPort } from "../src/endpoint/call/Port.ts";
 import type { McpInstanceGateway } from "../src/instance/Gateway.ts";
-import {
-    ToolCallHookSequence,
-    ToolCallPipeline,
-    type ToolCallHookValue,
-    type ToolCallTargetResolver,
-} from "@portable-devshell/core";
+import { ToolCallHookSequence, ToolCallPipeline, type ToolCallHookValue, type ToolCallTargetResolver } from "@portable-devshell/core/testing";
 
 function unexpectedGatewayOperation(name: string): never {
     throw new Error(`Unexpected test gateway operation: ${name}`);

@@ -6,15 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import {
-    CONTROL_PROTOCOL_VERSION,
-    Endpoint,
-    LocalChannel,
-    Rpc,
-    Stream,
-    resolveControlSocketPath,
-    type JsonValue,
-} from "@portable-devshell/shared";
+import { CONTROL_PROTOCOL_VERSION, Endpoint, LocalChannel, Rpc, Stream, type JsonValue } from "@portable-devshell/shared";
+import { resolveControlSocketPath } from "@portable-devshell/shared/testing";
 
 import { createCliClients } from "../../src/transport/Client.js";
 import { CliMain } from "../../src/app/Main.js";

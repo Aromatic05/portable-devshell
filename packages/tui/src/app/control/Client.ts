@@ -20,6 +20,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
+    createConversationPreferenceTransport,
     createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
@@ -104,7 +105,7 @@ export class TuiDomainSession {
         this.instanceTransport = createInstanceTransport(endpoint);
         this.config = new ConfigViewModel(this.configTransport);
         this.conversationPreferences = new ConversationPreferenceViewModel(
-            this.configTransport,
+            createConversationPreferenceTransport(endpoint),
         );
         this.overview = new OverviewViewModel(createOverviewTransport(endpoint));
         this.mcp = new AuthViewModel(createAuthTransport(endpoint));

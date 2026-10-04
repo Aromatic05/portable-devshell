@@ -259,16 +259,23 @@ export interface ConversationPreferenceViewModelState {
     preferences: ConversationPreferencesSnapshot;
 }
 
+interface ConversationPreferencePort {
+    getConversationPreferences(): Promise<ConversationPreferencesSnapshot>;
+    updateConversationPreferences(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot>;
+}
+
 export class ConversationPreferenceViewModel {
     readonly #listeners = new Set<() => void>();
-    readonly #transport: ConfigTransport;
+    readonly #transport: ConversationPreferencePort;
     #generation = 0;
     #published: ConversationPreferenceViewModelState =
         emptyConversationPreferenceViewModelState();
     #state: ConversationPreferenceViewModelState =
         emptyConversationPreferenceViewModelState();
 
-    constructor(transport: ConfigTransport) {
+    constructor(transport: ConversationPreferencePort) {
         this.#transport = transport;
     }
 

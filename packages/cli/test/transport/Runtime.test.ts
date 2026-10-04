@@ -2,12 +2,8 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import {
-    Endpoint,
-    PROCESS_PORT,
-    type Packet,
-    type ProcessTransport,
-} from "@portable-devshell/shared";
+import { Endpoint, PROCESS_PORT, type ProcessTransport } from "@portable-devshell/shared";
+import { type Packet } from "@portable-devshell/shared/testing";
 
 import { createCliRuntimeAdapter } from "../../src/transport/Runtime.js";
 

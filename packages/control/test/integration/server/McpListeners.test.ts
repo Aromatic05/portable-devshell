@@ -199,7 +199,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         );
     });
 
-    const result = (await runtime.configEditor.updateInstanceConfig({
+    const result = (await runtime.instanceEditor.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "a".repeat(48) } },
     })) as { restartControlRequired: boolean };

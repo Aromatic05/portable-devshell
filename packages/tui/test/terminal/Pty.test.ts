@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-    TerminalAttachment,
-    TerminalSessionDescriptor,
-    TerminalStreamCommandIdentity,
-    TerminalStreamMessage,
-    TerminalVersionedIdentity,
-} from "@portable-devshell/shared";
+import type { TerminalAttachment, TerminalSessionDescriptor, TerminalStreamMessage, TerminalVersionedIdentity } from "@portable-devshell/shared";
+import type { TerminalStreamCommandIdentity } from "@portable-devshell/shared/testing";
 import {
     TuiControlTerminalPtyFactory,
     type TuiControlTerminalClient,

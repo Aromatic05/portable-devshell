@@ -17,6 +17,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
+import { createTestInstanceDomainRuntime } from "../../../../src/testing.ts";
 import { ControlSocketServer } from "../../../../src/server/endpoint/Socket.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
@@ -35,6 +36,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         }),
     ]);
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
     });
@@ -107,6 +109,7 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         }),
     ]);
     const routes = new ControlRouteComposition({
+        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
     });

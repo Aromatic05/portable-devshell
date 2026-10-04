@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceFactory } from "../../../src/testing.ts";
+import {
+    InstanceFactory,
+    createInstanceTerminalBackend,
+} from "@portable-devshell/core";
 
 test("instance config mapper passes effective security mode and worker env into runtime config", () => {
     let capturedConfig: Record<string, unknown> | undefined;
@@ -145,7 +148,7 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
         workspace: { enabled: true },
     });
 
-    const opened = await descriptor.terminal!.open({
+    const opened = await createInstanceTerminalBackend(descriptor.worker).open({
         cols: 80,
         rows: 24,
         workspace: "/workspace",

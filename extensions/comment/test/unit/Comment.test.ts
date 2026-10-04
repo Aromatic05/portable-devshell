@@ -76,7 +76,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
     );
     assert.deepEqual(
         extension.routes.control().map((route) => route.name),
-        ["config"],
+        ["conversation"],
     );
 
     const message = extension.routes
@@ -138,17 +138,17 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
 
     const preferenceRoute = extension.routes.control()[0]!;
     const updatePreferences = preferenceRoute.operations.find(
-        (operation) => operation.name === "updateConversationPreferences",
+        (operation) => operation.name === "updatePreferences",
     );
     const preferences = preferenceRoute.operations.find(
-        (operation) => operation.name === "getConversationPreferences",
+        (operation) => operation.name === "preferences",
     );
     if (updatePreferences === undefined || preferences === undefined)
         throw new Error("Conversation preference routes are missing");
     await updatePreferences.handle(
         {
             id: "preferences-update",
-            name: "updateConversationPreferences",
+            name: "updatePreferences",
             payload: { titles: { "alpha\\u0000ctx-alpha": "Alpha" } },
         },
         routeContext,
@@ -158,7 +158,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             (await preferences.handle(
                 {
                     id: "preferences",
-                    name: "getConversationPreferences",
+                    name: "preferences",
                 },
                 routeContext,
             )) as { titles: Record<string, string> }

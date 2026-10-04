@@ -38,7 +38,7 @@ export interface InstanceTransport {
 }
 
 export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
-    const port = createPortClient(endpoint, CONTROL_HOST, "config");
+    const port = createPortClient(endpoint, CONTROL_HOST, "instance");
     return {
         createInstance: (draft) =>
             port.request<InstanceCreateResult>("createInstance", draft),

@@ -4,13 +4,8 @@ import { createServer } from "node:net";
 import { dirname } from "node:path";
 import test from "node:test";
 
-import {
-    CONTROL_PROTOCOL_VERSION,
-    Endpoint,
-    LocalChannel,
-    Rpc,
-    resolveControlSocketPath,
-} from "@portable-devshell/shared";
+import { CONTROL_PROTOCOL_VERSION, Endpoint, LocalChannel, Rpc } from "@portable-devshell/shared";
+import { resolveControlSocketPath } from "@portable-devshell/shared/testing";
 
 import {
     createCliClients,

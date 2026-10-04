@@ -19,7 +19,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
-import { negotiateControlProtocol } from "../../../../src/server/endpoint/Channel.ts";
+import { negotiateControlProtocol } from "../../../../src/service/Protocol.ts";
 import { ControlWebOAuthFlow } from "../../../../src/server/web/auth/OAuth.ts";
 import { ControlWebSessionService } from "../../../../src/server/web/auth/Session.ts";
 import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";

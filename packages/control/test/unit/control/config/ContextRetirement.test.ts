@@ -4,7 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-    ConfigEditorCoordinator,
+    ConfigEngine,
+    InstanceEditorCoordinator,
     InstanceRegistry,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
@@ -146,16 +147,30 @@ for (const descriptorState of ["present", "missing"] as const) {
 
         let currentConfig = config;
         const cleanupDebtFile = join(home, "instance-cleanup.json");
-        const coordinator = new ConfigEditorCoordinator({
-            cleanupDebtFile,
+        const engine = new ConfigEngine({
             configStore: {
                 async write(nextConfig) {
                     currentConfig = nextConfig;
                 },
             },
+            getConfig: () => currentConfig,
+            setConfig: (nextConfig) => {
+                currentConfig = nextConfig;
+            },
+        });
+        const coordinator = new InstanceEditorCoordinator({
+            cleanupDebtFile,
             detachContextInstance: async (instance) => {
                 await contexts.detachInstance(instance);
             },
+            engine,
+            instanceConfigMapper: {
+                map() {
+                    descriptorMapCalls += 1;
+                    return descriptor;
+                },
+            } as never,
+            instanceRegistry: instances,
             reconcileContextInstanceCleanup: async (
                 instance,
                 cleanupDescriptor,
@@ -176,17 +191,6 @@ for (const descriptorState of ["present", "missing"] as const) {
                         events.push(`reference.release:${ctxId}`);
                     },
                 });
-            },
-            getConfig: () => currentConfig,
-            instanceConfigMapper: {
-                map() {
-                    descriptorMapCalls += 1;
-                    return descriptor;
-                },
-            } as never,
-            instanceRegistry: instances,
-            setConfig: (nextConfig) => {
-                currentConfig = nextConfig;
             },
         });
 

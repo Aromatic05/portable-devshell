@@ -7,6 +7,7 @@ import type {
     ArtifactPayloadDescriptor,
     ArtifactTransferRecord,
     JsonValue,
+    MessageStream,
 } from "@portable-devshell/shared";
 import {
     ArtifactService,
@@ -62,7 +63,6 @@ async function waitWithAbort(
 }
 
 class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
-    readonly events: Array<{ type: string; data?: JsonValue }> = [];
     readonly closedPayloads: string[] = [];
     readonly payloadClosed = new Deferred();
     readonly abortedReceives: string[] = [];
@@ -82,10 +82,6 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         this.#bytes = bytes;
         this.#finishGate = finishGate;
         this.#openGate = openGate;
-    }
-
-    async appendControlEvent(type: string, data?: JsonValue): Promise<void> {
-        this.events.push({ type, data });
     }
 
     async openArtifactPayload(
@@ -308,24 +304,46 @@ test("artifact transfer returns queued immediately and completes asynchronously"
     assert.equal(completed.transferredBytes, 8);
     assert.deepEqual(target.received.get("receive-1"), Buffer.from("abcdefgh"));
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
-    assert.ok(
-        source.events.some(
-            (event) => event.type === "artifact.transferCompleted",
-        ),
-    );
-    assert.ok(
-        target.events.some(
-            (event) => event.type === "artifact.transferCompleted",
-        ),
-    );
-    const snapshot = service.snapshot();
-    assert.equal(snapshot.lastSeq, source.events.length);
-    assert.equal(snapshot.lastSeq, target.events.length);
-    assert.deepEqual(
-        source.events.map((event) => event.type),
-        target.events.map((event) => event.type),
-    );
+    const events = await readArtifactEvents(service, 1);
+    assert.ok(events.some((event) => event.type === "artifact.transferCompleted"));
+    assert.equal(service.snapshot().lastSeq, events.length);
 });
+
+async function readArtifactEvents(
+    service: ArtifactService,
+    fromSeq: number,
+): Promise<Array<{ type?: string }>> {
+    const messages: Array<{ name?: string; payload?: JsonValue }> = [];
+    let closed = false;
+    const stream = {
+        async send(message?: { name?: string; payload?: JsonValue }) {
+            messages.push(message ?? {});
+            closed = true;
+        },
+        onClose(listener: () => void) {
+            if (closed) queueMicrotask(listener);
+            return () => undefined;
+        },
+        onCancel() {
+            return () => undefined;
+        },
+    } as unknown as MessageStream;
+
+    await service.subscribe(stream, fromSeq);
+    const seed = messages.find((message) => message.name === "seed");
+    if (
+        typeof seed?.payload !== "object" ||
+        seed.payload === null ||
+        Array.isArray(seed.payload) ||
+        !Array.isArray(seed.payload.events)
+    ) {
+        return [];
+    }
+    return seed.payload.events.filter(
+        (event): event is { type?: string } =>
+            typeof event === "object" && event !== null && !Array.isArray(event),
+    );
+}
 
 test("artifact transfer relays through Control unless direct transfer is explicitly enabled", async (t) => {
     const storageDir = await createTestTempDirectory("artifact-direct-default");

@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import { createArtifactDirectoryArchive } from "../../../../../../../src/artifact/host/storage/Archive.ts";
+import { createArtifactDirectoryArchive } from "../../../../../../../src/artifact/Archive.ts";
 import { ExtensionAssetCapabilityControl } from "../../../../../../../src/extension/api/cap/asset/Control.ts";
 import { createTestTempDirectory } from "../../../../../../../../../test/TestTempDirectory.ts";
 

@@ -3,7 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/testing";
 import { asInstanceName } from "@portable-devshell/shared";
 
 import {

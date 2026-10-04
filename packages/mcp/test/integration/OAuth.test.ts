@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { ToolCallHookValue } from "@portable-devshell/core/testing";
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
@@ -38,10 +38,7 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import {
-    ToolCallHookSequence,
-    ToolCallPipeline,
-} from "@portable-devshell/core";
+import { ToolCallHookSequence, ToolCallPipeline } from "@portable-devshell/core/testing";
 import {
     asInstanceName,
     type ContextMessageRecord,

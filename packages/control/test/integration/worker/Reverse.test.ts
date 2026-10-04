@@ -221,7 +221,7 @@ test(
             async () => {
                 const snapshot = await request(
                     server.socketPath,
-                    "runtime.snapshot",
+                    "process.snapshot",
                     asInstanceName("reverse-test"),
                 );
                 return (
@@ -553,7 +553,7 @@ test(
             async () => {
                 const snapshot = await request(
                     server.socketPath,
-                    "runtime.snapshot",
+                    "process.snapshot",
                     asInstanceName("reverse-test"),
                 );
                 return (
@@ -631,7 +631,7 @@ test(
             async () => {
                 const snapshot = await request(
                     server.socketPath,
-                    "runtime.snapshot",
+                    "process.snapshot",
                     asInstanceName("reverse-test"),
                 );
                 return (
@@ -859,7 +859,7 @@ async function waitForReverseGeneration(
         async () => {
             const snapshot = await request(
                 socketPath,
-                "runtime.snapshot",
+                "process.snapshot",
                 asInstanceName(instance),
             );
             generation = snapshot.snapshot.reverse?.generation ?? 0;

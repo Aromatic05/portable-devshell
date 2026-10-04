@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { attachToolCallErrorPayload } from "@portable-devshell/core";
+import { attachToolCallErrorPayload } from "@portable-devshell/core/testing";
 import {
     createRemoteError,
     type JsonValue,
@@ -9,7 +9,8 @@ import {
     type ControlPortContext,
 } from "@portable-devshell/shared";
 
-import { createToolRouteModule } from "../../../src/tool/Route.ts";
+import { createToolIngressRouteModule } from "../../../src/tool/Route.ts";
+import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
 
 function routeContext(connectionId: string): ControlPortContext {
     return {
@@ -26,25 +27,21 @@ function callHandler(
     callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>,
     comments: readonly string[] = [],
 ) {
-    const module = createToolRouteModule(
-        { name: "demo", worker: {} as never },
-        undefined,
-        {
-            async call(_instance, toolName, input) {
-                const result = await callTool(toolName, input).catch(
-                    (error) => {
-                        throw attachToolCallErrorPayload(error, {
-                            comment: [...comments],
-                        });
-                    },
-                );
-                return {
-                    ...(result as Record<string, JsonValue>),
-                    comment: [...comments],
-                };
-            },
+    const module = createToolIngressRouteModule({
+        async call(_instance, toolName, input) {
+            const result = await callTool(toolName, input).catch(
+                (error) => {
+                    throw attachToolCallErrorPayload(error, {
+                        comment: [...comments],
+                    });
+                },
+            );
+            return {
+                ...(result as Record<string, JsonValue>),
+                comment: [...comments],
+            };
         },
-    );
+    });
     const operation = module.operations.find((entry) => entry.name === "call");
     if (operation === undefined)
         throw new Error("tool.call operation is missing");
@@ -126,36 +123,32 @@ test("control tool stream forwards progress before completing the unchanged fina
     let completed: JsonValue | undefined;
     let workerContext: ToolCallContext | undefined;
     let workerRecording: "caller" | "host" | undefined;
-    const module = createToolRouteModule(
-        { name: "demo", worker: {} as never },
-        undefined,
-        {
-            async call(
-                instance,
-                _toolName,
-                _input,
-                context,
-                signal,
-                _transformResult,
-                _invocationInput,
-                onProgress,
-                recording,
-            ) {
-                assert.equal(instance, "demo");
-                assert.equal(signal, streamContext.signal);
-                workerContext = context;
-                workerRecording = recording;
-                onProgress?.({ stdout: "one" });
-                onProgress?.({ stdout: "one\ntwo" });
-                return {
-                    exitCode: 0,
-                    stdout: "one\ntwo",
-                    stderr: "",
-                    termination: "exited",
-                };
-            },
+    const module = createToolIngressRouteModule({
+        async call(
+            instance,
+            _toolName,
+            _input,
+            context,
+            signal,
+            _transformResult,
+            _invocationInput,
+            onProgress,
+            recording,
+        ) {
+            assert.equal(instance, "demo");
+            assert.equal(signal, streamContext.signal);
+            workerContext = context;
+            workerRecording = recording;
+            onProgress?.({ stdout: "one" });
+            onProgress?.({ stdout: "one\ntwo" });
+            return {
+                exitCode: 0,
+                stdout: "one\ntwo",
+                stderr: "",
+                termination: "exited",
+            };
         },
-    );
+    });
     const operation = module.streams?.find(
         (entry) => entry.name === "callStream",
     );

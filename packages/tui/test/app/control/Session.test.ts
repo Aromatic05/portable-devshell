@@ -23,6 +23,7 @@ import {
     ControlSocketServer,
     ContextRegistry,
     InstanceRegistry,
+    createTestInstanceDomainRuntime,
 } from "@portable-devshell/control/testing";
 import {
     createTuiDomainSession,
@@ -608,6 +609,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             clients: {
                 artifact: domains.artifactTransport,
                 config: domains.configTransport,
+                instance: domains.instanceTransport,
                 reverse: domains.reverse,
                 service: domains.serviceTransport,
                 task: domains.taskTransport,
@@ -647,6 +649,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             decision: string;
         }> = [];
         const routes = new ControlRouteComposition({
+            instanceDomains: createTestInstanceDomainRuntime(),
             instances: new InstanceRegistry([]),
             mcpStatus: () => ({
                 authMode: "oauth2",
@@ -741,6 +744,17 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     } {
         const instances = new InstanceRegistry([
             {
+                enabled: true,
+                mcpEnabled: false,
+                mcpPath: "",
+                modelExtensions: [],
+                name: "alpha",
+                provider: "local",
+                worker: worker as unknown as WorkerInstance,
+            },
+        ]);
+        const instanceDomains = createTestInstanceDomainRuntime({
+            services: () => ({
                 approval: {
                     async cancel() {
                         return {} as ApprovalRequest;
@@ -751,6 +765,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                             approvalId,
                             decision,
                         );
+                    },
+                    async evaluate() {
+                        return { decision: "allow" };
                     },
                     async getApproval(approvalId) {
                         return await worker.getApproval(approvalId);
@@ -764,75 +781,91 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     async retire() {},
                     setPolicy() {},
                 },
-                approvalReview: () => ({ decision: "continue" }),
-                enabled: true,
-                goal: {
-                    async continuation() {
-                        return {};
+                task: {
+                    goal: {
+                        async continuation() {
+                            return {};
+                        },
+                        async list() {
+                            return [];
+                        },
+                        async manage() {
+                            return undefined;
+                        },
+                        async read() {
+                            return undefined;
+                        },
+                        async recordReentry() {},
+                        async stopAll() {
+                            return [];
+                        },
+                        async touch() {},
                     },
-                    async list() {
-                        return [];
-                    },
-                    async manage() {
-                        return undefined;
-                    },
-                    async read() {
-                        return undefined;
-                    },
-                    async recordReentry() {},
-                    async stopAll() {
-                        return [];
-                    },
-                    async touch() {},
-                },
-                mcpEnabled: false,
-                mcpPath: "",
-                modelExtensions: [],
-                name: "alpha",
-                provider: "local",
-                todo: {
-                    async cancelAll() {},
-                    async control() {
-                        return {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                        };
-                    },
-                    async delete() {},
-                    async read() {
-                        options.onTodoRead?.();
-                        await options.todoReadGate;
-                        return {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                        };
-                    },
-                    summaries() {
-                        return [];
-                    },
-                    async write() {
-                        return {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                        };
+                    todo: {
+                        async cancelAll() {},
+                        async control() {
+                            return {
+                                items: [],
+                                revision: 0,
+                                summary: { completed: 0, total: 0 },
+                            };
+                        },
+                        async delete() {},
+                        async read() {
+                            options.onTodoRead?.();
+                            await options.todoReadGate;
+                            return {
+                                items: [],
+                                revision: 0,
+                                summary: { completed: 0, total: 0 },
+                            };
+                        },
+                        summaries() {
+                            return [];
+                        },
+                        async write() {
+                            return {
+                                items: [],
+                                revision: 0,
+                                summary: { completed: 0, total: 0 },
+                            };
+                        },
                     },
                 },
-                worker: worker as unknown as WorkerInstance,
-            },
-        ]);
+            }),
+        });
         let server!: ControlSocketServer;
         let contextReads = 0;
         let oauthApprovalReads = 0;
         let restartCount = 0;
         const contextChanges = new ContextRegistry().changes;
         const routes = new ControlRouteComposition({
+            instanceDomains,
             extensionRoutes: {
                 modules(scope) {
                     return scope === "control"
-                        ? []
+                        ? [
+                              {
+                                  name: "conversation",
+                                  operations: [
+                                      {
+                                          name: "preferences",
+                                          handle: () => ({
+                                              hiddenContexts: {},
+                                              orderByWorkspace: {},
+                                              titles: {},
+                                              version: 1,
+                                              workspaceOrder: [],
+                                          }),
+                                      },
+                                      {
+                                          name: "updatePreferences",
+                                          handle: (request) =>
+                                              request.payload ?? {},
+                                      },
+                                  ],
+                              },
+                          ]
                         : [
                               {
                                   name: "message",

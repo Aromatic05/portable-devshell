@@ -45,6 +45,21 @@ import {
                 },
             },
             config: {
+                async update() {
+                    calls.push("config.update");
+                    return {};
+                },
+                async updateMcpEndpoint() {
+                    calls.push("config.mcp");
+                },
+                async updateWeb() {
+                    calls.push("config.web");
+                },
+                async validate() {
+                    calls.push("config.validate");
+                },
+            },
+            instance: {
                 async createInstance(draft: InstanceCreateDraft) {
                     calls.push(`instance.create:${draft.name}`);
                     return { name: draft.name };
@@ -73,23 +88,10 @@ import {
                 async deleteInstance(instance: string) {
                     calls.push(`instance.delete:${instance}`);
                 },
-                async update() {
-                    calls.push("config.update");
-                    return {};
-                },
                 async updateInstance(input: { instanceName: string }) {
                     calls.push(`config.instance:${input.instanceName}`);
                     if (options.failConfigUpdate)
                         throw new Error("config update failed");
-                },
-                async updateMcpEndpoint() {
-                    calls.push("config.mcp");
-                },
-                async updateWeb() {
-                    calls.push("config.web");
-                },
-                async validate() {
-                    calls.push("config.validate");
                 },
                 async validateInstanceCreate(draft: InstanceCreateDraft) {
                     calls.push("instance.validate");

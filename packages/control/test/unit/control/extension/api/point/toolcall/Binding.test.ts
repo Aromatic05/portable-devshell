@@ -10,6 +10,7 @@ import type {
     ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
+import { ToolCallHookRegistry } from "@portable-devshell/core/testing";
 
 import { ToolCallExtensionBinding } from "../../../../../../../src/extension/api/point/toolcall/Binding.ts";
 import {
@@ -74,6 +75,7 @@ function host(options: {
 
 test("ToolCall review pipeline orders builtin reviews with extension reviews", async () => {
     const calls: string[] = [];
+    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -95,19 +97,17 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
                 },
             ],
         }) as never,
-        undefined,
-        [
-            {
-                hook: "510-builtin",
-                id: "middle",
-                review: async () => {
-                    calls.push("builtin");
-                    return { decision: "continue" };
-                },
-            },
-        ],
     );
-    const lease = await binding.acquire(
+    binding.install(registry);
+    registry.registerReview({
+        hook: "510-builtin",
+        id: "middle",
+        review: async () => {
+            calls.push("builtin");
+            return { decision: "continue" };
+        },
+    });
+    const lease = await registry.provider()(
         context,
         new AbortController().signal,
         "host",
@@ -127,6 +127,7 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
 
 test("builtin review rejection short-circuits later reviews", async () => {
     const calls: string[] = [];
+    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -148,19 +149,17 @@ test("builtin review rejection short-circuits later reviews", async () => {
                 },
             ],
         }) as never,
-        undefined,
-        [
-            {
-                hook: "510-builtin",
-                id: "middle",
-                review: async () => {
-                    calls.push("builtin");
-                    return { decision: "reject", reason: "denied" };
-                },
-            },
-        ],
     );
-    const lease = await binding.acquire(
+    binding.install(registry);
+    registry.registerReview({
+        hook: "510-builtin",
+        id: "middle",
+        review: async () => {
+            calls.push("builtin");
+            return { decision: "reject", reason: "denied" };
+        },
+    });
+    const lease = await registry.provider()(
         context,
         new AbortController().signal,
         "host",
@@ -196,6 +195,7 @@ test("review and rewrite ordering are independent", async () => {
                 },
             };
         };
+    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -230,7 +230,8 @@ test("review and rewrite ordering are independent", async () => {
             ],
         }) as never,
     );
-    const lease = await binding.acquire(
+    binding.install(registry);
+    const lease = await registry.provider()(
         context,
         new AbortController().signal,
         "host",
@@ -255,6 +256,7 @@ test("review and rewrite ordering are independent", async () => {
 
 test("ToolCall binding holds exact registration leases for the call", async () => {
     const releases: string[] = [];
+    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         host({
             releases,
@@ -274,8 +276,9 @@ test("ToolCall binding holds exact registration leases for the call", async () =
             ],
         }) as never,
     );
+    binding.install(registry);
 
-    const lease = await binding.acquire(
+    const lease = await registry.provider()(
         context,
         new AbortController().signal,
         "host",

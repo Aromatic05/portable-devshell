@@ -19,6 +19,7 @@ import {
     createApprovalTransport,
     createArtifactTransport,
     createConfigTransport,
+    createConversationPreferenceTransport,
     createInstanceTransport,
     createContextTransport,
     createExtensionRuntimeTransport,
@@ -85,7 +86,7 @@ export class WebDomainSession {
         );
         this.config = new ConfigViewModel(createConfigTransport(this.#endpoint));
         this.conversationPreferences = new ConversationPreferenceViewModel(
-            createConfigTransport(this.#endpoint),
+            createConversationPreferenceTransport(this.#endpoint),
         );
         this.overview = new OverviewViewModel(
             createOverviewTransport(this.#endpoint),

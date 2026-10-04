@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    EnvelopeCodec,
-    type Channel,
-    type Envelope,
-} from "@portable-devshell/shared";
+import { type Channel } from "@portable-devshell/shared";
+import { EnvelopeCodec, type Envelope } from "@portable-devshell/shared/testing";
 
 class FragmentChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();

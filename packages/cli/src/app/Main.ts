@@ -210,8 +210,12 @@ export class CliMain {
             };
         } catch (error) {
             if (
-                error instanceof CliRenderError &&
-                error.code === "control.notRunning"
+                (error instanceof CliRenderError &&
+                    error.code === "control.notRunning") ||
+                (typeof error === "object" &&
+                    error !== null &&
+                    "code" in error &&
+                    error.code === "control.notRunning")
             ) {
                 return {
                     command: this.#parser.parse(argv),

@@ -56,7 +56,7 @@ test("reverse runtime is ready before the first reverse instance is created", as
         | ((instance: ControlConfig["instances"][number]) => Promise<void>)
         | undefined;
     const mcp = {
-        configEditor: {
+        instanceEditor: {
             registerInstanceDisableRetirement(
                 retire: (
                     instance: ControlConfig["instances"][number],
@@ -98,7 +98,7 @@ test("reverse runtime adopts a changed MCP public URL on the replacement host", 
         requireConfig: () => config,
     } as unknown as ControlRuntimeState;
     const mcp = {
-        configEditor: {
+        instanceEditor: {
             registerInstanceDeleteRetirement() {},
             registerInstanceDisableRetirement() {},
         },

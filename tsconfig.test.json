@@ -42,6 +42,9 @@
                 "./packages/extension/src/domain/secret.ts"
             ],
             "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
+            "@portable-devshell/shared/testing": [
+                "./packages/shared/src/testing.ts"
+            ],
             "@portable-devshell/shared/browser": [
                 "./packages/shared/src/browser.ts"
             ],
