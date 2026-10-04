@@ -4,7 +4,7 @@ import type { JsonValue, TodoReadInput } from "@portable-devshell/shared";
  * @compat todo-title-selector
  * @removeAt 0.7.10
  */
-export function readTodoInput(input: JsonValue): TodoReadInput | undefined {
+export function readTodoToolInput(input: JsonValue): TodoReadInput | undefined {
     if (typeof input !== "object" || input === null || Array.isArray(input))
         throw new Error("todo_read requires an object input.");
     const keys = Object.keys(input);

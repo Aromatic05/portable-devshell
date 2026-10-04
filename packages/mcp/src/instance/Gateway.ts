@@ -217,11 +217,7 @@ interface McpGatewayShape {
           }
     >;
     touchTemporaryDirectory(instance: string, path: string): Promise<void>;
-    writeTodo(
-        instance: string,
-        input: JsonValue,
-        context: ToolCallContext,
-    ): Promise<JsonValue>;
+
 
     viewArtifactImage?(
         defaultInstance: string,
@@ -263,7 +259,6 @@ export type McpTaskPort = Pick<
     | "listWaits"
     | "controlTodo"
     | "readTodo"
-    | "writeTodo"
 >;
 
 export type McpInstancePort = Pick<

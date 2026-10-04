@@ -22,7 +22,10 @@ import { DebugPatchService } from "../../debug/Service.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
 import { ModelDevshellBroker } from "../../extension/api/point/cli/command/ModelBroker.js";
-import { ProcessSubscriptionManager } from "@portable-devshell/core";
+import {
+    ProcessSubscriptionManager,
+    installTodoTools,
+} from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
@@ -169,6 +172,12 @@ export class ControlRuntime {
             installContextTools(options.contexts, toolCalls.hooks, {
                 modelCommands,
             }),
+        );
+        this.#toolCallHookUnregister.push(
+            installTodoTools(
+                toolCalls.hooks,
+                (instance) => options.mcp.instanceDomains.task(instance),
+            ),
         );
         this.#modelDevshell = new ModelDevshellBroker({
             access: {

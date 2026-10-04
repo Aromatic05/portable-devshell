@@ -9,6 +9,7 @@ export { type ApprovalApi } from "./approval/Api.js";
 export { createInstanceApprovalService } from "./approval/Factory.js";
 export type { TaskApi } from "./task/Api.js";
 export { createInstanceTaskServices } from "./task/Factory.js";
+export { installTodoTools } from "./task/todo/tool/Runtime.js";
 export { type TerminalBackend } from "./terminal/Backend.js";
 export { createInstanceTerminalBackend } from "./terminal/Factory.js";
 export { resolveWorkerHomeDirectory } from "./worker/provision/HomeDirectory.js";

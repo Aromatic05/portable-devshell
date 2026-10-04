@@ -1,14 +1,10 @@
-import type {
-    ToolCallApi,
-    ToolCallHookValue,
-} from "@portable-devshell/core/toolcall";
+import type { ToolCallApi } from "@portable-devshell/core/toolcall";
 import type {
     McpApprovalPort,
     McpInstanceGateway,
 } from "@portable-devshell/mcp";
 import {
     createRemoteError,
-    contextErrorCodes,
     controlErrorCodes,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
@@ -17,7 +13,6 @@ import type {
     ArtifactViewImageResult,
     ControlConfig,
     JsonValue,
-    ToolCallContext,
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceConnectionService } from "@portable-devshell/core";
@@ -443,17 +438,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
-    async writeTodo(
-        instance: string,
-        input: JsonValue,
-        context: ToolCallContext,
-    ): Promise<JsonValue> {
-        const ctxId = requireCtxId(context);
-        return (await this.#requireTask(instance).todo.write(
-            input as unknown as import("@portable-devshell/shared").TodoWriteInput,
-            ctxId,
-        )) as unknown as JsonValue;
-    }
 
     #requireApproval(instance: string) {
         const approval = this.#instanceDomains.approval(instance);
@@ -505,17 +489,6 @@ function withTodoSummaries<T extends object>(
         ...snapshot,
         ...(activeTodos.length === 0 ? {} : { activeTodos }),
     };
-}
-
-function requireCtxId(context: ToolCallContext): string {
-    if (context.ctxId !== undefined && context.ctxId.length > 0) {
-        return context.ctxId;
-    }
-    throw createRemoteError({
-        code: contextErrorCodes.invalid,
-        message: "todo_write requires a validated ctxId.",
-        retryable: false,
-    });
 }
 
 export function decorateMcpInstanceGatewayArtifact(

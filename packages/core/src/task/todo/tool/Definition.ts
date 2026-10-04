@@ -8,7 +8,7 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-export type McpToolCatalogTodoName = "todo_read" | "todo_write";
+export type TodoToolName = "todo_read" | "todo_write";
 
 const todoItemSchema: JsonValue = {
     additionalProperties: false,
@@ -154,7 +154,7 @@ function outputSchema(): JsonValue {
     };
 }
 
-export class McpToolCatalogTodo {
+export class TodoToolDefinitions {
     readonly #definitions: readonly ToolDefinition[] = [
         {
             requiredCapabilities: [],
@@ -265,11 +265,15 @@ export class McpToolCatalogTodo {
         return this.#definitions.find((definition) => definition.name === name);
     }
 
-    isTodoTool(name: string): name is McpToolCatalogTodoName {
+    isTodoTool(name: string): name is TodoToolName {
         return this.get(name) !== undefined;
     }
 
     list(): ToolDefinition[] {
         return this.#definitions.map((definition) => ({ ...definition }));
     }
+}
+
+export function todoToolDefinitions(): readonly ToolDefinition[] {
+    return new TodoToolDefinitions().list();
 }
