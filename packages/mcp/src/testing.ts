@@ -23,7 +23,6 @@ export {
 } from "./instance/Gateway.js";
 export type {
     McpApprovalPort,
-    McpExtensionToolResult,
     McpGoalGateway,
     McpInstanceGateway,
     McpTmuxWaitGateway,

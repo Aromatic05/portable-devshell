@@ -147,8 +147,10 @@ export class ControlRuntime {
         ];
         this.#mcp = options.mcp;
         this.#mcp.instanceGateway.bindToolCalls(this.#toolCalls);
-        this.#mcp.instanceGateway.setExtensionService(
-            new McpExtensionService(this.#extensions),
+        const extensionMcpTools = new McpExtensionService(this.#extensions);
+        this.#mcp.instanceGateway.setExtensionService(extensionMcpTools);
+        this.#toolCallHookUnregister.push(
+            extensionMcpTools.install(toolCalls.hooks),
         );
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);

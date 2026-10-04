@@ -42,14 +42,6 @@ export interface McpWorkspaceEventSlice {
     lastSeq: number;
 }
 
-export interface McpExtensionToolResult {
-    content?: readonly {
-        text: string;
-        type: "text";
-    }[];
-    isError?: boolean;
-    structuredContent: JsonValue;
-}
 
 export interface McpApprovalPort {
     listApprovals(instance: string): Promise<ApprovalRequest[]>;

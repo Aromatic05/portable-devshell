@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ToolCallPipeline } from "@portable-devshell/core/testing";
 import { ToolCallHookSequence } from "@portable-devshell/core/testing";
+import { PresentedToolCallResult, type ToolCallHooks } from "@portable-devshell/core/toolcall";
+import { mcpTools } from "@portable-devshell/mcp/tool";
 
 import {
     InstanceRegistry,
@@ -396,40 +398,48 @@ test("MCP instance connect lifecycle uses Context references without adopting an
     assert.equal(stopCalls, 1);
 });
 
-test("MCP Extension tools hold their generation lease through invocation", async () => {
+test("MCP Extension tools publish definitions and execute through ToolCall hooks", async () => {
     let releases = 0;
+    let listener: (() => void) | undefined;
+    let declarations = [
+        {
+            declaration: {
+                activity: "observation",
+                description: "Send progress.",
+                destructiveHint: false,
+                id: "todo_report",
+                idempotentHint: false,
+                inputSchema: {
+                    properties: {
+                        message: {
+                            description: "Progress message.",
+                            type: "string",
+                        },
+                    },
+                    type: "object",
+                },
+                openWorldHint: false,
+                outputSchema: {
+                    properties: { reported: { type: "boolean" } },
+                    type: "object",
+                },
+                readOnlyHint: false,
+                title: "Message user",
+            },
+            extensionId: "comment",
+            id: "todo_report",
+        },
+    ];
     const service = new McpExtensionService({
         listDeclarations(pointId: string) {
             assert.equal(pointId, "mcp.tools");
-            return [
-                {
-                    declaration: {
-                        activity: "observation",
-                        description: "Send progress.",
-                        destructiveHint: false,
-                        id: "todo_report",
-                        idempotentHint: false,
-                        inputSchema: {
-                            properties: {
-                                message: {
-                                    description: "Progress message.",
-                                    type: "string",
-                                },
-                            },
-                            type: "object",
-                        },
-                        openWorldHint: false,
-                        outputSchema: {
-                            properties: { reported: { type: "boolean" } },
-                            type: "object",
-                        },
-                        readOnlyHint: false,
-                        title: "Message user",
-                    },
-                    extensionId: "comment",
-                    id: "todo_report",
-                },
-            ] as never;
+            return declarations as never;
+        },
+        onChange(next: () => void) {
+            listener = next;
+            return () => {
+                listener = undefined;
+            };
         },
         async acquireRegistration(pointId: string, id: string) {
             assert.equal(pointId, "mcp.tools");
@@ -457,43 +467,74 @@ test("MCP Extension tools hold their generation lease through invocation", async
             } as never;
         },
     } as never);
-
-    const [tool] = service.listTools();
-    assert.equal(tool?.name, "todo_report");
-    assert.equal(tool?.description, "Send progress.");
-    assert.deepEqual(tool?._meta, {
-        devshell: {
-            extensionId: "comment",
-            mcp: {
-                activity: "observation",
-                annotations: {
-                    destructiveHint: false,
-                    idempotentHint: false,
-                    openWorldHint: false,
-                    readOnlyHint: false,
-                },
-                extensionTool: true,
-                preserveInputDescriptions: true,
-                title: "Message user",
-            },
+    const executes = new Map<
+        string,
+        Parameters<ToolCallHooks["registerExecute"]>[1]
+    >();
+    const hooks = {
+        registerContributor: () => () => undefined,
+        registerExecute: (
+            name: string,
+            execute: Parameters<ToolCallHooks["registerExecute"]>[1],
+        ) => {
+            executes.set(name, execute);
+            return () => executes.delete(name);
         },
-    });
-    assert.deepEqual(
-        await service.callTool(
-            "todo_report",
+        registerReview: () => () => undefined,
+    } as ToolCallHooks;
+
+    const uninstall = service.install(hooks);
+    try {
+        const tool = mcpTools.get("remote-server", "todo_report")?.definition;
+        assert.equal(tool?.name, "todo_report");
+        assert.equal(tool?.description, "Send progress.");
+        assert.deepEqual(tool?._meta, {
+            devshell: {
+                extensionId: "comment",
+                mcp: {
+                    activity: "observation",
+                    annotations: {
+                        destructiveHint: false,
+                        idempotentHint: false,
+                        openWorldHint: false,
+                        readOnlyHint: false,
+                    },
+                    extensionTool: true,
+                    preserveInputDescriptions: true,
+                    title: "Message user",
+                },
+            },
+        });
+        const execute = executes.get("todo_report");
+        assert.ok(execute);
+        const result = await execute(
+            "call-one",
             { message: "done" },
             {
-                callId: "call-one",
-                ctxId: "ctx-one",
-                instance: "remote-server",
+                context: {
+                    ctxId: "ctx-one",
+                    instance: "remote-server",
+                    source: "mcp",
+                },
+                kind: "call",
+                payload: { message: "done" },
+                toolName: "todo_report",
             },
-        ),
-        {
-            content: [{ text: "done", type: "text" }],
-            structuredContent: { reported: true },
-        },
-    );
-    assert.equal(releases, 1);
+        );
+        assert.ok(result instanceof PresentedToolCallResult);
+        assert.deepEqual(result.result, { reported: true });
+        assert.deepEqual(result.presentation.content, [
+            { text: "done", type: "text" },
+        ]);
+        assert.equal(releases, 1);
+
+        declarations = [];
+        listener?.();
+        assert.equal(mcpTools.get("remote-server", "todo_report"), undefined);
+        assert.equal(executes.has("todo_report"), false);
+    } finally {
+        uninstall();
+    }
 });
 
 test("MCP Context terminal delegates to Extension Context environment retirement", async () => {
