@@ -1,10 +1,10 @@
 import type { ControlConfig } from "@portable-devshell/shared";
 import type { ControlConfigStore } from "../config/store/index.js";
 import type { InstanceRegistryFactory } from "@portable-devshell/core";
-import type { McpRuntimeFactory } from "../composition/mcp/Runtime.js";
-import { ControlRuntimeFactory } from "../composition/control/Factory.js";
-import type { ControlRuntime } from "../composition/control/Runtime.js";
-import { ControlRuntimeState } from "../composition/control/State.js";
+import type { McpRuntimeFactory } from "./mcp/Runtime.js";
+import { ControlRuntimeFactory } from "./runtime/Factory.js";
+import type { ControlRuntime } from "./runtime/Runtime.js";
+import { ControlRuntimeState } from "./runtime/State.js";
 import { ControlSocketFile } from "@portable-devshell/shared";
 
 export interface ControlServerOptions {

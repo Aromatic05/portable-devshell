@@ -5,7 +5,7 @@ import type { ControlPortContext } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../../../src/artifact/Service.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
-import { ControlRouteComposition } from "../../../src/composition/Route.ts";
+import { ControlRouteComposition } from "../../../src/server/Route.ts";
 import { createTestInstanceDomainRuntime } from "../../../src/testing.ts";
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {

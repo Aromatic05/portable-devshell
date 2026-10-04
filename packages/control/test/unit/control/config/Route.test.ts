@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
-import { createConfigRouteModule } from "../../../../src/composition/ConfigRoute.ts";
+import { createConfigRouteModule } from "../../../../src/config/Route.ts";
 
 test("config route keeps legacy get while snapshot carries revision", async () => {
     const view = { restartControlRequired: false };

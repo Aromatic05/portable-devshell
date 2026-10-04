@@ -31,7 +31,7 @@ import { ArtifactModule } from "../../artifact/Module.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { ContextModule } from "@portable-devshell/core/context";
-import { McpControlModule } from "../mcp/Control.js";
+import { McpControlModule } from "../mcp/Module.js";
 import { ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {

@@ -13,8 +13,8 @@ import {
     ConnectionModule,
     InstanceRegistryFactory,
 } from "../../../../src/testing.ts";
-import type { McpControlModule } from "../../../../src/composition/mcp/Control.ts";
-import type { ControlRuntimeState } from "../../../../src/composition/control/State.ts";
+import type { McpControlModule } from "../../../../src/server/mcp/Module.ts";
+import type { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class RecordingHttpHost {

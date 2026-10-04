@@ -11,9 +11,9 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 
-import { McpControlModule } from "../../../src/composition/mcp/Control.ts";
+import { McpControlModule } from "../../../src/server/mcp/Module.ts";
 import { ContextModule } from "../../../src/context/Module.ts";
-import { ControlRuntimeState } from "../../../src/composition/control/State.ts";
+import { ControlRuntimeState } from "../../../src/server/runtime/State.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
 

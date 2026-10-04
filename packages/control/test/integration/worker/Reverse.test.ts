@@ -26,7 +26,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlServer } from "../../../src/server/Server.ts";
-import { ControlRuntimeFactory } from "../../../src/composition/control/Factory.ts";
+import { ControlRuntimeFactory } from "../../../src/server/runtime/Factory.ts";
 import { InstanceRegistryFactory } from "@portable-devshell/core";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { ControlPathHome } from "@portable-devshell/shared";

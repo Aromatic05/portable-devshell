@@ -7,7 +7,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../server/Route.js";
-import { ConfigChangeHub, type ConfigCommittedChange } from "../config/change/Config.js";
+import { ConfigChangeHub, type ConfigCommittedChange } from "./change/Config.js";
 
 export interface ConfigEditorPort {
     getConfigView(): JsonValue;

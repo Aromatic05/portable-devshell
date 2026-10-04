@@ -27,7 +27,7 @@ import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";
-import type { ControlRuntimeState } from "../control/State.js";
+import type { ControlRuntimeState } from "../runtime/State.js";
 
 export interface McpControlModuleOptions {
     contextTransport: ContextTransport;

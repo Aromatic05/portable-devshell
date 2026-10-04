@@ -32,7 +32,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
+import { ControlRouteComposition } from "../../../../src/server/Route.ts";
 import {
     createTestInstanceDomainRuntime,
     createTestTaskApi,

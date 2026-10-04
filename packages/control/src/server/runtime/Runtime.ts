@@ -26,8 +26,8 @@ import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.
 import { ProcessSubscriptionManager } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
-import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
-import { WebExtensionPageService } from "../../server/web/extension/page/Service.js";
+import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
+import { WebExtensionPageService } from "../web/extension/page/Service.js";
 import type { ExtensionHost } from "../../extension/host/Host.js";
 import { ExtensionInstallService } from "../../extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/Binding.js";
@@ -35,17 +35,15 @@ import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewr
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../overview/Service.js";
-import {
-    ControlTransportServer,
-    type ControlTransportListener,
-} from "../../server/transport/endpoint/Server.js";
-import { ControlSocketListener } from "../../server/transport/channel/Socket.js";
-import { resolveControlWebAssetsDirectory } from "../../server/web/Assets.js";
-import { ControlWebOAuthFlow } from "../../server/web/auth/OAuth.js";
-import { ControlWebSessionService } from "../../server/web/auth/Session.js";
-import { ControlWebSocketAccessService } from "../../server/web/auth/Access.js";
-import { ControlWebSocketListener } from "../../server/web/Socket.js";
-import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
+import { ControlTransportServer } from "../transport/endpoint/Server.js";
+import type { ControlTransportListener } from "../transport/channel/Listener.js";
+import { ControlSocketListener } from "../transport/channel/Socket.js";
+import { resolveControlWebAssetsDirectory } from "../web/Assets.js";
+import { ControlWebOAuthFlow } from "../web/auth/OAuth.js";
+import { ControlWebSessionService } from "../web/auth/Session.js";
+import { ControlWebSocketAccessService } from "../web/auth/Access.js";
+import { ControlWebSocketListener } from "../web/Socket.js";
+import { ExtensionWebGateway } from "../web/extension/application/Gateway.js";
 import { ControlRouteComposition } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
@@ -54,9 +52,9 @@ import {
     installContextTools,
     type ContextService,
 } from "@portable-devshell/core/context";
-import type { McpControlModule } from "../mcp/Control.js";
+import type { McpControlModule } from "../mcp/Module.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
-import { McpExtensionService } from "../mcp/extension/Service.js";
+import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 
 export interface ControlRuntimeOptions {
     contexts: ContextService;

@@ -10,8 +10,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ArtifactModule } from "../../../src/artifact/Module.ts";
-import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { ArtifactModule } from "../../../../src/artifact/Module.ts";
+import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryArtifactReceiver {
     readonly events: string[] = [];

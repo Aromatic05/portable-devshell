@@ -16,7 +16,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
+import { ControlRouteComposition } from "../../../../src/server/Route.ts";
 import { createTestInstanceDomainRuntime } from "../../../../src/testing.ts";
 import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
 import { InstanceRegistry } from "@portable-devshell/core";

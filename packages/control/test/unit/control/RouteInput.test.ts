@@ -13,12 +13,12 @@ import {
     readDefaultInstance,
     readShareId,
     readTransferId,
-} from "../../../../src/artifact/route/Input.ts";
+} from "../../../src/artifact/route/Input.ts";
 import {
     readMcpApprovalDecision,
     readMcpApprovalId,
-} from "../../../../src/auth/Input.ts";
-import { readReverseInstanceName } from "../../../../src/connection/Input.ts";
+} from "../../../src/auth/Input.ts";
+import { readReverseInstanceName } from "../../../src/connection/Input.ts";
 import {
     limitProcessLogResponse,
     readProcessLogQuery,

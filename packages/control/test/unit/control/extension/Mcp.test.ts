@@ -13,7 +13,7 @@ import {
     createTestInstanceDomainRuntime,
     createTestTaskApi,
 } from "../../../../src/testing.ts";
-import { McpExtensionService } from "../../../../src/composition/mcp/extension/Service.ts";
+import { McpExtensionService } from "../../../../src/extension/api/point/mcp/Service.ts";
 
 function createGateway(
     ready: boolean,

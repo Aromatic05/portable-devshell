@@ -15,9 +15,9 @@ import { CONTROL_WEB_RPC_PATH, CONTROL_WEB_SESSION_PATH } from "@portable-devshe
 import { ControlRuntime } from "../../../../src/testing.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { ExtensionPathLayout } from "../../../../src/extension/state/Layout.ts";
-import { McpControlModule } from "../../../../src/composition/mcp/Control.ts";
+import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { ContextModule } from "../../../../src/context/Module.ts";
-import { ControlRuntimeState } from "../../../../src/composition/control/State.ts";
+import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import {
     createTestIpcPath,
     ipcEndpointAcceptsConnections,
