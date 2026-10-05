@@ -1,12 +1,13 @@
 import type { InstanceName } from "@portable-devshell/shared";
-import { AuditDatabase, type StateStore } from "./database/Database.js";
+import type { AuditApi } from "./Api.js";
+import { AuditDatabase, type StateStore } from "./database/index.js";
 import { resolveAuditStorageLimits, type AuditStorageLimits } from "./database/Limits.js";
-import { AuditEventStore } from "./event/Store.js";
-import { LogStoreInstance } from "./log/Store.js";
+import { AuditEventStore } from "./event/index.js";
+import { LogStoreInstance } from "./log/index.js";
 import type { InstanceLogEntry } from "./log/Entry.js";
-import { AuditToolCallStore } from "./toolcall/Store.js";
+import { AuditToolCallStore } from "./toolcall/index.js";
 
-export interface InstanceAuditOptions {
+export interface AuditRuntimeOptions {
     instanceName: InstanceName;
     filePath: string;
     eventBufferSize: number;
@@ -14,34 +15,64 @@ export interface InstanceAuditOptions {
     now?: () => number;
 }
 
-export type AuditEvents = Pick<AuditEventStore, "append" | "readFrom" | "readTail" | "readHighWater">;
-export type AuditLogs = Pick<LogStoreInstance, "append" | "read">;
-export type AuditToolCalls = Pick<AuditToolCallStore, "append" | "hasCall" | "readQuery" | "readFailureSummary">;
-
-export class InstanceAudit {
-    readonly events: AuditEvents;
-    readonly logs: AuditLogs;
-    readonly toolCalls: AuditToolCalls;
+export class AuditRuntime {
+    readonly api: AuditApi;
     readonly #eventStore: AuditEventStore;
     readonly #logStore: LogStoreInstance;
     readonly #toolCallStore: AuditToolCallStore;
     readonly #database: AuditDatabase;
     #closePromise?: Promise<void>;
 
-    constructor(options: InstanceAuditOptions) {
+    constructor(options: AuditRuntimeOptions) {
         this.#database = new AuditDatabase(options.filePath, {
             ...resolveAuditStorageLimits(options.limits),
             now: options.now,
         });
-        this.events = this.#eventStore = new AuditEventStore(this.#database, options.eventBufferSize);
-        this.logs = this.#logStore = new LogStoreInstance(options.instanceName, this.#database.store<InstanceLogEntry>("logs", {
-            sequence: (record) => record.seq,
-            timestamp: (record) => record.at,
-        }));
-        this.toolCalls = this.#toolCallStore = new AuditToolCallStore(this.#database);
+        this.#eventStore = new AuditEventStore(
+            this.#database,
+            options.eventBufferSize,
+        );
+        this.#logStore = new LogStoreInstance(
+            options.instanceName,
+            this.#database.store<InstanceLogEntry>("logs", {
+                sequence: (record) => record.seq,
+                timestamp: (record) => record.at,
+            }),
+        );
+        this.#toolCallStore = new AuditToolCallStore(this.#database);
+        this.api = {
+            events: this.#eventStore,
+            logs: this.#logStore,
+            toolCalls: this.#toolCallStore,
+            state: <TValue>(namespace: string) =>
+                this.#state<TValue>(namespace),
+        };
     }
 
-    state<TValue>(namespace: string): StateStore<TValue> {
+    close(): Promise<void> {
+        if (this.#closePromise !== undefined) return this.#closePromise;
+        this.#eventStore.close();
+        this.#toolCallStore.close();
+        this.#closePromise = (async () => {
+            const failures: unknown[] = [];
+            try {
+                await this.#logStore.close();
+            } catch (error) {
+                failures.push(error);
+            }
+            try {
+                await this.#database.close();
+            } catch (error) {
+                failures.push(error);
+            }
+            if (failures.length === 1) throw failures[0];
+            if (failures.length > 1)
+                throw new AggregateError(failures, "Audit runtime failed to close.");
+        })();
+        return this.#closePromise;
+    }
+
+    #state<TValue>(namespace: string): StateStore<TValue> {
         this.#assertOpen();
         const store = this.#database.stateStore<TValue>(namespace);
         return {
@@ -58,18 +89,11 @@ export class InstanceAudit {
         };
     }
 
-    close(): Promise<void> {
-        if (this.#closePromise !== undefined) return this.#closePromise;
-        this.#eventStore.close();
-        this.#toolCallStore.close();
-        this.#closePromise = this.#logStore.close().then(() => this.#database.close());
-        return this.#closePromise;
-    }
     #assertOpen(): void {
         if (this.#closePromise !== undefined) throw new Error("Instance audit is closing.");
     }
 }
 
-export function createInstanceAudit(options: InstanceAuditOptions): InstanceAudit {
-    return new InstanceAudit(options);
+export function createAuditRuntime(options: AuditRuntimeOptions): AuditRuntime {
+    return new AuditRuntime(options);
 }

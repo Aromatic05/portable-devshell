@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
-import {
-    ToolCallHookRegistry,
-    type ToolCallReviewInput,
-} from "@portable-devshell/core/testing";
+import { ToolCallHookRegistry } from "../../../src/toolcall/registration/index.ts";
+import type { ToolCallReviewInput } from "../../../src/toolcall/execution/hook/Review.ts";
 
 import type {
     ApprovalEvaluation,

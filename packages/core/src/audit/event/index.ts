@@ -1,5 +1,5 @@
 import type { InstanceEventRecord } from "@portable-devshell/shared";
-import type { AuditDatabase } from "../database/Database.js";
+import type { AuditDatabase } from "../database/index.js";
 import type { AuditSequenceStore } from "../RecordStore.js";
 
 export class AuditEventStore {

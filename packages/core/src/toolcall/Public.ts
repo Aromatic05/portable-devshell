@@ -1,8 +1,13 @@
 export { createToolCallRuntime } from "./index.js";
 export type { ToolCallRuntime } from "./index.js";
+export { createToolCallExecutionRuntime } from "./index.js";
+export type {
+    ToolCallExecutionRuntime,
+    ToolCallExecutionRuntimeOptions,
+} from "./index.js";
 export type { ToolCallApi } from "./execution/Api.js";
 export type { ToolCallHooks, ToolCallExecutor, ToolCallHookRuntime, ToolCallReviewHook, ToolCallRewriteHook, ToolCallHookContribution, ToolCallHookContributor } from "./registration/Api.js";
-export type { ToolCallTarget, ToolCallTargetResolver } from "./execution/Pipeline.js";
+export type { ToolCallDispatchRequest, ToolCallTarget, ToolCallTargetResolver } from "./execution/Pipeline.js";
 export type { ToolCallHookValue, ToolCallReviewInput, ToolCallReviewResult } from "./execution/hook/Review.js";
 export type { ToolCallRewriteInput } from "./execution/hook/Rewrite.js";
 export { presentToolCallResult, PresentedToolCallResult } from "./execution/Presentation.js";

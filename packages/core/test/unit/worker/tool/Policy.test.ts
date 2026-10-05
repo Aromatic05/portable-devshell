@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runtimeErrorCodes } from "@portable-devshell/shared";
-import { WorkerToolCatalog } from "@portable-devshell/core/testing";
+import { WorkerToolCatalog } from "../../../../src/toolcall/worker/Catalog.ts";
 
 test("WorkerToolCatalog preserves the complete worker catalog and resets on clear", () => {
     const catalog = new WorkerToolCatalog();

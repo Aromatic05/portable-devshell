@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
-import { WorkerToolCallScheduler } from "@portable-devshell/core/testing";
+import { WorkerToolCallScheduler } from "../../../../src/toolcall/execution/Scheduler.ts";
 
 test("WorkerToolCallScheduler runs up to the configured limit and keeps later calls queued", async () => {
     const instanceName = asInstanceName("scheduler-test");
@@ -149,6 +149,66 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
     assert.deepEqual(started, ["running"]);
     blocker.resolve("done");
     assert.equal(await running, "done");
+});
+
+test("WorkerToolCallScheduler close cancels queued calls and waits for running calls", async () => {
+    const instanceName = asInstanceName("scheduler-close");
+    const scheduler = new WorkerToolCallScheduler({
+        byTool: {},
+        maxRunning: 1,
+        maxRunningPerSession: 2,
+        queueDepth: 2,
+        queueDepthPerSession: 2,
+        queueTimeoutMs: 1_000,
+    });
+    const started = createDeferred<void>();
+    const completion = createDeferred<string>();
+    const running = scheduler
+        .reserve({
+            callId: "running",
+            instanceName,
+            source: "mcp",
+            toolName: "bash_run",
+        })
+        .run(async () => {
+            started.resolve(undefined);
+            return await completion.promise;
+        });
+    await started.promise;
+    const queued = scheduler
+        .reserve({
+            callId: "queued",
+            instanceName,
+            source: "mcp",
+            toolName: "bash_run",
+        })
+        .run(async () => "unexpected");
+
+    let closed = false;
+    const closing = scheduler.close().then(() => {
+        closed = true;
+    });
+    await assert.rejects(queued, (error: unknown) => {
+        assert.equal(
+            (error as { code?: string }).code,
+            runtimeErrorCodes.toolCallCancelled,
+        );
+        return true;
+    });
+    assert.equal(closed, false);
+    assert.throws(() =>
+        scheduler.reserve({
+            callId: "after-close",
+            instanceName,
+            source: "mcp",
+            toolName: "bash_run",
+        }),
+    );
+
+    completion.resolve("finished");
+    assert.equal(await running, "finished");
+    await closing;
+    assert.equal(closed, true);
 });
 
 function createDeferred<T>(): {

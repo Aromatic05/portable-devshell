@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { ToolDefinition } from "@portable-devshell/shared";
-import { WorkerMcpToolRegistration } from "../../../../src/worker/tool/Mcp.ts";
+import { WorkerMcpToolRegistration } from "../../../../../mcp/src/endpoint/tool/worker/Mcp.ts";
 
 const definition: ToolDefinition = {
     description: "Run shell",

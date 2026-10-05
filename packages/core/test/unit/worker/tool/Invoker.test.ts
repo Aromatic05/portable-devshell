@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import {
-    WorkerToolCatalog,
-    WorkerToolInvoker,
-} from "@portable-devshell/core/testing";
+import { WorkerToolCatalog } from "../../../../src/toolcall/worker/Catalog.ts";
+import { WorkerToolInvoker } from "../../../../src/toolcall/worker/Invoker.ts";
 import {
     Endpoint,
     Rpc,

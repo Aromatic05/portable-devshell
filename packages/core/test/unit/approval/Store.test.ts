@@ -8,7 +8,8 @@ import { asInstanceName } from "@portable-devshell/shared";
 
 import { ApprovalService } from "../../../src/approval/execution/Service.ts";
 import { InstanceApprovalStore } from "../../../src/approval/Store.ts";
-import { createInstanceApprovalService } from "../../../src/approval/Factory.ts";
+import { createApprovalRuntime } from "../../../src/approval/index.ts";
+import { createAuditRuntime } from "../../../src/audit/index.ts";
 
 test("approval factory uses SQLite without importing or deleting legacy approvals", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "approval-factory-"));
@@ -27,19 +28,25 @@ test("approval factory uses SQLite without importing or deleting legacy approval
         toolName: "shell",
     }) + "\n";
     await writeFile(legacyPath, legacyRecord);
-    const service = createInstanceApprovalService({
+    const audit = createAuditRuntime({
+        eventBufferSize: 100,
+        filePath: join(directory, "audit.sqlite3"),
+        instanceName: asInstanceName("dev"),
+    });
+    const runtime = createApprovalRuntime({
         appendEvent: async () => {},
         instanceName: asInstanceName("dev"),
-        paths: { auditDatabaseFile: join(directory, "audit.sqlite3") },
         policy: { mode: "ask" },
+        stateStore: audit.api.state("approvals"),
     });
     t.after(async () => {
-        service.close();
+        runtime.close();
+        await audit.close();
         await rm(directory, { force: true, recursive: true });
     });
 
-    assert.deepEqual(await service.listApprovals(), []);
-    const evaluation = await service.evaluate({
+    assert.deepEqual(await runtime.api.listApprovals(), []);
+    const evaluation = await runtime.api.evaluate({
         callId: "database-call",
         source: "cli",
         inputSummary: "{}",
@@ -47,7 +54,7 @@ test("approval factory uses SQLite without importing or deleting legacy approval
     });
     assert.equal(evaluation.decision, "ask");
     assert.deepEqual(
-        (await service.listApprovals()).map((request) => request.callId),
+        (await runtime.api.listApprovals()).map((request) => request.callId),
         ["database-call"],
     );
     assert.equal(await readFile(legacyPath, "utf8"), legacyRecord);
@@ -56,7 +63,12 @@ test("approval factory uses SQLite without importing or deleting legacy approval
 test("instance approval store persists the latest approval record", async () => {
     const directory = await mkdtemp(join(tmpdir(), "approval-store-"));
     const databasePath = join(directory, "audit.sqlite3");
-    const store = new InstanceApprovalStore(databasePath);
+    const audit = createAuditRuntime({
+        eventBufferSize: 100,
+        filePath: databasePath,
+        instanceName: asInstanceName("dev"),
+    });
+    const store = new InstanceApprovalStore(audit.api.state("approvals"));
     const service = new ApprovalService({
         events: { append: async () => {} },
         instanceName: asInstanceName("dev"),
@@ -73,8 +85,16 @@ test("instance approval store persists the latest approval record", async () => 
             toolName: "shell",
         });
         service.close();
+        await audit.close();
 
-        const reopened = new InstanceApprovalStore(databasePath);
+        const reopenedAudit = createAuditRuntime({
+            eventBufferSize: 100,
+            filePath: databasePath,
+            instanceName: asInstanceName("dev"),
+        });
+        const reopened = new InstanceApprovalStore(
+            reopenedAudit.api.state("approvals"),
+        );
         try {
             assert.equal(
                 (await reopened.get("persisted-approval"))?.status,
@@ -92,9 +112,10 @@ test("instance approval store persists the latest approval record", async () => 
             );
             recovered.close();
         } finally {
-            reopened.close();
+            await reopenedAudit.close();
         }
     } finally {
+        await audit.close();
         await rm(directory, { force: true, recursive: true });
     }
 });
@@ -102,7 +123,12 @@ test("instance approval store persists the latest approval record", async () => 
 test("instance approval store upserts by approval id and keeps latest state after reopen", async () => {
     const directory = await mkdtemp(join(tmpdir(), "approval-store-upsert-"));
     const databasePath = join(directory, "audit.sqlite3");
-    const store = new InstanceApprovalStore(databasePath);
+    const audit = createAuditRuntime({
+        eventBufferSize: 100,
+        filePath: databasePath,
+        instanceName: asInstanceName("dev"),
+    });
+    const store = new InstanceApprovalStore(audit.api.state("approvals"));
     const pending = {
         approvalId: "approval-1",
         callId: "call-1",
@@ -141,9 +167,16 @@ test("instance approval store upserts by approval id and keeps latest state afte
                 decision: "approve",
             },
         });
-        store.close();
+        await audit.close();
 
-        const reopened = new InstanceApprovalStore(databasePath);
+        const reopenedAudit = createAuditRuntime({
+            eventBufferSize: 100,
+            filePath: databasePath,
+            instanceName: asInstanceName("dev"),
+        });
+        const reopened = new InstanceApprovalStore(
+            reopenedAudit.api.state("approvals"),
+        );
         try {
             assert.equal(
                 (await reopened.get("approval-1"))?.status,
@@ -162,9 +195,10 @@ test("instance approval store upserts by approval id and keeps latest state afte
                 },
             ]);
         } finally {
-            reopened.close();
+            await reopenedAudit.close();
         }
     } finally {
+        await audit.close();
         await rm(directory, { force: true, recursive: true });
     }
 });

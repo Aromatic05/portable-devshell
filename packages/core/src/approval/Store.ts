@@ -1,22 +1,13 @@
-import {
-    AuditDatabase,
-    type StateStore,
-} from "../audit/database/Database.js";
-import { resolveAuditStorageLimits } from "../audit/database/Limits.js";
+import type { StateStore } from "../audit/database/index.js";
 import type { ApprovalRequest } from "@portable-devshell/shared";
 
 import type { ApprovalStorePort } from "./execution/Service.js";
 
 export class InstanceApprovalStore implements ApprovalStorePort {
-    readonly #database: AuditDatabase;
     readonly #store: StateStore<ApprovalRequest>;
 
-    constructor(filePath: string) {
-        this.#database = new AuditDatabase(
-            filePath,
-            resolveAuditStorageLimits(undefined),
-        );
-        this.#store = this.#database.stateStore<ApprovalRequest>("approvals");
+    constructor(store: StateStore<ApprovalRequest>) {
+        this.#store = store;
     }
 
     append(request: ApprovalRequest): Promise<void> {
@@ -35,9 +26,5 @@ export class InstanceApprovalStore implements ApprovalStorePort {
         return (await this.#store.list()).sort((left, right) =>
             left.createdAt.localeCompare(right.createdAt),
         );
-    }
-
-    close(): void {
-        this.#database.close();
     }
 }

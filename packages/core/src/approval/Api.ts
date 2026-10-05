@@ -4,7 +4,6 @@ import type {
     ApprovalRequest,
     JsonValue,
 } from "@portable-devshell/shared";
-import type { ApprovalPolicy } from "@portable-devshell/shared/config";
 
 export interface ApprovalEvaluationInput {
     callId: string;
@@ -55,7 +54,6 @@ export interface ApprovalDecisionInput {
 
 export interface ApprovalApi extends ApprovalEvaluationApi {
     cancel(approvalId: string, reason?: string): Promise<ApprovalRequest>;
-    close(): void;
     decideApproval(
         approvalId: string,
         input: ApprovalDecisionInput,
@@ -63,6 +61,4 @@ export interface ApprovalApi extends ApprovalEvaluationApi {
     getApproval(approvalId: string): Promise<ApprovalRequest>;
     listApprovals(): Promise<ApprovalRequest[]>;
     listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]>;
-    retire(reason?: string): Promise<void>;
-    setPolicy(policy: ApprovalPolicy | undefined): void;
 }

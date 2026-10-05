@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { attachToolCallErrorPayload } from "@portable-devshell/core/testing";
+import { attachToolCallErrorPayload } from "@portable-devshell/shared";
 import {
     createRemoteError,
     type JsonValue,
@@ -9,8 +9,8 @@ import {
     type ControlPortContext,
 } from "@portable-devshell/shared";
 
-import { createToolIngressRouteModule } from "../../../src/toolcall/Route.ts";
-import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
+import { createToolIngressRouteModule } from "../../../src/toolcall/execution/transport/Route.ts";
+import { createToolRouteModule } from "../../../src/toolcall/execution/transport/ToolRoute.ts";
 
 function routeContext(connectionId: string): ControlPortContext {
     return {
@@ -211,7 +211,7 @@ test("control tool session exposes canonical workspace and releases the connecti
     const released: string[] = [];
     const module = createToolRouteModule({
         worker: {
-            listTools() {
+            async readWorkerTools() {
                 return [
                     {
                         description: "Read file",

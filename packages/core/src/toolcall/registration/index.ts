@@ -51,6 +51,12 @@ export class ToolCallHookRegistry implements ToolCallHooks {
         return this.#executes.get(toolName);
     }
 
+    close(): void {
+        this.#contributors.length = 0;
+        this.#executes.clear();
+        this.#reviews.length = 0;
+    }
+
     async #acquire(
         context: ToolCallHookContext,
         runtime: ToolCallHookRuntime,

@@ -110,6 +110,8 @@ export class WorkerToolCallScheduler {
     readonly #limits: WorkerToolSchedulerLimits;
     readonly #entries = new Map<string, ToolSchedulerEntry>();
     readonly #waiting: ToolSchedulerEntry[] = [];
+    #closed = false;
+    #closePromise?: Promise<void>;
 
     constructor(
         limits: WorkerToolSchedulerLimits = defaultWorkerToolSchedulerLimits,
@@ -121,6 +123,7 @@ export class WorkerToolCallScheduler {
         request: WorkerToolSchedulerRequest,
         signal?: AbortSignal,
     ): WorkerToolSchedulerReservation {
+        if (this.#closed) throw new Error("Tool call scheduler is closed.");
         if (signal?.aborted === true) {
             throw this.#cancelledErrorForRequest(request, signal.reason);
         }
@@ -153,6 +156,29 @@ export class WorkerToolCallScheduler {
                 await this.#queue(entry, work),
         };
     }
+
+    close(): Promise<void> {
+        if (this.#closePromise !== undefined) return this.#closePromise;
+        this.#closed = true;
+        for (const entry of this.#entries.values()) {
+            if (entry.state === "running") continue;
+            this.#finish(
+                entry,
+                "cancelled",
+                undefined,
+                this.#cancelledError(entry),
+            );
+        }
+        this.#closePromise =
+            this.#entries.size === 0
+                ? Promise.resolve()
+                : new Promise<void>((resolve) => {
+                      this.#closeWaiters.push(resolve);
+                  });
+        return this.#closePromise;
+    }
+
+    readonly #closeWaiters: Array<() => void> = [];
 
     #assertCapacity(request: WorkerToolSchedulerRequest): void {
         const snapshot = this.#snapshot(request);
@@ -254,6 +280,7 @@ export class WorkerToolCallScheduler {
     }
 
     #drain(): void {
+        if (this.#closed) return;
         for (;;) {
             let index = this.#waiting.findIndex(
                 (entry) =>
@@ -335,6 +362,9 @@ export class WorkerToolCallScheduler {
         this.#clearTimeout(entry);
         this.#removeWaiting(entry);
         this.#entries.delete(entry.request.callId);
+        if (this.#closed && this.#entries.size === 0) {
+            for (const resolve of this.#closeWaiters.splice(0)) resolve();
+        }
 
         if (state === "completed") {
             entry.resolve?.(value);

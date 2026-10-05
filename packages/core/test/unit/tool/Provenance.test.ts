@@ -13,8 +13,8 @@ import test from "node:test";
 
 import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 
-import { ToolCallProvenanceStore } from "../../../src/toolcall/Provenance.ts";
-import { createToolRouteModule } from "../../../src/composition/ToolRoute.ts";
+import { ToolCallProvenanceStore } from "../../../src/toolcall/execution/record/Provenance.ts";
+import { createToolRouteModule } from "../../../src/toolcall/execution/transport/ToolRoute.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("tool call provenance persists in Control and decorates matching Worker audit records", async () => {

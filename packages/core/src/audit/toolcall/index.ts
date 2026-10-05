@@ -1,5 +1,5 @@
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
-import type { AuditDatabase, AuditToolCallRecordStore } from "../database/Database.js";
+import type { AuditDatabase, AuditToolCallRecordStore } from "../database/index.js";
 
 export class AuditToolCallStore {
     #closing = false;

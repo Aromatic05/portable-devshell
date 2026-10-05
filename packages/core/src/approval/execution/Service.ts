@@ -38,7 +38,6 @@ export class ApprovalError extends Error {
 
 export interface ApprovalStorePort {
     append(request: ApprovalRequest): Promise<void>;
-    close?(): void;
     delete(approvalId: string): Promise<void>;
     get(approvalId: string): Promise<ApprovalRequest | undefined>;
     list(): Promise<ApprovalRequest[]>;
@@ -104,7 +103,6 @@ export class ApprovalService implements ApprovalApi {
             });
         }
         this.#pending.clear();
-        this.#store.close?.();
     }
 
     async evaluate(

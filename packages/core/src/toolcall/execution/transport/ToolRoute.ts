@@ -35,8 +35,8 @@ export interface ToolRouteEventPort {
 export interface ToolRouteInstancePort {
     name?: string;
     worker: {
-        listTools(): ToolDefinition[];
-        prepareWorkspace(workspace: string): Promise<{ workspace: string }>;
+        readWorkerTools(): Promise<readonly ToolDefinition[]>;
+        prepareWorkspace(workspace: string, connectionId: string): Promise<{ workspace: string }>;
         readToolCalls(query: ToolCallQuery): Promise<ToolCallRecord[]>;
         releaseToolSession(connectionId: string): Promise<void>;
     } & Partial<ToolRouteEventPort>;
@@ -64,12 +64,13 @@ export function createToolRouteModule(
     const local = routeModule(
         "tool",
         {
-            openSession: async (request) => {
+            openSession: async (request, context) => {
                 const prepared = await instance.worker.prepareWorkspace(
                     readToolSessionOpen(request.payload).workspace,
+                    context.connectionId,
                 );
                 return {
-                    tools: instance.worker.listTools(),
+                    tools: await instance.worker.readWorkerTools(),
                     workspace: prepared.workspace,
                 } as unknown as JsonValue;
             },
