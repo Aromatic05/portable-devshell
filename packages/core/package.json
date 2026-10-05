@@ -37,7 +37,6 @@
         "dist"
     ],
     "dependencies": {
-        "@portable-devshell/mcp": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "string-argv": "^0.3.2",
         "tar-stream": "3.2.0",

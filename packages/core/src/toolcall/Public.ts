@@ -30,6 +30,8 @@ export type {
     ToolCallRuntime,
     ToolCallTarget,
     ToolCallTargetResolver,
+    ToolNameHandle,
+    ToolNameRegistrar,
     ToolCallExecutor,
     ToolCallIngressPort,
     ToolRouteEventPort,

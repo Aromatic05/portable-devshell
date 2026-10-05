@@ -1,9 +1,5 @@
 import type { ToolCallHooks } from "../../../toolcall/Public.js";
 import {
-    mcpAllInstances,
-    mcpTools,
-} from "@portable-devshell/mcp/tool";
-import {
     contextErrorCodes,
     createRemoteError,
     runtimeErrorCodes,
@@ -19,7 +15,9 @@ export function installTodoTools(
     hooks: ToolCallHooks,
     resolveTask: (instance: string) => TaskApi | undefined,
 ): () => void {
-    const definitions = mcpTools.register(mcpAllInstances, todoToolDefinitions());
+    const unregisterDefinitions = todoToolDefinitions().map((definition) =>
+        hooks.registerToolName(definition.name, () => definition),
+    );
     const unregisterRead = hooks.registerExecute(
         "todo_read",
         async (_callId, input, value, signal) => {
@@ -49,7 +47,7 @@ export function installTodoTools(
     return () => {
         unregisterWrite();
         unregisterRead();
-        definitions.dispose();
+        for (const unregister of unregisterDefinitions.reverse()) unregister();
     };
 }
 

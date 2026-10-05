@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { HttpHost } from "@portable-devshell/mcp";
 import {
     createRemoteError,
     controlErrorCodes,
@@ -14,8 +13,11 @@ import {
 import { WebSocketServer } from "ws";
 
 import { ReverseConnections } from "./Connections.js";
-import type { ReverseConnectionIdentity } from "../../../../Api.js";
-import type { ReverseInstanceLookup } from "../../../../Api.js";
+import type {
+    ReverseConnectionIdentity,
+    ReverseHttpHost,
+    ReverseInstanceLookup,
+} from "../../../../Api.js";
 import { ReverseSseChannel } from "./SseChannel.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
 
@@ -48,7 +50,7 @@ export class ReverseIngress {
         this.#publicBaseUrl = publicBaseUrl;
     }
 
-    install(server: HttpHost): void {
+    install(server: ReverseHttpHost): void {
         const enrollPath = reverseRoute(this.#publicBaseUrl, ENROLL_SUFFIX);
         const ssePath = reverseRoute(this.#publicBaseUrl, SSE_SUFFIX);
         const upstreamPath = reverseRoute(this.#publicBaseUrl, UPSTREAM_SUFFIX);

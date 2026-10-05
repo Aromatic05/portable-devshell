@@ -93,6 +93,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
+        registerToolName: () => () => undefined,
     } as ToolCallHooks;
 
     const uninstall = service.install(hooks);

@@ -1,6 +1,6 @@
 import { ToolCallHookSequence, type ToolCallHookLease, type ToolCallHookProvider } from "../execution/hook/Sequence.js";
 import type { ToolCallHookContext } from "../execution/hook/Review.js";
-import type { ToolCallHooks, ToolCallExecutor, ToolCallHookContributor, ToolCallReviewHook, ToolCallRewriteHook, ToolCallHookRuntime } from "./Api.js";
+import type { ToolCallHooks, ToolCallExecutor, ToolCallHookContributor, ToolCallReviewHook, ToolCallRewriteHook, ToolCallHookRuntime, ToolNameHandle, ToolNameRegistrar } from "./Api.js";
 
 /**
  * Owns hook registration, sorting/merging, and lease composition. It builds the
@@ -12,6 +12,12 @@ export class ToolCallHookRegistry implements ToolCallHooks {
     readonly #contributors: ToolCallHookContributor[] = [];
     readonly #executes = new Map<string, ToolCallExecutor>();
     readonly #reviews: ToolCallReviewHook[] = [];
+    readonly #toolNames = new Map<string, () => void>();
+    readonly #registerToolName?: ToolNameRegistrar;
+
+    constructor(registerToolName?: ToolNameRegistrar) {
+        this.#registerToolName = registerToolName;
+    }
 
     registerExecute(toolName: string, execute: ToolCallExecutor): () => void {
         if (this.#executes.has(toolName))
@@ -20,6 +26,19 @@ export class ToolCallHookRegistry implements ToolCallHooks {
         return () => {
             if (this.#executes.get(toolName) === execute)
                 this.#executes.delete(toolName);
+        };
+    }
+
+    registerToolName(toolName: string, handle: ToolNameHandle): () => void {
+        if (this.#toolNames.has(toolName))
+            throw new Error(`ToolCall tool name already registered: ${toolName}`);
+        const unregister =
+            this.#registerToolName?.(toolName, handle) ?? (() => undefined);
+        this.#toolNames.set(toolName, unregister);
+        return () => {
+            if (this.#toolNames.get(toolName) !== unregister) return;
+            this.#toolNames.delete(toolName);
+            unregister();
         };
     }
 
@@ -55,6 +74,8 @@ export class ToolCallHookRegistry implements ToolCallHooks {
         this.#contributors.length = 0;
         this.#executes.clear();
         this.#reviews.length = 0;
+        for (const unregister of this.#toolNames.values()) unregister();
+        this.#toolNames.clear();
     }
 
     async #acquire(

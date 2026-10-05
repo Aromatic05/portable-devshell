@@ -27,6 +27,7 @@ function createHooks() {
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
+        registerToolName: () => () => undefined,
     } as ToolCallHooks;
     return { executes, hooks };
 }

@@ -69,6 +69,15 @@ export type ToolCallExecutor = (
     | JsonValue
     | ToolCallPresentedResult;
 
+export type ToolNameHandle = () =>
+    | Promise<ToolDefinition>
+    | ToolDefinition;
+
+export type ToolNameRegistrar = (
+    toolName: string,
+    handle: ToolNameHandle,
+) => () => void;
+
 export interface ToolCallPresentedResult {
     readonly type: "presented-tool-call-result";
     readonly presentation: ToolCallPresentation;
@@ -141,6 +150,7 @@ export interface ToolCallHooks {
     registerContributor(contributor: ToolCallHookContributor): () => void;
     registerExecute(toolName: string, execute: ToolCallExecutor): () => void;
     registerReview(review: ToolCallReviewHook): () => void;
+    registerToolName(toolName: string, handle: ToolNameHandle): () => void;
 }
 
 export interface ToolCallRuntime {

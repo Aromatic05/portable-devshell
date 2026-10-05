@@ -58,7 +58,6 @@ test("task domain keeps todo as the operation namespace", () => {
 });
 
 import type { ToolCallHooks } from "../../../src/toolcall/registration/Api.ts";
-import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { TaskApi } from "../../../src/task/Api.ts";
 import { installTodoTools } from "../../../src/task/todo/tool/Runtime.ts";
 
@@ -67,6 +66,10 @@ test("Todo tools register for all instances and execute against the selected Tas
     const executes = new Map<
         string,
         Parameters<ToolCallHooks["registerExecute"]>[1]
+    >();
+    const toolNames = new Map<
+        string,
+        Parameters<ToolCallHooks["registerToolName"]>[1]
     >();
     const hooks = {
         registerContributor: () => () => undefined,
@@ -78,6 +81,13 @@ test("Todo tools register for all instances and execute against the selected Tas
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
+        registerToolName: (
+            name: string,
+            handle: Parameters<ToolCallHooks["registerToolName"]>[1],
+        ) => {
+            toolNames.set(name, handle);
+            return () => toolNames.delete(name);
+        },
     } as ToolCallHooks;
     let writtenCtxId: string | undefined;
     const task = {
@@ -116,11 +126,11 @@ test("Todo tools register for all instances and execute against the selected Tas
     );
     try {
         assert.equal(
-            mcpTools.get("local", "todo_read")?.definition.name,
+            (await toolNames.get("todo_read")?.())?.name,
             "todo_read",
         );
         assert.equal(
-            mcpTools.get("remote", "todo_write")?.definition.name,
+            (await toolNames.get("todo_write")?.())?.name,
             "todo_write",
         );
         const read = executes.get("todo_read");
@@ -159,5 +169,5 @@ test("Todo tools register for all instances and execute against the selected Tas
     } finally {
         uninstall();
     }
-    assert.equal(mcpTools.get("local", "todo_read"), undefined);
+    assert.equal(toolNames.get("todo_read"), undefined);
 });

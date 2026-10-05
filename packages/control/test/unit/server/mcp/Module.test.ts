@@ -6,7 +6,9 @@ import {
     ControlPathHome,
     createDefaultControlConfig,
     type ControlConfig,
+    type ToolDefinition,
 } from "@portable-devshell/shared";
+import { mcpTools } from "@portable-devshell/mcp/tool";
 
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
@@ -73,4 +75,42 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
         reason: "MCP runtime is disabled.",
         running: false,
     });
+});
+
+test("tool names cross the internal transport and resolve definitions through reverse RPC", async (t) => {
+    const homeDirectory = await createTestTempDirectory("mcp-tool-name-rpc");
+    const runtime = new McpControlModule({
+        artifact: { service: {}, installHttpRoute() {} } as never,
+        config: createDefaultControlConfig(),
+        contextTransport: {} as never,
+        controlPaths: new ControlPathHome(homeDirectory),
+        factory: { wire: () => undefined } as never,
+        instances: { list: () => [] } as never,
+    });
+    t.after(async () => {
+        await runtime.stop();
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+    const definition: ToolDefinition = {
+        description: "Bridge probe",
+        group: "bridge",
+        inputSchema: { type: "object" },
+        name: "bridge_probe",
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+    };
+
+    const unregister = runtime.registerToolName(
+        definition.name,
+        () => definition,
+    );
+    await runtime.flushToolNames();
+    assert.equal(
+        mcpTools.get("local", definition.name)?.definition.name,
+        definition.name,
+    );
+
+    unregister();
+    await runtime.flushToolNames();
+    assert.equal(mcpTools.get("local", definition.name), undefined);
 });

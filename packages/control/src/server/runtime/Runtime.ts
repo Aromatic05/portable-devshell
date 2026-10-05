@@ -131,6 +131,7 @@ export class ControlRuntime {
             return options.instanceRuntimes.get(descriptor);
         };
         const toolCalls = createToolCallRuntime({
+            registerToolName: options.mcp.registerToolName,
             resolveTarget: (name) => runtimeFor(name).target(),
         });
         this.#toolCallRuntime = toolCalls;
@@ -353,6 +354,7 @@ export class ControlRuntime {
                 failures.push(error);
             }
         }
+        await this.#mcp.flushToolNames().catch((error) => failures.push(error));
         try {
             this.#internalControlEndpoint.close();
         } catch (error) {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ToolCallHooks } from "@portable-devshell/core/toolcall";
-import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { InstanceName, JsonValue } from "@portable-devshell/shared";
 
 import {
@@ -30,6 +29,10 @@ test("Context installs wildcard definitions and executes environ_info through To
         string,
         Parameters<ToolCallHooks["registerExecute"]>[1]
     >();
+    const toolNames = new Map<
+        string,
+        Parameters<ToolCallHooks["registerToolName"]>[1]
+    >();
     const hooks = {
         registerContributor: () => () => undefined,
         registerExecute: (name: string, execute: Parameters<ToolCallHooks["registerExecute"]>[1]) => {
@@ -37,6 +40,13 @@ test("Context installs wildcard definitions and executes environ_info through To
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
+        registerToolName: (
+            name: string,
+            handle: Parameters<ToolCallHooks["registerToolName"]>[1],
+        ) => {
+            toolNames.set(name, handle);
+            return () => toolNames.delete(name);
+        },
     } as ToolCallHooks;
     const record = {
         createdAt: "2026-10-04T00:00:00.000Z",
@@ -125,7 +135,7 @@ test("Context installs wildcard definitions and executes environ_info through To
     });
     try {
         assert.equal(
-            mcpTools.get("any-instance", "environ_info")?.definition.name,
+            (await toolNames.get("environ_info")?.())?.name,
             "environ_info",
         );
         const execute = executes.get("environ_info");
@@ -156,5 +166,5 @@ test("Context installs wildcard definitions and executes environ_info through To
     } finally {
         uninstall();
     }
-    assert.equal(mcpTools.get("any-instance", "environ_info"), undefined);
+    assert.equal(toolNames.get("environ_info"), undefined);
 });

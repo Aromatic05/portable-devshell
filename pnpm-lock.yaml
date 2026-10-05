@@ -234,9 +234,6 @@ importers:
 
   packages/core:
     dependencies:
-      '@portable-devshell/mcp':
-        specifier: workspace:*
-        version: link:../mcp
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
