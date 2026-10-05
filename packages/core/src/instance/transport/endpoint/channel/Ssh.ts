@@ -11,11 +11,8 @@ import {
 import { parseArgsStringToArgv } from "string-argv";
 
 import { type ChannelCommandOptions, type CommandOptions } from "./worker/Command.js";
-import {
-    type WorkerCommandInteractiveSession,
-    type SpawnFunction,
-    type ProviderCommandContext,
-} from "./worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../../Api.js";
+import { type SpawnFunction, type ProviderCommandContext } from "./worker/Command.js";
 import { createCommandContext } from "./worker/Error.js";
 import { ProcessRunner } from "./worker/Process.js";
 

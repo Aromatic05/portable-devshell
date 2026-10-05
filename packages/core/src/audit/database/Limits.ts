@@ -1,11 +1,9 @@
+import type { AuditStorageLimits } from "../Api.js";
 import { minimumAuditStorageBytes } from "@portable-devshell/shared";
 
 export { minimumAuditStorageBytes } from "@portable-devshell/shared";
 
-export interface AuditStorageLimits {
-    maxBytes: number;
-    retentionDays: number;
-}
+
 
 export const defaultAuditStorageLimits: AuditStorageLimits = {
     maxBytes: 1024 * 1024 * 1024,

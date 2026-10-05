@@ -1,3 +1,4 @@
+import type { InstanceEventSource } from "../../Api.js";
 import { createRemoteError, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type {
     InstanceEventRecord,
@@ -5,7 +6,7 @@ import type {
     ControlPortContext,
     MessageStream,
 } from "@portable-devshell/shared";
-import type { InstanceEventSource } from "./Event.js";
+
 
 export type ProcessEventProjector = (
     event: InstanceEventRecord,

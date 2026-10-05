@@ -1,5 +1,5 @@
 import type { WorkerRuntime } from "../Command.js";
-import type { WorkerCommandInteractiveSession } from "../../../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../../Api.js";
 import { runWorkerCommand, type WorkerChannelOptions, type WorkerCommandName, type WorkerCommandOptions } from "../Command.js";
 import { WorkerBinary } from "../../Binary.js";
 import { SshInstall, type SshInstallOptions } from "../../provision/install/provider/Ssh.js";

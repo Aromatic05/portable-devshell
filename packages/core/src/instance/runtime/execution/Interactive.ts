@@ -4,7 +4,7 @@ import {
     type JsonValue,
     type ControlStreamMessage,
 } from "@portable-devshell/shared";
-import type { WorkerCommandInteractiveSession } from "../../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../Api.js";
 
 export class ProcessInteractiveSession implements WorkerCommandInteractiveSession {
     readonly #queue: Buffer[] = [];

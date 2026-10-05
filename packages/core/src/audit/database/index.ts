@@ -10,6 +10,7 @@ import {
 } from "node:zlib";
 
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
+import type { AuditToolCallFailureSummary, StateStore } from "../Api.js";
 
 import {
     startAuditPayloadBackfill,
@@ -43,11 +44,6 @@ export interface AuditDatabaseStats {
     recordCount: number;
 }
 
-export interface AuditToolCallFailureSummary {
-    count: number;
-    latest?: ToolCallRecord;
-}
-
 export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecord> {
     hasCall(callId: string): boolean;
     readFailureSummary(
@@ -55,13 +51,6 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
         untilMs: number,
     ): AuditToolCallFailureSummary;
     readQuery(query: ToolCallQuery): ToolCallRecord[];
-}
-
-export interface StateStore<TValue> {
-    put(key: string, value: TValue): Promise<void>;
-    get(key: string): Promise<TValue | undefined>;
-    list(): Promise<TValue[]>;
-    delete(key: string): Promise<void>;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

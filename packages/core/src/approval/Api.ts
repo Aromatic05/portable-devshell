@@ -1,3 +1,8 @@
+import type { ApprovalEvent, ControlPortContext, InstanceEventRecord, MessageStream } from "@portable-devshell/shared";
+import type { InstanceEventSource } from "../instance/Public.js";
+import type { ApprovalEventType, InstanceName } from "@portable-devshell/shared";
+import type { ApprovalPolicy } from "@portable-devshell/shared/config";
+import type { StateStore } from "../audit/Public.js";
 import type {
     ApprovalDecision,
     ApprovalDecisionBy,
@@ -61,4 +66,46 @@ export interface ApprovalApi extends ApprovalEvaluationApi {
     getApproval(approvalId: string): Promise<ApprovalRequest>;
     listApprovals(): Promise<ApprovalRequest[]>;
     listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]>;
+}
+
+export interface ApprovalRuntimeOptions {
+    appendEvent(
+        type: ApprovalEventType,
+        data: Record<string, JsonValue>,
+    ): Promise<unknown>;
+    instanceName: InstanceName;
+    stateStore: StateStore<ApprovalRequest>;
+    policy?: ApprovalPolicy;
+}
+
+export interface ApprovalRuntime {
+    readonly api: ApprovalApi;
+    close(): void;
+    retire(reason?: string): Promise<void>;
+    setPolicy(policy: ApprovalPolicy | undefined): void;
+}
+
+export interface ApprovalRouteSubscriptionPort {
+    subscribe(
+        stream: MessageStream,
+        context: ControlPortContext,
+        instanceName: string,
+        instance: Pick<InstanceEventSource, "subscribe">,
+        fromSeq: number,
+        projectEvent?: (
+            event: InstanceEventRecord,
+        ) => ApprovalEvent | undefined,
+    ): Promise<void>;
+}
+
+export interface ApprovalRouteInstancePort {
+    approval: Pick<
+        ApprovalApi,
+        | "decideApproval"
+        | "getApproval"
+        | "listApprovals"
+        | "listPendingApprovals"
+    >;
+    events: InstanceEventSource;
+    name: string;
 }

@@ -5,10 +5,7 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import type {
-    ReverseInstanceLookup,
-    ReverseInstance,
-} from "../Instance.js";
+import type { ReverseInstanceLookup, ReverseInstance } from "../../../../../Api.js";
 import { ReverseCredentialStore } from "./Store.js";
 
 export class ReverseCredentials {

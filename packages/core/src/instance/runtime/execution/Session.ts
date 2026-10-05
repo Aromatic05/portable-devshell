@@ -1,34 +1,17 @@
+import type { WorkerCommandSessionOpen, WorkerCommandSessionClose, WorkerCommandSessionOutput, WorkerCommandSessionCompletion } from "../../Api.js";
 import { Endpoint, Event, type JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerProtocolClient } from "../../transport/packet/Client.js";
 
-export interface WorkerCommandSessionOpen {
-    argv: readonly string[];
-    ctxId: string;
-    cwd: string;
-    parentCallId: string;
-    sessionId: string;
-    taskId?: string;
-    workspace: string;
-}
 
-export interface WorkerCommandSessionClose {
-    sessionId: string;
-}
 
-export type WorkerCommandSessionStream = "stderr" | "stdout";
 
-export interface WorkerCommandSessionOutput {
-    data: string;
-    sessionId: string;
-    stream: WorkerCommandSessionStream;
-}
 
-export interface WorkerCommandSessionCompletion {
-    error?: string;
-    exitCode: number;
-    sessionId: string;
-}
+
+
+
+
+
 
 export class WorkerCommandSessionBridge {
     readonly #closeListeners = new Set<

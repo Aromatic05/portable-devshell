@@ -9,13 +9,12 @@ import {
     type ToolCallContext,
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
+import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
 
 import type { ContextApi } from "../Api.js";
-import type {
-    ContextInstanceLeasePort,
-    ContextInstancesPort,
-} from "../Port.js";
+import type { ContextInstanceLeasePort, ContextInstancesPort } from "../Api.js";
 import {
+    contextToolDefinitions,
     environmentInfoToolName,
     remoteEnvironmentToolName,
 } from "./Definition.js";
@@ -33,6 +32,10 @@ export function installContextTools(
     },
 ): () => void {
     const runtime = new ContextToolRuntime(contexts, options);
+    const definitions = mcpTools.register(
+        mcpAllInstances,
+        contextToolDefinitions(),
+    );
     const unregisterInfo = hooks.registerExecute(
         environmentInfoToolName,
         async (_callId, input, value, signal) =>
@@ -46,6 +49,7 @@ export function installContextTools(
     return () => {
         unregisterRemote();
         unregisterInfo();
+        definitions.dispose();
     };
 }
 

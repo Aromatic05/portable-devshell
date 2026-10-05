@@ -1,7 +1,7 @@
 import { runtimeErrorCodes } from "@portable-devshell/shared";
 import { WorkerBinary } from "../../../Binary.js";
 import { SshConnection, type SshConnectionOptions } from "../../../../transport/endpoint/channel/Ssh.js";
-import { type WorkerCommandInteractiveSession } from "../../../../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../../../Api.js";
 import { WorkerInstallerRemote } from "../Remote.js";
 import { createCommandContext, createProviderError } from "../../../../transport/endpoint/channel/worker/Error.js";
 

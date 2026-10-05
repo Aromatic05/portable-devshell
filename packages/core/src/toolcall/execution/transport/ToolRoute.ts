@@ -2,16 +2,9 @@ import {
     createRemoteError,
     controlErrorCodes,
     isToolCallEvent,
-    type ControlPortContext,
     type ControlPortDefinition,
-    type InstanceEventRecord,
     type JsonValue,
-    type MessageStream,
     type ToolEvent,
-    type STREAM_GAP_CODE,
-    type ToolDefinition,
-    type ToolCallQuery,
-    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../Port.js";
@@ -20,44 +13,20 @@ import {
     readToolCallQuery,
     readToolSessionOpen,
 } from "./Input.js";
-import type { ToolCallProvenanceStore } from "../record/Provenance.js";
+import type {
+    ToolCallIngressPort,
+    ToolCallProvenanceApi,
+    ToolRouteEventPort,
+    ToolRouteInstancePort,
+    ToolRouteSubscriptionPort,
+} from "../../Api.js";
 import {
     createToolIngressRouteModule,
-    type ToolCallIngressPort,
 } from "./Route.js";
-
-export interface ToolRouteEventPort {
-    subscribe(fromSeq?: number):
-        | { kind: "events"; events: InstanceEventRecord[]; lastSeq: number }
-        | { kind: "gap"; code: typeof STREAM_GAP_CODE; fromSeq: number; lastSeq: number; nextSeq: number };
-}
-
-export interface ToolRouteInstancePort {
-    name?: string;
-    worker: {
-        readWorkerTools(): Promise<readonly ToolDefinition[]>;
-        prepareWorkspace(workspace: string, connectionId: string): Promise<{ workspace: string }>;
-        readToolCalls(query: ToolCallQuery): Promise<ToolCallRecord[]>;
-        releaseToolSession(connectionId: string): Promise<void>;
-    } & Partial<ToolRouteEventPort>;
-}
-
-export interface ToolRouteSubscriptionPort {
-    subscribe(
-        stream: MessageStream,
-        context: ControlPortContext,
-        instanceName: string,
-        instance: ToolRouteEventPort,
-        fromSeq: number,
-        projectEvent?: (
-            event: InstanceEventRecord,
-        ) => ToolEvent | undefined,
-    ): Promise<void>;
-}
 
 export function createToolRouteModule(
     instance: ToolRouteInstancePort,
-    provenance?: ToolCallProvenanceStore,
+    provenance?: ToolCallProvenanceApi,
     ingress?: ToolCallIngressPort,
     subscriptions?: ToolRouteSubscriptionPort,
 ): ControlPortDefinition {

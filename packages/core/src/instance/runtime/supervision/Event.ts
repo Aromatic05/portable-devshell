@@ -1,3 +1,4 @@
+import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice, InstanceEventSource, InstanceEventPort } from "../../Api.js";
 import {
     STREAM_GAP_CODE,
     type InstanceEventRecord,
@@ -6,40 +7,15 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-export interface InstanceEventInput {
-    at: string;
-    data?: JsonValue;
-    type: string;
-}
 
-export interface InstanceEventStreamGap {
-    code: typeof STREAM_GAP_CODE;
-    fromSeq: number;
-    kind: "gap";
-    lastSeq: number;
-    nextSeq: number;
-}
 
-export interface InstanceEventStreamSlice {
-    events: InstanceEventRecord[];
-    kind: "events";
-    lastSeq: number;
-}
 
-export interface InstanceEventSource {
-    cursor(): number;
-    subscribe(
-        fromSeq?: number,
-    ): InstanceEventStreamGap | InstanceEventStreamSlice;
-}
 
-export interface InstanceEventPort {
-    cursor(): number;
-    append(event: InstanceEventInput): Promise<InstanceEventRecord>;
-    readFrom(
-        fromSeq?: number,
-    ): InstanceEventStreamGap | InstanceEventStreamSlice;
-}
+
+
+
+
+
 
 export class InstanceEventBuffer implements InstanceEventPort, InstanceEventSource {
     readonly #instanceName: InstanceName;

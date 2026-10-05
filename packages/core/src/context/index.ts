@@ -1,21 +1,14 @@
-import type { ContextApi } from "./Api.js";
-import type { ContextInstancesPort } from "./Port.js";
+import type { ContextRuntimeOptions, ContextRuntime } from "./Api.js";
+
+
 import { ContextService } from "./service/index.js";
 import { ContextRegistry } from "./registry/index.js";
 import { ContextEnvironmentService } from "./service/Scope.js";
 import { ContextCleanupService } from "./service/Cleanup.js";
 
-export interface ContextRuntimeOptions {
-    contextFile: string;
-    instances: ContextInstancesPort;
-}
 
-export interface ContextRuntime {
-    readonly api: ContextApi;
-    initialize(): Promise<void>;
-    reconcile(): Promise<void>;
-    close(): void;
-}
+
+
 
 export function createContextRuntime(
     options: ContextRuntimeOptions,

@@ -1,3 +1,4 @@
+import type { ReverseEnrollmentCredential, StoredReverseDeviceCode } from "../../../../../Api.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
     access,
@@ -33,16 +34,9 @@ import {
 
 const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
 
-export interface ReverseEnrollmentCredential {
-    deviceToken: string;
-    instance: string;
-}
 
-export interface StoredReverseDeviceCode {
-    deviceCode: string;
-    expiresAt: string;
-    instance: import("@portable-devshell/shared").InstanceName;
-}
+
+
 
 export class ReverseCredentialStore {
     readonly #fileSecurity: ReverseCredentialFileSecurity;

@@ -1,3 +1,5 @@
+import type { WorkerInstance as WorkerInstanceApi } from "../Api.js";
+import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice, WorkerExecProcessInput, WorkerTcpConnectInput, WorkerCommandSessionClose, WorkerCommandSessionCompletion, WorkerCommandSessionOpen, WorkerCommandSessionOutput, WorkerAlertsReadResult, WorkerExtensionResourcePrepareInput, WorkerExtensionResourcePrepareResult, WorkerHandshakeResult, WorkerWorkspacePrepareResult, WorkerArtifactDirectPushInput, WorkerArtifactDirectPushResult, WorkerArtifactDirectReceiveOpenInput, WorkerArtifactDirectReceiveOpenResult, WorkerArtifactPayloadOpenInput, WorkerArtifactPayloadOpenResult, WorkerArtifactPayloadReadInput, WorkerArtifactPayloadReadResult, WorkerArtifactReceiveBeginInput, WorkerArtifactReceiveBeginResult, WorkerArtifactReceiveFinishResult, WorkerArtifactReceiveWriteInput, WorkerArtifactReceiveWriteResult, WorkerTerminalAttachResult, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification, WorkerTerminalOpenInput, InstanceEventPort } from "../Api.js";
 import {
     type Endpoint,
     type MessageStream,
@@ -9,62 +11,20 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-import type {
-    InstanceEventInput,
-    InstanceEventStreamGap,
-    InstanceEventStreamSlice,
-} from "./supervision/Event.js";
+
 import type { WorkerCommandClient } from "./execution/Command.js";
-import type { WorkerCommandInteractiveSession } from "../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../Api.js";
 import type { TransportConnection } from "../transport/endpoint/Connection.js";
-import {
-    WorkerTunnel,
-    type WorkerExecProcessInput,
-    type WorkerTcpConnectInput,
-} from "../transport/packet/Tunnel.js";
-import {
-    WorkerCommandSessionBridge,
-    type WorkerCommandSessionClose,
-    type WorkerCommandSessionCompletion,
-    type WorkerCommandSessionOpen,
-    type WorkerCommandSessionOutput,
-} from "./execution/Session.js";
-import type {
-    WorkerAlertsReadResult,
-    WorkerExtensionResourcePrepareInput,
-    WorkerExtensionResourcePrepareResult,
-    WorkerHandshakeResult,
-    WorkerProtocolClient,
-    WorkerWorkspacePrepareResult,
-} from "../transport/packet/Client.js";
-import {
-    WorkerArtifact,
-    type WorkerArtifactDirectPushInput,
-    type WorkerArtifactDirectPushResult,
-    type WorkerArtifactDirectReceiveOpenInput,
-    type WorkerArtifactDirectReceiveOpenResult,
-    type WorkerArtifactPayloadOpenInput,
-    type WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadInput,
-    WorkerArtifactPayloadReadResult,
-    type WorkerArtifactReceiveBeginInput,
-    type WorkerArtifactReceiveBeginResult,
-    type WorkerArtifactReceiveFinishResult,
-    WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult,
-} from "../transport/packet/Artifact.js";
+import { WorkerTunnel } from "../transport/packet/Tunnel.js";
+import { WorkerCommandSessionBridge } from "./execution/Session.js";
+import type { WorkerProtocolClient } from "../transport/packet/Client.js";
+import { WorkerArtifact } from "../transport/packet/Artifact.js";
 import type { Channel } from "@portable-devshell/shared";
-import type {
-    WorkerTerminalAttachResult,
-    WorkerTerminalDescriptor,
-    WorkerTerminalIdentity,
-    WorkerTerminalNotification,
-    WorkerTerminalOpenInput,
-} from "../transport/packet/Terminal.js";
+
 import { WorkerTerminal } from "../transport/packet/Terminal.js";
 import type { InstanceStateMachine } from "./supervision/State.js";
 import type { InstanceSnapshot } from "./supervision/State.js";
-import type { InstanceEventPort } from "./supervision/Event.js";
+
 import type { ResolvedWorkerInstanceConfig } from "./provision/Config.js";
 import { WorkerInstanceConnection } from "./supervision/Connection.js";
 import { WorkerInstanceSupervision } from "./supervision/Recovery.js";
@@ -83,7 +43,7 @@ interface WorkerInstanceDependencies {
     transportConnection: TransportConnection;
 }
 
-export class WorkerInstance {
+export class WorkerInstance implements WorkerInstanceApi {
     readonly #artifact: WorkerArtifact;
     readonly #commandSessions: WorkerCommandSessionBridge;
     readonly #config: ResolvedWorkerInstanceConfig;

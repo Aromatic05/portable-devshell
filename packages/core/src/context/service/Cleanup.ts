@@ -5,15 +5,8 @@ import type {
     ContextRecord,
 } from "@portable-devshell/shared";
 
-import type {
-    ContextCleanupPort,
-    ContextInstanceLeasePort,
-    ContextInstancesPort,
-} from "../Port.js";
-
-export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
-    terminate(terminal: ContextRecord): Promise<void>;
-}
+import type { ContextInstanceLeasePort, ContextInstancesPort } from "../Api.js";
+import type { ContextLifecycleCleanupPort } from "../Api.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &

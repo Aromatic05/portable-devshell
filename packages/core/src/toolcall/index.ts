@@ -1,34 +1,16 @@
 import { ToolCallHookRegistry } from "./registration/index.js";
-import type { ToolCallHooks } from "./registration/Api.js";
-import type { ToolCallApi } from "./execution/Api.js";
-import { ToolCallPipeline, type ToolCallTarget, type ToolCallTargetResolver } from "./execution/Pipeline.js";
-import type {
-    InstanceName,
-    JsonValue,
-    ToolCallContext,
-    ToolCallQuery,
-    ToolCallRecord,
-    ToolDefinition,
-} from "@portable-devshell/shared";
-import type { Endpoint } from "@portable-devshell/shared";
-import type {
-    AuditApi,
-    AuditToolCallFailureSummary,
-    InstanceLogEntry,
-    LogQuery,
-} from "../audit/Public.js";
+
+import type { ToolCallExecutionRuntime, ToolCallExecutionRuntimeOptions, ToolCallProvenanceApi, ToolCallProvenanceOptions, ToolCallRuntime, ToolCallTargetResolver } from "./Api.js";
+import { ToolCallPipeline } from "./execution/Pipeline.js";
+
+
 import { WorkerInstanceTool } from "./execution/Tool.js";
-import type { ToolCallRecordEventType } from "./execution/record/Event.js";
+
 import { ToolCallHistory } from "./execution/record/History.js";
 import { WorkerToolCallScheduler } from "./execution/Scheduler.js";
 import { WorkerToolCatalog } from "./worker/Catalog.js";
 import { WorkerToolInvoker } from "./worker/Invoker.js";
-
-export interface ToolCallRuntime {
-    readonly api: ToolCallApi;
-    readonly hooks: ToolCallHooks;
-    close(): void;
-}
+import { ToolCallProvenanceStore } from "./execution/record/Provenance.js";
 
 export function createToolCallRuntime(options: {
     resolveTarget: ToolCallTargetResolver;
@@ -43,38 +25,6 @@ export function createToolCallRuntime(options: {
         hooks,
         close: () => hooks.close(),
     };
-}
-
-export interface ToolCallExecutionRuntimeOptions {
-    appendEvent(
-        type: ToolCallRecordEventType,
-        data?: JsonValue,
-    ): Promise<unknown>;
-    assertReady(): void;
-    audit: AuditApi;
-    endpoint: Endpoint;
-    instanceName: InstanceName;
-    readTools(): Promise<readonly ToolDefinition[]>;
-}
-
-export interface ToolCallExecutionRuntime {
-    target(): ToolCallTarget;
-    listTools(): ToolDefinition[];
-    readToolCalls(query?: ToolCallQuery): Promise<ToolCallRecord[]>;
-    readLogs(query?: LogQuery): Promise<InstanceLogEntry[]>;
-    hasActiveToolCalls(ctxId: string, excludeCallId?: string): boolean;
-    readToolCallFailureSummary(
-        sinceMs: number,
-        untilMs: number,
-    ): Promise<AuditToolCallFailureSummary>;
-    invokeInternal(
-        toolName: string,
-        input: JsonValue,
-        context?: ToolCallContext,
-        signal?: AbortSignal,
-    ): Promise<JsonValue>;
-    refreshTools(): Promise<ToolDefinition[]>;
-    close(): Promise<void>;
 }
 
 export function createToolCallExecutionRuntime(
@@ -130,4 +80,11 @@ export function createToolCallExecutionRuntime(
             await closePromise;
         },
     };
+}
+
+export function createToolCallProvenanceRuntime(
+    filePath: string,
+    options: ToolCallProvenanceOptions = {},
+): ToolCallProvenanceApi {
+    return new ToolCallProvenanceStore(filePath, options);
 }

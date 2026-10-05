@@ -1,23 +1,10 @@
-import type { ContextChangeHub } from "../registry/Change.js";
 import type {
-    ContextInstanceLeasePort,
-    ContextInstancesPort,
-} from "../Port.js";
-import {
-    contextErrorCodes,
-    createRemoteError,
-    type ContextRegistryPort,
-    type ContextResolveInput,
-    type ContextSnapshot,
-    type ContextRecord,
-} from "@portable-devshell/shared";
-import type { ContextEnvironmentPort } from "../Port.js";
-import type { ContextLifecycleCleanupPort } from "./Cleanup.js";
-
-export interface ContextRecordSourcePort extends ContextRegistryPort {
-    readonly changes: ContextChangeHub;
-    snapshot(): Promise<ContextSnapshot>;
-}
+    ContextLifecycleCleanupPort,
+    ContextRecordSourcePort,
+} from "../Api.js";
+import type { ContextInstanceLeasePort, ContextInstancesPort } from "../Api.js";
+import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
+import type { ContextEnvironmentPort } from "../Api.js";
 
 export class ContextService {
     readonly registry: ContextRecordSourcePort;

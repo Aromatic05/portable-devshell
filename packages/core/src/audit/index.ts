@@ -1,21 +1,17 @@
-import type { InstanceName } from "@portable-devshell/shared";
-import type { AuditApi } from "./Api.js";
-import { AuditDatabase, type StateStore } from "./database/index.js";
-import { resolveAuditStorageLimits, type AuditStorageLimits } from "./database/Limits.js";
+import type { AuditRuntime } from "./Api.js";
+import type { AuditRuntimeOptions } from "./Api.js";
+
+import type { AuditApi, InstanceLogEntry, StateStore } from "./Api.js";
+import { AuditDatabase } from "./database/index.js";
+import { resolveAuditStorageLimits } from "./database/Limits.js";
+
 import { AuditEventStore } from "./event/index.js";
 import { LogStoreInstance } from "./log/index.js";
-import type { InstanceLogEntry } from "./log/Entry.js";
 import { AuditToolCallStore } from "./toolcall/index.js";
 
-export interface AuditRuntimeOptions {
-    instanceName: InstanceName;
-    filePath: string;
-    eventBufferSize: number;
-    limits?: Partial<AuditStorageLimits>;
-    now?: () => number;
-}
 
-export class AuditRuntime {
+
+class AuditRuntimeInstance implements AuditRuntime {
     readonly api: AuditApi;
     readonly #eventStore: AuditEventStore;
     readonly #logStore: LogStoreInstance;
@@ -95,5 +91,5 @@ export class AuditRuntime {
 }
 
 export function createAuditRuntime(options: AuditRuntimeOptions): AuditRuntime {
-    return new AuditRuntime(options);
+    return new AuditRuntimeInstance(options);
 }

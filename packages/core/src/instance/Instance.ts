@@ -5,30 +5,14 @@ import {
     type ControlMcpContextMode,
 } from "@portable-devshell/shared";
 
-import type { WorkerInstance } from "./runtime/index.js";
+import type { InstanceFields, InstanceLease, InstanceReferenceLease, WorkerInstance } from "./Api.js";
 import type { TransportConnection } from "./transport/endpoint/Connection.js";
 
-export interface InstanceLease {
-    readonly instance: Instance;
-    release(): void;
-}
 
-export interface InstanceReferenceLease {
-    snapshot: ReturnType<WorkerInstance["snapshot"]>;
-    worker: WorkerInstance;
-}
 
-export interface InstanceFields {
-    enabled: boolean;
-    mcpContextMode?: ControlMcpContextMode;
-    mcpEnabled: boolean;
-    mcpPath: string;
-    modelExtensions: readonly string[];
-    name: string;
-    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
-    reverseConnection?: TransportConnection;
-    worker: WorkerInstance;
-}
+
+
+
 
 export class Instance {
     readonly #name: string;

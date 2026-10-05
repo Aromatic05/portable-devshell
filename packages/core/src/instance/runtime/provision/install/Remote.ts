@@ -12,7 +12,7 @@ import {
 import { WorkerAssetResolver } from "../Asset.js";
 import { WORKER_GENERATION_RETENTION_DAYS } from "../Config.js";
 import { probeRemoteWorkerTarget } from "../Target.js";
-import type { WorkerCommandInteractiveSession } from "../../../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../../Api.js";
 
 export interface WorkerInstallerRemoteOptions {
     resolver?: WorkerAssetResolver;

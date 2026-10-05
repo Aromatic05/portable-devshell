@@ -27,6 +27,22 @@ export function contextToolDefinitions(): readonly ToolDefinition[] {
 
 function environmentInfoDefinition(): ToolDefinition {
     return {
+        _meta: {
+            devshell: {
+                mcp: {
+                    annotations: {
+                        destructiveHint: false,
+                        idempotentHint: false,
+                        openWorldHint: false,
+                        readOnlyHint: false,
+                    },
+                    inputHints: {
+                        workspace: "Absolute workspace to attach or switch.",
+                    },
+                    title: "Create environment",
+                },
+            },
+        },
         description:
             "Prepare and inspect the workspace environment for the current portable-devshell Context. This is the Context bootstrap tool: with workspace it creates or attaches a Context when needed, stable external bindings are reused automatically, and an expired Context lease is renewed without changing ctxId. Call it once before using other portable-devshell tools.",
         group: "environ",
@@ -108,6 +124,24 @@ function environmentInfoDefinition(): ToolDefinition {
 
 function remoteEnvironmentDefinition(): ToolDefinition {
     return {
+        _meta: {
+            devshell: {
+                mcp: {
+                    annotations: {
+                        destructiveHint: true,
+                        idempotentHint: false,
+                        openWorldHint: false,
+                        readOnlyHint: false,
+                    },
+                    inputHints: {
+                        command: "Use help to list current operations.",
+                        handle: "Opaque instance handle from devshell instance list/status.",
+                        workspace: "Absolute workspace for attach operations.",
+                    },
+                    title: "Manage remote environment",
+                },
+            },
+        },
         description:
             "Manage remote environments for the current portable-devshell Context. Use command='help' when the current operations or arguments are unknown. Obtain opaque instance handles from model-facing devshell instance list or status. Masking is irreversible for the lifetime of this Context.",
         group: "environ",

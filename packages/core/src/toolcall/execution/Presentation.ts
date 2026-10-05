@@ -4,6 +4,7 @@ import type {
 } from "@portable-devshell/shared";
 
 export class PresentedToolCallResult {
+    readonly type = "presented-tool-call-result" as const;
     readonly presentation: ToolCallPresentation;
     readonly result: JsonValue;
 

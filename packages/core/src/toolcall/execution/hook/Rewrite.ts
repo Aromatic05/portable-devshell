@@ -1,10 +1,8 @@
-import type { ToolCallHookDirection, ToolCallHookValue } from "./Review.js";
-
-export interface ToolCallRewriteInput {
-    readonly callId: string;
-    readonly direction: ToolCallHookDirection;
-    readonly value: ToolCallHookValue;
-}
+import type {
+    ToolCallHookValue,
+    ToolCallRewriteInput,
+} from "../../Api.js";
+export type { ToolCallRewriteInput } from "../../Api.js";
 
 export type ToolCallRewrite = (
     input: ToolCallRewriteInput,

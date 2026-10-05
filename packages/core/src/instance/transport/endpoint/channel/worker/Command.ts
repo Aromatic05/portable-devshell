@@ -1,3 +1,4 @@
+import type { WorkerCommandInteractiveSession } from "../../../../Api.js";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 
 import type {
@@ -15,10 +16,7 @@ export interface CommandOptions {
 
 export type ChannelCommandOptions = Omit<CommandOptions, "input">;
 
-export interface WorkerCommandInteractiveSession {
-    readInput(): Promise<Buffer | undefined>;
-    writeOutput(chunk: string): Promise<void> | void;
-}
+
 
 export interface ProviderCommandContext extends CommandDiagnostic {
     command: string[];

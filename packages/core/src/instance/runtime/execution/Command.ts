@@ -1,6 +1,6 @@
 import type { Channel, CommandResult } from "@portable-devshell/shared";
 
-import type { WorkerCommandInteractiveSession } from "../../transport/endpoint/channel/worker/Command.js";
+import type { WorkerCommandInteractiveSession } from "../../Api.js";
 import type { WorkerConnection } from "../../transport/endpoint/channel/worker/index.js";
 import { WorkerBinary, type WorkerCommandName } from "../Binary.js";
 

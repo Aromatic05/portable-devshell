@@ -1,40 +1,18 @@
-import {
-    createRemoteError,
-    controlErrorCodes,
-    type ControlConfig,
-} from "@portable-devshell/shared";
-import type { InstanceRegistry } from "../../../../Registry.js";
+import type { ConnectionModuleOptions } from "../../../../Api.js";
+import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
+
 
 import { ReverseIngress } from "./Ingress.js";
 import { ReverseCredentials } from "./credential/Credentials.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
 
-interface ConnectionLifecyclePort {
-    registerInstanceDeleteRetirement(
-        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void;
-    registerInstanceDisableRetirement(
-        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void;
-}
 
-interface ConnectionMcpPort {
-    readonly instanceEditor: ConnectionLifecyclePort;
-    readonly host?: {
-        readonly server: Parameters<ReverseIngress["install"]>[0];
-    };
-}
 
-interface ConnectionStatePort {
-    readonly homeDirectory?: string;
-    readonly instances: InstanceRegistry;
-    requireConfig(): ControlConfig;
-}
 
-export interface ConnectionModuleOptions {
-    mcp: ConnectionMcpPort;
-    state: ConnectionStatePort;
-}
+
+
+
+
 
 export class ConnectionModule {
     readonly service?: ReverseCredentials;

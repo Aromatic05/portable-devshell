@@ -1,53 +1,25 @@
+import type { ApprovalRouteSubscriptionPort, ApprovalRouteInstancePort } from "../Api.js";
 // Approval control route. Legacy `list` remains an array for the current
 // clients; the new projection uses `snapshot`, which samples the instance cursor
 // before the authoritative read and then subscribes from `lastSeq + 1`.
 // Changes racing with the read may be observed twice, but cannot be missed.
 
-import type {
-    ApprovalEvent,
-    ApprovalDecisionBy,
-    ControlPortContext,
-    ControlPortDefinition,
-    InstanceEventRecord,
-    JsonValue,
-    MessageStream,
-} from "@portable-devshell/shared";
+import type { ApprovalEvent, ApprovalDecisionBy, ControlPortDefinition, JsonValue } from "@portable-devshell/shared";
 import { isApprovalEventType } from "@portable-devshell/shared";
 
 import { routeModule } from "../../Port.js";
-import type { InstanceEventSource } from "../../instance/runtime/supervision/Event.js";
+
 import {
     readApprovalDecision,
     readApprovalId,
     readApprovalListOptions,
     readApprovalSubscriptionFromSeq,
 } from "./Request.js";
-import type { ApprovalApi } from "../Api.js";
 
-export interface ApprovalRouteSubscriptionPort {
-    subscribe(
-        stream: MessageStream,
-        context: ControlPortContext,
-        instanceName: string,
-        instance: Pick<InstanceEventSource, "subscribe">,
-        fromSeq: number,
-        projectEvent?: (
-            event: InstanceEventRecord,
-        ) => ApprovalEvent | undefined,
-    ): Promise<void>;
-}
 
-export interface ApprovalRouteInstancePort {
-    approval: Pick<
-        ApprovalApi,
-        | "decideApproval"
-        | "getApproval"
-        | "listApprovals"
-        | "listPendingApprovals"
-    >;
-    events: InstanceEventSource;
-    name: string;
-}
+
+
+
 
 export function createApprovalRouteModule(
     instance: ApprovalRouteInstancePort,

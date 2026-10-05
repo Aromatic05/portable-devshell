@@ -13,7 +13,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { WorkerToolInvoker } from "../worker/Invoker.js";
-import { PresentedToolCallResult } from "./Presentation.js";
+import type { ToolCallPresentedResult } from "../Api.js";
 import type {
     WorkerToolCallScheduler,
     WorkerToolSchedulerReservation,
@@ -33,7 +33,7 @@ import type {
     ToolCallHookContext,
     ToolCallHookValue,
 } from "./hook/Review.js";
-import type { ToolCallHookSequence } from "./hook/Sequence.js";
+import type { ToolCallHookSequenceApi } from "../Api.js";
 import { getErrorCode } from "./Error.js";
 import {
     normalizeToolSchedulerError,
@@ -207,12 +207,13 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 );
             });
             executionCompleted = true;
+            const presented = isPresentedToolCallResult(executed);
             const presentation: ToolCallPresentation | undefined =
-                executed instanceof PresentedToolCallResult
+                presented
                     ? executed.presentation
                     : undefined;
             const rawResult =
-                executed instanceof PresentedToolCallResult
+                presented
                     ? executed.result
                     : executed;
             let adaptedResult: JsonValue;
@@ -407,6 +408,20 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
     }
 }
 
+function isPresentedToolCallResult(
+    value: JsonValue | ToolCallPresentedResult,
+): value is ToolCallPresentedResult {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        value.type === "presented-tool-call-result" &&
+        typeof value.presentation === "object" &&
+        value.presentation !== null &&
+        "result" in value
+    );
+}
+
 interface ToolCallOuterError {
     readonly error: Error;
     readonly payload: JsonValue;
@@ -415,7 +430,7 @@ interface ToolCallOuterError {
 }
 
 async function rewriteToolCallError(
-    hooks: ToolCallHookSequence,
+    hooks: ToolCallHookSequenceApi,
     callId: string,
     error: unknown,
     value: ToolCallHookValue,

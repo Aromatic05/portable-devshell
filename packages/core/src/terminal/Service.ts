@@ -11,12 +11,17 @@ import {
 } from "@portable-devshell/shared";
 
 import type {
+    TerminalAttachRequest,
     TerminalBackend,
     TerminalBackendOpenResult,
     TerminalBackendSession,
+    TerminalAttachment,
+    TerminalOpenRequest,
     TerminalProcess,
     TerminalProcessExit,
-} from "./Backend.js";
+    TerminalSessionApi,
+    TerminalSessionRuntimeOptions,
+} from "./Api.js";
 
 const DEFAULT_MAX_REPLAY_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_TERMINAL_HISTORY = 64;
@@ -49,41 +54,7 @@ interface TerminalAttachmentRecord {
     onOutput(frame: TerminalOutputFrame): void;
 }
 
-export interface TerminalSessionServiceOptions {
-    idFactory?: () => string;
-    maxReplayBytes?: number;
-    maxTerminalHistory?: number;
-    now?: () => Date;
-}
-
-export interface TerminalOpenRequest {
-    backend: TerminalBackend;
-    cols: number;
-    command?: string;
-    cwd?: string;
-    instance: string;
-    rows: number;
-    workspace: string;
-}
-
-export interface TerminalAttachRequest {
-    fromSeq: number;
-    generation: number;
-    onExit?(exit: TerminalProcessExit): void;
-    onOutput(frame: TerminalOutputFrame): void;
-    terminalId: string;
-}
-
-export interface TerminalAttachment {
-    readonly exit?: TerminalProcessExit;
-    readonly replay: TerminalOutputFrame[];
-    readonly session: TerminalSessionDescriptor;
-    detach(): void;
-    resize(cols: number, rows: number): Promise<void>;
-    write(data: string): Promise<void>;
-}
-
-export class TerminalSessionService {
+export class TerminalSessionService implements TerminalSessionApi {
     readonly #idFactory: () => string;
     readonly #instanceEpochs = new Map<string, number>();
     readonly #maxReplayBytes: number;
@@ -93,7 +64,7 @@ export class TerminalSessionService {
     #closed = false;
     #nextGeneration = 1;
 
-    constructor(options: TerminalSessionServiceOptions = {}) {
+    constructor(options: TerminalSessionRuntimeOptions = {}) {
         this.#idFactory =
             options.idFactory ?? (() => `terminal-${randomUUID()}`);
         this.#maxReplayBytes =

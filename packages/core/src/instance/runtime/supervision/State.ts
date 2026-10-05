@@ -1,3 +1,4 @@
+import type { InstanceEventInput, InstanceEventPort, InstanceEventStreamGap, InstanceEventStreamSlice } from "../../Api.js";
 import type {
     ConnectionState,
     DaemonState,
@@ -8,15 +9,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { ResolvedWorkerInstanceConfig } from "../provision/Config.js";
-import {
-    createConnectionChangedEventData,
-    createReadyChangedEventData,
-    createStatusChangedEventData,
-    type InstanceEventInput,
-    type InstanceEventPort,
-    type InstanceEventStreamGap,
-    type InstanceEventStreamSlice,
-} from "./Event.js";
+import { createConnectionChangedEventData, createReadyChangedEventData, createStatusChangedEventData } from "./Event.js";
 import {
     deriveProcessStatus,
     isReadyState,

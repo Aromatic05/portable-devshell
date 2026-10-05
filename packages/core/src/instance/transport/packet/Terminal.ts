@@ -1,3 +1,4 @@
+import type { WorkerTerminalDescriptor, WorkerTerminalOpenInput, WorkerTerminalIdentity, WorkerTerminalAttachResult, WorkerTerminalNotification } from "../../Api.js";
 import {
     Endpoint,
     Event,
@@ -6,63 +7,17 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-export interface WorkerTerminalDescriptor {
-    cols: number;
-    createdAtMs: number;
-    generation: number;
-    latestSeq: number;
-    rows: number;
-    state: "running" | "exited";
-    terminalId: string;
-    version: number;
-}
 
-export interface WorkerTerminalOpenInput {
-    cols: number;
-    command?: string;
-    cwd?: string;
-    rows: number;
-    workspace: string;
-}
 
-export interface WorkerTerminalIdentity {
-    clientSeq: number;
-    generation: number;
-    terminalId: string;
-    version: number;
-}
 
-export interface WorkerTerminalOutputFrame {
-    dataBase64: string;
-    seq: number;
-}
 
-export interface WorkerTerminalAttachResult {
-    exit?: { exitCode: number; signal: number };
-    replay: WorkerTerminalOutputFrame[];
-    session: WorkerTerminalDescriptor;
-}
 
-export type WorkerTerminalNotification =
-    | {
-          method: "terminal.output";
-          params: {
-              dataBase64: string;
-              generation: number;
-              seq: number;
-              terminalId: string;
-          };
-      }
-    | {
-          method: "terminal.exit";
-          params: {
-              exitCode: number;
-              generation: number;
-              signal: number;
-              terminalId: string;
-              version: number;
-          };
-      };
+
+
+
+
+
+
 
 export class WorkerTerminal {
     readonly #endpoint: Endpoint;

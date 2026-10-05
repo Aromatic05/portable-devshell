@@ -1,3 +1,4 @@
+import type { WorkerHandshakeParams } from "../../Api.js";
 import type {
     ControlInstanceAlertsConfig,
     ControlInstanceConfig,
@@ -25,10 +26,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 import type { TransportConnection } from "../../transport/endpoint/Connection.js";
 import type { WorkerRuntime } from "../execution/Command.js";
-import {
-    WORKER_PROTOCOL_RANGE,
-    type WorkerHandshakeParams,
-} from "../../transport/packet/Client.js";
+import { WORKER_PROTOCOL_RANGE } from "../../transport/packet/Client.js";
 
 export type WorkerManagementMode = "controllerManaged" | "selfManaged";
 

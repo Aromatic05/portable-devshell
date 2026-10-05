@@ -3,13 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
     "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "default": "./dist/index.js"
-        },
         "./audit": {
             "types": "./dist/audit/Public.d.ts",
             "default": "./dist/audit/Public.js"
@@ -35,8 +29,8 @@
             "default": "./dist/terminal/Public.js"
         },
         "./instance": {
-            "types": "./dist/instance/index.d.ts",
-            "default": "./dist/instance/index.js"
+            "types": "./dist/instance/Public.d.ts",
+            "default": "./dist/instance/Public.js"
         }
     },
     "files": [

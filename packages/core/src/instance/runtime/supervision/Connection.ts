@@ -1,3 +1,4 @@
+import type { InstanceEventInput, WorkerHandshakeResult } from "../../Api.js";
 import {
     Endpoint,
     createRemoteError,
@@ -8,13 +9,10 @@ import {
     type ReverseTransport,
 } from "@portable-devshell/shared";
 
-import type { InstanceEventInput } from "./Event.js";
+
 import type { InstanceStateUpdate } from "./State.js";
 import type { InstanceSnapshot } from "./State.js";
-import type {
-    WorkerProtocolClient,
-    WorkerHandshakeResult,
-} from "../../transport/packet/Client.js";
+import type { WorkerProtocolClient } from "../../transport/packet/Client.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { TransportConnection, ReverseAttachment } from "../../transport/endpoint/Connection.js";
 import type { ResolvedWorkerInstanceConfig } from "../provision/Config.js";

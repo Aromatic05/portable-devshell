@@ -1,3 +1,4 @@
+import type { WorkerProtocolRange, WorkerHandshakeParams, WorkerPingResult, WorkerStopResult, WorkerCommandSessionOutputInput, WorkerCommandSessionCompleteInput, WorkerHandshakeResult, WorkerToolsListResult, WorkerWorkspacePrepareResult, WorkerExtensionResourcePrepareInput, WorkerExtensionResourcePrepareResult, WorkerAlertsReadResult } from "../../Api.js";
 import {
     Endpoint,
     Rpc,
@@ -10,100 +11,34 @@ export const WORKER_PROTOCOL_RANGE = Object.freeze({
     max: WORKER_PROTOCOL_VERSION,
     min: WORKER_PROTOCOL_VERSION,
 });
-export interface WorkerProtocolRange {
-    min: string;
-    max: string;
-}
 
-export interface WorkerHandshakeParams {
-    protocolRange: WorkerProtocolRange;
-    clientName: string;
-    clientVersion: string;
-}
 
-export interface WorkerPingResult {
-    pong: boolean;
-}
-export interface WorkerStopResult {
-    stopping: boolean;
-}
 
-export interface WorkerCommandSessionOutputInput {
-    data: string;
-    sessionId: string;
-    stream: "stderr" | "stdout";
-}
 
-export interface WorkerCommandSessionCompleteInput {
-    error?: string;
-    exitCode: number;
-    sessionId: string;
-}
 
-export interface WorkerShellRuntime {
-    executable: string;
-    kind: "bash" | "powershell" | string;
-    version: string;
-}
 
-export interface WorkerHandshakeResult {
-    homeDirectory: string;
-    instance: string;
-    workerVersion: string;
-    workerSha256?: string;
-    protocolVersion: string;
-    platform: {
-        os: string;
-        arch: string;
-        distribution?: { id: string; name: string; version?: string };
-        packageManager?: string;
-        shell?: WorkerShellRuntime;
-    };
-    capabilities: {
-        tools: boolean;
-        streaming: boolean;
-        cancel: boolean;
-    };
-}
 
-export interface WorkerToolDefinition {
-    requiredCapabilities: readonly ("read" | "write" | "execute")[];
-    name: string;
-    description: string;
-    group: string;
-    inputSchema: JsonValue;
-    outputSchema: JsonValue;
-}
 
-export interface WorkerToolsListResult {
-    tools: WorkerToolDefinition[];
-}
 
-export interface WorkerWorkspacePrepareResult {
-    projectMemoryAgentFile: string;
-    projectMemoryDirectory: string;
-    projectMemoryPresent?: boolean;
-    temporaryDirectory: string;
-    workspace: string;
-}
 
-export interface WorkerExtensionResourcePrepareInput {
-    collection: string;
-    extensionId: string;
-}
 
-export interface WorkerExtensionResourcePrepareResult {
-    directory: string;
-}
 
-export interface WorkerAlertAdvice {
-    code: string;
-    text: string;
-}
 
-export interface WorkerAlertsReadResult {
-    advice: WorkerAlertAdvice[];
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export class WorkerProtocolClient {
     readonly #endpoint: Endpoint;

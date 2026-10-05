@@ -13,11 +13,9 @@ import {
 } from "@portable-devshell/shared";
 import { WebSocketServer } from "ws";
 
-import {
-    ReverseConnections,
-    type ReverseConnectionIdentity,
-} from "./Connections.js";
-import type { ReverseInstanceLookup } from "./Instance.js";
+import { ReverseConnections } from "./Connections.js";
+import type { ReverseConnectionIdentity } from "../../../../Api.js";
+import type { ReverseInstanceLookup } from "../../../../Api.js";
 import { ReverseSseChannel } from "./SseChannel.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
 

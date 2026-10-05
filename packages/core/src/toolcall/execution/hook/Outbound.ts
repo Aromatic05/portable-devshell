@@ -6,11 +6,11 @@ import {
 import { createErrorFromBody } from "../Error.js";
 import { attachToolCallErrorPayload } from "../ErrorPayload.js";
 import type { ToolCallHookValue } from "./Review.js";
-import type { ToolCallHookSequence } from "./Sequence.js";
+import type { ToolCallHookSequenceApi } from "../../Api.js";
 
 export async function runOutboundReview(
-    hooks: ToolCallHookSequence,
-    input: Parameters<ToolCallHookSequence["review"]>[0],
+    hooks: ToolCallHookSequenceApi,
+    input: Parameters<ToolCallHookSequenceApi["review"]>[0],
 ): Promise<void> {
     try {
         await hooks.review(input);
@@ -20,8 +20,8 @@ export async function runOutboundReview(
 }
 
 export async function runOutboundPipeline(
-    hooks: ToolCallHookSequence,
-    input: Parameters<ToolCallHookSequence["rewrite"]>[0],
+    hooks: ToolCallHookSequenceApi,
+    input: Parameters<ToolCallHookSequenceApi["rewrite"]>[0],
 ): Promise<ToolCallHookValue> {
     const value = await hooks.rewrite(input);
     await runOutboundReview(hooks, { ...input, value });

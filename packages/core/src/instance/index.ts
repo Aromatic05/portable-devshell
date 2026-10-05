@@ -1,3 +1,4 @@
+import type { InstanceEventPort } from "./Api.js";
 import {
     asInstanceName,
     type ControlInstanceConfig,
@@ -11,7 +12,7 @@ import {
 } from "./runtime/provision/Factory.js";
 import { ReverseProvision } from "./runtime/provision/install/provider/Reverse.js";
 import { WorkerInstance } from "./runtime/index.js";
-import type { InstanceEventPort } from "./runtime/supervision/Event.js";
+
 import { WorkerCommandClient } from "./runtime/execution/Command.js";
 import { WorkerProtocolClient } from "./transport/packet/Client.js";
 import { InstanceStateMachine } from "./runtime/supervision/State.js";
@@ -22,14 +23,6 @@ import {
     type WorkerInstanceConfig,
 } from "./runtime/provision/Config.js";
 
-export { Instance, type InstanceFields, type InstanceLease, type InstanceReferenceLease } from "./Instance.js";
-export { InstanceRegistry } from "./Registry.js";
-export type {
-    InstanceEventInput,
-    InstanceEventPort,
-    InstanceEventStreamGap,
-    InstanceEventStreamSlice,
-} from "./runtime/supervision/Event.js";
 
 export function createInstance(
     config: ControlInstanceConfig,

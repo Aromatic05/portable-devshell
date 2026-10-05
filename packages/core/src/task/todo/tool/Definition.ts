@@ -157,6 +157,22 @@ function outputSchema(): JsonValue {
 export class TodoToolDefinitions {
     readonly #definitions: readonly ToolDefinition[] = [
         {
+            _meta: {
+                devshell: {
+                    mcp: {
+                        annotations: {
+                            destructiveHint: false,
+                            idempotentHint: true,
+                            openWorldHint: false,
+                            readOnlyHint: true,
+                        },
+                        inputHints: {
+                            taskId: "Stable task id; prefer once known.",
+                        },
+                        title: "Read task plan",
+                    },
+                },
+            },
             requiredCapabilities: [],
             description:
                 "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId. Use todo tools only for multi-step tasks.",
@@ -177,6 +193,26 @@ export class TodoToolDefinitions {
             outputSchema: outputSchema(),
         },
         {
+            _meta: {
+                devshell: {
+                    mcp: {
+                        annotations: {
+                            destructiveHint: true,
+                            idempotentHint: false,
+                            openWorldHint: false,
+                            readOnlyHint: false,
+                        },
+                        inputHints: {
+                            checkpoint: "Optional durable handoff context.",
+                            revision: "Latest todo revision.",
+                            taskId: "Stable task id.",
+                            title: "Immutable task title.",
+                            todos: "Complete replacement list.",
+                        },
+                        title: "Update task plan",
+                    },
+                },
+            },
             requiredCapabilities: [],
             description:
                 "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. Include taskId on every update. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",

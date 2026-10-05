@@ -1,8 +1,8 @@
-import {
-    ContextChangeHub,
-    type ContextCommittedChange,
-} from "./registry/Change.js";
-import type { ContextRecordSourcePort } from "./service/index.js";
+import type {
+    ContextChangeSource,
+    ContextCommittedChange,
+    ContextRecordSourcePort,
+} from "./Api.js";
 import type { MessageStream } from "@portable-devshell/shared";
 import type {
     ContextResolveInput,
@@ -198,7 +198,7 @@ class ContextChangeStream {
 
     constructor(
         stream: MessageStream,
-        hub: ContextChangeHub,
+        hub: ContextChangeSource,
         fromRevision: number,
     ) {
         this.#stream = stream;

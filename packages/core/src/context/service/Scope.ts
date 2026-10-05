@@ -12,12 +12,11 @@ import type {
     ContextRecordPort,
 } from "@portable-devshell/shared";
 
+import type { ContextInstanceLeasePort, ContextInstancesPort } from "../Api.js";
 import type {
-    ContextInstanceLeasePort,
-    ContextInstancesPort,
     ContextEnvironmentPort,
     PreparedEnvironmentFacts,
-} from "../Port.js";
+} from "../Api.js";
 import { ContextCleanupService } from "./Cleanup.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {

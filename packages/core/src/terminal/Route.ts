@@ -12,15 +12,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../Port.js";
-import type { TerminalBackend } from "./Backend.js";
-import type { TerminalAttachment, TerminalSessionService } from "./Service.js";
-
-export interface TerminalRouteModuleOptions {
-    backend: TerminalBackend;
-    instance: string;
-    maxUnackedBytes?: number;
-    sessions: TerminalSessionService;
-}
+import type { TerminalAttachment, TerminalRouteModuleOptions } from "./Api.js";
 
 export function createTerminalRouteModule(
     options: TerminalRouteModuleOptions,

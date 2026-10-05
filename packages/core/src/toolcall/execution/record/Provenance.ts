@@ -12,6 +12,11 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ToolCallProvenanceApi,
+    ToolCallProvenanceOptions,
+    ToolCallProvenanceRecord,
+} from "../../Api.js";
 import { randomUUID } from "node:crypto";
 import {
     constants as zlibConstants,
@@ -29,28 +34,7 @@ const DEFAULT_COLD_MAX_BYTES = 64 * 1024 * 1024;
 
 const DEFAULT_RETENTION_DAYS = 7;
 
-export interface ToolCallProvenanceStoreOptions {
-    coldMaxBytes?: number;
-    hotMaxBytes?: number;
-    now?: () => number;
-    retentionDays?: number;
-}
-
-// The provenance ledger is written by the MCP host but owned by the instance
-// tool domain. Declaring the record shape locally keeps core independent of the
-// MCP package; the structural interface remains satisfied by MCP's recorder.
-export interface ToolCallProvenanceRecord {
-    callId: string;
-    explanation?: string;
-    instance: string;
-    purpose?: string;
-}
-
-export interface ToolCallProvenanceRecorder {
-    record(record: ToolCallProvenanceRecord): Promise<void>;
-}
-
-export class ToolCallProvenanceStore implements ToolCallProvenanceRecorder {
+export class ToolCallProvenanceStore implements ToolCallProvenanceApi {
     readonly #archive: ToolCallProvenanceArchive;
     readonly #filePath: string;
     readonly #hotMaxBytes: number;
@@ -64,7 +48,7 @@ export class ToolCallProvenanceStore implements ToolCallProvenanceRecorder {
 
     constructor(
         filePath: string,
-        options: ToolCallProvenanceStoreOptions = {},
+        options: ToolCallProvenanceOptions = {},
     ) {
         this.#filePath = filePath;
         this.#hotMaxBytes = positiveInteger(
@@ -91,6 +75,10 @@ export class ToolCallProvenanceStore implements ToolCallProvenanceRecorder {
 
     async warmup(): Promise<void> {
         await this.#initialize();
+    }
+
+    async flush(): Promise<void> {
+        await this.#mutation;
     }
 
     async record(record: ToolCallProvenanceRecord): Promise<void> {

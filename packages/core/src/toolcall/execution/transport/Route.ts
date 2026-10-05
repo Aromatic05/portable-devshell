@@ -10,9 +10,7 @@ import {
 import { routeModule } from "../../../Port.js";
 import { readToolCallErrorPayload } from "../ErrorPayload.js";
 import { readToolCall } from "./Input.js";
-import type { ToolCallApi } from "../Api.js";
-
-export type ToolCallIngressPort = Pick<ToolCallApi, "call">;
+import type { ToolCallIngressPort } from "../../Api.js";
 
 export function createToolIngressRouteModule(
     ingress: ToolCallIngressPort,

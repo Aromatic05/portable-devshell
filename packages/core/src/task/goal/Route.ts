@@ -1,16 +1,14 @@
+import type { GoalTaskRouteInstancePort } from "../Api.js";
 import type {
     JsonValue,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../Port.js";
-import type { InstanceEventSource } from "../../instance/runtime/supervision/Event.js";
-import type { GoalService } from "./index.js";
 
-export interface GoalTaskRouteInstancePort {
-    events: Pick<InstanceEventSource, "cursor">;
-    goal: Pick<GoalService, "list">;
-}
+
+
+
 
 export function createGoalTaskRouteModule(
     instance: GoalTaskRouteInstancePort,

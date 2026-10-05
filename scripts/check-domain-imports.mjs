@@ -109,6 +109,19 @@ const rules = [
     },
 ];
 
+const coreDomains = ["approval", "audit", "context", "instance", "task", "terminal", "toolcall"];
+for (const owner of coreDomains) {
+    rules.push({
+        name: `${owner}-uses-domain-public-entries`,
+        roots: [domain(`packages/core/src/${owner}`)],
+        forbidden: (candidate) => coreDomains.some((target) =>
+            target !== owner &&
+            under(candidate, domain(`packages/core/src/${target}`)) &&
+            candidate !== domain(`packages/core/src/${target}/Public`),
+        ),
+    });
+}
+
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 for (const sourceRoot of rules.flatMap((rule) => rule.roots)) {

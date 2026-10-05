@@ -1,19 +1,13 @@
+import type { WorkerTcpConnectInput, WorkerExecProcessInput } from "../../Api.js";
 import {
     Endpoint,
     Stream,
     type MessageStream,
 } from "@portable-devshell/shared";
 
-export interface WorkerTcpConnectInput {
-    host: string;
-    port: number;
-}
 
-export interface WorkerExecProcessInput {
-    executable: string;
-    args?: readonly string[];
-    cwd?: string;
-}
+
+
 
 export class WorkerTunnel {
     readonly #endpoint: Endpoint;

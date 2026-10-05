@@ -1,10 +1,8 @@
 import type { InstanceName } from "@portable-devshell/shared";
 
 import type { AuditSequenceStore } from "../RecordStore.js";
-import type { LogQuery } from "./Query.js";
+import type { InstanceLogEntry, LogQuery } from "../Api.js";
 
-import type { InstanceLogEntry } from "./Entry.js";
-export type { InstanceLogEntry } from "./Entry.js";
 
 export class LogStoreInstance {
     readonly #instanceName: InstanceName;

@@ -4,7 +4,6 @@ import {
     asInstanceName,
     createRemoteError,
     runtimeErrorCodes,
-    type InstanceName,
     type JsonValue,
     type ToolCallContext,
     type ToolCallPresentation,
@@ -19,40 +18,16 @@ import type {
     ToolCallHookContext,
     ToolCallHookValue,
 } from "./hook/Review.js";
-import {
-    ToolCallHookSequence,
-    type ToolCallHookProvider,
-} from "./hook/Sequence.js";
+import { type ToolCallHookProvider } from "./hook/Sequence.js";
 import { snapshotJson } from "./hook/Snapshot.js";
-import type { ToolCallApi } from "./Api.js";
+import type { ToolCallApi } from "../Api.js";
 import type { ToolCallExecutor } from "../registration/Api.js";
-
-
-export interface ToolCallDispatchRequest {
-    readonly callId: string;
-    readonly execute?: ToolCallExecutor;
-    readonly hooks: ToolCallHookSequence;
-    readonly invocationInput?: (
-        input: JsonValue,
-        callId: string,
-        finalValue: ToolCallHookValue,
-    ) => Promise<JsonValue> | JsonValue;
-    readonly onProgress?: (progress: JsonValue) => void;
-    readonly recording: "caller" | "host";
-    readonly signal?: AbortSignal;
-    readonly transformResult?: (
-        result: JsonValue,
-        callId: string,
-        presentation?: ToolCallPresentation,
-    ) => Promise<JsonValue>;
-    readonly value: ToolCallHookValue;
-}
-
-export interface ToolCallTarget {
-    dispatch(request: ToolCallDispatchRequest): Promise<JsonValue>;
-}
-
-export type ToolCallTargetResolver = (instance: InstanceName) => ToolCallTarget;
+import type { ToolCallTargetResolver } from "../Api.js";
+export type {
+    ToolCallDispatchRequest,
+    ToolCallTarget,
+    ToolCallTargetResolver,
+} from "../Api.js";
 
 export interface ToolCallPipelineOptions {
     hooks: ToolCallHookProvider;

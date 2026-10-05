@@ -1,8 +1,9 @@
+import type { InstanceEventInput } from "../../Api.js";
 import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import { WorkerCommandClient } from "./Command.js";
-import type { WorkerCommandInteractiveSession } from "../../transport/endpoint/channel/worker/Command.js";
-import type { InstanceEventInput } from "../supervision/Event.js";
+import type { WorkerCommandInteractiveSession } from "../../Api.js";
+
 import type { InstanceStateUpdate, InstanceSnapshot } from "../supervision/State.js";
 import type { WorkerInstanceConnection } from "../supervision/Connection.js";
 import type { ResolvedWorkerInstanceConfig } from "../provision/Config.js";
