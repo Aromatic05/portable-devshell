@@ -13,13 +13,19 @@ export { createInstanceHost, createConnectionRouteModule } from "./instance/Rout
 export { InstanceRegistry } from "./instance/Registry.js";
 export { InstancePaths } from "./instance/Paths.js";
 export { type ApprovalApi } from "./approval/Api.js";
-export { createInstanceApprovalService } from "./approval/index.js";
+export {
+    createApprovalRuntime,
+    type ApprovalRuntime,
+} from "./approval/index.js";
 export type { TaskApi } from "./task/Api.js";
-export { createInstanceTaskServices } from "./task/index.js";
+export { createTaskRuntime, type TaskRuntime } from "./task/index.js";
 export { installTodoTools } from "./task/todo/tool/Runtime.js";
 export { installWaitToolCallRewrite } from "./task/wait/Runtime.js";
 export { type TerminalBackend } from "./terminal/Backend.js";
-export { createInstanceTerminalBackend } from "./terminal/index.js";
+export {
+    createTerminalRuntime,
+    type TerminalRuntime,
+} from "./terminal/index.js";
 export { resolveWorkerHomeDirectory } from "./instance/runtime/provision/Home.js";
 export {
     assertInstanceDeletable,
@@ -34,13 +40,13 @@ export {
     resolveInstanceCreateSchema,
     summarizeInstanceCreate,
 } from "./instance/runtime/provision/Config.js";
-export { ProcessSubscriptionManager } from "./process/Subscription.js";
+export { ProcessSubscriptionManager } from "./instance/runtime/supervision/Subscription.js";
 export { TerminalSessionService } from "./terminal/Service.js";
 export { readToolCallErrorPayload } from "./toolcall/execution/ErrorPayload.js";
 export { limitToolCallResponse, readToolCallQuery } from "./toolcall/execution/transport/Input.js";
 export { ToolCallProvenanceStore } from "./toolcall/execution/record/Provenance.js";
 export { createToolIngressHost, type ToolCallIngressPort } from "./toolcall/execution/transport/Route.js";
-export { WorkerInstance } from "./worker/instance/Instance.js";
+export { WorkerInstance } from "./instance/runtime/index.js";
 export { WORKER_PROTOCOL_RANGE } from "./instance/transport/packet/Client.js";
 export { type WorkerCommandSessionClose, type WorkerCommandSessionOpen } from "./instance/runtime/execution/Session.js";
 export { TransportConnection } from "./instance/transport/endpoint/Connection.js";

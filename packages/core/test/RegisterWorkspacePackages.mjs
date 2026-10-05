@@ -55,8 +55,20 @@ const workspacePackages = new Map([
         new URL("../src/index.ts", import.meta.url).href,
     ],
     [
-        "@portable-devshell/core/testing",
-        new URL("../src/testing.ts", import.meta.url).href,
+        "@portable-devshell/core/context",
+        new URL("../src/context/Public.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/core/task",
+        new URL("../src/task/Public.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/core/terminal",
+        new URL("../src/terminal/Public.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/core/instance",
+        new URL("../src/instance/index.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/mcp/tool",

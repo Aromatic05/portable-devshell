@@ -10,13 +10,13 @@
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
         },
-        "./testing": {
-            "types": "./dist/testing.d.ts",
-            "default": "./dist/testing.js"
+        "./audit": {
+            "types": "./dist/audit/Public.d.ts",
+            "default": "./dist/audit/Public.js"
         },
         "./toolcall": {
-            "types": "./dist/tool/Public.d.ts",
-            "default": "./dist/tool/Public.js"
+            "types": "./dist/toolcall/Public.d.ts",
+            "default": "./dist/toolcall/Public.js"
         },
         "./approval": {
             "types": "./dist/approval/Public.d.ts",
@@ -25,6 +25,18 @@
         "./context": {
             "types": "./dist/context/Public.d.ts",
             "default": "./dist/context/Public.js"
+        },
+        "./task": {
+            "types": "./dist/task/Public.d.ts",
+            "default": "./dist/task/Public.js"
+        },
+        "./terminal": {
+            "types": "./dist/terminal/Public.d.ts",
+            "default": "./dist/terminal/Public.js"
+        },
+        "./instance": {
+            "types": "./dist/instance/index.d.ts",
+            "default": "./dist/instance/index.js"
         }
     },
     "files": [

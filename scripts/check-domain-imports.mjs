@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,8 +43,6 @@ const anyTarget = (...tests) => (candidate) =>
 const controlDomains = [
     "artifact",
     "auth",
-    "connection",
-    "context",
     "extension",
     "instance",
     "overview",
@@ -73,18 +71,24 @@ const rules = [
         ),
     },
     {
-        name: "instance-is-transparent-to-approval-task-terminal",
+        name: "instance-does-not-depend-on-business-domains",
         roots: [domain("packages/core/src/instance")],
         forbidden: anyTarget(
             pathTarget("packages/core/src/approval"),
             pathTarget("packages/core/src/task"),
             pathTarget("packages/core/src/terminal"),
+            pathTarget("packages/core/src/audit"),
+            pathTarget("packages/core/src/toolcall"),
             packageTarget("@portable-devshell/core/approval"),
+            packageTarget("@portable-devshell/core/task"),
+            packageTarget("@portable-devshell/core/terminal"),
+            packageTarget("@portable-devshell/core/audit"),
+            packageTarget("@portable-devshell/core/toolcall"),
         ),
     },
     {
         name: "context-does-not-depend-on-mcp",
-        roots: [domain("packages/control/src/context")],
+        roots: [domain("packages/core/src/context")],
         forbidden: anyTarget(
             packageTargetExcept(
                 "@portable-devshell/mcp",
@@ -94,36 +98,22 @@ const rules = [
         ),
     },
     {
-        name: "process-does-not-depend-on-task",
-        roots: [
-            domain("packages/core/src/process"),
-            domain("packages/shared/src/execution/process"),
-        ],
-        forbidden: anyTarget(
-            pathTarget("packages/core/src/task"),
-            pathTarget("packages/shared/src/workspace/task"),
-        ),
-    },
-    {
         name: "toolcall-does-not-depend-on-worker-or-approval",
-        roots: [domain("packages/core/src/tool")],
+        roots: [domain("packages/core/src/toolcall")],
         forbidden: anyTarget(
-            pathTarget("packages/core/src/worker"),
+            pathTarget("packages/core/src/instance"),
             pathTarget("packages/core/src/approval"),
+            packageTarget("@portable-devshell/core/instance"),
+            packageTarget("@portable-devshell/core/approval"),
         ),
-    },
-    {
-        name: "business-event-consumers-do-not-depend-on-worker",
-        roots: [
-            domain("packages/core/src/approval"),
-            domain("packages/core/src/task"),
-            domain("packages/core/src/message"),
-        ],
-        forbidden: pathTarget("packages/core/src/worker"),
     },
 ];
 
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
+
+for (const sourceRoot of rules.flatMap((rule) => rule.roots)) {
+    await access(sourceRoot);
+}
 
 async function sourceFiles(directory) {
     const entries = await readdir(directory, { withFileTypes: true });
