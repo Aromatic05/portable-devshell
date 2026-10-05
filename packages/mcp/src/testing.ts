@@ -11,8 +11,6 @@ export * from "./endpoint/extension/Contract.js";
 export * from "./endpoint/extension/Registry.js";
 export * from "./endpoint/extension/McpApp.js";
 export * from "./endpoint/call/Port.js";
-export * from "./endpoint/mcpapp/Catalog.js";
-export * from "./endpoint/mcpapp/Handler.js";
 export * from "./endpoint/tool/Catalog.js";
 export * from "./endpoint/tool/Registry.js";
 export * from "./endpoint/tool/Metadata.js";
