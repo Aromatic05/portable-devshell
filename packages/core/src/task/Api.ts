@@ -38,10 +38,8 @@ export interface GoalApi {
 }
 
 export interface WaitApi {
-    close(): void;
     detach(input: WaitDetachInput): Promise<WaitRecord>;
     list(ctxId?: string): Promise<WaitRecord[]>;
-    resume(): void;
 }
 
 export interface TaskApi {

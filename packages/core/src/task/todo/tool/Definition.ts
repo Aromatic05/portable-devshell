@@ -159,7 +159,7 @@ export class TodoToolDefinitions {
         {
             requiredCapabilities: [],
             description:
-                "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId whenever it is known; title remains a compatibility selector. Use todo tools only for multi-step tasks.",
+                "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId. Use todo tools only for multi-step tasks.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
@@ -167,12 +167,6 @@ export class TodoToolDefinitions {
                     taskId: {
                         description:
                             "Stable task identifier returned by todo_read or todo_write. Prefer this selector once known.",
-                        minLength: 1,
-                        type: "string",
-                    },
-                    title: {
-                        description:
-                            "Exact task title compatibility selector. Do not pass together with taskId.",
                         minLength: 1,
                         type: "string",
                     },
@@ -185,7 +179,7 @@ export class TodoToolDefinitions {
         {
             requiredCapabilities: [],
             description:
-                "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",
+                "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. Include taskId on every update. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,

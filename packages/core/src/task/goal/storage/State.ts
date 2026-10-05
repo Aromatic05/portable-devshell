@@ -764,16 +764,22 @@ function normalizeStepStatus(value: unknown): GoalStepStatus {
     );
 }
 
-/**
- * @compat goal-v1-normalization
- * @removeAt 0.7.10
- */
 function normalizeStoredGoal(value: unknown): GoalRecord {
     if (!isRecord(value)) throw new Error("goal state must be an object");
+    if (Object.hasOwn(value, "lastContinuationAt"))
+        throw new Error("goal state contains unsupported lastContinuationAt");
+    if (
+        !Array.isArray(value.steps) ||
+        value.steps.some(
+            (step) => !isRecord(step) || step.status === undefined,
+        )
+    ) {
+        throw new Error("stored goal steps must include a status");
+    }
     const steps = normalizeSteps(value.steps as GoalStepInput[], true);
     const storedStatus = normalizeGoalStatus(value.status);
-    const legacyAutoCompleted =
-        storedStatus === "active" && allStepsTerminal(steps);
+    if (storedStatus === "active" && allStepsTerminal(steps))
+        throw new Error("active goal must contain a non-terminal step");
     const record: GoalRecord = {
         continuationCount: nonNegativeInteger(
             value.continuationCount,
@@ -801,18 +807,11 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         ...(typeof value.lastReentryAt === "string" &&
         value.lastReentryAt.length > 0
             ? { lastReentryAt: value.lastReentryAt }
-            : typeof value.lastContinuationAt === "string" &&
-                value.lastContinuationAt.length > 0
-              ? { lastReentryAt: value.lastContinuationAt }
-              : {}),
-        lastProgressAt:
-            typeof value.lastProgressAt === "string" &&
-            value.lastProgressAt.length > 0
-                ? value.lastProgressAt
-                : requiredStoredString(
-                      value.lastAgentActivityAt,
-                      "lastAgentActivityAt",
-                  ),
+            : {}),
+        lastProgressAt: requiredStoredString(
+            value.lastProgressAt,
+            "lastProgressAt",
+        ),
         noActionStreak: optionalNonNegativeInteger(value.noActionStreak),
         objective: requiredText(
             value.objective,
@@ -822,7 +821,7 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         progressEpoch: optionalNonNegativeInteger(value.progressEpoch),
         revision: positiveInteger(value.revision, "revision"),
         stagnationStreak: optionalNonNegativeInteger(value.stagnationStreak),
-        status: legacyAutoCompleted ? "completed" : storedStatus,
+        status: storedStatus,
         steps,
         updatedAt: requiredStoredString(value.updatedAt, "updatedAt"),
         ...(typeof value.workspace === "string" && value.workspace.length > 0
@@ -842,28 +841,17 @@ function normalizeStoredGoal(value: unknown): GoalRecord {
         const field = value[key];
         if (typeof field === "string" && field.length > 0) record[key] = field;
     }
-    if (typeof value.reentryProgressEpoch === "number") {
+    if (value.reentryProgressEpoch !== undefined)
         record.reentryProgressEpoch = nonNegativeInteger(
             value.reentryProgressEpoch,
             "reentryProgressEpoch",
         );
-    } else if (record.lastReentryAt !== undefined) {
-        record.reentryProgressEpoch = goalProgressEpoch(record);
-    }
-    if (typeof value.continuationClaimProgressEpoch === "number") {
+    if (value.continuationClaimProgressEpoch !== undefined)
         record.continuationClaimProgressEpoch = nonNegativeInteger(
             value.continuationClaimProgressEpoch,
             "continuationClaimProgressEpoch",
         );
-    }
-    return legacyAutoCompleted
-        ? {
-              ...clearContinuation(record),
-              continuationCount: 0,
-              noActionStreak: 0,
-              stagnationStreak: 0,
-          }
-        : record;
+    return record;
 }
 
 function normalizeGoalStatus(value: unknown): GoalRecord["status"] {

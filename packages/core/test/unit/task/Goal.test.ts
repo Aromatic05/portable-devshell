@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { GoalState } from "../../../src/task/goal/storage/State.ts";
-import { GoalService } from "../../../src/task/goal/Service.ts";
+import { GoalService } from "../../../src/task/goal/index.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("GoalService stopAll terminalizes every live Goal while preserving completed history", async () => {

@@ -4,8 +4,8 @@ import type {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../Port.js";
-import type { InstanceEventSource } from "../../instance/EventBuffer.js";
-import type { GoalService } from "./Service.js";
+import type { InstanceEventSource } from "../../instance/runtime/supervision/Event.js";
+import type { GoalService } from "./index.js";
 
 export interface GoalTaskRouteInstancePort {
     events: Pick<InstanceEventSource, "cursor">;

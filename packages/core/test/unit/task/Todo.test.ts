@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { TodoService } from "../../../src/task/todo/Service.ts";
+import { TodoService } from "../../../src/task/todo/index.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("TodoService creates, validates revisions, persists atomically, and emits derived summaries", async () => {
@@ -71,6 +71,7 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
         service.write(
             {
                 revision: 0,
+                taskId: created.taskId,
                 title: "Implement todo",
                 todos: [{ content: "Stale", id: "stale", status: "pending" }],
             },
@@ -145,6 +146,7 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     await service.write(
         {
             revision: created.revision,
+            taskId: created.taskId,
             title: "First task",
             todos: [{ content: "Finish", id: "finish", status: "completed" }],
         },
@@ -172,7 +174,7 @@ test("TodoService emits terminal events once, archives terminal tasks, and reloa
     assert.equal("tasks" in next, false);
 
     const reloaded = createService();
-    const read = await reloaded.read("Second task");
+    const read = await reloaded.read({ taskId: next.taskId });
     assert.equal(read.revision, next.revision);
     assert.deepEqual(read.items, next.items);
     assert.equal("tasks" in read, false);
@@ -204,7 +206,7 @@ test("TodoService cancelAll archives every active task while preserving prior hi
         },
         "ctx-first",
     );
-    await service.write(
+    const second = await service.write(
         {
             revision: 0,
             title: "Second active",
@@ -220,6 +222,8 @@ test("TodoService cancelAll archives every active task while preserving prior hi
     assert.deepEqual(service.summaries(), []);
     const firstRead = await service.read({ taskId: first.taskId });
     assert.equal(typeof firstRead.cancelledAt, "string");
+    const secondRead = await service.read({ taskId: second.taskId });
+    assert.equal(typeof secondRead.cancelledAt, "string");
     assert.equal("tasks" in firstRead, false);
     assert.deepEqual((await service.read()).tasks, []);
 });
@@ -288,7 +292,10 @@ test("TodoService keeps a committed write successful when its derived audit even
     );
 
     assert.equal(written.revision, 1);
-    assert.equal((await service.read("Durable task")).revision, 1);
+    assert.equal(
+        (await service.read({ taskId: written.taskId })).revision,
+        1,
+    );
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
         active: Array<{ revision: number }>;
     };

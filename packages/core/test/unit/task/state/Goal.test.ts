@@ -92,34 +92,32 @@ test("GoalState completes atomically when the final step becomes terminal", () =
     assert.equal(transition.result?.status, "stopped");
 });
 
-test("GoalState normalizes legacy active Goals with only terminal steps as completed", () => {
+test("GoalState rejects active goals that contain only terminal steps", () => {
     const state = new GoalState({ now: () => "2026-08-20T12:00:00.000Z" });
-    const normalized = state.normalizeDocument({
-        goals: [
-            {
-                continuationCount: 2,
-                continuationPending: false,
-                createdAt: "2026-08-20T11:00:00.000Z",
-                createdByCtxId: "ctx-legacy",
-                goalId: "goal-legacy",
-                lastAgentActivityAt: "2026-08-20T11:01:00.000Z",
-                lastProgressAt: "2026-08-20T11:01:00.000Z",
-                noActionStreak: 2,
-                objective: "Legacy terminal Goal",
-                revision: 7,
-                stagnationStreak: 1,
-                status: "active",
-                steps: [{ id: "done", status: "completed", text: "Done" }],
-                updatedAt: "2026-08-20T11:01:00.000Z",
-            },
-        ],
-        version: 1,
-    });
-
-    const goal = state.read(normalized, "ctx-legacy");
-    assert.equal(goal?.status, "completed");
-    assert.equal(goal?.continuationDue, false);
-    assert.equal(goal?.continuationCount, 0);
+    assert.throws(
+        () => state.normalizeDocument({
+            goals: [
+                {
+                    continuationCount: 2,
+                    continuationPending: false,
+                    createdAt: "2026-08-20T11:00:00.000Z",
+                    createdByCtxId: "ctx-legacy",
+                    goalId: "goal-legacy",
+                    lastAgentActivityAt: "2026-08-20T11:01:00.000Z",
+                    lastProgressAt: "2026-08-20T11:01:00.000Z",
+                    noActionStreak: 2,
+                    objective: "Legacy terminal Goal",
+                    revision: 7,
+                    stagnationStreak: 1,
+                    status: "active",
+                    steps: [{ id: "done", status: "completed", text: "Done" }],
+                    updatedAt: "2026-08-20T11:01:00.000Z",
+                },
+            ],
+            version: 1,
+        }),
+        /active goal must contain a non-terminal step/u,
+    );
 });
 
 test("GoalState continuation claims are validated against agent activity and count only dispatched attempts", () => {

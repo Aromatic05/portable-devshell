@@ -13,7 +13,7 @@ import {
     type GoalDocument,
     type GoalTransition,
 } from "./storage/State.js";
-import { GoalStore } from "./storage/Store.js";
+import { GoalStore } from "./storage/index.js";
 
 export class GoalService {
     readonly #appendEvent: (

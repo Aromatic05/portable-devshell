@@ -1,4 +1,4 @@
-import type { ToolCallHooks } from "../../../toolcall/Runtime.js";
+import type { ToolCallHooks } from "../../../toolcall/Public.js";
 import {
     mcpAllInstances,
     mcpTools,

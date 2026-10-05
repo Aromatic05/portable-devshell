@@ -3,9 +3,9 @@ import type {
     ToolCallHookValue,
     WaitDetachInput,
 } from "@portable-devshell/shared";
-import type { ToolCallHooks } from "../../toolcall/Runtime.js";
+import type { ToolCallHooks } from "../../toolcall/Public.js";
 import type { WaitApi } from "../Api.js";
-import { WAIT_SYNC_MS } from "./Service.js";
+import { WAIT_SYNC_MS } from "./index.js";
 
 export function installWaitToolCallRewrite(
     hooks: ToolCallHooks,

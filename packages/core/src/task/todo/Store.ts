@@ -180,6 +180,7 @@ export interface TodoTransition {
         data: JsonValue;
         type: Extract<TaskEventType, `todo.${string}`>;
     }>;
+    taskId: string;
 }
 
 export class TodoState {
@@ -200,39 +201,23 @@ export class TodoState {
         return { active: [], archived: [], version: 4 };
     }
 
-    /**
-     * @compat todo-v1-v3
-     * @removeAt 0.7.10
-     */
     normalizeDocument(value: unknown): TodoDocument {
-        if (!isRecord(value) || !Array.isArray(value.archived)) {
+        if (
+            !isRecord(value) ||
+            value.version !== 4 ||
+            !Array.isArray(value.active) ||
+            !Array.isArray(value.archived)
+        ) {
             throw new Error(
-                "todo document must contain a supported version and archived array",
+                "todo document must contain version 4 and active and archived arrays",
             );
         }
-
-        const version = value.version;
-        let activeValues: unknown[];
-        if (version === 1) {
-            activeValues = value.active === undefined ? [] : [value.active];
-        } else if (version === 2 || version === 3 || version === 4) {
-            if (!Array.isArray(value.active)) {
-                throw new Error(
-                    `todo document version ${version} must contain an active array`,
-                );
-            }
-            if (version === 4 && Object.hasOwn(value, "comments")) {
-                throw new Error(
-                    "todo document version 4 must not contain comments",
-                );
-            }
-            activeValues = value.active;
-        } else {
-            throw new Error("todo document version is unsupported");
+        if (Object.hasOwn(value, "comments")) {
+            throw new Error("todo document version 4 must not contain comments");
         }
 
-        const active = activeValues.map((entry) =>
-            this.#normalizeStoredState(entry, version === 1),
+        const active = value.active.map((entry) =>
+            this.#normalizeStoredState(entry),
         );
         const titles = new Set(active.map((entry) => entry.title));
         if (titles.size !== active.length)
@@ -240,7 +225,7 @@ export class TodoState {
         return this.compact({
             active,
             archived: value.archived.map((entry) =>
-                this.#normalizeStoredState(entry, version === 1),
+                this.#normalizeStoredState(entry),
             ),
             version: 4,
         });
@@ -252,11 +237,12 @@ export class TodoState {
         ctxId: string,
     ): TodoTransition {
         const normalized = normalizeInput(input);
-        const previousIndex = document.active.findIndex((entry) =>
+        const previousIndex =
             normalized.taskId === undefined
-                ? entry.title === normalized.title
-                : entry.taskId === normalized.taskId,
-        );
+                ? -1
+                : document.active.findIndex(
+                      (entry) => entry.taskId === normalized.taskId,
+                  );
         const previous =
             previousIndex === -1 ? undefined : document.active[previousIndex];
         const events: TodoTransition["events"] = [];
@@ -320,6 +306,7 @@ export class TodoState {
         return {
             document: this.compact({ active, archived, version: 4 }),
             events,
+            taskId: next.taskId,
         };
     }
 
@@ -338,7 +325,7 @@ export class TodoState {
                 (entry) => entry.taskId === taskId,
             );
             if (action === "cancel" && archived?.cancelledAt !== undefined) {
-                return { document, events: [] };
+                return { document, events: [], taskId: archived.taskId };
             }
             throw invalidTodo(`todo task ${taskId} is not active`);
         }
@@ -353,9 +340,9 @@ export class TodoState {
             );
         }
         if (action === "pause" && previous.pausedAt !== undefined)
-            return { document, events: [] };
+            return { document, events: [], taskId: previous.taskId };
         if (action === "resume" && previous.pausedAt === undefined)
-            return { document, events: [] };
+            return { document, events: [], taskId: previous.taskId };
 
         const now = this.#now();
         const active = [...document.active];
@@ -391,6 +378,7 @@ export class TodoState {
                     todoEvent("todo.updated", next),
                     todoEvent("todo.archived", archivedState),
                 ],
+                taskId: next.taskId,
             };
         }
 
@@ -398,6 +386,7 @@ export class TodoState {
         return {
             document: this.compact({ active, archived, version: 4 }),
             events: [todoEvent("todo.updated", next)],
+            taskId: next.taskId,
         };
     }
 
@@ -418,6 +407,7 @@ export class TodoState {
                 version: 4,
             },
             events: [todoEvent("todo.deleted", state)],
+            taskId,
         };
     }
 
@@ -437,10 +427,9 @@ export class TodoState {
 
     readResult(
         document: TodoDocument,
-        input: TodoReadInput | string = {},
+        input: TodoReadInput = {},
     ): TodoReadResult {
-        const selector = typeof input === "string" ? { title: input } : input;
-        if (selector.taskId === undefined && selector.title === undefined) {
+        if (input.taskId === undefined) {
             return {
                 items: [],
                 revision: 0,
@@ -449,10 +438,7 @@ export class TodoState {
             };
         }
         const state = [...document.active, ...document.archived].find(
-            (entry) =>
-                selector.taskId === undefined
-                    ? entry.title === selector.title
-                    : entry.taskId === selector.taskId,
+            (entry) => entry.taskId === input.taskId,
         );
         if (state === undefined) {
             return {
@@ -536,12 +522,9 @@ export class TodoState {
 
     #normalizeStoredState(
         value: unknown,
-        allowMissingTitle = false,
     ): SharedTodoState {
         if (!isRecord(value)) throw new Error("todo state must be an object");
-        const activeCtxId = optionalString(
-            value.activeCtxId ?? value.activeSessionId,
-        );
+        const activeCtxId = optionalString(value.activeCtxId);
         const archivedAt = optionalString(value.archivedAt);
         const cancelledAt = optionalString(value.cancelledAt);
         const storedCheckpoint =
@@ -550,9 +533,7 @@ export class TodoState {
                 : normalizeStoredCheckpoint(value.checkpoint);
         const pausedAt = optionalString(value.pausedAt);
         const taskId = requiredString(value.taskId, "taskId");
-        const title =
-            optionalString(value.title) ??
-            (allowMissingTitle ? taskId : requiredString(value.title, "title"));
+        const title = requiredString(value.title, "title");
         const state: SharedTodoState = {
             ...(activeCtxId === undefined ? {} : { activeCtxId }),
             ...(archivedAt === undefined ? {} : { archivedAt }),
@@ -562,7 +543,7 @@ export class TodoState {
                 : { checkpoint: storedCheckpoint }),
             createdAt: requiredString(value.createdAt, "createdAt"),
             createdByCtxId: requiredString(
-                value.createdByCtxId ?? value.createdBySessionId,
+                value.createdByCtxId,
                 "createdByCtxId",
             ),
             items: normalizeItems(value.items),

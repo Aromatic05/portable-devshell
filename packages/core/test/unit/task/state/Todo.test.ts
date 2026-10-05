@@ -40,17 +40,20 @@ test("TodoState owns validation, transitions, and summaries", () => {
         (created.events[0]?.data as { ctxId?: string }).ctxId,
         "ctx-1",
     );
-    assert.deepEqual(state.readResult(created.document, "Implement"), {
-        items: [
-            { content: "Inspect", id: "inspect", status: "completed" },
-            { content: "Implement", id: "implement", status: "in_progress" },
-            { content: "Verify", id: "verify", status: "pending" },
-        ],
-        revision: 1,
-        summary: { completed: 1, currentItemId: "implement", total: 3 },
-        taskId: "task-fixed",
-        title: "Implement",
-    });
+    assert.deepEqual(
+        state.readResult(created.document, { taskId: "task-fixed" }),
+        {
+            items: [
+                { content: "Inspect", id: "inspect", status: "completed" },
+                { content: "Implement", id: "implement", status: "in_progress" },
+                { content: "Verify", id: "verify", status: "pending" },
+            ],
+            revision: 1,
+            summary: { completed: 1, currentItemId: "implement", total: 3 },
+            taskId: "task-fixed",
+            title: "Implement",
+        },
+    );
     assert.equal(
         "tasks" in state.readResult(created.document, { taskId: "task-fixed" }),
         false,
@@ -338,7 +341,10 @@ test("TodoState lists live titles and isolates concurrent task revisions", () =>
         state.readResult(second.document).tasks?.map((task) => task.title),
         ["First", "Second"],
     );
-    assert.equal(state.readResult(second.document, "First").taskId, "task-1");
+    assert.equal(
+        state.readResult(second.document, { taskId: "task-1" }).taskId,
+        "task-1",
+    );
 });
 
 test("TodoState rejects invalid item sets and stale revisions", () => {
@@ -385,6 +391,7 @@ test("TodoState rejects invalid item sets and stale revisions", () => {
             created.document,
             {
                 revision: 0,
+                taskId: created.document.active[0]?.taskId,
                 title: "Pending",
                 todos: [{ content: "Stale", id: "stale", status: "pending" }],
             },
@@ -423,13 +430,14 @@ test("TodoStore persists and reloads normalized state independently", async () =
     });
     assert.deepEqual(reloaded.read(), transition.document);
     assert.equal(
-        state.readResult(reloaded.read(), "Persist").summary.currentItemId,
+        state.readResult(reloaded.read(), { taskId: "task-fixed" }).summary
+            .currentItemId,
         "write",
     );
 });
 
-test("TodoStore discards obsolete comments while loading legacy documents", async () => {
-    const { readFile, writeFile } = await import("node:fs/promises");
+test("TodoStore rejects legacy document versions", async () => {
+    const { writeFile } = await import("node:fs/promises");
     const root = await createTestTempDirectory("todo-migration");
     const state = new TodoState("aromatic-pc");
     const storedState = {
@@ -444,90 +452,27 @@ test("TodoStore discards obsolete comments while loading legacy documents", asyn
         updatedAt: "2026-07-01T00:01:00.000Z",
     };
 
-    const version1Path = join(root, "todo-v1.json");
-    const { title: _legacyTitle, ...version1State } = storedState;
-    await writeFile(
-        version1Path,
-        JSON.stringify({
-            active: version1State,
-            archived: [],
-            version: 1,
-        }),
-    );
-    const version1 = new TodoStore({
-        filePath: version1Path,
-        instanceName: "aromatic-pc",
-        state,
-    }).read();
-    assert.equal(version1.version, 4);
-    assert.deepEqual(version1.active, [
-        { ...version1State, title: "task-legacy" },
-    ]);
-    assert.equal("comments" in version1, false);
     assert.equal("comments" in state.emptyDocument(), false);
-
-    const version2Path = join(root, "todo-v2.json");
-    await writeFile(
-        version2Path,
-        JSON.stringify({
-            active: [storedState],
-            archived: [],
-            comments: [
-                {
-                    createdAt: "2026-07-01T00:02:00.000Z",
-                    id: "comment-legacy",
-                    text: "Preserve this guidance",
-                },
-            ],
-            version: 2,
-        }),
-    );
-    const version2 = new TodoStore({
-        filePath: version2Path,
-        instanceName: "aromatic-pc",
-        state,
-    }).read();
-    assert.equal(version2.version, 4);
-    assert.deepEqual(version2.active, [storedState]);
-    assert.equal("comments" in version2, false);
-    assert.equal(
-        "comments" in state.readResult(version2, "Legacy task"),
-        false,
-    );
-
-    const version3Path = join(root, "todo-v3.json");
-    await writeFile(
-        version3Path,
-        JSON.stringify({
-            active: [storedState],
-            archived: [],
-            comments: [
-                {
-                    createdAt: "2026-07-01T00:03:00.000Z",
-                    ctxId: "ctx-legacy",
-                    id: "comment-v3",
-                    text: "Discard this obsolete comment",
-                },
-            ],
-            version: 3,
-        }),
-    );
-    const version3Store = new TodoStore({
-        filePath: version3Path,
-        instanceName: "aromatic-pc",
-        state,
-    });
-    const version3 = version3Store.read();
-    assert.equal(version3.version, 4);
-    assert.deepEqual(version3.active, [storedState]);
-    assert.equal("comments" in version3, false);
-
-    await version3Store.write(version3);
-    const persisted = JSON.parse(
-        await readFile(version3Path, "utf8"),
-    ) as Record<string, unknown>;
-    assert.equal(persisted.version, 4);
-    assert.equal("comments" in persisted, false);
+    for (const version of [1, 2, 3]) {
+        const filePath = join(root, `todo-v${version}.json`);
+        await writeFile(
+            filePath,
+            JSON.stringify({
+                active: [storedState],
+                archived: [],
+                version,
+            }),
+        );
+        assert.throws(
+            () =>
+                new TodoStore({
+                    filePath,
+                    instanceName: "aromatic-pc",
+                    state,
+                }).read(),
+            /Todo state for aromatic-pc is invalid/u,
+        );
+    }
 
     const version4Path = join(root, "todo-v4.json");
     await writeFile(

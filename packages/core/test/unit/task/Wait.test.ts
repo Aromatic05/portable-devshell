@@ -2,20 +2,24 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { JsonValue, WaitDetachInput } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    type JsonValue,
+    type WaitDetachInput,
+} from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import type { WaitApi } from "../../../src/task/Api.ts";
 import {
     WAIT_SYNC_MS,
     WaitService,
-} from "../../../src/task/wait/Service.ts";
+} from "../../../src/task/wait/index.ts";
 import { installWaitToolCallRewrite } from "../../../src/task/wait/Runtime.ts";
-import { ToolCallHookRegistry } from "../../../src/toolcall/Runtime.ts";
+import { ToolCallHookRegistry } from "../../../src/toolcall/registration/index.ts";
 
 test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async () => {
     const detached: WaitDetachInput[] = [];
+    const instanceName = asInstanceName("local");
     const wait = {
-        close() {},
         async detach(input: WaitDetachInput) {
             detached.push(input);
             const now = "2026-10-04T00:00:00.000Z";
@@ -30,13 +34,12 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
         async list() {
             return [];
         },
-        resume() {},
     } satisfies WaitApi;
     const hooks = new ToolCallHookRegistry();
     const uninstall = installWaitToolCallRewrite(hooks, () => wait);
     const context = {
         ctxId: "ctx-1",
-        instance: "local" as const,
+        instance: instanceName,
         source: "mcp" as const,
         workspace: "/repo",
     };
@@ -75,7 +78,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             {
                 callId: "call-run",
                 ctxId: "ctx-1",
-                instance: "local",
+                instance: instanceName,
                 source: "mcp",
                 targetId: "task-1",
                 toolName: "tmux_run",
@@ -120,6 +123,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
 });
 
 test("WaitService persists detached task and resolves it through native tmux_read", async () => {
+    const instanceName = asInstanceName("local");
     const root = await createTestTempDirectory("wait-runtime");
     const filePath = join(root, "detached-waits.json");
     const events: string[] = [];
@@ -151,7 +155,7 @@ test("WaitService persists detached task and resolves it through native tmux_rea
     await service.detach({
         callId: "call-1",
         ctxId: "ctx-1",
-        instance: "local" as const,
+        instance: instanceName,
         source: "mcp",
         targetId: "task-1",
         toolName: "tmux_run",
@@ -180,6 +184,6 @@ test("WaitService persists detached task and resolves it through native tmux_rea
         invoke: { async invoke() { throw new Error("unused"); } },
     });
     assert.equal((await restored.list("ctx-1"))[0]?.status, "resolved");
-    service.close();
-    restored.close();
+    await service.close();
+    await restored.close();
 });

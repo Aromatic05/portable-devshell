@@ -36,7 +36,7 @@ export class TodoService {
         });
     }
 
-    async read(input?: TodoReadInput | string): Promise<TodoReadResult> {
+    async read(input?: TodoReadInput): Promise<TodoReadResult> {
         await this.#operation;
         return this.#readDocument(
             input === undefined ? this.#store.readActive() : this.#store.read(),
@@ -57,10 +57,7 @@ export class TodoService {
                     ctxId,
                 );
                 const result = this.#readDocument(transition.document, {
-                    ...(input.taskId === undefined
-                        ? {}
-                        : { taskId: input.taskId }),
-                    title: input.title,
+                    taskId: transition.taskId,
                 });
                 return {
                     document: transition.document,
@@ -144,7 +141,7 @@ export class TodoService {
 
     #readDocument(
         document: TodoDocument,
-        input?: TodoReadInput | string,
+        input?: TodoReadInput,
     ): TodoReadResult {
         return this.#state.readResult(document, input);
     }

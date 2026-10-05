@@ -5,13 +5,12 @@ import test from "node:test";
 
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import { GoalState } from "../../../../src/task/goal/storage/State.ts";
-import { GoalStore } from "../../../../src/task/goal/storage/Store.ts";
+import { GoalStore } from "../../../../src/task/goal/storage/index.ts";
 import { TodoState } from "../../../../src/task/todo/Store.ts";
 import { TodoStore } from "../../../../src/task/todo/Store.ts";
-import { WaitState } from "../../../../src/task/wait/State.ts";
-import { WaitStore } from "../../../../src/task/wait/Store.ts";
+import { WaitService } from "../../../../src/task/wait/index.ts";
 
-test("interaction state stores defer persisted state loading until first access", async () => {
+test("Goal and Todo stores defer loading while WaitService validates on creation", async () => {
     const root = await createTestTempDirectory("lazy-interaction-state-");
     const files = {
         goal: join(root, "goals.json"),
@@ -34,13 +33,16 @@ test("interaction state stores defer persisted state loading until first access"
         instanceName: "alpha",
         state: new TodoState("alpha"),
     });
-    const wait = new WaitStore({
-        filePath: files.wait,
-        instanceName: "alpha",
-        state: new WaitState(),
-    });
+    assert.throws(
+        () =>
+            new WaitService({
+                appendEvent: async () => undefined,
+                filePath: files.wait,
+                invoke: { invoke: async () => ({}) },
+            }),
+        /not valid JSON/u,
+    );
 
     assert.throws(() => goal.read(), /Goal state for alpha is invalid/u);
     assert.throws(() => todo.read(), /Todo state for alpha is invalid/u);
-    assert.throws(() => wait.read(), /Wait state for alpha is invalid/u);
 });

@@ -39,7 +39,11 @@ export class WaitService {
     readonly #waitId: () => string;
     readonly #records = new Map<string, WaitRecord>();
     readonly #monitors = new Map<string, AbortController>();
+    readonly #monitorTasks = new Map<string, Promise<void>>();
+    readonly #monitorFailures: unknown[] = [];
     #writeTail = Promise.resolve();
+    #closed = false;
+    #closePromise?: Promise<void>;
 
     constructor(options: WaitServiceOptions) {
         this.#appendEvent = options.appendEvent;
@@ -58,6 +62,7 @@ export class WaitService {
     }
 
     async detach(input: WaitDetachInput): Promise<WaitRecord> {
+        if (this.#closed) throw new Error("Wait service is closed.");
         const existing = [...this.#records.values()].find(
             (record) =>
                 record.status === "detached" &&
@@ -90,23 +95,51 @@ export class WaitService {
     }
 
     resume(): void {
+        if (this.#closed) return;
         for (const record of this.#records.values())
             if (record.status === "detached") this.#start(record);
     }
 
-    close(): void {
+    close(): Promise<void> {
+        if (this.#closePromise !== undefined) return this.#closePromise;
+        this.#closed = true;
         for (const controller of this.#monitors.values()) controller.abort();
-        this.#monitors.clear();
+        this.#closePromise = (async () => {
+            await Promise.allSettled(this.#monitorTasks.values());
+            await this.#writeTail;
+            if (this.#monitorFailures.length > 0)
+                throw new AggregateError(
+                    this.#monitorFailures,
+                    "Wait monitors failed while closing.",
+                );
+        })();
+        return this.#closePromise;
     }
 
     #start(record: WaitRecord): void {
-        if (this.#monitors.has(record.waitId)) return;
+        if (this.#closed || this.#monitors.has(record.waitId)) return;
         const controller = new AbortController();
         this.#monitors.set(record.waitId, controller);
-        void this.#monitor(record.waitId, controller.signal).finally(() => {
-            if (this.#monitors.get(record.waitId) === controller)
-                this.#monitors.delete(record.waitId);
-        });
+        const task = this.#monitor(record.waitId, controller.signal);
+        this.#monitorTasks.set(record.waitId, task);
+        void task.then(
+            () => this.#finishMonitor(record.waitId, controller, task),
+            (error: unknown) => {
+                this.#monitorFailures.push(error);
+                this.#finishMonitor(record.waitId, controller, task);
+            },
+        );
+    }
+
+    #finishMonitor(
+        waitId: string,
+        controller: AbortController,
+        task: Promise<void>,
+    ): void {
+        if (this.#monitors.get(waitId) === controller)
+            this.#monitors.delete(waitId);
+        if (this.#monitorTasks.get(waitId) === task)
+            this.#monitorTasks.delete(waitId);
     }
 
     async #monitor(waitId: string, signal: AbortSignal): Promise<void> {
@@ -132,6 +165,7 @@ export class WaitService {
                     },
                     signal,
                 );
+                if (signal.aborted) return;
                 if (readString(result, "waitReason") !== "terminal") continue;
                 await this.#settle(waitId, "resolved", { result });
                 return;

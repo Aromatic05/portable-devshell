@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { asInstanceName } from "@portable-devshell/shared";
 import { TodoToolDefinitions } from "../../../src/task/todo/tool/Definition.ts";
 import { readTodoToolInput } from "../../../src/task/todo/tool/Input.ts";
 
-test("task todo read selector accepts taskId and the compatibility title selector", () => {
+test("task todo read selector accepts taskId and rejects title selectors", () => {
     assert.deepEqual(readTodoToolInput({ taskId: "task-1" }), { taskId: "task-1" });
-    assert.deepEqual(readTodoToolInput({ title: "Recover" }), { title: "Recover" });
     assert.deepEqual(readTodoToolInput({ taskId: "  task-2  " }), {
         taskId: "task-2",
     });
-    assert.deepEqual(readTodoToolInput({ title: "  Recover  " }), {
-        title: "Recover",
-    });
     assert.equal(readTodoToolInput({}), undefined);
+    assert.throws(
+        () => readTodoToolInput({ title: "Recover" }),
+        /optional taskId selector/u,
+    );
 });
 
 test("task todo read selector rejects ambiguous or malformed selectors", () => {
@@ -27,7 +28,7 @@ test("task todo read selector rejects ambiguous or malformed selectors", () => {
     );
     assert.throws(
         () => readTodoToolInput({ taskId: "task-1", title: "Recover" }),
-        /todo_read accepts only one optional selector: taskId or title/u,
+        /optional taskId selector/u,
     );
     assert.throws(
         () => readTodoToolInput({ taskId: "" }),
@@ -35,7 +36,7 @@ test("task todo read selector rejects ambiguous or malformed selectors", () => {
     );
     assert.throws(
         () => readTodoToolInput({ title: "   " }),
-        /todo_read title must be a non-empty string/u,
+        /optional taskId selector/u,
     );
 });
 
@@ -56,12 +57,13 @@ test("task domain keeps todo as the operation namespace", () => {
     assert.equal(catalog.isTodoTool("task_read"), false);
 });
 
-import type { ToolCallHooks } from "../../../src/toolcall/Runtime.ts";
+import type { ToolCallHooks } from "../../../src/toolcall/registration/Api.ts";
 import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { TaskApi } from "../../../src/task/Api.ts";
 import { installTodoTools } from "../../../src/task/todo/tool/Runtime.ts";
 
 test("Todo tools register for all instances and execute against the selected TaskApi", async () => {
+    const instanceName = asInstanceName("local");
     const executes = new Map<
         string,
         Parameters<ToolCallHooks["registerExecute"]>[1]
@@ -78,8 +80,6 @@ test("Todo tools register for all instances and execute against the selected Tas
         registerReview: () => () => undefined,
     } as ToolCallHooks;
     let writtenCtxId: string | undefined;
-    const cancelled: string[] = [];
-    const disabled: string[] = [];
     const task = {
         todo: {
             async read() {
@@ -105,28 +105,7 @@ test("Todo tools register for all instances and execute against the selected Tas
         },
         wait: {
             async list() {
-                return [
-                    {
-                        kind: "question",
-                        status: "waiting",
-                        taskId: "task-1",
-                        waitId: "question-1",
-                    },
-                    {
-                        kind: "process",
-                        status: "resolved",
-                        taskId: "task-1",
-                        waitId: "process-1",
-                    },
-                ];
-            },
-            async cancel(waitId: string) {
-                cancelled.push(waitId);
-                return {};
-            },
-            async disableRecovery(waitId: string) {
-                disabled.push(waitId);
-                return {};
+                return [];
             },
         },
     } as unknown as TaskApi;
@@ -152,7 +131,7 @@ test("Todo tools register for all instances and execute against the selected Tas
             "read-1",
             {},
             {
-                context: { instance: "local", source: "mcp" },
+                context: { instance: instanceName, source: "mcp" },
                 kind: "call",
                 payload: {},
                 toolName: "todo_read",
@@ -168,7 +147,7 @@ test("Todo tools register for all instances and execute against the selected Tas
             {
                 context: {
                     ctxId: "ctx-1",
-                    instance: "local",
+                    instance: instanceName,
                     source: "mcp",
                 },
                 kind: "call",
@@ -177,8 +156,6 @@ test("Todo tools register for all instances and execute against the selected Tas
             },
         );
         assert.equal(writtenCtxId, "ctx-1");
-        assert.deepEqual(cancelled, ["question-1"]);
-        assert.deepEqual(disabled, ["process-1"]);
     } finally {
         uninstall();
     }

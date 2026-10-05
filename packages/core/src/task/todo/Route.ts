@@ -13,8 +13,8 @@ import type {
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
 import { routeModule } from "../../Port.js";
-import type { InstanceEventSource } from "../../instance/EventBuffer.js";
-import type { TodoService } from "./Service.js";
+import type { InstanceEventSource } from "../../instance/runtime/supervision/Event.js";
+import type { TodoService } from "./index.js";
 
 export interface TodoTaskRouteSubscriptionPort {
     subscribe(
@@ -96,24 +96,22 @@ export function readTodoInput(payload?: JsonValue): TodoReadInput | undefined {
     }
     const keys = Object.keys(payload);
     if (keys.length === 0) return undefined;
-    if (keys.length !== 1 || (keys[0] !== "taskId" && keys[0] !== "title")) {
+    if (keys.length !== 1 || keys[0] !== "taskId") {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message:
-                "task.getTodo accepts only one optional selector: taskId or title.",
+            message: "task.getTodo accepts only the optional taskId selector.",
             retryable: false,
         });
     }
-    const key = keys[0] as "taskId" | "title";
-    const value = payload[key];
+    const value = payload.taskId;
     if (typeof value !== "string" || value.trim().length === 0) {
         throw createRemoteError({
             code: controlErrorCodes.invalidTarget,
-            message: `task.getTodo ${key} must be a non-empty string.`,
+            message: "task.getTodo taskId must be a non-empty string.",
             retryable: false,
         });
     }
-    return { [key]: value.trim() };
+    return { taskId: value.trim() };
 }
 
 export function readTodoTaskId(payload?: JsonValue): string {
