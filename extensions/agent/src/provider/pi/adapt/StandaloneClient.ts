@@ -12,12 +12,12 @@ import {
     createConfigTransport,
     createInstanceTransport,
     createProcessTransport,
-    createServiceTransport,
+    createServerTransport,
     createToolTransport,
     type ConfigTransport,
     type InstanceTransport,
     type ProcessTransport,
-    type ServiceTransport,
+    type ServerTransport,
     type ToolTransport,
 } from "@portable-devshell/shared";
 
@@ -39,7 +39,7 @@ export interface StandaloneDevshellPiOptions {
 interface StandaloneControlSession {
     instance: InstanceTransport;
     runtime: ProcessTransport;
-    service: ServiceTransport;
+    service: ServerTransport;
     tool: ToolTransport;
     close(): void;
 }
@@ -258,13 +258,13 @@ function createStandaloneControl(
     return {
         instance: createInstanceTransport(endpoint),
         runtime: createProcessTransport(endpoint),
-        service: createServiceTransport(endpoint, { clientKind: "cli" }),
+        service: createServerTransport(endpoint, { clientKind: "cli" }),
         tool: createToolTransport(endpoint),
         close: () => endpoint.close(),
     };
 }
 
-async function negotiate(service: ServiceTransport): Promise<void> {
+async function negotiate(service: ServerTransport): Promise<void> {
     const hello = await service.hello();
     if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
         throw new Error(
