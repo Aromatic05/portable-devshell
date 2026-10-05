@@ -32,7 +32,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { ControlRouteComposition } from "../../../../src/server/Route.ts";
+import { ControlRouteRegistry } from "../../../../src/server/Route.ts";
 import {
     createTestInstanceDomainRuntime,
     createTestTaskApi,
@@ -52,7 +52,7 @@ import { cleanupInOrder } from "../../../../../../test/TestCleanup.ts";
 interface Harness {
     cleanup(): Promise<void>;
     registry: InstanceRegistry;
-    routes: ControlRouteComposition;
+    routes: ControlRouteRegistry;
     server: ControlSocketServer;
     socketPath: string;
     worker: FakeWorker;
@@ -268,7 +268,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
     const debug = new DebugPatchService(registry);
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         debug,
         instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
@@ -361,7 +361,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
             config = next;
         },
     });
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         config: editor,
         instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
@@ -446,7 +446,7 @@ test("ControlSocketServer exposes server-backed Message preferences through the 
         },
         preferencesFile: join(directory, "message-preferences.json"),
     });
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         extensionRoutes: {
             modules(scope) {
                 return scope === "control" ? comment.routes.control() : [];
@@ -547,7 +547,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     const directory = await createTestTempDirectory("route-snapshot");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
         shutdown() {},
@@ -644,7 +644,7 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
             name: "alpha",
         },
     );
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         instanceDomains: createTestInstanceDomainRuntime({
             services: () => ({
                 terminal: { open: async () => process },
@@ -791,7 +791,7 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         new FakeWorker("alpha") as unknown as WorkerInstance,
         { name: "alpha" },
     );
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         instanceDomains: createTestInstanceDomainRuntime({
             services: () => ({
                 terminal: { open: async () => process },
@@ -868,7 +868,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     const directory = await createTestTempDirectory("shutdown-reply");
     const socketPath = createTestIpcPath("control-rpc", directory);
     let shutdownRequested = false;
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
         shutdown() {
@@ -897,7 +897,7 @@ async function createHarness(
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
-    const routes = new ControlRouteComposition({
+    const routes = new ControlRouteRegistry({
         instanceDomains: createTestInstanceDomainRuntime({
             services: () => ({ task: createActiveTodosTask(activeTodos) }),
         }),

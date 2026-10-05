@@ -91,7 +91,7 @@ export interface ControlRouteExtensionPort {
     onChange(listener: () => void): () => void;
 }
 
-export interface ControlRouteCompositionOptions {
+export interface ControlRouteRegistryOptions {
     artifact?: ArtifactRouteApi;
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
@@ -119,11 +119,11 @@ export interface ControlRouteCompositionOptions {
     webPages?: WebPagePort;
 }
 
-export class ControlRouteComposition {
+export class ControlRouteRegistry {
     readonly #configChanges: ConfigChangeHub;
     readonly #overview: OperationalOverviewPort;
     readonly #instanceChanges = new InstanceChangeHub();
-    readonly #options: ControlRouteCompositionOptions;
+    readonly #options: ControlRouteRegistryOptions;
     readonly #subscriptions: ProcessSubscriptionManager;
     readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeExtensions: () => void;
@@ -132,7 +132,7 @@ export class ControlRouteComposition {
     readonly #listeners = new Set<() => void>();
     #hosts: readonly ControlHostDefinition[];
 
-    constructor(options: ControlRouteCompositionOptions) {
+    constructor(options: ControlRouteRegistryOptions) {
         this.#options = options;
         this.#configChanges = options.configChanges ?? new ConfigChangeHub();
         this.#subscriptions =

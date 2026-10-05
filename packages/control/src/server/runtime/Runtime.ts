@@ -50,7 +50,7 @@ import { ControlWebSessionService } from "../web/auth/Session.js";
 import { ControlWebSocketAccessService } from "../web/auth/Access.js";
 import { ControlWebSocketListener } from "../web/Socket.js";
 import { ExtensionWebGateway } from "../web/extension/application/Gateway.js";
-import { ControlRouteComposition } from "../Route.js";
+import { ControlRouteRegistry } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import {
@@ -108,7 +108,7 @@ export class ControlRuntime {
     readonly #instanceEditor: InstanceEditorCoordinator;
     readonly #mcp: McpControlModule;
     readonly #reverse: ConnectionModule;
-    readonly #routes: ControlRouteComposition;
+    readonly #routes: ControlRouteRegistry;
     readonly #socketListener: ControlSocketListener;
     readonly #toolCallHookUnregister: Array<() => void>;
     readonly #toolCalls: ToolCallApi;
@@ -179,7 +179,7 @@ export class ControlRuntime {
                 toolCalls.hooks,
             ),
         );
-        this.#routes = new ControlRouteComposition({
+        this.#routes = new ControlRouteRegistry({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, {
                 surface: "native",
