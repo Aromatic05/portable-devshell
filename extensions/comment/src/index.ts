@@ -9,6 +9,7 @@ import {
 } from "@portable-devshell/extension";
 import {
     routes as controlRoutes,
+    streams as controlStreams,
     type ControlRouteBinding,
     type ControlRouteScope,
 } from "@portable-devshell/extension/control";
@@ -55,6 +56,7 @@ import {
 import { createMessagePreferenceRouteModule } from "./message/preference/Route.js";
 import { MessagePreferenceStore } from "./message/preference/Store.js";
 import { MessageStore } from "./message/store/MessageStore.js";
+import { createMessageSubscriptionBinding } from "./message/Route.js";
 import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
@@ -654,6 +656,11 @@ function registerCommentRoutes(
     source: BuiltinCommentInstanceSource,
     comment: CommentExtension,
 ): void {
+    context.register(
+        controlStreams,
+        "message-subscribe",
+        createMessageSubscriptionBinding(context.capabilities.instanceObserve!),
+    );
     for (const route of [
         {
             id: "context-message-list",

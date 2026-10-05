@@ -20,6 +20,7 @@ import type { ExtensionWorkerCapability } from "@portable-devshell/extension/wor
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
+    ExtensionInstanceEvent,
     ExtensionInstanceEventPublishCapability,
     ExtensionInstanceManageCapability,
     ExtensionInstanceObserveCapability,
@@ -685,6 +686,14 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                         ? {}
                         : { eventTypes: [...value.eventTypes] }),
                     fromSeq: value.fromSeq,
+                    ...(value.seed === true ? {
+                        onSeed: async (seed: { events: readonly ExtensionInstanceEvent[]; lastSeq: number }) =>
+                            this.#send({
+                                id,
+                                type: "capabilityProgress",
+                                value: { kind: "seed", seed: { events: seed.events.map((event) => ({ ...event })), lastSeq: seed.lastSeq } } as ExtensionJsonValue,
+                            }),
+                    } : {}),
                     onEvent: async (event) =>
                         this.#send({
                             id,

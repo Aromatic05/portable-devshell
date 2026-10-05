@@ -12,6 +12,14 @@
         "toolcall.history"
     ],
     "extensions": {
+        "control.streams": [
+            {
+                "id": "message-subscribe",
+                "module": "message",
+                "operation": "subscribe",
+                "scope": "instance"
+            }
+        ],
         "control.routes": [
             {
                 "id": "context-message-list",

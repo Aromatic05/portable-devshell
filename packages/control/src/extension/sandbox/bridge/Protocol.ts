@@ -317,6 +317,7 @@ export interface SandboxInstanceReadLogsInput {
     query?: ExtensionInstanceLogQuery;
 }
 export interface SandboxInstanceWatchInput {
+    seed?: boolean;
     eventTypes?: readonly string[];
     fromSeq: number;
     name: string;

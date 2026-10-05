@@ -8,6 +8,7 @@ import {
 } from "../api/point/cli/Sandbox.js";
 import { controlRoutesExtensionPointDefinition } from "../api/point/control/Declaration.js";
 import { controlRoutesSandboxCodec } from "../api/point/control/Sandbox.js";
+import { controlStreamsExtensionPointDefinition, controlStreamsSandboxCodec } from "../api/point/control/Stream.js";
 import { mcpToolsExtensionPointDefinition } from "../api/point/mcp/Declaration.js";
 import { mcpToolsSandboxCodec } from "../api/point/mcp/Sandbox.js";
 import {
@@ -36,6 +37,7 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
         controlRoutesExtensionPointDefinition,
+        controlStreamsExtensionPointDefinition,
         mcpToolsExtensionPointDefinition,
         tuiPagesExtensionPointDefinition,
         toolCallReviewExtensionPointDefinition,
@@ -55,6 +57,7 @@ export function createControlExtensionSandboxPointRegistry(): ExtensionSandboxPo
         cliModelCommandsSandboxCodec,
         cliNativeCommandsSandboxCodec,
         controlRoutesSandboxCodec,
+        controlStreamsSandboxCodec,
         mcpToolsSandboxCodec,
         tuiPagesSandboxCodec,
         toolCallReviewSandboxCodec,

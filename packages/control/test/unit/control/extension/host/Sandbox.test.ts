@@ -42,6 +42,8 @@ import {
     createCliNativeSandboxBinding,
 } from "../../../../../src/extension/api/point/cli/Sandbox.ts";
 import { createTuiPageSandboxBinding } from "../../../../../src/extension/api/point/tui/Sandbox.ts";
+import { controlStreamsExtensionPointDefinition } from "../../../../../src/extension/api/point/control/Stream.ts";
+import type { ControlStreamBinding, ControlStreamMessage } from "@portable-devshell/extension/control";
 import { createToolCallRewriteSandboxBinding } from "../../../../../src/extension/api/point/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
@@ -147,6 +149,60 @@ export function activate(context) {
         "open:/workspace",
         "call:echo:sandbox-op",
         "close",
+    ]);
+});
+
+test("Extension sandbox message stream preserves observation seed and cancels its watch", async (t) => {
+    const controller = new AbortController();
+    let markDelivered!: () => void;
+    const delivered = new Promise<void>((resolve) => { markDelivered = resolve; });
+    let watched = false;
+    let cancelled = false;
+    const sandbox = await setupSandbox(t, "extension-sandbox-message-stream", `
+export function activate(context) {
+    context.register({ id: "control.streams" }, "messages", async (stream, request, invocation) => {
+        await context.capabilities.instanceObserve.watchEvents(invocation.destination, {
+            fromSeq: request.payload.fromSeq,
+            onSeed: async (seed) => await stream.send({ name: "seed", payload: seed }),
+            onEvent: async (event) => await stream.send({ name: "event", payload: event, seq: event.seq }),
+            signal: invocation.signal,
+        });
+    });
+}
+`, {
+        capabilities: ["instance.observe"],
+        instanceObserve: {
+            ...fakeInstanceObserve([]),
+            async watchEvents(name, watch) {
+                assert.equal(name, "dev");
+                assert.equal(watch.fromSeq, 1);
+                assert.equal(typeof watch.onSeed, "function");
+                watched = true;
+                const cancellation = new Promise<void>((resolve) => watch.signal.addEventListener("abort", () => { cancelled = true; resolve(); }, { once: true }));
+                await watch.onSeed!({ events: [{ at: "now", instanceName: "dev", seq: 1, type: "context.message.queued" }], lastSeq: 1 });
+                await watch.onEvent({ at: "now", instanceName: "dev", seq: 2, type: "context.message.delivered" });
+                await cancellation;
+            },
+        },
+    });
+    const registration = await sandboxRegistration(sandbox, "control.streams", "messages");
+    const binding = controlStreamsExtensionPointDefinition.createSandboxBinding!(
+        registration.descriptor, sandboxPointContext("messages"), sandbox,
+    ) as ControlStreamBinding;
+    const messages: ControlStreamMessage[] = [];
+    const invocation = binding({
+        send: async (message) => { messages.push(message); if (message.name === "event") markDelivered(); },
+        close: async () => {},
+    }, { payload: { fromSeq: 1 } }, { destination: "dev", peer: "cli", requestId: "messages", signal: controller.signal });
+    const stopped = assert.rejects(async () => await invocation, /stream stopped/u);
+    await delivered;
+    controller.abort(new Error("stream stopped"));
+    await stopped;
+    assert.equal(watched, true);
+    assert.equal(cancelled, true);
+    assert.deepEqual(messages, [
+        { name: "seed", payload: { events: [{ at: "now", instanceName: "dev", seq: 1, type: "context.message.queued" }], lastSeq: 1 } },
+        { name: "event", payload: { at: "now", instanceName: "dev", seq: 2, type: "context.message.delivered" }, seq: 2 },
     ]);
 });
 

@@ -76,7 +76,7 @@ test("Comment Extension activates from observe, event-publish, and history capab
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 11);
+    assert.equal(registrations.length, 12);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
@@ -85,6 +85,7 @@ test("Comment Extension activates from observe, event-publish, and history capab
             { id: "comment-delivery", pointId: "toolcall.rewrite" },
             { id: "tool-advice", pointId: "toolcall.rewrite" },
             { id: "todo-invalid", pointId: "toolcall.rewrite" },
+            { id: "message-subscribe", pointId: "control.streams" },
             { id: "context-message-list", pointId: "control.routes" },
             { id: "context-message-queue", pointId: "control.routes" },
             { id: "message-list", pointId: "control.routes" },

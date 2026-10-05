@@ -312,6 +312,10 @@ Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec
 
 ### Invocation-scoped Host interface
 
+`@portable-devshell/extension/control` 提供普通请求 `control.routes` 和输出流 `control.streams`。两者都声明 `module / operation / scope`，由 Control 接到 shared 的 `host:port` 通信层。Stream binding 接收 `stream.send()`、`stream.close()` 与 invocation `signal`；客户端取消、实例退役和 Extension generation 替换都会结束订阅并释放 generation lease。
+
+Comment Extension 拥有完整 `message` 端点：实例消息使用 `<instance>:message`，偏好设置使用 `@control:message`。`message.subscribe` 的事件筛选与 `todo_report` 到 `message.changed` 的投影由 Comment 实现；`instance.observe.watchEvents` 的 `onSeed` 提供初始事件与 cursor，初始序列缺口会拒绝订阅。
+
 某些 Extension Point binding 在一次 invocation 内需要读取 Host 已经掌握、并且能够按当前 authoritative context 进一步收窄的状态。这类能力通过 invocation context 提供，不属于 generation capability，也不是新的 Extension Point。
 
 ```text

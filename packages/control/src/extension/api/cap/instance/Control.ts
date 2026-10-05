@@ -20,6 +20,7 @@ import {
     type InstanceLogEntry,
     type JsonValue,
     runtimeErrorCodes,
+    STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "@portable-devshell/core";
@@ -77,6 +78,45 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
                 name: configured.name,
                 provider: configured.provider,
             };
+        });
+    }
+
+    async watchEvents(name: string, watch: ExtensionInstanceEventWatch): Promise<void> {
+        this.#assertAllowed();
+        watch.signal.throwIfAborted();
+        if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 0)
+            throw new TypeError("Instance event watch fromSeq must be a non-negative integer.");
+        const descriptor = this.#require(name);
+        const source = { subscribe: (fromSeq: number) => descriptor.worker.subscribe(fromSeq) };
+        const types = watch.eventTypes === undefined ? undefined : new Set(watch.eventTypes);
+        let fromSeq = watch.fromSeq;
+        if (watch.onSeed !== undefined) {
+            const seed = source.subscribe(fromSeq);
+            if (seed.kind === "gap") {
+                throw createRemoteError({
+                    code: STREAM_GAP_CODE,
+                    message: "Requested event sequence is no longer available. Pull a fresh snapshot.",
+                    retryable: true,
+                    details: {
+                        instance: name,
+                        latestSeq: seed.lastSeq,
+                        oldestAvailableSeq: seed.nextSeq,
+                        requestedFromSeq: fromSeq,
+                    },
+                });
+            }
+            await watch.onSeed({
+                events: seed.events.filter((event) => types === undefined || types.has(event.type)).map(toEvent),
+                lastSeq: seed.lastSeq,
+            });
+            fromSeq = seed.lastSeq + 1;
+        }
+        if (watch.signal.aborted) return;
+        await this.#subscriptions.watch(name, source, fromSeq, watch.signal, {
+            onEvent: async (event: Parameters<typeof toEvent>[0]) => {
+                if (types === undefined || types.has(event.type)) await watch.onEvent(toEvent(event));
+            },
+            onGap: async (gap: { lastSeq: number; nextSeq: number }) => await watch.onGap?.(gap),
         });
     }
 

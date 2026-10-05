@@ -37,6 +37,7 @@ import type {
     ExtensionContextQuery,
 } from "@portable-devshell/extension/context";
 import type {
+    ExtensionInstanceEvent,
     ExtensionInstanceEventPublishCapability,
     ExtensionInstanceEventWatch,
     ExtensionInstanceLogQuery,
@@ -604,6 +605,7 @@ function createInstanceObserveCapability(): ExtensionInstanceObserveCapability {
                             ? {}
                             : { eventTypes: [...watch.eventTypes] }),
                         fromSeq: watch.fromSeq,
+                        seed: watch.onSeed !== undefined,
                         name,
                     } satisfies SandboxInstanceWatchInput,
                     {
@@ -897,28 +899,18 @@ async function deliverInstanceWatchProgress(
         throw new TypeError(
             "Extension sandbox Instance watch progress must be an object.",
         );
-    if (progress.kind === "event") {
-        const event = progress.event;
-        if (
-            !isRecord(event) ||
-            typeof event.at !== "string" ||
-            typeof event.instanceName !== "string" ||
-            !Number.isSafeInteger(event.seq) ||
-            typeof event.type !== "string"
-        ) {
-            throw new TypeError(
-                "Extension sandbox Instance watch event is invalid.",
-            );
-        }
-        await watch.onEvent({
-            at: event.at,
-            ...(event.data === undefined
-                ? {}
-                : { data: event.data as ExtensionJsonValue }),
-            instanceName: event.instanceName,
-            seq: event.seq as number,
-            type: event.type,
+    if (progress.kind === "seed") {
+        const seed = progress.seed;
+        if (!isRecord(seed) || !Array.isArray(seed.events) || typeof seed.lastSeq !== "number" || !Number.isSafeInteger(seed.lastSeq) || seed.lastSeq < 0)
+            throw new TypeError("Extension sandbox Instance watch seed is invalid.");
+        await watch.onSeed?.({
+            events: seed.events.map(readInstanceWatchEvent),
+            lastSeq: seed.lastSeq,
         });
+        return;
+    }
+    if (progress.kind === "event") {
+        await watch.onEvent(readInstanceWatchEvent(progress.event));
         return;
     }
     if (progress.kind === "gap") {
@@ -1041,6 +1033,20 @@ async function requestInterface(
             }
         },
     );
+}
+
+function readInstanceWatchEvent(value: ExtensionJsonValue | undefined): ExtensionInstanceEvent {
+    if (!isRecord(value) || typeof value.at !== "string" || typeof value.instanceName !== "string" ||
+        typeof value.seq !== "number" || !Number.isSafeInteger(value.seq) || value.seq < 0 || typeof value.type !== "string") {
+        throw new TypeError("Extension sandbox Instance watch event is invalid.");
+    }
+    return {
+        at: value.at,
+        ...(value.data === undefined ? {} : { data: value.data }),
+        instanceName: value.instanceName,
+        seq: value.seq,
+        type: value.type,
+    };
 }
 
 function rejectInvocationInterfaceRequests(

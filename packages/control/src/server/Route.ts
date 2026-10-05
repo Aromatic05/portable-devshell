@@ -184,6 +184,7 @@ export class ControlRouteRegistry {
     }
 
     async retireInstance(instance: string): Promise<void> {
+        await this.#options.extensionRoutes?.retireInstance(instance);
         await this.#terminals.closeInstance(instance);
     }
 

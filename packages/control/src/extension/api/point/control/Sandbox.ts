@@ -121,7 +121,7 @@ export function validateControlRouteBinding(
     }
 }
 
-function readControlRouteRequest(
+export function readControlRouteRequest(
     value: ExtensionJsonValue | undefined,
 ): ControlRouteRequest {
     const record = readExtensionRecord(value, "Control route request");
@@ -149,14 +149,14 @@ function readControlRouteRequest(
     });
 }
 
-function readRoutePeer(
+export function readRoutePeer(
     value: ExtensionJsonValue | undefined,
 ): ControlRouteInvocationContext["peer"] {
     if (value === "cli" || value === "tui" || value === "web") return value;
     throw new TypeError("Control route peer is invalid.");
 }
 
-function readRouteSubject(
+export function readRouteSubject(
     value: ExtensionJsonValue,
 ): NonNullable<ControlRouteInvocationContext["subject"]> {
     const record = readExtensionRecord(value, "Control route subject");
@@ -166,7 +166,7 @@ function readRouteSubject(
     });
 }
 
-function readExtensionRecord(
+export function readExtensionRecord(
     value: ExtensionJsonValue | undefined,
     label: string,
 ): Record<string, ExtensionJsonValue> {
@@ -176,7 +176,7 @@ function readExtensionRecord(
     throw new TypeError(`${label} must be an object.`);
 }
 
-function readExtensionString(
+export function readExtensionString(
     value: ExtensionJsonValue | undefined,
     label: string,
 ): string {

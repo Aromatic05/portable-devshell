@@ -77,6 +77,8 @@ export interface ExtensionInstanceEventGap {
 export interface ExtensionInstanceEventWatch {
     eventTypes?: readonly string[];
     fromSeq: number;
+    /** Buffered events and cursor, delivered once before live events; an initial gap rejects. */
+    onSeed?(seed: { events: readonly ExtensionInstanceEvent[]; lastSeq: number }): Promise<void> | void;
     onEvent(event: ExtensionInstanceEvent): Promise<void> | void;
     onGap?(gap: ExtensionInstanceEventGap): Promise<void> | void;
     signal: AbortSignal;
