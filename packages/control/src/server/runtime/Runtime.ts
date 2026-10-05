@@ -20,10 +20,16 @@ import {
 } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
+import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
+import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
+import type { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { DebugPatchService } from "../../debug/Service.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
-import { ProcessSubscriptionManager } from "@portable-devshell/core";
+import {
+    type ConnectionModule,
+    ProcessSubscriptionManager,
+} from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
@@ -67,8 +73,11 @@ export interface ControlRuntimeOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
+    configEditor: ConfigEditorCoordinator;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
+    instanceCreate: InstanceCreateCoordinator;
+    instanceEditor: InstanceEditorCoordinator;
     instances: InstanceRegistry;
     mcp: McpControlModule;
     restart: () => Promise<void>;
@@ -96,6 +105,7 @@ export class ControlRuntime {
     readonly #instances: InstanceRegistry;
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
+    readonly #instanceEditor: InstanceEditorCoordinator;
     readonly #mcp: McpControlModule;
     readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteComposition;
@@ -124,6 +134,7 @@ export class ControlRuntime {
         this.#instances = options.instances;
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
+        this.#instanceEditor = options.instanceEditor;
         const toolCalls = createToolCallRuntime({});
         this.#toolCalls = toolCalls.api;
         const extensionToolCalls = new ToolCallExtensionBinding(
@@ -173,7 +184,7 @@ export class ControlRuntime {
             cliCommands: new CliExtensionCommandService(this.#extensions, {
                 surface: "native",
             }),
-            config: options.mcp.configEditor,
+            config: options.configEditor,
             configChanges: options.configChanges,
             ...(options.config === undefined
                 ? {}
@@ -182,8 +193,8 @@ export class ControlRuntime {
             debug: this.#debug,
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
-            instanceCreate: options.mcp.instanceCreate,
-            instanceEditor: options.mcp.instanceEditor,
+            instanceCreate: options.instanceCreate,
+            instanceEditor: options.instanceEditor,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
@@ -201,17 +212,17 @@ export class ControlRuntime {
             webApplications: new WebApplicationCatalog(this.#extensions),
             webPages: new WebExtensionPageService(this.#extensions),
         });
-        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
+        this.#instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceGeneration(instance.name);
             },
         );
-        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
+        this.#instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#debug.retireInstance(instance.name);
             },
         );
-        this.#mcp.instanceEditor.registerInstanceGenerationRetirement(
+        this.#instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#routes.retireInstance(instance.name);
             },
@@ -284,7 +295,7 @@ export class ControlRuntime {
                     source.path,
                 );
             }
-            await this.#mcp.prepare();
+            await this.#instanceEditor.reconcileCleanupDebt();
             await this.#mcp.start();
             await this.#contexts.reconcile();
         } catch (error) {

@@ -32,7 +32,15 @@ import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { ContextModule } from "@portable-devshell/core/context";
 import { McpControlModule } from "../mcp/Module.js";
-import { ProcessSubscriptionManager } from "@portable-devshell/core";
+import { ConfigEditorCoordinator } from "../../config/editor/index.js";
+import { ConfigEngine } from "../../config/engine/index.js";
+import { HttpEndpointPreflight } from "../../config/engine/Http.js";
+import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
+import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
+import {
+    ConnectionModule,
+    ProcessSubscriptionManager,
+} from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -90,11 +98,68 @@ export class ControlRuntimeFactory {
                 instances: instanceTransport,
             });
             const mcp = new McpControlModule({
-                contextTransport,
                 artifact,
+                config: options.state.requireConfig(),
+                contextTransport,
                 controlPaths,
                 factory: this.#mcpFactory,
-                state: options.state,
+                instances: options.state.instances,
+            });
+            const configEngine = new ConfigEngine({
+                configStore: options.state.configStore,
+                getConfig: () => options.state.requireConfig(),
+                getRestartControlRequired: () =>
+                    options.state.restartControlRequired,
+                homeDirectory: options.state.homeDirectory,
+                markRestartControlRequired: () =>
+                    options.state.markRestartControlRequired(),
+                changeHub: options.state.configChanges,
+                mutationRunner: options.state.configMutations,
+                registry: options.state.configRegistry,
+                runtimeApply: {
+                    apply: async (previous, next, changes) =>
+                        await mcp.applyRuntimeConfig(previous, next, changes),
+                },
+                runtimePreflight: new HttpEndpointPreflight(),
+                setConfig: (config) => options.state.setConfig(config),
+            });
+            const instanceEditor = new InstanceEditorCoordinator({
+                cleanupDebtFile: controlPaths.lifecycleCleanupFile,
+                engine: configEngine,
+                detachContextInstance: async (instance) => {
+                    await contextTransport.detachInstance(instance);
+                },
+                reconcileContextInstanceCleanup: async (instance) => {
+                    await contextTransport.reconcileInstance(instance);
+                },
+                instanceRegistry: options.state.instances,
+                mcp: mcp.instancePort,
+            });
+            const instanceCreate = new InstanceCreateCoordinator({
+                assertCleanupSettled: async (instance) =>
+                    await instanceEditor.assertInstanceCleanupSettled(instance),
+                configStore: options.state.configStore,
+                getConfig: () => options.state.requireConfig(),
+                homeDirectory: options.state.homeDirectory,
+                instanceRegistry: options.state.instances,
+                mcp: mcp.instancePort,
+                mutationRunner: options.state.configMutations,
+                setConfig: (config) => options.state.setConfig(config),
+            });
+            const configEditor = new ConfigEditorCoordinator({
+                engine: configEngine,
+                configStore: options.state.configStore,
+                getConfig: () => options.state.requireConfig(),
+                getRestartControlRequired: () =>
+                    options.state.restartControlRequired,
+                homeDirectory: options.state.homeDirectory,
+                instances: instanceEditor,
+                markRestartControlRequired: () =>
+                    options.state.markRestartControlRequired(),
+                changeHub: options.state.configChanges,
+                mutationRunner: options.state.configMutations,
+                registry: options.state.configRegistry,
+                setConfig: (config) => options.state.setConfig(config),
             });
             const extensions = new ExtensionHost({
                 configRegistry: options.state.configRegistry,
@@ -135,7 +200,7 @@ export class ControlRuntimeFactory {
                             registry: options.state.configRegistry,
                             stateDirectory,
                             updateCoreConfig: async (patch) =>
-                                await mcp.configEditor.updateCorePaths(patch),
+                                await configEditor.updateCorePaths(patch),
                         }),
                     contextObserveFactory: ({ allowed, extensionId }) =>
                         new ExtensionContextObserveCapabilityControl({
@@ -151,8 +216,8 @@ export class ControlRuntimeFactory {
                     }) => ({
                         manage: new ExtensionInstanceManageCapabilityControl({
                             allowed: manageAllowed,
-                            create: mcp.instanceCreate,
-                            editor: mcp.instanceEditor,
+                            create: instanceCreate,
+                            editor: instanceEditor,
                             extensionId,
                             instances: options.state.instances,
                         }),
@@ -182,10 +247,13 @@ export class ControlRuntimeFactory {
                 ),
             });
             const reverse = new ConnectionModule({
-                mcp,
+                mcp: {
+                    host: mcp.host,
+                    instanceEditor,
+                },
                 state: options.state,
             });
-            mcp.instanceEditor.registerInstanceGenerationRetirement(
+            instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await artifact.service.retireInstance(instance.name);
                 },
@@ -201,8 +269,11 @@ export class ControlRuntimeFactory {
                 builtinExtensionSources: this.#builtinExtensionSources,
                 config: () => options.state.requireConfig(),
                 configChanges: options.state.configChanges,
+                configEditor,
                 extensionPaths,
                 extensions,
+                instanceCreate,
+                instanceEditor,
                 instances: options.state.instances,
                 mcp,
                 restart: options.restart,

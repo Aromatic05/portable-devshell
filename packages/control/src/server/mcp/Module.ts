@@ -13,34 +13,28 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import {
-    ConfigEditorCoordinator,
-    type ConfigRuntimeChangeSet,
-} from "../../config/editor/index.js";
-import { ConfigEngine } from "../../config/engine/index.js";
-import { HttpEndpointPreflight } from "../../config/engine/Http.js";
+import type { ConfigRuntimeChangeSet } from "../../config/engine/index.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
-import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
-import { ToolCallProvenanceStore } from "@portable-devshell/core";
-import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
+import {
+    ToolCallProvenanceStore,
+    type InstanceRegistry,
+} from "@portable-devshell/core";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";
-import type { ControlRuntimeState } from "../runtime/State.js";
 
 export interface McpControlModuleOptions {
-    contextTransport: ContextTransport;
     artifact: ArtifactModule;
+    config: ControlConfig;
+    contextTransport: ContextTransport;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
-    state: ControlRuntimeState;
+    instances: InstanceRegistry;
 }
 
 export class McpControlModule {
-    readonly configEditor: ConfigEditorCoordinator;
-    readonly instanceEditor: InstanceEditorCoordinator;
-    readonly instanceCreate: InstanceCreateCoordinator;
+    readonly instancePort: InstanceMcpRuntimePort;
     readonly toolProvenance: ToolCallProvenanceStore;
     #publicBaseUrl?: string;
     #oauthApproval: ControlConfig["mcp"]["oauth2"];
@@ -51,7 +45,7 @@ export class McpControlModule {
     #host?: McpHost;
     readonly #mcpEnabled: boolean;
     readonly #factory: McpRuntimeFactory;
-    readonly #state: ControlRuntimeState;
+    readonly #instances: InstanceRegistry;
     readonly #artifact: ArtifactModule;
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
@@ -67,7 +61,7 @@ export class McpControlModule {
     constructor(options: McpControlModuleOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
         this.#factory = factory;
-        this.#state = options.state;
+        this.#instances = options.instances;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         this.#runtimeState = new McpRuntimeState({
@@ -78,23 +72,19 @@ export class McpControlModule {
         this.toolProvenance = new ToolCallProvenanceStore(
             options.controlPaths.toolProvenanceFile,
         );
-        const config = options.state.requireConfig();
+        const config = options.config;
         this.#mcpEnabled = config.mcp.enabled;
         this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
         const endpointFactory = new McpEndpointFactory();
-        const instanceMcp: InstanceMcpRuntimePort = {
+        this.instancePort = {
             registerInstance: (instance, auth, workspaceEnabled = true) => {
-                const descriptor = options.state.instances.get(instance);
+                const descriptor = options.instances.get(instance);
                 if (descriptor === undefined) return;
                 this.#host?.registerInstance(
-                    endpointFactory.map(
-                        descriptor,
-                        auth,
-                        workspaceEnabled,
-                    ),
+                    endpointFactory.map(descriptor, auth, workspaceEnabled),
                 );
             },
             unregisterInstance: (instance) => {
@@ -104,58 +94,12 @@ export class McpControlModule {
                 await this.#host?.retireMcpApp(instance);
             },
         };
-        const configEngine = new ConfigEngine({
-            configStore: options.state.configStore,
-            getConfig: () => options.state.requireConfig(),
-            getRestartControlRequired: () =>
-                options.state.restartControlRequired,
-            homeDirectory: options.state.homeDirectory,
-            markRestartControlRequired: () =>
-                options.state.markRestartControlRequired(),
-            changeHub: options.state.configChanges,
-            mutationRunner: options.state.configMutations,
-            registry: options.state.configRegistry,
-            runtimeApply: {
-                apply: async (previous, next, changes) =>
-                    await this.#applyConfig(previous, next, changes),
-            },
-            runtimePreflight: new HttpEndpointPreflight(),
-            setConfig: (config) => options.state.setConfig(config),
+        this.#host = factory.wire(config, options.instances, {
+            storageDir: options.controlPaths.oauthDir,
+            runtimeState: this.#runtimeState,
+            toolProvenance: this.toolProvenance,
+            mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
-        this.instanceEditor = new InstanceEditorCoordinator({
-            cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
-            engine: configEngine,
-            detachContextInstance: async (instance) => {
-                await options.contextTransport.detachInstance(instance);
-            },
-            reconcileContextInstanceCleanup: async (instance) => {
-                await options.contextTransport.reconcileInstance(instance);
-            },
-            instanceRegistry: options.state.instances,
-            mcp: instanceMcp,
-        });
-        this.instanceCreate = new InstanceCreateCoordinator({
-            assertCleanupSettled: async (instance) =>
-                await this.instanceEditor.assertInstanceCleanupSettled(instance),
-            configStore: options.state.configStore,
-            getConfig: () => options.state.requireConfig(),
-            homeDirectory: options.state.homeDirectory,
-            instanceRegistry: options.state.instances,
-            mcp: instanceMcp,
-            mutationRunner: options.state.configMutations,
-            setConfig: (config) => options.state.setConfig(config),
-        });
-        this.#host = factory.wire(
-            options.state.requireConfig(),
-            options.state.instances,
-            {
-                storageDir: options.controlPaths.oauthDir,
-                runtimeState: this.#runtimeState,
-                toolProvenance: this.toolProvenance,
-                mcpAppLeaseFile:
-                    options.controlPaths.mcpAppLeasesFile,
-            },
-        );
         if (config.web.enabled) {
             this.#webPublicBaseUrl = config.web.publicBaseUrl;
             this.#webHost =
@@ -168,25 +112,6 @@ export class McpControlModule {
         }
         if (this.#host !== undefined)
             options.artifact.installHttpRoute(this.#host.server);
-        this.configEditor = new ConfigEditorCoordinator({
-            engine: configEngine,
-            configStore: options.state.configStore,
-            getConfig: () => options.state.requireConfig(),
-            getRestartControlRequired: () =>
-                options.state.restartControlRequired,
-            homeDirectory: options.state.homeDirectory,
-            instances: this.instanceEditor,
-            markRestartControlRequired: () =>
-                options.state.markRestartControlRequired(),
-            changeHub: options.state.configChanges,
-            mutationRunner: options.state.configMutations,
-            registry: options.state.configRegistry,
-            setConfig: (config) => options.state.setConfig(config),
-        });
-    }
-
-    async prepare(): Promise<void> {
-        await this.instanceEditor.reconcileCleanupDebt();
     }
 
     get host(): McpHost | undefined {
@@ -217,7 +142,7 @@ export class McpControlModule {
         previousConfig: ControlConfig,
         config: ControlConfig,
     ): Promise<McpHost | undefined> {
-        const next = this.#factory.wire(config, this.#state.instances, {
+        const next = this.#factory.wire(config, this.#instances, {
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,
@@ -394,7 +319,7 @@ export class McpControlModule {
         }
     }
 
-    async #applyConfig(
+    async applyRuntimeConfig(
         previous: ControlConfig,
         next: ControlConfig,
         changes: ConfigRuntimeChangeSet,
