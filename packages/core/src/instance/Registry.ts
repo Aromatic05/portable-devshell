@@ -1,4 +1,10 @@
+import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 import type { InstanceDescriptor } from "./Descriptor.js";
+
+export interface InstanceReferenceLease {
+    snapshot: ReturnType<InstanceDescriptor["worker"]["snapshot"]>;
+    worker: InstanceDescriptor["worker"];
+}
 
 export interface InstanceGenerationLease {
     readonly descriptor: InstanceDescriptor;
@@ -33,6 +39,87 @@ export class InstanceRegistry {
             this.#descriptors.set(descriptor.name, descriptor);
             this.#generations.set(descriptor, createGenerationState());
         }
+    }
+
+    async acquireInstanceReference(
+        instance: string,
+        reference: string,
+    ): Promise<InstanceReferenceLease> {
+        const generation = this.acquireGeneration(instance);
+        const descriptor = generation.descriptor;
+        if (!descriptor.enabled) {
+            generation.release();
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
+                details: { instance, operation: "connect" },
+                message: `Instance ${instance} is disabled.`,
+                retryable: false,
+            });
+        }
+
+        let ownsLifecycle = false;
+        try {
+            let snapshot = descriptor.worker.snapshot();
+            if (!snapshot.ready) {
+                if (descriptor.worker.managementMode === "selfManaged") {
+                    snapshot = await descriptor.worker.refreshStatus();
+                    if (!snapshot.ready) {
+                        throw createRemoteError({
+                            code: runtimeErrorCodes.reverseSelfManagedOffline,
+                            details: { instance },
+                            message: `Instance ${instance} is self-managed and is not connected.`,
+                            retryable: true,
+                        });
+                    }
+                } else {
+                    snapshot = await descriptor.worker.start();
+                    ownsLifecycle = true;
+                }
+            }
+
+            if (this.get(instance) !== descriptor) {
+                if (
+                    ownsLifecycle &&
+                    descriptor.worker.snapshot().daemonState !== "stopped"
+                ) {
+                    await descriptor.worker.stop();
+                }
+                throw createRemoteError({
+                    code: runtimeErrorCodes.instanceConflict,
+                    details: { instance, operation: "connect" },
+                    message: `Instance ${instance} generation was retired while connecting.`,
+                    retryable: true,
+                });
+            }
+
+            if (descriptor.worker.managementMode !== "selfManaged") {
+                this.#retainConnectionReference(
+                    instance,
+                    descriptor.worker,
+                    reference,
+                    ownsLifecycle,
+                );
+            }
+            return {
+                snapshot,
+                worker: descriptor.worker,
+            };
+        } finally {
+            generation.release();
+        }
+    }
+
+    async releaseInstanceReference(instance: string, reference: string): Promise<void> {
+        const released = this.#releaseConnectionReference(
+            instance,
+            reference,
+        );
+        if (released === undefined || !released.shouldStop) return;
+        const { worker } = released;
+        if (worker.snapshot().daemonState !== "stopped") {
+            await worker.stop();
+        }
+        this.#clearConnectionOwnership(instance, worker);
     }
 
     get(name: string): InstanceDescriptor | undefined {
@@ -141,7 +228,7 @@ export class InstanceRegistry {
         this.#connectionReferences.delete(name);
     }
 
-    retainConnectionReference(
+    #retainConnectionReference(
         name: string,
         worker: InstanceDescriptor["worker"],
         reference: string,
@@ -170,7 +257,7 @@ export class InstanceRegistry {
         }
     }
 
-    releaseConnectionReference(
+    #releaseConnectionReference(
         name: string,
         reference: string,
     ):
@@ -202,17 +289,7 @@ export class InstanceRegistry {
         };
     }
 
-    retireConnectionReferences(
-        name: string,
-        worker: InstanceDescriptor["worker"],
-    ): void {
-        const workers = this.#connectionReferences.get(name);
-        workers?.delete(worker);
-        if (workers?.size === 0) this.#connectionReferences.delete(name);
-        this.clearConnectionOwnership(name, worker);
-    }
-
-    clearConnectionOwnership(
+    #clearConnectionOwnership(
         name: string,
         worker: InstanceDescriptor["worker"],
     ): void {
@@ -247,7 +324,7 @@ export class InstanceRegistry {
             try {
                 await worker.stop();
                 this.#owned.delete(name);
-                this.clearConnectionOwnership(name, worker);
+                this.#clearConnectionOwnership(name, worker);
             } catch (error) {
                 failures.push(
                     error instanceof Error ? error : new Error(String(error)),

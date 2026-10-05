@@ -1,29 +1,53 @@
-import type { Channel } from "@portable-devshell/shared";
+import type { Channel, ReverseTransport } from "@portable-devshell/shared";
+
+export interface ReverseAttachment {
+    connectedAt?: string;
+    generation: number;
+    transport: ReverseTransport;
+}
 
 export class TransportConnection {
-    readonly #connect?: () => Promise<Channel>;
+    readonly #connect?: (signal?: AbortSignal) => Promise<Channel>;
+    readonly #attachListeners = new Set<(input: ReverseAttachment) => Promise<unknown>>();
     #attached?: Channel;
 
-    constructor(connect?: () => Promise<Channel>) {
+    constructor(connect?: (signal?: AbortSignal) => Promise<Channel>) {
         this.#connect = connect;
     }
 
-    attach(channel: Channel): void {
+    onAttach(listener: (input: ReverseAttachment) => Promise<unknown>): () => void {
+        this.#attachListeners.add(listener);
+        return () => this.#attachListeners.delete(listener);
+    }
+
+    async attach(channel: Channel, input?: ReverseAttachment): Promise<void> {
         this.#attached?.close();
         this.#attached = channel;
+        if (input === undefined) return;
+        try {
+            for (const listener of this.#attachListeners) await listener(input);
+        } catch (error) {
+            channel.close(error instanceof Error ? error : new Error(String(error)));
+            if (this.#attached === channel) this.#attached = undefined;
+            throw error;
+        }
+    }
+
+    takeAttached(): Channel | undefined {
+        const attached = this.#attached;
+        this.#attached = undefined;
+        return attached;
     }
 
     async connect(signal?: AbortSignal): Promise<Channel> {
         signal?.throwIfAborted();
-        const attached = this.#attached;
-        if (attached !== undefined) {
-            this.#attached = undefined;
-            return attached;
-        }
         if (this.#connect === undefined)
             throw new Error("Worker transport connection is not attached.");
-        const channel = await this.#connect();
-        signal?.throwIfAborted();
+        const channel = await this.#connect(signal);
+        if (signal?.aborted) {
+            channel.close(signal.reason instanceof Error ? signal.reason : new Error("Worker transport connection aborted."));
+            signal.throwIfAborted();
+        }
         return channel;
     }
 

@@ -1,15 +1,25 @@
-import { WorkerInstanceFactory } from "../worker/instance/Factory.js";
-import type { WorkerInstanceConfig } from "../worker/instance/Config.js";
-import { resolveWorkerHomeDirectory } from "../worker/provision/HomeDirectory.js";
-import { WorkerTransportFactory } from "../worker/transport/Factory.js";
-import { WorkerTransportConnection } from "../worker/transport/Transport.js";
-import type { WorkerTransportFactoryOptions } from "../worker/transport/Factory.js";
+import type { WorkerInstanceConfig } from "./runtime/provision/Config.js";
+import type { ApprovalApi } from "../approval/Api.js";
+import { createInstanceApprovalService } from "../approval/Factory.js";
+import type { TerminalBackend } from "../terminal/Backend.js";
+import { createInstanceTerminalBackend } from "../terminal/Factory.js";
+import { resolveWorkerHomeDirectory } from "./runtime/provision/Home.js";
+import {
+    WorkerRuntimeFactory,
+    type WorkerRuntimeFactoryOptions,
+} from "./runtime/provision/Factory.js";
+import { ReverseProvision } from "./runtime/provision/install/provider/Reverse.js";
+import { TransportConnection } from "./transport/endpoint/Connection.js";
+import { TransportFactory } from "./transport/endpoint/Factory.js";
 import {
     asInstanceName,
     type ControlInstanceConfig,
+    type ControlConfig,
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "./Descriptor.js";
+import { InstanceRegistry } from "./Registry.js";
+import { InstancePaths } from "./Paths.js";
 
 export class InstanceFactory {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
@@ -21,15 +31,42 @@ export class InstanceFactory {
 
     map(instance: ControlInstanceConfig): InstanceDescriptor {
         const homeDirectory = resolveWorkerHomeDirectory();
-        const reverseConnection =
+        const instanceName = asInstanceName(instance.name);
+        const paths = new InstancePaths(instanceName, homeDirectory);
+        const reverse =
             instance.provider === "reverse"
-                ? new WorkerTransportConnection()
+                ? new ReverseProvision()
                 : undefined;
         const worker = this.#workerInstanceFactory.create(
-            this.#toWorkerConfig(instance, reverseConnection, homeDirectory),
+            this.#toWorkerConfig(instance, reverse, homeDirectory),
+        );
+        let approvalService: ApprovalApi | undefined;
+        let approvalPolicy = instance.approvalPolicy;
+        let terminalBackend: TerminalBackend | undefined;
+        const approval = lazyMethods(
+            () =>
+                (approvalService ??= createInstanceApprovalService({
+                    appendEvent: async (type, data) =>
+                        await worker.appendControlEvent(type, data),
+                    instanceName,
+                    paths,
+                    policy: approvalPolicy,
+                })),
+            {
+                close: () => approvalService?.close(),
+                setPolicy: (policy) => {
+                    approvalPolicy = policy;
+                    approvalService?.setPolicy(policy);
+                },
+            },
+        );
+        const terminal = lazyMethods(
+            () =>
+                (terminalBackend ??= createInstanceTerminalBackend(worker)),
         );
 
         return {
+            approval,
             enabled: instance.enabled,
             mcpContextMode: instance.mcp.contextMode,
             mcpEnabled: instance.mcp.enabled,
@@ -37,14 +74,17 @@ export class InstanceFactory {
             modelExtensions: [...instance.extensions.model],
             name: instance.name,
             provider: instance.provider,
-            ...(reverseConnection === undefined ? {} : { reverseConnection }),
+            ...(reverse === undefined
+                ? {}
+                : { reverseConnection: reverse.transportConnection }),
+            terminal,
             worker,
         };
     }
 
     #toWorkerConfig(
         instance: ControlInstanceConfig,
-        reverseConnection: WorkerTransportConnection | undefined,
+        reverse: ReverseProvision | undefined,
         homeDirectory: string,
     ): WorkerInstanceConfig {
         const effectiveSecurityMode: "disabled" | "workspace" =
@@ -57,40 +97,40 @@ export class InstanceFactory {
                 DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
             },
             eventBufferSize: instance.logs?.eventBufferSize,
-            auditStorage: {
-                maxBytes: instance.logs?.maxBytes,
-                retentionDays: instance.logs?.retentionDays,
-            },
-            toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
             homeDirectory,
             name: asInstanceName(instance.name),
         };
 
         if (instance.provider === "reverse") {
-            return {
-                ...common,
-                managementMode: "selfManaged",
-                transportConnection:
-                    reverseConnection ??
-                    fail(
-                        `reverse instance ${instance.name} requires transport connection`,
-                    ),
-            };
+            if (reverse === undefined)
+                throw new Error(
+                    `reverse instance ${instance.name} requires provision`,
+                );
+            return reverse.createConfig(common);
         }
 
+        const provider = WorkerRuntimeFactory.create(
+            this.#toRuntimeOptions(instance),
+        );
+        const transportConnection = new TransportConnection(
+            async () =>
+                await provider.connectChannel({
+                    env: common.env,
+                    instanceName: common.name,
+                }),
+        );
         return {
             ...common,
             managementMode: "controllerManaged",
-            transport: WorkerTransportFactory.create(
-                this.#toTransportOptions(instance),
-            ),
+            runtime: provider,
+            transportConnection,
         };
     }
 
-    #toTransportOptions(
+    #toRuntimeOptions(
         instance: ControlInstanceConfig,
-    ): WorkerTransportFactoryOptions {
+    ): WorkerRuntimeFactoryOptions {
         switch (instance.provider) {
             case "local":
                 return {
@@ -121,6 +161,70 @@ export class InstanceFactory {
     }
 }
 
-function fail(message: string): never {
-    throw new Error(message);
+function lazyMethods<T extends object>(
+    load: () => T,
+    overrides: Partial<T> = {},
+): T {
+    return new Proxy(overrides as T, {
+        get(target, property) {
+            if (Reflect.has(target, property))
+                return Reflect.get(target, property);
+            const loaded = load();
+            const value = Reflect.get(loaded, property);
+            return typeof value === "function" ? value.bind(loaded) : value;
+        },
+    });
+}
+
+import { InstanceEventBuffer } from "./runtime/supervision/Event.js";
+import { WorkerCommandClient } from "./runtime/execution/Command.js";
+import { WorkerProtocolClient } from "./transport/packet/Client.js";
+import { InstanceStateMachine } from "./runtime/supervision/State.js";
+import { WorkerInstance } from "./runtime/index.js";
+import { resolveWorkerInstanceConfig } from "./runtime/provision/Config.js";
+
+export class WorkerInstanceFactory {
+    create(config: WorkerInstanceConfig): WorkerInstance {
+        const resolved = resolveWorkerInstanceConfig(config);
+        const transportConnection = resolved.transportConnection;
+        const workerHost = `${resolved.name}-worker`;
+        const endpoint = TransportFactory.createEndpoint(transportConnection, resolved.name, workerHost);
+        const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
+        return new WorkerInstance({
+            commandClient:
+                resolved.runtime === undefined
+                    ? undefined
+                    : new WorkerCommandClient(
+                          resolved.runtime,
+                          resolved.name,
+                          resolved.env,
+                      ),
+            config: resolved,
+            eventBuffer: new InstanceEventBuffer(
+                resolved.name,
+                resolved.eventBufferSize,
+            ),
+            endpoint,
+            protocolClient,
+            stateMachine: new InstanceStateMachine(resolved.name),
+            transportConnection,
+        });
+    }
+
+}
+
+export class InstanceRegistryFactory {
+    readonly #mapper: InstanceFactory;
+
+    constructor(options?: { mapper?: InstanceFactory }) {
+        this.#mapper = options?.mapper ?? new InstanceFactory();
+    }
+
+    build(config: ControlConfig): InstanceRegistry {
+        return new InstanceRegistry(
+            config.instances
+                .filter((instance) => instance.enabled)
+                .map((instance) => this.#mapper.map(instance)),
+        );
+    }
 }
