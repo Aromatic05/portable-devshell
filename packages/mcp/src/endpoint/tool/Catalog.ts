@@ -12,8 +12,9 @@ import {
 } from "../../context/Selector.js";
 import {
     mcpToolAnnotations,
+    mcpToolHiddenInputProperties,
+    mcpToolInputHints,
     mcpToolPreserveInputDescriptions,
-    McpToolDescriptionEnhancer,
     mcpToolInvocationStatus,
     mcpToolTitle,
 } from "./Metadata.js";
@@ -51,7 +52,6 @@ export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
     readonly #bootstrapPresentationResourceUri?: string;
     readonly #contextSelector: McpContextSelector;
-    readonly #descriptionEnhancer = new McpToolDescriptionEnhancer();
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
     readonly #registry: McpToolRegistry;
@@ -78,7 +78,9 @@ export class McpEndpointCatalog {
     listTools(): McpTool[] {
         const snapshot = this.snapshot();
         return snapshot.entries.map((entry) =>
-            this.adapt(this.#withRoutingTarget(entry, snapshot.instanceRoutingEnabled)),
+            this.adapt(
+                this.#withRoutingTarget(entry, snapshot.instanceRoutingEnabled),
+            ),
         );
     }
 
@@ -95,7 +97,7 @@ export class McpEndpointCatalog {
 
     adapt(tool: ToolDefinition): McpTool {
         const modelTool = withBootstrapPresentation(
-            hideInternalWorkerInput(tool),
+            tool,
             this.#bootstrapPresentationResourceUri,
         );
         const provenanceTool =
@@ -117,22 +119,20 @@ export class McpEndpointCatalog {
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            this.#descriptionEnhancer.enhance(
-                exposed.name,
-                exposed.description,
-                exposed._meta,
-            ),
+            exposed.description.trim(),
             {
+                hiddenInputProperties: mcpToolHiddenInputProperties(
+                    exposed._meta,
+                ),
+                inputHints: mcpToolInputHints(exposed._meta),
                 modelFacing,
-                preserveInputDescriptions:
-                    mcpToolPreserveInputDescriptions(exposed._meta),
+                preserveInputDescriptions: mcpToolPreserveInputDescriptions(
+                    exposed._meta,
+                ),
             },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);
-        const invocationStatus = mcpToolInvocationStatus(
-            exposed.name,
-            exposed._meta,
-        );
+        const invocationStatus = mcpToolInvocationStatus(exposed._meta);
         const meta = {
             ...asRecord(adapted._meta),
             ...(invocationStatus === undefined
@@ -148,7 +148,7 @@ export class McpEndpointCatalog {
             ...adapted,
             ...(Object.keys(meta).length === 0 ? {} : { _meta: meta }),
             ...(securitySchemes === undefined ? {} : { securitySchemes }),
-            annotations: mcpToolAnnotations(exposed.name, exposed._meta),
+            annotations: mcpToolAnnotations(exposed._meta),
             title: mcpToolTitle(exposed.name, exposed._meta),
         };
     }
@@ -175,7 +175,10 @@ function withBootstrapPresentation(
     tool: ToolDefinition,
     resourceUri: string | undefined,
 ): ToolDefinition {
-    if (resourceUri === undefined || tool.name !== `${bootstrapToolNamespace}_info`)
+    if (
+        resourceUri === undefined ||
+        tool.name !== `${bootstrapToolNamespace}_info`
+    )
         return tool;
     return {
         ...tool,
@@ -189,21 +192,6 @@ function withBootstrapPresentation(
             "ui/resourceUri": resourceUri,
             "openai/outputTemplate": resourceUri,
             "openai/widgetAccessible": true,
-        },
-    };
-}
-
-function hideInternalWorkerInput(tool: ToolDefinition): ToolDefinition {
-    if (tool.name !== "tmux_run" && tool.name !== "tmux_read") return tool;
-    const inputSchema = asRecord(tool.inputSchema);
-    const properties = { ...asRecord(inputSchema.properties) };
-    if (!("consumeOutput" in properties)) return tool;
-    delete properties.consumeOutput;
-    return {
-        ...tool,
-        inputSchema: {
-            ...inputSchema,
-            properties,
         },
     };
 }

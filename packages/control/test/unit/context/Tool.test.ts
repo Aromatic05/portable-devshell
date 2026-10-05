@@ -3,11 +3,13 @@ import test from "node:test";
 
 import type { ToolCallHooks } from "@portable-devshell/core/toolcall";
 import { mcpTools } from "@portable-devshell/mcp/tool";
-import type { JsonValue } from "@portable-devshell/shared";
+import type { InstanceName, JsonValue } from "@portable-devshell/shared";
 
-import type { ContextService } from "../../../src/context/Service/index.ts";
-import { contextToolDefinitions } from "../../../src/context/tool/Definition.ts";
-import { installContextTools } from "../../../src/context/tool/Runtime.ts";
+import {
+    contextToolDefinitions,
+    installContextTools,
+    type ContextApi,
+} from "@portable-devshell/core/context";
 
 test("Context owns environ tool definitions with structured environment output", () => {
     const definitions = contextToolDefinitions();
@@ -85,22 +87,42 @@ test("Context installs wildcard definitions and executes environ_info through To
                 return undefined;
             },
         },
-        worker() {
+    } as unknown as ContextApi;
+    const worker = {
+        snapshot: () => ({ ready: true }),
+        handshake: {
+            platform: { arch: "x86_64", os: "linux" },
+        },
+        async prepareWorkspace(workspace: string) {
             return {
-                handshake: {
-                    platform: { arch: "x86_64", os: "linux" },
-                },
-                async prepareExtensionResource() {
-                    return { directory: "/skills" };
-                },
-                async readAlerts() {
-                    return { advice: [] };
-                },
+                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+                projectMemoryDirectory: `${workspace}/.agent`,
+                temporaryDirectory: "/tmp/context",
+                workspace,
             };
         },
-    } as unknown as ContextService;
+        async prepareExtensionResource() {
+            return { directory: "/skills" };
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
+    };
 
-    const uninstall = installContextTools(contexts, hooks);
+    const uninstall = installContextTools(contexts, hooks, {
+        instances: {
+            get: () => ({
+                acquireLease: () => ({
+                    instance: { worker } as never,
+                    release() {},
+                }),
+                async acquireReference() {
+                    throw new Error("Unexpected remote instance reference.");
+                },
+                async releaseReference() {},
+            }),
+        },
+    });
     try {
         assert.equal(
             mcpTools.get("any-instance", "environ_info")?.definition.name,
@@ -115,7 +137,7 @@ test("Context installs wildcard definitions and executes environ_info through To
                 context: {
                     contextMode: "explicit",
                     externalBindings: [{ kind: "session", value: "s-1" }],
-                    instance: "local",
+                    instance: "local" as InstanceName,
                     principal: "alice",
                     source: "mcp",
                 },

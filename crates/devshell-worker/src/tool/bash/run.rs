@@ -61,10 +61,26 @@ impl ToolHandler for BashRunTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<BashRunParams, BashRunOutput>(
+        crate::tool::contract::catalog_entry_with_meta::<BashRunParams, BashRunOutput>(
             &self.name,
             self.shell.catalog_description(),
             [ToolCapability::Execute],
+            serde_json::json!({
+                "devshell": { "mcp": {
+                    "annotations": {
+                        "destructiveHint": true,
+                        "idempotentHint": false,
+                        "openWorldHint": true,
+                        "readOnlyHint": false
+                    },
+                    "inputHints": {
+                        "cwd": "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
+                        "stdin": "Omit to send EOF.",
+                        "timeoutMs": "Required timeout in milliseconds."
+                    },
+                    "title": "Run shell command"
+                }}
+            }),
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

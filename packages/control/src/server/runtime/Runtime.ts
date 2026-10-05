@@ -7,7 +7,7 @@ import {
 import { registerApprovalToolCallReview, createApprovalRouteModule } from "@portable-devshell/core/approval";
 import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "@portable-devshell/core/task";
 import { createTerminalRouteModule } from "@portable-devshell/core/terminal";
-import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core";
+import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core/task";
 
 import {
     type ContextTransport,
@@ -16,8 +16,7 @@ import {
     type ServerTransport,
 } from "@portable-devshell/shared";
 
-import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
-import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core";
+import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core/instance";
 import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -26,10 +25,7 @@ import type { InstanceCreateCoordinator } from "../../instance/editor/create/ind
 import { DebugPatchService } from "../../debug/Service.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
-import {
-    type ConnectionModule,
-    ProcessSubscriptionManager,
-} from "@portable-devshell/core";
+import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
@@ -49,7 +45,6 @@ import { ControlRouteRegistry } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import {
-    contextToolDefinitions,
     createContextRouteModule,
     installContextTools,
     type ContextRuntime,
@@ -174,13 +169,6 @@ export class ControlRuntime {
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
         };
-        const contextToolRegistration = mcpTools.register(
-            mcpAllInstances,
-            contextToolDefinitions(),
-        );
-        this.#toolCallHookUnregister.push(() =>
-            contextToolRegistration.dispose(),
-        );
         this.#toolCallHookUnregister.push(
             installContextTools(options.contexts.api, toolCalls.hooks, {
                 instances: options.instances,

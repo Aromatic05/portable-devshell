@@ -45,10 +45,24 @@ impl ToolHandler for FileReadTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
+        crate::tool::contract::catalog_entry_with_meta::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more paths as text content, structural outline, or filesystem metadata. Bare relative paths are normalized to the workspace namespace. Batch requests return successful items alongside per-item read errors. Content selectors support N, N-M, N+count, and comma-separated ranges; ranges are sorted, merged, and clamped to EOF when unambiguous. Workspace content reads establish edit coverage for returned source lines; outline reads establish coverage only for exact signature source lines rendered in the outline. Virtual tool-result reads and metadata reads do not establish edit coverage.".to_string(),
+            "Read file content, structural outline, metadata, or retained tool output. Use selectors to keep large text reads focused; content reads establish file_edit coverage and nextSelector continues truncated content.".to_string(),
             [ToolCapability::Read],
+            serde_json::json!({
+                "devshell": { "mcp": {
+                    "annotations": {
+                        "destructiveHint": false,
+                        "idempotentHint": true,
+                        "openWorldHint": false,
+                        "readOnlyHint": true
+                    },
+                    "inputHints": {
+                        "selector": "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges."
+                    },
+                    "title": "Read file"
+                }}
+            }),
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

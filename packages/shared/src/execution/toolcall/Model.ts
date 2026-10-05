@@ -141,6 +141,9 @@ export const toolSchema = {
             throw new Error("tool schemas must be JSON objects");
         }
         return {
+            ...(value._meta === undefined
+                ? {}
+                : { _meta: value._meta as JsonValue }),
             description: value.description,
             group: value.group,
             inputSchema: value.inputSchema as JsonValue,

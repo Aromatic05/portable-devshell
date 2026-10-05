@@ -7,231 +7,60 @@ export interface McpToolAnnotations extends Record<string, JsonValue> {
     readOnlyHint: boolean;
 }
 
-const readOnlyTools = new Set([
-    "artifact_viewImage",
-    "file_glob",
-    "file_grep",
-    "file_read",
-    "instance_list",
-    "instance_status",
-    "tmux_inspect",
-    "todo_read",
-    "mcpapp_open",
-    "mcpapp_reconnect",
-    "mcpapp_snapshot",
-    "mcpapp_watch",
-]);
-
-const nonDestructiveMutationTools = new Set([
-    "artifact_share",
-    "environ_info",
-    "instance_create",
-    "tmux_read",
-    "mcpapp_goal",
-]);
-
-const idempotentMutationTools = new Set<string>();
-
-const closedWorldTools = new Set([
-    "artifact_viewImage",
-    "environ_info",
-    "environ_remote",
-    "file_edit",
-    "file_glob",
-    "file_grep",
-    "file_read",
-    "instance_list",
-    "instance_status",
-    "tmux_inspect",
-    "tmux_manage",
-    "tmux_read",
-    "todo_read",
-    "todo_write",
-    "mcpapp_goal",
-    "mcpapp_open",
-    "mcpapp_reconnect",
-    "mcpapp_action",
-    "mcpapp_snapshot",
-    "mcpapp_watch",
-]);
-
-export function mcpToolAnnotations(
-    toolName: string,
-    meta?: JsonValue,
-): McpToolAnnotations {
-    const readOnlyHint = readOnlyTools.has(toolName);
-    const extension = extensionMcpMeta(meta);
-    const extensionAnnotations = asRecord(extension.annotations);
+export function mcpToolAnnotations(meta?: JsonValue): McpToolAnnotations {
+    const mcp = mcpMeta(meta);
+    const annotations = asRecord(mcp.annotations);
+    const readOnlyHint = booleanField(annotations, "readOnlyHint") ?? false;
     return {
-        readOnlyHint:
-            booleanField(extensionAnnotations, "readOnlyHint") ?? readOnlyHint,
+        readOnlyHint,
         destructiveHint:
-            booleanField(extensionAnnotations, "destructiveHint") ??
-            (!readOnlyHint && !nonDestructiveMutationTools.has(toolName)),
+            booleanField(annotations, "destructiveHint") ?? !readOnlyHint,
         idempotentHint:
-            booleanField(extensionAnnotations, "idempotentHint") ??
-            (readOnlyHint || idempotentMutationTools.has(toolName)),
-        openWorldHint:
-            booleanField(extensionAnnotations, "openWorldHint") ??
-            !closedWorldTools.has(toolName),
+            booleanField(annotations, "idempotentHint") ?? readOnlyHint,
+        openWorldHint: booleanField(annotations, "openWorldHint") ?? true,
     };
 }
 
-const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
-    [
-        "environ_info",
-        "Prepare the current devshell Context and workspace. Call once before other tools; it also bootstraps the MCP App. Use workspace to attach or switch, or ctxId to select an existing Context.",
-    ],
-    [
-        "environ_remote",
-        "Manage remote environments for this Context. Use command=help for current operations. Handles come from devshell instance list/status; mask is irreversible for the Context.",
-    ],
-    [
-        "bash_run",
-        "Execute short, bounded, non-interactive shell work. For long-running or PTY-oriented work call tmux_run instead. When retained stdout/stderr paths are returned, file_read can retrieve omitted output.",
-    ],
-    [
-        "file_edit",
-        "Apply an ordered multi-file edit. Existing target content must first be covered by file_read or file_grep; keep related mutations in one change set and inspect any failed operation before retrying.",
-    ],
-    [
-        "file_glob",
-        "Locate files and directories by exact path or glob. Use it for path discovery, not text matching; continue a paged traversal by calling file_glob again with cursor alone.",
-    ],
-    [
-        "file_grep",
-        "Search text across files, directories, or globs. Returned lines establish file_edit coverage. Continue per-file truncation with startLine and traversal pages with cursor alone.",
-    ],
-    [
-        "file_read",
-        "Read file content, structural outline, metadata, or retained tool output. Use selectors to keep large text reads focused; content reads establish file_edit coverage and nextSelector continues truncated content.",
-    ],
-    [
-        "tmux_input",
-        "Send terminal input to a managed task or persistent pane. Use task ids for managed executions and pane ids/names for persistent interactions; observe follow-up output with tmux_read or tmux_inspect as appropriate.",
-    ],
-    [
-        "tmux_inspect",
-        "Inspect pane terminal screen/history without consuming a managed task transcript. Use it for persistent terminals and current TUI/curses screen state; use tmux_read for durable managed-task transcript consumption.",
-    ],
-    [
-        "tmux_manage",
-        "Manage tmux resources with command=list, create, or close. list discovers panes and active tasks, create opens a persistent interactive pane, and close terminates a task or closes a persistent pane; force explicitly permits busy-resource termination.",
-    ],
-    [
-        "tmux_read",
-        "Wait for or consume a managed task's durable transcript. Positive line values consume the oldest unread lines. Negative values also consume all unread transcript data, discard the earlier portion, and return only the requested tail after waiting. Use tmux_inspect instead when non-consuming pane screen state is required.",
-    ],
-    [
-        "tmux_run",
-        "Start long-running or PTY/interactive work as a managed task. Prefer wait=block for work that must complete on the current critical path; use wait=nonblock when continuing other work or planning later interaction through tmux_read/tmux_input.",
-    ],
-    [
-        "todo_read",
-        "Read todo plans. With no selector, list live tasks. Prefer taskId once known; title is compatibility-only. Use todo tools only for multi-step work.",
-    ],
-    [
-        "todo_write",
-        "Replace a todo plan completely. Create with revision=0 and immutable title; then reuse taskId and current revision. At most one item is in_progress; blocked/failed require detail. checkpoint stores durable handoff context. Update on state changes.",
-    ],
-    [
-        "mcpapp_goal",
-        "Manage the durable MCP App Goal. start creates; get reads; update edits; block/resume control continuation; finish completes an all-terminal Goal; stop exits Goal mode without stopping shell/tmux. The final terminal step completes the Goal automatically.",
-    ],
-    [
-        "mcpapp_open",
-        "Re-present or restore the MCP App only when its App is inactive or dismissed. Normal startup is handled by environ_info.",
-    ],
-]);
-
-export class McpToolDescriptionEnhancer {
-    enhance(
-        toolName: string,
-        description: string | undefined,
-        meta?: JsonValue,
-    ): string {
-        if (extensionMcpMeta(meta).extensionTool === true)
-            return description?.trim() ?? "";
-        return (
-            MCP_WORKER_TOOL_DESCRIPTIONS.get(toolName) ??
-            description?.trim() ??
-            ""
-        );
-    }
-}
-
-const titles: Readonly<Record<string, string>> = {
-    artifact_share: "Share artifact",
-    artifact_viewImage: "View image",
-    bash_run: "Run shell command",
-    environ_info: "Create environment",
-    environ_remote: "Manage remote environment",
-    file_edit: "Edit file",
-    file_glob: "Glob files",
-    file_grep: "Grep files",
-    file_read: "Read file",
-    instance_create: "Create instance",
-    instance_list: "List instances",
-    instance_status: "Read instance status",
-    instance_stop: "Stop instance",
-    tmux_input: "Send tmux input",
-    tmux_inspect: "Inspect tmux pane",
-    tmux_manage: "Manage tmux resources",
-    tmux_read: "Read tmux task",
-    tmux_run: "Run tmux task",
-    todo_read: "Read task plan",
-    todo_write: "Update task plan",
-    mcpapp_action: "Apply MCP App action",
-    mcpapp_goal: "Manage goal",
-    mcpapp_open: "Open MCP App",
-    mcpapp_reconnect: "Reconnect MCP App",
-    mcpapp_snapshot: "Read MCP App snapshot",
-    mcpapp_watch: "Watch MCP App",
-};
-
 export function mcpToolTitle(toolName: string, meta?: JsonValue): string {
-    const extensionTitle = stringField(extensionMcpMeta(meta), "title");
-    return extensionTitle ?? titles[toolName] ?? humanizeToolName(toolName);
+    return stringField(mcpMeta(meta), "title") ?? humanizeToolName(toolName);
 }
-
-const invocationStatuses: Readonly<
-    Record<string, { invoked: string; invoking: string }>
-> = {
-    mcpapp_open: {
-        invoked: "MCP App ready",
-        invoking: "Opening MCP App…",
-    },
-};
 
 export function mcpToolInvocationStatus(
-    toolName: string,
     meta?: JsonValue,
 ): { invoked: string; invoking: string } | undefined {
-    const extension = extensionMcpMeta(meta);
-    const invoked = stringField(extension, "invoked");
-    const invoking = stringField(extension, "invoking");
+    const mcp = mcpMeta(meta);
+    const invoked = stringField(mcp, "invoked");
+    const invoking = stringField(mcp, "invoking");
     if (invoked !== undefined && invoking !== undefined)
         return { invoked, invoking };
-    return invocationStatuses[toolName];
-}
-
-export function mcpToolActivity(
-    meta?: JsonValue,
-): "execution" | "mutation" | "observation" | "wait" | undefined {
-    const activity = extensionMcpMeta(meta).activity;
-    return activity === "execution" ||
-        activity === "mutation" ||
-        activity === "observation" ||
-        activity === "wait"
-        ? activity
-        : undefined;
+    return undefined;
 }
 
 export function mcpToolPreserveInputDescriptions(meta?: JsonValue): boolean {
-    return extensionMcpMeta(meta).preserveInputDescriptions === true;
+    return mcpMeta(meta).preserveInputDescriptions === true;
 }
 
-function extensionMcpMeta(meta?: JsonValue): Record<string, JsonValue> {
+export function mcpToolInputHints(
+    meta?: JsonValue,
+): Readonly<Record<string, string>> {
+    const hints = asRecord(mcpMeta(meta).inputHints);
+    return Object.fromEntries(
+        Object.entries(hints).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+    );
+}
+
+export function mcpToolHiddenInputProperties(
+    meta?: JsonValue,
+): readonly string[] {
+    const hidden = mcpMeta(meta).hiddenInputProperties;
+    return Array.isArray(hidden)
+        ? hidden.filter((entry): entry is string => typeof entry === "string")
+        : [];
+}
+
+function mcpMeta(meta?: JsonValue): Record<string, JsonValue> {
     return asRecord(asRecord(asRecord(meta).devshell).mcp);
 }
 

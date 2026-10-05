@@ -29,9 +29,9 @@ use crate::transport::endpoint::channel::EndpointPaths;
 pub use backend::retire::retire_instance_runtime;
 
 #[cfg(unix)]
-const RUN_DESCRIPTION: &str = "Start a managed PTY task in a fresh ephemeral pane using clean Bash without user rc files. command may contain multiple lines and cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.";
+const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. Prefer wait=block for work that must complete on the current critical path; use wait=nonblock when continuing other work or planning later interaction through tmux_read/tmux_input.";
 #[cfg(windows)]
-const RUN_DESCRIPTION: &str = "Start a managed PTY task in a fresh ephemeral pane using PowerShell without user profiles. command uses PowerShell syntax and may contain multiple lines; cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.";
+const RUN_DESCRIPTION: &str = "Start long-running or PTY/interactive work as a managed task. Prefer wait=block for work that must complete on the current critical path; use wait=nonblock when continuing other work or planning later interaction through tmux_read/tmux_input.";
 
 fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
     TmuxWarning {
@@ -45,6 +45,7 @@ struct TmuxTool<I, O> {
     name: ToolName,
     description: &'static str,
     capability: ToolCapability,
+    meta: serde_json::Value,
     states: Arc<TmuxStateRegistry>,
     operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
     marker: PhantomData<fn(I) -> O>,
@@ -60,10 +61,11 @@ where
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<I, O>(
+        crate::tool::contract::catalog_entry_with_meta::<I, O>(
             &self.name,
             self.description,
             [self.capability],
+            self.meta.clone(),
         )
     }
 
@@ -127,6 +129,7 @@ fn tool<I, O>(
     name: ToolName,
     description: &'static str,
     capability: ToolCapability,
+    meta: serde_json::Value,
     states: Arc<TmuxStateRegistry>,
     operation: fn(&TmuxState, &ToolCall, I) -> Result<O, ToolError>,
 ) -> Arc<dyn ToolHandler>
@@ -138,6 +141,7 @@ where
         name,
         description,
         capability,
+        meta,
         states,
         operation,
         marker: PhantomData,
@@ -164,34 +168,111 @@ pub fn register_tools(
         ToolName::parse("tmux_run").unwrap(),
         RUN_DESCRIPTION,
         ToolCapability::Execute,
+        serde_json::json!({
+            "devshell": { "mcp": {
+                "annotations": {
+                    "destructiveHint": true,
+                    "idempotentHint": false,
+                    "openWorldHint": true,
+                    "readOnlyHint": false
+                },
+                "hiddenInputProperties": ["consumeOutput"],
+                "inputHints": {
+                    "cwd": "Initial task directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
+                    "line": "Output lines returned with the task.",
+                    "timeout": "Block-wait deadline; the task keeps running after it expires.",
+                    "wait": "block waits for progress; nonblock returns after start."
+                },
+                "title": "Run tmux task"
+            }}
+        }),
         Arc::clone(&states),
         TmuxState::run,
     ))?;
     registry.register(tool::<TmuxInputParams, TmuxInputOutput>(
         ToolName::parse("tmux_input").unwrap(),
-        "Send raw terminal input to either a running managed task or a persistent interactive pane. Task input can wait for subsequent transcript output according to line and timeMs; pane input returns after delivery. Input never creates a new managed task. Caret notation encodes control keys such as ^B, ^C, ^D, ^I, and ^M.",
+        "Send terminal input to a managed task or persistent pane. Use task ids for managed executions and pane ids/names for persistent interactions; observe follow-up output with tmux_read or tmux_inspect as appropriate.",
         ToolCapability::Execute,
+        serde_json::json!({
+            "devshell": { "mcp": {
+                "annotations": {
+                    "destructiveHint": true,
+                    "idempotentHint": false,
+                    "openWorldHint": true,
+                    "readOnlyHint": false
+                },
+                "hiddenInputProperties": ["line", "timeMs"],
+                "title": "Send tmux input"
+            }}
+        }),
         Arc::clone(&states),
         TmuxState::input,
     ))?;
     registry.register(tool::<TmuxReadParams, TmuxReadOutput>(
         ToolName::parse("tmux_read").unwrap(),
-        "Read a managed task's durable terminal transcript. Positive line values consume the oldest unread lines, zero discards unread transcript data, and negative values wait until terminal state or timeMs, consume all unread transcript data, discard the earlier portion, and return only the requested tail. Transcript capture is bounded and reports truncation explicitly.",
+        "Wait for or consume a managed task's durable transcript. Positive line values consume the oldest unread lines. Negative values also consume all unread transcript data, discard the earlier portion, and return only the requested tail after waiting. Use tmux_inspect instead when non-consuming pane screen state is required.",
         ToolCapability::Read,
+        serde_json::json!({
+            "devshell": { "mcp": {
+                "annotations": {
+                    "destructiveHint": false,
+                    "idempotentHint": false,
+                    "openWorldHint": false,
+                    "readOnlyHint": false
+                },
+                "hiddenInputProperties": ["consumeOutput"],
+                "inputHints": {
+                    "line": "Positive consumes oldest unread lines; negative also consumes all unread data, discards the earlier part, and returns the requested tail after waiting.",
+                    "timeMs": "Maximum wait, in milliseconds."
+                },
+                "title": "Read tmux task"
+            }}
+        }),
         Arc::clone(&states),
         TmuxState::read,
     ))?;
     registry.register(tool::<TmuxInspectParams, TmuxPaneOperationOutput>(
         ToolName::parse("tmux_inspect").unwrap(),
-        "Inspect current pane terminal screen/history without consuming managed task transcript data. Omit pane/panes for main, set pane for one pane, or set panes=all for every current pane. start and end select a bounded terminal-history window.",
+        "Inspect pane terminal screen/history without consuming a managed task transcript. Use it for persistent terminals and current TUI/curses screen state; use tmux_read for durable managed-task transcript consumption.",
         ToolCapability::Read,
+        serde_json::json!({
+            "devshell": { "mcp": {
+                "annotations": {
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false,
+                    "readOnlyHint": true
+                },
+                "inputHints": {
+                    "end": "History end offset; defaults to 0.",
+                    "panes": "Set to all to inspect every pane.",
+                    "start": "History start offset; defaults to -80."
+                },
+                "title": "Inspect tmux pane"
+            }}
+        }),
         Arc::clone(&states),
         TmuxState::inspect,
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),
-        "Manage persistent pane and task lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task, and succeeds as a no-op when that task is already terminal. The main pane cannot be closed.",
+        "Manage tmux resources with command=list, create, or close. list discovers panes and active tasks, create opens a persistent interactive pane, and close terminates a task or closes a persistent pane; force explicitly permits busy-resource termination.",
         ToolCapability::Execute,
+        serde_json::json!({
+            "devshell": { "mcp": {
+                "annotations": {
+                    "destructiveHint": true,
+                    "idempotentHint": false,
+                    "openWorldHint": false,
+                    "readOnlyHint": false
+                },
+                "inputHints": {
+                    "cwd": "Initial pane directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
+                    "force": "Allow closing a running or busy resource."
+                },
+                "title": "Manage tmux resources"
+            }}
+        }),
         states,
         TmuxState::manage,
     ))?;

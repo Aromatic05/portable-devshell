@@ -9,6 +9,8 @@ export interface McpTool {
 }
 
 export interface McpToolSchemaAdapterOptions {
+    hiddenInputProperties?: readonly string[];
+    inputHints?: Readonly<Record<string, string>>;
     modelFacing?: boolean;
     preserveInputDescriptions?: boolean;
 }
@@ -67,11 +69,7 @@ export class McpToolSchemaAdapter {
             ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
             description,
             inputSchema: modelFacing
-                ? compactModelInputSchema(
-                      tool.name,
-                      tool.inputSchema,
-                      options.preserveInputDescriptions === true,
-                  )
+                ? compactModelInputSchema(tool.inputSchema, options)
                 : normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,
             outputSchema: modelFacing
@@ -82,152 +80,37 @@ export class McpToolSchemaAdapter {
 }
 
 const COMMON_MODEL_INPUT_HINTS: Readonly<Record<string, string>> = {
-    ctxId: "Context from environ_info.",
+    ctxId: "Current Context ID.",
     explanation: "Why this call is useful.",
     instance: "Managed instance name.",
     purpose: "Intended outcome.",
 };
 
-const MODEL_HIDDEN_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
-    ["tmux_input", new Set(["line", "timeMs"])],
-]);
-
-const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
-    [
-        "artifact_viewImage",
-        {
-            handle: "Artifact handle; exclusive with path.",
-            path: "Image path; exclusive with handle.",
-        },
-    ],
-    [
-        "bash_run",
-        {
-            cwd: "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
-            stdin: "Omit to send EOF.",
-            timeoutMs: "Required timeout in milliseconds.",
-        },
-    ],
-    [
-        "environ_info",
-        {
-            workspace: "Absolute workspace to attach or switch.",
-        },
-    ],
-    [
-        "environ_remote",
-        {
-            command: "Use help to list current operations.",
-            handle: "Opaque instance handle from devshell instance list/status.",
-            workspace: "Absolute workspace for attach operations.",
-        },
-    ],
-    [
-        "file_edit",
-        {
-            changes: "Ordered *** Begin Edit / *** End Edit change set.",
-        },
-    ],
-    [
-        "file_glob",
-        {
-            cursor: "Continuation cursor; when set, omit query fields.",
-            patterns: "Exact paths or globs; required without cursor.",
-        },
-    ],
-    [
-        "file_grep",
-        {
-            cursor: "Continuation cursor; when set, omit query fields.",
-            pattern: "Required without cursor.",
-            startLine: "Single exact file only.",
-            syntax: "Defaults to regex.",
-        },
-    ],
-    [
-        "file_read",
-        {
-            selector:
-                "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
-        },
-    ],
-    [
-        "tmux_inspect",
-        {
-            end: "History end offset; defaults to 0.",
-            panes: "Set to all to inspect every pane.",
-            start: "History start offset; defaults to -80.",
-        },
-    ],
-    [
-        "tmux_manage",
-        {
-            cwd: "Initial pane directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
-            force: "Allow closing a running or busy resource.",
-        },
-    ],
-    [
-        "tmux_read",
-        {
-            line: "Positive consumes oldest unread lines; negative also consumes all unread data, discards the earlier part, and returns the requested tail after waiting.",
-            timeMs: "Maximum wait, in milliseconds.",
-        },
-    ],
-    [
-        "tmux_run",
-        {
-            cwd: "Initial task directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
-            line: "Output lines returned with the task.",
-            timeout:
-                "Block-wait deadline; the task keeps running after it expires.",
-            wait: "block waits for progress; nonblock returns after start.",
-        },
-    ],
-    [
-        "todo_read",
-        {
-            taskId: "Stable task id; prefer once known.",
-            title: "Compatibility selector; omit with taskId.",
-        },
-    ],
-    [
-        "todo_write",
-        {
-            checkpoint: "Optional durable handoff context.",
-            revision: "Latest todo revision.",
-            taskId: "Stable task id.",
-            title: "Immutable task title.",
-            todos: "Complete replacement list.",
-        },
-    ],
-]);
-
 function compactModelInputSchema(
-    toolName: string,
     value: JsonValue,
-    preserveDescriptions = false,
+    options: McpToolSchemaAdapterOptions,
 ): JsonValue {
     const normalized = hideModelInputProperties(
-        toolName,
         normalizeModelInputSchema(value),
+        options.hiddenInputProperties ?? [],
     );
     return pruneUnusedLocalDefinitions(
         compactModelInputDescriptions(
-            toolName,
             normalized,
+            options.inputHints ?? {},
             undefined,
-            preserveDescriptions,
+            options.preserveInputDescriptions === true,
         ),
     );
 }
 
 function hideModelInputProperties(
-    toolName: string,
     value: JsonValue,
+    hiddenProperties: readonly string[],
 ): JsonValue {
     if (!isRecord(value) || !isRecord(value.properties)) return value;
-    const hidden = MODEL_HIDDEN_INPUT_PROPERTIES.get(toolName);
-    if (hidden === undefined || hidden.size === 0) return value;
+    const hidden = new Set(hiddenProperties);
+    if (hidden.size === 0) return value;
 
     const properties = { ...value.properties };
     for (const property of hidden) delete properties[property];
@@ -244,16 +127,16 @@ function hideModelInputProperties(
 }
 
 function compactModelInputDescriptions(
-    toolName: string,
     value: JsonValue,
+    inputHints: Readonly<Record<string, string>>,
     hint?: string,
     preserveDescriptions = false,
 ): JsonValue {
     if (Array.isArray(value)) {
         return value.map((entry) =>
             compactModelInputDescriptions(
-                toolName,
                 entry,
+                inputHints,
                 undefined,
                 preserveDescriptions,
             ),
@@ -273,16 +156,15 @@ function compactModelInputDescriptions(
                 compacted.description = entry;
             continue;
         }
-        if (key === "$schema" || key === "title")
-            continue;
+        if (key === "$schema" || key === "title") continue;
         if (key === "properties" && isRecord(entry)) {
             compacted.properties = Object.fromEntries(
                 Object.entries(entry).map(([propertyName, propertySchema]) => [
                     propertyName,
                     compactModelInputDescriptions(
-                        toolName,
                         propertySchema,
-                        modelInputHint(toolName, propertyName),
+                        inputHints,
+                        modelInputHint(inputHints, propertyName),
                         preserveDescriptions,
                     ),
                 ]),
@@ -290,8 +172,8 @@ function compactModelInputDescriptions(
             continue;
         }
         compacted[key] = compactModelInputDescriptions(
-            toolName,
             entry,
+            inputHints,
             undefined,
             preserveDescriptions,
         );
@@ -300,13 +182,10 @@ function compactModelInputDescriptions(
 }
 
 function modelInputHint(
-    toolName: string,
+    inputHints: Readonly<Record<string, string>>,
     propertyName: string,
 ): string | undefined {
-    return (
-        MODEL_INPUT_HINTS.get(toolName)?.[propertyName] ??
-        COMMON_MODEL_INPUT_HINTS[propertyName]
-    );
+    return inputHints[propertyName] ?? COMMON_MODEL_INPUT_HINTS[propertyName];
 }
 
 function pruneUnusedLocalDefinitions(value: JsonValue): JsonValue {

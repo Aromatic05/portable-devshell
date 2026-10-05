@@ -33,10 +33,25 @@ impl ToolHandler for FileGlobTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<FileGlobInput, FileGlobOutput>(
+        crate::tool::contract::catalog_entry_with_meta::<FileGlobInput, FileGlobOutput>(
             &self.name,
-            "Resolve exact paths or glob patterns to files and directories. Bare relative paths are normalized to the workspace namespace. Missing exact paths and missing glob roots are normal empty discovery results. Initial requests accept patterns with optional type, hidden, and gitignore filters; continuation requests contain cursor alone.".to_string(),
+            "Locate files and directories by exact path or glob. Use it for path discovery, not text matching; continue a paged traversal by calling file_glob again with cursor alone.".to_string(),
             [ToolCapability::Read],
+            serde_json::json!({
+                "devshell": { "mcp": {
+                    "annotations": {
+                        "destructiveHint": false,
+                        "idempotentHint": true,
+                        "openWorldHint": false,
+                        "readOnlyHint": true
+                    },
+                    "inputHints": {
+                        "cursor": "Continuation cursor; when set, omit query fields.",
+                        "patterns": "Exact paths or globs; required without cursor."
+                    },
+                    "title": "Glob files"
+                }}
+            }),
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

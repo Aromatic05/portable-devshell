@@ -16,18 +16,7 @@ impl ShellRuntime {
     }
 
     pub fn catalog_description(&self) -> String {
-        #[cfg(windows)]
-        {
-            return format!(
-                "Execute a bounded, non-interactive command using {} {} with PowerShell syntax. Captures stdout and stderr and reports termination, byte counts, truncation, and optional read-only recovery paths for retained output.",
-                self.display_name(),
-                self.version
-            );
-        }
-        #[cfg(not(windows))]
-        {
-            "Execute a bounded, non-interactive Bash command. Captures stdout and stderr and reports termination, byte counts, truncation, and optional read-only recovery paths for retained output.".to_string()
-        }
+        "Execute short, bounded, non-interactive shell work. For long-running or PTY-oriented work call tmux_run instead. When retained stdout/stderr paths are returned, file_read can retrieve omitted output.".to_string()
     }
 
     #[cfg(windows)]

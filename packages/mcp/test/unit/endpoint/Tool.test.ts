@@ -3,7 +3,6 @@ import test from "node:test";
 import {
     McpEndpointCatalog,
     McpToolRegistry,
-    McpToolDescriptionEnhancer,
     McpToolSchemaAdapter,
     mcpToolAnnotations,
     mcpToolInvocationStatus,
@@ -64,53 +63,34 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         },
     };
 
-    test("MCP safety annotations are explicit for known semantics and conservative for unknown tools", () => {
-        assert.deepEqual(mcpToolAnnotations("file_read"), {
+    const readOnlyClosedMeta: JsonValue = {
+        devshell: {
+            mcp: {
+                annotations: {
+                    destructiveHint: false,
+                    idempotentHint: true,
+                    openWorldHint: false,
+                    readOnlyHint: true,
+                },
+                title: "Read resource",
+            },
+        },
+    };
+
+    test("MCP safety annotations come from tool metadata with conservative defaults", () => {
+        assert.deepEqual(mcpToolAnnotations(readOnlyClosedMeta), {
             destructiveHint: false,
             idempotentHint: true,
             openWorldHint: false,
             readOnlyHint: true,
         });
-        assert.deepEqual(mcpToolAnnotations("tmux_read"), {
+        assert.deepEqual(mcpToolAnnotations(extensionToolMeta), {
             destructiveHint: false,
             idempotentHint: false,
             openWorldHint: false,
             readOnlyHint: false,
         });
-        assert.deepEqual(mcpToolAnnotations("tmux_manage"), {
-            destructiveHint: true,
-            idempotentHint: false,
-            openWorldHint: false,
-            readOnlyHint: false,
-        });
-        assert.deepEqual(mcpToolAnnotations("instance_create"), {
-            destructiveHint: false,
-            idempotentHint: false,
-            openWorldHint: true,
-            readOnlyHint: false,
-        });
-        assert.deepEqual(mcpToolAnnotations("todo_write"), {
-            destructiveHint: true,
-            idempotentHint: false,
-            openWorldHint: false,
-            readOnlyHint: false,
-        });
-        assert.deepEqual(
-            mcpToolAnnotations("todo_report", extensionToolMeta),
-            {
-                destructiveHint: false,
-                idempotentHint: false,
-                openWorldHint: false,
-                readOnlyHint: false,
-            },
-        );
-        assert.deepEqual(mcpToolAnnotations("mcpapp_action"), {
-            destructiveHint: true,
-            idempotentHint: false,
-            openWorldHint: false,
-            readOnlyHint: false,
-        });
-        assert.deepEqual(mcpToolAnnotations("future_unknown"), {
+        assert.deepEqual(mcpToolAnnotations(), {
             destructiveHint: true,
             idempotentHint: false,
             openWorldHint: true,
@@ -119,10 +99,10 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
     });
 
     test("MCP tools expose concise human-readable titles with a safe fallback", () => {
-        assert.equal(mcpToolTitle("bash_run"), "Run shell command");
-        assert.equal(mcpToolTitle("mcpapp_open"), "Open Workspace");
-        assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
-        assert.equal(mcpToolTitle("tmux_manage"), "Manage tmux resources");
+        assert.equal(
+            mcpToolTitle("resource_read", readOnlyClosedMeta),
+            "Read resource",
+        );
         assert.equal(
             mcpToolTitle("todo_report", extensionToolMeta),
             "Message user",
@@ -130,17 +110,22 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         assert.equal(mcpToolTitle("future_unknown"), "Future unknown");
     });
 
-    test("ChatGPT invocation status is limited to long-lived visible tool states", () => {
-        assert.deepEqual(mcpToolInvocationStatus("mcpapp_ask"), {
-            invoked: "Answer received",
-            invoking: "Waiting for your answer…",
-        });
-        assert.equal(mcpToolInvocationStatus("tmux_run"), undefined);
-        assert.deepEqual(mcpToolInvocationStatus("mcpapp_open"), {
-            invoked: "Workspace ready",
-            invoking: "Opening Workspace…",
-        });
-        assert.equal(mcpToolInvocationStatus("file_read"), undefined);
+    test("ChatGPT invocation status comes from tool metadata", () => {
+        assert.deepEqual(
+            mcpToolInvocationStatus({
+                devshell: {
+                    mcp: {
+                        invoked: "Answer received",
+                        invoking: "Waiting for your answer…",
+                    },
+                },
+            }),
+            {
+                invoked: "Answer received",
+                invoking: "Waiting for your answer…",
+            },
+        );
+        assert.equal(mcpToolInvocationStatus(), undefined);
     });
 
     test("McpToolRegistry merges wildcard and instance scopes", () => {
@@ -149,8 +134,13 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         const worker = registry.register("local", [bashRun]);
 
         assert.deepEqual(
-            registry.list("local").map((entry) => [entry.scope, entry.definition.name]),
-            [["*", "environ_info"], ["local", "bash_run"]],
+            registry
+                .list("local")
+                .map((entry) => [entry.scope, entry.definition.name]),
+            [
+                ["*", "environ_info"],
+                ["local", "bash_run"],
+            ],
         );
         assert.deepEqual(
             registry.list("remote").map((entry) => entry.definition.name),
@@ -172,12 +162,18 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
     test("McpToolRegistry rejects overlapping duplicate names atomically", () => {
         const registry = new McpToolRegistry();
         registry.register("*", [todoRead]);
-        assert.throws(() => registry.register("local", [todoRead]), /more than once/iu);
+        assert.throws(
+            () => registry.register("local", [todoRead]),
+            /more than once/iu,
+        );
 
         const local = registry.register("local", [bashRun]);
         registry.register("remote", [bashRun]);
         assert.throws(() => local.replace([todoRead]), /more than once/iu);
-        assert.equal(registry.get("local", "bash_run")?.definition.name, "bash_run");
+        assert.equal(
+            registry.get("local", "bash_run")?.definition.name,
+            "bash_run",
+        );
     });
 
     test("McpToolRegistry validates tool namespace groups", () => {
@@ -186,40 +182,6 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             () => registry.register("local", [{ ...bashRun, group: "file" }]),
             /namespace/iu,
         );
-    });
-
-    test("McpToolDescriptionEnhancer owns concise model-facing guidance", () => {
-        const enhancer = new McpToolDescriptionEnhancer();
-        const bash = enhancer.enhance(
-            "bash_run",
-            "  Worker-neutral shell contract  ",
-        );
-        assert.match(bash, /tmux_run/u);
-        assert.match(bash, /file_read/u);
-        assert.notEqual(bash, "Worker-neutral shell contract");
-        assert.match(
-            enhancer.enhance("tmux_read", "Worker-neutral tmux contract"),
-            /consume all unread transcript data/u,
-        );
-        assert.match(
-            enhancer.enhance("tmux_read", "Worker-neutral tmux contract"),
-            /discard the earlier portion/u,
-        );
-        assert.match(
-            enhancer.enhance("mcpapp_open", "  Open workspace  "),
-            /environ_info/u,
-        );
-        const extensionDescription =
-            "Reply to comments first. #push requires a reply. #stop disables tools.";
-        assert.equal(
-            enhancer.enhance(
-                "todo_report",
-                extensionDescription,
-                extensionToolMeta,
-            ),
-            extensionDescription,
-        );
-        assert.equal(enhancer.enhance("future_tool", undefined), "");
     });
 
     test("McpToolSchemaAdapter rejects missing schema", () => {
@@ -314,7 +276,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         assert.deepEqual(schema.required?.sort(), ["ctxId", "input"]);
     });
 
-    test("McpToolSchemaAdapter hides tmux_input wait/read fields only from model-facing schema", () => {
+    test("McpToolSchemaAdapter hides metadata-selected fields only from model-facing schema", () => {
         const adapter = new McpToolSchemaAdapter();
         const tmuxInput: ToolDefinition = {
             ...bashRun,
@@ -348,6 +310,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
 
         const canonical = adapter.toMcpTool(tmuxInput, "Send input");
         const model = adapter.toMcpTool(tmuxInput, "Send input", {
+            hiddenInputProperties: ["line", "timeMs"],
             modelFacing: true,
         });
         const canonicalProperties = (
@@ -521,7 +484,12 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
                 },
             },
             "Run shell",
-            { modelFacing: true },
+            {
+                inputHints: {
+                    cwd: "Working directory.",
+                },
+                modelFacing: true,
+            },
         );
 
         const properties = (
@@ -530,7 +498,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             }
         ).properties;
         assert.equal(properties?.command?.description, undefined);
-        assert.equal(typeof properties?.cwd?.description, "string");
+        assert.equal(properties?.cwd?.description, "Working directory.");
         assert.equal(properties?.purpose?.description, "Intended outcome.");
         const input = tool.inputSchema as Record<string, unknown>;
         assert.equal(input.$schema, undefined);

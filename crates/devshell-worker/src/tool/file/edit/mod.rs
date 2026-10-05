@@ -45,10 +45,24 @@ impl ToolHandler for FileEditTool {
     }
 
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
+        crate::tool::contract::catalog_entry_with_meta::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Write/Add and Move targets create missing parent directories automatically. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing content requires edit coverage established in the current context; successful edits carry valid coverage forward to their resulting revision or path, while failed edits do not create coverage. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
+            "Apply an ordered multi-file edit. Existing target content must first be covered by file_read or file_grep; keep related mutations in one change set and inspect any failed operation before retrying.".to_string(),
             [ToolCapability::Write],
+            serde_json::json!({
+                "devshell": { "mcp": {
+                    "annotations": {
+                        "destructiveHint": true,
+                        "idempotentHint": false,
+                        "openWorldHint": false,
+                        "readOnlyHint": false
+                    },
+                    "inputHints": {
+                        "changes": "Ordered *** Begin Edit / *** End Edit change set."
+                    },
+                    "title": "Edit file"
+                }}
+            }),
         )
     }
 

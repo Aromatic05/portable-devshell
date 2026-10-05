@@ -87,10 +87,27 @@ impl ToolHandler for FileGrepTool {
         &self.name
     }
     fn catalog_entry(&self) -> ToolCatalogEntry {
-        crate::tool::contract::catalog_entry::<FileGrepInput, FileGrepOutput>(
+        crate::tool::contract::catalog_entry_with_meta::<FileGrepInput, FileGrepOutput>(
             &self.name,
-            "Search UTF-8 text in files, directories, or globs. Bare relative paths are normalized to the workspace namespace and missing paths contribute no matches. Regex remains the default; when syntax is omitted and the pattern is not valid regex, it is retried as a literal. Explicit syntax=regex stays strict. Returned source lines establish edit coverage.".to_string(),
+            "Search text across files, directories, or globs. Returned lines establish file_edit coverage. Continue per-file truncation with startLine and traversal pages with cursor alone.".to_string(),
             [ToolCapability::Read],
+            serde_json::json!({
+                "devshell": { "mcp": {
+                    "annotations": {
+                        "destructiveHint": false,
+                        "idempotentHint": true,
+                        "openWorldHint": false,
+                        "readOnlyHint": true
+                    },
+                    "inputHints": {
+                        "cursor": "Continuation cursor; when set, omit query fields.",
+                        "pattern": "Required without cursor.",
+                        "startLine": "Single exact file only.",
+                        "syntax": "Defaults to regex."
+                    },
+                    "title": "Grep files"
+                }}
+            }),
         )
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {

@@ -109,6 +109,8 @@ pub enum ToolCapability {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCatalogEntry {
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
     pub group: String,
     pub name: String,
     pub description: String,
@@ -123,6 +125,7 @@ pub(crate) fn catalog_entry<I: JsonSchema, O: JsonSchema>(
     capabilities: impl IntoIterator<Item = ToolCapability>,
 ) -> ToolCatalogEntry {
     ToolCatalogEntry {
+        meta: None,
         group: name.group().to_string(),
         name: name.as_str(),
         description: description.into(),
@@ -130,6 +133,17 @@ pub(crate) fn catalog_entry<I: JsonSchema, O: JsonSchema>(
         output_schema: serde_json::to_value(schemars::schema_for!(O)).unwrap(),
         required_capabilities: capabilities.into_iter().collect(),
     }
+}
+
+pub(crate) fn catalog_entry_with_meta<I: JsonSchema, O: JsonSchema>(
+    name: &ToolName,
+    description: impl Into<String>,
+    capabilities: impl IntoIterator<Item = ToolCapability>,
+    meta: serde_json::Value,
+) -> ToolCatalogEntry {
+    let mut entry = catalog_entry::<I, O>(name, description, capabilities);
+    entry.meta = Some(meta);
+    entry
 }
 
 pub(crate) fn serialize(value: impl Serialize) -> Result<serde_json::Value, ToolError> {

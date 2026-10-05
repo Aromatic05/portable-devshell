@@ -393,11 +393,17 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
                 .is_none()
         );
         let tmux_run_description = tmux_run["description"].as_str().unwrap();
-        assert!(tmux_run_description.contains("Start a managed PTY task"));
-        assert!(tmux_run_description.contains("durable bounded transcript"));
-        for consumer_policy in ["Use bash_run", "Prefer wait=block", "use tmux_read"] {
-            assert!(!tmux_run_description.contains(consumer_policy));
-        }
+        assert!(tmux_run_description.contains("Start long-running or PTY/interactive work"));
+        assert!(tmux_run_description.contains("Prefer wait=block"));
+        assert!(tmux_run_description.contains("tmux_read/tmux_input"));
+        assert_eq!(
+            tmux_run["_meta"]["devshell"]["mcp"]["title"],
+            "Run tmux task"
+        );
+        assert_eq!(
+            tmux_run["_meta"]["devshell"]["mcp"]["hiddenInputProperties"],
+            serde_json::json!(["consumeOutput"])
+        );
         assert_eq!(
             tmux_run["inputSchema"]["properties"]["wait"]["description"],
             "Wait strategy. Defaults to nonblock."
@@ -411,8 +417,12 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             .find(|tool| tool["name"] == "bash_run")
             .unwrap();
         let bash_description = bash_run["description"].as_str().unwrap();
-        assert!(!bash_description.contains("tmux_run"));
-        assert!(!bash_description.contains("file_read"));
+        assert!(bash_description.contains("tmux_run"));
+        assert!(bash_description.contains("file_read"));
+        assert_eq!(
+            bash_run["_meta"]["devshell"]["mcp"]["title"],
+            "Run shell command"
+        );
         assert!(
             !bash_run["inputSchema"]["properties"]["timeoutMs"]["description"]
                 .as_str()

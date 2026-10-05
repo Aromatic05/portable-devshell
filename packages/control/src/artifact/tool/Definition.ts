@@ -4,6 +4,23 @@ export const artifactViewImageToolName = "artifact_viewImage" as const;
 
 export function artifactViewImageDefinition(): ToolDefinition {
     return {
+        _meta: {
+            devshell: {
+                mcp: {
+                    annotations: {
+                        destructiveHint: false,
+                        idempotentHint: true,
+                        openWorldHint: false,
+                        readOnlyHint: true,
+                    },
+                    inputHints: {
+                        handle: "Artifact handle; exclusive with path.",
+                        path: "Image path; exclusive with handle.",
+                    },
+                    title: "View image",
+                },
+            },
+        },
         description:
             "View a PNG, JPEG, GIF, or WebP source as native MCP image content. Provide exactly one of path or handle. The selected source instance is read through the existing artifact payload protocol; images larger than 10 MiB are rejected.",
         group: "artifact",
