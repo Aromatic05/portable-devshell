@@ -8,7 +8,7 @@ import type { WorkerCommandClient } from "../execution/Command.js";
 import type { ResolvedWorkerInstanceConfig } from "./Config.js";
 import { toJsonDetails } from "../../transport/endpoint/channel/worker/Error.js";
 import { withInstanceDetails } from "../execution/Error.js";
-import type { InstanceDescriptor } from "../../Descriptor.js";
+import type { Instance } from "../../Instance.js";
 
 export class WorkerInstanceRetirement {
     readonly #commandClient?: WorkerCommandClient;
@@ -43,7 +43,7 @@ export class WorkerInstanceRetirement {
 
 export function assertInstanceDeletable(
     instanceName: string,
-    descriptor: InstanceDescriptor | undefined,
+    descriptor: Instance | undefined,
 ): boolean {
     if (descriptor === undefined) return false;
     const snapshot = descriptor.worker.snapshot();
@@ -67,7 +67,7 @@ export function assertInstanceDeletable(
 }
 
 export async function retireInstanceForDelete(
-    descriptor: InstanceDescriptor | undefined,
+    descriptor: Instance | undefined,
     skipRuntimeRetirement = false,
 ): Promise<void> {
     if (descriptor === undefined) return;
@@ -89,7 +89,7 @@ export async function retireInstanceForDelete(
 }
 
 export async function closeInstanceResources(
-    descriptor: InstanceDescriptor,
+    descriptor: Instance,
 ): Promise<void> {
     const failures: unknown[] = [];
     await descriptor.worker

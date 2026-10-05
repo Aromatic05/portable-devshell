@@ -18,6 +18,11 @@ interface ActiveReverseConnection {
     transport: "sse" | "wss";
 }
 
+interface ReverseGenerationLease {
+    readonly descriptor: ReverseInstance;
+    release(): void;
+}
+
 export interface ReverseConnectionIdentity {
     credentialToken: string;
     descriptor: ReverseInstance;
@@ -83,9 +88,7 @@ export class ReverseConnections {
         transport: "sse" | "wss",
         channel: Channel,
     ): Promise<void> {
-        let generation:
-            | ReturnType<ReverseInstanceLookup["acquireGeneration"]>
-            | undefined;
+        let generation: ReverseGenerationLease | undefined;
         try {
             generation = this.#acquireIdentityGeneration(identity);
             await this.#exclusive(identity.descriptor.name, async () => {
@@ -207,19 +210,24 @@ export class ReverseConnections {
 
     #acquireIdentityGeneration(
         identity: ReverseConnectionIdentity,
-    ): ReturnType<ReverseInstanceLookup["acquireGeneration"]> {
-        let generation: ReturnType<
-            ReverseInstanceLookup["acquireGeneration"]
-        >;
+    ): ReverseGenerationLease {
+        const instance = this.#instanceRegistry.get(identity.descriptor.name);
+        if (instance === undefined) {
+            throw retiredGeneration(identity.descriptor.name);
+        }
+        let lease: { readonly instance: ReverseInstance; release(): void };
         try {
-            generation = this.#instanceRegistry.acquireGeneration(
-                identity.descriptor.name,
-            );
+            lease = instance.acquireLease();
         } catch {
             throw retiredGeneration(identity.descriptor.name);
         }
-        if (generation.descriptor === identity.descriptor) return generation;
-        generation.release();
+        if (lease.instance === identity.descriptor) {
+            return {
+                descriptor: identity.descriptor,
+                release: () => lease.release(),
+            };
+        }
+        lease.release();
         throw retiredGeneration(identity.descriptor.name);
     }
 

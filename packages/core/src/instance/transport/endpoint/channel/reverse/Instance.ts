@@ -6,10 +6,13 @@ export interface ReverseInstance {
     reverseConnection?: TransportConnection;
 }
 
-export interface ReverseInstanceLookup {
-    acquireGeneration(instanceName: string): {
-        readonly descriptor: ReverseInstance;
+export interface ReverseInstanceHandle extends ReverseInstance {
+    acquireLease(): {
+        readonly instance: ReverseInstance;
         release(): void;
     };
-    get(instanceName: string): ReverseInstance | undefined;
+}
+
+export interface ReverseInstanceLookup {
+    get(instanceName: string): ReverseInstanceHandle | undefined;
 }

@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerInstance } from "../worker/instance/Instance.js";
+import type { WorkerInstance } from "../instance/runtime/index.js";
 import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
