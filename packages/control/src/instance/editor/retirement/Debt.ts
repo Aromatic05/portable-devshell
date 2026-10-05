@@ -10,14 +10,14 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import {
-    closeInstanceResources,
-    createInstance,
+    retireInstanceForDelete,
     type Instance,
     type InstanceRegistry,
 } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";
+import { closeDescriptorResourcesBestEffort } from "./State.js";
 import type { InstanceRetirementCoordinator } from "./index.js";
 
 export interface InstanceCleanupDebtRecord {
@@ -198,6 +198,9 @@ export class InstanceCleanupDebt {
     readonly #instanceRegistry: InstanceRegistry;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
+    readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
+    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
+    readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(
         options: InstanceEditorCoordinatorOptions,
@@ -213,6 +216,9 @@ export class InstanceCleanupDebt {
         this.#instanceRegistry = options.instanceRegistry;
         this.#retirement = retirement;
         this.#syncMcpEndpoint = syncMcpEndpoint;
+        this.#createRuntimeInstance = options.createRuntimeInstance;
+        this.#retireRuntimeInstance = options.retireRuntimeInstance;
+        this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
     retainDescriptor(
@@ -338,6 +344,8 @@ export class InstanceCleanupDebt {
                 await this.#instanceRegistry.remove(
                     record.instance.name,
                     candidate,
+                    async (retiring) =>
+                        await this.#retireRuntimeInstance(retiring),
                 );
                 this.#instanceChanges.publish("registry");
             } catch (error) {
@@ -345,13 +353,16 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-
         await this.#retirement.notification
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
+
         if (failures.length > 0) {
             if (candidate !== undefined) {
-                await closeInstanceResources(candidate).catch(
+                await closeDescriptorResourcesBestEffort(
+                    candidate,
+                    this.#finalizeRuntimeInstance,
+                ).catch(
                     (error) => failures.push(error),
                 );
             }
@@ -364,7 +375,7 @@ export class InstanceCleanupDebt {
                     instance.name === record.instance.name && instance.enabled,
             );
             if (configured !== undefined) {
-                candidate = createInstance(configured);
+                candidate = this.#createRuntimeInstance(configured);
             }
         }
         if (candidate === undefined) return failures;
@@ -386,7 +397,10 @@ export class InstanceCleanupDebt {
                     (cleanupError) => failures.push(cleanupError),
                 );
             }
-            await closeInstanceResources(candidate).catch(
+            await closeDescriptorResourcesBestEffort(
+                candidate,
+                this.#finalizeRuntimeInstance,
+            ).catch(
                 (cleanupError) => failures.push(cleanupError),
             );
         }
@@ -398,10 +412,9 @@ export class InstanceCleanupDebt {
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
         const descriptor =
-            record.operation === "delete"
-                ? (this.#cleanupOnlyDescriptors.get(record.instance.name) ??
-                  createInstance(record.instance))
-                : createInstance(record.instance);
+            this.#cleanupOnlyDescriptors.get(record.instance.name) ??
+            this.#createRuntimeInstance(record.instance);
+        this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
         if (record.operation === "delete") {
             this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
             try {
@@ -414,18 +427,32 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
+        if (!descriptor.retired) {
+            await descriptor
+                .retire(async () => {
+                    await this.#retireRuntimeInstance(descriptor);
+                })
+                .catch((error) => failures.push(error));
+        }
         await this.#retirement.notification
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
+        let workerRetirementSucceeded = false;
         if (record.operation === "disable") {
-            await this.#mcp
-                ?.retireMcpApp(record.instance.name)
-                .catch((error) => failures.push(error));
             failures.push(
                 ...(await this.#retirement.notification.retireDisable(
                     record.instance,
                 )),
             );
+            await this.#mcp
+                ?.retireMcpApp(record.instance.name)
+                .catch((error) => failures.push(error));
+            try {
+                await descriptor.worker.stop();
+                workerRetirementSucceeded = true;
+            } catch (error) {
+                failures.push(error);
+            }
             await this.#retirement.notification
                 .notifyDisabled(record.instance)
                 .catch((error) => failures.push(error));
@@ -435,14 +462,34 @@ export class InstanceCleanupDebt {
                     record.instance,
                 )),
             );
+            try {
+                await retireInstanceForDelete(
+                    descriptor,
+                    record.skipRuntimeRetirement,
+                );
+                workerRetirementSucceeded = true;
+            } catch (error) {
+                failures.push(error);
+            }
             await this.#retirement.notification
                 .notifyDeleted(record.instance)
                 .catch((error) => failures.push(error));
         }
-        await closeInstanceResources(descriptor).catch((error) =>
-            failures.push(error),
-        );
-        if (record.operation === "delete") {
+        let descriptorFinalized = false;
+        if (workerRetirementSucceeded) {
+            await closeDescriptorResourcesBestEffort(
+                descriptor,
+                this.#finalizeRuntimeInstance,
+            )
+                .then(() => {
+                    descriptorFinalized = true;
+                })
+                .catch((error) => failures.push(error));
+        }
+        if (
+            descriptorFinalized &&
+            this.#cleanupOnlyDescriptors.get(record.instance.name) === descriptor
+        ) {
             this.#cleanupOnlyDescriptors.delete(record.instance.name);
         }
         return failures;

@@ -1,11 +1,11 @@
 import type {
-    JsonValue,
-    ToolCallContext,
     ToolCallQuery,
     ToolCallRecord,
+    ToolCallApi,
 } from "@portable-devshell/shared";
 
-import type { McpEndpointEnvironmentHandshake } from "../../instance/Gateway.js";
+/** The single global tool-call ingress supplied by Control. */
+export type ToolCallIngressPort = ToolCallApi;
 
 export interface McpEndpointWorkerPort {
     snapshot(): { ready?: boolean };
@@ -38,7 +38,6 @@ export interface McpEndpointWorkerPort {
           }
     >;
     touchTemporaryDirectory?(path: string): Promise<void>;
-    readonly handshake?: McpEndpointEnvironmentHandshake;
 }
 
 export interface McpEndpointCallContext {

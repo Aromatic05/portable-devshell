@@ -4,27 +4,67 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
+import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import {
-    ConfigEditorCoordinator,
     ConfigEngine,
     type ConfigEngineOptions,
     type ConfigRuntimeChangeSet,
-    HttpEndpointPreflight,
-    InstanceEditorCoordinator,
-    InstanceRegistry,
-    InstanceRegistryFactory,
-    createDefaultControlConfig,
-} from "../../../../src/testing.ts";
-import type { InstanceDescriptor } from "@portable-devshell/core";
+} from "../../../../src/config/engine/index.ts";
+import { HttpEndpointPreflight } from "../../../../src/config/engine/Http.ts";
+import {
+    InstanceEditorCoordinator as ProductionInstanceEditorCoordinator,
+    type InstanceEditorCoordinatorOptions,
+} from "../../../../src/instance/editor/index.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
+import { InstanceRegistry, type Instance } from "@portable-devshell/core";
+import { createContextRuntime } from "@portable-devshell/core/context";
+import { createDefaultControlConfig, type ControlConfig } from "@portable-devshell/shared";
+import {
+    buildTestInstanceRegistry,
+    createTestInstance,
+    testRuntimeHooks,
+} from "../../../support/InstanceRuntime.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
-import { ContextModule } from "../../../../src/context/Module.ts";
 import {
     MASKED_CONFIG_TOKEN,
     normalizeConfigInstanceDraft,
-    type ControlConfig,
     type JsonValue,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+
+class InstanceRegistryFactory {
+    build(config: ControlConfig): InstanceRegistry {
+        return buildTestInstanceRegistry(config);
+    }
+}
+
+class InstanceEditorCoordinator extends ProductionInstanceEditorCoordinator {
+    readonly changes: InstanceChangeHub;
+
+    constructor(
+        options: Pick<InstanceEditorCoordinatorOptions, "engine" | "instanceRegistry"> &
+            Partial<InstanceEditorCoordinatorOptions>,
+    ) {
+        const defaults = testRuntimeHooks();
+        const changes = options.instanceChanges ?? new InstanceChangeHub();
+        super({
+            ...defaults,
+            instanceChanges: changes,
+            ...options,
+            updateApprovalPolicy:
+                options.updateApprovalPolicy ??
+                (async (instance, policy) => {
+                    const descriptor = options.instanceRegistry.get(instance) as
+                        | (ReturnType<typeof options.instanceRegistry.get> & {
+                              approval?: { setPolicy(policy: unknown): void };
+                          })
+                        | undefined;
+                    descriptor?.approval?.setPolicy(policy);
+            }),
+        });
+        this.changes = changes;
+    }
+}
 
 test("config editor returns each patch apply summary to the initiating request", async () => {
     let config = createConfig();
@@ -43,7 +83,7 @@ test("config editor returns each patch apply summary to the initiating request",
             config = nextConfig;
         },
     });
-    const service = new ConfigEditorCoordinator({ engine });
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: registry,
@@ -166,13 +206,10 @@ test("config batch update persists instance, MCP, and Web changes as one transac
             },
         },
     );
-    const service = new ConfigEditorCoordinator({
-        engine,
-        instances: new InstanceEditorCoordinator({
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }),
-    });
+        }));
 
     const result = (await service.updateConfig({
         instance: {
@@ -237,13 +274,10 @@ test("config batch preflight failure leaves every requested scope unchanged", as
             },
         },
     );
-    const service = new ConfigEditorCoordinator({
-        engine,
-        instances: new InstanceEditorCoordinator({
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }),
-    });
+        }));
 
     try {
         await assert.rejects(
@@ -296,7 +330,7 @@ test("config view and validation mask all tokens while updates preserve masked s
     const engine = configEngine(() => config, (nextConfig) => {
         config = nextConfig;
     });
-    const service = new ConfigEditorCoordinator({ engine });
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: registry,
@@ -376,8 +410,7 @@ test("listener preflight rejects an occupied Web bind without persisting configu
     );
     const address = occupied.address();
     assert.ok(typeof address === "object" && address !== null);
-    const service = new ConfigEditorCoordinator({
-        engine: configEngine(
+    const engine = configEngine(
             () => config,
             (nextConfig) => {
                 config = nextConfig;
@@ -390,8 +423,8 @@ test("listener preflight rejects an occupied Web bind without persisting configu
                     },
                 },
             },
-        ),
-    });
+        );
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
 
     try {
         await assert.rejects(
@@ -426,15 +459,14 @@ test("listener preflight does not treat a disabled MCP endpoint as active", asyn
     assert.ok(typeof address === "object" && address !== null);
     config.mcp.listenPort = address.port;
     config.web.listenPort = address.port;
-    const service = new ConfigEditorCoordinator({
-        engine: configEngine(
+    const engine = configEngine(
             () => config,
             (nextConfig) => {
                 config = nextConfig;
             },
             { configStore: { async write() {} } },
-        ),
-    });
+        );
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
 
     try {
         await assert.rejects(
@@ -454,8 +486,7 @@ test("listener preflight does not treat a disabled MCP endpoint as active", asyn
 test("endpoint runtime failure restores the prior persisted configuration", async () => {
     let config = createConfig();
     const writes: ControlConfig[] = [];
-    const service = new ConfigEditorCoordinator({
-        engine: configEngine(
+    const engine = configEngine(
             () => config,
             (nextConfig) => {
                 config = nextConfig;
@@ -474,8 +505,8 @@ test("endpoint runtime failure restores the prior persisted configuration", asyn
                     },
                 },
             },
-        ),
-    });
+        );
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
 
     await assert.rejects(
         service.updateWebConfig({
@@ -511,7 +542,7 @@ test("namespace auth updates apply runtime protection before exposing OAuth", as
             },
         },
     );
-    const service = new ConfigEditorCoordinator({ engine });
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: new InstanceRegistryFactory().build(config),
@@ -578,7 +609,7 @@ test("config editor reconfigures and disables a running instance without replaci
         },
     });
     const enabledChanges: boolean[] = [];
-    registry.onChange(() => {
+    service.changes.onChange(() => {
         enabledChanges.push(registry.get("demo-local")?.enabled === true);
     });
     await service.disableInstance({ instanceName: "demo-local" });
@@ -595,7 +626,10 @@ test("config editor reconfigures and disables a running instance without replaci
     };
     assert.equal(reconfigure.alerts?.intervalMs, 2_000);
     assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
-    assert.deepEqual(approvalPolicies, [{ mode: "ask", rules: undefined }]);
+    assert.deepEqual(approvalPolicies, [
+        { mode: "ask", rules: undefined },
+        { mode: "ask", rules: undefined },
+    ]);
     assert.equal(reconfigure.effectiveSecurityMode, "disabled");
     assert.equal(
         reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE,
@@ -732,13 +766,13 @@ test("instance cleanup debt survives coordinator restart and gates the next gene
                 async retireRuntime() {},
             });
         },
-    } as never;
+    };
     const first = new InstanceEditorCoordinator({
         cleanupDebtFile,
         engine: configEngine(() => config, (nextConfig) => {
             config = nextConfig;
         }),
-        instanceConfigMapper: mapper,
+        createRuntimeInstance: mapper.map,
         instanceRegistry: firstRegistry,
     });
     first.registerInstanceGenerationRetirement(async () => {
@@ -759,7 +793,7 @@ test("instance cleanup debt survives coordinator restart and gates the next gene
         engine: configEngine(() => config, (nextConfig) => {
             config = nextConfig;
         }),
-        instanceConfigMapper: mapper,
+        createRuntimeInstance: mapper.map,
         instanceRegistry: secondRegistry,
     });
     let replayedGenerationRetirement = 0;
@@ -790,13 +824,13 @@ test("failed cleanup debt persistence does not leave a phantom in-memory debt", 
         map() {
             return descriptor({ snapshot: stoppedSnapshot });
         },
-    } as never;
+    };
     const service = new InstanceEditorCoordinator({
         cleanupDebtFile,
         engine: configEngine(() => config, (nextConfig) => {
             config = nextConfig;
         }),
-        instanceConfigMapper: mapper,
+        createRuntimeInstance: mapper.map,
         instanceRegistry: registry,
     });
     let generationRetirements = 0;
@@ -936,10 +970,14 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
             instance.registerInstanceDisabled(async () => {
                 committed += 1;
             });
-            const configEditor = new ConfigEditorCoordinator({
+            const configEditor = makeConfigEditor(
                 engine,
-                instances: instance,
-            });
+                () => config,
+                (nextConfig) => {
+                    config = nextConfig;
+                },
+                instance,
+            );
 
             const warnings = await captureWarnings(
                 async () =>
@@ -1001,8 +1039,8 @@ test("disable commits before stopping the Worker and retiring interactions", asy
 
     assert.deepEqual(actions.slice(0, 3), [
         "config.write",
-        "worker.stop",
         "interaction.retire:demo-local",
+        "worker.stop",
     ]);
     assert.equal(config.instances[0]?.enabled, false);
 });
@@ -1126,7 +1164,7 @@ test("disable committed listeners run after persisted descriptor state is visibl
         }),
         instanceRegistry: registry,
     });
-    registry.onChange(() => {
+    service.changes.onChange(() => {
         observed.push(`registry:${registry.get("demo-local")?.enabled}`);
     });
     service.registerInstanceDisabled(async () => {
@@ -1279,13 +1317,10 @@ test("batch instance failure restores a hot-applied endpoint before configuratio
             runtimePreflight: { async assertAvailable() {} },
         },
     );
-    const service = new ConfigEditorCoordinator({
-        engine,
-        instances: new InstanceEditorCoordinator({
+    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }),
-    });
+        }));
 
     await assert.rejects(
         service.updateConfig({
@@ -1399,12 +1434,10 @@ test("successful instance rebuild replaces the descriptor then closes the old Wo
                 },
             },
         ),
-        instanceConfigMapper: {
-            map() {
-                actions.push("replacement.prepare");
-                return replacement;
-            },
-        } as never,
+        createRuntimeInstance: () => {
+            actions.push("replacement.prepare");
+            return replacement;
+        },
         instanceRegistry: registry,
     });
 
@@ -1453,7 +1486,7 @@ test("instance rebuild cleanup debt withholds replacement and reconciles before 
                 },
             },
         ),
-        instanceConfigMapper: { map: () => replacement } as never,
+        createRuntimeInstance: () => replacement,
         instanceRegistry: registry,
     });
     service.registerInstanceGenerationRetirement(async () => {
@@ -1521,7 +1554,7 @@ test("failed rebuild persistence closes the uncommitted replacement descriptor",
                 },
             },
         ),
-        instanceConfigMapper: { map: () => replacement } as never,
+        createRuntimeInstance: () => replacement,
         instanceRegistry: registry,
     });
 
@@ -1681,12 +1714,12 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
     config.mcp.enabled = false;
     config.instances[0]!.enabled = false;
     const instances = new InstanceRegistry([]);
-    const contexts = new ContextModule({
+    const contexts = createContextRuntime({
         contextFile: contextPath,
         instances,
     });
     await contexts.initialize();
-    const context = await contexts.registry.create({
+    const context = await contexts.api.registry.create({
         principal: "local",
         environments: [{ instance: "demo-local", workspace: "/historical" }],
     });
@@ -1696,7 +1729,7 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
             config = nextConfig;
         }),
         detachContextInstance: async (instance) => {
-            await contexts.detachInstance(instance);
+            await contexts.api.detachInstance(instance);
         },
         instanceRegistry: instances,
     });
@@ -1704,33 +1737,33 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
     await service.deleteInstance({ instanceName: "demo-local" });
 
     assert.equal(config.instances.length, 0);
-    const detached = await contexts.registry.lookup(context.ctxId, {
+    const detached = await contexts.api.registry.lookup(context.ctxId, {
         principal: "local",
     });
     assert.equal(detached.status, "active");
     assert.deepEqual(detached.environments, []);
-    assert.equal((await contexts.renew(context.ctxId)).status, "active");
+    assert.equal((await contexts.api.renew(context.ctxId)).status, "active");
 
-    const restoredContexts = new ContextModule({
+    const restoredContexts = createContextRuntime({
         contextFile: contextPath,
         instances,
     });
     await restoredContexts.initialize();
     assert.deepEqual(
         (
-            await restoredContexts.registry.lookup(context.ctxId, {
+            await restoredContexts.api.registry.lookup(context.ctxId, {
                 principal: "local",
             })
         ).environments,
         [],
     );
-    await restoredContexts.registry.attachEnvironment(context.ctxId, {
+    await restoredContexts.api.registry.attachEnvironment(context.ctxId, {
         instance: "replacement",
         workspace: "/replacement",
     });
     assert.deepEqual(
         (
-            await restoredContexts.registry.lookup(context.ctxId, {
+            await restoredContexts.api.registry.lookup(context.ctxId, {
                 principal: "local",
             })
         ).environments,
@@ -1786,31 +1819,27 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
     let config = createConfig();
     config.mcp.enabled = false;
     config.instances[0]!.enabled = false;
-    const contexts = new ContextModule({
+    const cleanupOnly = new Map<string, ReturnType<typeof descriptor>>();
+    const contexts = createContextRuntime({
         contextFile: join(contextHome, "contexts.json"),
-        instances,
+        instances: {
+            get: (instance) => instances.get(instance) ?? cleanupOnly.get(instance),
+        },
     });
     await contexts.initialize();
-    const context = await contexts.registry.create({
+    const context = await contexts.api.registry.create({
         principal: "local",
         environments: [{ instance: instanceName, workspace: "/historical" }],
     });
-    await contexts.registry.recordEnvironmentCleanup(context.ctxId, {
+    await contexts.api.registry.recordEnvironmentCleanup(context.ctxId, {
         instance: instanceName,
         kind: "instance_reference",
     });
-    await contexts.registry.recordEnvironmentCleanup(context.ctxId, {
+    await contexts.api.registry.recordEnvironmentCleanup(context.ctxId, {
         instance: instanceName,
         kind: "alerts",
         workspace: "/historical",
     });
-    instances.markOwned(instanceName);
-    instances.retainConnectionReference(
-        instanceName,
-        instances.get(instanceName)!.worker,
-        context.ctxId,
-        true,
-    );
     const service = new InstanceEditorCoordinator({
         cleanupDebtFile: join(contextHome, "cleanup-debt.json"),
         engine: configEngine(
@@ -1827,24 +1856,26 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
             },
         ),
         detachContextInstance: async (instance) => {
-            await contexts.detachInstance(instance);
+            await contexts.api.detachInstance(instance);
         },
         instanceRegistry: instances,
         reconcileContextInstanceCleanup: async (
             instance,
-            cleanupDescriptor,
+            cleanupDescriptor: Instance | undefined,
         ) => {
-            await contexts.cleanup.reconcileInstance(instance, {
-                releaseAlerts: async (workspace) => {
-                    assert.ok(cleanupDescriptor);
-                    if (!cleanupDescriptor.worker.snapshot().ready)
-                        await cleanupDescriptor.worker.start();
-                    await cleanupDescriptor.worker.releaseAlerts(workspace);
-                },
-                releaseInstanceReference: async (ctxId) => {
-                    instances.releaseConnectionReference(instance, ctxId);
-                },
-            });
+            const currentDescriptor = requireCleanupDescriptor(cleanupDescriptor);
+            const cleanupCapability = descriptor(
+                currentDescriptor.worker as unknown as Record<string, unknown>,
+                { name: instance, mcpPath: currentDescriptor.mcpPath },
+            );
+            cleanupOnly.set(instance, cleanupCapability);
+            try {
+                if (!cleanupCapability.worker.snapshot().ready)
+                    await cleanupCapability.worker.start();
+                await contexts.api.cleanup.reconcileInstance(instance);
+            } finally {
+                cleanupOnly.delete(instance);
+            }
         },
     });
 
@@ -1858,8 +1889,8 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
         "worker.close",
     ]);
     assert.equal(instances.get(instanceName), undefined);
-    assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), []);
-    await contexts.cleanup.reconcile();
+    assert.deepEqual(await contexts.api.registry.listEnvironmentCleanup(), []);
+    await contexts.reconcile();
 });
 
 test("failed Context cleanup keeps both debts and cleanup capability through retry and replay", async (t) => {
@@ -1918,18 +1949,21 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         config.instances[0]!.mcp.path = `/${instanceName}/mcp`;
         config.instances[0]!.enabled = false;
         config.mcp.enabled = false;
-        const contexts = new ContextModule({
+        const cleanupOnly = new Map<string, ReturnType<typeof descriptor>>();
+        const contexts = createContextRuntime({
             contextFile: contextPath,
-            instances,
+            instances: {
+                get: (instance) => instances.get(instance) ?? cleanupOnly.get(instance),
+            },
         });
         await contexts.initialize();
-        const context = await contexts.registry.create({
+        const context = await contexts.api.registry.create({
             principal: "local",
             environments: [
                 { instance: instanceName, workspace: "/historical" },
             ],
         });
-        await contexts.registry.recordEnvironmentCleanup(context.ctxId, {
+        await contexts.api.registry.recordEnvironmentCleanup(context.ctxId, {
             instance: instanceName,
             kind: "alerts",
             workspace: "/historical",
@@ -1955,30 +1989,28 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
                     },
                 ),
                 detachContextInstance: async (instance) => {
-                    await contexts.detachInstance(instance);
+                    await contexts.api.detachInstance(instance);
                 },
-                instanceConfigMapper:
-                    mapDescriptor === undefined
-                        ? undefined
-                        : ({ map: () => mapDescriptor } as never),
+                createRuntimeInstance: (instance) =>
+                    mapDescriptor ?? createTestInstance(instance),
                 instanceRegistry: registry,
                 reconcileContextInstanceCleanup: async (
                     instance,
-                    cleanupDescriptor,
+                    cleanupDescriptor: Instance | undefined,
                 ) => {
-                    await contexts.cleanup.reconcileInstance(instance, {
-                        releaseAlerts: async (workspace) => {
-                            assert.ok(cleanupDescriptor);
-                            if (!cleanupDescriptor.worker.snapshot().ready)
-                                await cleanupDescriptor.worker.start();
-                            await cleanupDescriptor.worker.releaseAlerts(
-                                workspace,
-                            );
-                        },
-                        releaseInstanceReference: async (ctxId) => {
-                            registry.releaseConnectionReference(instance, ctxId);
-                        },
-                    });
+                    const currentDescriptor = requireCleanupDescriptor(cleanupDescriptor);
+                    const cleanupCapability = descriptor(
+                        currentDescriptor.worker as unknown as Record<string, unknown>,
+                        { name: instance, mcpPath: currentDescriptor.mcpPath },
+                    );
+                    cleanupOnly.set(instance, cleanupCapability);
+                    try {
+                        if (!cleanupCapability.worker.snapshot().ready)
+                            await cleanupCapability.worker.start();
+                        await contexts.api.cleanup.reconcileInstance(instance);
+                    } finally {
+                        cleanupOnly.delete(instance);
+                    }
                 },
             });
 
@@ -1988,7 +2020,7 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         });
         assert.equal(warnings.length, 1);
         assert.equal(instances.get(instanceName), undefined);
-        assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), [
+        assert.deepEqual(await contexts.api.registry.listEnvironmentCleanup(), [
             {
                 ctxId: context.ctxId,
                 cleanup: {
@@ -2047,7 +2079,7 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
             assert.equal(replayRegistry.get(instanceName), undefined);
             assert.ok(events.includes("replay.start"));
         }
-        assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), []);
+        assert.deepEqual(await contexts.api.registry.listEnvironmentCleanup(), []);
         assert.equal(
             JSON.parse(await readFile(cleanupDebtFile, "utf8")).length,
             0,
@@ -2821,8 +2853,7 @@ test("config editor applies Core path updates transactionally and restores on ru
     const changeHub = new ConfigChangeHub();
     changeHub.onChange((change) => committed.push([...change.paths]));
     let failRuntime = false;
-    const service = new ConfigEditorCoordinator({
-        engine: configEngine(
+    const engine = configEngine(
             () => config,
             (nextConfig) => {
                 config = nextConfig;
@@ -2851,7 +2882,9 @@ test("config editor applies Core path updates transactionally and restores on ru
                 },
                 runtimePreflight: { async assertAvailable() {} },
             },
-        ),
+        );
+    const service = makeConfigEditor(engine, () => config, (nextConfig) => {
+        config = nextConfig;
     });
 
     await service.updateCorePaths({
@@ -2890,8 +2923,7 @@ test("MCP OAuth2 approval changes also invalidate an active Web OAuth2 runtime",
         enabled: true,
     };
     const changes: Array<{ mcp: boolean; web: boolean }> = [];
-    const service = new ConfigEditorCoordinator({
-        engine: configEngine(
+    const engine = configEngine(
             () => config,
             (nextConfig) => {
                 config = nextConfig;
@@ -2917,7 +2949,9 @@ test("MCP OAuth2 approval changes also invalidate an active Web OAuth2 runtime",
                 },
                 runtimePreflight: { async assertAvailable() {} },
             },
-        ),
+        );
+    const service = makeConfigEditor(engine, () => config, (nextConfig) => {
+        config = nextConfig;
     });
 
     await service.updateMcpConfig({
@@ -2966,6 +3000,33 @@ function configEngine(
     });
 }
 
+function makeConfigEditor(
+    engine: ConfigEngine,
+    getConfig: () => ControlConfig,
+    setConfig: (config: ControlConfig) => void,
+    instances?: InstanceEditorCoordinator,
+): ConfigEditorCoordinator {
+    return new ConfigEditorCoordinator({
+        engine,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                setConfig(nextConfig);
+            },
+        },
+        getConfig,
+        setConfig,
+        instances,
+    });
+}
+
+function requireCleanupDescriptor(
+    value: Instance | undefined,
+): Instance {
+    if (value === undefined)
+        throw new Error("Expected a Context cleanup descriptor.");
+    return value;
+}
+
 function createService(
     getConfig: () => ReturnType<typeof createConfig>,
     setConfig: (config: ReturnType<typeof createConfig>) => void,
@@ -2981,13 +3042,40 @@ function descriptor(
     worker: Record<string, unknown>,
     extra: Record<string, unknown> = {},
 ) {
-    return {
+    const config = normalizeConfigInstanceDraft({
+        enabled: (extra.enabled as boolean | undefined) ?? true,
+        extensions: {
+            model:
+                (extra.modelExtensions as string[] | undefined) ?? ["instance"],
+        },
+        mcp: {
+            contextMode:
+                (extra.mcpContextMode as "explicit" | "openai-session" | undefined) ??
+                "openai-session",
+            enabled: (extra.mcpEnabled as boolean | undefined) ?? true,
+            path: (extra.mcpPath as string | undefined) ?? "/demo-local/mcp",
+        },
+        name: (extra.name as string | undefined) ?? "demo-local",
+        provider: (extra.provider as "local" | undefined) ?? "local",
+    });
+    const instance = createTestInstance(config, {
+        managementMode: "controllerManaged",
+        async listApprovals() {
+            return [];
+        },
+        async cancelApproval() {
+            throw new Error("no pending approval");
+        },
+        async retireRuntime() {},
+        async retireProviderResources() {},
+        ...worker,
+    });
+    const runtimeFields = {
         approval: {
             close() {},
             async retire() {},
             setPolicy() {},
         },
-        enabled: true,
         goal: {
             async continuation() {
                 return {};
@@ -3007,10 +3095,6 @@ function descriptor(
             },
             async touch() {},
         },
-        mcpEnabled: true,
-        mcpPath: "/demo-local/mcp",
-        modelExtensions: ["instance"],
-        name: "demo-local",
         todo: {
             async cancelAll() {},
             async control() {
@@ -3031,20 +3115,22 @@ function descriptor(
                 throw new Error("unused");
             },
         },
-        worker: {
-            managementMode: "controllerManaged",
-            async listApprovals() {
-                return [];
-            },
-            async cancelApproval() {
-                throw new Error("no pending approval");
-            },
-            async retireRuntime() {},
-            async retireProviderResources() {},
-            ...worker,
-        },
-        ...extra,
-    } as never;
+    };
+    const reserved = new Set([
+        "enabled",
+        "mcpEnabled",
+        "mcpPath",
+        "mcpContextMode",
+        "modelExtensions",
+        "name",
+        "provider",
+        "worker",
+    ]);
+    for (const [key, value] of Object.entries(extra)) {
+        if (!reserved.has(key))
+            (runtimeFields as Record<string, unknown>)[key] = value;
+    }
+    return Object.assign(instance, runtimeFields);
 }
 
 interface TestLifecycleDescriptor {

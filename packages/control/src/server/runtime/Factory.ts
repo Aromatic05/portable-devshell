@@ -6,7 +6,6 @@ import {
     Endpoint,
     connectControlChannel,
     createContextTransport,
-    createInstanceTransport,
     createServerTransport,
 } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../extension/host/Host.js";
@@ -31,7 +30,7 @@ import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ArtifactModule } from "../../artifact/Module.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
-import { ContextModule } from "@portable-devshell/core/context";
+import { createContextRuntime } from "@portable-devshell/core/context";
 import { McpControlModule } from "../mcp/Module.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
 import { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -91,13 +90,12 @@ export class ControlRuntimeFactory {
                     ),
             });
             const contextTransport = createContextTransport(internalEndpoint);
-            const instanceTransport = createInstanceTransport(internalEndpoint);
             const serverTransport = createServerTransport(internalEndpoint, {
                 clientKind: "cli",
             });
-            const contexts = new ContextModule({
+            const contexts = createContextRuntime({
                 contextFile: controlPaths.contextsFile,
-                instances: instanceTransport,
+                instances: options.state.instances,
             });
             const mcp = new McpControlModule({
                 artifact,
@@ -126,6 +124,14 @@ export class ControlRuntimeFactory {
                 setConfig: (config) => options.state.setConfig(config),
             });
             const instanceEditor = new InstanceEditorCoordinator({
+                createRuntimeInstance: (config) => options.state.instanceRuntimes.create(config),
+                retireRuntimeInstance: (descriptor) => options.state.instanceRuntimes.retire(descriptor),
+                finalizeRuntimeInstance: (descriptor) => options.state.instanceRuntimes.finalize(descriptor),
+                updateApprovalPolicy: async (name, policy) => {
+                    const descriptor = options.state.instances.get(name);
+                    if (descriptor !== undefined)
+                        options.state.instanceRuntimes.get(descriptor).approval.setPolicy(policy);
+                },
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
                 detachContextInstance: async (instance) => {
@@ -139,6 +145,10 @@ export class ControlRuntimeFactory {
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({
+                publishConfigChange: (paths) => options.state.configChanges.publish(paths),
+                createRuntimeInstance: (config) => options.state.instanceRuntimes.create(config),
+                retireRuntimeInstance: (descriptor) => options.state.instanceRuntimes.retire(descriptor),
+                finalizeRuntimeInstance: (descriptor) => options.state.instanceRuntimes.finalize(descriptor),
                 assertCleanupSettled: async (instance) =>
                     await instanceEditor.assertInstanceCleanupSettled(instance),
                 configStore: options.state.configStore,
@@ -239,9 +249,19 @@ export class ControlRuntimeFactory {
                                         provider: instance.provider,
                                     })),
                             subscriptions: processSubscriptions,
+                            readLogs: async (name, query) => {
+                                const descriptor = options.state.instances.get(name);
+                                if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
+                                return options.state.instanceRuntimes.get(descriptor).tools.readLogs(query);
+                            },
                         }),
                     }),
                     instances: options.state.instances,
+                    readToolCalls: async (name, query) => {
+                        const descriptor = options.state.instances.get(name);
+                        if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
+                        return options.state.instanceRuntimes.get(descriptor).tools.readToolCalls(query);
+                    },
                     paths: extensionPaths,
                     points: extensionPoints,
                     toolCallDecorator: mcp.toolProvenance,
@@ -270,6 +290,7 @@ export class ControlRuntimeFactory {
                 },
             );
             return new ControlRuntime({
+                instanceRuntimes: options.state.instanceRuntimes,
                 contexts,
                 contextTransport,
                 internalControl: {

@@ -6,7 +6,6 @@ import type {
 
 import type { Instance } from "@portable-devshell/core";
 import {
-    OperationalOverviewInstanceCollector,
     type OperationalOverviewInstanceCollection,
 } from "./collector/Instance.js";
 import {
@@ -43,7 +42,7 @@ export interface OperationalOverviewSystemCollectorPort {
 }
 
 export interface OperationalOverviewServiceOptions {
-    instanceCollector?: OperationalOverviewInstanceCollectorPort;
+    instanceCollector: OperationalOverviewInstanceCollectorPort;
     instances: OperationalOverviewRegistryPort;
     now?: () => Date;
     oauthApprovals?: () => OperationalOverviewApprovalPort | undefined;
@@ -63,11 +62,7 @@ export class OperationalOverviewService {
     readonly #uptimeSeconds: () => number;
 
     constructor(options: OperationalOverviewServiceOptions) {
-        this.#instanceCollector =
-            options.instanceCollector ??
-            new OperationalOverviewInstanceCollector({
-                activityLimit,
-            });
+        this.#instanceCollector = options.instanceCollector;
         this.#instances = options.instances;
         this.#now = options.now ?? (() => new Date());
         this.#oauthApprovals = options.oauthApprovals ?? (() => undefined);

@@ -4,6 +4,7 @@ export { McpOAuthProtectedResource } from "./auth/oauth/Resource.js";
 export { McpOAuthApprovalService } from "./auth/oauth/interaction/Approval.js";
 export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } from "./auth/oauth/provider/Provider.js";
 export { type McpEndpointWorkerPort } from "./endpoint/call/Port.js";
+export { type ToolCallIngressPort } from "./endpoint/call/Port.js";
 export { type McpToolProvenanceRecorder } from "./endpoint/tool/Provenance.js";
 export { mcpAllInstances, mcpTools, McpToolRegistry, type McpToolRegistration, type McpToolRegistrationScope, type McpToolRegistryEntry } from "./endpoint/tool/Registry.js";
 export { McpHost, type McpHostInstanceConfig, McpRuntimeState, type WorkerInstanceLike } from "./host/Host.js";

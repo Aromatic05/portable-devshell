@@ -7,14 +7,11 @@ import {
     type OAuthApprovalRequest,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
+import { Instance } from "@portable-devshell/core";
+import type { OperationalOverviewInstanceData } from "../../../src/overview/collector/Instance.ts";
+import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
 
 import { OperationalOverviewService } from "../../../src/overview/Service.ts";
-import { createTestInstanceDescriptor } from "../../support/ControlFixtures.ts";
-import {
-    createTestApprovalApi,
-    createTestInstanceDomainRuntime,
-    createTestTaskApi,
-} from "../../../src/testing.ts";
 
 const now = new Date("2026-07-31T00:00:00.000Z");
 const healthySystemCollector = {
@@ -30,6 +27,49 @@ const healthySystemCollector = {
         };
     },
 };
+
+function instance(name: string, worker: object, options: {
+    mcpEnabled?: boolean;
+    provider?: Instance["provider"];
+} = {}): Instance {
+    return new Instance({
+        enabled: true,
+        mcpEnabled: options.mcpEnabled ?? false,
+        mcpPath: "",
+        modelExtensions: [],
+        name,
+        provider: options.provider ?? "local",
+        worker: worker as never,
+    });
+}
+
+function instanceData(options: {
+    pendingApprovals?: unknown[];
+    todos?: ActiveTodoSummary[];
+    calls?: ToolCallRecord[];
+    failureSummary?: { count: number; latest?: ToolCallRecord };
+    readApprovals?: () => Promise<never[]>;
+    readTodos?: () => ActiveTodoSummary[];
+    readCalls?: (query: unknown) => Promise<ToolCallRecord[]>;
+    readFailures?: (sinceMs: number, untilMs: number) => Promise<{ count: number; latest?: ToolCallRecord }>;
+} = {}): OperationalOverviewInstanceData {
+    return {
+        approval: {
+            listPendingApprovals: options.readApprovals ?? (async () => options.pendingApprovals ?? []),
+        },
+        task: {
+            todo: { summaries: options.readTodos ?? (() => options.todos ?? []) },
+        },
+        tools: {
+            readToolCalls: options.readCalls ?? (async () => options.calls ?? []),
+            readToolCallFailureSummary: options.readFailures ?? (async () => options.failureSummary ?? { count: 0 }),
+        },
+    } as OperationalOverviewInstanceData;
+}
+
+function collector(data: (descriptor: Instance) => OperationalOverviewInstanceData) {
+    return new OperationalOverviewInstanceCollector({ activityLimit: 20, instanceData: data });
+}
 
 test("operational overview prioritizes failures, approvals, activity, and todos without raw payloads", async () => {
     const blockedTodo: ActiveTodoSummary = {
@@ -54,8 +94,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         status: "failed",
         toolName: "bash_run",
     };
-    const ready = createTestInstanceDescriptor(
-        {
+    const ready = instance("ready-one", {
             handshake: {
                 capabilities: { cancel: true, streaming: true, tools: true },
                 instance: "ready-one",
@@ -75,12 +114,6 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                 workerVersion: "0.4.10",
                 homeDirectory: "/workspace",
             },
-            listApprovals: async () => [],
-            readToolCallFailureSummary: async () => ({
-                count: 1,
-                latest: failedCall,
-            }),
-            readToolCalls: async () => [failedCall],
             snapshot: () => ({
                 connectionState: "connected",
                 daemonState: "running",
@@ -89,17 +122,12 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                 ready: true,
                 status: "ready",
             }),
-        } as never,
-        {
-            mcpEnabled: true,
-            name: "ready-one",
-            provider: "local",
         },
+        { mcpEnabled: true, provider: "local" },
     );
-    const failed = createTestInstanceDescriptor(
+    const failed = instance(
+        "failed-one",
         {
-            listApprovals: async () => [],
-            readToolCalls: async () => [],
             snapshot: () => ({
                 connectionState: "failed",
                 daemonState: "failed",
@@ -109,32 +137,20 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                 ready: false,
                 status: "failed",
             }),
-        } as never,
-        {
-            name: "failed-one",
-            provider: "reverse",
         },
+        { provider: "reverse" },
     );
+    const data = new Map<string, OperationalOverviewInstanceData>([
+        ["ready-one", instanceData({
+            pendingApprovals: [{ id: "approval-1" }],
+            todos: [blockedTodo],
+            calls: [failedCall],
+            failureSummary: { count: 1, latest: failedCall },
+        })],
+        ["failed-one", instanceData()],
+    ]);
     const overview = await new OperationalOverviewService({
-        instanceDomains: createTestInstanceDomainRuntime({
-            approval: (instance) =>
-                instance === "ready-one"
-                    ? createTestApprovalApi({
-                          listApprovals: async () => [],
-                          listPendingApprovals: async () =>
-                              [{ id: "approval-1" }] as never,
-                      })
-                    : undefined,
-            task: (instance) =>
-                instance === "ready-one"
-                    ? createTestTaskApi({
-                          todo: {
-                              ...createTestTaskApi().todo,
-                              summaries: () => [blockedTodo],
-                          },
-                      })
-                    : undefined,
-        }),
+        instanceCollector: collector((descriptor) => data.get(descriptor.name)!),
         instances: { list: () => [ready, failed] },
         now: () => now,
         oauthApprovals: () => ({
@@ -227,10 +243,9 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
 });
 
 test("operational overview treats a deliberately stopped instance as neutral while keeping transitional non-ready instances actionable", async () => {
-    const stopped = createTestInstanceDescriptor(
+    const stopped = instance(
+        "stopped-one",
         {
-            listApprovals: async () => [],
-            readToolCalls: async () => [],
             snapshot: () => ({
                 connectionState: "disconnected",
                 daemonState: "stopped",
@@ -239,13 +254,11 @@ test("operational overview treats a deliberately stopped instance as neutral whi
                 ready: false,
                 status: "stopped",
             }),
-        } as never,
-        { name: "stopped-one" },
+        },
     );
-    const starting = createTestInstanceDescriptor(
+    const starting = instance(
+        "starting-one",
         {
-            listApprovals: async () => [],
-            readToolCalls: async () => [],
             snapshot: () => ({
                 connectionState: "connecting",
                 daemonState: "starting",
@@ -254,12 +267,12 @@ test("operational overview treats a deliberately stopped instance as neutral whi
                 ready: false,
                 status: "starting",
             }),
-        } as never,
-        { name: "starting-one" },
+        },
     );
 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [stopped, starting] },
+        instanceCollector: collector(() => instanceData()),
         now: () => now,
         systemCollector: healthySystemCollector,
     }).read();
@@ -324,20 +337,9 @@ test("operational overview counts the full 24 hour failure window while bounding
     };
     let activityQuery: unknown;
     let failureWindow: [number, number] | undefined;
-    const descriptor = createTestInstanceDescriptor(
+    const descriptor = instance(
+        "busy-one",
         {
-            listApprovals: async () => [],
-            readToolCallFailureSummary: async (
-                sinceMs: number,
-                untilMs: number,
-            ) => {
-                failureWindow = [sinceMs, untilMs];
-                return { count: 1, latest: olderFailure };
-            },
-            readToolCalls: async (query: unknown) => {
-                activityQuery = query;
-                return [olderFailure, futureFailure, ...completedCalls];
-            },
             snapshot: () => ({
                 connectionState: "connected",
                 daemonState: "running",
@@ -346,12 +348,25 @@ test("operational overview counts the full 24 hour failure window while bounding
                 ready: true,
                 status: "ready",
             }),
-        } as never,
-        { name: "busy-one" },
+        },
     );
+    const data = instanceData({
+            readFailures: async (
+                sinceMs: number,
+                untilMs: number,
+            ) => {
+                failureWindow = [sinceMs, untilMs];
+                return { count: 1, latest: olderFailure };
+            },
+            readCalls: async (query: unknown) => {
+                activityQuery = query;
+                return [olderFailure, futureFailure, ...completedCalls];
+            },
+    });
 
     const overview = await new OperationalOverviewService({
         instances: { list: () => [descriptor] },
+        instanceCollector: collector(() => data),
         now: () => now,
         systemCollector: healthySystemCollector,
     }).read();
@@ -378,9 +393,7 @@ test("operational overview counts the full 24 hour failure window while bounding
 });
 
 test("operational overview coalesces concurrent reads without caching later refreshes", async () => {
-    const descriptor = createTestInstanceDescriptor({} as never, {
-        name: "coalesced-one",
-    });
+    const descriptor = instance("coalesced-one", {});
     let collectCount = 0;
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {
@@ -432,6 +445,7 @@ test("operational overview coalesces concurrent reads without caching later refr
 test("controller resource alerts participate in overall health", async () => {
     const service = new OperationalOverviewService({
         instances: { list: () => [] },
+        instanceCollector: collector(() => instanceData()),
         now: () => now,
         systemCollector: {
             async collect() {
@@ -468,20 +482,17 @@ test("controller resource alerts participate in overall health", async () => {
 });
 
 test("operational overview isolates snapshot and todo collection failures per instance", async () => {
-    const snapshotBroken = createTestInstanceDescriptor(
+    const snapshotBroken = instance(
+        "snapshot-broken",
         {
-            listApprovals: async () => [],
-            readToolCalls: async () => [],
             snapshot: () => {
                 throw new Error("snapshot unavailable");
             },
-        } as never,
-        { name: "snapshot-broken" },
+        },
     );
-    const todoBroken = createTestInstanceDescriptor(
+    const todoBroken = instance(
+        "todo-broken",
         {
-            listApprovals: async () => [],
-            readToolCalls: async () => [],
             snapshot: () => ({
                 connectionState: "connected",
                 daemonState: "running",
@@ -490,26 +501,13 @@ test("operational overview isolates snapshot and todo collection failures per in
                 ready: true,
                 status: "ready",
             }),
-        } as never,
-        {
-            name: "todo-broken",
         },
     );
 
     const overview = await new OperationalOverviewService({
-        instanceDomains: createTestInstanceDomainRuntime({
-            task: (instance) =>
-                instance === "todo-broken"
-                    ? createTestTaskApi({
-                          todo: {
-                              ...createTestTaskApi().todo,
-                              summaries: () => {
-                                  throw new Error("todo store unavailable");
-                              },
-                          },
-                      })
-                    : undefined,
-        }),
+        instanceCollector: collector((descriptor) => descriptor.name === "todo-broken"
+            ? instanceData({ readTodos: () => { throw new Error("todo store unavailable"); } })
+            : instanceData()),
         instances: { list: () => [snapshotBroken, todoBroken] },
         now: () => now,
         systemCollector: healthySystemCollector,
@@ -540,14 +538,9 @@ test("operational overview isolates snapshot and todo collection failures per in
 });
 
 test("operational overview remains available when one collection source fails", async () => {
-    const descriptor = createTestInstanceDescriptor(
+    const descriptor = instance(
+        "local-one",
         {
-            listApprovals: async () => {
-                throw new Error("approval store unavailable");
-            },
-            readToolCalls: async () => {
-                throw new Error("audit store unavailable");
-            },
             snapshot: () => ({
                 connectionState: "connected",
                 daemonState: "running",
@@ -556,23 +549,17 @@ test("operational overview remains available when one collection source fails", 
                 ready: true,
                 status: "ready",
             }),
-        } as never,
-        {
-            name: "local-one",
         },
     );
-
     const overview = await new OperationalOverviewService({
-        instanceDomains: createTestInstanceDomainRuntime({
-            approval: (instance) =>
-                instance === "local-one"
-                    ? createTestApprovalApi({
-                          listPendingApprovals: async () => {
-                              throw new Error("approval store unavailable");
-                          },
-                      })
-                    : undefined,
-        }),
+        instanceCollector: collector(() => instanceData({
+            readApprovals: async () => {
+                throw new Error("approval store unavailable");
+            },
+            readCalls: async () => {
+                throw new Error("audit store unavailable");
+            },
+        })),
         instances: { list: () => [descriptor] },
         now: () => now,
         systemCollector: healthySystemCollector,

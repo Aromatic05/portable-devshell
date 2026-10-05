@@ -2,17 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ControlConfig } from "@portable-devshell/shared";
-import {
-    ConfigEditorCoordinator,
-    ControlConfigMutationLock,
-    InstanceCreateCoordinator,
-    InstanceRegistryFactory,
-    createDefaultControlConfig,
-} from "../../../../src/testing.ts";
+import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
+import { ControlConfigMutationLock } from "../../../../src/config/engine/Lock.ts";
+import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
+import { createDefaultControlConfig } from "@portable-devshell/shared";
+import { buildTestInstanceRegistry, testRuntimeHooks } from "../../../support/InstanceRuntime.ts";
 
 test("instance creation and endpoint updates share one configuration mutation boundary", async () => {
     let config = createDefaultControlConfig();
-    const registry = new InstanceRegistryFactory().build(config);
+    const registry = buildTestInstanceRegistry(config);
     const mutations = new ControlConfigMutationLock();
     let writeCount = 0;
     let releaseFirstWrite!: () => void;
@@ -34,11 +33,14 @@ test("instance creation and endpoint updates share one configuration mutation bo
         },
     };
     const common = {
+        ...testRuntimeHooks(),
         configStore,
         getConfig: () => config,
         homeDirectory: undefined,
+        instanceChanges: new InstanceChangeHub(),
         instanceRegistry: registry,
         mutationRunner: mutations,
+        publishConfigChange: () => undefined,
         setConfig: (next: ControlConfig) => {
             config = next;
         },

@@ -16,6 +16,7 @@ import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type {
     McpEndpointCallContext,
     McpEndpointWorkerPort,
+    ToolCallIngressPort,
 } from "./call/Port.js";
 import type { McpEndpointResult } from "./call/Boundary.js";
 
@@ -32,6 +33,7 @@ export interface McpEndpointWorkerOptions {
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
     toolRegistry?: McpToolRegistry;
+    tools: ToolCallIngressPort;
     worker: McpEndpointWorkerPort;
 }
 
@@ -61,6 +63,7 @@ export class McpEndpointWorker {
             contextSelector,
             instanceName: options.instanceName,
             toolProvenance: options.toolProvenance,
+            tools: options.tools,
             worker: options.worker,
         });
         this.#instanceName = options.instanceName;

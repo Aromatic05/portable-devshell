@@ -1,7 +1,4 @@
-import { join } from "node:path";
-
 import {
-    HttpHost,
     McpRuntimeState,
     type McpHost,
     type McpOAuthApprovalService,
@@ -9,8 +6,8 @@ import {
 import type {
     ContextTransport,
     ControlConfig,
-    ControlWebAuthConfig,
     JsonValue,
+    ToolCallApi,
 } from "@portable-devshell/shared";
 
 import type { ConfigRuntimeChangeSet } from "../../config/engine/index.js";
@@ -38,17 +35,13 @@ export class McpControlModule {
     readonly toolProvenance: ToolCallProvenanceStore;
     #publicBaseUrl?: string;
     #oauthApproval: ControlConfig["mcp"]["oauth2"];
-    #webHost?: HttpHost;
-    #webPublicBaseUrl?: string;
-    #webAuth: ControlWebAuthConfig;
-    #webEnabled: boolean;
     #host?: McpHost;
-    readonly #mcpEnabled: boolean;
     readonly #factory: McpRuntimeFactory;
     readonly #instances: InstanceRegistry;
     readonly #artifact: ArtifactModule;
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
+    #toolCalls?: ToolCallApi;
     #applyWebConfig?: (
         previous: ControlConfig,
         next: ControlConfig,
@@ -66,6 +59,11 @@ export class McpControlModule {
         this.#controlPaths = options.controlPaths;
         this.#runtimeState = new McpRuntimeState({
             context: options.contextTransport,
+            tools: { call: (...args) => {
+                if (this.#toolCalls === undefined)
+                    throw new Error("Control tool calls are not initialized.");
+                return this.#toolCalls.call(...args);
+            } },
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
@@ -73,11 +71,8 @@ export class McpControlModule {
             options.controlPaths.toolProvenanceFile,
         );
         const config = options.config;
-        this.#mcpEnabled = config.mcp.enabled;
         this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
-        this.#webAuth = config.web.auth;
-        this.#webEnabled = config.web.enabled;
         const endpointFactory = new McpEndpointFactory();
         this.instancePort = {
             registerInstance: (instance, auth, workspaceEnabled = true) => {
@@ -100,22 +95,16 @@ export class McpControlModule {
             toolProvenance: this.toolProvenance,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
-        if (config.web.enabled) {
-            this.#webPublicBaseUrl = config.web.publicBaseUrl;
-            this.#webHost =
-                this.#host !== undefined && sameEndpoint(config.mcp, config.web)
-                    ? this.#host.server
-                    : new HttpHost({
-                          listenHost: config.web.listenHost,
-                          listenPort: config.web.listenPort,
-                      });
-        }
         if (this.#host !== undefined)
             options.artifact.installHttpRoute(this.#host.server);
     }
 
     get host(): McpHost | undefined {
         return this.#host;
+    }
+
+    setToolCalls(tools: ToolCallApi): void {
+        this.#toolCalls = tools;
     }
 
     get oauthApproval(): ControlConfig["mcp"]["oauth2"] {
@@ -209,116 +198,6 @@ export class McpControlModule {
         }
     }
 
-    get webAuth(): ControlWebAuthConfig {
-        return this.#webAuth;
-    }
-
-    get webEnabled(): boolean {
-        return this.#webEnabled;
-    }
-
-    get webHost(): HttpHost | undefined {
-        return this.#webHost;
-    }
-
-    get webPublicBaseUrl(): string | undefined {
-        return this.#webPublicBaseUrl;
-    }
-
-    get webOauthDir(): string {
-        return join(this.#controlPaths.oauthDir, "web");
-    }
-
-    async replaceWebHost(
-        previousConfig: ControlConfig,
-        config: ControlConfig,
-    ): Promise<HttpHost | undefined> {
-        const previous = this.#webHost;
-        const next = config.web.enabled
-            ? this.#host !== undefined && sameEndpoint(config.mcp, config.web)
-                ? this.#host.server
-                : new HttpHost({
-                      listenHost: config.web.listenHost,
-                      listenPort: config.web.listenPort,
-                  })
-            : undefined;
-        const same =
-            previous !== undefined &&
-            next !== undefined &&
-            next !== previous &&
-            next !== this.#host?.server &&
-            previous !== this.#host?.server &&
-            sameEndpoint(previousConfig.web, config.web);
-        if (same && previous !== undefined) {
-            await previous.stop();
-        }
-        if (
-            next !== undefined &&
-            next !== previous &&
-            next !== this.#host?.server
-        ) {
-            try {
-                await next.start();
-            } catch (error) {
-                const rollbackFailures: unknown[] = [];
-                if (same && previous !== undefined) {
-                    await previous
-                        .start()
-                        .catch((rollbackError) =>
-                            rollbackFailures.push(rollbackError),
-                        );
-                }
-                if (rollbackFailures.length > 0) {
-                    throw new AggregateError(
-                        [error, ...rollbackFailures],
-                        "Web host replacement failed and rollback was incomplete.",
-                    );
-                }
-                throw error;
-            }
-        }
-        this.#webAuth = config.web.auth;
-        this.#webEnabled = config.web.enabled;
-        this.#webPublicBaseUrl = config.web.enabled
-            ? config.web.publicBaseUrl
-            : undefined;
-        this.#webHost = next;
-        return previous;
-    }
-
-    async stopRetiredWebHost(host: HttpHost | undefined): Promise<void> {
-        if (
-            host !== undefined &&
-            host !== this.#webHost &&
-            host !== this.#host?.server
-        ) {
-            await host.stop();
-        }
-    }
-
-    async restoreWebHost(
-        host: HttpHost | undefined,
-        config: ControlConfig,
-    ): Promise<void> {
-        const current = this.#webHost;
-        this.#webAuth = config.web.auth;
-        this.#webEnabled = config.web.enabled;
-        this.#webPublicBaseUrl = config.web.enabled
-            ? config.web.publicBaseUrl
-            : undefined;
-        this.#webHost = host;
-        if (
-            current !== undefined &&
-            current !== host &&
-            current !== this.#host?.server
-        ) {
-            await current.stop();
-        }
-        if (host !== undefined && host !== this.#host?.server) {
-            await host.start();
-        }
-    }
-
     async applyRuntimeConfig(
         previous: ControlConfig,
         next: ControlConfig,
@@ -360,11 +239,11 @@ export class McpControlModule {
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {
-        return this.#mcpEnabled ? this.#host?.oauthApprovals : undefined;
+        return this.#host?.oauthApprovals;
     }
 
     status(): JsonValue {
-        if (!this.#mcpEnabled) {
+        if (this.#host === undefined) {
             return {
                 running: false,
                 reason: "MCP runtime is disabled.",
@@ -382,30 +261,10 @@ export class McpControlModule {
 
     async start(): Promise<void> {
         await this.#host?.start();
-        if (
-            this.#webHost !== undefined &&
-            this.#webHost !== this.#host?.server
-        ) {
-            await this.#webHost.start();
-        }
     }
 
     async stop(): Promise<void> {
-        const failures: unknown[] = [];
-        if (
-            this.#webHost !== undefined &&
-            this.#webHost !== this.#host?.server
-        ) {
-            await this.#webHost.stop().catch((error) => failures.push(error));
-        }
-        await this.#host?.stop().catch((error) => failures.push(error));
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1) {
-            throw new AggregateError(
-                failures,
-                "MCP runtime failed to stop every listener cleanly.",
-            );
-        }
+        await this.#host?.stop();
     }
 }
 

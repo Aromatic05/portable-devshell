@@ -11,8 +11,9 @@ import {
     createCoreConfigRegistry,
 } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import { InstanceRegistry, createInstance } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceChangeHub } from "../../instance/Change.js";
+import { InstanceRuntimeRegistry } from "./Instance.js";
 
 export interface ControlRuntimeStateOptions {
     configRegistry?: ConfigRegistry;
@@ -27,6 +28,7 @@ export class ControlRuntimeState {
     readonly configMutations = new ControlConfigMutationLock();
     readonly homeDirectory?: string;
     readonly instanceChanges = new InstanceChangeHub();
+    readonly instanceRuntimes: InstanceRuntimeRegistry;
     #config?: ControlConfig;
     #instances = new InstanceRegistry([]);
     #restartControlRequired = false;
@@ -38,6 +40,7 @@ export class ControlRuntimeState {
             options.configStore ??
             new ControlConfigStore({ registry: this.configRegistry });
         this.homeDirectory = options.homeDirectory;
+        this.instanceRuntimes = new InstanceRuntimeRegistry(options.homeDirectory);
     }
 
     get config(): ControlConfig | undefined {
@@ -55,11 +58,21 @@ export class ControlRuntimeState {
     async load(): Promise<void> {
         const config = await this.configStore.readOrCreate(this.homeDirectory);
         this.#config = config;
-        this.#instances = new InstanceRegistry(
-            config.instances
-                .filter((instance) => instance.enabled)
-                .map((instance) => createInstance(instance)),
-        );
+        try {
+            this.#instances = new InstanceRegistry(
+                config.instances
+                    .filter((instance) => instance.enabled)
+                    .map((instance) => this.instanceRuntimes.create(instance)),
+            );
+        } catch (error) {
+            this.reset();
+            try {
+                await this.instanceRuntimes.close();
+            } catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "Control instance state load failed and cleanup was incomplete.");
+            }
+            throw error;
+        }
         this.#restartControlRequired = false;
     }
 

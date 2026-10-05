@@ -11,7 +11,6 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import { createInstance } from "@portable-devshell/core";
 import type { Instance, InstanceRegistry } from "@portable-devshell/core";
 import { InstanceChangeHub } from "../Change.js";
 import type { InstanceMcpRuntimePort } from "../Mcp.js";
@@ -43,24 +42,32 @@ export interface InstanceConfigUpdatePlan {
 }
 
 export class InstanceReconfigurationCoordinator {
+    readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
     readonly #engine: ConfigEngine;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #cleanup: InstanceCleanupDebt;
+    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
+    readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
+    readonly #updateApprovalPolicy: InstanceEditorCoordinatorOptions["updateApprovalPolicy"];
 
     constructor(
         options: InstanceEditorCoordinatorOptions,
         retirement: InstanceRetirementCoordinator,
         cleanup: InstanceCleanupDebt,
     ) {
+        this.#createRuntimeInstance = options.createRuntimeInstance;
         this.#engine = options.engine;
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcp = options.mcp;
         this.#retirement = retirement;
         this.#cleanup = cleanup;
+        this.#retireRuntimeInstance = options.retireRuntimeInstance;
+        this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
+        this.#updateApprovalPolicy = options.updateApprovalPolicy;
     }
 
     async createUpdatePlan(
@@ -97,8 +104,19 @@ export class InstanceReconfigurationCoordinator {
     }
 
     assertUpdateReady(plan: InstanceConfigUpdatePlan): void {
-        if (plan.rebuildRequired)
-            this.#assertInstanceStopped(plan.target, "update");
+        if (!plan.rebuildRequired || plan.descriptor === undefined) return;
+        const snapshot = plan.descriptor.worker.snapshot();
+        if (snapshot.daemonState === "stopped") return;
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
+            details: {
+                instance: plan.target,
+                operation: "update",
+                status: snapshot.status,
+            },
+            message: `Instance ${plan.target} must be stopped before rebuilding its worker configuration.`,
+            retryable: false,
+        });
     }
 
     prepareUpdate(
@@ -340,6 +358,7 @@ export class InstanceReconfigurationCoordinator {
             } else if (input.preparedDescriptor !== undefined) {
                 await closeDescriptorResourcesBestEffort(
                     input.preparedDescriptor,
+                    this.#finalizeRuntimeInstance,
                 ).catch((rollbackError) => failures.push(rollbackError));
             }
             if (failures.length === 1) throw error;
@@ -356,12 +375,23 @@ export class InstanceReconfigurationCoordinator {
         preparedDescriptor: Instance | undefined,
     ): Promise<void> {
         const failures: unknown[] = [];
-        if (descriptor === undefined) {
+        let restored: Instance | undefined;
+        if (descriptor === undefined || descriptor.retired) {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
-                    .remove(existing.name, current)
+                    .remove(existing.name, current, async (retiring) =>
+                        await this.#retireRuntimeInstance(retiring),
+                    )
                     .catch((error) => failures.push(error));
+            if (existing.enabled) {
+                try {
+                    restored = this.#createRuntimeInstance(existing);
+                    this.#instanceRegistry.add(restored);
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
         } else {
             try {
                 const current = this.#instanceRegistry.get(existing.name);
@@ -369,23 +399,44 @@ export class InstanceReconfigurationCoordinator {
                     await this.#instanceRegistry.remove(
                         existing.name,
                         current,
+                        async (retiring) =>
+                            await this.#retireRuntimeInstance(retiring),
                     );
                 }
                 descriptor.update(existing);
+                await descriptor.worker.reconfigure(
+                    toWorkerReconfigureInput(existing),
+                );
                 if (this.#instanceRegistry.get(existing.name) !== descriptor)
                     this.#instanceRegistry.add(descriptor);
+                restored = descriptor;
             } catch (error) {
                 failures.push(error);
             }
         }
+        if (restored !== undefined) {
+            await this.#updateApprovalPolicy(
+                existing.name,
+                existing.approvalPolicy,
+            ).catch((error) => failures.push(error));
+        }
         this.#instanceChanges.publish("registry");
         if (
             preparedDescriptor !== undefined &&
-            preparedDescriptor !== descriptor
+            preparedDescriptor !== restored
         ) {
-            await closeDescriptorResourcesBestEffort(preparedDescriptor).catch(
+            await closeDescriptorResourcesBestEffort(
+                preparedDescriptor,
+                this.#finalizeRuntimeInstance,
+            ).catch(
                 (error) => failures.push(error),
             );
+        }
+        if (descriptor?.retired && descriptor !== restored) {
+            await closeDescriptorResourcesBestEffort(
+                descriptor,
+                this.#finalizeRuntimeInstance,
+            ).catch((error) => failures.push(error));
         }
         if (failures.length > 0)
             throw new AggregateError(
@@ -401,7 +452,7 @@ export class InstanceReconfigurationCoordinator {
     ): Instance | undefined {
         if (!instance.enabled) return undefined;
         if (descriptor === undefined || rebuildRequired)
-            return createInstance(instance);
+            return this.#createRuntimeInstance(instance);
         return undefined;
     }
 
@@ -417,6 +468,8 @@ export class InstanceReconfigurationCoordinator {
                 await this.#instanceRegistry.remove(
                     instance.name,
                     descriptor,
+                    async (retiring) =>
+                        await this.#retireRuntimeInstance(retiring),
                 );
                 this.#instanceChanges.publish("registry");
             }
@@ -437,12 +490,15 @@ export class InstanceReconfigurationCoordinator {
             await this.#instanceRegistry.remove(
                 instance.name,
                 descriptor,
+                async (retiring) =>
+                    await this.#retireRuntimeInstance(retiring),
             );
             this.#instanceChanges.publish("registry");
             return;
         }
         descriptor.update(instance);
-        descriptor.approval.setPolicy(instance.approvalPolicy);
+        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        await this.#updateApprovalPolicy(instance.name, instance.approvalPolicy);
         this.#instanceChanges.publish("registry");
     }
 
@@ -484,7 +540,10 @@ export class InstanceReconfigurationCoordinator {
             )
                 throw error;
             try {
-                await closeDescriptorResourcesBestEffort(preparedDescriptor);
+                await closeDescriptorResourcesBestEffort(
+                    preparedDescriptor,
+                    this.#finalizeRuntimeInstance,
+                );
             } catch (cleanupError) {
                 throw new AggregateError(
                     [error, cleanupError],
@@ -509,50 +568,80 @@ export class InstanceReconfigurationCoordinator {
         );
 
         if (
+            existing !== undefined &&
+            next !== undefined &&
+            !next.enabled &&
+            descriptor !== undefined
+        ) {
+            let stopped =
+                descriptor.worker.managementMode === "selfManaged";
+            if (!stopped) {
+                try {
+                    await descriptor.worker.stop();
+                    stopped = true;
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (stopped) {
+                await closeDescriptorResourcesBestEffort(
+                    descriptor,
+                    this.#finalizeRuntimeInstance,
+                )
+                    .then(() => this.#cleanup.releaseDescriptor(existing.name))
+                    .catch((error) => failures.push(error));
+            }
+        }
+
+        if (
             rebuildRequired &&
             existing !== undefined &&
             descriptor !== undefined &&
             preparedDescriptor !== undefined &&
             descriptor !== preparedDescriptor
         ) {
-            let generationCleanupFailed = false;
-            await this.#retirement.notification
-                .retireGenerationResources(existing)
-                .catch((error) => {
-                    generationCleanupFailed = true;
-                    failures.push(error);
-                });
-            if (!generationCleanupFailed) {
-                try {
-                    this.#instanceRegistry.add(preparedDescriptor);
-                    this.#instanceChanges.publish("registry");
-                    await this.syncMcpEndpoint(existing.name);
-                } catch (error) {
-                    failures.push(error);
-                    if (
-                        this.#instanceRegistry.get(existing.name) ===
-                        preparedDescriptor
-                    ) {
-                        await this.#instanceRegistry
-                            .remove(existing.name, preparedDescriptor)
-                            .catch((cleanupError) =>
-                                failures.push(cleanupError),
-                            );
-                        this.#instanceChanges.publish("registry");
-                        await this.syncMcpEndpoint(existing.name).catch(
-                            (cleanupError) => failures.push(cleanupError),
-                        );
-                    }
-                    await closeDescriptorResourcesBestEffort(
-                        preparedDescriptor,
-                    ).catch((cleanupError) => failures.push(cleanupError));
-                }
-            } else {
+            if (failures.length > 0) {
                 await closeDescriptorResourcesBestEffort(
                     preparedDescriptor,
+                    this.#finalizeRuntimeInstance,
+                ).catch((error) => failures.push(error));
+                await closeDescriptorResourcesBestEffort(
+                    descriptor,
+                    this.#finalizeRuntimeInstance,
+                ).catch((error) => failures.push(error));
+                return failures;
+            }
+            try {
+                this.#instanceRegistry.add(preparedDescriptor);
+                this.#instanceChanges.publish("registry");
+                await this.syncMcpEndpoint(existing.name);
+            } catch (error) {
+                failures.push(error);
+                if (
+                    this.#instanceRegistry.get(existing.name) ===
+                    preparedDescriptor
+                ) {
+                    await this.#instanceRegistry
+                        .remove(existing.name, preparedDescriptor, async (retiring) =>
+                            await this.#retireRuntimeInstance(retiring),
+                        )
+                        .catch((cleanupError) =>
+                            failures.push(cleanupError),
+                        );
+                    this.#instanceChanges.publish("registry");
+                    await this.syncMcpEndpoint(existing.name).catch(
+                        (cleanupError) => failures.push(cleanupError),
+                    );
+                }
+                await closeDescriptorResourcesBestEffort(
+                    preparedDescriptor,
+                    this.#finalizeRuntimeInstance,
                 ).catch((cleanupError) => failures.push(cleanupError));
             }
-            await closeDescriptorResourcesBestEffort(descriptor).catch(
+            await closeDescriptorResourcesBestEffort(
+                descriptor,
+                this.#finalizeRuntimeInstance,
+            ).catch(
                 (error) => failures.push(error),
             );
         }
@@ -566,6 +655,13 @@ export class InstanceReconfigurationCoordinator {
         preparedDescriptor: PreparedInstanceDescriptor | undefined,
         rebuildRequired: boolean,
     ): Promise<void> {
+        if (
+            existing.enabled &&
+            !next.enabled &&
+            descriptor !== undefined
+        ) {
+            this.#cleanup.retainDescriptor(existing.name, descriptor);
+        }
         await this.#cleanup.cleanupCommittedInstanceChangeWithDebt(
             existing,
             next,
@@ -581,6 +677,19 @@ export class InstanceReconfigurationCoordinator {
                     rebuildRequired,
                 ),
         );
+    }
+
+    #assertInstanceStopped(instance: string, operation: string): void {
+        const descriptor = this.#instanceRegistry.get(instance);
+        if (descriptor === undefined) return;
+        const snapshot = descriptor.worker.snapshot();
+        if (snapshot.daemonState === "stopped") return;
+        throw createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
+            details: { instance, operation, status: snapshot.status },
+            message: `Instance ${instance} must be stopped before ${operation}.`,
+            retryable: false,
+        });
     }
 }
 

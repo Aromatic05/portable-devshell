@@ -2,39 +2,42 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../../../src/extension/api/cap/toolcall/History.ts";
-import type { InstanceDescriptor } from "@portable-devshell/core";
-import { InstanceRegistry } from "@portable-devshell/core";
+import { Instance, InstanceRegistry } from "@portable-devshell/core";
+import { asInstanceName } from "@portable-devshell/shared";
 
 test("ToolCall history capability is read-only, typed, bounded, and provenance-decorated", async () => {
     const queries: unknown[] = [];
     const instances = new InstanceRegistry([
-        {
+        new Instance({
             enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            modelExtensions: [],
             name: "demo-local",
-            worker: {
-                async readToolCalls(query: unknown) {
-                    queries.push(query);
-                    return [
-                        {
-                            callId: "call-1",
-                            ctxId: "ctx-1",
-                            inputSummary: "{}",
-                            instance: "demo-local",
-                            source: "mcp",
-                            startedAt: "2026-10-02T00:00:00.000Z",
-                            status: "completed",
-                            toolName: "file_read",
-                            workspace: "/repo",
-                        },
-                    ];
-                },
-            },
-        } as unknown as InstanceDescriptor,
+            provider: "local",
+            worker: {} as never,
+        }),
     ]);
     const capability = new ExtensionToolCallHistoryCapabilityControl({
         allowed: true,
         extensionId: "recall",
         instances,
+        readToolCalls: async (_instance, query) => {
+            queries.push(query);
+            return [
+                {
+                    callId: "call-1",
+                    ctxId: "ctx-1",
+                    inputSummary: "{}",
+                    instance: asInstanceName("demo-local"),
+                    source: "mcp",
+                    startedAt: "2026-10-02T00:00:00.000Z",
+                    status: "completed",
+                    toolName: "file_read",
+                    workspace: "/repo",
+                },
+            ];
+        },
         toolCallDecorator: {
             async decorate(instance, records) {
                 assert.equal(instance, "demo-local");
@@ -94,6 +97,7 @@ test("ToolCall history capability rejects undeclared access", async () => {
         allowed: false,
         extensionId: "example",
         instances: new InstanceRegistry([]),
+        readToolCalls: async () => [],
     });
 
     await assert.rejects(

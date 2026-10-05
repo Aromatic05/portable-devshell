@@ -1,7 +1,13 @@
 import {
     createToolCallRuntime,
     type ToolCallApi,
+    type ToolCallRuntime,
+    createToolRouteModule,
 } from "@portable-devshell/core/toolcall";
+import { registerApprovalToolCallReview, createApprovalRouteModule } from "@portable-devshell/core/approval";
+import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "@portable-devshell/core/task";
+import { createTerminalRouteModule } from "@portable-devshell/core/terminal";
+import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core";
 
 import {
     type ContextTransport,
@@ -35,6 +41,7 @@ import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewr
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../overview/Service.js";
+import { OperationalOverviewInstanceCollector } from "../../overview/collector/Instance.js";
 import { ControlTransportServer } from "../transport/endpoint/Server.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
 import { ControlSocketListener } from "../transport/channel/Socket.js";
@@ -45,14 +52,16 @@ import {
     contextToolDefinitions,
     createContextRouteModule,
     installContextTools,
-    type ContextService,
+    type ContextRuntime,
 } from "@portable-devshell/core/context";
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
+import type { InstanceRuntimeRegistry } from "./Instance.js";
 
 export interface ControlRuntimeOptions {
-    contexts: ContextService;
+    instanceRuntimes: InstanceRuntimeRegistry;
+    contexts: ContextRuntime;
     contextTransport: ContextTransport;
     internalControl: {
         endpoint: Endpoint;
@@ -79,7 +88,9 @@ export interface ControlRuntimeOptions {
 }
 
 export class ControlRuntime {
-    readonly #contexts: ContextService;
+    readonly #instanceRuntimes: InstanceRuntimeRegistry;
+    readonly #toolCallRuntime: ToolCallRuntime;
+    readonly #contexts: ContextRuntime;
     readonly #artifact: ArtifactModule;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #transport: ControlTransportServer;
@@ -100,6 +111,7 @@ export class ControlRuntime {
     readonly #web: ControlWebRuntime;
 
     constructor(options: ControlRuntimeOptions) {
+        this.#instanceRuntimes = options.instanceRuntimes;
         this.#contexts = options.contexts;
         this.#artifact = options.artifact;
         this.#builtinExtensionSources = Object.freeze([
@@ -118,7 +130,15 @@ export class ControlRuntime {
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#instanceEditor = options.instanceEditor;
-        const toolCalls = createToolCallRuntime({});
+        const runtimeFor = (name: string) => {
+            const descriptor = options.instances.get(name);
+            if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
+            return options.instanceRuntimes.get(descriptor);
+        };
+        const toolCalls = createToolCallRuntime({
+            resolveTarget: (name) => runtimeFor(name).target(),
+        });
+        this.#toolCallRuntime = toolCalls;
         this.#toolCalls = toolCalls.api;
         const extensionToolCalls = new ToolCallExtensionBinding(
             this.#extensions,
@@ -126,14 +146,18 @@ export class ControlRuntime {
         );
         this.#toolCallHookUnregister = [
             extensionToolCalls.install(toolCalls.hooks),
+            registerApprovalToolCallReview(toolCalls.hooks, (name) => runtimeFor(name).approval.api),
+            installTodoTools(toolCalls.hooks, (name) => runtimeFor(name).task.api),
+            installWaitToolCallRewrite(toolCalls.hooks, (name) => runtimeFor(name).task.api.wait),
         ];
         this.#mcp = options.mcp;
+        this.#mcp.setToolCalls(this.#toolCalls);
         const extensionMcpTools = new McpExtensionService(this.#extensions);
         this.#toolCallHookUnregister.push(
             extensionMcpTools.install(toolCalls.hooks),
         );
         this.#reverse = options.reverse;
-        this.#debug = new DebugPatchService(options.instances);
+        this.#debug = new DebugPatchService(options.instances, (descriptor) => options.instanceRuntimes.get(descriptor));
         const processSubscriptions =
             options.processSubscriptions ?? new ProcessSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(
@@ -158,7 +182,7 @@ export class ControlRuntime {
             contextToolRegistration.dispose(),
         );
         this.#toolCallHookUnregister.push(
-            installContextTools(options.contexts, toolCalls.hooks, {
+            installContextTools(options.contexts.api, toolCalls.hooks, {
                 instances: options.instances,
                 modelCommands,
             }),
@@ -181,7 +205,30 @@ export class ControlRuntime {
             ...(options.config === undefined
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
-            controlPorts: [createContextRouteModule(options.contexts)],
+            controlPorts: [createContextRouteModule(options.contexts.api)],
+            instancePorts: (descriptor, sessions) => {
+                const runtime = options.instanceRuntimes.get(descriptor);
+                const events = {
+                    cursor: () => descriptor.worker.snapshot().lastSeq,
+                    subscribe: (fromSeq?: number) => descriptor.worker.subscribe(fromSeq),
+                };
+                return [
+                    createApprovalRouteModule({ approval: runtime.approval.api, events, name: descriptor.name }, processSubscriptions),
+                    createTerminalRouteModule({ backend: runtime.terminal.api, instance: descriptor.name, sessions }),
+                    createGoalTaskRouteModule({ events, goal: runtime.task.api.goal }),
+                    createTodoTaskRouteModule({ events, name: descriptor.name, todo: runtime.task.api.todo }, processSubscriptions),
+                    createToolRouteModule({
+                        name: descriptor.name,
+                        worker: {
+                            readWorkerTools: async () => runtime.tools.listTools(),
+                            prepareWorkspace: (workspace, connectionId) => runtime.openToolSession(workspace, connectionId),
+                            readToolCalls: (query) => runtime.tools.readToolCalls(query),
+                            releaseToolSession: (connectionId) => runtime.releaseToolSession(connectionId),
+                            subscribe: events.subscribe,
+                        },
+                    }, options.mcp.toolProvenance, this.#toolCalls, processSubscriptions),
+                ];
+            },
             debug: this.#debug,
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
@@ -192,6 +239,13 @@ export class ControlRuntime {
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: new OperationalOverviewService({
+                instanceCollector: new OperationalOverviewInstanceCollector({
+                    activityLimit: 20,
+                    instanceData: descriptor => {
+                        const runtime = options.instanceRuntimes.get(descriptor);
+                        return { approval: runtime.approval.api, task: runtime.task.api, tools: runtime.tools };
+                    },
+                }),
                 instances: options.instances,
                 oauthApprovals: () => options.mcp.oauthApprovals,
             }),
@@ -331,6 +385,9 @@ export class ControlRuntime {
         await stopOwnedInstances(this.#instances).catch((error) =>
             failures.push(error),
         );
+        await this.#instanceRuntimes.close().catch((error) => failures.push(error));
+        this.#toolCallRuntime.close();
+        this.#contexts.close();
         try {
             this.#routes.dispose();
         } catch (error) {

@@ -63,34 +63,40 @@ export class ControlServer {
 
     async #start(): Promise<void> {
         if (this.#runtime !== undefined) return;
+        await this.#state.instanceRuntimes.close();
         this.#startupDiagnostic("control state load started");
         await this.#state.load();
-        this.#startupDiagnostic("control state load completed");
-        this.#startupDiagnostic(
-            "control runtime directory initialization started",
-        );
-        await this.#socketFile.ensureRuntimeDir();
-        this.#startupDiagnostic(
-            "control runtime directory initialization completed",
-        );
-        this.#startupDiagnostic("control runtime composition started");
-        const runtime = await this.#runtimeFactory.create({
-            restart: async () => {
-                await this.restart();
-            },
-            shutdown: async () => {
-                await this.stop();
-            },
-            socketPath: this.#socketFile.path,
-            state: this.#state,
-        });
-        this.#startupDiagnostic("control runtime composition completed");
         try {
+            this.#startupDiagnostic("control state load completed");
+            this.#startupDiagnostic(
+                "control runtime directory initialization started",
+            );
+            await this.#socketFile.ensureRuntimeDir();
+            this.#startupDiagnostic(
+                "control runtime directory initialization completed",
+            );
+            this.#startupDiagnostic("control runtime composition started");
+            const runtime = await this.#runtimeFactory.create({
+                restart: async () => {
+                    await this.restart();
+                },
+                shutdown: async () => {
+                    await this.stop();
+                },
+                socketPath: this.#socketFile.path,
+                state: this.#state,
+            });
+            this.#startupDiagnostic("control runtime composition completed");
             this.#startupDiagnostic("control runtime start started");
             await runtime.start();
             this.#runtime = runtime;
             this.#startupDiagnostic("control runtime start completed");
         } catch (error) {
+            try {
+                await this.#state.instanceRuntimes.close();
+            } catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "Control startup failed and instance cleanup was incomplete.");
+            }
             this.#state.reset();
             throw error;
         }
@@ -98,7 +104,8 @@ export class ControlServer {
 
     async #stop(): Promise<void> {
         const runtime = this.#runtime;
-        await runtime?.stop();
+        if (runtime === undefined) await this.#state.instanceRuntimes.close();
+        else await runtime.stop();
         this.#runtime = undefined;
         this.#state.reset();
     }

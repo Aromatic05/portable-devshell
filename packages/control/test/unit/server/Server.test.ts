@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { createDefaultControlConfig, normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+import type { ControlRuntimeState } from "../../../src/server/runtime/State.ts";
 import test from "node:test";
 
 import { ControlServer } from "../../../src/server/Server.ts";
@@ -22,12 +23,7 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
     const server = new ControlServer({
         configStore: {
             async readOrCreate() {
-                return {};
-            },
-        } as never,
-        instanceRegistryBuilder: {
-            build() {
-                return {};
+                return createDefaultControlConfig();
             },
         } as never,
         runtimeFactory: {
@@ -76,12 +72,7 @@ test("failed stop preserves the runtime owner until a retry succeeds", async (t)
     const server = new ControlServer({
         configStore: {
             async readOrCreate() {
-                return { marker: "loaded" };
-            },
-        } as never,
-        instanceRegistryBuilder: {
-            build() {
-                return {};
+                return createDefaultControlConfig();
             },
         } as never,
         runtimeFactory: {
@@ -121,3 +112,68 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     }
     throw new Error("Timed out waiting for condition.");
 }
+
+test("runtime composition failure closes loaded instance domains before retry", async (t) => {
+    const root = await createTestTempDirectory("control-server-compose");
+    t.after(() => rm(root, { force: true, recursive: true }));
+    const config = createDefaultControlConfig();
+    config.instances = [normalizeConfigInstanceDraft({ name: "local", provider: "local" })];
+    const failure = new Error("composition failed");
+    const generations: import("@portable-devshell/core").Instance[] = [];
+    const runtimes: import("../../../src/server/runtime/Instance.ts").InstanceRuntime[] = [];
+    const server = new ControlServer({
+        configStore: { async readOrCreate() { return config; } } as never,
+        homeDirectory: root,
+        runtimeFactory: {
+            async create({ state }: { state: ControlRuntimeState }) {
+                const instance = state.instances.get("local")!;
+                generations.push(instance);
+                runtimes.push(state.instanceRuntimes.get(instance));
+                throw failure;
+            },
+        } as never,
+        xdgRuntimeDir: root,
+    });
+
+    await assert.rejects(server.start(), error => error === failure);
+    assert.equal(server.config, undefined);
+    assert.equal(generations[0]!.retired, true);
+    assert.throws(() => runtimes[0]!.audit.api.events.readHighWater(), /closed/iu);
+    await assert.rejects(server.start(), error => error === failure);
+    assert.notEqual(generations[1], generations[0]);
+    assert.equal(generations[1]!.retired, true);
+});
+
+test("failed startup cleanup retains its instance owner for explicit stop retry", async (t) => {
+    const root = await createTestTempDirectory("control-server-cleanup-retry");
+    t.after(() => rm(root, { force: true, recursive: true }));
+    const config = createDefaultControlConfig();
+    config.instances = [normalizeConfigInstanceDraft({ name: "retry-local", provider: "local" })];
+    const failure = new Error("composition failed");
+    const cleanupFailure = new Error("worker close failed");
+    let restoreWorkerClose!: () => void;
+    const server = new ControlServer({
+        configStore: { async readOrCreate() { return config; } } as never,
+        homeDirectory: root,
+        runtimeFactory: {
+            async create({ state }: { state: ControlRuntimeState }) {
+                const worker = state.instances.get("retry-local")!.worker;
+                const close = worker.close.bind(worker);
+                restoreWorkerClose = () => { worker.close = close; };
+                worker.close = async () => { throw cleanupFailure; };
+                throw failure;
+            },
+        } as never,
+        xdgRuntimeDir: root,
+    });
+    await assert.rejects(server.start(), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors[0], failure);
+        assert.ok(error.errors[1] instanceof AggregateError);
+        return true;
+    });
+    assert.notEqual(server.config, undefined);
+    restoreWorkerClose();
+    await server.stop();
+    assert.equal(server.config, undefined);
+});

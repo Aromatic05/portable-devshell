@@ -10,16 +10,18 @@ import {
 } from "@portable-devshell/shared";
 
 import {
-    createInstance,
     discoverSshConfigHosts,
     normalizeInstanceCreateDraft,
     resolveInstanceCreateSchema,
     summarizeInstanceCreate,
+    type Instance,
     type InstanceRegistry,
 } from "@portable-devshell/core";
 import type { InstanceMcpRuntimePort } from "../../Mcp.js";
 import { InstanceChangeHub } from "../../Change.js";
 import { ControlConfigValidator } from "../../../config/engine/Validator.js";
+import { diffConfigPaths } from "../../../config/Path.js";
+import { closeDescriptorResourcesBestEffort } from "../retirement/State.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
@@ -31,11 +33,21 @@ interface ControlConfigWriter {
 export interface InstanceCreateCoordinatorOptions {
     assertCleanupSettled?: (instance: string) => Promise<void>;
     configStore: ControlConfigWriter;
+    createRuntimeInstance(
+        config: ControlConfig["instances"][number],
+    ): Instance;
+    finalizeRuntimeInstance(
+        descriptor: Instance,
+    ): Promise<void>;
+    publishConfigChange(paths: readonly string[]): void;
     getConfig: () => ControlConfig;
     homeDirectory?: string;
     instanceChanges: InstanceChangeHub;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
+    retireRuntimeInstance(
+        descriptor: Instance,
+    ): Promise<void>;
     mcp?: InstanceMcpRuntimePort;
     mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
@@ -46,6 +58,8 @@ export interface InstanceCreateCoordinatorOptions {
 export class InstanceCreateCoordinator {
     readonly #assertCleanupSettled: (instance: string) => Promise<void>;
     readonly #configStore: ControlConfigWriter;
+    readonly #createRuntimeInstance: InstanceCreateCoordinatorOptions["createRuntimeInstance"];
+    readonly #finalizeRuntimeInstance: InstanceCreateCoordinatorOptions["finalizeRuntimeInstance"];
     readonly #getConfig: () => ControlConfig;
     readonly #homeDirectory?: string;
     readonly #instanceChanges: InstanceChangeHub;
@@ -53,6 +67,8 @@ export class InstanceCreateCoordinator {
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
+    readonly #publishConfigChange: InstanceCreateCoordinatorOptions["publishConfigChange"];
+    readonly #retireRuntimeInstance: InstanceCreateCoordinatorOptions["retireRuntimeInstance"];
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #sshHosts: () => readonly string[];
     readonly #validator: ControlConfigValidator;
@@ -61,6 +77,8 @@ export class InstanceCreateCoordinator {
         this.#assertCleanupSettled =
             options.assertCleanupSettled ?? (async () => {});
         this.#configStore = options.configStore;
+        this.#createRuntimeInstance = options.createRuntimeInstance;
+        this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
         this.#getConfig = options.getConfig;
         this.#homeDirectory = options.homeDirectory;
         this.#instanceChanges = options.instanceChanges;
@@ -69,6 +87,8 @@ export class InstanceCreateCoordinator {
         this.#mutationRunner =
             options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
+        this.#publishConfigChange = options.publishConfigChange;
+        this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#setConfig = options.setConfig;
         this.#sshHosts = options.sshHosts ?? discoverSshConfigHosts;
         this.#validator = options.validator ?? new ControlConfigValidator();
@@ -112,7 +132,7 @@ export class InstanceCreateCoordinator {
         const previousConfig = this.#getConfig();
         const nextConfig = this.#validateMergedConfig(normalized);
         const descriptor = normalized.enabled
-            ? createInstance(normalized)
+            ? this.#createRuntimeInstance(normalized)
             : undefined;
         let persisted = false;
 
@@ -122,6 +142,9 @@ export class InstanceCreateCoordinator {
             persisted = true;
 
             if (!normalized.enabled || descriptor === undefined) {
+                this.#publishConfigChange(
+                    diffConfigPaths(previousConfig.instances, nextConfig.instances, "instances"),
+                );
                 return {
                     enabled: false,
                     mcpPath: normalized.mcp.enabled
@@ -139,6 +162,9 @@ export class InstanceCreateCoordinator {
                     normalized.mcp.auth,
                 );
             }
+            this.#publishConfigChange(
+                diffConfigPaths(previousConfig.instances, nextConfig.instances, "instances"),
+            );
 
             return {
                 enabled: true,
@@ -149,9 +175,38 @@ export class InstanceCreateCoordinator {
             };
         } catch (error) {
             const failures: unknown[] = [error];
-            this.#mcp?.unregisterInstance(normalized.name);
-            await this.#instanceRegistry.remove(normalized.name);
-            this.#instanceChanges.publish("registry");
+            try {
+                this.#mcp?.unregisterInstance(normalized.name);
+            } catch (cleanupError) {
+                failures.push(cleanupError);
+            }
+            const current = this.#instanceRegistry.get(normalized.name);
+            if (descriptor !== undefined) {
+                if (current === descriptor) {
+                    await this.#instanceRegistry
+                        .remove(
+                            normalized.name,
+                            descriptor,
+                            async (retiring) =>
+                                await this.#retireRuntimeInstance(retiring),
+                        )
+                        .catch((cleanupError) => failures.push(cleanupError));
+                } else {
+                    await descriptor
+                        .retire(async () =>
+                            await this.#retireRuntimeInstance(descriptor),
+                        )
+                        .catch((cleanupError) => failures.push(cleanupError));
+                }
+                await closeDescriptorResourcesBestEffort(
+                    descriptor,
+                    this.#finalizeRuntimeInstance,
+                ).catch((cleanupError) => failures.push(cleanupError));
+            } else if (current !== undefined) {
+                await this.#instanceRegistry
+                    .remove(normalized.name, current)
+                    .catch((cleanupError) => failures.push(cleanupError));
+            }
             if (persisted) {
                 try {
                     await this.#configStore.write(
@@ -162,6 +217,9 @@ export class InstanceCreateCoordinator {
                 } catch (rollbackError) {
                     failures.push(rollbackError);
                 }
+            }
+            if (current === descriptor && descriptor !== undefined) {
+                this.#instanceChanges.publish("registry");
             }
             if (failures.length === 1) throw error;
             throw new AggregateError(
@@ -227,4 +285,3 @@ function isStructuredError(
         typeof error.message === "string"
     );
 }
-

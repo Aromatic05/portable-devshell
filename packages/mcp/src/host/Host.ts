@@ -8,6 +8,7 @@ import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
+import type { ToolCallIngressPort } from "../endpoint/call/Port.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
 import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
@@ -69,6 +70,7 @@ export interface McpHostConfig {
 }
 
 export class McpRuntimeState {
+    readonly tools: ToolCallIngressPort;
     readonly context: ContextTransport;
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
@@ -80,10 +82,12 @@ export class McpRuntimeState {
 
     constructor(config: {
         context: ContextTransport;
+        tools: ToolCallIngressPort;
         storageDir?: string;
         mcpAppLeaseFile?: string;
     }) {
         this.context = config.context;
+        this.tools = config.tools;
         this.mcpAppLeases = new McpAppLeaseStore({
             filePath: config.mcpAppLeaseFile,
         });
@@ -238,6 +242,7 @@ export class McpHost {
                 contextMode: instance.contextMode ?? "explicit",
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
+                tools: this.#runtimeState.tools,
                 worker: instance.worker,
             }),
             this.#config.serverVersion,

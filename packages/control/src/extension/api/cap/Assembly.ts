@@ -15,6 +15,7 @@ import type { ExtensionProcessCapability } from "@portable-devshell/extension/pr
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { InstanceRegistry } from "@portable-devshell/core";
+import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { ExtensionConfigRuntime } from "./config/Control.js";
 import { ExtensionAssetCapabilityControl } from "./asset/Control.js";
@@ -68,6 +69,7 @@ export interface ExtensionCapabilityAssemblerOptions {
         observe: ExtensionInstanceObserveCapability;
     };
     instances: InstanceRegistry;
+    readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
     toolCallDecorator?: ExtensionToolCallDecorator;
     workerDelegateFactory?: (input: {
         allowed: boolean;
@@ -174,6 +176,7 @@ export class ExtensionCapabilityAssembler {
                 extensionId,
                 instances: this.#options.instances,
                 toolCallDecorator: this.#options.toolCallDecorator,
+                readToolCalls: this.#options.readToolCalls,
             });
         const workerExecute = manifest.capabilities.includes("worker.execute")
             ? (this.#options.workerExecuteFactory?.({

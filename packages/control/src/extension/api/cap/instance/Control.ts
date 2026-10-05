@@ -50,6 +50,7 @@ export interface ExtensionInstanceObserveCapabilityControlOptions {
     extensionId: string;
     instances: InstanceRegistry;
     listConfigured(): readonly ExtensionConfiguredInstance[];
+    readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly InstanceLogEntry[]>;
     subscriptions: ProcessSubscriptionManager;
 }
 
@@ -60,6 +61,7 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
     readonly #instances: InstanceRegistry;
     readonly #listConfigured: () => readonly ExtensionConfiguredInstance[];
     readonly #subscriptions: ProcessSubscriptionManager;
+    readonly #readLogs: ExtensionInstanceObserveCapabilityControlOptions["readLogs"];
 
     constructor(options: ExtensionInstanceObserveCapabilityControlOptions) {
         this.#allowed = options.allowed;
@@ -67,16 +69,44 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
         this.#instances = options.instances;
         this.#listConfigured = options.listConfigured;
         this.#subscriptions = options.subscriptions;
+        this.#readLogs = options.readLogs;
+    }
+
+    async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        const lease = this.#require(name).acquireLease();
+        try { return toSnapshot(lease.instance.worker.snapshot()); }
+        finally { lease.release(); }
+    }
+
+    async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        const lease = this.#require(name).acquireLease();
+        try { return toSnapshot(await lease.instance.worker.refreshStatus()); }
+        finally { lease.release(); }
+    }
+
+    async readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]> {
+        this.#assertAllowed();
+        const lease = this.#require(name).acquireLease();
+        try { return (await this.#readLogs(name, query)).map(toLogEntry); }
+        finally { lease.release(); }
     }
 
     async list(): Promise<readonly ExtensionInstanceRecord[]> {
         this.#assertAllowed();
         return this.#listConfigured().map((configured) => {
+            const descriptor = configured.enabled
+                ? this.#instances.get(configured.name)
+                : undefined;
             return {
                 enabled: configured.enabled,
                 mcpEnabled: configured.mcpEnabled,
                 name: configured.name,
                 provider: configured.provider,
+                ...(descriptor === undefined
+                    ? {}
+                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
             };
         });
     }
@@ -182,6 +212,37 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
         await this.#editor.enableInstance({ instanceName: requireName(name) });
     }
 
+    async start(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        const descriptor = this.#require(name);
+        if (!descriptor.enabled) {
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
+                details: { instance: name, operation: "start" },
+                message: `Instance ${name} is disabled.`,
+                retryable: false,
+            });
+        }
+        const lease = descriptor.acquireLease();
+        try {
+            const snapshot = await lease.instance.worker.start();
+            lease.instance.markOwned();
+            return toSnapshot(snapshot);
+        }
+        finally { lease.release(); }
+    }
+
+    async stop(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        const lease = this.#require(name).acquireLease();
+        try {
+            const snapshot = await lease.instance.worker.stop();
+            lease.instance.clearOwned();
+            return toSnapshot(snapshot);
+        }
+        finally { lease.release(); }
+    }
+
     async disable(name: string): Promise<void> {
         this.#assertAllowed();
         await this.#editor.disableInstance({ instanceName: requireName(name) });
@@ -201,6 +262,19 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
         throw new Error(
             `Extension ${this.#extensionId} did not declare the instance.manage capability.`,
         );
+    }
+}
+
+export class ExtensionInstanceEventPublishCapabilityControl implements ExtensionInstanceEventPublishCapability {
+    constructor(private readonly options: { allowed: boolean; extensionId: string; instances: InstanceRegistry }) {}
+
+    async appendEvent(name: string, type: string, data?: ExtensionJsonValue): Promise<void> {
+        if (!this.options.allowed)
+            throw new Error(`Extension ${this.options.extensionId} did not declare the instance.events.publish capability.`);
+        const lease = requireInstance(this.options.instances, name).acquireLease();
+        try {
+            await lease.instance.worker.appendControlEvent(requireEventType(type), data as JsonValue | undefined);
+        } finally { lease.release(); }
     }
 }
 

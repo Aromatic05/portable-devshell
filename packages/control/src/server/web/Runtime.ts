@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import {
     McpOAuthProtectedResource,
-    type HttpHost,
+    HttpHost,
     type McpHost,
 } from "@portable-devshell/mcp";
 import {
@@ -23,24 +23,10 @@ import { ControlWebSessionService } from "./auth/Session.js";
 import { ControlWebSocketListener } from "./Socket.js";
 import { ExtensionWebGateway } from "./extension/application/Gateway.js";
 
-export interface ControlWebHostPort {
+export interface ControlWebMcpPort {
     readonly host?: Pick<McpHost, "oauthProtectedResource" | "server">;
     readonly oauthApproval: ControlConfig["mcp"]["oauth2"];
     readonly publicBaseUrl?: string;
-    readonly webAuth: ControlWebAuthConfig;
-    readonly webEnabled: boolean;
-    readonly webHost?: HttpHost;
-    readonly webOauthDir: string;
-    readonly webPublicBaseUrl?: string;
-    replaceWebHost(
-        previousConfig: ControlConfig,
-        config: ControlConfig,
-    ): Promise<HttpHost | undefined>;
-    restoreWebHost(
-        host: HttpHost | undefined,
-        config: ControlConfig,
-    ): Promise<void>;
-    stopRetiredWebHost(host: HttpHost | undefined): Promise<void>;
 }
 
 export interface ControlWebTransportPort {
@@ -51,8 +37,10 @@ export interface ControlWebTransportPort {
 }
 
 export interface ControlWebRuntimeOptions {
+    config: ControlConfig;
     extensions: ExtensionHost;
-    host: ControlWebHostPort;
+    mcp: ControlWebMcpPort;
+    oauthDirectory: string;
     paths: ExtensionPathLayout;
 }
 
@@ -63,17 +51,29 @@ interface WebRuntimeGeneration {
 }
 
 export class ControlWebRuntime {
+    #auth: ControlWebAuthConfig;
     readonly #extensions: ExtensionHost;
-    readonly #host: ControlWebHostPort;
-    readonly #paths: ExtensionPathLayout;
+    #enabled: boolean;
     #flow?: ControlWebOAuthFlow;
     #flowUninstall?: () => void;
+    #host?: HttpHost;
     #listener?: ControlWebSocketListener;
+    readonly #mcp: ControlWebMcpPort;
+    readonly #oauthDirectory: string;
+    readonly #paths: ExtensionPathLayout;
+    #publicBaseUrl?: string;
 
     constructor(options: ControlWebRuntimeOptions) {
         this.#extensions = options.extensions;
-        this.#host = options.host;
+        this.#mcp = options.mcp;
+        this.#oauthDirectory = options.oauthDirectory;
         this.#paths = options.paths;
+        this.#auth = options.config.web.auth;
+        this.#enabled = options.config.web.enabled;
+        this.#publicBaseUrl = options.config.web.enabled
+            ? options.config.web.publicBaseUrl
+            : undefined;
+        this.#host = this.#createHost(options.config);
         const runtime = this.#create();
         this.#flow = runtime?.flow;
         this.#listener = runtime?.listener;
@@ -85,9 +85,20 @@ export class ControlWebRuntime {
 
     async prepare(): Promise<void> {
         await this.#flow?.warmup();
-        const webHost = this.#host.webHost;
-        if (this.#flow !== undefined && webHost !== undefined) {
-            this.#flowUninstall = this.#flow.install(webHost);
+        if (this.#flow !== undefined && this.#host !== undefined) {
+            this.#flowUninstall = this.#flow.install(this.#host);
+        }
+    }
+
+    async startHost(): Promise<void> {
+        if (this.#host !== undefined && this.#host !== this.#mcp.host?.server) {
+            await this.#host.start();
+        }
+    }
+
+    async stopHost(): Promise<void> {
+        if (this.#host !== undefined && this.#host !== this.#mcp.host?.server) {
+            await this.#host.stop();
         }
     }
 
@@ -102,7 +113,7 @@ export class ControlWebRuntime {
         nextConfig: ControlConfig,
         transport: ControlWebTransportPort,
     ): Promise<void> {
-        const previousHost = await this.#host.replaceWebHost(
+        const previousHost = await this.#replaceHost(
             previousConfig,
             nextConfig,
         );
@@ -132,9 +143,9 @@ export class ControlWebRuntime {
             this.#listener = nextRuntime.listener;
             this.#flow = nextRuntime.flow;
             this.#flowUninstall = nextFlowUninstall;
-            await this.#host
-                .stopRetiredWebHost(previousHost)
-                .catch(reportRetiredWebHostFailure);
+            await this.#stopRetiredHost(previousHost).catch(
+                reportRetiredWebHostFailure,
+            );
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             try {
@@ -142,23 +153,21 @@ export class ControlWebRuntime {
             } catch (rollbackError) {
                 rollbackFailures.push(rollbackError);
             }
-            await this.#host
-                .restoreWebHost(previousHost, previousConfig)
-                .catch((rollbackError) => {
+            await this.#restoreHost(previousHost, previousConfig).catch(
+                (rollbackError) => {
                     rollbackFailures.push(rollbackError);
-                });
+                },
+            );
             this.#listener = previousListener;
             this.#flow = previousFlow;
             if (
                 previousFlowRemoved &&
                 previousFlow !== undefined &&
-                this.#host.webHost !== undefined
+                this.#host !== undefined
             ) {
                 try {
                     await previousFlow.warmup();
-                    this.#flowUninstall = previousFlow.install(
-                        this.#host.webHost,
-                    );
+                    this.#flowUninstall = previousFlow.install(this.#host);
                 } catch (rollbackError) {
                     rollbackFailures.push(rollbackError);
                 }
@@ -176,13 +185,13 @@ export class ControlWebRuntime {
     }
 
     #create(): WebRuntimeGeneration | undefined {
-        const http = this.#host.webHost;
-        if (http === undefined || !this.#host.webEnabled) return undefined;
-        const basePath = controlWebBasePath(this.#host.webPublicBaseUrl);
+        const http = this.#host;
+        if (http === undefined || !this.#enabled) return undefined;
+        const basePath = controlWebBasePath(this.#publicBaseUrl);
         const secureCookie =
-            this.#host.webPublicBaseUrl?.startsWith("https://") ?? false;
+            this.#publicBaseUrl?.startsWith("https://") ?? false;
         const sessions = new ControlWebSessionService({
-            auth: this.#host.webAuth,
+            auth: this.#auth,
             basePath,
             secureCookie,
         });
@@ -211,7 +220,7 @@ export class ControlWebRuntime {
                 assetDirectory: resolveControlWebAssetsDirectory(),
                 basePath,
                 http,
-                remotePath: controlRemoteRpcPath(this.#host.webPublicBaseUrl),
+                remotePath: controlRemoteRpcPath(this.#publicBaseUrl),
                 routeInstaller: (host, webSessions) =>
                     new ExtensionWebGateway({
                         basePath: `${basePath}/extensions`,
@@ -224,43 +233,51 @@ export class ControlWebRuntime {
         };
     }
 
+    #createHost(config: ControlConfig): HttpHost | undefined {
+        if (!config.web.enabled) return undefined;
+        return this.#mcp.host !== undefined &&
+            sameEndpoint(config.mcp, config.web)
+            ? this.#mcp.host.server
+            : new HttpHost({
+                  listenHost: config.web.listenHost,
+                  listenPort: config.web.listenPort,
+              });
+    }
+
     #createOAuthFlow(
         http: HttpHost,
         basePath: string,
         secureCookie: boolean,
         sessions: ControlWebSessionService,
     ): ControlWebOAuthFlow | undefined {
-        const auth = this.#host.webAuth;
-        const publicBaseUrl = this.#host.webPublicBaseUrl;
-        if (auth.mode !== "oauth2" || publicBaseUrl === undefined)
+        const publicBaseUrl = this.#publicBaseUrl;
+        if (this.#auth.mode !== "oauth2" || publicBaseUrl === undefined)
             return undefined;
 
-        const mcpHost = this.#host.host;
-        const reused = sameOrigin(publicBaseUrl, this.#host.publicBaseUrl)
+        const mcpHost = this.#mcp.host;
+        const reused = sameOrigin(publicBaseUrl, this.#mcp.publicBaseUrl)
             ? mcpHost?.oauthProtectedResource
             : undefined;
         const providerConfig = {
-            documentationUrl: auth.oauth2.documentationUrl,
-            requiredScopes: [...auth.oauth2.requiredScopes],
-            resourceName: auth.oauth2.resourceName,
+            documentationUrl: this.#auth.oauth2.documentationUrl,
+            requiredScopes: [...this.#auth.oauth2.requiredScopes],
+            resourceName: this.#auth.oauth2.resourceName,
         };
         const protectedResource =
             reused ??
             new McpOAuthProtectedResource(
                 providerConfig,
                 new URL(publicBaseUrl).origin,
-                this.#host.webOauthDir,
+                this.#oauthDirectory,
                 {
-                    approval: toMcpOAuthApprovalConfig(
-                        this.#host.oauthApproval,
-                    ),
+                    approval: toMcpOAuthApprovalConfig(this.#mcp.oauthApproval),
                     trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl),
                 },
             );
 
         return new ControlWebOAuthFlow({
             basePath,
-            clientStateFile: join(this.#host.webOauthDir, "client.json"),
+            clientStateFile: `${this.#oauthDirectory}/client.json`,
             config: providerConfig,
             installProvider: reused === undefined || http !== mcpHost?.server,
             ownsProvider: reused === undefined,
@@ -269,6 +286,87 @@ export class ControlWebRuntime {
             secureCookie,
             sessions,
         });
+    }
+
+    async #replaceHost(
+        previousConfig: ControlConfig,
+        config: ControlConfig,
+    ): Promise<HttpHost | undefined> {
+        const previous = this.#host;
+        const next = this.#createHost(config);
+        const same =
+            previous !== undefined &&
+            next !== undefined &&
+            next !== previous &&
+            next !== this.#mcp.host?.server &&
+            previous !== this.#mcp.host?.server &&
+            sameEndpoint(previousConfig.web, config.web);
+        if (same) await previous.stop();
+        if (
+            next !== undefined &&
+            next !== previous &&
+            next !== this.#mcp.host?.server
+        ) {
+            try {
+                await next.start();
+            } catch (error) {
+                const rollbackFailures: unknown[] = [];
+                if (same) {
+                    await previous
+                        .start()
+                        .catch((rollbackError) =>
+                            rollbackFailures.push(rollbackError),
+                        );
+                }
+                if (rollbackFailures.length > 0) {
+                    throw new AggregateError(
+                        [error, ...rollbackFailures],
+                        "Web host replacement failed and rollback was incomplete.",
+                    );
+                }
+                throw error;
+            }
+        }
+        this.#auth = config.web.auth;
+        this.#enabled = config.web.enabled;
+        this.#publicBaseUrl = config.web.enabled
+            ? config.web.publicBaseUrl
+            : undefined;
+        this.#host = next;
+        return previous;
+    }
+
+    async #restoreHost(
+        host: HttpHost | undefined,
+        config: ControlConfig,
+    ): Promise<void> {
+        const current = this.#host;
+        this.#auth = config.web.auth;
+        this.#enabled = config.web.enabled;
+        this.#publicBaseUrl = config.web.enabled
+            ? config.web.publicBaseUrl
+            : undefined;
+        this.#host = host;
+        if (
+            current !== undefined &&
+            current !== host &&
+            current !== this.#mcp.host?.server
+        ) {
+            await current.stop();
+        }
+        if (host !== undefined && host !== this.#mcp.host?.server) {
+            await host.start();
+        }
+    }
+
+    async #stopRetiredHost(host: HttpHost | undefined): Promise<void> {
+        if (
+            host !== undefined &&
+            host !== this.#host &&
+            host !== this.#mcp.host?.server
+        ) {
+            await host.stop();
+        }
     }
 }
 
@@ -279,6 +377,16 @@ function isLoopbackPublicBaseUrl(publicBaseUrl: string): boolean {
     } catch {
         return false;
     }
+}
+
+function sameEndpoint(
+    left: { listenHost: string; listenPort: number },
+    right: { listenHost: string; listenPort: number },
+): boolean {
+    return (
+        left.listenHost === right.listenHost &&
+        left.listenPort === right.listenPort
+    );
 }
 
 function sameOrigin(

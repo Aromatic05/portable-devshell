@@ -8,8 +8,6 @@ import {
 } from "@portable-devshell/shared";
 import {
     assertInstanceDeletable,
-    closeInstanceResources,
-    createInstance,
     InstanceRetirementNotification,
     retireInstanceForDelete,
     type Instance,
@@ -18,6 +16,7 @@ import {
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";
+import { closeDescriptorResourcesBestEffort } from "./State.js";
 import {
     warnCommittedCleanupFailures,
     type InstanceCleanupDebt,
@@ -41,6 +40,9 @@ export class InstanceRetirementCoordinator {
     readonly #instanceChanges: InstanceChangeHub;
 
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
+    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
+    readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(options: InstanceEditorCoordinatorOptions) {
         this.#detachContextInstance = options.detachContextInstance;
@@ -50,6 +52,9 @@ export class InstanceRetirementCoordinator {
         this.#mcp = options.mcp;
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
+        this.#createRuntimeInstance = options.createRuntimeInstance;
+        this.#retireRuntimeInstance = options.retireRuntimeInstance;
+        this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
     async deleteInstance(
@@ -118,7 +123,9 @@ export class InstanceRetirementCoordinator {
         if (descriptor !== undefined) {
             cleanup.retainDescriptor(instanceName, descriptor);
             await this.#instanceRegistry
-                .remove(instanceName, descriptor)
+                .remove(instanceName, descriptor, async (retiring) => {
+                    await this.#retireRuntimeInstance(retiring);
+                })
                 .catch((error) => cleanupFailures.push(error));
             this.#instanceChanges.publish("registry");
         }
@@ -159,6 +166,16 @@ export class InstanceRetirementCoordinator {
             existing.enabled
         ) {
             const instanceDisabled = !next.enabled;
+            if (descriptor.retired) {
+                await this.notification
+                    .retireGenerationResources(existing)
+                    .catch((error) => failures.push(error));
+                if (instanceDisabled) {
+                    failures.push(
+                        ...(await this.notification.retireDisable(existing)),
+                    );
+                }
+            }
             const workspaceDisabled =
                 existing.workspace.enabled && !next.workspace.enabled;
             if (workspaceDisabled || instanceDisabled) {
@@ -167,12 +184,6 @@ export class InstanceRetirementCoordinator {
                     .catch((error) => failures.push(error));
             }
             if (instanceDisabled) {
-                await this.notification
-                    .retireGenerationResources(existing)
-                    .catch((error) => failures.push(error));
-                failures.push(
-                    ...(await this.notification.retireDisable(existing)),
-                );
                 await this.notification
                     .notifyDisabled(existing)
                     .catch((error) => failures.push(error));
@@ -193,7 +204,7 @@ export class InstanceRetirementCoordinator {
             descriptor ??
             (this.#reconcileContextInstanceCleanup === undefined
                 ? undefined
-                : createInstance(existing));
+                : this.#createRuntimeInstance(existing));
         if (cleanupDescriptor !== undefined) {
             cleanup.retainDescriptor(existing.name, cleanupDescriptor);
         }
@@ -212,20 +223,39 @@ export class InstanceRetirementCoordinator {
             failures.push(error);
             return failures;
         }
-        await this.notification
-            .retireGenerationResources(existing)
-            .catch((error) => failures.push(error));
-        failures.push(...(await this.notification.retireDelete(existing)));
-        await retireInstanceForDelete(
-            cleanupDescriptor,
-            skipRuntimeRetirement,
-        )
-            .catch((error) => failures.push(error));
+        if (descriptor?.retired) {
+            await this.notification
+                .retireGenerationResources(existing)
+                .catch((error) => failures.push(error));
+            failures.push(...(await this.notification.retireDelete(existing)));
+        }
+        if (descriptor === undefined) {
+            await this.notification
+                .retireGenerationResources(existing)
+                .catch((error) => failures.push(error));
+            failures.push(...(await this.notification.retireDelete(existing)));
+        }
+        let workerRetirementSucceeded = cleanupDescriptor === undefined;
         if (cleanupDescriptor !== undefined) {
-            await closeInstanceResources(cleanupDescriptor).catch(
-                (error) => failures.push(error),
-            );
-            cleanup.releaseDescriptor(existing.name);
+            try {
+                await retireInstanceForDelete(
+                    cleanupDescriptor,
+                    skipRuntimeRetirement,
+                );
+                workerRetirementSucceeded = true;
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        if (cleanupDescriptor !== undefined) {
+            if (workerRetirementSucceeded) {
+                await closeDescriptorResourcesBestEffort(
+                    cleanupDescriptor,
+                    this.#finalizeRuntimeInstance,
+                )
+                    .then(() => cleanup.releaseDescriptor(existing.name))
+                    .catch((error) => failures.push(error));
+            }
         }
 
         await this.notification

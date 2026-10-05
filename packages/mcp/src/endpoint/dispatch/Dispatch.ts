@@ -28,10 +28,9 @@ import {
     readMcpProvenanceInput,
     readMcpRoutedInput,
 } from "../tool/Input.js";
-import type { McpEndpointCallContext, McpEndpointWorkerPort } from "../call/Port.js";
+import type { McpEndpointCallContext, McpEndpointWorkerPort, ToolCallIngressPort } from "../call/Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../call/Boundary.js";
 import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
-import { McpEndpointHandlerTool } from "../tool/Handler.js";
 import {
     assertMcpEndpointReady,
     mcpEndpointToolNotExposed,
@@ -48,6 +47,7 @@ export interface McpEndpointDispatchOptions {
     contextSelector?: McpContextSelector;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
+    tools: ToolCallIngressPort;
     worker: McpEndpointWorkerPort;
 }
 
@@ -63,7 +63,7 @@ export class McpEndpointDispatch {
     readonly #instanceName: string;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
     readonly #worker: McpEndpointWorkerPort;
-    readonly #workerHandler: McpEndpointHandlerTool;
+    readonly #tools: ToolCallIngressPort;
 
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
@@ -73,9 +73,7 @@ export class McpEndpointDispatch {
         this.#instanceName = options.instanceName;
         this.#toolProvenance = options.toolProvenance;
         this.#worker = options.worker;
-        this.#workerHandler = new McpEndpointHandlerTool({
-            instanceName: options.instanceName,
-        });
+        this.#tools = options.tools;
     }
 
     assertReady(
@@ -112,7 +110,8 @@ export class McpEndpointDispatch {
         }
 
         if (toolNamespace(toolName) === bootstrapToolNamespace) {
-            return await this.#workerHandler.call(
+            return await this.#tools.call(
+                this.#instanceName,
                 toolName,
                 input,
                 {
@@ -123,7 +122,6 @@ export class McpEndpointDispatch {
                     requestId: requestContext.requestId,
                     source: "mcp",
                 },
-                snapshot.instanceRoutingEnabled,
                 signal,
             );
         }
@@ -178,11 +176,11 @@ export class McpEndpointDispatch {
             );
             return accepted;
         };
-        const result = await this.#workerHandler.call(
+        const result = await this.#tools.call(
+                routed.instance,
                 toolName,
                 input,
                 context,
-                snapshot.instanceRoutingEnabled,
                 signal,
                 async (structured, _callId, nextPresentation) => {
                     presentation = nextPresentation;

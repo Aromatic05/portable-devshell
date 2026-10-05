@@ -17,6 +17,7 @@ import {
     TerminalSessionService,
     type ToolCallIngressPort,
     type ToolCallProvenanceStore,
+    type Instance,
 } from "@portable-devshell/core";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
@@ -47,7 +48,6 @@ import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "../auth/Route.js";
 import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
-import { OperationalOverviewService } from "../overview/Service.js";
 import type { ReverseCredentials } from "@portable-devshell/core";
 import {
     createWebApplicationRouteModule,
@@ -91,6 +91,7 @@ export function createServerRouteModule(
 export interface ControlRouteExtensionPort {
     modules(scope: "control" | "instance"): readonly ControlPortDefinition[];
     onChange(listener: () => void): () => void;
+    retireInstance(instance: string): Promise<void>;
 }
 
 export interface ControlRouteRegistryOptions {
@@ -107,9 +108,10 @@ export interface ControlRouteRegistryOptions {
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
+    instancePorts?: (descriptor: Instance, sessions: TerminalSessionService) => readonly ControlPortDefinition[];
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
-    overview?: OperationalOverviewPort;
+    overview: OperationalOverviewPort;
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentials;
     processSubscriptions?: ProcessSubscriptionManager;
@@ -142,12 +144,7 @@ export class ControlRouteRegistry {
             options.instanceChanges ?? new InstanceChangeHub();
         this.#subscriptions =
             options.processSubscriptions ?? new ProcessSubscriptionManager();
-        this.#overview =
-            options.overview ??
-            new OperationalOverviewService({
-                instances: options.instances,
-                oauthApprovals: options.oauthApprovals,
-            });
+        this.#overview = options.overview;
         this.#hosts = this.#build();
         this.#unsubscribeExtensions =
             options.extensionRoutes?.onChange(() => this.#rebuild()) ??
@@ -283,13 +280,10 @@ export class ControlRouteRegistry {
                 createInstanceHost({
                     descriptor,
                     extensionPorts:
-                        this.#options.extensionRoutes?.modules("instance") ??
-                        [],
+                        [...(this.#options.extensionRoutes?.modules("instance") ?? []),
+                            ...(this.#options.instancePorts?.(descriptor, this.#terminals) ?? [])],
                     registry: this.#options.instances,
                     subscriptions: this.#subscriptions,
-                    terminalMaxUnackedBytes:
-                        this.#options.terminalMaxUnackedBytes,
-                    terminals: this.#terminals,
                 }),
             );
         }

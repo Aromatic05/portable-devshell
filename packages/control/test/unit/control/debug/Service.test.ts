@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerInstance } from "@portable-devshell/core";
+import { Instance, InstanceRegistry } from "@portable-devshell/core";
 import type { ToolCallContext } from "@portable-devshell/shared";
 
 import { DebugPatchService } from "../../../../src/debug/Service.ts";
-import { InstanceRegistry } from "@portable-devshell/core";
 
 function context(ctxId: string): ToolCallContext {
     return {
@@ -18,25 +17,29 @@ function context(ctxId: string): ToolCallContext {
 
 test("DebugPatchService can hold one Context without intercepting the same tool in another Context", async () => {
     const calls: string[] = [];
-    const worker = {
-        async callTool(
-            toolName: string,
-            _input: unknown,
-            callContext: ToolCallContext,
-            signal?: AbortSignal,
-        ) {
+    const runtime = {
+        async callTool(request: never) {
+            const { value, signal } = request as unknown as {
+                value: { context: ToolCallContext; toolName: string };
+                signal?: AbortSignal;
+            };
             if (signal?.aborted === true) throw signal.reason;
-            calls.push(`${callContext.ctxId}:${toolName}`);
-            return { ctxId: callContext.ctxId, toolName };
+            calls.push(`${value.context.ctxId}:${value.toolName}`);
+            return { ctxId: value.context.ctxId, toolName: value.toolName };
         },
     };
     const registry = new InstanceRegistry([
-        {
+        new Instance({
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            modelExtensions: [],
             name: "demo-local",
-            worker,
-        } as never,
+            provider: "local",
+            worker: {} as never,
+        }),
     ]);
-    const service = new DebugPatchService(registry);
+    const service = new DebugPatchService(registry, () => runtime);
     const patch = await service.load({
         scope: { ctxId: "ctx-own", toolName: "file_read" },
         source: `(event) =>
@@ -47,16 +50,13 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
     });
     const controller = new AbortController();
 
-    const ownCall = worker.callTool(
-        "file_read",
-        { files: [{ path: "./probe", view: "metadata" }] },
-        context("ctx-own"),
-        controller.signal,
-    );
+    const invoke = async (toolName: string, payload: unknown, callContext: ToolCallContext, signal?: AbortSignal) =>
+        await runtime.callTool({ value: { toolName, payload, context: callContext }, signal } as never);
+    const ownCall = invoke("file_read", { files: [{ path: "./probe", view: "metadata" }] }, context("ctx-own"), controller.signal);
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.deepEqual(
-        await worker.callTool(
+        await invoke(
             "file_read",
             { files: [{ path: "./other", view: "metadata" }] },
             context("ctx-other"),
@@ -67,7 +67,7 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
     assert.equal(service.listPatches()[0]?.invocationCount, 1);
 
     assert.deepEqual(
-        await worker.callTool("tmux_read", {}, context("ctx-own")),
+        await invoke("tmux_read", {}, context("ctx-own")),
         { ctxId: "ctx-own", toolName: "tmux_read" },
     );
     assert.deepEqual(calls, ["ctx-other:file_read", "ctx-own:tmux_read"]);
@@ -88,15 +88,23 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
 });
 
 test("DebugPatchService rejects worker patches without an explicit Context scope", async () => {
-    const worker = {
+    const runtime = {
         async callTool() {
             return {};
         },
-    } as unknown as WorkerInstance;
+    };
     const registry = new InstanceRegistry([
-        { name: "demo-local", worker } as never,
+        new Instance({
+            enabled: true,
+            mcpEnabled: false,
+            mcpPath: "",
+            modelExtensions: [],
+            name: "demo-local",
+            provider: "local",
+            worker: {} as never,
+        }),
     ]);
-    const service = new DebugPatchService(registry);
+    const service = new DebugPatchService(registry, () => runtime);
 
     await assert.rejects(
         service.load({
