@@ -21,6 +21,10 @@
         "./approval": {
             "types": "./dist/approval/Public.d.ts",
             "default": "./dist/approval/Public.js"
+        },
+        "./context": {
+            "types": "./dist/context/Public.d.ts",
+            "default": "./dist/context/Public.js"
         }
     },
     "files": [

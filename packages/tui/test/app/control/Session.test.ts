@@ -7,7 +7,7 @@ import {
     type MessageEntry,
     type InstanceSnapshot,
     type JsonValue,
-    type McpContextRecord,
+    type ContextRecord,
     type OAuthApprovalRequest,
     type ToolCallQuery,
     type ToolCallRecord,
@@ -178,7 +178,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             runtimeDir,
         );
         const worker = new FakeWorker("alpha");
-        let status: McpContextRecord["status"] = "active";
+        let status: ContextRecord["status"] = "active";
         const server = createServer(socketPath, worker, () => 7, {
             contextRecords: () => [contextRecord(status)],
         });
@@ -730,7 +730,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         getConfigVersion: () => number,
         options: {
             messageHistoryEntries?: () => MessageEntry[];
-            contextRecords?: () => McpContextRecord[];
+            contextRecords?: () => ContextRecord[];
             onTodoRead?: () => void;
             restartable?: boolean;
             todoReadGate?: Promise<void>;
@@ -1050,8 +1050,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     }
 
     function contextRecord(
-        status: McpContextRecord["status"],
-    ): McpContextRecord {
+        status: ContextRecord["status"],
+    ): ContextRecord {
         return {
             createdAt: "2026-09-10T10:00:00.000Z",
             ctxId: "ctx-alpha",

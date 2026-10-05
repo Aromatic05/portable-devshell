@@ -5,7 +5,7 @@ import {
     type ContextMessageRecord,
     type InstanceCreateDraft,
     type InstanceSnapshot,
-    type McpContextRecord,
+    type ContextRecord,
     type ProcessStartOptions,
 } from "@portable-devshell/shared";
 
@@ -340,9 +340,9 @@ describe("WebStore", () => {
     it("attempts every Context in a batch disable and reports the failure", async () => {
         const domains = new WebTestDomains();
         const disable = vi.fn(
-            async (ctxId: string): Promise<McpContextRecord> => {
+            async (ctxId: string): Promise<ContextRecord> => {
                 if (ctxId === "ctx-b") throw new Error("ctx-b refused");
-                return { ctxId } as McpContextRecord;
+                return { ctxId } as ContextRecord;
             },
         );
         domains.domains.context.disable = disable;

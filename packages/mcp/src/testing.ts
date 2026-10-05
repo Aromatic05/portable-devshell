@@ -25,6 +25,3 @@ export * from "./host/Route.js";
 export * from "./mcpapp/app/App.js";
 export * from "./mcpapp/app/Lease.js";
 export * from "./mcpapp/app/Presence.js";
-
-export type * from "./context/Port.js";
-export type * from "./context/Runtime.js";

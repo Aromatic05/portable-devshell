@@ -1,15 +1,15 @@
 import {
     bootstrapToolNamespace,
     toolNamespace,
+    type ContextTransport,
     type ToolCallHookValue,
     type JsonValue,
-    type McpContextEnvironment,
-    type McpContextRecord,
+    type ContextEnvironment,
+    type ContextRecord,
     type ToolCallContext,
     type ToolCallProvenance,
 } from "@portable-devshell/shared";
 
-import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     createMcpContextSelector,
     readMcpContextInput,
@@ -44,7 +44,7 @@ export type {
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
-    contextRegistry: ContextRegistryPort;
+    context: Pick<ContextTransport, "resolve">;
     contextSelector?: McpContextSelector;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
@@ -58,7 +58,7 @@ interface McpAcceptedCall {
 
 export class McpEndpointDispatch {
     readonly #catalog: McpEndpointCatalog;
-    readonly #contextRegistry: ContextRegistryPort;
+    readonly #context: Pick<ContextTransport, "resolve">;
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
@@ -67,7 +67,7 @@ export class McpEndpointDispatch {
 
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
-        this.#contextRegistry = options.contextRegistry;
+        this.#context = options.context;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
@@ -139,10 +139,9 @@ export class McpEndpointDispatch {
                   !isPassiveWorkspaceRead(toolName),
               )
             : await this.#contextSelector.resolve(
-                  this.#contextRegistry,
+                  this.#context,
                   input,
                   requestContext,
-                  this.#instanceName,
                   {
                       allowExpired:
                           touchContext &&
@@ -208,17 +207,13 @@ export class McpEndpointDispatch {
     ): Promise<McpAcceptedCall> {
         const { instance, ctxId } = value.context;
         const touchContext = !isPassiveWorkspaceRead(value.toolName);
-        let record = await this.#contextRegistry.lookup(ctxId!, {
+        await this.#context.resolve({
+            ctxId: ctxId!,
+            instance,
             principal: requestContext.principal,
+            renewExpired: touchContext,
+            touch: touchContext,
         });
-        if (touchContext) {
-            record = record.status === "expired"
-                ? await this.#contextRegistry.renewForPrincipal(record.ctxId, { principal: requestContext.principal })
-                : await this.#contextRegistry.validateAndTouch(record.ctxId, { principal: requestContext.principal });
-        } else {
-            record = await this.#contextRegistry.validate(record.ctxId, { principal: requestContext.principal });
-        }
-        await this.#contextRegistry.assertInstanceAvailable(record.ctxId, instance);
         const workspaceAdvice: string[] = [];
         await this.#appendMcpToolCalled(instance, value.toolName, value.context);
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {
@@ -229,7 +224,7 @@ export class McpEndpointDispatch {
 
 
     #createToolContext(
-        record: McpContextRecord,
+        record: ContextRecord,
         requestContext: McpEndpointCallContext,
         instance: string,
         signal?: AbortSignal,
@@ -251,15 +246,13 @@ export class McpEndpointDispatch {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         touch: boolean,
-    ): Promise<{ input: JsonValue; record: McpContextRecord }> {
+    ): Promise<{ input: JsonValue; record: ContextRecord }> {
         const contextInput = readMcpContextInput(input);
-        const record = touch
-            ? await this.#contextRegistry.validateAndTouch(contextInput.ctxId, {
-                  principal: requestContext.principal,
-              })
-            : await this.#contextRegistry.validate(contextInput.ctxId, {
-                  principal: requestContext.principal,
-              });
+        const record = await this.#context.resolve({
+            ctxId: contextInput.ctxId,
+            principal: requestContext.principal,
+            touch,
+        });
         return { input: contextInput.input, record };
     }
 
@@ -301,9 +294,9 @@ function hasToolProvenance(provenance: ToolCallProvenance): boolean {
 }
 
 function contextEnvironment(
-    record: McpContextRecord,
+    record: ContextRecord,
     instance: string,
-): McpContextEnvironment | undefined {
+): ContextEnvironment | undefined {
     return record.environments.find(
         (environment) => environment.instance === instance,
     );

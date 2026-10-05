@@ -7,7 +7,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 import { ContextCleanupService } from "../../control/src/context/Service/Cleanup.ts";
 import { ContextEnvironmentService } from "../../control/src/context/Service/Scope.ts";
 import { ContextRegistry } from "../../control/src/context/Registry/index.ts";
-import type { McpContextRegistryOptions } from "../../control/src/context/Model.ts";
+import type { ContextRegistryOptions } from "../../control/src/context/Model.ts";
 import { ContextService } from "../../control/src/context/Service/index.ts";
 import type { ContextRecordSourcePort } from "../../control/src/context/Service/index.ts";
 import {
@@ -118,7 +118,7 @@ export function createTestCallOperationGateway(): McpInstanceGateway {
 export function createTestContextRuntime(
     options: {
         contextRegistry?: ContextRecordSourcePort;
-        registryOptions?: McpContextRegistryOptions;
+        registryOptions?: ContextRegistryOptions;
         instanceName?: string;
         gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
         worker?: McpEndpointWorkerPort;
@@ -156,7 +156,7 @@ export function createTestContextRuntime(
 export function createTestContextEnvironment(
     options: {
         contextRegistry?: ContextRecordSourcePort;
-        registryOptions?: McpContextRegistryOptions;
+        registryOptions?: ContextRegistryOptions;
         instanceName?: string;
         gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
         worker?: McpEndpointWorkerPort;

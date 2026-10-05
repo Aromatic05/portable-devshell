@@ -10,7 +10,7 @@ import {
     type ApprovalRequest,
     type ArtifactStoredImageResult,
     type InstanceListEntry,
-    type McpContextRecord,
+    type ContextRecord,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -378,7 +378,7 @@ function auditScope(route: Extract<WebRoute, { page: "audit" }>): AuditScope {
 
 function auditScopeOptions(
     instances: readonly InstanceListEntry[],
-    contexts: readonly McpContextRecord[],
+    contexts: readonly ContextRecord[],
     calls: readonly { ctxId?: string; instance: string; workspace?: string }[],
     contextStatus: AuditContextStatusFilter,
     now: number,
@@ -390,7 +390,7 @@ function auditScopeOptions(
         {
             ctxId: string;
             instance: string;
-            record?: McpContextRecord;
+            record?: ContextRecord;
             status?: string;
             workspace?: string;
         }
@@ -463,7 +463,7 @@ function auditScopeOptions(
 function callMatchesContextFilter(
     call: { ctxId?: string; instance: string },
     scope: AuditScope,
-    contextRecords: ReadonlyMap<string, McpContextRecord>,
+    contextRecords: ReadonlyMap<string, ContextRecord>,
     filter: AuditContextStatusFilter,
     now: number,
 ): boolean {
@@ -481,7 +481,7 @@ function callMatchesContextFilter(
 }
 
 function contextMatchesFilter(
-    context: McpContextRecord | undefined,
+    context: ContextRecord | undefined,
     filter: AuditContextStatusFilter,
     now: number,
 ): boolean {

@@ -1,14 +1,11 @@
 import {
     createRemoteError,
     contextErrorCodes,
+    type ContextTransport,
     type ControlMcpContextMode,
     type JsonValue,
-    type McpContextRecord,
-} from "@portable-devshell/shared";
-
-import type {
-    ContextRegistryPort,
-    McpContextExternalBinding,
+    type ContextExternalBinding,
+    type ContextRecord,
 } from "@portable-devshell/shared";
 
 export interface McpContextRequestContext {
@@ -18,7 +15,7 @@ export interface McpContextRequestContext {
 
 export interface McpResolvedContext {
     input: JsonValue;
-    record: McpContextRecord;
+    record: ContextRecord;
 }
 
 export interface McpContextSelector {
@@ -26,13 +23,12 @@ export interface McpContextSelector {
     readonly requiresExplicitContextId: boolean;
     bindings(
         requestContext: McpContextRequestContext,
-    ): McpContextExternalBinding[];
-    expose(record: McpContextRecord): Record<string, JsonValue>;
+    ): ContextExternalBinding[];
+    expose(record: ContextRecord): Record<string, JsonValue>;
     resolve(
-        registry: ContextRegistryPort,
+        contexts: Pick<ContextTransport, "resolve">,
         input: JsonValue,
         requestContext: McpContextRequestContext,
-        instanceName: string,
         options?: { allowExpired?: boolean; touch?: boolean },
     ): Promise<McpResolvedContext>;
 }
@@ -54,7 +50,7 @@ class UnifiedContextSelector implements McpContextSelector {
 
     bindings(
         requestContext: McpContextRequestContext,
-    ): McpContextExternalBinding[] {
+    ): ContextExternalBinding[] {
         if (this.id !== "openai-session") return [];
         const session = requestContext.requestMeta?.["openai/session"];
         return typeof session === "string" && session.length > 0
@@ -62,51 +58,28 @@ class UnifiedContextSelector implements McpContextSelector {
             : [];
     }
 
-    expose(record: McpContextRecord): Record<string, JsonValue> {
+    expose(record: ContextRecord): Record<string, JsonValue> {
         return this.requiresExplicitContextId ? { ctxId: record.ctxId } : {};
     }
 
     async resolve(
-        registry: ContextRegistryPort,
+        contexts: Pick<ContextTransport, "resolve">,
         input: JsonValue,
         requestContext: McpContextRequestContext,
-        _instanceName: string,
-        options?: { allowExpired?: boolean; touch?: boolean },
+        options: { allowExpired?: boolean; touch?: boolean } = {},
     ): Promise<McpResolvedContext> {
-        const validate = async (ctxId: string) => {
-            if (options?.touch !== false) {
-                return await registry.validateAndTouch(ctxId, {
-                    principal: requestContext.principal,
-                });
-            }
-            if (options.allowExpired === true) {
-                const record = await registry.lookup(ctxId, {
-                    principal: requestContext.principal,
-                });
-                if (record.status === "disabled") {
-                    return await registry.validate(ctxId, {
-                        principal: requestContext.principal,
-                    });
-                }
-                return record;
-            }
-            return await registry.validate(ctxId, {
-                principal: requestContext.principal,
-            });
-        };
         const contextInput = readOptionalMcpContextInput(input);
         if (this.requiresExplicitContextId) {
-            if (contextInput.ctxId === undefined) {
-                throw createRemoteError({
-                    code: contextErrorCodes.invalid,
-                    message:
-                        "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
-                    retryable: false,
-                });
-            }
+            if (contextInput.ctxId === undefined)
+                throw missingExplicitContext();
             return {
                 input: contextInput.input,
-                record: await validate(contextInput.ctxId),
+                record: await contexts.resolve({
+                    acceptExpired: options.allowExpired === true,
+                    ctxId: contextInput.ctxId,
+                    principal: requestContext.principal,
+                    touch: options.touch !== false,
+                }),
             };
         }
         if (contextInput.ctxId !== undefined) {
@@ -117,41 +90,16 @@ class UnifiedContextSelector implements McpContextSelector {
                 retryable: false,
             });
         }
-        let boundCtxId: string | undefined;
-        for (const binding of this.bindings(requestContext)) {
-            const record = await registry.lookupExternal(binding, {
+        return {
+            input: contextInput.input,
+            record: await contexts.resolve({
+                acceptExpired: options.allowExpired === true,
+                externalBindings: this.bindings(requestContext),
                 principal: requestContext.principal,
-            });
-            if (record === undefined) continue;
-            if (boundCtxId !== undefined && boundCtxId !== record.ctxId) {
-                throw createRemoteError({
-                    code: contextErrorCodes.invalid,
-                    message: "External Context bindings disagree on ctxId.",
-                    retryable: false,
-                });
-            }
-            boundCtxId = record.ctxId;
-        }
-        if (boundCtxId !== undefined) {
-            const bound = await registry.lookup(boundCtxId, {
-                principal: requestContext.principal,
-            });
-            return {
-                input: contextInput.input,
-                record:
-                    bound.status === "expired" && options?.touch !== false
-                        ? await registry.renewForPrincipal(boundCtxId, {
-                              principal: requestContext.principal,
-                          })
-                        : await validate(boundCtxId),
-            };
-        }
-        throw createRemoteError({
-            code: contextErrorCodes.invalid,
-            message:
-                "No Context is bound to this request. Call environ_info with workspace.",
-            retryable: false,
-        });
+                renewExpired: options.touch !== false,
+                touch: options.touch !== false,
+            }),
+        };
     }
 }
 
@@ -160,14 +108,7 @@ export function readMcpContextInput(input: JsonValue): {
     input: JsonValue;
 } {
     const context = readOptionalMcpContextInput(input);
-    if (context.ctxId === undefined) {
-        throw createRemoteError({
-            code: contextErrorCodes.invalid,
-            message:
-                "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
-            retryable: false,
-        });
-    }
+    if (context.ctxId === undefined) throw missingExplicitContext();
     return { ctxId: context.ctxId, input: context.input };
 }
 
@@ -185,6 +126,15 @@ export function readOptionalMcpContextInput(input: JsonValue): {
     }
     const { ctxId, ...toolInput } = input;
     return { ctxId: ctxId.trim(), input: toolInput };
+}
+
+function missingExplicitContext() {
+    return createRemoteError({
+        code: contextErrorCodes.invalid,
+        message:
+            "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
+        retryable: false,
+    });
 }
 
 function isRecord(

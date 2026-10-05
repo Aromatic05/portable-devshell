@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type { ContextTransport } from "@portable-devshell/shared";
 import {
     isMcpAppActionGateway,
     isMcpAppGateway,
@@ -31,7 +31,7 @@ export interface McpAppLiveRouteHost {
 }
 
 export interface McpAppLiveRouteOptions {
-    contextRegistry: ContextRegistryPort;
+    context: Pick<ContextTransport, "reentry" | "validateForInstance">;
     gateway?: McpAppPort;
     heartbeatMs?: number;
     host: McpAppLiveRouteHost;
@@ -189,7 +189,7 @@ function registerLiveRouteBase(
                                     {
                                         instances: authorized.instances,
                                         reentry:
-                                            (await options.contextRegistry.reentry.readAutomaticReentry(
+                                            (await options.context.reentry.readAutomaticReentry(
                                                 ctxId,
                                                 options.instanceName,
                                             )) as unknown as JsonValue,
@@ -248,11 +248,11 @@ async function authorize(
         );
     }
     try {
-        const record = await options.contextRegistry.validateForInstance(
+        const record = await options.context.validateForInstance(
             ctxId,
             options.instanceName,
         );
-        const reentry = await options.contextRegistry.reentry.readAutomaticReentry(
+        const reentry = await options.context.reentry.readAutomaticReentry(
             ctxId,
             options.instanceName,
         );

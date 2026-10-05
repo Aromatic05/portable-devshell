@@ -6,7 +6,7 @@ import {
     useSyncExternalStore,
 } from "react";
 
-import type { McpContextRecord } from "@portable-devshell/shared";
+import type { ContextRecord } from "@portable-devshell/shared";
 
 import {
     useDomainSnapshot,
@@ -26,7 +26,7 @@ export function ContextBatchDisableDialog({
     onDisable,
 }: {
     busy: boolean;
-    contexts: readonly McpContextRecord[];
+    contexts: readonly ContextRecord[];
     disabled?: boolean;
     now: number;
     onClose(): void;

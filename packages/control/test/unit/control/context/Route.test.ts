@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
-    McpContextRecord,
+    ContextRecord,
     ControlPortContext,
 } from "@portable-devshell/shared";
 
@@ -12,7 +12,7 @@ import {
 } from "../../../../src/context/Route.ts";
 import { ContextChangeHub } from "../../../../src/context/Registry/Change.ts";
 
-function record(ctxId: string): McpContextRecord {
+function record(ctxId: string): ContextRecord {
     return {
         createdAt: "2026-08-10T00:00:00.000Z",
         ctxId,

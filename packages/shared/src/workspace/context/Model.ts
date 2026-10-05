@@ -1,99 +1,77 @@
 /**
  * Context model.
  *
- * Owns the MCP Context record acquired from a control host and the authority
- * vocabulary used to bind, validate, and re-enter Contexts: its status,
+ * Owns the Context record acquired from a control host and the authority
+ * vocabulary used to bind and validate Contexts: its status,
  * environment attachments, external bindings, remote instance references,
- * cleanup obligations, automatic-reentry state, and query shape. Context
- * messages and the Message surface live in their own subdomains.
+ * cleanup obligations, and query shape. Context messages and the Message
+ * surface live in their own subdomains.
  *
  * The record carries only the authoritative environment list; an "initial"
  * environment is whichever entry the authority attached first, not a second
  * copy of the same data.
  */
 
-export type McpContextStatus = "active" | "expired" | "disabled";
+export type ContextStatus = "active" | "expired" | "disabled";
 
-export interface McpContextEnvironment {
+export interface ContextEnvironment {
     instance: string;
     temporaryDirectory?: string;
     workspace?: string;
 }
 
-export interface McpContextRecord {
+export interface ContextRecord {
     createdAt: string;
     ctxId: string;
-    environments: McpContextEnvironment[];
+    environments: ContextEnvironment[];
     expiresAt: string;
     lastAccessedAt: string;
     principal: string;
-    status: McpContextStatus;
+    status: ContextStatus;
 }
 
-export interface McpContextBinding {
+export interface ContextBinding {
     principal: string;
-    environments?: McpContextEnvironment[];
+    environments?: ContextEnvironment[];
 }
 
-export interface McpContextEnvironmentBinding {
+export interface ContextEnvironmentBinding {
     instance: string;
     temporaryDirectory?: string;
     workspace?: string;
 }
 
-export interface McpContextValidationBinding {
+export interface ContextValidationBinding {
     principal: string;
 }
 
-export interface McpContextExternalBinding {
+export interface ContextExternalBinding {
     kind: string;
     value: string;
 }
 
-export interface McpContextInstanceReference {
+export interface ContextInstanceReference {
     current: boolean;
     handle?: string;
 }
 
-export interface McpContextMaskedInstance {
-    environment?: McpContextEnvironment;
+export interface ContextMaskedInstance {
+    environment?: ContextEnvironment;
     instance: string;
 }
 
-export type McpContextEnvironmentCleanup =
+export type ContextEnvironmentCleanup =
     | { instance: string; kind: "alerts"; workspace: string }
     | { instance: string; kind: "instance_reference" };
 
-export type McpContextAutomaticReentryMode =
-    "automatic" | "user_owned" | "paused";
-export type McpContextAutomaticReentrySourceKind =
-    "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait";
-
-export interface McpContextAutomaticReentryState {
-    attempted: boolean;
-    claimId?: string;
-    epoch: number;
-    executionActive: boolean;
-    executionEpoch: number;
-    executionLastActivityAt?: string;
-    executionLeaseUntil?: string;
-    mode: McpContextAutomaticReentryMode;
-    pending: boolean;
-    reason?: string;
-    sourceId?: string;
-    sourceKind?: McpContextAutomaticReentrySourceKind;
-    suppressedAt?: string;
-}
-
-export interface McpContextQuery {
+export interface ContextQuery {
     instance?: string;
     workspace?: string;
-    status?: McpContextStatus;
+    status?: ContextStatus;
 }
 
-// Interaction Context bounded-context error codes. These describe MCP Context
-// lifecycle failures (expired/disabled/invalid/renewal/workspace). The values
-// are the wire codes carried in RemoteErrorBody.code.
+// Context authority error codes. The wire values retain their historical
+// mcp.context* names for protocol compatibility.
 
 export const contextErrorCodes = {
     disabled: "mcp.contextDisabled",

@@ -1,4 +1,5 @@
 import type {
+    ContextTransport,
     GoalManageInput,
     JsonValue,
     TodoTaskControlAction,
@@ -12,7 +13,6 @@ import {
     type McpAppActionGateway,
     type McpAppPort,
 } from "../../instance/Gateway.js";
-import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { McpToolCatalogMcpAppName } from "./Catalog.js";
 import { readMcpAppSnapshot } from "../../mcpapp/Projection.js";
 import {
@@ -37,7 +37,7 @@ export class McpEndpointHandlerMcpApp {
 
     constructor(
         private readonly options: {
-            contextRegistry?: ContextRegistryPort;
+            context?: Pick<ContextTransport, "reentry" | "validateForInstance">;
             gateway?: McpAppPort;
             instanceName: string;
             now?: () => number;
@@ -151,12 +151,12 @@ export class McpEndpointHandlerMcpApp {
             await this.#actionStore.suppressContextPending(ctxId);
         }
         if (request.action === "start") {
-            await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
+            await this.options.context?.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );
         } else if (request.action !== "get") {
-            await this.options.contextRegistry?.reentry.observeAutomaticReentryActivity(
+            await this.options.context?.reentry.observeAutomaticReentryActivity(
                 ctxId,
                 this.options.instanceName,
                 request.action === "block"
@@ -195,20 +195,20 @@ export class McpEndpointHandlerMcpApp {
             ctxId,
         );
         if (command === "pause") {
-            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
+            await this.options.context?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "McpApp Goal paused by user",
                 "paused",
             );
         } else if (command === "stop") {
-            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
+            await this.options.context?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "McpApp Goal stopped by user",
             );
         } else {
-            await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
+            await this.options.context?.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );
@@ -294,8 +294,8 @@ export class McpEndpointHandlerMcpApp {
         gateway: McpAppActionGateway,
         ctxId: string,
     ): Promise<JsonValue> {
-        const registry = this.options.contextRegistry;
-        if (registry === undefined)
+        const contexts = this.options.context;
+        if (contexts === undefined)
             return await readMcpAppSnapshot(
                 gateway,
                 this.options.instanceName,
@@ -303,7 +303,7 @@ export class McpEndpointHandlerMcpApp {
                 { directives: await this.#actionStore.pendingDirectives(ctxId, this.options.instanceName) },
             );
         return await readContextWorkspaceSnapshot(
-            registry,
+            contexts,
             gateway,
             this.options.instanceName,
             ctxId,
@@ -326,9 +326,9 @@ export class McpEndpointHandlerMcpApp {
                 store: this.#actionStore,
                 instance: this.options.instanceName,
                 contextInstances: async (id) => await this.#contextInstances(id),
-                reentry: async (id) => this.options.contextRegistry === undefined
+                reentry: async (id) => this.options.context === undefined
                     ? undefined
-                    : await this.options.contextRegistry.reentry.readAutomaticReentry(id, this.options.instanceName) as unknown as JsonValue,
+                    : await this.options.context.reentry.readAutomaticReentry(id, this.options.instanceName) as unknown as JsonValue,
                 snapshot: async (activeGateway, id, _directives) => {
                     const current = await this.#mcpAppSnapshot(activeGateway, id);
                     const record = asRecord(current);
@@ -373,7 +373,7 @@ export class McpEndpointHandlerMcpApp {
                 await this.#controlGoal("resume", { goalId: target, revision: action.revision } as unknown as JsonValue, scoped);
                 return { kind: "reentry", intent: "goal-resume", sourceId: target };
             case "goal-retry":
-                await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
+                await this.options.context?.reentry.resumeAutomaticReentry(
                     requireCtxId(context),
                     this.options.instanceName,
                 );
@@ -386,10 +386,10 @@ export class McpEndpointHandlerMcpApp {
     }
 
     async #contextInstances(ctxId: string): Promise<string[]> {
-        const registry = this.options.contextRegistry;
-        if (registry === undefined) return [this.options.instanceName];
+        const contexts = this.options.context;
+        if (contexts === undefined) return [this.options.instanceName];
         return await readMcpAppContextInstances(
-            registry,
+            contexts,
             this.options.instanceName,
             ctxId,
         );
@@ -459,20 +459,20 @@ export class McpEndpointHandlerMcpApp {
             revision,
         );
         if (action === "cancel") {
-            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
+            await this.options.context?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "McpApp task cancelled by user",
             );
         } else if (action === "pause") {
-            await this.options.contextRegistry?.reentry.suppressAutomaticReentry(
+            await this.options.context?.reentry.suppressAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
                 "McpApp task paused by user",
                 "paused",
             );
         } else {
-            await this.options.contextRegistry?.reentry.resumeAutomaticReentry(
+            await this.options.context?.reentry.resumeAutomaticReentry(
                 ctxId,
                 this.options.instanceName,
             );

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { McpContextBinding } from "@portable-devshell/shared";
+import type { ContextBinding } from "@portable-devshell/shared";
 
 import { ContextRegistry } from "../../../../src/context/Registry/index.js";
 
@@ -44,7 +44,7 @@ test("rejects invalid environment values without creating a Context", async () =
             registry.create({
                 principal: "user-1",
                 environments,
-            } as McpContextBinding),
+            } as ContextBinding),
             /Invalid Context environments/u,
         );
         assert.deepEqual(await registry.list(), []);

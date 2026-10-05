@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { McpContextRecord } from "@portable-devshell/shared";
+import type { ContextRecord } from "@portable-devshell/shared";
 import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type {
     McpEndpointWorkerPort,
@@ -93,7 +93,7 @@ async function createContext(
     registry: ContextRegistry,
     instance: string,
     workspace: string,
-): Promise<McpContextRecord> {
+): Promise<ContextRecord> {
     return await registry.create({
         principal: "user-1",
         environments: [

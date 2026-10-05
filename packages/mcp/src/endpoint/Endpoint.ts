@@ -1,11 +1,11 @@
 import type {
+    ContextTransport,
     ControlMcpContextMode,
     JsonValue,
     ToolDefinition,
 } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../auth/Config.js";
-import type { ContextRegistryPort } from "@portable-devshell/shared";
 import { createMcpContextSelector } from "../context/Selector.js";
 import type { McpTool } from "./tool/Schema.js";
 import type { McpToolRegistry } from "./tool/Registry.js";
@@ -26,7 +26,7 @@ export type {
 
 export interface McpEndpointWorkerOptions {
     auth?: McpAuthConfig;
-    contextRegistry: ContextRegistryPort;
+    context: Pick<ContextTransport, "resolve">;
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     instanceName: string;
@@ -57,7 +57,7 @@ export class McpEndpointWorker {
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
-            contextRegistry: options.contextRegistry,
+            context: options.context,
             contextSelector,
             instanceName: options.instanceName,
             toolProvenance: options.toolProvenance,

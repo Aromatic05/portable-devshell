@@ -10,6 +10,7 @@ import {
     type ServerTransport,
 } from "@portable-devshell/shared";
 
+import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -40,6 +41,7 @@ import { ControlRouteRegistry } from "../Route.js";
 import type { ArtifactModule } from "../../artifact/Module.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import {
+    contextToolDefinitions,
     createContextRouteModule,
     installContextTools,
     type ContextService,
@@ -145,8 +147,16 @@ export class ControlRuntime {
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
         };
+        const contextToolRegistration = mcpTools.register(
+            mcpAllInstances,
+            contextToolDefinitions(),
+        );
+        this.#toolCallHookUnregister.push(() =>
+            contextToolRegistration.dispose(),
+        );
         this.#toolCallHookUnregister.push(
             installContextTools(options.contexts, toolCalls.hooks, {
+                instances: options.instances,
                 modelCommands,
             }),
         );

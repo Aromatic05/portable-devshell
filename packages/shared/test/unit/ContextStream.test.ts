@@ -5,7 +5,7 @@ import { ContextViewModel } from "../../src/workspace/context/ViewModel.ts";
 import type { ContextChangeEvent, ContextSnapshot } from "../../src/workspace/context/Revision.ts";
 import { createContextTransport, type ContextTransport } from "../../src/workspace/context/Transport.ts";
 import type { EventStreamPort, StreamMessage } from "../../src/client/Stream.ts";
-import type { McpContextRecord } from "../../src/workspace/context/Model.ts";
+import type { ContextRecord } from "../../src/workspace/context/Model.ts";
 import { CONTROL_HOST } from "../../src/client/Control.ts";
 import { Endpoint } from "../../src/transport/endpoint/Endpoint.ts";
 import type { Channel } from "../../src/transport/endpoint/channel/Channel.ts";
@@ -42,7 +42,7 @@ class Feed implements EventStreamPort<ContextChangeEvent> {
     }
 }
 
-function record(ctxId: string, lastAccessedAt: string): McpContextRecord {
+function record(ctxId: string, lastAccessedAt: string): ContextRecord {
     return {
         createdAt: "2026-01-01T00:00:00.000Z",
         ctxId,
@@ -54,7 +54,7 @@ function record(ctxId: string, lastAccessedAt: string): McpContextRecord {
     };
 }
 
-function snapshot(revision: number, contexts: McpContextRecord[] = []): ContextSnapshot {
+function snapshot(revision: number, contexts: ContextRecord[] = []): ContextSnapshot {
     return { contexts, revision };
 }
 

@@ -1,7 +1,7 @@
 import {
     toolCallOutcome,
     type ApprovalRequest,
-    type McpContextStatus,
+    type ContextStatus,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -15,7 +15,7 @@ export type TuiAuditContextKey =
 export interface TuiAuditContextSummary {
     readonly approvals: readonly ApprovalRequest[];
     readonly calls: readonly ToolCallRecord[];
-    readonly contextStatus?: McpContextStatus;
+    readonly contextStatus?: ContextStatus;
     readonly key: TuiAuditContextKey;
     readonly label: string;
     readonly latestActivityAt: string;

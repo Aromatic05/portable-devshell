@@ -1,10 +1,14 @@
-import { EventSubscription, readStreamGap, type SubscriptionStatus } from "../../client/Stream.js";
+import {
+    EventSubscription,
+    readStreamGap,
+    type SubscriptionStatus,
+} from "../../client/Stream.js";
 import type { ContextChangeEvent, ContextSnapshot } from "./Revision.js";
-import type { McpContextRecord } from "./Model.js";
+import type { ContextRecord } from "./Model.js";
 import type { ContextTransport } from "./Transport.js";
 
 export interface ContextViewModelState {
-    contexts: McpContextRecord[];
+    contexts: ContextRecord[];
     revision: number;
     connection: SubscriptionStatus;
     failure?: Error;
@@ -49,7 +53,11 @@ export class ContextViewModel {
         try {
             const snapshot = await this.#transport.snapshot(signal);
             const contexts = snapshot.contexts;
-            if (generation !== this.#generation || readGeneration !== this.#readGeneration) return undefined;
+            if (
+                generation !== this.#generation ||
+                readGeneration !== this.#readGeneration
+            )
+                return undefined;
             this.#state = {
                 ...this.#state,
                 revision: snapshot.revision,
@@ -61,26 +69,24 @@ export class ContextViewModel {
             this.#emit();
             return snapshot;
         } catch (error) {
-            if (generation !== this.#generation || readGeneration !== this.#readGeneration) return undefined;
+            if (
+                generation !== this.#generation ||
+                readGeneration !== this.#readGeneration
+            )
+                return undefined;
             this.#state = { ...this.#state, failure: toError(error) };
         }
         this.#emit();
         return undefined;
     }
 
-    async disable(
-        ctxId: string,
-        signal?: AbortSignal,
-    ): Promise<McpContextRecord> {
+    async disable(ctxId: string, signal?: AbortSignal): Promise<ContextRecord> {
         const record = await this.#transport.disable(ctxId, signal);
         await this.refresh(signal);
         return record;
     }
 
-    async renew(
-        ctxId: string,
-        signal?: AbortSignal,
-    ): Promise<McpContextRecord> {
+    async renew(ctxId: string, signal?: AbortSignal): Promise<ContextRecord> {
         const record = await this.#transport.renew(ctxId, signal);
         await this.refresh(signal);
         return record;
@@ -96,22 +102,28 @@ export class ContextViewModel {
     }
 
     #startSubscription(): void {
-        if (this.#subscription !== undefined || this.#state.failure !== undefined) return;
+        if (
+            this.#subscription !== undefined ||
+            this.#state.failure !== undefined
+        )
+            return;
         const generation = this.#generation;
         this.#subscription = new EventSubscription(this.#state.revision + 1, {
-            eventSeq: event => event.revision,
-            onEvent: event => {
+            eventSeq: (event) => event.revision,
+            onEvent: (event) => {
                 if (event.revision > this.#state.revision) void this.#read();
             },
             onGap: async () => {
                 const snapshot = await this.#read();
-                return generation !== this.#generation || snapshot === undefined ? undefined : snapshot.revision + 1;
+                return generation !== this.#generation || snapshot === undefined
+                    ? undefined
+                    : snapshot.revision + 1;
             },
-            onStatusChange: connection => {
+            onStatusChange: (connection) => {
                 this.#state = { ...this.#state, connection };
                 this.#emit();
             },
-            open: fromRevision => this.#transport.subscribe(fromRevision),
+            open: (fromRevision) => this.#transport.subscribe(fromRevision),
             readGapError: readStreamGap,
         });
         this.#subscription.start();

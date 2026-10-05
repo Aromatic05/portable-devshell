@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
-    McpContextRecord,
+    ContextRecord,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 import type { CliModelCommandBinding } from "@portable-devshell/extension/cli";
@@ -141,7 +141,7 @@ function harness(
                         { instance: "beta", workspace: "/b" },
                         { instance: "demo-local", workspace: contextWorkspace },
                     ],
-                } as McpContextRecord;
+                } as ContextRecord;
             },
         },
     } as unknown as ContextAdminPort;

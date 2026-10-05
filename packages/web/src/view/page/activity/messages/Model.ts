@@ -8,7 +8,7 @@ import {
     type MessagePreferencesSnapshot,
     type MessageHistoryViewModelState,
     type InstanceListEntry,
-    type McpContextRecord,
+    type ContextRecord,
     type MessageViewModelState,
 } from "@portable-devshell/shared";
 
@@ -43,7 +43,7 @@ const emptyMessageEntries = Object.freeze(
  * WebState or a shared read-model snapshot.
  */
 export interface WebMessageProjection {
-    contexts: readonly McpContextRecord[];
+    contexts: readonly ContextRecord[];
     message: MessageHistoryViewModelState;
     instances: readonly InstanceListEntry[];
     messages: MessageViewModelState;

@@ -4,7 +4,7 @@ import {
     type ConfigView,
     type ContextMessageRecord,
     type JsonValue,
-    type McpContextRecord,
+    type ContextRecord,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -315,7 +315,7 @@ export interface TuiDomainHarnessOptions {
     approvalRecords?: ApprovalRequest[];
     configUpdate?: (request: unknown) => unknown;
     configView?: Record<string, unknown>;
-    contextRecords?: McpContextRecord[];
+    contextRecords?: ContextRecord[];
     image?: {
         blake3: string;
         bytes: number;
@@ -380,7 +380,7 @@ export class TuiDomainHarness {
         toolName: string;
     }> = [];
     readonly #approvalRecords: ApprovalRequest[];
-    readonly #contextRecords: McpContextRecord[];
+    readonly #contextRecords: ContextRecord[];
     readonly #options: TuiDomainHarnessOptions;
     readonly #toolCallRecords: ToolCallRecord[];
     readonly #instanceSource: TestDomainSource<any>;

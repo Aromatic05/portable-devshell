@@ -1,45 +1,76 @@
 import type {
-    McpContextBinding,
-    McpContextEnvironment,
-    McpContextEnvironmentBinding,
-    McpContextExternalBinding,
-    McpContextInstanceReference,
-    McpContextMaskedInstance,
-    McpContextQuery,
-    McpContextRecord,
-    McpContextValidationBinding,
+    ContextBinding,
+    ContextEnvironment,
+    ContextEnvironmentBinding,
+    ContextExternalBinding,
+    ContextInstanceReference,
+    ContextMaskedInstance,
+    ContextQuery,
+    ContextRecord,
+    ContextValidationBinding,
 } from "../Model.js";
 
 export interface ContextRecordPort {
     initialize(): Promise<void>;
-    create(binding: McpContextBinding): Promise<McpContextRecord>;
-    bindExternal(ctxId: string, external: McpContextExternalBinding, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    lookupExternal(external: McpContextExternalBinding, binding: McpContextValidationBinding): Promise<McpContextRecord | undefined>;
-    resolveExternal(external: McpContextExternalBinding, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    lookup(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    validateAndTouch(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    validate(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    validateForInstance(ctxId: string, instance: string, options?: { execution?: boolean }): Promise<McpContextRecord>;
+    create(binding: ContextBinding): Promise<ContextRecord>;
+    lookupExternal(
+        external: ContextExternalBinding,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord | undefined>;
+    lookup(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validateAndTouch(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validate(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validateForInstance(
+        ctxId: string,
+        instance: string,
+    ): Promise<ContextRecord>;
     assertInstanceAvailable(ctxId: string, instance: string): Promise<void>;
     attachEnvironment(
         ctxId: string,
-        binding: McpContextEnvironmentBinding,
-        external?: { bindings: readonly McpContextExternalBinding[]; principal: string },
-    ): Promise<McpContextRecord>;
-    resolveEnvironment(ctxId: string, instance: string): Promise<McpContextEnvironment | undefined>;
-    detachEnvironment(ctxId: string, instance: string): Promise<McpContextRecord>;
-    detachInstance(instance: string): Promise<McpContextRecord[]>;
-    referenceInstance(ctxId: string, instance: string): Promise<McpContextInstanceReference | undefined>;
+        binding: ContextEnvironmentBinding,
+        external?: {
+            bindings: readonly ContextExternalBinding[];
+            principal: string;
+        },
+    ): Promise<ContextRecord>;
+    resolveEnvironment(
+        ctxId: string,
+        instance: string,
+    ): Promise<ContextEnvironment | undefined>;
+    detachEnvironment(ctxId: string, instance: string): Promise<ContextRecord>;
+    detachInstance(instance: string): Promise<ContextRecord[]>;
+    referenceInstance(
+        ctxId: string,
+        instance: string,
+    ): Promise<ContextInstanceReference | undefined>;
     resolveRemoteInstanceHandle(ctxId: string, handle: string): Promise<string>;
-    maskRemoteInstance(ctxId: string, handle: string): Promise<McpContextMaskedInstance>;
-    list(query?: McpContextQuery): Promise<McpContextRecord[]>;
-    disable(ctxId: string): Promise<McpContextRecord>;
-    discard(ctxId: string): Promise<McpContextRecord>;
-    renewForPrincipal(ctxId: string, binding: McpContextValidationBinding): Promise<McpContextRecord>;
-    renew(ctxId: string): Promise<McpContextRecord>;
+    maskRemoteInstance(
+        ctxId: string,
+        handle: string,
+    ): Promise<ContextMaskedInstance>;
+    list(query?: ContextQuery): Promise<ContextRecord[]>;
+    disable(ctxId: string): Promise<ContextRecord>;
+    discard(ctxId: string): Promise<ContextRecord>;
+    renewForPrincipal(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    renew(ctxId: string): Promise<ContextRecord>;
     updateWorkerState(
         ctxId: string,
         instance: string,
-        binding: Pick<McpContextEnvironmentBinding, "temporaryDirectory" | "workspace">,
-    ): Promise<McpContextRecord>;
+        binding: Pick<
+            ContextEnvironmentBinding,
+            "temporaryDirectory" | "workspace"
+        >,
+    ): Promise<ContextRecord>;
 }

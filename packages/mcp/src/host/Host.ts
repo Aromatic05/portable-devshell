@@ -1,11 +1,9 @@
-import type { ControlMcpContextMode } from "@portable-devshell/shared";
+import type { ContextTransport, ControlMcpContextMode } from "@portable-devshell/shared";
 import type {
     McpAuthConfig,
     McpOAuth2Config,
     McpOAuthApprovalConfig,
 } from "../auth/Config.js";
-import type { ContextRegistryPort } from "@portable-devshell/shared";
-import type { ContextRuntimePort } from "../context/Runtime.js";
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
@@ -71,7 +69,7 @@ export interface McpHostConfig {
 }
 
 export class McpRuntimeState {
-    readonly contexts: ContextRuntimePort;
+    readonly context: ContextTransport;
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly workers = new Map<string, WorkerInstanceLike>();
@@ -81,11 +79,11 @@ export class McpRuntimeState {
     #initializePromise?: Promise<void>;
 
     constructor(config: {
-        contexts: ContextRuntimePort;
+        context: ContextTransport;
         storageDir?: string;
         mcpAppLeaseFile?: string;
     }) {
-        this.contexts = config.contexts;
+        this.context = config.context;
         this.mcpAppLeases = new McpAppLeaseStore({
             filePath: config.mcpAppLeaseFile,
         });
@@ -93,18 +91,6 @@ export class McpRuntimeState {
             filePath: config.mcpAppLeaseFile === undefined
                 ? undefined
                 : `${config.mcpAppLeaseFile}.actions`,
-        });
-        this.contexts.bindPresentation({
-            revokeContext: async (ctxId) => {
-                await this.mcpAppLeases.revokeContext(ctxId);
-                await this.workspaceActions.revokeContext(ctxId);
-                this.mcpAppPresence.revokeContext(ctxId);
-            },
-            revokeInstance: async (instance) => {
-                await this.mcpAppLeases.revokeInstance(instance);
-                await this.workspaceActions.revokeInstance(instance);
-                this.mcpAppPresence.revokeInstance(instance);
-            },
         });
         this.oauthApprovals =
             config.storageDir === undefined
@@ -166,7 +152,7 @@ export class McpRuntimeState {
 
 export class McpHost {
     readonly #config: McpHostConfig;
-    readonly #contextRegistry: ContextRegistryPort;
+    readonly #contexts: ContextTransport;
     readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();
@@ -181,7 +167,7 @@ export class McpHost {
     constructor(config: McpHostConfig, state: McpRuntimeState) {
         this.#config = config;
         this.#runtimeState = state;
-        this.#contextRegistry = state.contexts.registry;
+        this.#contexts = state.context;
         this.#workers = this.#runtimeState.workers;
         this.#mcpAppLeases = this.#runtimeState.mcpAppLeases;
         this.#workspaceActions = this.#runtimeState.workspaceActions;
@@ -248,7 +234,7 @@ export class McpHost {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
-                contextRegistry: this.#contextRegistry,
+                context: this.#contexts,
                 contextMode: instance.contextMode ?? "explicit",
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,

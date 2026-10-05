@@ -4,21 +4,21 @@ import type {
     ExtensionContextRecord,
     ExtensionContextStatus,
 } from "@portable-devshell/extension/context";
-import type { McpContextRecord } from "@portable-devshell/shared";
+import type { ContextRecord } from "@portable-devshell/shared";
 
 export class ExtensionContextObserveCapabilityControl implements ExtensionContextObserveCapability {
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #listContexts: (
         query: ExtensionContextQuery,
-    ) => Promise<readonly McpContextRecord[]>;
+    ) => Promise<readonly ContextRecord[]>;
 
     constructor(options: {
         allowed: boolean;
         extensionId: string;
         listContexts: (
             query: ExtensionContextQuery,
-        ) => Promise<readonly McpContextRecord[]>;
+        ) => Promise<readonly ContextRecord[]>;
     }) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
@@ -70,7 +70,7 @@ function isContextStatus(value: unknown): value is ExtensionContextStatus {
     return value === "active" || value === "expired" || value === "disabled";
 }
 
-function toContextRecord(record: McpContextRecord): ExtensionContextRecord {
+function toContextRecord(record: ContextRecord): ExtensionContextRecord {
     return {
         createdAt: record.createdAt,
         ctxId: record.ctxId,

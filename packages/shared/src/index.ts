@@ -67,10 +67,9 @@ export { type ApprovalTransport, createApprovalTransport } from "./workspace/app
 export { ApprovalViewModel } from "./workspace/approval/ViewModel.js";
 export { type ContextCleanupLedgerPort } from "./workspace/context/Authority/Cleanup.js";
 export { type ContextRecordPort } from "./workspace/context/Authority/Record.js";
-export { type ContextReentryPort } from "./workspace/context/Authority/Reentry.js";
 export { type ContextRegistryPort } from "./workspace/context/Authority/index.js";
-export { contextErrorCodes, type McpContextAutomaticReentryMode, type McpContextAutomaticReentrySourceKind, type McpContextAutomaticReentryState, type McpContextBinding, type McpContextEnvironment, type McpContextEnvironmentBinding, type McpContextEnvironmentCleanup, type McpContextExternalBinding, type McpContextInstanceReference, type McpContextMaskedInstance, type McpContextQuery, type McpContextRecord, type McpContextStatus, type McpContextValidationBinding } from "./workspace/context/Model.js";
-export { type ContextTransport, createContextTransport } from "./workspace/context/Transport.js";
+export { contextErrorCodes, type ContextBinding, type ContextEnvironment, type ContextEnvironmentBinding, type ContextEnvironmentCleanup, type ContextExternalBinding, type ContextInstanceReference, type ContextMaskedInstance, type ContextQuery, type ContextRecord, type ContextStatus, type ContextValidationBinding } from "./workspace/context/Model.js";
+export { type ContextChangeEvent, type ContextResolveInput, type ContextSnapshot, type ContextTransport, createContextTransport } from "./workspace/context/Transport.js";
 export { ContextViewModel } from "./workspace/context/ViewModel.js";
 export { compactContextId, type ContextMessageDirective, type ContextMessageListInput, type ContextMessageQueueInput, type ContextMessageReadResult, type ContextMessageRecord, type ContextMessageStatus, type MessageEntry, type MessageEntryKind, type MessageListInput, humanMessageTitle, isMessageEventType, type MessageEvent, type MessageEventType, parseContextMessageDirective } from "./workspace/message/Model.js";
 export { createMessagePreferenceTransport, type MessagePreferenceTransport, createMessageTransport, type MessageTransport } from "./workspace/message/Transport.js";
