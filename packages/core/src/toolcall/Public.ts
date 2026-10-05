@@ -1,35 +1,21 @@
-import {
-    ToolCallHookRegistry,
-    type ToolCallApi,
-    type ToolCallHooks,
-} from "./Runtime.js";
-import {
-    ToolCallPipeline,
-    type ToolCallTargetResolver,
-} from "./Pipeline.js";
-
-export type {
-    ToolCallApi,
-    ToolCallHooks,
-} from "./Runtime.js";
-export type { ToolCallHookValue } from "./hook/Review.js";
-export { presentToolCallResult, PresentedToolCallResult } from "./Presentation.js";
-
-export interface ToolCallRuntime {
-    readonly api: ToolCallApi;
-    readonly hooks: ToolCallHooks;
-}
-
-export function createToolCallRuntime(options: {
-    resolveTarget: ToolCallTargetResolver;
-}): ToolCallRuntime {
-    const hooks = new ToolCallHookRegistry();
-    return {
-        api: new ToolCallPipeline({
-            hooks: hooks.provider(),
-            resolveExecute: (toolName) => hooks.lookupExecute(toolName),
-            resolveTarget: options.resolveTarget,
-        }),
-        hooks,
-    };
-}
+export { createToolCallRuntime } from "./index.js";
+export type { ToolCallRuntime } from "./index.js";
+export type { ToolCallApi } from "./execution/Api.js";
+export type { ToolCallHooks, ToolCallExecutor, ToolCallHookRuntime, ToolCallReviewHook, ToolCallRewriteHook, ToolCallHookContribution, ToolCallHookContributor } from "./registration/Api.js";
+export type { ToolCallTarget, ToolCallTargetResolver } from "./execution/Pipeline.js";
+export type { ToolCallHookValue, ToolCallReviewInput, ToolCallReviewResult } from "./execution/hook/Review.js";
+export type { ToolCallRewriteInput } from "./execution/hook/Rewrite.js";
+export { presentToolCallResult, PresentedToolCallResult } from "./execution/Presentation.js";
+export { WorkerToolCatalog } from "./worker/Catalog.js";
+export { WorkerToolInvoker } from "./worker/Invoker.js";
+export { WorkerInstanceTool } from "./execution/Tool.js";
+export type { WorkerToolOptions } from "./execution/Tool.js";
+export { WorkerToolCallScheduler, defaultWorkerToolSchedulerLimits } from "./execution/Scheduler.js";
+export type { WorkerToolSchedulerLimits } from "./execution/Scheduler.js";
+export { ToolCallHistory } from "./execution/record/History.js";
+export { ToolCallProvenanceStore } from "./execution/record/Provenance.js";
+export type { ToolCallProvenanceRecord, ToolCallProvenanceRecorder } from "./execution/record/Provenance.js";
+export { createToolIngressHost, createToolIngressRouteModule } from "./execution/transport/Route.js";
+export type { ToolCallIngressPort } from "./execution/transport/Route.js";
+export { createToolRouteModule } from "./execution/transport/ToolRoute.js";
+export type { ToolRouteInstancePort, ToolRouteSubscriptionPort, ToolRouteEventPort } from "./execution/transport/ToolRoute.js";

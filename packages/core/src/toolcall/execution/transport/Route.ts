@@ -2,14 +2,15 @@ import {
     RemoteError,
     createRemoteError,
     controlErrorCodes,
+    type ControlHostDefinition,
     type ControlPortDefinition,
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
-import { readToolCallErrorPayload } from "./ErrorPayload.js";
+import { routeModule } from "../../../Port.js";
+import { readToolCallErrorPayload } from "../ErrorPayload.js";
 import { readToolCall } from "./Input.js";
-import type { ToolCallApi } from "./Runtime.js";
+import type { ToolCallApi } from "../Api.js";
 
 export type ToolCallIngressPort = Pick<ToolCallApi, "call">;
 
@@ -84,6 +85,15 @@ export function createToolIngressRouteModule(
             },
         },
     );
+}
+
+export function createToolIngressHost(
+    ingress: ToolCallIngressPort,
+): ControlHostDefinition {
+    return {
+        host: "*",
+        ports: [createToolIngressRouteModule(ingress)],
+    };
 }
 
 function toolCallFailure(error: unknown): JsonValue {

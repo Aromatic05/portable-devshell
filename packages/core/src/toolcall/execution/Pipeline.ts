@@ -24,9 +24,9 @@ import {
     type ToolCallHookProvider,
 } from "./hook/Sequence.js";
 import { snapshotJson } from "./hook/Snapshot.js";
-import type { ToolCallApi, ToolCallHooks } from "./Runtime.js";
+import type { ToolCallApi } from "./Api.js";
+import type { ToolCallExecutor } from "../registration/Api.js";
 
-type ToolCallExecutor = Parameters<ToolCallHooks["registerExecute"]>[1];
 
 export interface ToolCallDispatchRequest {
     readonly callId: string;
