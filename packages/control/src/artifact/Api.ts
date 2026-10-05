@@ -1,4 +1,4 @@
-import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
+import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 import type {
     ArtifactShareInput,
     ArtifactShareResult,

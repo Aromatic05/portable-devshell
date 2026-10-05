@@ -11,7 +11,7 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import type { Instance, InstanceRegistry } from "@portable-devshell/core";
+import type { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceChangeHub } from "../Change.js";
 import type { InstanceMcpRuntimePort } from "../Mcp.js";
 import {

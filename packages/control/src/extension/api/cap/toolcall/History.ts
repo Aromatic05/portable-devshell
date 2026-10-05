@@ -1,5 +1,5 @@
 import type { ToolCallHistoryCapability, ToolCallHistoryQuery, ToolCallHistoryRecord } from "@portable-devshell/extension/toolcall";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 export interface ExtensionToolCallDecorator {

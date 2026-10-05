@@ -37,7 +37,7 @@ import type {
     ArtifactServiceSchedule,
     StoredArtifactTransfer,
 } from "../Service.js";
-import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
+import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 
 export interface ArtifactTransferServiceOptions {
     chunkBytes?: number;

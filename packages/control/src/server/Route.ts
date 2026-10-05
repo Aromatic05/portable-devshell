@@ -8,17 +8,12 @@ import {
 import { negotiateControlProtocol } from "./Protocol.js";
 import { routeModule } from "../Port.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
+import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core/instance";
+import { createToolIngressHost, type ToolCallIngressPort, type ToolCallProvenanceApi } from "@portable-devshell/core/toolcall";
 import {
-    createInstanceHost,
-    createConnectionRouteModule,
-    createToolIngressHost,
-    InstanceRegistry,
-    ProcessSubscriptionManager,
-    TerminalSessionService,
-    type ToolCallIngressPort,
-    type ToolCallProvenanceStore,
-    type Instance,
-} from "@portable-devshell/core";
+    createTerminalSessionRuntime,
+    type TerminalSessionApi,
+} from "@portable-devshell/core/terminal";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
@@ -48,7 +43,7 @@ import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "../auth/Route.js";
 import type { OperationalOverviewPort } from "../overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Route.js";
-import type { ReverseCredentials } from "@portable-devshell/core";
+import type { ReverseCredentials } from "@portable-devshell/core/instance";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,
@@ -108,7 +103,7 @@ export interface ControlRouteRegistryOptions {
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
-    instancePorts?: (descriptor: Instance, sessions: TerminalSessionService) => readonly ControlPortDefinition[];
+    instancePorts?: (descriptor: Instance, sessions: TerminalSessionApi) => readonly ControlPortDefinition[];
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
     overview: OperationalOverviewPort;
@@ -118,7 +113,7 @@ export interface ControlRouteRegistryOptions {
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
     toolCalls?: ToolCallIngressPort;
-    toolProvenance?: ToolCallProvenanceStore;
+    toolProvenance?: ToolCallProvenanceApi;
     tuiPages?: TuiPagePort;
     webApplications?: WebApplicationCatalogPort;
     webPages?: WebPagePort;
@@ -130,7 +125,7 @@ export class ControlRouteRegistry {
     readonly #instanceChanges: InstanceChangeHub;
     readonly #options: ControlRouteRegistryOptions;
     readonly #subscriptions: ProcessSubscriptionManager;
-    readonly #terminals = new TerminalSessionService();
+    readonly #terminals = createTerminalSessionRuntime();
     readonly #unsubscribeExtensions: () => void;
     readonly #unsubscribeConfigChanges: () => void;
     readonly #unsubscribeInstances: () => void;
@@ -182,7 +177,7 @@ export class ControlRouteRegistry {
 
     async retireInstance(instance: string): Promise<void> {
         await this.#options.extensionRoutes?.retireInstance(instance);
-        await this.#terminals.closeInstance(instance);
+        await this.#terminals.api.closeInstance(instance);
     }
 
     dispose(): void {
@@ -281,7 +276,7 @@ export class ControlRouteRegistry {
                     descriptor,
                     extensionPorts:
                         [...(this.#options.extensionRoutes?.modules("instance") ?? []),
-                            ...(this.#options.instancePorts?.(descriptor, this.#terminals) ?? [])],
+                            ...(this.#options.instancePorts?.(descriptor, this.#terminals.api) ?? [])],
                     registry: this.#options.instances,
                     subscriptions: this.#subscriptions,
                 }),

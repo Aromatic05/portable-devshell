@@ -11,7 +11,7 @@ import {
     createCoreConfigRegistry,
 } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceChangeHub } from "../../instance/Change.js";
 import { InstanceRuntimeRegistry } from "./Instance.js";
 

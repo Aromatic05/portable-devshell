@@ -15,7 +15,7 @@ import {
 
 import { requirePort, routeModule } from "../Port.js";
 import type { InstanceChange, InstanceChangeHub } from "./Change.js";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 
 export interface InstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;

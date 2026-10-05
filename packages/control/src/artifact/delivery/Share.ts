@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
+import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 import {
     createRemoteError,
     artifactErrorCodes,

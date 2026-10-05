@@ -1,5 +1,5 @@
 import { asInstanceName, type OperationalOverviewActivity, type OperationalOverviewAlert, type OperationalOverviewInstance, type OperationalOverviewTodo, type ToolCallQuery, type ToolCallRecord } from "@portable-devshell/shared";
-import type { Instance } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core/instance";
 import type { ApprovalApi } from "@portable-devshell/core/approval";
 import type { TaskApi } from "@portable-devshell/core/task";
 import { createCollectionFailure, createRecentFailureAlert, createSnapshotAlerts, createTodoAlerts, selectOperationalActivity } from "./Policy.js";

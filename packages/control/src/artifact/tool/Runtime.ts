@@ -1,4 +1,4 @@
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import {
     presentToolCallResult,
     type ToolCallHooks,

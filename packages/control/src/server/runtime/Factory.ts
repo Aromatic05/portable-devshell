@@ -38,10 +38,7 @@ import { ConfigEngine } from "../../config/engine/index.js";
 import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import {
-    ConnectionModule,
-    ProcessSubscriptionManager,
-} from "@portable-devshell/core";
+import { ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];

@@ -7,15 +7,16 @@ import type {
     ContextTransport,
     ControlConfig,
     JsonValue,
-    ToolCallApi,
 } from "@portable-devshell/shared";
 
 import type { ConfigRuntimeChangeSet } from "../../config/engine/index.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
+import type { ToolCallApi } from "@portable-devshell/shared";
 import {
-    ToolCallProvenanceStore,
-    type InstanceRegistry,
-} from "@portable-devshell/core";
+    createToolCallProvenanceRuntime,
+    type ToolCallProvenanceApi,
+} from "@portable-devshell/core/toolcall";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
@@ -32,7 +33,7 @@ export interface McpControlModuleOptions {
 
 export class McpControlModule {
     readonly instancePort: InstanceMcpRuntimePort;
-    readonly toolProvenance: ToolCallProvenanceStore;
+    readonly toolProvenance: ToolCallProvenanceApi;
     #publicBaseUrl?: string;
     #oauthApproval: ControlConfig["mcp"]["oauth2"];
     #host?: McpHost;
@@ -67,7 +68,7 @@ export class McpControlModule {
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
-        this.toolProvenance = new ToolCallProvenanceStore(
+        this.toolProvenance = createToolCallProvenanceRuntime(
             options.controlPaths.toolProvenanceFile,
         );
         const config = options.config;
@@ -264,7 +265,14 @@ export class McpControlModule {
     }
 
     async stop(): Promise<void> {
-        await this.#host?.stop();
+        const failures: unknown[] = [];
+        await this.#host?.stop().catch((error) => failures.push(error));
+        await this.toolProvenance
+            .flush()
+            .catch((error) => failures.push(error));
+        if (failures.length > 0) {
+            throw new AggregateError(failures, "MCP module shutdown failed.");
+        }
     }
 }
 

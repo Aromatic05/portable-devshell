@@ -4,7 +4,7 @@ import type {
     OperationalOverviewAlert,
 } from "@portable-devshell/shared";
 
-import type { Instance } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core/instance";
 import {
     type OperationalOverviewInstanceCollection,
 } from "./collector/Instance.js";

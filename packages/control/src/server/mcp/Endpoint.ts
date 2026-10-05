@@ -4,7 +4,7 @@ import type {
 } from "@portable-devshell/mcp";
 import type { ControlMcpAuthConfig } from "@portable-devshell/shared";
 
-import type { Instance } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core/instance";
 
 export class McpEndpointFactory {
     map(

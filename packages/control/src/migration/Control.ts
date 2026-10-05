@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { WORKER_PROTOCOL_RANGE } from "@portable-devshell/core";
+import { WORKER_PROTOCOL_RANGE } from "@portable-devshell/core/instance";
 import { parseExtensionManifest } from "@portable-devshell/extension";
 import { CONTROL_PROTOCOL_RANGE } from "@portable-devshell/shared";
 import { FRAME_PROTOCOL_RANGE } from "@portable-devshell/shared/transport/frame";

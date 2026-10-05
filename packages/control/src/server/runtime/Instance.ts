@@ -9,17 +9,10 @@ import {
     type InstanceEventRecord,
     type JsonValue,
 } from "@portable-devshell/shared";
-import {
-    createInstance,
-    createApprovalRuntime,
-    createTaskRuntime,
-    createTerminalRuntime,
-    InstancePaths,
-    type ApprovalRuntime,
-    type Instance,
-    type TaskRuntime,
-    type TerminalRuntime,
-} from "@portable-devshell/core";
+import { createInstance, InstancePaths, type Instance } from "@portable-devshell/core/instance";
+import { createApprovalRuntime, type ApprovalRuntime } from "@portable-devshell/core/approval";
+import { createTaskRuntime, type TaskRuntime } from "@portable-devshell/core/task";
+import { createTerminalRuntime, type TerminalRuntime } from "@portable-devshell/core/terminal";
 import { createAuditRuntime, type AuditRuntime } from "@portable-devshell/core/audit";
 import { createToolCallExecutionRuntime, type ToolCallDispatchRequest, type ToolCallExecutionRuntime, type ToolCallTarget } from "@portable-devshell/core/toolcall";
 import { mcpTools, type McpToolRegistration } from "@portable-devshell/mcp/tool";

@@ -22,10 +22,7 @@ import {
 } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import type {
-    WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadResult,
-} from "@portable-devshell/core";
+import type { WorkerArtifactPayloadOpenResult, WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 import {
     createRemoteError,
     type ArtifactPayloadDescriptor,

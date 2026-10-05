@@ -1,4 +1,4 @@
-import type { Instance } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core/instance";
 
 export async function closeDescriptorResourcesBestEffort(
     descriptor: Instance,

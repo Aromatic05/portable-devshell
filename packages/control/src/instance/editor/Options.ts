@@ -1,4 +1,4 @@
-import type { Instance, InstanceRegistry } from "@portable-devshell/core";
+import type { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ControlConfig } from "@portable-devshell/shared";
 
 import { InstanceChangeHub } from "../Change.js";

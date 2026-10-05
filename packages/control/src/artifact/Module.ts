@@ -15,7 +15,7 @@ import type { ExtensionAssetProjectionPortInput } from "../extension/api/cap/ass
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
 import { ArtifactHostBridge } from "./host/Bridge.js";
 import { ArtifactService } from "./Service.js";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
 
 export interface ArtifactModuleOptions {
