@@ -23,12 +23,17 @@ import {
 } from "./Revision.js";
 
 export interface InstanceTransport {
+    acquireInstanceReference(
+        instanceName: string,
+        reference: string,
+    ): Promise<Record<string, JsonValue>>;
     createInstance(draft: InstanceCreateDraft): Promise<InstanceCreateResult>;
     createInstanceSchema(): Promise<InstanceCreateSchema>;
     deleteInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     listInstances(): Promise<InstanceListEnvelope["instances"]>;
+    releaseInstanceReference(instanceName: string, reference: string): Promise<void>;
     snapshotInstances(): Promise<InstanceListEnvelope>;
     subscribeInstances(fromRevision: number): Promise<InstanceChangeStreamPort>;
     updateInstance(request: ConfigUpdateInstanceRequest): Promise<ConfigView>;
@@ -40,6 +45,11 @@ export interface InstanceTransport {
 export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
     const port = createPortClient(endpoint, CONTROL_HOST, "instance");
     return {
+        acquireInstanceReference: (instanceName, reference) =>
+            port.request<Record<string, JsonValue>>("acquireInstanceReference", {
+                instanceName,
+                reference,
+            }),
         createInstance: (draft) =>
             port.request<InstanceCreateResult>("createInstance", draft),
         createInstanceSchema: () =>
@@ -58,6 +68,9 @@ export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
             }),
         listInstances: () =>
             port.request<InstanceListEnvelope["instances"]>("listInstances"),
+        releaseInstanceReference: async (instanceName, reference) => {
+            await port.request("releaseInstanceReference", { instanceName, reference });
+        },
         snapshotInstances: () =>
             port.request<InstanceListEnvelope>("snapshotInstances"),
         subscribeInstances: async (fromRevision) =>

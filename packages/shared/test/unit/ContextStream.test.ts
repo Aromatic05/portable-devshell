@@ -69,6 +69,11 @@ function transport(
         disable: unavailable,
         list: async () => [],
         renew: unavailable,
+        resolve: unavailable,
+        referenceInstance: unavailable,
+        validateForInstance: unavailable,
+        detachInstance: unavailable,
+        reconcileInstance: unavailable,
     };
 }
 

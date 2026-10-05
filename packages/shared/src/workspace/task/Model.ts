@@ -226,7 +226,6 @@ export interface TodoReadResult {
 }
 export interface TodoReadInput {
     taskId?: string;
-    title?: string;
 }
 export interface TodoTaskSummary extends ActiveTodoSummary {
     ctxId?: string;

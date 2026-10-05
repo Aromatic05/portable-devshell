@@ -60,3 +60,40 @@ export interface ControlHostDefinition {
     readonly host: string;
     readonly ports: readonly ControlPortDefinition[];
 }
+
+export function mergeControlPorts(
+    ...ports: readonly ControlPortDefinition[]
+): ControlPortDefinition {
+    const first = ports[0];
+    if (first === undefined)
+        throw new Error("Cannot merge an empty port list.");
+    if (ports.some((port) => port.name !== first.name))
+        throw new Error("Cannot merge ports with different names.");
+    const operations = ports.flatMap((port) => port.operations);
+    const streams = ports.flatMap((port) => port.streams ?? []);
+    const names = new Set<string>();
+    for (const operation of [...operations, ...streams]) {
+        if (names.has(operation.name))
+            throw new Error(
+                `Duplicate ${first.name} operation: ${operation.name}`,
+            );
+        names.add(operation.name);
+    }
+    return {
+        name: first.name,
+        operations,
+        ...(streams.length === 0 ? {} : { streams }),
+    };
+}
+
+export function mergeControlPortsByName(
+    ports: readonly ControlPortDefinition[],
+): ControlPortDefinition[] {
+    const groups = new Map<string, ControlPortDefinition[]>();
+    for (const port of ports) {
+        const group = groups.get(port.name) ?? [];
+        group.push(port);
+        groups.set(port.name, group);
+    }
+    return [...groups.values()].map((group) => mergeControlPorts(...group));
+}
