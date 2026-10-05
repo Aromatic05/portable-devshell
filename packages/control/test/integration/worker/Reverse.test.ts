@@ -27,10 +27,9 @@ import {
 
 import { ControlServer } from "../../../src/server/Server.ts";
 import { ControlRuntimeFactory } from "../../../src/server/runtime/Factory.ts";
-import { InstanceRegistryFactory } from "@portable-devshell/core";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "../../../src/connection/credential/Store.ts";
+import { ReverseCredentialStore } from "@portable-devshell/core/instance";
 import {
     encodeGlobalConfig,
     encodeInstanceConfig,
@@ -55,13 +54,12 @@ import {
 const workerBinary = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
 
-class CapturingInstanceRegistryFactory extends InstanceRegistryFactory {
+class CapturingRuntimeFactory extends ControlRuntimeFactory {
     registry?: InstanceRegistry;
 
-    override build(config: ControlConfig): InstanceRegistry {
-        const registry = super.build(config);
-        this.registry = registry;
-        return registry;
+    override async create(options: Parameters<ControlRuntimeFactory["create"]>[0]) {
+        this.registry = options.state.instances;
+        return await super.create(options);
     }
 }
 
@@ -107,13 +105,10 @@ test(
             "reverse-real-worker",
         );
         const paths = new ControlPathHome(homeDirectory);
-        const instanceRegistryBuilder = new CapturingInstanceRegistryFactory();
+        const runtimeFactory = new CapturingRuntimeFactory({ builtinExtensionSources: [] });
         const server = new ControlServer({
             homeDirectory,
-            instanceRegistryBuilder,
-            runtimeFactory: new ControlRuntimeFactory({
-                builtinExtensionSources: [],
-            }),
+            runtimeFactory,
             xdgRuntimeDir,
         });
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
@@ -250,7 +245,7 @@ test(
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
         const workerInstance =
-            instanceRegistryBuilder.registry?.get("reverse-test")?.worker;
+            runtimeFactory.registry?.get("reverse-test")?.worker;
         assert.ok(workerInstance);
         const httpBody = "reverse-http-over-devshell";
         const httpServer = createHttpServer((request, response) => {
@@ -1006,7 +1001,7 @@ async function negotiateClient(
     client: TestClient,
     clientKind: "cli" | "tui",
 ): Promise<void> {
-    await client.request("@control", "service", "hello", {
+    await client.request("@control", "server", "hello", {
         clientKind,
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });

@@ -1,81 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createInstance, type WorkerInstance } from "@portable-devshell/core/instance";
+import { createTerminalRuntime } from "@portable-devshell/core/terminal";
+import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 
-import {
-    InstanceFactory,
-    createInstanceTerminalBackend,
-} from "@portable-devshell/core";
-
-test("instance config mapper passes effective security mode and worker env into runtime config", () => {
-    let capturedConfig: Record<string, unknown> | undefined;
-    const mapper = new InstanceFactory({
-        workerInstanceFactory: {
-            create(config: unknown) {
-                capturedConfig = config as Record<string, unknown>;
-                return {
-                    snapshot() {
-                        return {
-                            connectionState: "disconnected",
-                            daemonState: "stopped",
-                            effectiveSecurityMode: "workspace",
-                            lastSeq: 0,
-                            name: "demo-local",
-                            ready: false,
-                            status: "stopped",
-                        };
-                    },
-                };
-            },
-        } as never,
+test("instance composition keeps configured security mode and starts with no admitted worker", async (t) => {
+    const instance = createInstance(normalizeConfigInstanceDraft({
+        enabled: true, name: "demo-local", provider: "local", security: { mode: "workspace" },
+        env: { DEMO: "1" }, extensions: { model: ["instance"] },
+    }), {
+        events: {
+            cursor: () => 0,
+            append: async () => { throw new Error("No event append expected before start."); },
+            readFrom: () => ({ kind: "events", events: [], lastSeq: 0 }),
+        },
     });
-
-    mapper.map({
-        approvalPolicy: {
-            mode: "ask",
-            rules: [
-                {
-                    decision: "deny",
-                    match: "exact",
-                    source: "mcp",
-                    toolName: "bash_run",
-                },
-            ],
-        },
-        enabled: true,
-        extensions: { model: ["instance"] },
-        env: {
-            DEMO: "1",
-        },
-        logs: {
-            eventBufferSize: 250,
-            maxBytes: 33_554_432,
-            retentionDays: 14,
-        },
-        mcp: {
-            auth: { mode: "none" },
-            contextMode: "explicit",
-            enabled: true,
-            path: "/demo-local/mcp",
-        },
-        name: "demo-local",
-        provider: "local",
-        security: {
-            mode: "workspace",
-        },
-        workspace: { enabled: true },
-    });
-
-    assert.equal(capturedConfig?.effectiveSecurityMode, "workspace");
-    assert.equal(capturedConfig?.eventBufferSize, 250);
-    assert.deepEqual(capturedConfig?.auditStorage, {
-        maxBytes: 33_554_432,
-        retentionDays: 14,
-    });
-    assert.deepEqual(capturedConfig?.env, {
-        DEMO: "1",
-        DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
-        DEVSHELL_WORKER_SECURITY_MODE: "workspace",
-    });
+    t.after(async () => { await instance.close(); });
+    assert.equal(instance.worker.snapshot().effectiveSecurityMode, "workspace");
+    assert.equal(instance.worker.snapshot().ready, false);
+    assert.equal(instance.worker.managementMode, "controllerManaged");
+    assert.equal(instance.mcpPath, "/demo-local/mcp");
+    assert.deepEqual(instance.modelExtensions, ["instance"]);
 });
 
 test("controller-managed terminals use the instance Worker RPC surface", async () => {
@@ -130,25 +75,7 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
             };
         },
     };
-    const mapper = new InstanceFactory({
-        workerInstanceFactory: { create: () => worker } as never,
-    });
-    const descriptor = mapper.map({
-        enabled: true,
-        extensions: { model: ["instance"] },
-        mcp: {
-            auth: { mode: "none" },
-            contextMode: "explicit",
-            enabled: false,
-            path: "/demo-local/mcp",
-        },
-        name: "demo-local",
-        provider: "local",
-        security: { mode: "workspace" },
-        workspace: { enabled: true },
-    });
-
-    const opened = await createInstanceTerminalBackend(descriptor.worker).open({
+    const opened = await createTerminalRuntime(worker as unknown as WorkerInstance).api.open({
         cols: 80,
         rows: 24,
         workspace: "/workspace",

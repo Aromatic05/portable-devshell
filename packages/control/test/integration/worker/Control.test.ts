@@ -21,7 +21,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { controlDaemonModulePath } from "../../../src/testing.ts";
+import { controlDaemonModulePath } from "../../../src/server/Daemon.ts";
 import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/extension/install/BuiltinSource.ts";
 import {
     createTestWindowsIdentity,
@@ -155,20 +155,6 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
                 runtimePaths.socketFile,
                 "aromatic-pc",
                 workspacePath,
-            );
-
-            const logs = await request(
-                runtimePaths.socketFile,
-                "process.readLogs",
-                asInstanceName("aromatic-pc"),
-                { fromSeq: 1 },
-            );
-            assert.equal(Array.isArray(logs), true);
-            assert.match(
-                logs
-                    .map((entry: { message: string }) => entry.message)
-                    .join("\n"),
-                /portable-devshell-control-workspace/u,
             );
 
             const toolCalls = await request(
@@ -333,7 +319,7 @@ async function exerciseWorkerTerminal(
 ): Promise<void> {
     const client = createClient(socketPath);
     try {
-        await client.request("@control", "service", "hello", {
+        await client.request("@control", "server", "hello", {
             clientKind: "tui",
             protocolRange: CONTROL_PROTOCOL_RANGE,
         });
@@ -512,7 +498,7 @@ async function request(
     const [port, method] = operation.split(".");
     const client = createClient(socketPath);
     try {
-        await client.request("@control", "service", "hello", {
+        await client.request("@control", "server", "hello", {
             clientKind,
             protocolRange: CONTROL_PROTOCOL_RANGE,
         });

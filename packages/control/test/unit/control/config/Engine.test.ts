@@ -7,7 +7,7 @@ import {
 } from "@portable-devshell/shared";
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
-import { createDefaultControlConfig } from "../../../../src/testing.ts";
+import { createDefaultControlConfig } from "@portable-devshell/shared";
 
 const runtimeChanges = { instanceAuth: false, mcp: false, web: true };
 

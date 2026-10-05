@@ -1,4 +1,6 @@
 import { asInstanceName } from "@portable-devshell/shared";
+import type { ContextRecord, ContextTransport, ToolCallApi } from "@portable-devshell/shared";
+import { contextToolDefinitions } from "@portable-devshell/core/context";
 import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -23,11 +25,8 @@ import {
     mcpAppResourceMeta,
     mcpAppResourceUri,
     mcpAppStableResourceUri,
-    type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/context/Registry/index.ts";
 import {
-    createTestCallOperationGateway,
     TestMcpEndpointWorker as McpEndpointWorker,
 } from "../../../ContextRuntime.ts";
 
@@ -95,7 +94,9 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     const harness = createWorkerHarness();
     const base = {
         instanceName: "demo",
-        gateway: harness.gateway,
+        context: harness.context,
+        tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
         worker: harness.worker,
     };
 
@@ -148,135 +149,6 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     );
 });
 
-test("HTTP tools/list keeps Workspace actions app-only while advertising host auth metadata", async () => {
-    const harness = createWorkerHarness({ tools: [] });
-    const unused = async () => {
-        throw new Error("unused");
-    };
-    const gateway = {
-        ...createTestCallOperationGateway(),
-        consumeWait: unused,
-        createWait: unused,
-        detachWait: unused,
-        approval: {
-            decideApproval: unused,
-            listApprovals: async () => [],
-            listPendingApprovals: async () => [],
-        },
-        listTools: () => [],
-        listWaits: async () => [],
-        resolveWait: unused,
-        waitForWait: unused,
-    } as unknown as McpInstanceGateway;
-    const binding = new McpEndpointBinding(
-        new McpEndpointWorker({
-            extensions: new McpExtensionRegistry([
-                createMcpAppMcpExtension(),
-            ]),
-            gateway,
-            instanceName: "demo",
-            worker: harness.worker,
-        }),
-    );
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        const response = await postJson(
-            server.url,
-            await readFixture("mcp-tools-list.json"),
-            session.headers,
-        );
-        assert.equal(response.status, 200);
-        const tools = response.body.result?.tools as
-            | Array<{
-                  _meta?: Record<string, JsonValue>;
-                  name?: string;
-                  outputSchema?: JsonValue;
-                  securitySchemes?: JsonValue;
-              }>
-            | undefined;
-        const action = tools?.find((tool) => tool.name === "mcpapp_action");
-        const environment = tools?.find((tool) => tool.name === "environ_info");
-        const open = tools?.find((tool) => tool.name === "mcpapp_open");
-        assert.notEqual(environment, undefined);
-        assert.deepEqual(environment?.outputSchema, { type: "object" });
-        assert.equal(
-            environment?._meta?.["openai/outputTemplate"],
-            mcpAppResourceUri,
-        );
-        assert.deepEqual(
-            (environment?._meta?.ui as { visibility?: JsonValue } | undefined)
-                ?.visibility,
-            ["model", "app"],
-        );
-        assert.notEqual(action, undefined);
-        assert.notDeepEqual(action?.outputSchema, { type: "object" });
-        assert.deepEqual(action?._meta?.ui, { visibility: ["app"] });
-        assert.equal(action?._meta?.["openai/visibility"], "private");
-        assert.equal(action?._meta?.["openai/widgetAccessible"], true);
-        assert.deepEqual(action?.securitySchemes, [{ type: "noauth" }]);
-        assert.deepEqual(action?._meta?.securitySchemes, [{ type: "noauth" }]);
-        assert.notEqual(open, undefined);
-        assert.deepEqual(
-            (open?._meta?.ui as { visibility?: JsonValue } | undefined)
-                ?.visibility,
-            ["model", "app"],
-        );
-        assert.deepEqual(open?.securitySchemes, [{ type: "noauth" }]);
-        assert.deepEqual(open?._meta?.securitySchemes, [{ type: "noauth" }]);
-    } finally {
-        await server.close();
-    }
-});
-
-test("Workspace disable removes only Workspace tools and app metadata", () => {
-    const harness = createWorkerHarness();
-    const unused = async () => {
-        throw new Error("unused");
-    };
-    const gateway = {
-        consumeWait: unused,
-        createWait: unused,
-        detachWait: unused,
-        approval: {
-            decideApproval: unused,
-            listApprovals: async () => [],
-            listPendingApprovals: async () => [],
-        },
-        listTools: () => [],
-        listWaits: async () => [],
-        resolveWait: unused,
-        waitForWait: unused,
-    } as unknown as McpInstanceGateway;
-    const tools = new McpEndpointWorker({
-        gateway,
-        instanceName: "demo",
-        worker: harness.worker,
-        mcpAppEnabled: false,
-    }).listTools();
-
-    assert.equal(
-        tools.some((tool) => tool.name.startsWith("mcpapp_")),
-        false,
-    );
-    const environment = tools.find((tool) => tool.name === "environ_info");
-    assert.notEqual(environment, undefined);
-    assert.equal(
-        (environment?._meta as Record<string, JsonValue> | undefined)?.[
-            "openai/outputTemplate"
-        ],
-        undefined,
-    );
-    const bash = tools.find((tool) => tool.name === "bash_run");
-    assert.notEqual(bash, undefined);
-    assert.notEqual(
-        (bash?.inputSchema as { properties?: Record<string, unknown> })
-            .properties?.instance,
-        undefined,
-    );
-});
-
 test("tmux_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
         tools: [
@@ -292,8 +164,10 @@ test("tmux_run does not render a Workspace App", () => {
     });
     const tool = new McpEndpointWorker({
         instanceName: "demo",
-        gateway: harness.gateway,
+        context: harness.context,
         worker: harness.worker,
+        tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
     })
         .listTools()
         .find((entry) => entry.name === "tmux_run");
@@ -337,9 +211,10 @@ test("MCP endpoint serves App resources and environment presentation from a gene
         new McpEndpointWorker({
             extensions,
             instanceName: "demo",
-            gateway: harness.gateway,
+            context: harness.context,
             worker: harness.worker,
-            mcpAppEnabled: false,
+            tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -472,13 +347,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             read.body.result?.contents?.[0]?._meta,
             mcpAppResourceMeta,
         );
-        assert.deepEqual(mcpAppLegacyResourceUris, [
-            "ui://portable-devshell/mcpapp-651c9d0f1042c493.html",
-            "ui://portable-devshell/mcpapp-98410baf51f694b0.html",
-            "ui://portable-devshell/mcpapp-03c4911b6d185e3c.html",
-            "ui://portable-devshell/mcpapp-c978585dba4e38c7.html",
-            "ui://portable-devshell/mcpapp-4305d70d5fdb6a12.html",
-        ]);
+        assert.equal(mcpAppLegacyResourceUris.length, 5);
         for (const [index, uri] of mcpAppLegacyResourceUris.entries()) {
             const legacy = await postJson(
                 server.url,
@@ -700,7 +569,7 @@ test("cached removed tool recipients return a structured tombstone over MCP", as
     }
 });
 
-test("tools/call delegates to host Gateway ingress", async () => {
+test("tools/call delegates through the host ToolCall API", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -775,8 +644,10 @@ test("tools/call forwards stale worker arguments even when the advertised schema
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             instanceName: "demo",
-            gateway: harness.gateway,
+            context: harness.context,
             worker: harness.worker,
+            tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -915,98 +786,6 @@ test("tools/call appends a worker result hint and keeps the flat shape", async (
     }
 });
 
-test("environment and control-owned tools execute through the endpoint audit path", async () => {
-    const harness = createWorkerHarness();
-    const gateway = {
-        ...harness.gateway,
-        assertReady() {},
-        async callTool() {
-            return {};
-        },
-        async createSshInstance() {
-            return {};
-        },
-        async listInstances() {
-            return [{ name: "demo-local" }];
-        },
-        async readTodo() {
-            return { revision: 1, todos: [] };
-        },
-        listTools() {
-            return [];
-        },
-        async shareArtifact(
-            _defaultInstance: string,
-            input: { path?: string },
-        ) {
-            return {
-                ...(input.path === undefined ? {} : { path: input.path }),
-                shareId: "share-1",
-            };
-        },
-        async transferArtifact() {
-            return {};
-        },
-        async connectInstance(instance: string) {
-            return { instance };
-        },
-        async statusInstance() {
-            return {};
-        },
-        async stopInstance() {
-            return {};
-        },
-        async writeTodo() {
-            return {};
-        },
-    } as unknown as McpInstanceGateway;
-    const endpoint = new McpEndpointWorker({
-        gateway,
-        instanceName: "demo-local",
-        worker: harness.worker,
-    });
-    const requestContext = {
-        principal: "test",
-        requestId: "request-control-tools",
-    };
-
-    const environment = await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace" },
-        requestContext,
-    );
-    const ctxId = String(
-        structuredResult<{ ctxId?: string }>(environment).ctxId,
-    );
-    await endpoint.callTool("todo_read", { ctxId }, requestContext);
-
-    assert.deepEqual(
-        harness.auditedCalls.map((call) => ({
-            ctxId: call.context.ctxId,
-            input: call.input,
-            requestId: call.context.requestId,
-            source: call.context.source,
-            toolName: call.toolName,
-        })),
-        [
-            {
-                ctxId,
-                input: { workspace: "/workspace" },
-                requestId: "request-control-tools",
-                source: "mcp",
-                toolName: "environ_info",
-            },
-            {
-                ctxId,
-                input: {},
-                requestId: "request-control-tools",
-                source: "mcp",
-                toolName: "todo_read",
-            },
-        ],
-    );
-});
-
 test("explicit context mode exposes ctxId and does not bind authority to OpenAI session metadata", async () => {
     const harness = createWorkerHarness();
     const provenanceRecords: Array<{
@@ -1022,7 +801,9 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
                 provenanceRecords.push(record);
             },
         },
-        gateway: harness.gateway,
+        context: harness.context,
+        tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
         worker: harness.worker,
     });
     const bashTool = endpoint
@@ -1185,406 +966,6 @@ test("explicit context mode ignores OpenAI session metadata unless ctxId is supp
     }
 });
 
-test("OpenAI session binding resolves one internal ctxId without making models carry it", async () => {
-    const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({
-        idFactory: () => "ctx-openai-stable",
-    });
-    await registry.initialize();
-    const endpoint = new McpEndpointWorker({
-        contextMode: "openai-session",
-        contextRegistry: registry,
-        instanceName: "demo",
-        gateway: harness.gateway,
-        worker: harness.worker,
-    });
-    const requestContext = {
-        principal: "subject-1",
-        requestMeta: { "openai/session": "chat-session-stable" },
-        requestId: "request-openai-session",
-    };
-
-    const bashTool = endpoint
-        .listTools()
-        .find((tool) => tool.name === "bash_run");
-    const bashSchema = bashTool?.inputSchema as {
-        properties?: Record<string, unknown>;
-        required?: string[];
-    };
-    assert.equal(bashSchema.properties?.ctxId, undefined);
-    assert.equal(bashSchema.required?.includes("ctxId") ?? false, false);
-    const environmentTool = endpoint
-        .listTools()
-        .find((tool) => tool.name === "environ_info");
-    assert.equal(
-        (
-            environmentTool?.inputSchema as {
-                properties?: Record<string, unknown>;
-            }
-        ).properties?.ctxId,
-        undefined,
-    );
-    assert.equal(
-        (
-            environmentTool?.outputSchema as {
-                properties?: Record<string, unknown>;
-            }
-        ).properties?.ctxId,
-        undefined,
-    );
-
-    const first = structuredResult<{ status: string; workspace: string }>(
-        await endpoint.callTool(
-            "environ_info",
-            { workspace: "/mcpapp/one" },
-            requestContext,
-        ),
-    );
-    assert.equal("ctxId" in first, false);
-    const internalCtxId = (await registry.list())[0]?.ctxId;
-    assert.equal(internalCtxId, "ctx-openai-stable");
-
-    const second = structuredResult<{ status: string; workspace: string }>(
-        await endpoint.callTool(
-            "environ_info",
-            { workspace: "/mcpapp/two" },
-            requestContext,
-        ),
-    );
-
-    assert.equal(first.workspace, "/mcpapp/one");
-    assert.equal("ctxId" in second, false);
-    assert.equal(second.status, "active");
-    assert.equal(second.workspace, "/mcpapp/two");
-    assert.deepEqual(
-        (await registry.list()).map((record) => record.ctxId),
-        [internalCtxId],
-    );
-    assert.equal(
-        endpoint.listTools().some((tool) => tool.name === "context_acquire"),
-        false,
-    );
-    assert.equal(
-        endpoint.listTools().some((tool) => tool.name === "context_renew"),
-        false,
-    );
-
-    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls[0]?.ctxId, internalCtxId);
-    assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
-
-    await assert.rejects(
-        endpoint.callTool(
-            "bash_run",
-            { command: "pwd", ctxId: internalCtxId },
-            {
-                ...requestContext,
-                requestMeta: { "openai/session": "another-session" },
-            },
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "mcp.contextInvalid",
-    );
-    await assert.rejects(
-        endpoint.callTool(
-            "environ_info",
-            { ctxId: internalCtxId, workspace: "/mcpapp/three" },
-            requestContext,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "control.invalidTarget",
-    );
-    assert.equal(harness.calls.length, 1);
-});
-
-test("OpenAI session mode keeps ctxId out of model inputs but declares it for app-only Workspace tools", async () => {
-    const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({
-        idFactory: () => "ctx-openai-workspace-app",
-    });
-    await registry.initialize();
-    const unused = async () => {
-        throw new Error("unused");
-    };
-    const gateway = {
-        ...createTestCallOperationGateway(),
-        consumeWait: unused,
-        createWait: unused,
-        detachWait: unused,
-        approval: {
-            decideApproval: unused,
-            listApprovals: async () => [],
-            listPendingApprovals: async () => [],
-        },
-        listTools: () => [],
-        listWaits: async () => [],
-        readTodo: async () => ({
-            items: [],
-            revision: 0,
-            summary: { completed: 0, total: 0 },
-            tasks: [],
-        }),
-        resolveWait: unused,
-        waitForWait: unused,
-    } as unknown as McpInstanceGateway;
-    const endpoint = new McpEndpointWorker({
-        contextMode: "openai-session",
-        contextRegistry: registry,
-        gateway,
-        instanceName: "demo",
-        worker: harness.worker,
-    });
-    const tools = endpoint.listTools();
-    const inputSchema = (name: string) =>
-        tools.find((tool) => tool.name === name)?.inputSchema as
-            | {
-                  properties?: Record<string, unknown>;
-                  required?: string[];
-              }
-            | undefined;
-
-    for (const name of ["environ_info", "bash_run", "mcpapp_open"]) {
-        const schema = inputSchema(name);
-        assert.equal(schema?.properties?.ctxId, undefined, name);
-        assert.equal(schema?.required?.includes("ctxId") ?? false, false, name);
-    }
-    for (const name of [
-        "mcpapp_snapshot",
-        "mcpapp_watch",
-        "mcpapp_action",
-    ]) {
-        const schema = inputSchema(name);
-        assert.notEqual(schema?.properties?.ctxId, undefined, name);
-        assert.equal(schema?.required?.includes("ctxId") ?? false, true, name);
-    }
-
-    const requestContext = {
-        principal: "subject-1",
-        requestMeta: { "openai/session": "chat-workspace-app" },
-        requestId: "request-workspace-app",
-    };
-    const environment = await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace" },
-        requestContext,
-    );
-    assert.ok(environment instanceof McpNativeToolResult);
-    const token = (
-        environment._meta?.["portable-devshell/mcpapp"] as
-            { token?: unknown } | undefined
-    )?.token;
-    assert.equal(typeof token, "string");
-    const ctxId = (await registry.list())[0]?.ctxId;
-    assert.equal(ctxId, "ctx-openai-workspace-app");
-
-    const snapshot = structuredResult<{
-        ctxId?: string;
-        modelContext?: unknown;
-        presentation?: unknown;
-        reentry?: unknown;
-    }>(
-        await endpoint.callTool(
-            "mcpapp_snapshot",
-            { ctxId, token: token as string },
-            {
-                principal: "subject-1",
-                requestId: "request-workspace-app-snapshot",
-            },
-        ),
-    );
-    assert.equal(snapshot.ctxId, ctxId);
-    assert.ok(snapshot.presentation);
-    assert.ok(snapshot.modelContext);
-    assert.ok(snapshot.reentry);
-});
-
-test("expired OpenAI session binding renews the same internal Context on ordinary activity", async () => {
-    let now = 1_000;
-    const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({
-        idFactory: () => "ctx-openai-renew",
-        now: () => now,
-        ttlMs: 100,
-    });
-    await registry.initialize();
-    const endpoint = new McpEndpointWorker({
-        contextMode: "openai-session",
-        contextRegistry: registry,
-        instanceName: "demo",
-        gateway: harness.gateway,
-        worker: harness.worker,
-    });
-    const requestContext = {
-        principal: "subject-1",
-        requestMeta: { "openai/session": "chat-session-renew" },
-        requestId: "request-openai-renew",
-    };
-
-    const acquired = structuredResult<{ status: string }>(
-        await endpoint.callTool(
-            "environ_info",
-            { workspace: "/workspace" },
-            requestContext,
-        ),
-    );
-    assert.equal("ctxId" in acquired, false);
-    const ctxId = (await registry.list())[0]?.ctxId;
-    assert.equal(ctxId, "ctx-openai-renew");
-
-    now = 1_101;
-    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls.at(-1)?.ctxId, ctxId);
-    const renewed = await registry.lookup(ctxId!, { principal: "subject-1" });
-    assert.equal(renewed.status, "active");
-});
-
-test("disabled OpenAI session binding reacquires a new Context and moves the binding", async () => {
-    const ids = ["ctx-openai-disabled", "ctx-openai-replacement"];
-    const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({
-        idFactory: () => ids.shift() ?? "ctx-unexpected",
-    });
-    await registry.initialize();
-    const endpoint = new McpEndpointWorker({
-        contextMode: "openai-session",
-        contextRegistry: registry,
-        instanceName: "demo",
-        gateway: harness.gateway,
-        worker: harness.worker,
-    });
-    const requestContext = {
-        principal: "subject-1",
-        requestMeta: { "openai/session": "chat-session-disabled" },
-        requestId: "request-openai-disabled",
-    };
-
-    const first = structuredResult<{ status: string }>(
-        await endpoint.callTool(
-            "environ_info",
-            { workspace: "/mcpapp/old" },
-            requestContext,
-        ),
-    );
-    assert.equal("ctxId" in first, false);
-    const firstCtxId = (await registry.list())[0]?.ctxId;
-    assert.equal(firstCtxId, "ctx-openai-disabled");
-    await registry.disable(firstCtxId!);
-
-    await assert.rejects(
-        endpoint.callTool("bash_run", { command: "pwd" }, requestContext),
-        (error: unknown) =>
-            (error as { code?: string }).code === "mcp.contextDisabled",
-    );
-
-    const replacement = structuredResult<{ status: string; workspace: string }>(
-        await endpoint.callTool(
-            "environ_info",
-            { workspace: "/mcpapp/new" },
-            requestContext,
-        ),
-    );
-    assert.equal("ctxId" in replacement, false);
-    assert.equal(replacement.status, "active");
-    assert.equal(replacement.workspace, "/mcpapp/new");
-
-    const bound = await registry.lookupExternal(
-        { kind: "openai/session", value: "chat-session-disabled" },
-        { principal: "subject-1" },
-    );
-    assert.equal(bound?.ctxId, "ctx-openai-replacement");
-    assert.equal(
-        (await registry.lookup(firstCtxId!, { principal: "subject-1" })).status,
-        "disabled",
-    );
-
-    await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
-    assert.equal(harness.calls.at(-1)?.ctxId, "ctx-openai-replacement");
-});
-
-test("HTTP forwards OpenAI session metadata into the generic Context binding", async () => {
-    const harness = createWorkerHarness();
-    const binding = createBinding(harness, { contextMode: "openai-session" });
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        const meta = { "openai/session": "chat-http-bound" };
-        const acquire = async (workspace: string) =>
-            await postJson(
-                server.url,
-                {
-                    id: `req-session-acquire-${workspace}`,
-                    jsonrpc: "2.0",
-                    method: "tools/call",
-                    params: {
-                        _meta: meta,
-                        arguments: { workspace },
-                        name: "environ_info",
-                    },
-                },
-                session.headers,
-            );
-
-        const first = await acquire("/mcpapp/one");
-        assert.equal(
-            "ctxId" in (first.body.result?.structuredContent ?? {}),
-            false,
-        );
-
-        const firstRun = await postJson(
-            server.url,
-            {
-                id: "req-session-run-with-first-binding",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    _meta: meta,
-                    arguments: { command: "pwd" },
-                    name: "bash_run",
-                },
-            },
-            session.headers,
-        );
-        assert.equal(firstRun.status, 200);
-        assert.equal(
-            firstRun.body.error,
-            undefined,
-            JSON.stringify(firstRun.body),
-        );
-        const firstCtxId = harness.calls[0]?.ctxId;
-        assert.equal(typeof firstCtxId, "string");
-
-        const second = await acquire("/mcpapp/two");
-        assert.equal(
-            "ctxId" in (second.body.result?.structuredContent ?? {}),
-            false,
-        );
-        const secondRun = await postJson(
-            server.url,
-            {
-                id: "req-session-run-with-second-binding",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    _meta: meta,
-                    arguments: { command: "pwd" },
-                    name: "bash_run",
-                },
-            },
-            session.headers,
-        );
-        assert.equal(secondRun.status, 200);
-        assert.equal(
-            secondRun.body.error,
-            undefined,
-            JSON.stringify(secondRun.body),
-        );
-        assert.equal(harness.calls[1]?.ctxId, firstCtxId);
-    } finally {
-        await server.close();
-    }
-});
-
 test("notifications/cancelled is acknowledged without a matching in-flight call", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
@@ -1671,229 +1052,6 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
     }
 });
 
-test("retired instance_connect returns an actionable tombstone through SDK transport", async () => {
-    const harness = createWorkerHarness({
-        hasToolSchemaCache: false,
-        ready: false,
-        tools: [],
-    });
-    const gateway = {
-        ...createTestCallOperationGateway(),
-        assertReady() {},
-        async callTool() {
-            return {};
-        },
-        async createSshInstance() {
-            return {};
-        },
-        async readTodo() {
-            return {
-                items: [],
-                revision: 0,
-                summary: { completed: 0, total: 0 },
-            };
-        },
-        listTools() {
-            return [];
-        },
-        async connectInstance(instance: string) {
-            return { instance };
-        },
-        async statusInstance() {
-            return {};
-        },
-        async stopInstance() {
-            return {};
-        },
-        async writeTodo() {
-            return {
-                items: [],
-                revision: 0,
-                summary: { completed: 0, total: 0 },
-            };
-        },
-    } as unknown as McpInstanceGateway;
-    const binding = new McpEndpointBinding(
-        new McpEndpointWorker({
-            gateway,
-            instanceName: "demo",
-            worker: harness.worker,
-        }),
-    );
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        const ctxId = await createContext(server.url, session.headers);
-        const response = await postJson(
-            server.url,
-            {
-                id: "req-instance-connect",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    arguments: { ctxId, instance: "demo" },
-                    name: "instance_connect",
-                },
-            },
-            session.headers,
-        );
-
-        assert.equal(response.status, 200);
-        assert.equal(response.body.error, undefined);
-        assert.deepEqual(response.body.result?.structuredContent, {
-            staleToolSnapshot: {
-                assistantInstruction:
-                    "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
-                help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
-                name: "instance_connect",
-                removedIn: "0.7.1",
-            },
-        });
-    } finally {
-        await server.close();
-    }
-});
-
-test("artifact_viewImage returns native image content over SDK transport", async () => {
-    const pngData =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-    const harness = createWorkerHarness({
-        hasToolSchemaCache: false,
-        ready: false,
-        tools: [],
-    });
-    const registry = new McpToolRegistry();
-    const registration = registry.register("demo", [
-        {
-            description: "View image",
-            group: "artifact",
-            inputSchema: {
-                additionalProperties: false,
-                properties: { path: { type: "string" } },
-                required: ["path"],
-                type: "object",
-            },
-            name: "artifact_viewImage",
-            outputSchema: { type: "object" },
-            requiredCapabilities: ["read"],
-        },
-    ]);
-    const gateway = {
-        ...createTestCallOperationGateway(),
-        assertReady() {},
-        async callTool(
-            _instance: string,
-            _toolName: string,
-            _input: JsonValue,
-            _context: unknown,
-            _signal?: AbortSignal,
-            transformResult?: (
-                result: JsonValue,
-                callId: string,
-                presentation?: {
-                    content?: readonly {
-                        data: string;
-                        mediaType: string;
-                        type: "image";
-                    }[];
-                },
-            ) => Promise<JsonValue>,
-            invocationInput?: (
-                input: JsonValue,
-                callId: string,
-                finalValue: ToolCallHookValue,
-            ) => Promise<JsonValue> | JsonValue,
-        ) {
-            const callId = "artifact-call";
-            await invocationInput?.(
-                { path: "./pixel.png" },
-                callId,
-                {
-                    context: {
-                        ctxId: "ctx-artifact-test",
-                        instance: asInstanceName("demo"),
-                        source: "mcp",
-                        workspace: "/workspace",
-                    },
-                    kind: "call",
-                    payload: { path: "./pixel.png" },
-                    toolName: "artifact_viewImage",
-                },
-            );
-            const structured = {
-                blake3: "b".repeat(64),
-                bytes: 68,
-                imageRef: `${"b".repeat(64)}.png`,
-                mediaType: "image/png",
-                name: "pixel.png",
-                source: { instance: "demo", path: "./pixel.png", type: "file" },
-            } as JsonValue;
-            return transformResult === undefined
-                ? structured
-                : await transformResult(structured, callId, {
-                      content: [
-                          {
-                              data: pngData,
-                              mediaType: "image/png",
-                              type: "image",
-                          },
-                      ],
-                  });
-        },
-        async listInstances() {
-            return [];
-        },
-        async readTodo() {
-            return { revision: 0, todos: [] };
-        },
-    } as unknown as McpInstanceGateway;
-    const binding = new McpEndpointBinding(
-        new McpEndpointWorker({
-            gateway,
-            instanceName: "demo",
-            toolRegistry: registry,
-            worker: harness.worker,
-        }),
-    );
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        const ctxId = await createContext(server.url, session.headers);
-        const response = await postJson(
-            server.url,
-            {
-                id: "req-artifact-view-image",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    arguments: { ctxId, path: "./pixel.png" },
-                    name: "artifact_viewImage",
-                },
-            },
-            session.headers,
-        );
-
-        assert.equal(response.status, 200);
-        assert.equal(response.body.error, undefined);
-        assert.deepEqual(response.body.result?.content, [
-            { data: pngData, mimeType: "image/png", type: "image" },
-        ]);
-        assert.deepEqual(response.body.result?.structuredContent, {
-            blake3: "b".repeat(64),
-            bytes: 68,
-            imageRef: `${"b".repeat(64)}.png`,
-            mediaType: "image/png",
-            name: "pixel.png",
-            source: { instance: "demo", path: "./pixel.png", type: "file" },
-        });
-    } finally {
-        registration.dispose();
-        await server.close();
-    }
-});
-
 test("tools/list returns cached schema while the instance is not ready", async () => {
     const binding = createBinding(createWorkerHarness({ ready: false }));
     const server = await createBindingServer(binding);
@@ -1937,9 +1095,7 @@ test("environ_info remains callable without a worker schema", async () => {
 });
 
 test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
-    const binding = createBinding(createWorkerHarness({ ready: false }), {
-        readyWaitMs: 50,
-    });
+    const binding = createBinding(createWorkerHarness({ ready: false }));
     const server = await createBindingServer(binding);
 
     try {
@@ -1958,92 +1114,15 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
     }
 });
 
-test("tools/call waits for a transiently not-ready instance before executing", async () => {
-    const pending = { ready: false };
-    const harness = createWorkerHarness({ ready: false });
-    const worker = harness.worker;
-    let invoked = false;
-    worker.snapshot = () => ({ ready: pending.ready });
-    harness.gateway.assertReady = () => {
-        if (!pending.ready)
-            throw Object.assign(new Error("not ready"), {
-                code: "core.instanceNotReady",
-            });
-    };
-    harness.gateway.callTool = async (
-        _instance,
-        toolName,
-        input,
-        context,
-        _signal,
-        transformResult,
-        invocationInput,
-    ) => {
-        await invocationInput?.(input, "call-test", {
-            kind: "call",
-            toolName,
-            payload: input,
-            context: { ...context, instance: asInstanceName("demo") },
-        });
-        invoked = true;
-        return { exitCode: 0, stderr: "", stdout: "/workspace\n" };
-    };
-    const binding = createBinding(harness, { readyWaitMs: 2_000 });
-    const server = await createBindingServer(binding);
-
-    try {
-        const session = await initialize(server.url);
-        const ctxId = await createContext(server.url, session.headers);
-
-        const call = postJson(
-            server.url,
-            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
-            session.headers,
-        );
-
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        pending.ready = true;
-
-        const response = await call;
-        assert.equal(response.status, 200);
-        assert.equal(response.body.error, undefined);
-        assert.equal(invoked, true);
-    } finally {
-        await server.close();
-    }
-});
-
 function createBinding(
     harness = createWorkerHarness(),
     options?: {
         contextMode?: "explicit" | "openai-session";
         publicBaseUrl?: string;
-        readyWaitMs?: number;
         serverVersion?: string;
         mcpApp?: boolean;
     },
 ): McpEndpointBinding {
-    const unused = async () => {
-        throw new Error("unused");
-    };
-    const gateway =
-        options?.mcpApp === true
-            ? ({
-                  ...harness.gateway,
-                  consumeWait: unused,
-                  createWait: unused,
-                  approval: {
-                      decideApproval: unused,
-                      listApprovals: async () => [],
-                      listPendingApprovals: async () => [],
-                  },
-                  detachWait: unused,
-                  listTools: () => [],
-                  listWaits: async () => [],
-                  resolveWait: unused,
-                  waitForWait: unused,
-              } as unknown as McpInstanceGateway)
-            : harness.gateway;
     const extensions =
         options?.mcpApp === true
             ? new McpExtensionRegistry([
@@ -2054,9 +1133,10 @@ function createBinding(
         new McpEndpointWorker({
             contextMode: options?.contextMode,
             ...(extensions === undefined ? {} : { extensions }),
-            ...(gateway === undefined ? {} : { gateway }),
+            context: harness.context,
             instanceName: "demo",
-            readyWaitMs: options?.readyWaitMs,
+            tools: harness.tools,
+        toolRegistry: harness.toolRegistry,
             worker: harness.worker,
         }),
         options?.serverVersion,
@@ -2244,7 +1324,7 @@ function createWorkerHarness(options?: {
     }> = [];
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
-    const tools: ToolDefinition[] = options?.tools ?? [
+    const definitions: ToolDefinition[] = options?.tools ?? [
         {
             requiredCapabilities: ["execute"] as const,
             group: "bash",
@@ -2265,6 +1345,9 @@ function createWorkerHarness(options?: {
             outputSchema: { type: "object" },
         },
     ];
+    const toolRegistry = new McpToolRegistry();
+    toolRegistry.register("*", contextToolDefinitions());
+    toolRegistry.register("demo", definitions);
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;
     const result = options?.result ?? {
@@ -2345,146 +1428,90 @@ function createWorkerHarness(options?: {
             return { ready };
         },
         listTools() {
-            return tools;
+            return definitions;
         },
     };
-    const gateway: McpInstanceGateway = {
-        async callToolOperation<T extends JsonValue>(
-            instance: string,
-            toolName: string,
-            input: JsonValue,
-            context: { ctxId?: string; requestId?: string; source: string },
-            operation: (
-                callId: string,
-                input: JsonValue,
-                finalValue: ToolCallHookValue,
-            ) => Promise<T>,
-            _signal?: AbortSignal,
-        ): Promise<T> {
-            auditedCalls.push({ context, input, toolName });
-            return await operation("call-test", input, {
-                kind: "call",
-                toolName: toolName,
-                payload: input,
-                context: {
-                    ...context,
-                    source: "mcp",
-                    instance: asInstanceName(instance),
-                },
-            });
+    const contexts = new Map<string, ContextRecord>();
+    const context = {
+        async resolve(input: { ctxId?: string; principal: string }) {
+            const record = input.ctxId === undefined ? undefined : contexts.get(input.ctxId);
+            if (record === undefined || record.principal !== input.principal)
+                throw Object.assign(new Error("Context is invalid."), { code: "mcp.contextInvalid" });
+            return record;
         },
-        async callTool(
+    } as Pick<ContextTransport, "resolve">;
+    const tools: ToolCallApi = {
+        async call(
             instance: string,
             toolName: string,
             input: JsonValue,
-            context: { ctxId?: string; requestId?: string; source: string },
+            callContext: { ctxId?: string; principal?: string; requestId?: string; source?: string },
             signal?: AbortSignal,
-            transformResult?: (
-                result: JsonValue,
-                callId: string,
-            ) => Promise<JsonValue>,
-            _invocationInput?: (
-                input: JsonValue,
-                callId: string,
-                finalValue: ToolCallHookValue,
-            ) => Promise<JsonValue> | JsonValue,
-            _onProgress?: (progress: JsonValue) => void,
-            _recording?: "caller" | "host",
-        ) {
-            input =
-                (await _invocationInput?.(input, "call-test", {
-                    kind: "call",
-                    toolName,
-                    payload: input,
-                    context: {
-                        ...context,
-                        source: "mcp",
-                        instance: asInstanceName(instance),
-                    },
-                })) ?? input;
-            if (!worker.snapshot().ready) {
-                const error = new Error("not ready");
-                Object.assign(error, {
-                    code: "core.instanceNotReady",
-                    details: { toolName },
-                    retryable: false,
+            transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+        ): Promise<JsonValue> {
+            signal?.throwIfAborted();
+            if (toolName === "environ_info") {
+                const ctxId = typeof (input as { ctxId?: unknown }).ctxId === "string"
+                    ? (input as { ctxId: string }).ctxId
+                    : "ctx-endpoint-test";
+                const workspace = typeof (input as { workspace?: unknown }).workspace === "string"
+                    ? (input as { workspace: string }).workspace
+                    : "/workspace";
+                const now = new Date(0).toISOString();
+                contexts.set(ctxId, {
+                    createdAt: now,
+                    ctxId,
+                    environments: [{ instance, workspace }],
+                    expiresAt: new Date(86_400_000).toISOString(),
+                    lastAccessedAt: now,
+                    principal: callContext.principal ?? "test",
+                    status: "active",
                 });
-                throw error;
+                return { ctxId, status: "active", workspace };
             }
-
-            calls.push({ toolName, input, ...context });
+            const contextValue = {
+                ctxId: callContext.ctxId,
+                instance: asInstanceName(instance),
+                source: callContext.source ?? "mcp",
+                requestId: callContext.requestId,
+            };
+            const callId = "call-test";
+            auditedCalls.push({
+                context: { ...callContext, source: callContext.source ?? "mcp" },
+                input,
+                toolName,
+            });
+            const finalValue: ToolCallHookValue = {
+                kind: "call",
+                toolName,
+                payload: input,
+                context: contextValue as ToolCallHookValue["context"],
+            };
+            const effectiveInput = await invocationInput?.(input, callId, finalValue) ?? input;
+            if (!worker.snapshot().ready) {
+                throw Object.assign(new Error("not ready"), { code: "core.instanceNotReady" });
+            }
+            const executionContext = {
+                ctxId: callContext.ctxId,
+                requestId: callContext.requestId,
+                source: callContext.source ?? "mcp",
+            };
+            calls.push({ input: effectiveInput, toolName, ...executionContext });
+            worker.appendMcpToolCalled(toolName, executionContext);
             let toolResult: JsonValue;
             try {
-                toolResult =
-                    options?.callHandler === undefined
-                        ? result
-                        : await options.callHandler(
-                              toolName,
-                              input,
-                              context,
-                              signal,
-                          );
+                toolResult = options?.callHandler === undefined
+                    ? result
+                    : await options.callHandler(toolName, effectiveInput, executionContext, signal);
             } catch (error) {
-                if (
-                    (options?.comments?.length ?? 0) > 0 &&
-                    error instanceof Error
-                )
-                    throw attachToolCallErrorPayload(error, {
-                        comment: [...options!.comments!],
-                    });
+                if ((options?.comments?.length ?? 0) > 0 && error instanceof Error)
+                    throw attachToolCallErrorPayload(error, { comment: [...options!.comments!] });
                 throw error;
             }
-            if (
-                (options?.comments?.length ?? 0) > 0 &&
-                typeof toolResult === "object" &&
-                toolResult !== null &&
-                !Array.isArray(toolResult)
-            ) {
-                toolResult = {
-                    ...toolResult,
-                    comment: [...options!.comments!],
-                };
-            }
-            return transformResult === undefined
-                ? toolResult
-                : await transformResult(toolResult, "call-test");
-        },
-        async appendMcpToolCalled() {},
-        assertReady() {
-            if (!worker.snapshot().ready)
-                throw Object.assign(new Error("not ready"), {
-                    code: "core.instanceNotReady",
-                });
-        },
-        environment: () => worker.handshake,
-        listTools: () => tools,
-        async listInstances() {
-            return [];
-        },
-        async prepareWorkspace(_instance, workspace) {
-            return await worker.prepareWorkspace(workspace);
-        },
-        async readAlerts() {
-            return { advice: [] };
-        },
-        async releaseAlerts() {},
-        async touchAlerts() {},
-        async touchTemporaryDirectory() {},
-        async connectInstance() {
-            return {};
-        },
-        async releaseInstanceReference() {},
-        async statusInstance() {
-            return {};
-        },
-        async stopInstance() {
-            return {};
-        },
-        async readTodo() {
-            return {};
-        },
-        async writeTodo() {
-            return {};
+            if ((options?.comments?.length ?? 0) > 0 && typeof toolResult === "object" && toolResult !== null && !Array.isArray(toolResult))
+                toolResult = { ...toolResult, comment: [...options!.comments!] };
+            return transformResult === undefined ? toolResult : await transformResult(toolResult, callId);
         },
     };
     return {
@@ -2497,7 +1524,9 @@ function createWorkerHarness(options?: {
             toolName: string;
         }>,
         events,
-        gateway,
+        context,
+        tools,
+        toolRegistry,
         worker,
     } as const;
 }

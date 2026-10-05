@@ -1,8 +1,4 @@
-import {
-    Instance,
-    InstanceRegistry,
-    type WorkerInstance,
-} from "@portable-devshell/core";
+import { Instance, InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";
 import type { ControlConfig } from "@portable-devshell/shared";
 
 export function createTestInstance(

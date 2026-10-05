@@ -1,7 +1,7 @@
 import {
     mcpTools,
     type McpToolRegistration,
-} from "@portable-devshell/mcp/tool";
+} from "../Public.js";
 import type { ToolDefinition } from "@portable-devshell/shared";
 
 export class WorkerMcpToolRegistration {

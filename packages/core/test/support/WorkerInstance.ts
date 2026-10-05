@@ -6,11 +6,11 @@ import {
 } from "@portable-devshell/shared";
 import { join } from "node:path";
 
-import { createAuditRuntime, type AuditRuntime } from "../../src/audit/index.ts";
+import { createAuditRuntime, type AuditRuntime } from "../../src/audit/Public.ts";
 import {
     createToolCallExecutionRuntime,
     type ToolCallExecutionRuntime,
-} from "../../src/toolcall/index.ts";
+} from "../../src/toolcall/Public.ts";
 import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
 import { WorkerCommandClient, type WorkerRuntime } from "../../src/instance/runtime/execution/Command.ts";
 import { WorkerBinary } from "../../src/instance/runtime/Binary.ts";

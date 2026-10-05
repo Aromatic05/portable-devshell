@@ -4,14 +4,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import {
-    ControlConfigStore,
-    ControlConfigValidator,
-    ControlGlobalTomlDocument,
-    ControlInstanceTomlDocument,
-    ControlConfigTomlCodec,
-    createDefaultControlConfig,
-} from "../../../../src/testing.ts";
+import { ControlConfigStore } from "../../../../src/config/store/index.ts";
+import { ControlConfigValidator } from "../../../../src/config/engine/Validator.ts";
+import { ControlGlobalTomlDocument } from "../../../../src/config/store/document/Global.ts";
+import { ControlInstanceTomlDocument } from "../../../../src/config/store/document/Instance.ts";
+import { ControlConfigTomlCodec } from "../../../../src/config/store/TomlCodec.ts";
+import { createDefaultControlConfig } from "@portable-devshell/shared";
 import {
     ControlPathHome,
     normalizeConfigGlobalDraft,

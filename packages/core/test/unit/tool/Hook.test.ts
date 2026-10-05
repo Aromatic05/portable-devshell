@@ -7,7 +7,7 @@ import { ToolCallHookSequence } from "../../../src/toolcall/execution/hook/Seque
 import type {
     ToolCallHookValue,
     ToolCallReviewInput,
-} from "../../../src/toolcall/execution/hook/Review.ts";
+} from "../../../src/toolcall/Api.ts";
 import type { ToolCallRewrite } from "../../../src/toolcall/execution/hook/Rewrite.ts";
 
 function value(payload: unknown = { command: "echo ok" }): ToolCallHookValue {

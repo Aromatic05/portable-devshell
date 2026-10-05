@@ -244,7 +244,7 @@ describe("web domain transport", () => {
         serverChannel.close(new Error("transport lost"));
 
         expect(await closed).toBe("transport lost");
-        serverRpc.close();
+        service.close();
         server.close();
         domains.close();
     });

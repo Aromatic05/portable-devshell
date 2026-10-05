@@ -6,13 +6,20 @@ import test from "node:test";
 
 import {
     ControlPathHome,
+    Endpoint,
+    createContextTransport,
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
     type ControlConfig,
 } from "@portable-devshell/shared";
 
 import { McpControlModule } from "../../../src/server/mcp/Module.ts";
-import { ContextModule } from "../../../src/context/Module.ts";
+import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
+import { ExtensionHost } from "../../../src/extension/host/Host.ts";
+import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
+import { ConfigEngine } from "../../../src/config/engine/index.ts";
+import { ConfigEditorCoordinator } from "../../../src/config/editor/index.ts";
+import { InstanceEditorCoordinator } from "../../../src/instance/editor/index.ts";
 import { ControlRuntimeState } from "../../../src/server/runtime/State.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
@@ -30,14 +37,15 @@ test("MCP and Web reuse one listener only when their bind endpoints match", asyn
         );
     });
 
-    assert.equal(runtime.webHost, runtime.host?.server);
     await runtime.start();
-    const address = runtime.webHost?.address;
+    const address = runtime.mcp.host?.server.address;
     assert.ok(typeof address === "object" && address !== null);
     assert.equal(
         address.port,
-        (runtime.host?.server.address as { port: number }).port,
+        (runtime.mcp.host?.server.address as { port: number }).port,
     );
+    const response = await fetch(`http://127.0.0.1:${address.port}/web/session`, { method: "POST" });
+    assert.equal(response.status, 200);
 });
 
 test("MCP startup does not parse provenance history before the listener is ready", async (t) => {
@@ -61,7 +69,7 @@ test("MCP startup does not parse provenance history before the listener is ready
     });
 
     await runtime.start();
-    const address = runtime.host?.server.address;
+    const address = runtime.mcp.host?.server.address;
     assert.ok(typeof address === "object" && address !== null);
 });
 
@@ -70,7 +78,7 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
         "runtime-listener-separate",
     );
     const runtime = await createRuntime(
-        createIndependentConfig(),
+        await createIndependentConfig(),
         homeDirectory,
     );
     t.after(async () => {
@@ -80,11 +88,11 @@ test("separate Web listener can stop without interrupting MCP", async (t) => {
         );
     });
 
-    assert.notEqual(runtime.webHost, runtime.host?.server);
+    assert.ok(runtime.web.listener);
     await runtime.start();
-    const address = runtime.host?.server.address;
+    const address = runtime.mcp.host?.server.address;
     assert.ok(typeof address === "object" && address !== null);
-    await runtime.webHost?.stop();
+    await runtime.web.stopHost();
 
     const mcpResponse = await fetch(
         `http://127.0.0.1:${address.port}/missing/mcp`,
@@ -97,7 +105,7 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
     const homeDirectory = await createTestTempDirectory(
         "runtime-listener-replace",
     );
-    const config = createIndependentConfig();
+    const config = await createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
         await cleanupInOrder(
@@ -106,19 +114,23 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
         );
     });
     await runtime.start();
-    const mcpAddress = runtime.host?.server.address;
+    const mcpAddress = runtime.mcp.host?.server.address;
     assert.ok(typeof mcpAddress === "object" && mcpAddress !== null);
-    const previousWeb = runtime.webHost;
+    const previousWeb = runtime.web.listener;
     const next = structuredClone(config);
 
-    const retired = await runtime.replaceWebHost(config, next);
-    await runtime.stopRetiredWebHost(retired);
+    await runtime.web.replace(config, next, {
+        async replaceListener(previous, replacement) {
+            await previous.close();
+            await replacement.start(() => undefined);
+        },
+    });
 
     assert.equal(
-        (runtime.host?.server.address as { port: number }).port,
+        (runtime.mcp.host?.server.address as { port: number }).port,
         mcpAddress.port,
     );
-    assert.notEqual(runtime.webHost, previousWeb);
+    assert.notEqual(runtime.web.listener, previousWeb);
     const mcpResponse = await fetch(
         `http://127.0.0.1:${mcpAddress.port}/missing/mcp`,
         { method: "POST" },
@@ -128,7 +140,7 @@ test("replacing an independent Web listener keeps the MCP listener running", asy
 
 test("replacing an independent MCP listener keeps the Web listener running", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-mcp-replace");
-    const config = createIndependentConfig();
+    const config = await createIndependentConfig();
     const runtime = await createRuntime(config, homeDirectory);
     t.after(async () => {
         await cleanupInOrder(
@@ -137,25 +149,24 @@ test("replacing an independent MCP listener keeps the Web listener running", asy
         );
     });
     await runtime.start();
-    const web = runtime.webHost;
+    const web = runtime.web.listener;
     const next = structuredClone(config);
 
-    const retired = await runtime.replaceMcpHost(config, next);
+    const retired = await runtime.mcp.replaceMcpHost(config, next);
     await retired?.stop();
 
-    assert.equal(runtime.webHost, web);
-    const address = runtime.webHost?.address;
-    assert.ok(typeof address === "object" && address !== null);
-    await fetch(`http://127.0.0.1:${address.port}/web/session`, {
+    assert.equal(runtime.web.listener, web);
+    const response = await fetch(`http://127.0.0.1:${config.web.listenPort}/web/session`, {
         method: "POST",
     });
+    assert.equal(response.status, 200);
 });
 
 test("instance MCP auth updates do not replace an unrelated Web listener", async (t) => {
     const homeDirectory = await createTestTempDirectory(
         "runtime-instance-auth",
     );
-    let config = createIndependentConfig();
+    let config = await createIndependentConfig();
     config.instances = [
         normalizeConfigInstanceDraft({
             mcp: { contextMode: "explicit" },
@@ -178,13 +189,11 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
-        state,
     });
     runtime.setWebConfigApplier(async () => {
         webApplyCalls += 1;
@@ -199,7 +208,8 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         );
     });
 
-    const result = (await runtime.instanceEditor.updateInstanceConfig({
+    const { instanceEditor } = createEditors(state, runtime);
+    const result = (await instanceEditor.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "a".repeat(48) } },
     })) as { restartControlRequired: boolean };
@@ -228,13 +238,11 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
-        state,
     });
     runtime.setMcpConfigApplier(async () => {
         mcpApplyCalls += 1;
@@ -246,7 +254,8 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         );
     });
 
-    const result = (await runtime.configEditor.updateMcpConfig({
+    const { configEditor } = createEditors(state, runtime);
+    const result = (await configEditor.updateMcpConfig({
         patch: { enabled: true },
     })) as { restartControlRequired: boolean };
 
@@ -291,10 +300,9 @@ test("MCP migration starts a different listener before retiring the previous lis
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -303,7 +311,6 @@ test("MCP migration starts a different listener before retiring the previous lis
                 return wireCalls === 1 ? oldHost : newHost;
             },
         } as never,
-        state,
     });
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
@@ -357,10 +364,9 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -369,7 +375,6 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
                 return wireCalls === 1 ? oldHost : newHost;
             },
         } as never,
-        state,
     });
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
@@ -432,10 +437,9 @@ test("MCP restore attempts every host transition and reports rollback failures",
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -444,7 +448,6 @@ test("MCP restore attempts every host transition and reports rollback failures",
                 return wireCalls === 1 ? oldHost : newHost;
             },
         } as never,
-        state,
     });
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
@@ -481,7 +484,7 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     });
     const address = occupied.address();
     assert.ok(typeof address === "object" && address !== null);
-    const config = createIndependentConfig();
+    const config = await createIndependentConfig();
     config.web.listenHost = "127.0.0.1";
     config.web.listenPort = address.port;
     const state = new ControlRuntimeState({
@@ -494,13 +497,11 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
-        state,
     });
     t.after(async () => {
         await cleanupInOrder(
@@ -514,8 +515,10 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
         );
     });
 
+    const web = createWeb(config, homeDirectory, runtime);
+    t.after(async () => { web.stop(); await runtime.stop(); });
     await assert.rejects(
-        runtime.replaceWebHost(config, structuredClone(config)),
+        web.replace(config, structuredClone(config), { async replaceListener() {} }),
         (error: unknown) => {
             assert.ok(error instanceof AggregateError);
             assert.equal(error.errors.length, 2);
@@ -550,16 +553,14 @@ test("shared listener Web auth changes require an explicit control restart witho
     });
     await state.load();
     const runtime = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
+        config: state.requireConfig(),
+        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: state.instances,
         artifact: {
             service: {},
             installHttpRoute() {},
         } as never,
         controlPaths: new ControlPathHome(homeDirectory),
-        state,
     });
     runtime.setWebConfigApplier(async () => {
         webHotApplyCalls += 1;
@@ -571,7 +572,9 @@ test("shared listener Web auth changes require an explicit control restart witho
         );
     });
 
-    const result = (await runtime.configEditor.updateWebConfig({
+    const { configEditor } = createEditors(state, runtime);
+    const previousHost = runtime.host;
+    const result = (await configEditor.updateWebConfig({
         patch: { auth: "token", token: "a".repeat(48) },
     })) as {
         restartControlRequired: boolean;
@@ -579,40 +582,93 @@ test("shared listener Web auth changes require an explicit control restart witho
 
     assert.equal(webHotApplyCalls, 0);
     assert.equal(result.restartControlRequired, true);
-    assert.equal(runtime.webHost, runtime.host?.server);
-    const view = runtime.configEditor.getConfigView() as {
+    assert.equal(runtime.host, previousHost);
+    const view = configEditor.getConfigView() as {
         restartControlRequired?: boolean;
     };
     assert.equal(view.restartControlRequired, true);
 });
 
-async function createRuntime(
-    config: ControlConfig,
-    homeDirectory: string,
-): Promise<McpControlModule> {
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-        } as never,
-        homeDirectory,
+function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControlModule): ControlWebRuntime {
+    return new ControlWebRuntime({
+        config,
+        extensions: { points: { list: () => [] } } as unknown as ExtensionHost,
+        mcp,
+        oauthDirectory: join(new ControlPathHome(homeDirectory).oauthDir, "web"),
+        paths: new ExtensionPathLayout({ homeDirectory }),
     });
-    await state.load();
-    const contexts = new ContextModule({
-        contextFile: new ControlPathHome(homeDirectory).contextsFile,
-        instances: state.instances,
-    });
-    await contexts.initialize();
-    return new McpControlModule({
-        contexts,
-        artifact: {
-            service: {},
-            installHttpRoute() {},
-        } as never,
+}
+
+async function createRuntime(config: ControlConfig, homeDirectory: string) {
+    const state = new ControlRuntimeState({ homeDirectory });
+    state.setConfig(config);
+    const endpoint = new Endpoint({ host: "listener-test" });
+    const mcp = new McpControlModule({
+        config, contextTransport: createContextTransport(endpoint), instances: state.instances,
+        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
-        state,
     });
+    const web = createWeb(config, homeDirectory, mcp);
+    return {
+        mcp, web,
+        async start() {
+            await web.prepare();
+            await web.listener?.start(() => undefined);
+            await mcp.start();
+            await web.startHost();
+        },
+        async stop() {
+            await cleanupInOrder(
+                () => web.listener?.close(),
+                () => { web.stop(); },
+                () => web.stopHost(),
+                () => mcp.stop(),
+                () => { endpoint.close(); },
+                () => state.instanceRuntimes.close(),
+            );
+        },
+    };
+}
+
+function createEditors(state: ControlRuntimeState, mcp: McpControlModule) {
+    const options = {
+        configStore: state.configStore,
+        getConfig: () => state.requireConfig(),
+        getRestartControlRequired: () => state.restartControlRequired,
+        markRestartControlRequired: () => state.markRestartControlRequired(),
+        homeDirectory: state.homeDirectory,
+        changeHub: state.configChanges,
+        mutationRunner: state.configMutations,
+        registry: state.configRegistry,
+        runtimeApply: { apply: mcp.applyRuntimeConfig.bind(mcp) },
+        setConfig: (config: ControlConfig) => state.setConfig(config),
+    };
+    const engine = new ConfigEngine(options);
+    const instanceEditor = new InstanceEditorCoordinator({
+        engine, instanceRegistry: state.instances, instanceChanges: state.instanceChanges,
+        createRuntimeInstance: config => state.instanceRuntimes.create(config),
+        retireRuntimeInstance: instance => state.instanceRuntimes.retire(instance),
+        finalizeRuntimeInstance: instance => state.instanceRuntimes.finalize(instance),
+        updateApprovalPolicy: async (name, policy) => {
+            const instance = state.instances.get(name);
+            assert.ok(instance);
+            state.instanceRuntimes.get(instance).approval.setPolicy(policy);
+        },
+        mcp: mcp.instancePort,
+    });
+    return { instanceEditor, configEditor: new ConfigEditorCoordinator({ ...options, engine, instances: instanceEditor }) };
+}
+
+async function availablePort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    return address.port;
 }
 
 function createConfig(mcpPort: number, webPort: number): ControlConfig {
@@ -628,8 +684,9 @@ function createConfig(mcpPort: number, webPort: number): ControlConfig {
     return config;
 }
 
-function createIndependentConfig(): ControlConfig {
+async function createIndependentConfig(): Promise<ControlConfig> {
     const config = createConfig(0, 0);
     config.web.listenHost = "0.0.0.0";
+    config.web.listenPort = await availablePort();
     return config;
 }

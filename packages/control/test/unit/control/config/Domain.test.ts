@@ -3,12 +3,10 @@ import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-    ConfigDomainController,
-    ConfigDomainStore,
-    ConfigRegistry,
-    ControlConfigMutationLock,
-} from "../../../../src/testing.ts";
+import { ConfigDomainController } from "../../../../src/config/domain/index.ts";
+import { ConfigDomainStore } from "../../../../src/config/domain/Store.ts";
+import { ConfigRegistry } from "../../../../src/config/domain/Registry.ts";
+import { ControlConfigMutationLock } from "../../../../src/config/engine/Lock.ts";
 import { setConfigPathValue } from "../../../../src/config/Path.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 

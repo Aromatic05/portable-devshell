@@ -18,7 +18,6 @@ import {
     readMcpApprovalDecision,
     readMcpApprovalId,
 } from "../../../src/auth/Input.ts";
-import { readReverseInstanceName } from "../../../src/connection/Input.ts";
 import {
     readProcessSubscriptionFromSeq,
 } from "../../../../core/src/instance/Route.ts";
@@ -153,19 +152,14 @@ test("artifact identity readers apply default-instance precedence and strict ids
     }
 });
 
-test("MCP and reverse route inputs accept only their closed decision and identity contracts", () => {
+test("MCP route inputs accept only their closed decision and identity contracts", () => {
     assert.equal(readMcpApprovalId({ approvalId: "approval-1" }), "approval-1");
     assert.equal(readMcpApprovalDecision({ decision: "approve" }), "approve");
     assert.equal(readMcpApprovalDecision({ decision: "deny" }), "deny");
-    assert.equal(
-        readReverseInstanceName({ instance: "reverse-one" }),
-        "reverse-one",
-    );
 
     for (const action of [
         () => readMcpApprovalId({ approvalId: "" }),
         () => readMcpApprovalDecision({ decision: "allow" }),
-        () => readReverseInstanceName({ instance: 1 } as never),
     ]) {
         assertTargetInvalid(action);
     }

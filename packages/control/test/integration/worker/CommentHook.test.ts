@@ -11,7 +11,6 @@ import {
     createCommentToolCallGate,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
-import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
 import { CONTEXT_MESSAGE_PUSH_TOOL_BUDGET } from "@portable-devshell/shared/testing";
 
@@ -115,12 +114,11 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         resolveTarget: () => target,
     });
     const worker = createWorker(workspace);
-    const gateway = createCommentGateway(execution, worker);
     const host = new TestMcpHost({
+        tools: execution,
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
-                gateway,
                 name: instanceName,
                 worker: worker as never,
             },
@@ -383,39 +381,6 @@ function createWorker(workspace: string) {
         async touchAlerts() {},
         async touchTemporaryDirectory() {},
     };
-}
-
-function createCommentGateway(
-    execution: ToolCallPipeline,
-    worker: ReturnType<typeof createWorker>,
-): McpInstanceGateway {
-    return {
-        async appendMcpToolCalled() {},
-        assertReady() {},
-        callToolOperation: (
-            ...args: Parameters<McpInstanceGateway["callToolOperation"]>
-        ) => execution.callOperation(...args),
-        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) =>
-            execution.call(...args),
-        environment() {
-            return worker.handshake as never;
-        },
-        async listInstances() {
-            return [];
-        },
-        listTools() {
-            return worker.listTools();
-        },
-        modelCommands() {
-            return [];
-        },
-        async readTodo() {
-            return {};
-        },
-        async writeTodo() {
-            return {};
-        },
-    } as never;
 }
 
 async function queueComment(

@@ -17,14 +17,16 @@ import {
     refreshTuiAudit,
     refreshTuiInstance,
 } from "../../../src/app/control/Refresh.ts";
-import type { WorkerInstance } from "../../../../core/src/instance/runtime/index.ts";
+import type { WorkerInstance } from "@portable-devshell/core/instance";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
+import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
+import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
 import {
-    ControlRouteComposition,
-    ControlSocketServer,
-    ContextRegistry,
-    InstanceRegistry,
-    createTestInstanceDomainRuntime,
-} from "@portable-devshell/control/testing";
+    createTestApprovalApi,
+    createTestTaskApi,
+} from "../../../../control/test/support/DomainApis.ts";
+import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
+import { createTestInstance } from "../../../../control/test/support/ControlFixtures.ts";
 import {
     createTuiDomainSession,
     TuiControlSession,
@@ -335,7 +337,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             createdAt: new Date(8).toISOString(),
             ctxId: "ctx-alpha",
             id: "message-1",
-            instance: "alpha",
+                            instance: "alpha",
             status: "sent",
             text: "first guidance",
         });
@@ -648,9 +650,10 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             decidedBy: string;
             decision: string;
         }> = [];
-        const routes = new ControlRouteComposition({
-            instanceDomains: createTestInstanceDomainRuntime(),
-            instances: new InstanceRegistry([]),
+        const instances = new InstanceRegistry([]);
+        const routes = new ControlRouteRegistry({
+            ...createTestRouteBindings(instances),
+            instances,
             mcpStatus: () => ({
                 authMode: "oauth2",
                 oauthReady: true,
@@ -743,45 +746,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         stop(): Promise<void>;
     } {
         const instances = new InstanceRegistry([
-            {
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                modelExtensions: [],
+            createTestInstance(worker as unknown as WorkerInstance, {
                 name: "alpha",
-                provider: "local",
-                worker: worker as unknown as WorkerInstance,
-            },
+            }),
         ]);
-        const instanceDomains = createTestInstanceDomainRuntime({
-            services: () => ({
-                approval: {
-                    async cancel() {
-                        return {} as ApprovalRequest;
-                    },
-                    close() {},
-                    async decideApproval(approvalId, decision) {
-                        return await worker.decideApproval(
-                            approvalId,
-                            decision,
-                        );
-                    },
-                    async evaluate() {
-                        return { decision: "allow" };
-                    },
-                    async getApproval(approvalId) {
-                        return await worker.getApproval(approvalId);
-                    },
-                    async listApprovals() {
-                        return await worker.listApprovals();
-                    },
-                    async listPendingApprovals() {
-                        return await worker.listPendingApprovals();
-                    },
-                    async retire() {},
-                    setPolicy() {},
-                },
-                task: {
+        const task = createTestTaskApi({
                     goal: {
                         async continuation() {
                             return {};
@@ -831,16 +800,165 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                             };
                         },
                     },
-                },
-            }),
+        });
+        const approval = createTestApprovalApi({
+            async decideApproval(approvalId, input) {
+                return await worker.decideApproval(approvalId, input);
+            },
+            async getApproval(approvalId) {
+                return await worker.getApproval(approvalId);
+            },
+            async listApprovals() {
+                return await worker.listApprovals();
+            },
+            async listPendingApprovals() {
+                return await worker.listPendingApprovals();
+            },
         });
         let server!: ControlSocketServer;
         let contextReads = 0;
         let oauthApprovalReads = 0;
         let restartCount = 0;
-        const contextChanges = new ContextRegistry().changes;
-        const routes = new ControlRouteComposition({
-            instanceDomains,
+        const toolCalls = {
+            async call(..._args: unknown[]) {
+                return (await worker.callTool()) as unknown as JsonValue;
+            },
+        };
+        const contextChanges = {
+            revision: 0,
+            onChange: () => () => undefined,
+            readSince: () => ({
+                changes: [],
+                kind: "events" as const,
+                latestRevision: 0,
+                oldestAvailableRevision: 0,
+            }),
+        };
+        const contextAdmin =
+            options.contextRecords === undefined
+                ? undefined
+                : () =>
+                      ({
+                          registry: {
+                              changes: contextChanges,
+                              async snapshot() {
+                                  contextReads += 1;
+                                  return {
+                                      contexts: options.contextRecords!(),
+                                      revision: contextChanges.revision,
+                                  };
+                              },
+                              async list() {
+                                  contextReads += 1;
+                                  return options.contextRecords!();
+                              },
+                              async referenceInstance() {
+                                  return undefined;
+                              },
+                              async validateForInstance(
+                                  ctxId: string,
+                                  instance: string,
+                              ) {
+                                  const record = options
+                                      .contextRecords!()
+                                      .find(
+                                          (candidate) =>
+                                              candidate.ctxId === ctxId &&
+                                              candidate.environments.some(
+                                                  (environment) =>
+                                                      environment.instance ===
+                                                      instance,
+                                              ),
+                                      );
+                                  if (record === undefined)
+                                      throw new Error(
+                                          "Context is unavailable.",
+                                      );
+                                  return record;
+                              },
+                          },
+                          async disable(ctxId: string) {
+                              return options.contextRecords!().find(
+                                  (record) => record.ctxId === ctxId,
+                              )!;
+                          },
+                          async renew(ctxId: string) {
+                              return options.contextRecords!().find(
+                                  (record) => record.ctxId === ctxId,
+                              )!;
+                          },
+                      }) as never;
+        const overview = {
+            async read() {
+                const now = Date.now();
+                const activity = await worker.readToolCalls({
+                    includeInput: false,
+                    includeOutput: false,
+                    limit: 20,
+                    maxBytes: 128 * 1024,
+                });
+                const failure = await worker.readToolCallFailureSummary(
+                    now - 24 * 60 * 60 * 1000,
+                    now,
+                );
+                const snapshot = worker.snapshot();
+                return {
+                    activity: activity.map((record) => ({
+                        callId: record.callId,
+                        completedAt: record.completedAt,
+                        errorSummary: record.error,
+                        instance: record.instance,
+                        source: record.source,
+                        startedAt: record.startedAt,
+                        status: record.status,
+                        toolName: record.toolName,
+                    })),
+                    alerts:
+                        failure.latest === undefined
+                            ? []
+                            : [
+                                  {
+                                      detail: "A tool call failed.",
+                                      id: `activity.failed:${failure.latest.callId}`,
+                                      instance: asInstanceName("alpha"),
+                                      kind: "activity.failed" as const,
+                                      severity: "attention" as const,
+                                      title: "Tool call failed",
+                                  },
+                              ],
+                    controller: { pid: process.pid, uptimeSeconds: 0 },
+                    counts: {
+                        activeTodos: 0,
+                        failedCalls24h: failure.count,
+                        instancesAttention: 0,
+                        instancesCritical: 0,
+                        instancesReady: snapshot.ready ? 1 : 0,
+                        instancesTotal: 1,
+                        pendingApprovals: 0,
+                    },
+                    generatedAt: new Date(now).toISOString(),
+                    health: failure.count > 0 ? "attention" as const : "healthy" as const,
+                    instances: [
+                        {
+                            mcpEnabled: false,
+                            name: asInstanceName("alpha"),
+                            pendingApprovals: 0,
+                            provider: "local" as const,
+                            snapshot,
+                        },
+                    ],
+                    todos: [],
+                };
+            },
+        };
+        const routes = new ControlRouteRegistry({
+            ...createTestRouteBindings(instances, {
+                approval,
+                contextAdmin,
+                overview,
+                task,
+                toolCalls: toolCalls as never,
+            }),
             extensionRoutes: {
                 modules(scope) {
                     return scope === "control"
@@ -903,6 +1021,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 onChange() {
                     return () => undefined;
                 },
+                async retireInstance() {},
             },
             artifact: {
                 listShares() {
@@ -912,75 +1031,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     return [];
                 },
             } as never,
-            toolCalls: {
-                async call(..._args: unknown[]) {
-                    return (await worker.callTool()) as unknown as JsonValue;
-                },
-            } as never,
-            contextAdmin:
-                options.contextRecords === undefined
-                    ? undefined
-                    : () =>
-                          ({
-                              registry: {
-                                  changes: contextChanges,
-                                  async snapshot() {
-                                      contextReads += 1;
-                                      return {
-                                          contexts:
-                                              options.contextRecords!(),
-                                          revision:
-                                              contextChanges.revision,
-                                      };
-                                  },
-                                  async list() {
-                                      contextReads += 1;
-                                      return options.contextRecords!();
-                                  },
-                                  async referenceInstance() {
-                                      return undefined;
-                                  },
-                                  async validateForInstance(
-                                      ctxId: string,
-                                      instance: string,
-                                  ) {
-                                      const record =
-                                          options
-                                              .contextRecords!()
-                                              .find(
-                                                  (candidate) =>
-                                                      candidate.ctxId ===
-                                                          ctxId &&
-                                                      candidate.environments.some(
-                                                          (environment) =>
-                                                              environment.instance ===
-                                                              instance,
-                                                      ),
-                                              );
-                                      if (record === undefined)
-                                          throw new Error(
-                                              "Context is unavailable.",
-                                          );
-                                      return record;
-                                  },
-                              },
-                              async disable(ctxId: string) {
-                                  return options
-                                      .contextRecords!()
-                                      .find(
-                                          (record) =>
-                                              record.ctxId === ctxId,
-                                      )!;
-                              },
-                              async renew(ctxId: string) {
-                                  return options
-                                      .contextRecords!()
-                                      .find(
-                                          (record) =>
-                                              record.ctxId === ctxId,
-                                      )!;
-                              },
-                          }) as never,
+            toolCalls: toolCalls as never,
             config: {
                 getConfigView() {
                     return {

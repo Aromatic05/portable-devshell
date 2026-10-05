@@ -1,8 +1,6 @@
-import {
-    ControlGlobalTomlDocument,
-    ControlInstanceTomlDocument,
-    ControlConfigTomlCodec,
-} from "../../../../../src/testing.ts";
+import { ControlGlobalTomlDocument } from "../../../../../src/config/store/document/Global.ts";
+import { ControlInstanceTomlDocument } from "../../../../../src/config/store/document/Instance.ts";
+import { ControlConfigTomlCodec } from "../../../../../src/config/store/TomlCodec.ts";
 import {
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,

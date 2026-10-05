@@ -7,7 +7,7 @@ import {
     type OAuthApprovalRequest,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
-import { Instance } from "@portable-devshell/core";
+import { Instance, type Instance } from "@portable-devshell/core/instance";
 import type { OperationalOverviewInstanceData } from "../../../src/overview/collector/Instance.ts";
 import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
 

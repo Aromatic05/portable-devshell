@@ -129,6 +129,7 @@ test("Extension loader reads and validates a generation manifest without activat
     });
     let imports = 0;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => {
             imports += 1;
             return { activate() {} };
@@ -164,6 +165,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     const events: string[] = [];
     let seenContext: ExtensionContext | undefined;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate(context: ExtensionContext): void {
                 seenContext = context;
@@ -243,6 +245,7 @@ test("Extension loader binds execute and delegate through independent Worker aut
     const factoryCalls: string[] = [];
     let seenContext: ExtensionContext | undefined;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate(context: ExtensionContext) {
                 seenContext = context;
@@ -293,6 +296,7 @@ test("Extension loader validates declared Config and injects context.config", as
     const calls: string[] = [];
     let seenContext: ExtensionContext | undefined;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         configFactory: (input) => {
             assert.deepEqual(input.declaration, declaration);
             assert.equal(input.extensionId, id);
@@ -354,6 +358,7 @@ test("Extension loader projects scoped Core Config without owning a Config domai
     const calls: string[] = [];
     let seenContext: ExtensionContext | undefined;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         configFactory: (input) => {
             assert.deepEqual(input.declaration, declaration);
             return {
@@ -408,6 +413,7 @@ test("Extension loader isolates runtime directories for overlapping loads of the
     const { id, generation } = await harness.writeGeneration();
     const runtimeDirectories: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             async activate(context: ExtensionContext): Promise<void> {
                 runtimeDirectories.push(context.paths.runtimeDirectory);
@@ -461,6 +467,7 @@ test("Extension loader rejects incompatible API without owning the CLI command n
     const cliNamedExtension = await harness.writeGeneration({ id: "status" });
     let imports = 0;
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => {
             imports += 1;
             return {};
@@ -491,6 +498,7 @@ test("Extension loader rejects manifest identity mismatch", async (t) => {
     t.after(harness.cleanup);
     const target = await harness.writeGeneration({ manifestId: "other" });
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({ activate() {} }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
@@ -511,6 +519,7 @@ test("Extension loader rolls back Worker resources and runtime directory when ac
     });
     const events: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             async activate(context: ExtensionContext) {
                 await context.capabilities.workerExecute!.openSession({
@@ -541,6 +550,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
     const target = await harness.writeGeneration();
     const events: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate(context: ExtensionContext) {
                 context.register(nativeCommands, "example", async () => ({
@@ -573,6 +583,7 @@ test("Extension loader separates Instance generation notification from host-mana
     });
     const events: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate() {},
             instanceGenerationRetired(event: { instance: string }) {
@@ -603,6 +614,7 @@ test("Extension loader notifies retired Context environments without touching Wo
     });
     const events: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate() {},
             contextEnvironmentRetired(input: {
@@ -648,6 +660,7 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
     });
     const events: string[] = [];
     const loader = new ExtensionLoader({
+        readToolCalls: async () => [],
         importer: async () => ({
             activate(context: ExtensionContext) {
                 context.register(applications, "example", {

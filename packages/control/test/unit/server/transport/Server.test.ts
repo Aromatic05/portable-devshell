@@ -263,7 +263,7 @@ test("ControlTransportServer serves the same routes through multiple channel pro
     t.after(() => webConnection.close());
 
     await assert.rejects(
-        socketConnection.request("@control", "service", "ping"),
+        socketConnection.request("@control", "server", "ping"),
         (error: unknown) =>
             (error as { code?: string }).code ===
             "control.clientIdentityRequired",
@@ -274,7 +274,7 @@ test("ControlTransportServer serves the same routes through multiple channel pro
     assert.deepEqual(
         await socketConnection.request<JsonValue>(
             "@control",
-            "service",
+            "server",
             "ping",
         ),
         {
@@ -284,7 +284,7 @@ test("ControlTransportServer serves the same routes through multiple channel pro
         },
     );
     assert.deepEqual(
-        await webConnection.request<JsonValue>("@control", "service", "ping"),
+        await webConnection.request<JsonValue>("@control", "server", "ping"),
         {
             pong: true,
             protocolVersion: CONTROL_PROTOCOL_VERSION,
@@ -292,7 +292,7 @@ test("ControlTransportServer serves the same routes through multiple channel pro
         },
     );
     await assert.rejects(
-        webConnection.request("@control", "service", "hello", {
+        webConnection.request("@control", "server", "hello", {
             clientKind: "web",
             protocolRange: CONTROL_PROTOCOL_RANGE,
         }),
@@ -306,7 +306,7 @@ test("ControlTransportServer serves the same routes through multiple channel pro
     assert.equal(webProvider.closed, true);
     assert.equal(closedConnections.length, 2);
     await assert.rejects(
-        webConnection.request("@control", "service", "ping"),
+        webConnection.request("@control", "server", "ping"),
         /closed/iu,
     );
 });
@@ -345,7 +345,7 @@ test("ControlTransportServer rejects unsupported protocol ranges during first re
     t.after(() => connection.close());
 
     await assert.rejects(
-        connection.request("@control", "service", "hello", {
+        connection.request("@control", "server", "hello", {
             clientKind: "tui",
             protocolRange: { max: "2.0.0", min: "2.0.0" },
         }),
@@ -366,7 +366,7 @@ test("ControlTransportServer rejects unsafe semantic protocol components as inva
     t.after(() => connection.close());
 
     await assert.rejects(
-        connection.request("@control", "service", "hello", {
+        connection.request("@control", "server", "hello", {
             clientKind: "tui",
             protocolRange: {
                 max: "9007199254740992.0.0",
@@ -391,7 +391,7 @@ test("ControlTransportServer negotiates semantic protocol ranges", async (t) => 
     t.after(() => connection.close());
 
     assert.deepEqual(
-        await connection.request("@control", "service", "hello", {
+        await connection.request("@control", "server", "hello", {
             clientKind: "tui",
             protocolRange: CONTROL_PROTOCOL_RANGE,
         }),
@@ -411,7 +411,7 @@ test("ControlTransportServer does not authenticate a connection when hello handl
                 host: "@control",
                 ports: [
                     {
-                        name: "service",
+                        name: "server",
                         operations: [
                             {
                                 name: "hello",
@@ -436,7 +436,7 @@ test("ControlTransportServer does not authenticate a connection when hello handl
 
     await assert.rejects(negotiate(connection, "tui"), /hello failed/u);
     await assert.rejects(
-        connection.request("@control", "service", "ping"),
+        connection.request("@control", "server", "ping"),
         (error: unknown) =>
             (error as { code?: string }).code ===
             "control.clientIdentityRequired",
@@ -691,7 +691,7 @@ function createRouteHosts(): readonly ControlHostDefinition[] {
             host: "@control",
             ports: [
                 {
-                    name: "service",
+                    name: "server",
                     operations: [
                         {
                             name: "hello",
@@ -732,7 +732,7 @@ async function negotiate(
     connection: TestClient,
     clientKind: "cli" | "tui" | "web",
 ): Promise<void> {
-    await connection.request("@control", "service", "hello", {
+    await connection.request("@control", "server", "hello", {
         clientKind,
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });

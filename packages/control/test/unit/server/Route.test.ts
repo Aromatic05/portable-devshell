@@ -4,9 +4,10 @@ import test from "node:test";
 import type { ControlPortContext } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../../../src/artifact/Service.ts";
-import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
+import type { ToolCallIngressPort } from "@portable-devshell/core/toolcall";
 import { ControlRouteRegistry } from "../../../src/server/Route.ts";
-import { createTestInstanceDomainRuntime } from "../../../src/testing.ts";
+import { createTestRouteBindings } from "../../support/RouteBindings.ts";
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
@@ -27,10 +28,11 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
             };
         },
     } as unknown as ArtifactService;
+    const instances = new InstanceRegistry([]);
     const routes = new ControlRouteRegistry({
         artifact: artifactService,
-        instanceDomains: createTestInstanceDomainRuntime(),
-        instances: new InstanceRegistry([]),
+        ...createTestRouteBindings(instances),
+        instances,
         shutdown() {},
     });
     const control = routes.hosts().find((host) => host.host === "@control")!;
@@ -88,19 +90,21 @@ function createContext(host: string): ControlPortContext {
 
 test("native control tool.call admits a nonexistent original instance to host ingress", async () => {
     const calls: string[] = [];
-    const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime(),
-        instances: new InstanceRegistry([]),
-        shutdown() {},
-        toolCalls: {
-            async call(instance, toolName, input, context) {
-                calls.push(instance);
-                assert.equal(toolName, "file_read");
-                assert.deepEqual(input, { path: "file.txt" });
-                assert.equal(context.workspace, "/workspace");
-                return { content: "read" };
-            },
+    const instances = new InstanceRegistry([]);
+    const toolCalls: ToolCallIngressPort = {
+        async call(instance, toolName, input, context) {
+            calls.push(instance);
+            assert.equal(toolName, "file_read");
+            assert.deepEqual(input, { path: "file.txt" });
+            assert.equal(context.workspace, "/workspace");
+            return { content: "read" };
         },
+    };
+    const routes = new ControlRouteRegistry({
+        ...createTestRouteBindings(instances, { toolCalls }),
+        instances,
+        shutdown() {},
+        toolCalls,
     });
     const dynamic = routes.hosts().find((host) => host.host === "*")!;
     const tool = dynamic.ports.filter((port) => port.name === "tool");

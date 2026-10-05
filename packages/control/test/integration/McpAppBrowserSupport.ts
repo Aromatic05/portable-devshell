@@ -1,5 +1,5 @@
 export const MCPAPP_FIXTURE_PROTOCOL = String.raw`
-window.projectWorkspaceFixture = function (source, modelContext) {
+window.projectMcpAppFixture = function (source, modelContext) {
     var state = source || {};
     var actions = function (pairs) { return pairs.map(function (pair) { var action = { id: pair[0], label: pair[1] }; if (pair[2]) action.confirmation = { message: pair[2] }; return action; }); };
     var work = (state.tasks || []).filter(function (task) { return task.status !== "completed" && task.status !== "cancelled"; }).map(function (task) {

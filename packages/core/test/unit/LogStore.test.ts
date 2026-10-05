@@ -12,7 +12,8 @@ import {
 } from "@portable-devshell/shared";
 import { AuditDatabase, AUDIT_DATABASE_SCHEMA_VERSION } from "../../src/audit/database/index.ts";
 import { AuditEventStore } from "../../src/audit/event/index.ts";
-import { LogStoreInstance, type InstanceLogEntry } from "../../src/audit/log/index.ts";
+import type { InstanceLogEntry } from "../../src/audit/Api.ts";
+import { LogStoreInstance } from "../../src/audit/log/index.ts";
 import { InstancePaths } from "../../src/instance/Paths.ts";
 import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
 import { ToolCallHistory } from "../../src/toolcall/execution/record/History.ts";

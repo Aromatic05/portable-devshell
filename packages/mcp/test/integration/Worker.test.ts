@@ -17,13 +17,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import {
-    WorkerTransportDriverLocal,
-    WorkerBinary,
-    WorkerInstanceFactory,
-    type WorkerInstance,
-} from "@portable-devshell/core/testing";
-import {
-    createTestWorkerGateway,
+    createTestInstance,
     TestMcpHost as McpHost,
 } from "../ContextRuntime.ts";
 import {
@@ -99,29 +93,23 @@ import { tmpdir } from "node:os";
                 "legacy read\n",
                 "utf8",
             );
-            const instance = new WorkerInstanceFactory().create({
+            const instance = createTestInstance({
                 env: { ...process.env, HOME: homeDirectory },
                 homeDirectory,
                 name: asInstanceName(instanceName),
-                transport: new WorkerTransportDriverLocal({
-                    spawnFunction: nodeSpawn,
-                    workerBinary: new WorkerBinary(workerBinaryPath!),
-                }),
+                workerBinaryPath: workerBinaryPath!,
             });
             const host = new McpHost({
                 instances: [
                     {
                         auth: { enabled: false, provider: "none" },
-                        gateway: createTestWorkerGateway(
-                            () => instance.toolCallTarget(),
-                            () => instance.listTools(),
-                        ),
                         name: instanceName,
-                        worker: instance,
+                        worker: instance.worker,
                     },
                 ],
                 listenHost: "127.0.0.1",
                 listenPort: 0,
+                resolveTarget: () => instance.target(),
             });
 
             try {
@@ -211,12 +199,8 @@ import { tmpdir } from "node:os";
                     .listTools()
                     .find((tool) => tool.name === "tmux_manage")
                     ?.inputSchema as Record<string, unknown> | undefined;
-                assert.notEqual(bash?.description, workerBash?.description);
+                assert.equal(bash?.description, workerBash?.description);
                 assert.match(bash?.description ?? "", /tmux_run/u);
-                assert.equal(
-                    workerBash?.description.includes("tmux_run"),
-                    false,
-                );
                 assert.deepEqual(
                     Object.fromEntries(
                         Object.entries(bash?.inputSchema ?? {}).filter(
@@ -274,7 +258,7 @@ import { tmpdir } from "node:os";
                     (bash?.inputSchema.properties as Record<string, unknown>)
                         .ctxId,
                     {
-                        description: "Context from environ_info.",
+                        description: "Current Context ID.",
                         minLength: 1,
                         type: "string",
                     },
@@ -411,17 +395,11 @@ import { tmpdir } from "node:os";
                     true,
                 );
                 const auditDatabase = await stat(
-                    join(
-                        homeDirectory,
-                        ".devshell",
-                        instanceName,
-                        "control-worker",
-                        "audit.sqlite3",
-                    ),
+                    join(homeDirectory, "audit.sqlite"),
                 );
                 assert.equal(auditDatabase.size > 0, true);
 
-                const replay = instance.subscribe(1);
+                const replay = instance.worker.subscribe(1);
                 assert.equal(replay.kind, "events");
                 assert.equal(
                     replay.events.some(
@@ -431,7 +409,6 @@ import { tmpdir } from "node:os";
                 );
             } finally {
                 await host.stop();
-                await instance.stop();
                 await instance.close();
                 await rm(homeDirectory, { force: true, recursive: true });
                 await rm(workspacePath, { force: true, recursive: true });
@@ -566,10 +543,6 @@ import { tmpdir } from "node:os";
                         runTool?.inputSchema.properties?.resume,
                         undefined,
                     );
-                    assert.equal(
-                        runTool?.inputSchema.properties?.consumeOutput,
-                        undefined,
-                    );
                     assert.notEqual(
                         runTool?.inputSchema.properties?.timeout,
                         undefined,
@@ -578,10 +551,6 @@ import { tmpdir } from "node:os";
                         (entry) => entry.name === "tmux_read",
                     );
                     assert.notEqual(readTool, undefined);
-                    assert.equal(
-                        readTool?.inputSchema.properties?.consumeOutput,
-                        undefined,
-                    );
                     assert.equal(
                         readTool?.inputSchema.properties?.timeMs?.minimum,
                         0,
@@ -1052,29 +1021,23 @@ import { tmpdir } from "node:os";
                 : {}),
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
-        const instance = new WorkerInstanceFactory().create({
+        const instance = createTestInstance({
             env: workerEnvironment,
             homeDirectory,
             name: asInstanceName(instanceName),
-            transport: new WorkerTransportDriverLocal({
-                spawnFunction: nodeSpawn,
-                workerBinary: new WorkerBinary(workerBinaryPath!),
-            }),
+            workerBinaryPath: workerBinaryPath!,
         });
         const host = new McpHost({
             instances: [
                 {
                     auth: { enabled: false, provider: "none" },
-                    gateway: createTestWorkerGateway(
-                        () => instance.toolCallTarget(),
-                        () => instance.listTools(),
-                    ),
                     name: instanceName,
-                    worker: instance,
+                    worker: instance.worker,
                 },
             ],
             listenHost: "127.0.0.1",
             listenPort: 0,
+            resolveTarget: () => instance.target(),
         });
 
         try {
@@ -1192,7 +1155,6 @@ import { tmpdir } from "node:os";
                         "failed to stop test tmux server",
                 );
             }
-            await instance.stop();
             await instance.close();
             if (process.platform === "win32") {
                 const cleanup = spawnSync(

@@ -5,12 +5,10 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
-import {
-    ControlRouteComposition,
-    ControlSocketServer,
-    InstanceRegistry,
-    createTestInstanceDomainRuntime,
-} from "@portable-devshell/control/testing";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
+import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
+import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
+import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
 import { type McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
@@ -57,7 +55,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await host.start();
         const listenPort = requireTcpPort(host.server.address);
         proxy.setTarget(`http://127.0.0.1:${listenPort}`);
-        const routes = new ControlRouteComposition({
+        const instances = new InstanceRegistry([]);
+        const routes = new ControlRouteRegistry({
             config: {
                 getConfigView() {
                     return {
@@ -89,8 +88,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     };
                 },
             } as never,
-            instanceDomains: createTestInstanceDomainRuntime(),
-            instances: new InstanceRegistry([]),
+            ...createTestRouteBindings(instances),
+            instances,
             tuiPages: {
                 async invoke() {
                     return { items: [], title: "" };

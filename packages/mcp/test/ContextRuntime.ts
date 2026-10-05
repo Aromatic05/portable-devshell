@@ -1,256 +1,260 @@
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import type {
-    JsonValue,
-    ToolCallContext,
-    ToolDefinition,
-} from "@portable-devshell/shared";
-import { asInstanceName } from "@portable-devshell/shared";
-import { ContextCleanupService } from "../../control/src/context/Service/Cleanup.ts";
-import { ContextEnvironmentService } from "../../control/src/context/Service/Scope.ts";
-import { ContextRegistry } from "../../control/src/context/Registry/index.ts";
-import type { ContextRegistryOptions } from "../../control/src/context/Model.ts";
-import { ContextService } from "../../control/src/context/Service/index.ts";
-import type { ContextRecordSourcePort } from "../../control/src/context/Service/index.ts";
+    ContextApi,
+    ContextRuntime,
+} from "@portable-devshell/core/context";
+import { createContextRuntime } from "@portable-devshell/core/context";
 import {
-    McpEndpointWorker,
-    type McpEndpointWorkerOptions,
-} from "../src/endpoint/Endpoint.ts";
+    InstanceRegistry,
+    type WorkerInstance,
+} from "@portable-devshell/core/instance";
+import type { ToolCallApi } from "@portable-devshell/core/toolcall";
+import { createToolCallRuntime } from "@portable-devshell/core/toolcall";
+import { installContextTools } from "@portable-devshell/core/context";
+import type {
+    ContextTransport,
+} from "@portable-devshell/shared";
+import type { ContextChangeEvent } from "@portable-devshell/shared";
+import type { EventStreamPort } from "../../shared/src/client/Stream.ts";
+
 import {
     McpEndpointDispatch,
     type McpEndpointDispatchOptions,
 } from "../src/endpoint/dispatch/Dispatch.ts";
 import { McpHost, McpRuntimeState } from "../src/host/Host.ts";
-import type { McpHostConfig } from "../src/host/Host.ts";
-import type { McpEndpointWorkerPort } from "../src/endpoint/call/Port.ts";
-import type { McpInstanceGateway } from "../src/instance/Gateway.ts";
-import { ToolCallHookSequence } from "../../core/src/toolcall/execution/hook/Sequence.ts.ts";
-import { ToolCallPipeline } from "../../core/src/toolcall/execution/Pipeline.ts.ts";
-import type { ToolCallHookValue } from "@portable-devshell/shared";
-import type { ToolCallTargetResolver } from "../../core/src/toolcall/execution/Pipeline.ts.ts";
+import type {
+    McpHostConfig,
+    McpHostInstanceConfig,
+} from "../src/host/Host.ts";
+import type { McpEndpointWorkerOptions } from "../src/endpoint/Endpoint.ts";
+import { McpEndpointWorker } from "../src/endpoint/Endpoint.ts";
+import type { ToolCallTargetResolver } from "@portable-devshell/core/toolcall";
+import {
+    createTestWorkerToolRuntime,
+    createTestWorkerInstance,
+    type TestWorkerInstanceFields,
+} from "../../core/test/support/WorkerInstance.ts";
+import { mcpTools } from "@portable-devshell/mcp/tool";
 
-function unexpectedGatewayOperation(name: string): never {
-    throw new Error(`Unexpected test gateway operation: ${name}`);
+export interface TestContextRuntime extends Omit<ContextRuntime, "close">, ContextApi {
+    close(): Promise<void>;
 }
 
-function createFailClosedGateway(): McpInstanceGateway {
-    return {
-        appendMcpToolCalled: async () =>
-            unexpectedGatewayOperation("appendMcpToolCalled"),
-        assertReady() {},
-        callTool: async () => unexpectedGatewayOperation("callTool"),
-        async callToolOperation<T extends JsonValue>(
-            instance: string,
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            operation: (
-                callId: string,
-                input: JsonValue,
-                finalValue: ToolCallHookValue,
-            ) => Promise<T>,
-        ): Promise<T> {
-            return await operation("test-call", input, {
-                kind: "call",
-                toolName,
-                payload: input,
-                context: { ...context, instance: asInstanceName(instance) },
-            });
-        },
-        environment: () => undefined,
-        listInstances: async () => unexpectedGatewayOperation("listInstances"),
-        listTools: () => [],
-        readTodo: async () => unexpectedGatewayOperation("readTodo"),
-        prepareWorkspace: async () =>
-            unexpectedGatewayOperation("prepareWorkspace"),
-        readAlerts: async () => unexpectedGatewayOperation("readAlerts"),
-        releaseAlerts: async () => unexpectedGatewayOperation("releaseAlerts"),
-        connectInstance: async () =>
-            unexpectedGatewayOperation("connectInstance"),
-        releaseInstanceReference: async () =>
-            unexpectedGatewayOperation("releaseInstanceReference"),
-        statusInstance: async () =>
-            unexpectedGatewayOperation("statusInstance"),
-        stopInstance: async () => unexpectedGatewayOperation("stopInstance"),
-        touchAlerts: async () => unexpectedGatewayOperation("touchAlerts"),
-        touchTemporaryDirectory: async () =>
-            unexpectedGatewayOperation("touchTemporaryDirectory"),
-        writeTodo: async () => unexpectedGatewayOperation("writeTodo"),
-    };
+export interface TestMcpRuntimeState {
+    readonly contexts: TestContextRuntime;
+    readonly contextTransport: ContextTransport;
+    readonly state: McpRuntimeState;
+    readonly toolCallRuntime: ReturnType<typeof createToolCallRuntime>;
+    readonly closeContextTools: () => void;
+    readonly oauthResource: McpRuntimeState["oauthResource"];
 }
 
-export function createTestWorkerGateway(
-    resolveTarget: ToolCallTargetResolver,
-    listTools: () => ToolDefinition[],
-): McpInstanceGateway {
-    const pipeline = new ToolCallPipeline({
-        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence({}) }),
-        resolveTarget,
-    });
-    return {
-        ...createFailClosedGateway(),
-        assertReady() {},
-        callTool: (...args) => pipeline.call(...args),
-        callToolOperation: (...args) => pipeline.callOperation(...args),
-        listTools: () => listTools(),
-    };
-}
-
-export function createTestCallOperationGateway(): McpInstanceGateway {
-    return {
-        ...createFailClosedGateway(),
-        async callToolOperation<T extends JsonValue>(
-            instance: string,
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            operation: (
-                callId: string,
-                input: JsonValue,
-                finalValue: ToolCallHookValue,
-            ) => Promise<T>,
-        ): Promise<T> {
-            return await operation("test-call", input, {
-                kind: "call",
-                toolName,
-                payload: input,
-                context: { ...context, instance: asInstanceName(instance) },
-            });
-        },
-    };
+export interface TestMcpRuntimeOptions {
+    contextFile?: string;
+    instances?: InstanceRegistry;
+    tools?: ToolCallApi;
+    resolveTarget?: ToolCallTargetResolver;
+    configureToolCalls?: (
+        runtime: ReturnType<typeof createToolCallRuntime>,
+    ) => void;
 }
 
 export function createTestContextRuntime(
-    options: {
-        contextRegistry?: ContextRecordSourcePort;
-        registryOptions?: ContextRegistryOptions;
-        instanceName?: string;
-        gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
-        worker?: McpEndpointWorkerPort;
-    } = {},
-) {
-    const registry =
-        options.contextRegistry ?? new ContextRegistry(options.registryOptions);
-    const gateway = (_instance: string): McpInstanceGateway | undefined =>
-        typeof options.gateway === "function"
-            ? options.gateway()
-            : options.gateway;
-    const worker = (instance: string): McpEndpointWorkerPort | undefined =>
-        instance === options.instanceName ? options.worker : undefined;
-    const cleanup = new ContextCleanupService({
-        contextRegistry: registry,
-        gateway,
-        releaseLocalAlerts: async (instance, workspace) =>
-            await worker(instance)?.releaseAlerts?.(workspace),
+    options: Pick<TestMcpRuntimeOptions, "contextFile" | "instances"> = {},
+): TestContextRuntime {
+    const contextFile = options.contextFile ?? join(
+        tmpdir(),
+        `portable-devshell-test-context-${randomUUID()}.jsonl`,
+    );
+    const removeContextFile = options.contextFile === undefined;
+    const runtime = createContextRuntime({
+        contextFile,
+        instances: options.instances ?? emptyInstances(),
     });
-    const environment = new ContextEnvironmentService({
-        cleanup,
-        contextRegistry: registry,
-        gateway,
-        worker,
+    const closeRuntime = runtime.close.bind(runtime);
+    return Object.assign(runtime, {
+        cleanup: runtime.api.cleanup,
+        environment: runtime.api.environment,
+        registry: runtime.api.registry,
+        disable: runtime.api.disable.bind(runtime.api),
+        detachInstance: runtime.api.detachInstance.bind(runtime.api),
+        reconcileInstance: runtime.api.reconcileInstance.bind(runtime.api),
+        renew: runtime.api.renew.bind(runtime.api),
+        resolve: runtime.api.resolve.bind(runtime.api),
+        async close() {
+            closeRuntime();
+            if (removeContextFile) await rm(contextFile, { force: true });
+        },
     });
-    const service = new ContextService({
-        cleanup,
-        environment,
-        registry,
-        worker,
-    });
-    return { cleanup, environment, registry, service };
 }
 
 export function createTestContextEnvironment(
-    options: {
-        contextRegistry?: ContextRecordSourcePort;
-        registryOptions?: ContextRegistryOptions;
-        instanceName?: string;
-        gateway?: McpInstanceGateway | (() => McpInstanceGateway | undefined);
-        worker?: McpEndpointWorkerPort;
-    } = {},
+    options: Pick<TestMcpRuntimeOptions, "contextFile" | "instances"> = {},
 ) {
     return createTestContextRuntime(options).environment;
 }
 
 export function createTestEndpointDispatch(
-    options: Omit<
-        McpEndpointDispatchOptions,
-        "cleanup" | "contextRegistry" | "environmentService"
-    > & { contextRegistry?: ContextRecordSourcePort },
+    options: McpEndpointDispatchOptions,
 ) {
-    const runtime = createTestContextRuntime({
-        contextRegistry: options.contextRegistry,
-        instanceName: options.instanceName,
-        gateway: options.gateway,
-        worker: options.worker,
+    return new McpEndpointDispatch(options);
+}
+
+export function createTestToolCallApi(
+    resolveTarget?: ToolCallTargetResolver,
+): ToolCallApi {
+    return createToolCallRuntime({
+        resolveTarget: resolveTarget ?? (() => ({
+            async dispatch() {
+                throw new Error("Test MCP tool target is not configured.");
+            },
+        })),
+    }).api;
+}
+
+export function createTestInstance(options: TestWorkerInstanceFields) {
+    const worker = createTestWorkerInstance(options);
+    const mcpWorker = Object.assign(worker, {
+        appendMcpSessionClosed: async (sessionId: string) => {
+            await worker.appendControlEvent("mcp.sessionClosed", { sessionId });
+        },
+        appendMcpSessionOpened: async (sessionId: string) => {
+            await worker.appendControlEvent("mcp.sessionOpened", { sessionId });
+        },
+        appendMcpToolCalled: async (
+            toolName: string,
+            context: { ctxId?: string; requestId?: string },
+        ) => {
+            await worker.appendControlEvent("mcp.toolCalled", {
+                ...context,
+                source: "mcp",
+                toolName,
+            });
+        },
     });
-    return new McpEndpointDispatch({
-        ...options,
-        cleanup: runtime.cleanup,
-        contextRegistry: runtime.registry,
-        environmentService: runtime.environment,
+    const registration = mcpTools.register(options.name, []);
+    const runtime = createTestWorkerToolRuntime({
+        homeDirectory: options.homeDirectory,
+        instanceName: options.name,
+        worker: mcpWorker,
     });
+    return {
+        worker: mcpWorker,
+        runtime,
+        async start() {
+            await worker.start();
+            registration.replace(await runtime.execution.refreshTools());
+        },
+        async close() {
+            registration.dispose();
+            await runtime.execution.close();
+            await runtime.audit.close();
+            await worker.stop();
+            await worker.close();
+        },
+        target: () => runtime.execution.target(),
+        listTools: () => runtime.execution.listTools(),
+        readToolCalls: (query?: import("@portable-devshell/shared").ToolCallQuery) =>
+            runtime.execution.readToolCalls(query),
+    };
 }
 
 export function createTestMcpRuntimeState(
-    options: {
-        contextFile?: string;
+    options: TestMcpRuntimeOptions & {
         storageDir?: string;
         mcpAppLeaseFile?: string;
     } = {},
-) {
-    const registry = new ContextRegistry({
-        ...(options.contextFile === undefined
-            ? {}
-            : { filePath: options.contextFile }),
+): TestMcpRuntimeState {
+    const contexts = createTestContextRuntime({
+        contextFile: options.contextFile,
+        instances: options.instances,
     });
-    const stateRef: { current?: McpRuntimeState } = {};
-    const requireState = (): McpRuntimeState => {
-        if (stateRef.current === undefined) {
-            throw new Error("Test MCP runtime state is not initialized.");
-        }
-        return stateRef.current;
-    };
-    const gateway = (instance: string): McpInstanceGateway | undefined =>
-        requireState().gateways.get(instance);
-    const worker = (instance: string): McpEndpointWorkerPort | undefined =>
-        requireState().workers.get(instance);
-    const cleanup = new ContextCleanupService({
-        contextRegistry: registry,
-        gateway,
-        releaseLocalAlerts: async (instance, workspace) =>
-            await worker(instance)?.releaseAlerts?.(workspace),
+    const context = createContextTransport(contexts);
+    const toolCallRuntime = createToolCallRuntime({
+        resolveTarget: options.resolveTarget ?? (() => ({
+            async dispatch() {
+                throw new Error("Test MCP tool target is not configured.");
+            },
+        })),
     });
-    const environment = new ContextEnvironmentService({
-        cleanup,
-        contextRegistry: registry,
-        gateway,
-        worker,
-    });
-    const contexts = new ContextService({
-        cleanup,
-        environment,
-        registry,
-        worker,
-    });
-    const state: McpRuntimeState = new McpRuntimeState({
+    const closeContextTools = installContextTools(
         contexts,
+        toolCallRuntime.hooks,
+        { instances: options.instances ?? emptyInstances() },
+    );
+    options.configureToolCalls?.(toolCallRuntime);
+    const state = new McpRuntimeState({
+        context,
+        tools: options.tools ?? toolCallRuntime.api,
         storageDir: options.storageDir,
         mcpAppLeaseFile: options.mcpAppLeaseFile,
     });
-    stateRef.current = state;
-    return state;
+    return {
+        contexts,
+        contextTransport: context,
+        state,
+        toolCallRuntime,
+        closeContextTools,
+        oauthResource: state.oauthResource.bind(state),
+    };
+}
+
+export interface TestMcpHostConfig extends McpHostConfig {
+    contextFile?: string;
+    tools?: ToolCallApi;
+    resolveTarget?: ToolCallTargetResolver;
+    configureToolCalls?: TestMcpRuntimeOptions["configureToolCalls"];
 }
 
 export class TestMcpHost extends McpHost {
-    readonly contexts: ContextService;
+    readonly contexts: TestContextRuntime;
+    readonly #testRuntime: TestMcpRuntimeState;
+    readonly #toolRegistrations = new Map<
+        string,
+        ReturnType<typeof mcpTools.register>
+    >();
 
-    constructor(
-        config: McpHostConfig & { contextFile?: string },
-        state = createTestMcpRuntimeState({
-            contextFile: config.contextFile,
-            storageDir: config.storageDir,
-            mcpAppLeaseFile: config.mcpAppLeaseFile,
-        }),
-    ) {
-        super(config, state);
-        this.contexts = state.contexts as ContextService;
+    constructor(config: TestMcpHostConfig, runtime?: TestMcpRuntimeState) {
+        const {
+            contextFile,
+            tools,
+            resolveTarget,
+            configureToolCalls,
+            ...hostConfig
+        } = config;
+        const testRuntime = runtime ?? createTestMcpRuntimeState({
+            contextFile,
+            instances: instancesForHost(hostConfig.instances),
+            tools,
+            resolveTarget,
+            configureToolCalls,
+            storageDir: hostConfig.storageDir,
+            mcpAppLeaseFile: hostConfig.mcpAppLeaseFile,
+        });
+        const toolRegistrations: [
+            string,
+            ReturnType<typeof mcpTools.register>,
+        ][] = [];
+        for (const instance of config.instances) {
+            const listTools = (
+                instance.worker as McpHostInstanceConfig["worker"] & {
+                    listTools?: () => readonly import("@portable-devshell/shared").ToolDefinition[];
+                }
+            ).listTools;
+            if (listTools !== undefined)
+                toolRegistrations.push(
+                    [instance.name, mcpTools.register(instance.name, listTools())],
+                );
+        }
+        super(hostConfig, testRuntime.state);
+        for (const [name, registration] of toolRegistrations)
+            this.#toolRegistrations.set(name, registration);
+        this.contexts = testRuntime.contexts;
+        this.#testRuntime = testRuntime;
     }
 
     override async start(): Promise<void> {
@@ -258,28 +262,151 @@ export class TestMcpHost extends McpHost {
         await super.start();
         await this.contexts.reconcile();
     }
+
+    override async stop(): Promise<void> {
+        const failures: unknown[] = [];
+        await super.stop().catch((error) => failures.push(error));
+        this.#testRuntime.closeContextTools();
+        this.#testRuntime.toolCallRuntime.close();
+        for (const registration of this.#toolRegistrations.values())
+            registration.dispose();
+        await this.contexts.close().catch((error) => failures.push(error));
+        if (failures.length > 0)
+            throw new AggregateError(failures, "Test MCP host shutdown failed.");
+    }
+
+    replaceTestTools(
+        instance: string,
+        definitions: readonly import("@portable-devshell/shared").ToolDefinition[],
+    ): void {
+        const registration = this.#toolRegistrations.get(instance);
+        if (registration === undefined)
+            throw new Error(`No test tool registration for ${instance}.`);
+        registration.replace(definitions);
+    }
 }
 
 export class TestMcpEndpointWorker extends McpEndpointWorker {
     constructor(
-        options: Omit<
-            McpEndpointWorkerOptions,
-            "cleanup" | "contextRegistry" | "environmentService"
-        > & {
-            contextRegistry?: ContextRecordSourcePort;
+        options: Omit<McpEndpointWorkerOptions, "context" | "tools"> & {
+            context?: McpEndpointWorkerOptions["context"];
+            tools?: McpEndpointWorkerOptions["tools"];
         },
     ) {
-        const runtime = createTestContextRuntime({
-            contextRegistry: options.contextRegistry,
-            instanceName: options.instanceName,
-            gateway: options.gateway,
-            worker: options.worker,
-        });
+        const contexts = createTestContextRuntime();
+        const contextTransport = createContextTransport(contexts);
         super({
             ...options,
-            contextRegistry: runtime.registry,
-            cleanup: runtime.cleanup,
-            environmentService: runtime.environment,
+            context: options.context ?? contextTransport,
+            tools: options.tools ?? createTestToolCallApi(),
         });
     }
+}
+
+function instancesForHost(instances: readonly McpHostInstanceConfig[]): InstanceRegistry {
+    return new InstanceRegistry(instances.map((config) => new Instance({
+        enabled: true,
+        mcpContextMode: config.contextMode,
+        mcpEnabled: true,
+        mcpPath: config.path ?? `/${config.name}/mcp`,
+        modelExtensions: [],
+        name: config.name,
+        provider: "local",
+        worker: config.worker as unknown as WorkerInstance,
+    })));
+}
+
+function emptyInstances(): InstanceRegistry {
+    return new InstanceRegistry([]);
+}
+
+function createContextTransport(contexts: TestContextRuntime): ContextTransport {
+    return {
+        snapshot: async () => await contexts.registry.snapshot(),
+        subscribe: async (fromRevision) => createContextChangeStream(contexts, fromRevision),
+        disable: async (ctxId, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.disable(ctxId);
+        },
+        list: async (query, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.registry.list(query);
+        },
+        renew: async (ctxId, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.renew(ctxId);
+        },
+        resolve: async (input, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.resolve(input);
+        },
+        referenceInstance: async (ctxId, instance, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.registry.referenceInstance(ctxId, instance);
+        },
+        validateForInstance: async (ctxId, instance, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.registry.validateForInstance(ctxId, instance);
+        },
+        detachInstance: async (instance, signal) => {
+            signal?.throwIfAborted();
+            return await contexts.detachInstance(instance);
+        },
+        reconcileInstance: async (instance, signal) => {
+            signal?.throwIfAborted();
+            await contexts.reconcileInstance(instance);
+        },
+    };
+}
+
+function createContextChangeStream(
+    contexts: TestContextRuntime,
+    fromRevision: number,
+): EventStreamPort<ContextChangeEvent> {
+    const initial = contexts.registry.changes.readSince(fromRevision);
+    const queue: Array<
+        | { kind: "event"; event: ContextChangeEvent }
+        | { details?: never; gap: { fromSeq: number; lastSeq: number; nextSeq: number }; kind: "gap" }
+    > = initial.kind === "gap"
+        ? [{
+              kind: "gap",
+              gap: {
+                  fromSeq: fromRevision,
+                  lastSeq: initial.latestRevision,
+                  nextSeq: initial.oldestAvailableRevision,
+              },
+          }]
+        : initial.changes.map((change) => ({
+              kind: "event" as const,
+              event: { ctxIds: [...change.ctxIds], revision: change.revision },
+          }));
+    const waiters: Array<(message: (typeof queue)[number] | { kind: "closed" }) => void> = [];
+    let closed = false;
+    const unsubscribe = contexts.registry.changes.onChange((change) => {
+        const message = {
+            kind: "event" as const,
+            event: { ctxIds: [...change.ctxIds], revision: change.revision },
+        };
+        const waiter = waiters.shift();
+        if (waiter !== undefined) waiter(message);
+        else queue.push(message);
+    });
+    return {
+        close() {
+            if (closed) return;
+            closed = true;
+            unsubscribe();
+            for (const waiter of waiters.splice(0)) waiter({ kind: "closed" });
+        },
+        async next() {
+            const message = queue.shift() ?? (closed
+                ? { kind: "closed" as const }
+                : await new Promise<(typeof queue)[number] | { kind: "closed" }>((resolve) => waiters.push(resolve)));
+            return message.kind === "event"
+                ? message
+                : message.kind === "gap"
+                  ? message
+                  : message;
+        },
+    };
 }

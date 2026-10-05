@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import {
-    PresentedToolCallResult,
+    type ToolCallPresentedResult,
     type ToolCallHooks,
 } from "@portable-devshell/core/toolcall";
+import { asInstanceName } from "@portable-devshell/shared";
+import { InstanceChangeHub } from "../../../src/instance/Change.ts";
 import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
@@ -34,20 +36,15 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         { mcpEnabled: true, name: "local" },
         { mcpEnabled: false, name: "hidden" },
     ];
-    let onChange: (() => void) | undefined;
+    const changes = new InstanceChangeHub();
     const instances = {
         list: () => descriptors,
-        onChange: (listener: () => void) => {
-            onChange = listener;
-            return () => {
-                onChange = undefined;
-            };
-        },
     } as unknown as InstanceRegistry;
     const { hooks } = createHooks();
     const uninstall = installArtifactTools(
         {} as ArtifactImageApi,
         instances,
+        changes,
         hooks,
     );
     try {
@@ -58,7 +55,7 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         assert.equal(mcpTools.get("hidden", "artifact_viewImage"), undefined);
 
         descriptors = [{ mcpEnabled: true, name: "remote" }];
-        onChange?.();
+        changes.publish("registry");
         assert.equal(mcpTools.get("local", "artifact_viewImage"), undefined);
         assert.equal(
             mcpTools.get("remote", "artifact_viewImage")?.definition.name,
@@ -100,7 +97,7 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         onChange: () => () => undefined,
     } as unknown as InstanceRegistry;
     const { executes, hooks } = createHooks();
-    const uninstall = installArtifactTools(artifact, instances, hooks);
+    const uninstall = installArtifactTools(artifact, instances, new InstanceChangeHub(), hooks);
     try {
         const execute = executes.get("artifact_viewImage");
         assert.ok(execute);
@@ -110,7 +107,7 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
             {
                 context: {
                     ctxId: "ctx-1",
-                    instance: "remote",
+                    instance: asInstanceName("remote"),
                     source: "mcp",
                     workspace: "/repo",
                 },
@@ -119,18 +116,19 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
                 toolName: "artifact_viewImage",
             },
         );
-        assert.ok(result instanceof PresentedToolCallResult);
+        assert.equal((result as ToolCallPresentedResult).type, "presented-tool-call-result");
+        const presented = result as ToolCallPresentedResult;
         assert.deepEqual(calls, [
             {
                 input: { path: "./pixel.png", workspace: "/repo" },
                 instance: "remote",
             },
         ]);
-        assert.deepEqual(result.presentation.content, [
+        assert.deepEqual(presented.presentation.content, [
             { data: "png-base64", mediaType: "image/png", type: "image" },
         ]);
         assert.equal(
-            (result.result as { name?: string }).name,
+            (presented.result as { name?: string }).name,
             "pixel.png",
         );
     } finally {

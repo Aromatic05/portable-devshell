@@ -5,10 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import {
-    ReverseCredentialStore,
-    reverseRoute,
-} from "../../../../src/testing.ts";
+import { ReverseCredentialStore } from "@portable-devshell/core/instance";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const execFileAsync = promisify(execFile);
@@ -199,17 +196,6 @@ test("failed replacement preparation leaves the previous reverse credential acti
     assert.equal(
         await initialStore.authenticate("remote-test", initial.deviceToken),
         true,
-    );
-});
-
-test("reverse route follows the public base URL path", () => {
-    assert.equal(
-        reverseRoute("https://example.test", "/reverse/v1/connect"),
-        "/reverse/v1/connect",
-    );
-    assert.equal(
-        reverseRoute("https://example.test/devshell/", "/reverse/v1/connect"),
-        "/devshell/reverse/v1/connect",
     );
 });
 

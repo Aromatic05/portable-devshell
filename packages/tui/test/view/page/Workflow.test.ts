@@ -4,13 +4,12 @@ import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
 import { type TodoReadResult } from "@portable-devshell/shared";
-import { InstanceRegistry } from "../../../../core/src/instance/Registry.ts";
-import type { WorkerInstance } from "../../../../core/src/instance/runtime/index.ts";
-import {
-    ControlRouteComposition,
-    ControlSocketServer,
-    createTestInstanceDomainRuntime,
-} from "@portable-devshell/control/testing";
+import { InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";
+import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
+import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
+import { createTestTaskApi } from "../../../../control/test/support/DomainApis.ts";
+import { createTestInstance } from "../../../../control/test/support/ControlFixtures.ts";
+import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
 import {
     createTuiDomainSession,
     currentTuiRoute,
@@ -61,6 +60,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             await waitUntil(
                 () => runtime.store.getState().ui.selectedInstance === "alpha",
             );
+            await waitUntil(() => server.todoReadTaskIds().length > 0);
             await waitUntil(() =>
                 selectMainScreenModel(
                     runtime.store.getState(),
@@ -264,19 +264,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const worker = new FakeWorker("alpha");
         const todoReadTaskIds: Array<string | undefined> = [];
         const instances = new InstanceRegistry([
-            {
-                enabled: true,
-                mcpEnabled: false,
-                mcpPath: "",
-                modelExtensions: [],
+            createTestInstance(worker as unknown as WorkerInstance, {
                 name: "alpha",
-                provider: "local",
-                worker: worker as unknown as WorkerInstance,
-            },
+            }),
         ]);
-        const instanceDomains = createTestInstanceDomainRuntime({
-            services: () => ({
-                task: {
+        const task = createTestTaskApi({
                     goal: {
                         async continuation() {
                             return {};
@@ -321,10 +313,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                             return todoFixture;
                         },
                     },
-                },
-            }),
         });
-        const routes = new ControlRouteComposition({
+        const routes = new ControlRouteRegistry({
             config: {
                 getConfigView() {
                     return {
@@ -375,8 +365,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 onChange() {
                     return () => undefined;
                 },
+                async retireInstance() {},
             },
-            instanceDomains,
+            ...createTestRouteBindings(instances, { task }),
             instances,
             tuiPages: {
                 async invoke() {

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { createInstanceConfigRouteModule } from "../../../../src/instance/Route.ts";
-import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
 
 test("config instance route exposes list and revisioned snapshot", async () => {
     const changes = new InstanceChangeHub();

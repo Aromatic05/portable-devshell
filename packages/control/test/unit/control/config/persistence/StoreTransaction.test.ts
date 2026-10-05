@@ -7,10 +7,8 @@ import {
     ControlPathHome,
     normalizeConfigInstanceDraft,
 } from "@portable-devshell/shared";
-import {
-    ControlConfigStore,
-    createDefaultControlConfig,
-} from "../../../../../src/testing.ts";
+import { ControlConfigStore } from "../../../../../src/config/store/index.ts";
+import { createDefaultControlConfig } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 test("a failed multi-file configuration write restores the previous complete generation", async (t) => {

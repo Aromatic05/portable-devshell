@@ -6,8 +6,8 @@ import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
 } from "../../../../../../../src/extension/api/cap/instance/Control.ts";
-import { Instance, InstanceRegistry } from "@portable-devshell/core";
-import { ProcessSubscriptionManager } from "@portable-devshell/core";
+import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
+import { ProcessSubscriptionManager } from "@portable-devshell/core/instance";
 
 const readySnapshot = {
     connectionState: "connected" as const,

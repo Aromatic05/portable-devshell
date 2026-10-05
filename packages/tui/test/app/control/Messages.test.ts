@@ -17,7 +17,7 @@ import {
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
 import { MessageStore } from "../../../../../extensions/comment/src/message/store/MessageStore.ts";
 import { MessagePreferenceStore } from "../../../../../extensions/comment/src/message/preference/Store.ts";
-import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
+import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
 import { createTuiDomainSession } from "../../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.js";
 import {
@@ -716,7 +716,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 host: "@control",
                 ports: [
                     {
-                        name: "service",
+                        name: "server",
                         operations: [
                             {
                                 name: "hello",

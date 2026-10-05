@@ -144,7 +144,8 @@ class RuntimeTestHost extends McpAppHost {
     override async updateModelContext(): Promise<unknown> { return undefined; }
 }
 
-function runtimeTestHost(context: TestContext): RuntimeTestHost {
+function runtimeTestHost(context: TestContext, cleanup: () => Promise<void>): RuntimeTestHost {
+    context.after(cleanup);
     const globals = {
         window: new EventTarget(),
         __portableDevshellMcpApps: { App, applyDocumentTheme: () => undefined, applyHostFonts: () => undefined, applyHostStyleVariables: () => undefined },
@@ -159,7 +160,7 @@ function runtimeTestHost(context: TestContext): RuntimeTestHost {
 
 test("delayed bootstrap shows Context waiting, then authorization waiting without premature MCP requests", async context => {
     context.mock.timers.enable({ apis: ["setTimeout"] });
-    const host = runtimeTestHost(context);
+    const host = runtimeTestHost(context, () => runtime.destroy());
     const requests: string[] = [];
     context.mock.method(host.app, "callServerTool", async (request: { name: string }) => {
         requests.push(request.name);
@@ -167,7 +168,6 @@ test("delayed bootstrap shows Context waiting, then authorization waiting withou
     });
     const status = { textContent: "" };
     const runtime = new McpAppRuntime({ version: "test", host, root: new CardRoot() as unknown as HTMLElement, status: status as HTMLElement });
-    context.after(() => runtime.destroy());
     const starting = runtime.start();
     await Promise.resolve();
     context.mock.timers.tick(300);
@@ -180,7 +180,7 @@ test("delayed bootstrap shows Context waiting, then authorization waiting withou
 });
 
 test("non-user cancellation preserves held watch while user stop yields and refreshes", async context => {
-    const host = runtimeTestHost(context);
+    const host = runtimeTestHost(context, () => runtime.destroy());
     host.bootstrap = { structuredContent: { ctxId: "ctx-one" }, _meta: { "portable-devshell/mcpapp": { token: "token-one" } } };
     const requests: Array<{ name: string; arguments: Record<string, unknown> }> = [];
     const signals: AbortSignal[] = [];
@@ -203,7 +203,6 @@ test("non-user cancellation preserves held watch while user stop yields and refr
         throw new Error(`Unexpected MCP request: ${request.name}`);
     });
     const runtime = new McpAppRuntime({ version: "test", host, root: new CardRoot() as unknown as HTMLElement, status: { textContent: "" } as HTMLElement });
-    context.after(() => runtime.destroy());
     await runtime.start();
     assert.equal(signals.length, 1);
     host.cancelled?.({ reason: "test cancellation" });
@@ -220,7 +219,7 @@ test("non-user cancellation preserves held watch while user stop yields and refr
 });
 
 test("a held watch with a newer cursor applies after a later human action", async context => {
-    const host = runtimeTestHost(context);
+    const host = runtimeTestHost(context, () => runtime.destroy());
     host.bootstrap = { structuredContent: { ctxId: "ctx-one" }, _meta: { "portable-devshell/mcpapp": { token: "token-one" } } };
     const root = new CardRoot();
     let resolveWatch!: (result: { structuredContent: { snapshot: McpAppSnapshot; cursor: number } }) => void;
@@ -248,7 +247,6 @@ test("a held watch with a newer cursor applies after a later human action", asyn
         });
     });
     const runtime = new McpAppRuntime({ version: "test", host, root: root as unknown as HTMLElement, status: { textContent: "" } as HTMLElement });
-    context.after(() => runtime.destroy());
     await runtime.start();
     root.emit("click", cardButton({ item: "decision-1", action: "approve" }, ["[data-action]"]));
     await actionContext;
@@ -867,7 +865,7 @@ test("card binding requires inline Confirm, Cancel makes no RPC, and busy confir
     view.destroy();
 });
 
-test("question choices stay compact and click immediately sends the generic action while text uses Send separately", () => {
+test("decision actions send a selected choice and a separate text response", () => {
     const root = new CardRoot();
     const requests: McpAppActionRequest[] = [];
     const view = new McpAppView(root as unknown as HTMLElement, {
@@ -876,41 +874,31 @@ test("question choices stay compact and click immediately sends the generic acti
     });
     const current = snapshot();
     current.presentation.primary = {
-        kind: "question", id: "question-1", title: "Question", prompt: "Choose an option",
-        input: { kind: "choice", allowText: true, choices: Array.from({ length: 12 }, (_, index) => ({ id: `choice-${index}`, label: index === 0 ? "Continue" : `Option ${index}` })) },
-        actions: [{ id: "answer", label: "Answer" }],
+        kind: "decision", id: "decision-1", title: "Decision",
+        actions: [
+            { id: "choose", label: "Choose", input: { kind: "choice", choices: [{ id: "continue", label: "Continue" }, { id: "stop", label: "Stop" }] } },
+            { id: "answer", label: "Send", input: { kind: "text" } },
+        ],
     };
     view.setSnapshot(current);
-    assert.equal(root.innerHTML.match(/data-choice data-item=/gu)?.length, 3);
-    assert.match(root.innerHTML, /Show 9 more/u);
-    assert.match(root.innerHTML, /<span>Continue<\/span>/u);
-    assert.doesNotMatch(root.innerHTML, /data-choice-continue|aria-pressed/u);
+    assert.match(root.innerHTML, /data-value="continue"/u);
+    assert.match(root.innerHTML, />Continue<\/button>/u);
     assert.match(root.innerHTML, />Send<\/button>/u);
-    const selector = "[data-choice], [data-choice-expand]";
-    root.emit("click", cardButton({ item: "question-1", actionId: "answer" }, [selector], ["data-choice-expand"]));
-    assert.equal(root.innerHTML.match(/data-choice data-item=/gu)?.length, 12);
-    assert.match(root.innerHTML, /class="choice-list" data-expanded="true"/u);
-    assert.deepEqual(requests, []);
-    const choice = cardButton({ item: "question-1", action: "answer", value: "choice-8" }, [selector, "[data-action]"], ["data-choice"]);
+    const choice = cardButton({ item: "decision-1", action: "choose", value: "continue" }, ["[data-action]"]);
     root.emit("click", choice);
-    assert.deepEqual(requests, [{ itemId: "question-1", actionId: "answer", input: "choice-8" }]);
-    view.setBusy("answer", true);
+    assert.deepEqual(requests, [{ itemId: "decision-1", actionId: "choose", input: "continue" }]);
+    view.setBusy("choose", true);
     root.emit("click", choice);
     assert.equal(requests.length, 1);
-    view.setBusy("answer", false);
     root.emit("submit", {
-        dataset: { actionItem: "question-1", actionId: "answer" },
+        dataset: { actionItem: "decision-1", actionId: "answer" },
         matches: (selector: string) => selector === "[data-action-item]",
         querySelector: (selector: string) => selector === 'input[name="input"]' ? { value: "typed answer" } : { disabled: false },
     });
     assert.deepEqual(requests, [
-        { itemId: "question-1", actionId: "answer", input: "choice-8" },
-        { itemId: "question-1", actionId: "answer", input: "typed answer" },
+        { itemId: "decision-1", actionId: "choose", input: "continue" },
+        { itemId: "decision-1", actionId: "answer", input: "typed answer" },
     ]);
-    view.setSnapshot({ ...current, cursor: current.cursor + 1 });
-    assert.equal(root.innerHTML.match(/data-choice data-item=/gu)?.length, 12);
-    view.setSnapshot({ ...current, ctxId: "ctx-new" });
-    assert.equal(root.innerHTML.match(/data-choice data-item=/gu)?.length, 3);
     view.destroy();
 });
 

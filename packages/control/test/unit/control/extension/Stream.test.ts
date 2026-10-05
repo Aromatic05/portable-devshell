@@ -4,7 +4,7 @@ import type { ControlStreamBinding, ControlStreamMessage } from "@portable-devsh
 import type { ControlPortContext, MessageStream } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
 import type { ProcessSubscriptionManager } from "../../../../../core/src/instance/runtime/supervision/Subscription.ts";
-import type { InstanceEventSource } from "../../../../../core/src/instance/runtime/supervision/Event.ts";
+import type { InstanceEventSource } from "@portable-devshell/core/instance";
 import type { ExtensionPointSandboxBridge } from "../../../../src/extension/registration/PointRegistry.ts";
 import { controlStreamsExtensionPointDefinition, controlStreamsSandboxCodec } from "../../../../src/extension/api/point/control/Stream.ts";
 import { ControlExtensionRouteService } from "../../../../src/extension/api/point/control/Dispatch.ts";

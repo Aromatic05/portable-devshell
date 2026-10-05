@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    ConfigRegistry,
-    ControlGlobalTomlDocument,
-    createCoreConfigRegistry,
-} from "../../../../src/testing.ts";
+import { ConfigRegistry, createCoreConfigRegistry } from "../../../../src/config/domain/Registry.ts";
+import { ControlGlobalTomlDocument } from "../../../../src/config/store/document/Global.ts";
 
 test("core Config registry owns the current global domains", () => {
     const registry = createCoreConfigRegistry();

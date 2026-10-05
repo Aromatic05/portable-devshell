@@ -20,7 +20,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { controlDaemonModulePath } from "../../../src/testing.ts";
+import { controlDaemonModulePath } from "../../../src/server/Daemon.ts";
 import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/extension/install/BuiltinSource.ts";
 import {
     createTestIpcPath,

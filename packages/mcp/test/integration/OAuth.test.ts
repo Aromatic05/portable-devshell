@@ -39,24 +39,17 @@ import {
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
 import { ToolCallHookSequence } from "../../../core/src/toolcall/execution/hook/Sequence.ts";
-import { ToolCallPipeline } from "../../../core/src/toolcall/execution/Pipeline.ts";
 import {
     asInstanceName,
     type ContextMessageRecord,
     type JsonValue,
     type ControlPortContext,
-    type ToolCallContext,
 } from "@portable-devshell/shared";
 import {
-    WorkerBinary,
-    WorkerInstanceFactory,
-    WorkerTransportDriverLocal,
-} from "@portable-devshell/core/testing";
-import {
-    createTestWorkerGateway,
+    createTestInstance,
     TestMcpHost as McpHost,
 } from "../ContextRuntime.ts";
-import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
+import type { McpAuthConfig } from "@portable-devshell/mcp";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
@@ -204,84 +197,6 @@ test(
             preferencesFile: join(contextRoot, "message-preferences.json"),
         });
         let sequence = new ToolCallHookSequence({});
-        const pipeline = new ToolCallPipeline({
-            hooks: () => ({ release() {}, sequence }),
-            resolveTarget: () => target.toolCallTarget(),
-        });
-        const gateway = {
-            async appendMcpToolCalled() {},
-            assertReady() {},
-            async callToolOperation<T extends JsonValue>(
-                instance: string,
-                name: string,
-                input: JsonValue,
-                context: ToolCallContext,
-                operation: (
-                    callId: string,
-                    input: JsonValue,
-                    finalValue: ToolCallHookValue,
-                ) => Promise<T>,
-                signal?: AbortSignal,
-            ): Promise<T> {
-                return await pipeline.callOperation(
-                    instance,
-                    name,
-                    input,
-                    context,
-                    operation,
-                    signal,
-                );
-            },
-            callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) =>
-                pipeline.call(...args),
-            environment() {
-                return undefined;
-            },
-            async listInstances() {
-                return [];
-            },
-            listTools() {
-                return target?.listTools() ?? [];
-            },
-            async prepareWorkspace(_instance: string, workspace: string) {
-                return {
-                    projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
-                    projectMemoryDirectory: `${workspace}/.devshell`,
-                    projectMemoryPresent: true,
-                    temporaryDirectory: "/tmp/mcp-comment",
-                    workspace,
-                };
-            },
-            async readAlerts() {
-                return { advice: [] };
-            },
-            async releaseAlerts() {},
-            async readTodo() {
-                return { items: [], revision: 0 };
-            },
-            async connectInstance() {
-                return null;
-            },
-            async releaseInstanceReference() {},
-            async statusInstance() {
-                return null;
-            },
-            async stopInstance() {
-                return null;
-            },
-            async touchAlerts() {},
-            async touchTemporaryDirectory() {},
-            async writeTodo() {
-                return { items: [], revision: 0 };
-            },
-        } satisfies McpInstanceGateway;
-        const { cleanupDirs, host, instance, workspaceMarker, workspacePath } =
-            await startFrozenWorkerHost(
-                "real-comment",
-                { enabled: false, provider: "none" },
-                gateway,
-            );
-        const target: ReturnType<WorkerInstanceFactory["create"]> = instance;
         const commentGate = createCommentToolCallGate(comment.comment);
         const commentTodoAccess = createCommentTodoAccess(comment.comment);
         const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
@@ -294,6 +209,28 @@ test(
                 );
             },
         };
+        const { cleanupDirs, host, instance, workspaceMarker, workspacePath } =
+            await startFrozenWorkerHost(
+                "real-comment",
+                { enabled: false, provider: "none" },
+                (_instance, runtime) => {
+                    runtime.hooks.registerContributor(() => ({
+                        reviews: [{
+                            hook: "comment.review",
+                            id: "comment-gate",
+                            review: async (input) =>
+                                await sequence.review(input as never),
+                        }],
+                        rewrites: [{
+                            hook: "comment.rewrite",
+                            id: "comment-rewrite",
+                            rewrite: async (input) =>
+                                await sequence.rewrite(input as never),
+                        }],
+                        release() {},
+                    }));
+                },
+            );
         sequence = new ToolCallHookSequence({
             reviews: [
                 async (input) =>
@@ -567,16 +504,13 @@ test(
                         },
                         provider: "oauth2",
                     },
-                    gateway: createTestWorkerGateway(
-                        () => instance.toolCallTarget(),
-                        () => instance.listTools(),
-                    ),
                     name: "real-oauth",
-                    worker: instance,
+                    worker: instance.worker,
                 },
             ],
             listenHost: "127.0.0.1",
             listenPort: 0,
+        resolveTarget: () => instance.target(),
             publicBaseUrl: origin,
             storageDir,
         });
@@ -857,16 +791,13 @@ test(
                         },
                         provider: "oauth2",
                     },
-                    gateway: createTestWorkerGateway(
-                        () => instance.toolCallTarget(),
-                        () => instance.listTools(),
-                    ),
                     name: "real-oauth-token",
-                    worker: instance,
+                    worker: instance.worker,
                 },
             ],
             listenHost: "127.0.0.1",
             listenPort: 0,
+        resolveTarget: () => instance.target(),
             oauthApproval: { mode: "token", token: approvalToken },
             publicBaseUrl: origin,
             storageDir,
@@ -1274,7 +1205,7 @@ function createFrozenWorker(
     runtimeDirectory: string,
     workspacePath: string,
 ) {
-    return new WorkerInstanceFactory().create({
+    return createTestInstance({
         env: {
             ...process.env,
             HOME: homeDirectory,
@@ -1283,17 +1214,17 @@ function createFrozenWorker(
         },
         homeDirectory,
         name: asInstanceName(name),
-        transport: new WorkerTransportDriverLocal({
-            spawnFunction: nodeSpawn,
-            workerBinary: new WorkerBinary(workerBinaryPath!),
-        }),
+        workerBinaryPath: workerBinaryPath!,
     });
 }
 
 async function startFrozenWorkerHost(
     name: string,
     auth: McpAuthConfig,
-    gateway?: McpInstanceGateway,
+    configureToolCalls?: (
+        instance: ReturnType<typeof createTestInstance>,
+        runtime: ReturnType<typeof import("@portable-devshell/core/toolcall").createToolCallRuntime>,
+    ) => void,
 ) {
     const homeDirectory = await createTestTempDirectory(
         `mcp-real-${name}-home`,
@@ -1318,18 +1249,16 @@ async function startFrozenWorkerHost(
         instances: [
             {
                 auth,
-                gateway:
-                    gateway ??
-                    createTestWorkerGateway(
-                        () => instance.toolCallTarget(),
-                        () => instance.listTools(),
-                    ),
                 name,
-                worker: instance,
+                worker: instance.worker,
             },
         ],
         listenHost: "127.0.0.1",
         listenPort: 0,
+        resolveTarget: () => instance.target(),
+        ...(configureToolCalls === undefined
+            ? {}
+            : { configureToolCalls: (runtime: Parameters<typeof configureToolCalls>[1]) => configureToolCalls(instance, runtime) }),
     });
 
     await instance.start();
@@ -1346,11 +1275,10 @@ async function startFrozenWorkerHost(
 
 async function teardownFrozenWorker(
     host: McpHost,
-    instance: { close(): Promise<void>; stop(): Promise<unknown> },
+    instance: ReturnType<typeof createTestInstance>,
     cleanupDirs: readonly string[] = [],
 ): Promise<void> {
     await host.stop();
-    await instance.stop();
     await instance.close();
     for (const dir of cleanupDirs) {
         await rm(dir, { force: true, recursive: true });

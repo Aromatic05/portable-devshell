@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Instance, InstanceRegistry } from "@portable-devshell/core";
+import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ToolCallContext } from "@portable-devshell/shared";
 
 import { DebugPatchService } from "../../../../src/debug/Service.ts";

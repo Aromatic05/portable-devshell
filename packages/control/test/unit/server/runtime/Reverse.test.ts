@@ -10,10 +10,10 @@ import {
 } from "@portable-devshell/shared";
 import type { HttpHost } from "@portable-devshell/mcp";
 import {
-    ConnectionModule,
-    InstanceRegistryFactory,
-} from "../../../../src/testing.ts";
-import type { McpControlModule } from "../../../../src/server/mcp/Module.ts";
+    createReverseRuntime,
+    type ReverseRuntimeOptions,
+} from "@portable-devshell/core/instance";
+import { buildTestInstanceRegistry } from "../../../support/InstanceRuntime.ts";
 import type { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -42,7 +42,7 @@ test("reverse runtime is ready before the first reverse instance is created", as
     const config = createDefaultControlConfig();
     config.mcp.enabled = true;
     config.mcp.publicBaseUrl = "https://controller.example.test";
-    const instances = new InstanceRegistryFactory().build(config);
+    const instances = buildTestInstanceRegistry(config);
     const host = new RecordingHttpHost();
     const state = {
         homeDirectory,
@@ -73,9 +73,9 @@ test("reverse runtime is ready before the first reverse instance is created", as
             },
         },
         host: { server: host as unknown as HttpHost },
-    } as unknown as McpControlModule;
+    } as unknown as ReverseRuntimeOptions["mcp"];
 
-    const reverse = new ConnectionModule({ mcp, state });
+    const reverse = createReverseRuntime({ mcp, state });
 
     assert.notEqual(reverse.service, undefined);
     assert.notEqual(disableRetirement, undefined);
@@ -90,7 +90,7 @@ test("reverse runtime adopts a changed MCP public URL on the replacement host", 
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
     const config = reverseConfig("https://controller.example.test/old");
-    const instances = new InstanceRegistryFactory().build(config);
+    const instances = buildTestInstanceRegistry(config);
     const firstHost = new RecordingHttpHost();
     const state = {
         homeDirectory,
@@ -103,8 +103,8 @@ test("reverse runtime adopts a changed MCP public URL on the replacement host", 
             registerInstanceDisableRetirement() {},
         },
         host: { server: firstHost as unknown as HttpHost },
-    } as unknown as McpControlModule;
-    const reverse = new ConnectionModule({ mcp, state });
+    } as unknown as ReverseRuntimeOptions["mcp"];
+    const reverse = createReverseRuntime({ mcp, state });
 
     assert.equal(firstHost.rawPaths.includes("/old/reverse/v1/enroll"), true);
     const nextHost = new RecordingHttpHost();

@@ -4,7 +4,7 @@ import test from "node:test";
 import type {
     TerminalProcess,
     TerminalProcessExit,
-} from "../../../src/terminal/Backend.ts";
+} from "../../../src/terminal/Api.ts";
 import { TerminalSessionService } from "../../../src/terminal/Service.ts";
 
 class FakeTerminalProcess implements TerminalProcess {

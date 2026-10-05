@@ -56,6 +56,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
     });
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
+            readToolCalls: async () => [],
             instances: { list: () => [] } as never,
             paths,
             points: createControlExtensionPointRegistry(),
@@ -326,6 +327,7 @@ test("reinstalling the selected builtin generation preserves lazy startup until 
 
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
+            readToolCalls: async () => [],
             instances: { list: () => [] } as never,
             paths: h.paths,
             points: createControlExtensionPointRegistry(),
@@ -359,6 +361,7 @@ test("reinstalling a disabled builtin keeps it disabled across Control restart",
 
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
+            readToolCalls: async () => [],
             instances: { list: () => [] } as never,
             paths: h.paths,
             points: createControlExtensionPointRegistry(),

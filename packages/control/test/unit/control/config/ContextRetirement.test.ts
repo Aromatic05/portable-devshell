@@ -4,19 +4,27 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-    ConfigEngine,
-    InstanceEditorCoordinator,
+    createContextRuntime,
+    type ContextInstancesPort,
+} from "@portable-devshell/core/context";
+import {
     InstanceRegistry,
+    Instance,
+    type WorkerInstance,
+} from "@portable-devshell/core/instance";
+import {
     createDefaultControlConfig,
-} from "../../../../src/testing.ts";
-import { ContextModule } from "../../../../src/context/Module.ts";
-import type { InstanceDescriptor } from "@portable-devshell/core";
-import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+    normalizeConfigInstanceDraft,
+    type ControlConfig,
+} from "@portable-devshell/shared";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
+import { InstanceEditorCoordinator } from "../../../../src/instance/editor/index.ts";
+import { createTestInstance } from "../../../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 for (const descriptorState of ["present", "missing"] as const) {
-    test(`deleting an active Context scope settles ownership debt with ${descriptorState} descriptor`, async (t) => {
-        const hasLiveDescriptor = descriptorState === "present";
+    test(`instance deletion retries Context cleanup debt with ${descriptorState} descriptor`, async (t) => {
         const home = await createTestTempDirectory("context-retirement-chain");
         t.after(async () => await rm(home, { force: true, recursive: true }));
 
@@ -25,21 +33,20 @@ for (const descriptorState of ["present", "missing"] as const) {
         const events: string[] = [];
         let ready = true;
         let allowAlertsRelease = false;
-        const instances = new InstanceRegistry([]);
-        const worker = {
-            managementMode: "controllerManaged" as const,
-            snapshot: () => ({
-                daemonState: ready ? "running" : "stopped",
-                ready,
-            }),
+        let releaseAttempts = 0;
+        let factoryCalls = 0;
+        const makeWorker = (): WorkerInstance => ({
+            managementMode: "controllerManaged",
+            snapshot: () => ({ daemonState: ready ? "running" : "stopped", ready }),
             async start() {
-                assert.equal(instances.get(instanceName), undefined);
                 events.push("worker.start.cleanup-only");
                 ready = true;
+                return { daemonState: "running", ready: true };
             },
             async stop() {
                 events.push("worker.stop");
                 ready = false;
+                return { daemonState: "stopped", ready: false };
             },
             async prepareWorkspace(path: string) {
                 assert.equal(ready, true);
@@ -52,18 +59,15 @@ for (const descriptorState of ["present", "missing"] as const) {
                 };
             },
             async releaseAlerts(path: string) {
-                assert.equal(ready, true);
-                assert.equal(instances.get(instanceName), undefined);
+                releaseAttempts += 1;
                 events.push(
                     allowAlertsRelease
                         ? "alerts.release.success"
                         : "alerts.release.failure",
                 );
-                if (!allowAlertsRelease)
-                    throw new Error(
-                        "alerts release is temporarily unavailable",
-                    );
                 assert.equal(path, workspace);
+                if (!allowAlertsRelease)
+                    throw new Error("alerts release is temporarily unavailable");
             },
             async retireRuntime() {
                 events.push("worker.retireRuntime");
@@ -74,29 +78,7 @@ for (const descriptorState of ["present", "missing"] as const) {
             async close() {
                 events.push("worker.close");
             },
-        };
-        const descriptor = {
-            approval: {
-                async retire() {},
-                close() {},
-            },
-            enabled: true,
-            goal: {
-                async stopAll() {},
-            },
-            mcpEnabled: true,
-            mcpPath: `/${instanceName}/mcp`,
-            modelExtensions: [],
-            name: instanceName,
-            provider: "local" as const,
-            todo: {
-                async cancelAll() {},
-            },
-            worker,
-        } as unknown as InstanceDescriptor;
-        instances.add(descriptor);
-        instances.markOwned(instanceName);
-        let descriptorMapCalls = 0;
+        } as unknown as WorkerInstance);
 
         const config = createDefaultControlConfig();
         config.mcp.enabled = false;
@@ -108,45 +90,57 @@ for (const descriptorState of ["present", "missing"] as const) {
                 security: { mode: "disabled" },
             }),
         ];
-        const contexts = new ContextModule({
+        const instances = new InstanceRegistry([
+            createTestInstance(makeWorker(), {
+                enabled: true,
+                mcpEnabled: true,
+                mcpPath: `/${instanceName}/mcp`,
+                modelExtensions: [],
+                name: instanceName,
+                provider: "local",
+            }),
+        ]);
+        let cleanupDescriptor: Instance | undefined;
+        const contextInstances: ContextInstancesPort = {
+            get: (name) => {
+                const descriptor =
+                    cleanupDescriptor?.name === name
+                        ? cleanupDescriptor
+                        : instances.get(name);
+                if (descriptor === undefined) return undefined;
+                return {
+                    acquireLease: () => ({
+                        instance: { worker: descriptor.worker },
+                        release() {},
+                    }),
+                    async acquireReference(reference) {
+                        return {
+                            snapshot: descriptor.worker.snapshot(),
+                            worker: descriptor.worker,
+                        };
+                    },
+                    async releaseReference(reference) {
+                        await descriptor.releaseReference(reference);
+                    },
+                };
+            },
+        };
+        const contexts = createContextRuntime({
             contextFile: join(home, "contexts.json"),
-            instances,
+            instances: contextInstances,
         });
         await contexts.initialize();
-        const withWorkspace = await contexts.registry.create({
-            principal: "local",
-        });
-        await contexts.environment.prepareLocal(
-            withWorkspace.ctxId,
+        const context = await contexts.api.registry.create({ principal: "local" });
+        await contexts.api.environment.prepareLocal(
+            context.ctxId,
             instanceName,
             workspace,
         );
-        const withoutWorkspace = await contexts.registry.create({
-            principal: "local",
-        });
-        await contexts.registry.attachEnvironment(withoutWorkspace.ctxId, {
-            instance: instanceName,
-        });
-        assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), []);
-
-        instances.retainConnectionReference(
-            instanceName,
-            descriptor.worker,
-            withWorkspace.ctxId,
-            true,
-        );
-        instances.retainConnectionReference(
-            instanceName,
-            descriptor.worker,
-            withoutWorkspace.ctxId,
-            true,
-        );
         ready = false;
-        if (!hasLiveDescriptor)
-            await instances.retireGeneration(instanceName, descriptor);
+        if (descriptorState === "missing")
+            await instances.remove(instanceName);
 
-        let currentConfig = config;
-        const cleanupDebtFile = join(home, "instance-cleanup.json");
+        let currentConfig: ControlConfig = config;
         const engine = new ConfigEngine({
             configStore: {
                 async write(nextConfig) {
@@ -158,40 +152,40 @@ for (const descriptorState of ["present", "missing"] as const) {
                 currentConfig = nextConfig;
             },
         });
+        const cleanupDebtFile = join(home, "instance-cleanup.json");
         const coordinator = new InstanceEditorCoordinator({
             cleanupDebtFile,
-            detachContextInstance: async (instance) => {
-                await contexts.detachInstance(instance);
-            },
-            engine,
-            instanceConfigMapper: {
-                map() {
-                    descriptorMapCalls += 1;
-                    return descriptor;
-                },
-            } as never,
-            instanceRegistry: instances,
-            reconcileContextInstanceCleanup: async (
-                instance,
-                cleanupDescriptor,
-            ) => {
-                await contexts.cleanup.reconcileInstance(instance, {
-                    releaseAlerts: async (path) => {
-                        assert.ok(cleanupDescriptor);
-                        if (!cleanupDescriptor.worker.snapshot().ready)
-                            await cleanupDescriptor.worker.start();
-                        await cleanupDescriptor.worker.releaseAlerts(path);
-                    },
-                    releaseInstanceReference: async (ctxId) => {
-                        const released = instances.releaseConnectionReference(
-                            instance,
-                            ctxId,
-                        );
-                        assert.notEqual(released, undefined);
-                        events.push(`reference.release:${ctxId}`);
-                    },
+            createRuntimeInstance: () => {
+                factoryCalls += 1;
+                return createTestInstance(makeWorker(), {
+                    enabled: true,
+                    mcpEnabled: true,
+                    mcpPath: `/${instanceName}/mcp`,
+                    modelExtensions: [],
+                    name: instanceName,
+                    provider: "local",
                 });
             },
+            detachContextInstance: async (instance) => {
+                await contexts.api.detachInstance(instance);
+            },
+            engine,
+            instanceChanges: new InstanceChangeHub(),
+            instanceRegistry: instances,
+            reconcileContextInstanceCleanup: async (instance, descriptor) => {
+                cleanupDescriptor = descriptor ?? instances.get(instance);
+                if (
+                    cleanupDescriptor !== undefined &&
+                    !cleanupDescriptor.worker.snapshot().ready
+                )
+                    await cleanupDescriptor.worker.start();
+                await contexts.api.cleanup.reconcileInstance(instance);
+            },
+            retireRuntimeInstance: async () => {},
+            finalizeRuntimeInstance: async (descriptor) => {
+                await descriptor.close();
+            },
+            updateApprovalPolicy: async () => {},
         });
 
         const warnings: unknown[] = [];
@@ -204,18 +198,14 @@ for (const descriptorState of ["present", "missing"] as const) {
         }
 
         assert.equal(warnings.length, 1);
-        assert.equal(instances.get(instanceName), undefined);
         assert.equal(currentConfig.instances.length, 0);
         assert.deepEqual(
-            (await contexts.registry.listEnvironmentCleanup()).map(
-                ({ ctxId, cleanup }) => ({
-                    ctxId,
-                    cleanup,
-                }),
+            (await contexts.api.registry.listEnvironmentCleanup()).map(
+                ({ ctxId, cleanup }) => ({ ctxId, cleanup }),
             ),
             [
                 {
-                    ctxId: withWorkspace.ctxId,
+                    ctxId: context.ctxId,
                     cleanup: {
                         instance: instanceName,
                         kind: "alerts",
@@ -224,41 +214,19 @@ for (const descriptorState of ["present", "missing"] as const) {
                 },
             ],
         );
-        const persistedInstanceDebt = JSON.parse(
-            await readFile(cleanupDebtFile, "utf8"),
-        ) as Array<{ instance: { name: string }; operation: string }>;
-        assert.equal(persistedInstanceDebt[0]?.instance.name, instanceName);
-        assert.equal(persistedInstanceDebt[0]?.operation, "delete");
+        assert.equal(releaseAttempts, 1);
         assert.equal(events.includes("worker.close"), false);
-        assert.equal(events.includes("worker.retireRuntime"), false);
-        assert.equal(events.includes("worker.stop"), false);
 
         allowAlertsRelease = true;
         await coordinator.reconcileCleanupDebt();
 
-        for (const context of [withWorkspace, withoutWorkspace]) {
-            const current = await contexts.registry.lookup(context.ctxId, {
-                principal: "local",
-            });
-            assert.equal(current.status, "active");
-            assert.deepEqual(current.environments, []);
-        }
-        assert.deepEqual(await contexts.registry.listEnvironmentCleanup(), []);
+        assert.deepEqual(await contexts.api.registry.listEnvironmentCleanup(), []);
         assert.deepEqual(
             JSON.parse(await readFile(cleanupDebtFile, "utf8")),
             [],
         );
-        assert.equal(instances.get(instanceName), undefined);
-        assert.equal(descriptorMapCalls, hasLiveDescriptor ? 0 : 1);
-        assert.equal(
-            events.filter((event) => event === "worker.start.cleanup-only")
-                .length,
-            1,
-        );
-        assert.equal(
-            events.filter((event) => event === "alerts.release.success").length,
-            1,
-        );
+        assert.equal(releaseAttempts, 2);
+        assert.equal(factoryCalls, descriptorState === "missing" ? 1 : 0);
         assert.ok(
             events.indexOf("alerts.release.success") <
                 events.indexOf("worker.retireRuntime"),

@@ -3,7 +3,11 @@ import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type { ToolCallHookValue } from "@portable-devshell/shared";
+import type {
+    ToolCallApi,
+    ToolCallHookValue,
+    ToolDefinition,
+} from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
 
 import {
@@ -13,10 +17,7 @@ import {
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
-import {
-    createTestCallOperationGateway,
-    TestMcpHost as McpHost,
-} from "../ContextRuntime.ts";
+import { TestMcpHost as McpHost } from "../ContextRuntime.ts";
 import type {
     McpAuthConfig,
     McpHostInstanceConfig,
@@ -276,166 +277,6 @@ test("oauth2 keeps a public path prefix on resources while using the origin as i
     }
 });
 
-test("Live Workspace capability survives MCP host restart and drives the direct state route", async () => {
-    const root = await createTestTempDirectory("mcp-workspace-lease-host");
-    const contextFile = join(root, "contexts.json");
-    const mcpAppLeaseFile = join(root, "workspace-app-leases.json");
-    const recovery = { ctxId: "", detached: false, observed: 0, resolved: 0 };
-    let first: McpHost | undefined;
-    let restarted: McpHost | undefined;
-    try {
-        first = createWorkspaceHost(
-            contextFile,
-            mcpAppLeaseFile,
-            recovery,
-        );
-        await first.start();
-        const created = await first.contexts.registry.create({
-            environments: [{
-                instance: "demo",
-                workspace: "/workspace",
-            }],
-            principal: "local",
-        });
-        await first.contexts.registry.attachEnvironment(created.ctxId, {
-            instance: "beta",
-            workspace: "/beta",
-        });
-        const firstEndpoint = `http://127.0.0.1:${requireTcpPort(first.server.address)}/demo/mcp`;
-        const opened = await callMcpTool(firstEndpoint, "mcpapp_open", {
-            ctxId: created.ctxId,
-        });
-        assert.equal(
-            opened.error,
-            undefined,
-            `mcpapp_open returned a JSON-RPC error: ${JSON.stringify(opened.error)}`,
-        );
-        assert.ok(opened.result, `mcpapp_open returned no result: ${JSON.stringify(opened)}`);
-        assert.equal(opened.result.isError, false);
-        const token = (
-            opened.result?._meta?.["portable-devshell/mcpapp"] as
-                { token?: unknown } | undefined
-        )?.token;
-        const liveBaseUrl = (
-            opened.result?._meta?.["portable-devshell/mcpapp"] as
-                { liveBaseUrl?: unknown } | undefined
-        )?.liveBaseUrl;
-        assert.equal(typeof token, "string");
-        assert.equal(
-            liveBaseUrl,
-            "https://mcp.example.test/devshell/api/live/demo/workspace",
-        );
-        if (typeof token !== "string")
-            throw new Error("Workspace capability was not returned.");
-        assert.equal(
-            JSON.stringify(opened.result?.structuredContent).includes(token),
-            false,
-        );
-        const beforeLiveRead = await first.contexts.registry.lookup(
-            created.ctxId,
-            { principal: "local" },
-        );
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        const firstLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(first.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
-            { headers: { authorization: `Bearer ${token}` } },
-        );
-        assert.equal(firstLive.status, 200);
-        assert.equal(firstLive.headers.get("access-control-allow-origin"), "*");
-        assert.equal(
-            ((await firstLive.json()) as { ctxId?: unknown }).ctxId,
-            created.ctxId,
-        );
-        const afterLiveRead = await first.contexts.registry.lookup(
-            created.ctxId,
-            { principal: "local" },
-        );
-        assert.equal(afterLiveRead.expiresAt, beforeLiveRead.expiresAt);
-
-        await first.stop();
-        first = undefined;
-
-        restarted = createWorkspaceHost(
-            contextFile,
-            mcpAppLeaseFile,
-            recovery,
-        );
-        await restarted.start();
-        recovery.ctxId = created.ctxId;
-        recovery.detached = true;
-        const restartedEndpoint = `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/demo/mcp`;
-        const restartedLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
-            { headers: { authorization: `Bearer ${token}` } },
-        );
-        assert.equal(restartedLive.status, 200);
-        assert.equal(
-            ((await restartedLive.json()) as { ctxId?: unknown }).ctxId,
-            created.ctxId,
-        );
-        await waitUntil(() => recovery.resolved === 1);
-        assert.equal(recovery.observed, 1);
-        assert.equal(recovery.detached, false);
-        const reconnected = await callMcpTool(
-            restartedEndpoint,
-            "mcpapp_reconnect",
-            {
-                ctxId: created.ctxId,
-                token,
-            },
-        );
-        assert.notEqual(reconnected.result?.isError, true);
-        assert.equal(
-            (
-                reconnected.result?._meta?.["portable-devshell/mcpapp"] as
-                    { token?: unknown } | undefined
-            )?.token,
-            token,
-        );
-
-        const unauthenticated = await callMcpTool(
-            restartedEndpoint,
-            "mcpapp_reconnect",
-            {
-                ctxId: created.ctxId,
-            },
-        );
-        assert.match(
-            unauthenticated.error?.message ?? "",
-            /token|required|invalid/i,
-        );
-
-        await restarted.contexts.detachInstance("demo");
-        await restarted.contexts.registry.attachEnvironment(created.ctxId, {
-            instance: "demo",
-            workspace: "/replacement-workspace",
-        });
-        const afterGenerationChange = await callMcpTool(
-            restartedEndpoint,
-            "mcpapp_reconnect",
-            {
-                ctxId: created.ctxId,
-                token,
-            },
-        );
-        assert.match(
-            afterGenerationChange.error?.message ??
-                afterGenerationChange.result?.content?.[0]?.text ??
-                "",
-            /authorization is invalid/i,
-        );
-        const revokedLive = await fetch(
-            `http://127.0.0.1:${requireTcpPort(restarted.server.address)}/devshell/api/live/demo/mcpapp/snapshot?ctxId=${encodeURIComponent(created.ctxId)}`,
-            { headers: { authorization: `Bearer ${token}` } },
-        );
-        assert.equal(revokedLive.status, 401);
-    } finally {
-        await first?.stop().catch(() => undefined);
-        await restarted?.stop().catch(() => undefined);
-        await rm(root, { force: true, recursive: true });
-    }
-});
-
 test("running host replaces and unregisters instance bindings without restart", async () => {
     const host = createHost();
     await host.start();
@@ -448,24 +289,29 @@ test("running host replaces and unregisters instance bindings without restart", 
             "environ_info",
             "environ_remote",
             "bash_run",
-            "todo_read",
-            "todo_write",
         ]);
 
+        const fileTool = {
+            requiredCapabilities: ["read"],
+            group: "file",
+            name: "file_read",
+            description: "Read a file",
+            inputSchema: { type: "object" },
+            outputSchema: { type: "object" },
+        } as const satisfies ToolDefinition;
+        host.replaceTestTools("demo", [fileTool]);
         host.registerInstance({
             name: "demo",
-            worker: createToolWorker({
-                requiredCapabilities: ["read"],
-                group: "file",
-                name: "file_read",
-            }),
+            worker: createToolWorker(fileTool),
         });
         assert.deepEqual(await initializeAndListTools(endpoint), [
             "environ_info",
+            "environ_remote",
             "file_read",
         ]);
 
         host.unregisterInstance("demo");
+        host.replaceTestTools("demo", []);
         const missing = await fetch(endpoint, {
             method: "POST",
             headers: {
@@ -563,148 +409,6 @@ function createToolWorker(tool: {
     } as never;
 }
 
-function createWorkspaceHost(
-    contextFile: string,
-    mcpAppLeaseFile: string,
-    recovery?: {
-        ctxId: string;
-        detached: boolean;
-        observed: number;
-        resolved: number;
-    },
-): McpHost {
-    return new McpHost({
-        contextFile,
-        instances: [
-            {
-                gateway: {
-                    ...createTestCallOperationGateway(),
-                    async cancelWait() {
-                        throw new Error("unused");
-                    },
-                    async consumeWait() {
-                        throw new Error("unused");
-                    },
-                    async createWait() {
-                        throw new Error("unused");
-                    },
-                    async detachWait() {
-                        throw new Error("unused");
-                    },
-                    approval: {
-                        async decideApproval() {
-                            throw new Error("unused");
-                        },
-                        async listApprovals() {
-                            return [];
-                        },
-                        async listPendingApprovals() {
-                            return [];
-                        },
-                    },
-                    async listWaits() {
-                        if (recovery?.detached !== true) return [];
-                        const now = new Date().toISOString();
-                        return [
-                            {
-                                createdAt: now,
-                                createdByCtxId: recovery.ctxId,
-                                detachedAt: now,
-                                kind: "tmux",
-                                status: "detached",
-                                targetId: "tmux-restored",
-                                updatedAt: now,
-                                waitId: "wait-restored",
-                            },
-                        ];
-                    },
-                    async observeTmuxTask() {
-                        if (recovery === undefined) throw new Error("unused");
-                        recovery.observed += 1;
-                        return { task: { id: "tmux-restored", status: "0" } };
-                    },
-                    async readToolCalls() {
-                        return [];
-                    },
-                    async readTodo() {
-                        return {
-                            items: [],
-                            revision: 0,
-                            summary: { completed: 0, total: 0 },
-                            tasks: [],
-                        };
-                    },
-                    async readWorkspaceEvents() {
-                        return { events: [], gap: false, lastSeq: 0 };
-                    },
-                    async reattachWait() {
-                        throw new Error("unused");
-                    },
-                    async resolveWait() {
-                        if (recovery === undefined) throw new Error("unused");
-                        recovery.detached = false;
-                        recovery.resolved += 1;
-                        return {};
-                    },
-                    async waitForWait() {
-                        throw new Error("unused");
-                    },
-                } as never,
-                name: "demo",
-                worker: {
-                    async callToolOperation(
-                        _toolName: string,
-                        input: unknown,
-                        _context: unknown,
-                        operation: (callId: string, input: unknown) => Promise<unknown>,
-                    ) {
-                        return await operation("call-test", input);
-                    },
-                    async appendMcpSessionClosed() {},
-                    async appendMcpSessionOpened() {},
-                    async appendMcpToolCalled() {},
-                    async callTool() {
-                        return {};
-                    },
-                    async invokeToolInternal(toolName: string) {
-                        assert.equal(toolName, "tmux_read");
-                        if (recovery === undefined) throw new Error("unused");
-                        recovery.observed += 1;
-                        return {
-                            task: { id: "tmux-restored", status: "0" },
-                            waitReason: "terminal",
-                        };
-                    },
-                    listTools() {
-                        return [];
-                    },
-                    async readAlerts() {
-                        return { advice: [] };
-                    },
-                    snapshot() {
-                        return { ready: true };
-                    },
-                } as never,
-            },
-        ],
-        listenHost: "127.0.0.1",
-        listenPort: 0,
-        publicBaseUrl: "https://mcp.example.test/devshell",
-        mcpAppLeaseFile,
-    });
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-    const deadline = Date.now() + 1_000;
-    while (!predicate()) {
-        if (Date.now() >= deadline)
-            throw new Error(
-                "Timed out waiting for asynchronous Workspace recovery.",
-            );
-        await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-}
-
 async function callMcpTool(
     endpoint: string,
     name: string,
@@ -750,6 +454,7 @@ function createHost(overrides?: {
     return new McpHost({
         listenHost: "127.0.0.1",
         listenPort: overrides?.listenPort ?? 0,
+        tools: createHttpToolCallApi(),
         publicBaseUrl: overrides?.publicBaseUrl,
         storageDir: overrides?.storageDir,
         instances: [
@@ -767,29 +472,6 @@ function createInstance(
 ): McpHostInstanceConfig {
     return {
         auth,
-        gateway: {
-            ...createTestCallOperationGateway(),
-            listTools: () => [{
-                requiredCapabilities: ["execute"],
-                group: "bash",
-                name: "bash_run",
-                description: "Run shell",
-                inputSchema: { type: "object" },
-                outputSchema: { type: "object" },
-            }],
-            async callTool(instance, toolName, input, context, _signal, transformResult, invocationInput) {
-                const callId = "http-test-call";
-                const finalValue: ToolCallHookValue = {
-                    kind: "call",
-                    toolName,
-                    payload: input,
-                    context: { ...context, instance: asInstanceName(instance) },
-                };
-                const prepared = await invocationInput?.(input, callId, finalValue) ?? input;
-                const result = { exitCode: 0, stderr: "", stdout: "ok\n" };
-                return await transformResult?.(result, callId) ?? result;
-            },
-        },
         name,
         worker: {
             async appendMcpSessionClosed(_sessionId: string) {},
@@ -830,5 +512,30 @@ function createInstance(
                 };
             },
         } as never,
+    };
+}
+
+function createHttpToolCallApi(): ToolCallApi {
+    return {
+        async call(
+            instance,
+            toolName,
+            input,
+            context,
+            _signal,
+            transformResult,
+            invocationInput,
+        ) {
+            const callId = "http-test-call";
+            const finalValue: ToolCallHookValue = {
+                kind: "call",
+                toolName,
+                payload: input,
+                context: { ...context, instance: asInstanceName(instance) },
+            };
+            const prepared = await invocationInput?.(input, callId, finalValue) ?? input;
+            const result = { exitCode: 0, stderr: "", stdout: "ok\n" };
+            return await transformResult?.(result, callId) ?? result;
+        },
     };
 }

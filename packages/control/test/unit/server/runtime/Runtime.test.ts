@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createServer as createNetServer } from "node:net";
 import test from "node:test";
 
 import {
@@ -12,11 +13,13 @@ import {
 import { ControlPathHome, Endpoint, LocalChannel, ServerSession, type JsonValue, createDefaultControlConfig, createEmptyMessagePreferences, createServerTransport, createToolTransport, type ControlConfig } from "@portable-devshell/shared";
 import { CONTROL_WEB_RPC_PATH, CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/testing";
 
-import { ControlRuntime } from "../../../../src/testing.ts";
+import { ControlRuntime, type ControlRuntimeOptions } from "../../../../src/server/runtime/Runtime.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { ExtensionPathLayout } from "../../../../src/extension/state/Layout.ts";
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
-import { ContextModule } from "../../../../src/context/Module.ts";
+import { ControlWebRuntime } from "../../../../src/server/web/Runtime.ts";
+import { createContextRuntime } from "@portable-devshell/core/context";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import {
     createTestIpcPath,
@@ -37,7 +40,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
         releaseArtifact = resolve;
     });
     let artifactStopping = false;
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
@@ -55,10 +58,6 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: () => undefined,
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -98,7 +97,7 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-start-rollback");
     const socketPath = createTestIpcPath("control-runtime-start", runtimeDir);
     const calls: string[] = [];
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -110,10 +109,6 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: undefined,
             async prepare() {},
             async start() {
                 calls.push("mcp.start");
@@ -146,64 +141,27 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
 });
 
 test("MCP runtime stop attempts both independent listener hosts", async (t) => {
-    const homeDirectory = await createTestTempDirectory("mcp-stop-all-hosts");
-    const config = createDefaultControlConfig();
-    config.mcp = {
-        ...config.mcp,
-        enabled: true,
-        listenPort: 18001,
-        publicBaseUrl: "http://127.0.0.1:18001",
-    };
-    config.web = {
-        ...config.web,
-        enabled: true,
-        listenPort: 18002,
-        publicBaseUrl: "http://127.0.0.1:18002",
-    };
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-            async write() {},
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
-    const mcp = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: new ControlPathHome(homeDirectory).contextsFile,
-            instances: state.instances,
-        }),
-        artifact: {
-            installHttpRoute() {},
-            service: undefined,
-            async stop() {},
-        } as never,
-        controlPaths: new ControlPathHome(homeDirectory),
-        state,
-    });
-    const mcpHost = mcp.host;
-    const webHost = mcp.webHost;
-    assert.notEqual(mcpHost, undefined);
-    assert.notEqual(webHost, undefined);
-    assert.notEqual(webHost, mcpHost?.server);
-    if (mcpHost === undefined || webHost === undefined)
-        throw new Error("expected independent MCP and Web hosts");
     const calls: string[] = [];
-    mcpHost.stop = async () => {
-        calls.push("mcp");
-        throw new Error("mcp host stop failed");
-    };
-    webHost.stop = async () => {
-        calls.push("web");
-        throw new Error("web host stop failed");
-    };
-    t.after(async () => {
-        await rm(homeDirectory, { force: true, recursive: true });
+    const runtimeDir = await createTestTempDirectory("runtime-stop-all-hosts");
+    const runtime = createControlRuntime({
+        socketPath: createTestIpcPath("control-runtime", runtimeDir),
+        mcp: {
+            async stop() {
+                calls.push("mcp");
+                throw new Error("mcp host stop failed");
+            },
+        } as never,
+        web: {
+            async stopHost() {
+                calls.push("web");
+                throw new Error("web host stop failed");
+            },
+        } as never,
     });
+    t.after(async () => await rm(runtimeDir, { force: true, recursive: true }));
 
-    await assert.rejects(mcp.stop(), (error: unknown) => {
+    await runtime.start();
+    await assert.rejects(runtime.stop(), (error: unknown) => {
         assert.ok(error instanceof AggregateError);
         assert.deepEqual(
             error.errors.map((entry) => (entry as Error).message),
@@ -228,7 +186,7 @@ test("runtime registers one Extension generation retirement handler", async (t) 
     const generationRetirements: Array<
         (instance: { name: string }) => Promise<void>
     > = [];
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -240,32 +198,30 @@ test("runtime registers one Extension generation retirement handler", async (t) 
                 lifecycle.push(`resources:${instance}`);
             },
         } as never,
+        instanceEditor: {
+            ...testInstanceEditor(),
+            registerInstanceDisableRetirement() {
+                disableRetirements += 1;
+                return () => undefined;
+            },
+            registerInstanceDeleteRetirement() {
+                deleteRetirements += 1;
+                return () => undefined;
+            },
+            registerInstanceGenerationRetirement(
+                listener: (instance: { name: string }) => Promise<void>,
+            ) {
+                generationRetirements.push(listener);
+                return () => undefined;
+            },
+        } as never,
         instances: {
             list: () => [],
             onChange: () => () => undefined,
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: {
-                registerInstanceDisableRetirement() {
-                    disableRetirements += 1;
-                    return () => undefined;
-                },
-                registerInstanceDeleteRetirement() {
-                    deleteRetirements += 1;
-                    return () => undefined;
-                },
-                registerInstanceGenerationRetirement(
-                    listener: (instance: { name: string }) => Promise<void>,
-                ) {
-                    generationRetirements.push(listener);
-                    return () => undefined;
-                },
-            },
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: undefined,
-            webEnabled: false,
+            setToolCalls() {},
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -299,39 +255,72 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     throw new Error("Timed out waiting for condition.");
 }
 
-function testConfigEditor() {
+function testInstanceEditor() {
     return {
-        registerInstanceDisabled() {
-            return () => undefined;
-        },
-        registerInstanceDisableRetirement() {
-            return () => undefined;
-        },
-        registerInstanceDeleted() {
-            return () => undefined;
-        },
-        registerInstanceDeleteRetirement() {
-            return () => undefined;
-        },
-        registerInstanceGenerationRetirement() {
-            return () => undefined;
-        },
+        registerInstanceDisabled() { return () => undefined; },
+        registerInstanceDisableRetirement() { return () => undefined; },
+        registerInstanceDeleted() { return () => undefined; },
+        registerInstanceDeleteRetirement() { return () => undefined; },
+        registerInstanceGenerationRetirement() { return () => undefined; },
+        async reconcileCleanupDebt() {},
     };
 }
 
 function testContexts(contextFile: string) {
-    return new ContextModule({
+    return createContextRuntime({
         contextFile,
-        instances: { get: () => undefined } as never,
+        instances: new InstanceRegistry([]),
     });
 }
 
-function testInstanceGateway() {
-    return {
-        bindToolCalls() {},
-        setExtensionService() {},
-        setModelCommandCatalog() {},
+function createControlRuntime(
+    overrides: Partial<ControlRuntimeOptions> & Pick<ControlRuntimeOptions, "socketPath">,
+): ControlRuntime {
+    const instances = new InstanceRegistry([]);
+    const endpoint = new Endpoint({ connectChannel: () => Promise.reject(new Error("Unexpected internal connection.")) as never });
+    const noOpEditor = testInstanceEditor();
+    const web = {
+        listener: undefined,
+        async prepare() {},
+        async startHost() {},
+        async stopHost() {},
+        stop() {},
+        async replace() {},
     };
+    const mcp = {
+        setToolCalls() {}, setWebConfigApplier() {}, setMcpConfigApplier() {},
+        host: undefined, async start() {}, async stop() {},
+        async replaceMcpHost() { return undefined; },
+        async restoreMcpHost() {}, status: () => ({ running: false }),
+    };
+    const options = {
+        artifact: { service: undefined, installHttpRoute() {}, async stop() {} } as never,
+        configChanges: new ConfigChangeHub(),
+        configEditor: noOpEditor as never,
+        contexts: testContexts(join(dirname(overrides.socketPath), "contexts.json")),
+        contextTransport: {} as never,
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
+        instanceCreate: {} as never,
+        instanceEditor: noOpEditor as never,
+        instanceChanges: { onChange: () => () => undefined } as never,
+        instanceRuntimes: { get: () => { throw new Error("Unexpected instance runtime lookup."); }, async close() {} } as never,
+        instances,
+        internalControl: { endpoint, server: { async hello() {} } as never },
+        restart: async () => undefined,
+        reverse: { service: undefined, install() {}, stop() {} } as never,
+        shutdown: async () => undefined,
+        ...overrides,
+        mcp: mergeOwner(mcp, overrides.mcp),
+        web: mergeOwner(web, overrides.web),
+    } as unknown as ControlRuntimeOptions;
+    return new ControlRuntime(options);
+}
+
+function mergeOwner<T extends object>(fallback: T, override: unknown): T {
+    if (override === undefined) return fallback;
+    if (Object.getPrototypeOf(override) !== Object.prototype) return override as T;
+    return { ...fallback, ...override };
 }
 
 function testExtensionSurface() {
@@ -369,11 +358,11 @@ function testExtensionPaths() {
     } as never;
 }
 
-test("runtime stop attempts every cleanup step after failures", async (t) => {
+test("runtime stop attempts every remaining cleanup after failures", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-failure");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
@@ -385,19 +374,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
                 throw new Error("artifact stop failed");
             },
         } as never,
-        instances: {
-            list: () => [],
-            onChange: () => () => undefined,
-            async stopOwned() {
-                calls.push("instances");
-                throw new Error("instance stop failed");
-            },
-        } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: () => undefined,
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -424,7 +401,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     await runtime.start();
     await assert.rejects(runtime.stop(), AggregateError);
 
-    assert.deepEqual(calls, ["mcp", "reverse", "artifact", "instances"]);
+    assert.deepEqual(calls, ["mcp", "reverse", "artifact"]);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
@@ -443,11 +420,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         },
     };
     const mcp = {
-        configEditor: testConfigEditor(),
         host: undefined,
-        instanceGateway: testInstanceGateway(),
-        instanceCreate: undefined,
-        oauthApprovals: undefined,
         async replaceMcpHost() {
             return retired;
         },
@@ -462,13 +435,12 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         ) {
             applyMcpConfig = apply;
         },
-        webEnabled: false,
         async prepare() {},
         async start() {},
         status: () => ({ running: false }),
         async stop() {},
     };
-    new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
@@ -485,7 +457,12 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         shutdown: async () => undefined,
         socketPath,
     });
-    t.after(async () => await rm(runtimeDir, { force: true, recursive: true }));
+    t.after(async () => {
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(runtimeDir, { force: true, recursive: true }),
+        );
+    });
     const previous = createDefaultControlConfig();
     const next = structuredClone(previous);
     next.mcp.publicBaseUrl = "https://new.example";
@@ -509,22 +486,7 @@ test("Web hot replacement preserves the original failure when host rollback also
         previous: ControlConfig,
         next: ControlConfig,
     ) => Promise<void>;
-    const http = {};
     const mcp = {
-        configEditor: testConfigEditor(),
-        instanceGateway: testInstanceGateway(),
-        instanceCreate: undefined,
-        oauthApprovals: undefined,
-        webAuth: { mode: "none" },
-        webEnabled: true,
-        webHost: http,
-        webPublicBaseUrl: "http://127.0.0.1",
-        async replaceWebHost() {
-            return http;
-        },
-        async restoreWebHost() {
-            throw new Error("web host rollback failed");
-        },
         setWebConfigApplier(
             apply: (
                 previous: ControlConfig,
@@ -533,13 +495,24 @@ test("Web hot replacement preserves the original failure when host rollback also
         ) {
             applyWebConfig = apply;
         },
-        async stopRetiredWebHost() {},
-        async prepare() {},
-        async start() {},
-        status: () => ({ running: false }),
         async stop() {},
     };
-    new ControlRuntime({
+    const web = {
+        listener: undefined,
+        async prepare() {},
+        async startHost() {},
+        async stopHost() {},
+        stop() {},
+        async replace() {
+            throw new AggregateError(
+                [
+                    new Error("web host was not started"),
+                    new Error("web host rollback failed"),
+                ],
+            );
+        },
+    };
+    const runtime = createControlRuntime({
         contexts: testContexts(
             join("/tmp", `runtime-context-${Date.now()}.json`),
         ),
@@ -553,12 +526,18 @@ test("Web hot replacement preserves the original failure when host rollback also
             async stopOwned() {},
         } as never,
         mcp: mcp as never,
+        web: web as never,
         restart: async () => undefined,
         reverse: { service: undefined, stop() {} } as never,
         shutdown: async () => undefined,
         socketPath,
     });
-    t.after(async () => await rm(runtimeDir, { force: true, recursive: true }));
+    t.after(async () => {
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(runtimeDir, { force: true, recursive: true }),
+        );
+    });
     const previous = createDefaultControlConfig();
     previous.web.enabled = true;
     const next = structuredClone(previous);
@@ -585,6 +564,11 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
     const staticRoutes: Array<{ directory: string; path: string }> = [];
     const upgradeRoutes: string[] = [];
     const upgradePrefixes: string[] = [];
+    const config = createDefaultControlConfig();
+    config.mcp.enabled = true;
+    config.mcp.publicBaseUrl = "https://devshell.example";
+    config.web.enabled = true;
+    config.web.publicBaseUrl = "https://devshell.example";
     const http = {
         registerAuthenticatedRawRoute(method: string, path: string) {
             authenticatedRoutes.push({ method, path });
@@ -611,7 +595,20 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             return () => undefined;
         },
     };
-    const runtime = new ControlRuntime({
+    const mcp = {
+        host: { server: http },
+        oauthApproval: config.mcp.oauth2,
+        publicBaseUrl: config.mcp.publicBaseUrl,
+    };
+    const web = new ControlWebRuntime({
+        config,
+        extensions: testExtensions(),
+        mcp: mcp as never,
+        oauthDirectory: join(runtimeDir, "oauth"),
+        paths: testExtensionPaths(),
+    });
+    const runtime = createControlRuntime({
+        config: () => config,
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
@@ -626,19 +623,11 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: undefined,
-            webAuth: { mode: "none" },
-            webHost: http,
-            webPublicBaseUrl: "https://devshell.example",
-            webEnabled: true,
-            async prepare() {},
-            async start() {},
-            status: () => ({ running: true }),
-            async stop() {},
+            host: mcp.host,
+            oauthApproval: config.mcp.oauth2,
+            publicBaseUrl: config.mcp.publicBaseUrl,
         } as never,
+        web,
         restart: async () => undefined,
         reverse: {
             service: undefined,
@@ -676,7 +665,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
 test("runtime does not mount WebUI routes when web.enabled is false", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         extensionPaths: testExtensionPaths(),
@@ -688,7 +677,6 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
             host: {
                 server: new Proxy(
                     {},
@@ -701,11 +689,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
                     },
                 ),
             },
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: undefined,
             publicBaseUrl: "http://127.0.0.1:17890",
-            webEnabled: false,
             async prepare() {},
             async start() {},
             status: () => ({ running: true }),
@@ -729,9 +713,10 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
 test("failed OAuth Web hot replacement restores the previous listener and OAuth routes", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-web-rollback");
     const socketPath = createTestIpcPath("control-runtime", homeDirectory);
-    const proxy = await startLoopbackHttpProxy();
-    const origin = proxy.origin;
-    let persisted = createDefaultControlConfig();
+    const port = await reserveTcpPort();
+    const origin = `http://127.0.0.1:${port}`;
+    const persisted = createDefaultControlConfig();
+    persisted.mcp.enabled = false;
     persisted.web = {
         auth: {
             mode: "oauth2",
@@ -739,84 +724,80 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         },
         enabled: true,
         listenHost: "127.0.0.1",
-        listenPort: 0,
+        listenPort: port,
         publicBaseUrl: origin,
     };
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return persisted;
-            },
-            async write(config: ControlConfig) {
-                persisted = config;
-            },
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
     const controlPaths = new ControlPathHome(homeDirectory);
     const artifact = {
         installHttpRoute() {},
         service: undefined,
         async stop() {},
     } as never;
+    const instances = new InstanceRegistry([]);
     const mcp = new McpControlModule({
-        contexts: new ContextModule({
-            contextFile: controlPaths.contextsFile,
-            instances: state.instances,
-        }),
         artifact,
+        config: persisted,
+        contextTransport: {} as never,
         controlPaths,
-        state,
+        instances,
     });
-    const runtime = new ControlRuntime({
-        contexts: new ContextModule({
+    const web = new ControlWebRuntime({
+        config: persisted,
+        extensions: testExtensions(),
+        mcp,
+        oauthDirectory: controlPaths.oauthDir,
+        paths: testExtensionPaths(),
+    });
+    const runtime = createControlRuntime({
+        config: () => persisted,
+        configChanges: new ConfigChangeHub(),
+        contexts: createContextRuntime({
             contextFile: controlPaths.contextsFile,
-            instances: state.instances,
+            instances,
         }),
-        configChanges: state.configChanges,
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
-        instances: state.instances,
+        instances,
         mcp,
+        web,
         restart: async () => undefined,
         reverse: { service: undefined, stop() {} } as never,
         shutdown: async () => undefined,
         socketPath,
     });
     t.after(async () => {
-        try {
-            await runtime.stop();
-            await rm(homeDirectory, { force: true, recursive: true });
-        } finally {
-            await proxy.close();
-        }
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
     });
 
     await runtime.start();
-    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(mcp.webHost?.address)}`);
     const initialMetadata = await requestHttp(
         origin,
         "/.well-known/oauth-protected-resource/web",
     );
     assert.equal(initialMetadata.status, 200);
 
-    const oauthStorage = mcp.webOauthDir;
+    const oauthStorage = controlPaths.oauthDir;
     const oauthBackup = `${oauthStorage}.backup`;
     await rename(oauthStorage, oauthBackup);
     await writeFile(oauthStorage, "block replacement warmup", "utf8");
 
+    const next = structuredClone(persisted);
+    next.web.auth = {
+        mode: "oauth2",
+        oauth2: { requiredScopes: ["web"], resourceName: "web-after" },
+    };
     await assert.rejects(
-        mcp.configEditor.updateWebConfig({
-            patch: {
-                auth: "oauth2",
-                oauth2: { requiredScopes: ["web"], resourceName: "web-after" },
-            },
+        mcp.applyRuntimeConfig(persisted, next, {
+            instanceAuth: false,
+            mcp: false,
+            web: true,
         }),
         /EEXIST|ENOTDIR|not a directory/iu,
     );
-    proxy.setTarget(`http://127.0.0.1:${requireTcpPort(mcp.webHost?.address)}`);
 
     assert.equal(persisted.web.auth.mode, "oauth2");
     if (persisted.web.auth.mode !== "oauth2")
@@ -865,7 +846,23 @@ async function requestHttp(
     });
 }
 
-test("runtime installs builtin Extensions through the normal installer before opening the Control channel", async (t) => {
+async function reserveTcpPort(): Promise<number> {
+    const server = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(typeof address === "object" && address !== null);
+    await new Promise<void>((resolve, reject) =>
+        server.close((error) =>
+            error === undefined ? resolve() : reject(error),
+        ),
+    );
+    return address.port;
+}
+
+test("runtime installs builtin Extensions through the normal installer after opening the Control channel", async (t) => {
     const root = await createTestTempDirectory("runtime-builtin-extension");
     const socketPath = createTestIpcPath("control-runtime-builtin", root);
     const source = join(root, "builtin-source");
@@ -904,7 +901,7 @@ test("runtime installs builtin Extensions through the normal installer before op
             assert.equal(id, "skill");
             assert.equal(
                 await ipcEndpointAcceptsConnections(socketPath),
-                false,
+                true,
             );
             selectedGeneration = generation;
         },
@@ -938,7 +935,7 @@ test("runtime installs builtin Extensions through the normal installer before op
         async stop() {},
         async waitForDrain() {},
     } as never;
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: {
@@ -954,10 +951,6 @@ test("runtime installs builtin Extensions through the normal installer before op
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: () => undefined,
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -990,7 +983,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     );
     const source = join(root, "invalid-builtin");
     await mkdir(source, { recursive: true });
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -1030,10 +1023,6 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             async stopOwned() {},
         } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: () => undefined,
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -1097,8 +1086,8 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         listDeclarations(pointId: string) {
             return [
                 {
-                    declaration: { hook: "500-guard", id: "guard" },
-                    id: pointId === "toolcall.review" ? "guard" : "rewrite",
+                    declaration: { hook: "500-guard", id: "guard_hook" },
+                    id: pointId === "toolcall.review" ? "guard_hook" : "rewrite_hook",
                 },
             ];
         },
@@ -1155,7 +1144,7 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         },
         async stopOwned() {},
     };
-    const runtime = new ControlRuntime({
+    const runtime = createControlRuntime({
         contexts: testContexts(
             join("/tmp", `runtime-context-${Date.now()}.json`),
         ),
@@ -1164,12 +1153,24 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,
         instances: instances as never,
+        instanceRuntimes: {
+            get(descriptor: { worker: { toolCallTarget(): unknown } }) {
+                return {
+                    approval: { api: {} },
+                    task: { api: { goal: {}, todo: {} } },
+                    terminal: { api: {} },
+                    tools: {
+                        async listTools() { return []; },
+                        async readToolCalls() { return []; },
+                    },
+                    target: () => descriptor.worker.toolCallTarget(),
+                    async openToolSession() { throw new Error("Unexpected workspace session."); },
+                    async releaseToolSession() {},
+                };
+            },
+            async close() {},
+        } as never,
         mcp: {
-            configEditor: testConfigEditor(),
-            instanceGateway: testInstanceGateway(),
-            instanceCreate: undefined,
-            oauthApprovals: undefined,
-            webEnabled: false,
             async prepare() {},
             async start() {},
             status: () => ({ running: false }),
@@ -1197,10 +1198,8 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     const tools = createToolTransport(endpoint);
     t.after(() => service.close());
     await service.connect();
-    assert.deepEqual(
-        await tools.call("nonexistent", "file_read", {}, "/workspace"),
-        { instance: "existing" },
-    );
+    const first = await tools.call("nonexistent", "file_read", {}, "/workspace");
+    assert.deepEqual(first, { instance: "existing" });
     assert.deepEqual(events, [
         "review:nonexistent",
         "rewrite:nonexistent",

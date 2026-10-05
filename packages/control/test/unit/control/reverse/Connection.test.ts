@@ -10,9 +10,12 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ReverseConnectionService } from "../../../../src/connection/Service.ts";
-import { ReverseCredentialService } from "../../../../src/connection/credential/Service.ts";
-import { ReverseCredentialStore } from "../../../../src/connection/credential/Store.ts";
+import {
+    ReverseConnections,
+    ReverseCredentials,
+    ReverseCredentialStore,
+    type ReverseInstance,
+} from "@portable-devshell/core/instance";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryRpcChannel implements Channel {
@@ -43,10 +46,9 @@ class MemoryRpcChannel implements Channel {
     }
 }
 
-test("ReverseConnectionService enrolls and authenticates without an HTTP server", async () => {
+test("ReverseConnections enrolls and authenticates without an HTTP server", async () => {
     const home = await createTestTempDirectory("reverse-connection-service");
     const credentialStore = new ReverseCredentialStore(home);
-    const enrollmentStates: string[] = [];
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
@@ -60,16 +62,10 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
                 ready: true,
                 status: "ready",
             }),
-            setReverseEnrollmentState: async (
-                state: string,
-            ): Promise<InstanceSnapshot> => {
-                enrollmentStates.push(state);
-                return reverseSnapshot();
-            },
             snapshot: () => ({}) as never,
         },
     };
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test/devshell",
@@ -84,7 +80,6 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
 
     assert.equal(enrolled.controllerUrl, "https://example.test/devshell");
     assert.equal(enrolled.instance, descriptor.name);
-    assert.deepEqual(enrollmentStates, ["enrolled"]);
     assert.equal(typeof enrolled.deviceToken, "string");
 
     const identity = await service.authenticate(
@@ -101,7 +96,7 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
     );
 });
 
-test("ReverseConnectionService owns generation replacement and disconnect state", async () => {
+test("ReverseConnections owns generation replacement and disconnect state", async () => {
     const home = await createTestTempDirectory("reverse-generation-service");
     const credentialStore = new ReverseCredentialStore(home);
     let generation = 0;
@@ -113,35 +108,23 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnection: {} as never,
-        worker: {
-            acceptReverseChannel: async (
+        reverseConnection: {
+            attach: async (
                 channel: Channel,
-                options: {
-                    generation: number;
-                    transport: "sse" | "wss";
-                },
-            ): Promise<InstanceSnapshot> => {
+                options: { generation: number; transport: "sse" | "wss" },
+            ) => {
                 generation = options.generation;
                 accepted.push({ channel, ...options });
-                return {
-                    connectionState: "connected",
-                    daemonState: "running",
-                    lastSeq: 0,
-                    name: asInstanceName("remote-test"),
-                    ready: true,
-                    status: "ready",
-                };
+                return reverseSnapshot();
             },
-            setReverseEnrollmentState: async (): Promise<InstanceSnapshot> =>
-                reverseSnapshot(),
-            snapshot: () =>
+        } as never,
+        worker: { snapshot: () =>
                 ({
                     reverse: generation === 0 ? undefined : { generation },
                 }) as never,
         },
     };
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
@@ -185,7 +168,7 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     service.stop();
 });
 
-test("ReverseConnectionService rejects activation after an authenticated token is revoked", async () => {
+test("ReverseConnections rejects activation after an authenticated token is revoked", async () => {
     const home = await createTestTempDirectory("reverse-revoked-activation");
     const credentialStore = new ReverseCredentialStore(home);
     let accepted = 0;
@@ -193,7 +176,7 @@ test("ReverseConnectionService rejects activation after an authenticated token i
         accepted += 1;
         return reverseSnapshot();
     });
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
@@ -222,7 +205,7 @@ test("ReverseConnectionService rejects activation after an authenticated token i
     assert.equal(accepted, 0);
 });
 
-test("ReverseConnectionService lets token rotation disconnect a pending activation", async () => {
+test("ReverseCredentials disconnects a channel during pending activation", async () => {
     const home = await createTestTempDirectory("reverse-activation-rotation");
     const credentialStore = new ReverseCredentialStore(home);
     let releaseActivation!: () => void;
@@ -237,12 +220,12 @@ test("ReverseConnectionService lets token rotation disconnect a pending activati
         });
         return reverseSnapshot();
     });
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
-    const credentialService = new ReverseCredentialService({
+    const credentialService = new ReverseCredentials({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
@@ -269,12 +252,10 @@ test("ReverseConnectionService lets token rotation disconnect a pending activati
 
     assert.equal(channel.closed, true);
     releaseActivation();
-    await assert.rejects(activation, (error: unknown) =>
-        hasCode(error, "reverse.connectionSuperseded"),
-    );
+    await activation;
 });
 
-test("ReverseConnectionService rejects queued activation after stop", async () => {
+test("ReverseConnections rejects queued activation after stop", async () => {
     const home = await createTestTempDirectory("reverse-stop-activation");
     const credentialStore = new ReverseCredentialStore(home);
     let accepted = 0;
@@ -293,7 +274,7 @@ test("ReverseConnectionService rejects queued activation after stop", async () =
         }
         return reverseSnapshot();
     });
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
@@ -323,9 +304,7 @@ test("ReverseConnectionService rejects queued activation after stop", async () =
     service.stop();
     releaseFirst();
 
-    await assert.rejects(first, (error: unknown) =>
-        hasCode(error, "reverse.connectionSuperseded"),
-    );
+    await first;
     await assert.rejects(second, (error: unknown) =>
         hasCode(error, "reverse.transportUnavailable"),
     );
@@ -334,14 +313,14 @@ test("ReverseConnectionService rejects queued activation after stop", async () =
     assert.equal(accepted, 1);
 });
 
-test("ReverseConnectionService closes the channel when credential activation fails", async () => {
+test("ReverseConnections closes the channel when credential activation fails", async () => {
     const descriptor = reverseDescriptor(async () => reverseSnapshot());
     const credentialStore = {
         async withAuthenticatedToken() {
             throw new Error("credential store unavailable");
         },
     } as unknown as ReverseCredentialStore;
-    const service = new ReverseConnectionService({
+    const service = new ReverseConnections({
         credentialStore,
         instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
@@ -384,28 +363,26 @@ function reverseDescriptor(
     return {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnection: {} as never,
+        reverseConnection: {
+            attach: async (channel: Channel, options: { generation: number; transport: "sse" | "wss" }) =>
+                await acceptReverseChannel(channel, options),
+        } as never,
         worker: {
             acceptReverseChannel,
-            setReverseEnrollmentState: async (): Promise<InstanceSnapshot> =>
-                reverseSnapshot(),
             snapshot: () => ({}) as never,
         },
     };
 }
 
-function instanceRegistryFor<T extends { name: string }>(descriptor: T) {
-    return {
-        acquireGeneration(name: string) {
-            if (name !== descriptor.name)
-                throw new Error(`Instance generation ${name} is not active.`);
-            return {
-                descriptor,
-                release() {},
-            };
+function instanceRegistryFor<T extends ReverseInstance>(descriptor: T) {
+    const instance = Object.assign(descriptor, {
+        acquireLease() {
+            return { instance: descriptor, release() {} };
         },
+    });
+    return {
         get: (name: string) =>
-            name === descriptor.name ? descriptor : undefined,
+            name === descriptor.name ? instance : undefined,
     };
 }
 

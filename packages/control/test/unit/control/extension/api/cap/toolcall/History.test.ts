@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../../../src/extension/api/cap/toolcall/History.ts";
-import { Instance, InstanceRegistry } from "@portable-devshell/core";
+import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import { asInstanceName } from "@portable-devshell/shared";
 
 test("ToolCall history capability is read-only, typed, bounded, and provenance-decorated", async () => {

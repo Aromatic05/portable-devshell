@@ -14,7 +14,7 @@ import {
     sourceTypeFromPayload,
     validateTransferStart,
 } from "../../../../src/artifact/Source.ts";
-import { ReverseCredentialService } from "../../../../src/connection/credential/Service.ts";
+import { ReverseCredentials } from "@portable-devshell/core/instance";
 
 test("artifact source helpers preserve handle and path variants", () => {
     assert.deepEqual(
@@ -158,7 +158,7 @@ test("artifact source instance resolution and descriptors retain authority and s
 
 test("reverse credential service validates instance existence and provider before touching credentials", async () => {
     const calls: string[] = [];
-    const service = new ReverseCredentialService({
+    const service = new ReverseCredentials({
         credentialStore: credentialStore(calls),
         instanceRegistry: {
             get(instance: string) {
@@ -200,19 +200,14 @@ test("reverse credential service validates instance existence and provider befor
     assert.deepEqual(calls, []);
 });
 
-test("reverse credential service coordinates enrollment, rotation, revocation, and disconnect ordering", async () => {
+test("reverse credentials coordinate enrollment, rotation, revocation, and disconnect ordering", async () => {
     const calls: string[] = [];
-    const worker = {
-        async setReverseEnrollmentState(state: string) {
-            calls.push(`worker:${state}`);
-        },
-    };
-    const service = new ReverseCredentialService({
+    const service = new ReverseCredentials({
         credentialStore: credentialStore(calls),
         instanceRegistry: {
             get(instance: string) {
                 return instance === "reverse-one"
-                    ? { provider: "reverse", worker }
+                    ? { provider: "reverse" }
                     : undefined;
             },
         } as never,
@@ -239,15 +234,12 @@ test("reverse credential service coordinates enrollment, rotation, revocation, a
     await service.retireInstance("reverse-one");
     assert.deepEqual(calls, [
         "store:create:reverse-one",
-        "worker:pending",
         "store:rotate:reverse-one",
         "disconnect:reverse-one",
         "store:revoke:reverse-one",
         "disconnect:reverse-one",
-        "worker:revoked",
         "store:retire:reverse-one",
         "disconnect:reverse-one",
-        "worker:revoked",
     ]);
 });
 

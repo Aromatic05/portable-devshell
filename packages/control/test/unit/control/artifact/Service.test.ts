@@ -9,11 +9,7 @@ import type {
     JsonValue,
     MessageStream,
 } from "@portable-devshell/shared";
-import {
-    ArtifactService,
-    type ArtifactServiceEndpoint,
-    type ArtifactServiceSchedule,
-} from "@portable-devshell/control/testing";
+import { ArtifactService, type ArtifactServiceEndpoint, type ArtifactServiceSchedule } from "../../../../src/artifact/Service.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const png = Buffer.from(

@@ -6,10 +6,8 @@ import test from "node:test";
 import { asInstanceName } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import { AuditDatabase } from "../../../../src/audit/database/index.ts";
-import {
-    type InstanceLogEntry,
-    LogStoreInstance,
-} from "../../../../src/audit/log/index.ts";
+import type { InstanceLogEntry } from "../../../../src/audit/Api.ts";
+import { LogStoreInstance } from "../../../../src/audit/log/index.ts";
 import { WorkerInstanceToolLog } from "../../../../src/toolcall/execution/record/Log.ts";
 
 test("WorkerInstanceToolLog chunks large streams without changing their content", async () => {

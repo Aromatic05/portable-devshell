@@ -12,10 +12,8 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import type { ArtifactPayloadDescriptor } from "@portable-devshell/shared";
-import {
-    ArtifactHostBridge,
-    type ArtifactHostAccessContext,
-} from "@portable-devshell/control/testing";
+import { ArtifactHostBridge } from "../../../../src/artifact/host/Bridge.ts";
+import { type ArtifactHostAccessContext } from "../../../../src/artifact/host/Model.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 function context(
@@ -289,7 +287,7 @@ test("artifact service routes hidden host source and target with the real author
     const authority = context();
     const authorities: Array<string | undefined> = [];
     const { ArtifactService } =
-        await import("@portable-devshell/control/testing");
+        await import("../../../../src/artifact/Service.ts");
     const service = new ArtifactService({
         resolveEndpoint: (name, authorityInstance) => {
             authorities.push(authorityInstance);

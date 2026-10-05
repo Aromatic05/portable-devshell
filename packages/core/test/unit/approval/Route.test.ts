@@ -8,7 +8,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { createApprovalRouteModule } from "../../../src/approval/transport/index.ts";
-import type { InstanceEventSource } from "../../../src/instance/runtime/supervision/Event.ts";
+import type { InstanceEventSource } from "@portable-devshell/core/instance";
 
 function eventSource(lastSeq = 7): InstanceEventSource {
     return {

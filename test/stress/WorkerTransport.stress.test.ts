@@ -4,13 +4,11 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import test from "node:test";
 
-import {
-    WorkerBinary,
-    WorkerInstanceFactory,
-    WorkerTransportConnection,
-    WorkerTransportDriverLocal,
-    WorkerTransportServiceClient,
-} from "@portable-devshell/core/testing";
+import { WorkerBinary } from "../../packages/core/src/instance/runtime/Binary.ts";
+import { LocalExecution } from "../../packages/core/src/instance/runtime/execution/provider/Local.ts";
+import { TransportConnection } from "../../packages/core/src/instance/transport/endpoint/Connection.ts";
+import { WorkerTunnel } from "../../packages/core/src/instance/transport/packet/Tunnel.ts";
+import { createTestWorkerInstance } from "../../packages/core/test/support/WorkerInstance.ts";
 import { Endpoint, asInstanceName, type MessageStream } from "@portable-devshell/shared";
 
 import { resolveTestWorkerBinary } from "../TestPlatformSupport.ts";
@@ -56,16 +54,16 @@ test("stress: real Rust Worker keeps multiplexed TCP and process streams stable"
         USERPROFILE: homeDirectory,
         XDG_RUNTIME_DIR: runtimeDirectory,
     };
-    const transport = new WorkerTransportDriverLocal({
+    const transport = new LocalExecution({
         workerBinary: new WorkerBinary(workerBinaryPath),
     });
     const options = { env, instanceName };
-    const connection = WorkerTransportConnection.fromTransport(transport, options);
+    const connection = new TransportConnection(() => transport.connectChannel(options));
     const endpoint = new Endpoint({
         host: instanceName,
         connectChannel: (signal) => connection.connect(signal),
     });
-    const services = new WorkerTransportServiceClient(
+    const services = new WorkerTunnel(
         endpoint,
         `${instanceName}-worker`,
     );
@@ -127,7 +125,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     const source = payload(32 * 1024 * 1024, 4242);
     await writeFile(`${workspace}/source.bin`, source);
 
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         env: {
             ...process.env,
             HOME: homeDirectory,
@@ -136,9 +134,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
         },
         homeDirectory,
         name: instanceName,
-        transport: new WorkerTransportDriverLocal({
-            workerBinary: new WorkerBinary(workerBinaryPath),
-        }),
+        workerBinaryPath,
     });
     t.after(async () => {
         await instance.stop().catch(() => undefined);

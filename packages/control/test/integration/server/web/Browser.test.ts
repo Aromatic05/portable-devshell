@@ -424,7 +424,7 @@ function createRouteHosts(calls: {
             host: "@control",
             ports: [
                 {
-                    name: "service",
+                    name: "server",
                     operations: [
                         {
                             name: "hello",

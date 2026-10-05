@@ -19,9 +19,8 @@ import { ExtensionHost } from "../../../src/extension/host/Host.ts";
 import { ExtensionInstallService } from "../../../src/extension/install/Service.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
-import type { InstanceDescriptor } from "@portable-devshell/core";
-import { InstanceRegistry } from "@portable-devshell/core";
-import { ToolCallProvenanceStore } from "@portable-devshell/core";
+import { Instance, InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";
+import { createToolCallProvenanceRuntime } from "@portable-devshell/core/toolcall";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const RECALL_SOURCE = fileURLToPath(
@@ -39,7 +38,7 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
     const audit = database.toolCallStore({
         timestamp: (record) => record.completedAt ?? record.startedAt,
     });
-    const provenance = new ToolCallProvenanceStore(
+    const provenance = createToolCallProvenanceRuntime(
         join(root, "tool-call-provenance.jsonl"),
         {
             now: () => now,
@@ -72,17 +71,16 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
         purpose: "Inspect Recall implementation",
     });
 
-    const instances = new InstanceRegistry([
-        {
-            enabled: true,
-            name: instanceName,
-            worker: {
-                async readToolCalls(query: ToolCallQuery) {
-                    return await audit.readQuery(query);
-                },
-            },
-        } as unknown as InstanceDescriptor,
-    ]);
+    const instance = new Instance({
+        enabled: true,
+        mcpEnabled: false,
+        mcpPath: "/alpha/mcp",
+        modelExtensions: [],
+        name: instanceName,
+        provider: "local",
+        worker: { snapshot: () => ({ ready: false }) } as unknown as WorkerInstance,
+    });
+    const instances = new InstanceRegistry([instance]);
     const paths = new ExtensionPathLayout({
         dataHome: join(root, "data"),
         homeDirectory: join(root, "home"),
@@ -97,6 +95,7 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
                     listContexts: async () => [],
                 }),
             instances,
+            readToolCalls: async (_name, query) => await audit.readQuery(query ?? {}),
             paths,
             points: createControlExtensionPointRegistry(),
             toolCallDecorator: provenance,

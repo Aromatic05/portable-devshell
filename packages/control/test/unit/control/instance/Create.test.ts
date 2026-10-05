@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry } from "@portable-devshell/core";
+import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
