@@ -51,16 +51,8 @@ function installTestWatchdog() {
 
 const workspacePackages = new Map([
     [
-        "@portable-devshell/core/audit",
-        new URL("../src/audit/Public.ts", import.meta.url).href,
-    ],
-    [
-        "@portable-devshell/core/approval",
-        new URL("../src/approval/Public.ts", import.meta.url).href,
-    ],
-    [
-        "@portable-devshell/core/toolcall",
-        new URL("../src/toolcall/Public.ts", import.meta.url).href,
+        "@portable-devshell/core",
+        new URL("../src/index.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/core/context",
@@ -76,7 +68,7 @@ const workspacePackages = new Map([
     ],
     [
         "@portable-devshell/core/instance",
-        new URL("../src/instance/Public.ts", import.meta.url).href,
+        new URL("../src/instance/index.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/mcp/tool",
