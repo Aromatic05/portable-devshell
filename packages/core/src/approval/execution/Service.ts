@@ -3,7 +3,6 @@ import {
     createRemoteError,
     runtimeErrorCodes,
     type ApprovalDecision,
-    type ApprovalDecisionBy,
     type ApprovalEventType,
     type ApprovalRequest,
     type ApprovalTimeout,
@@ -12,10 +11,12 @@ import {
 } from "@portable-devshell/shared";
 import type { ApprovalPolicy } from "@portable-devshell/shared/config";
 import type {
+    ApprovalApi,
+    ApprovalDecisionInput,
     ApprovalEvaluation,
     ApprovalEvaluationInput,
     ApprovalResolution,
-} from "./Api.js";
+} from "../Api.js";
 
 type ApprovalPolicyDecision = Exclude<ApprovalPolicy["mode"], "disabled">;
 
@@ -67,7 +68,7 @@ interface PendingApproval {
     removeAbortListener?: () => void;
 }
 
-export class ApprovalService {
+export class ApprovalService implements ApprovalApi {
     readonly #instance: InstanceName;
     readonly #store: ApprovalStorePort;
     readonly #events: ApprovalEventPort;
@@ -209,13 +210,7 @@ export class ApprovalService {
 
     async decideApproval(
         approvalId: string,
-        input: {
-            decision: "approve" | "deny";
-            decidedBy: ApprovalDecisionBy;
-            policyPatch?: JsonValue;
-            reason?: string;
-            remember?: boolean;
-        },
+        input: ApprovalDecisionInput,
     ): Promise<ApprovalRequest> {
         await this.#ensureReady();
         return this.#exclusive(async () => {

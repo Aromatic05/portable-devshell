@@ -12,7 +12,7 @@ import {
     ApprovalService,
     type ApprovalStorePort,
     type ApprovalEventPort,
-} from "../../../src/approval/Service.ts";
+} from "../../../src/approval/execution/Service.ts";
 
 class MemoryStore implements ApprovalStorePort {
     readonly records = new Map<string, ApprovalRequest>();

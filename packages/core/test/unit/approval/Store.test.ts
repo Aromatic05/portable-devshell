@@ -1,19 +1,62 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { ApprovalService } from "../../../src/approval/Service.ts";
+import { ApprovalService } from "../../../src/approval/execution/Service.ts";
 import { InstanceApprovalStore } from "../../../src/approval/Store.ts";
+import { createInstanceApprovalService } from "../../../src/approval/Factory.ts";
+
+test("approval factory uses SQLite without importing or deleting legacy approvals", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "approval-factory-"));
+    const legacyPath = join(directory, "approvals.jsonl");
+    const legacyRecord = JSON.stringify({
+        approvalId: "legacy-approval",
+        callId: "legacy-call",
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        inputSummary: "{}",
+        instance: "dev",
+        reason: "approval required",
+        riskLevel: "medium",
+        source: "cli",
+        status: "pending",
+        toolName: "shell",
+    }) + "\n";
+    await writeFile(legacyPath, legacyRecord);
+    const service = createInstanceApprovalService({
+        appendEvent: async () => {},
+        instanceName: asInstanceName("dev"),
+        paths: { auditDatabaseFile: join(directory, "audit.sqlite3") },
+        policy: { mode: "ask" },
+    });
+    t.after(async () => {
+        service.close();
+        await rm(directory, { force: true, recursive: true });
+    });
+
+    assert.deepEqual(await service.listApprovals(), []);
+    const evaluation = await service.evaluate({
+        callId: "database-call",
+        source: "cli",
+        inputSummary: "{}",
+        toolName: "shell",
+    });
+    assert.equal(evaluation.decision, "ask");
+    assert.deepEqual(
+        (await service.listApprovals()).map((request) => request.callId),
+        ["database-call"],
+    );
+    assert.equal(await readFile(legacyPath, "utf8"), legacyRecord);
+});
 
 test("instance approval store persists the latest approval record", async () => {
     const directory = await mkdtemp(join(tmpdir(), "approval-store-"));
     const databasePath = join(directory, "audit.sqlite3");
-    const legacyPath = join(directory, "approvals.jsonl");
-    const store = new InstanceApprovalStore(databasePath, legacyPath);
+    const store = new InstanceApprovalStore(databasePath);
     const service = new ApprovalService({
         events: { append: async () => {} },
         instanceName: asInstanceName("dev"),
@@ -31,7 +74,7 @@ test("instance approval store persists the latest approval record", async () => 
         });
         service.close();
 
-        const reopened = new InstanceApprovalStore(databasePath, legacyPath);
+        const reopened = new InstanceApprovalStore(databasePath);
         try {
             assert.equal(
                 (await reopened.get("persisted-approval"))?.status,
@@ -59,8 +102,7 @@ test("instance approval store persists the latest approval record", async () => 
 test("instance approval store upserts by approval id and keeps latest state after reopen", async () => {
     const directory = await mkdtemp(join(tmpdir(), "approval-store-upsert-"));
     const databasePath = join(directory, "audit.sqlite3");
-    const legacyPath = join(directory, "approvals.jsonl");
-    const store = new InstanceApprovalStore(databasePath, legacyPath);
+    const store = new InstanceApprovalStore(databasePath);
     const pending = {
         approvalId: "approval-1",
         callId: "call-1",
@@ -101,7 +143,7 @@ test("instance approval store upserts by approval id and keeps latest state afte
         });
         store.close();
 
-        const reopened = new InstanceApprovalStore(databasePath, legacyPath);
+        const reopened = new InstanceApprovalStore(databasePath);
         try {
             assert.equal(
                 (await reopened.get("approval-1"))?.status,

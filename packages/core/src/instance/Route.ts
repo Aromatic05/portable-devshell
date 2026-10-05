@@ -12,7 +12,7 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { createApprovalRouteModule } from "../approval/Route.js";
+import { createApprovalRouteModule } from "../approval/transport/Route.js";
 import { createMessageRouteModule } from "../message/Route.js";
 import { requirePort, routeModule } from "../Port.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";

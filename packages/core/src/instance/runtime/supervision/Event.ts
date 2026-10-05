@@ -1,7 +1,5 @@
 import {
     STREAM_GAP_CODE,
-    type ApprovalDecision,
-    type ApprovalRequest,
     type InstanceEventRecord,
     type InstanceName,
     type InstanceSnapshot,
@@ -111,33 +109,6 @@ export function toEventData(
     return Object.fromEntries(
         Object.entries(record).filter(([, value]) => value !== undefined),
     ) as Record<string, JsonValue>;
-}
-
-export function toApprovalEventData(
-    request: ApprovalRequest,
-    decision?: ApprovalDecision,
-): Record<string, JsonValue> {
-    return toEventData({
-        approvalId: request.approvalId,
-        callId: request.callId,
-        createdAt: request.createdAt,
-        decidedAt: decision?.decidedAt,
-        decidedBy: decision?.decidedBy,
-        decision: decision?.decision,
-        expiresAt: request.expiresAt,
-        inputSummary: request.inputSummary,
-        reason: decision?.reason ?? request.reason,
-        recording: request.recording,
-        requestId: request.requestId,
-        remember: decision?.remember,
-        riskLevel: request.riskLevel,
-        ctxId: request.ctxId,
-        extensionId: request.extensionId,
-        source: request.source,
-        status: request.status,
-        toolName: request.toolName,
-        workspace: request.workspace,
-    });
 }
 
 export function createStatusChangedEventData(

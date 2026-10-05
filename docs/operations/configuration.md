@@ -313,7 +313,7 @@ eventBufferSize = 100
 
 模型提供的 tool-call `purpose` / `explanation` 属于 Control provenance，不下传 Worker。它使用独立的 hot/cold 生命周期：hot journal 位于 `~/.devshell/control/tool-call-provenance.jsonl`，默认达到 8 MiB 后压缩为 Zstd level 1 的 `tool-call-provenance.jsonl.archive/*.jsonl.zst`；cold 总量默认限制为 64 MiB，默认保留 7 天。运行时只常驻 hot provenance，查询历史 tool call 时通过 `instance + callId` 索引按需读取 cold archive。容量淘汰从最旧 cold archive 开始，不改变 Worker `audit.sqlite3` 的生命周期或权限边界。
 
-升级时，旧的 `events.jsonl`、`logs.jsonl`、`tool-calls.jsonl` 和 `approvals.jsonl` 会在首次打开实例时事务导入 SQLite，导入成功后删除旧文件。
+升级时，旧的 `events.jsonl`、`logs.jsonl` 和 `tool-calls.jsonl` 会在首次打开实例时事务导入 SQLite，导入成功后删除旧文件。审批记录仅使用 SQLite 存储，旧的 `approvals.jsonl` 不再导入。
 
 ## 实例状态与数据
 

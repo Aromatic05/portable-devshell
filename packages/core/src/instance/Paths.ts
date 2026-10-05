@@ -14,11 +14,6 @@ export class InstancePaths {
      */
     readonly contextMessagesFile: string;
     readonly goalsFile: string;
-    /**
-     * @compat audit-jsonl-v1
-     * @removeAt 0.7.10
-     */
-    readonly legacyApprovalsFile: string;
     readonly legacyEventsFile: string;
     readonly legacyLogsFile: string;
     readonly legacyToolCallsFile: string;
@@ -41,10 +36,6 @@ export class InstancePaths {
         );
         this.goalsFile = join(this.controlWorkerDir, "goals.json");
         this.auditDatabaseFile = join(this.controlWorkerDir, "audit.sqlite3");
-        this.legacyApprovalsFile = join(
-            this.controlWorkerDir,
-            "approvals.jsonl",
-        );
         this.legacyEventsFile = join(this.controlWorkerDir, "events.jsonl");
         this.legacyLogsFile = join(this.controlWorkerDir, "logs.jsonl");
         this.legacyToolCallsFile = join(

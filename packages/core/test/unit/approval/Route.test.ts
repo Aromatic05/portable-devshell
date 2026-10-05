@@ -7,8 +7,8 @@ import type {
     InstanceEventRecord,
 } from "@portable-devshell/shared";
 
-import { createApprovalRouteModule } from "../../../src/approval/Route.ts";
-import type { InstanceEventSource } from "../../../src/instance/EventBuffer.ts";
+import { createApprovalRouteModule } from "../../../src/approval/transport/Route.ts";
+import type { InstanceEventSource } from "../../../src/instance/runtime/supervision/Event.ts";
 
 function eventSource(lastSeq = 7): InstanceEventSource {
     return {

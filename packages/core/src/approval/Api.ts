@@ -45,18 +45,20 @@ export interface ApprovalEvaluationApi {
     ): Promise<ApprovalEvaluation>;
 }
 
+export interface ApprovalDecisionInput {
+    decision: ApprovalDecision["decision"];
+    decidedBy: ApprovalDecisionBy;
+    policyPatch?: JsonValue;
+    reason?: string;
+    remember?: boolean;
+}
+
 export interface ApprovalApi extends ApprovalEvaluationApi {
     cancel(approvalId: string, reason?: string): Promise<ApprovalRequest>;
     close(): void;
     decideApproval(
         approvalId: string,
-        input: {
-            decision: "approve" | "deny";
-            decidedBy: ApprovalDecisionBy;
-            policyPatch?: JsonValue;
-            reason?: string;
-            remember?: boolean;
-        },
+        input: ApprovalDecisionInput,
     ): Promise<ApprovalRequest>;
     getApproval(approvalId: string): Promise<ApprovalRequest>;
     listApprovals(): Promise<ApprovalRequest[]>;

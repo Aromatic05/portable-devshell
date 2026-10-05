@@ -6,12 +6,11 @@ import type {
 import type { ApprovalPolicy } from "@portable-devshell/shared/config";
 
 import type { ApprovalApi } from "./Api.js";
-import { ApprovalService } from "./Service.js";
+import { ApprovalService } from "./execution/Service.js";
 import { InstanceApprovalStore } from "./Store.js";
 
 export interface InstanceApprovalPaths {
     auditDatabaseFile: string;
-    legacyApprovalsFile: string;
 }
 
 export interface InstanceApprovalServiceOptions {
@@ -33,9 +32,6 @@ export function createInstanceApprovalService(
         },
         instanceName: options.instanceName,
         policy: options.policy,
-        store: new InstanceApprovalStore(
-            options.paths.auditDatabaseFile,
-            options.paths.legacyApprovalsFile,
-        ),
+        store: new InstanceApprovalStore(options.paths.auditDatabaseFile),
     });
 }

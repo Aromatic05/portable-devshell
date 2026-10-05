@@ -1,10 +1,6 @@
-import {
-    runtimeErrorCodes,
-    errorMessage,
-    type JsonValue,
-} from "@portable-devshell/shared";
-import type { ToolCallHooks } from "../toolcall/Public.js";
-import type { ApprovalEvaluationApi } from "./Api.js";
+import type { JsonValue } from "@portable-devshell/shared";
+import type { ToolCallHooks } from "../../toolcall/Public.js";
+import type { ApprovalEvaluationApi, ApprovalEvaluationError } from "../Api.js";
 
 export function registerApprovalToolCallReview(
     hooks: ToolCallHooks,
@@ -36,23 +32,14 @@ export function registerApprovalToolCallReview(
         );
         if (evaluation.decision === "allow") return { decision: "continue" };
         if (evaluation.decision === "deny") {
-            return reject(evaluation.error, runtimeErrorCodes.approvalDenied);
+            return reject(evaluation.error);
         }
 
         const resolution = await evaluation.awaitDecision;
         if (resolution.status === "approved") {
             return { decision: "continue" };
         }
-        if (resolution.status === "denied") {
-            return reject(resolution.error, runtimeErrorCodes.approvalDenied);
-        }
-        if (resolution.status === "cancelled") {
-            return reject(
-                resolution.error,
-                runtimeErrorCodes.toolCallCancelled,
-            );
-        }
-        return reject(resolution.error, runtimeErrorCodes.approvalExpired);
+        return reject(resolution.error);
         },
     });
 }
@@ -65,17 +52,10 @@ function summarize(value: JsonValue): string {
     return summary.length <= 512 ? summary : `${summary.slice(0, 511)}…`;
 }
 
-function reject(error: unknown, fallback: string) {
-    const code =
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        typeof error.code === "string"
-            ? error.code
-            : fallback;
+function reject(error: ApprovalEvaluationError) {
     return {
         decision: "reject" as const,
-        error: { code },
-        reason: errorMessage(error),
+        error: { code: error.code },
+        reason: error.message,
     };
 }

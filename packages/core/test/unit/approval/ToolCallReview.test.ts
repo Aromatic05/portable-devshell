@@ -14,8 +14,8 @@ import type {
 import {
     ApprovalError,
     ApprovalService,
-} from "../../../src/approval/Service.ts";
-import { registerApprovalToolCallReview } from "../../../src/approval/ToolCallReview.ts";
+} from "../../../src/approval/execution/Service.ts";
+import { registerApprovalToolCallReview } from "../../../src/approval/execution/ToolCallReview.ts";
 
 const input: ToolCallReviewInput = {
     callId: "call-1",
@@ -253,3 +253,19 @@ for (const status of ["denied", "cancelled", "expired"] as const) {
         );
     });
 }
+
+test("review preserves the typed evaluation error code and message", async (t) => {
+    const { hooks, service } = fixture();
+    t.mock.method(service, "evaluate", async () => ({
+        decision: "deny",
+        error: { code: "approval.policy.denied", message: "Denied by policy." },
+    }));
+    assert.deepEqual(
+        await runReview(hooks, input, new AbortController().signal, "host"),
+        {
+            decision: "reject",
+            error: { code: "approval.policy.denied" },
+            reason: "Denied by policy.",
+        },
+    );
+});

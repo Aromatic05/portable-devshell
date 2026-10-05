@@ -1,9 +1,9 @@
 import {
     createRemoteError,
     controlErrorCodes,
-    type ApprovalDecision,
     type JsonValue,
 } from "@portable-devshell/shared";
+import type { ApprovalDecisionInput } from "../Api.js";
 
 export function readApprovalId(
     payload: JsonValue | undefined,
@@ -47,12 +47,9 @@ export function readApprovalSubscriptionFromSeq(payload?: JsonValue): number {
     return payload.fromSeq;
 }
 
-export function readApprovalDecision(payload?: JsonValue): {
-    decision: ApprovalDecision["decision"];
-    policyPatch?: JsonValue;
-    reason?: string;
-    remember?: boolean;
-} {
+export function readApprovalDecision(
+    payload?: JsonValue,
+): Omit<ApprovalDecisionInput, "decidedBy"> {
     if (
         !isRecord(payload) ||
         (payload.decision !== "approve" && payload.decision !== "deny")
