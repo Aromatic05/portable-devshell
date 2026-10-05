@@ -15,11 +15,10 @@ import { type McpInstanceGateway } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue, type ToolCallContext, type ToolDefinition } from "@portable-devshell/shared";
 import { CONTEXT_MESSAGE_PUSH_TOOL_BUDGET } from "@portable-devshell/shared/testing";
 
-import {
-    createToolCallScope,
-    ToolCallHookRegistry,
-} from "@portable-devshell/core/testing";
-import { ToolCallPipeline, ToolCallExecutionTarget } from "@portable-devshell/core/testing";
+import { createToolCallScope } from "../../../../core/src/toolcall/execution/Context.ts";
+import { ToolCallHookRegistry } from "../../../../core/src/toolcall/registration/index.ts";
+import { ToolCallPipeline } from "../../../../core/src/toolcall/execution/Pipeline.ts";
+import { ToolCallExecutionTarget } from "../../../../core/src/toolcall/execution/ExecutionTarget.ts";
 import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/Binding.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";

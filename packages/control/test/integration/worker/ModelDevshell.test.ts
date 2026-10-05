@@ -6,7 +6,7 @@ import test from "node:test";
 import {
     WorkerBinary,
     WorkerInstanceFactory,
-    WorkerTransportDriverLocal,
+    TransportDriverLocal,
 } from "@portable-devshell/core/testing";
 import {
     createTestWorkerGateway,
@@ -67,7 +67,7 @@ test(
             },
             homeDirectory,
             name: asInstanceName(instanceName),
-            transport: new WorkerTransportDriverLocal({
+            transport: new TransportDriverLocal({
                 spawnFunction: spawn,
                 workerBinary: new WorkerBinary(workerBinaryPath!),
             }),
@@ -354,6 +354,7 @@ function instanceModelExtensionHost(
                 provider: "local",
             },
         ],
+        readLogs: async () => [],
         subscriptions: new ProcessSubscriptionManager(),
     });
     const declaration = {

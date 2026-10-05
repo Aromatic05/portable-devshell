@@ -1,5 +1,5 @@
 import { asInstanceName } from "@portable-devshell/shared";
-import type { ToolCallHookValue } from "@portable-devshell/core/testing";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

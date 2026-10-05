@@ -6,7 +6,7 @@ import test from "node:test";
 import {
     WORKER_PROTOCOL_VERSION,
     WorkerInstanceFactory,
-    WorkerTransportConnection,
+    TransportConnection,
 } from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import {
@@ -28,7 +28,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
     const home = await createTestTempDirectory("devshell-reverse-gateway");
-    const connection = new WorkerTransportConnection();
+    const connection = new TransportConnection();
     const worker = new WorkerInstanceFactory().create({
         homeDirectory: home,
         managementMode: "selfManaged",
@@ -156,7 +156,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
 
 test("SSE plus POST fallback completes RPC handshake and deduplicates repeated upstream frames", async () => {
     const home = await createTestTempDirectory("devshell-reverse-sse");
-    const connection = new WorkerTransportConnection();
+    const connection = new TransportConnection();
     const worker = new WorkerInstanceFactory().create({
         homeDirectory: home,
         managementMode: "selfManaged",

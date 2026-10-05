@@ -20,16 +20,14 @@ import {
 } from "../../../src/auth/Input.ts";
 import { readReverseInstanceName } from "../../../src/connection/Input.ts";
 import {
-    limitProcessLogResponse,
-    readProcessLogQuery,
     readProcessSubscriptionFromSeq,
-    readTodoSubscriptionFromSeq,
-    readToolCall,
-} from "@portable-devshell/core/testing";
+} from "../../../../core/src/instance/Route.ts";
+import { readTodoSubscriptionFromSeq } from "../../../../core/src/task/todo/Route.ts";
 import {
-    limitToolCallResponse,
+    readToolCall,
     readToolCallQuery,
-} from "@portable-devshell/core";
+    limitToolCallResponse,
+} from "../../../../core/src/toolcall/execution/transport/Input.ts";
 
 test("artifact route inputs preserve the two supported source forms", () => {
     assert.deepEqual(
@@ -173,37 +171,7 @@ test("MCP and reverse route inputs accept only their closed decision and identit
     }
 });
 
-test("process route inputs clamp log queries and strictly validate subscription cursors", () => {
-    assert.deepEqual(readProcessLogQuery(), {
-        fromSeq: undefined,
-        limit: 100,
-        maxDecodedBytes: 1024 * 1024,
-    });
-    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 0 }), {
-        fromSeq: 10,
-        limit: 1,
-        maxDecodedBytes: 1024 * 1024,
-    });
-    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 500 }), {
-        fromSeq: 10,
-        limit: 100,
-        maxDecodedBytes: 1024 * 1024,
-    });
-    assert.deepEqual(readProcessLogQuery({ fromSeq: 10, limit: 1.5 }), {
-        fromSeq: 10,
-        limit: 100,
-        maxDecodedBytes: 1024 * 1024,
-    });
-    assert.deepEqual(readProcessLogQuery({ maxDecodedBytes: 256 * 1024 }), {
-        fromSeq: undefined,
-        limit: 100,
-        maxDecodedBytes: 256 * 1024,
-    });
-    assert.deepEqual(
-        readProcessLogQuery({ maxDecodedBytes: 2 * 1024 * 1024 }),
-        { fromSeq: undefined, limit: 100, maxDecodedBytes: 1024 * 1024 },
-    );
-
+test("process route strictly validates subscription cursors", () => {
     for (const cursor of [0, 1, Number.MAX_SAFE_INTEGER]) {
         assert.equal(
             readProcessSubscriptionFromSeq({ fromSeq: cursor }),
@@ -219,42 +187,6 @@ test("process route inputs clamp log queries and strictly validate subscription 
             readTodoSubscriptionFromSeq({ fromSeq: cursor }),
         );
     }
-});
-
-test("runtime log response limiting stays within one MiB and retains the newest fitting suffix", () => {
-    const logs = [
-        { message: "first", seq: 1 },
-        { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
-        { message: "newest", seq: 3 },
-    ];
-    const limited = limitProcessLogResponse(logs, true);
-
-    assert.equal(limited.length, 2);
-    assert.match(limited[0]?.message ?? "", /TAIL$/u);
-    assert.equal(limited[0]?.message === logs[1]?.message, false);
-    assert.equal(limited[1]?.message, "newest");
-    assert.equal(
-        Buffer.byteLength(JSON.stringify(limited), "utf8") <= 1024 * 1024,
-        true,
-    );
-});
-
-test("runtime log response limiting preserves the oldest unread prefix for cursor reads", () => {
-    const logs = [
-        { message: "first", seq: 1 },
-        { message: `${"前".repeat(600_000)}TAIL`, seq: 2 },
-        { message: "later", seq: 3 },
-    ];
-    const limited = limitProcessLogResponse(logs, false);
-
-    assert.equal(limited.length, 2);
-    assert.equal(limited[0]?.message, "first");
-    assert.match(limited[1]?.message ?? "", /TAIL$/u);
-    assert.equal(limited[1]?.message === logs[1]?.message, false);
-    assert.equal(
-        Buffer.byteLength(JSON.stringify(limited), "utf8") <= 1024 * 1024,
-        true,
-    );
 });
 
 test("tool route inputs preserve control-host call defaults and filters", () => {

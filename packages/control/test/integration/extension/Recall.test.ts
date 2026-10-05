@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { AuditDatabase } from "@portable-devshell/core/testing";
+import { AuditDatabase } from "../../../../core/src/audit/database/index.ts";
 import {
     asInstanceName,
     type ToolCallQuery,

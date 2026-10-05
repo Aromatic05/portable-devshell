@@ -51,9 +51,6 @@
             ],
             "@portable-devshell/cli": ["./packages/cli/dist/index.d.ts"],
             "@portable-devshell/tui": ["./packages/tui/dist/index.d.ts"],
-            "@portable-devshell/control/testing": [
-                "./packages/control/dist/testing.d.ts"
-            ],
             "@portable-devshell/mcp/testing": [
                 "./packages/mcp/dist/testing.d.ts"
             ],

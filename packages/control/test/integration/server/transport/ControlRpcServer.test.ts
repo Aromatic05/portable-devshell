@@ -7,10 +7,7 @@ import type {
     WorkerCommandInteractiveSession,
     WorkerInstance,
 } from "@portable-devshell/core/testing";
-import type {
-    TerminalProcess,
-    TerminalProcessExit,
-} from "@portable-devshell/core/testing";
+import type { TerminalProcess, TerminalProcessExit } from "../../../../../core/src/terminal/Backend.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
@@ -432,13 +429,8 @@ test("config RPC masks the Web token across get, validate, and update responses"
 });
 
 test("ControlSocketServer exposes server-backed Message preferences through the control route", async (t) => {
-    const directory = await createTestTempDirectory(
-        "message-preference-rpc",
-    );
-    const socketPath = createTestIpcPath(
-        "message-preference-rpc",
-        directory,
-    );
+    const directory = await createTestTempDirectory("message-preference-rpc");
+    const socketPath = createTestIpcPath("message-preference-rpc", directory);
     const comment = new CommentExtension({
         instances: {
             list: () => [],

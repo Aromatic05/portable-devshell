@@ -1,5 +1,5 @@
 import { asInstanceName } from "@portable-devshell/shared";
-import type { ToolCallHookValue } from "@portable-devshell/core/testing";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import { parseMcpHttpResponse } from "../../../TestMcpHttpResponse.ts";
 
-import { attachToolCallErrorPayload } from "@portable-devshell/core/testing";
+import { attachToolCallErrorPayload } from "@portable-devshell/shared";
 
 import {
     McpEndpointBinding,

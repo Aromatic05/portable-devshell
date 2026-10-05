@@ -1,7 +1,5 @@
-import type {
-    InstanceDescriptor,
-    WorkerInstance,
-} from "@portable-devshell/core/testing";
+import type { InstanceDescriptor } from "../../../core/src/instance/Descriptor.ts.ts";
+import type { WorkerInstance } from "../../../core/src/instance/runtime/index.ts.ts";
 
 export function createTestInstanceDescriptor(
     worker: WorkerInstance,

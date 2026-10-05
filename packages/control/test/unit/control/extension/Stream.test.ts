@@ -65,6 +65,7 @@ test("seeded instance observation resumes after the seed and preserves initial g
         allowed: true, extensionId: "comment",
         instances: { get: () => ({ worker: source }) } as never,
         listConfigured: () => [],
+        readLogs: async () => [],
         subscriptions: { async watch(...[_name, _source, fromSeq, _signal, handlers]: Parameters<ProcessSubscriptionManager["watch"]>) {
             nextFromSeq = fromSeq;
             await handlers.onEvent(event(4, "context.message.delivered"));

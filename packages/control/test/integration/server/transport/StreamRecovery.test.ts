@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { WorkerInstance } from "@portable-devshell/core/testing";
+import type { WorkerInstance } from "../../../../../core/src/instance/runtime/index.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     Endpoint,

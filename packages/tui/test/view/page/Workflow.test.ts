@@ -4,10 +4,8 @@ import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
 import { type TodoReadResult } from "@portable-devshell/shared";
-import {
-    InstanceRegistry,
-    type WorkerInstance,
-} from "@portable-devshell/core/testing";
+import { InstanceRegistry } from "../../../../core/src/instance/Registry.ts";
+import type { WorkerInstance } from "../../../../core/src/instance/runtime/index.ts";
 import {
     ControlRouteComposition,
     ControlSocketServer,

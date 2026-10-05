@@ -1,4 +1,4 @@
-import type { ToolCallHookValue } from "@portable-devshell/core/testing";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
@@ -38,7 +38,8 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import { ToolCallHookSequence, ToolCallPipeline } from "@portable-devshell/core/testing";
+import { ToolCallHookSequence } from "../../../core/src/toolcall/execution/hook/Sequence.ts";
+import { ToolCallPipeline } from "../../../core/src/toolcall/execution/Pipeline.ts";
 import {
     asInstanceName,
     type ContextMessageRecord,

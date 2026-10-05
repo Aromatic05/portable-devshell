@@ -17,7 +17,7 @@ import {
     refreshTuiAudit,
     refreshTuiInstance,
 } from "../../../src/app/control/Refresh.ts";
-import { type WorkerInstance } from "@portable-devshell/core/testing";
+import type { WorkerInstance } from "../../../../core/src/instance/runtime/index.ts";
 import {
     ControlRouteComposition,
     ControlSocketServer,

@@ -10,7 +10,7 @@ import type {
     ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
-import { ToolCallHookRegistry } from "@portable-devshell/core/testing";
+import { ToolCallHookRegistry } from "../../../../../../../../core/src/toolcall/registration/index.ts";
 
 import { ToolCallExtensionBinding } from "../../../../../../../src/extension/api/point/toolcall/Binding.ts";
 import {
