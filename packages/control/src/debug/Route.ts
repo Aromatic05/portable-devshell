@@ -9,7 +9,7 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../server/Route.js";
+import { routeModule } from "../Port.js";
 
 export interface DebugPatchPort {
     listPatches(): DebugPatchSummary[];

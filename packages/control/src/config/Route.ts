@@ -6,7 +6,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../server/Route.js";
+import { requirePort, routeModule } from "../Port.js";
 import { ConfigChangeHub, type ConfigCommittedChange } from "./change/Config.js";
 
 export interface ConfigEditorPort {

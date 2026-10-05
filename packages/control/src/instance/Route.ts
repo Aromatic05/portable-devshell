@@ -13,7 +13,7 @@ import {
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../server/Route.js";
+import { requirePort, routeModule } from "../Port.js";
 import type { InstanceChange, InstanceChangeHub } from "./Change.js";
 import {
     InstanceConnectionService,

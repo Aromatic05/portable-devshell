@@ -17,7 +17,7 @@ import {
     type ControlStreamMessage,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../../server/Route.js";
+import { routeModule } from "../../../../Port.js";
 import { CliCommandStreamIo } from "./command/Io.js";
 
 export interface CliCommandPort {

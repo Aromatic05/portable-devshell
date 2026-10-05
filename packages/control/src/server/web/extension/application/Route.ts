@@ -10,7 +10,7 @@ import {
     type WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../Route.js";
+import { routeModule } from "../../../../Port.js";
 
 export interface WebApplicationCatalogPort {
     list(): readonly WebApplicationDescriptor[];

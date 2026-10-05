@@ -10,7 +10,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../../server/Route.js";
+import { requirePort, routeModule } from "../../Port.js";
 import { ExtensionChangeHub } from "./Change.js";
 import type { ExtensionControlPort } from "./Port.js";
 

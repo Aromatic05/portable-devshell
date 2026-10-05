@@ -4,7 +4,7 @@ import type {
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../server/Route.js";
+import { requirePort, routeModule } from "../Port.js";
 import { readMcpApprovalDecision, readMcpApprovalId } from "./Input.js";
 
 export interface AuthRouteModuleOptions {

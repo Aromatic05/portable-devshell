@@ -10,7 +10,7 @@ import {
     type ControlRouteScope,
 } from "@portable-devshell/extension/control";
 
-import { routeModule } from "../../../../server/Route.js";
+import { routeModule } from "../../../../Port.js";
 import type { ExtensionHost } from "../../../host/Host.js";
 
 export class ControlExtensionRouteService {

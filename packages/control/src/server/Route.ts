@@ -1,14 +1,11 @@
 import {
-    createRemoteError,
-    controlErrorCodes,
     type ControlHostDefinition,
     type ControlPortDefinition,
-    type ControlPortHandler,
-    type ControlPortStreamHandler,
     JsonValue,
 } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
+import { routeModule } from "../Port.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import {
     createInstanceHost,
@@ -55,39 +52,6 @@ import {
     type WebApplicationCatalogPort,
     type WebPagePort,
 } from "./web/extension/application/Route.js";
-
-export function routeModule(
-    name: string,
-    operations: Record<string, ControlPortHandler>,
-    streams: Record<string, ControlPortStreamHandler> = {},
-): ControlPortDefinition {
-    return {
-        name,
-        operations: Object.entries(operations).map(([operation, handle]) => ({
-            name: operation,
-            handle,
-        })),
-        ...(Object.keys(streams).length === 0
-            ? {}
-            : {
-                  streams: Object.entries(streams).map(
-                      ([operation, handle]) => ({
-                          name: operation,
-                          handle,
-                      }),
-                  ),
-              }),
-    };
-}
-
-export function requirePort<T>(port: T | undefined, message: string): T {
-    if (port !== undefined) return port;
-    throw createRemoteError({
-        code: controlErrorCodes.methodNotFound,
-        message,
-        retryable: false,
-    });
-}
 
 export interface ServerRouteModuleOptions {
     instanceCount(): number;
