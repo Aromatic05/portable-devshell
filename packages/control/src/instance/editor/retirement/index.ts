@@ -7,26 +7,26 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import {
-    InstanceFactory,
+    assertInstanceDeletable,
+    closeInstanceResources,
+    createInstance,
+    InstanceRetirementNotification,
+    retireInstanceForDelete,
+    type Instance,
     type InstanceRegistry,
 } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
-import { InstanceRetirementNotification } from "./Notification.js";
-import {
-    InstanceRetirementState,
-    closeDescriptorResourcesBestEffort,
-} from "./State.js";
+import { InstanceChangeHub } from "../../Change.js";
 import {
     warnCommittedCleanupFailures,
     type InstanceCleanupDebt,
 } from "./Debt.js";
 
-type InstanceDescriptor = ReturnType<InstanceRegistry["get"]>;
+type InstanceDescriptor = Instance | undefined;
 
 export class InstanceRetirementCoordinator {
     readonly notification = new InstanceRetirementNotification();
-    readonly #state = new InstanceRetirementState();
     readonly #detachContextInstance?: (instance: string) => Promise<void>;
 
     readonly #reconcileContextInstanceCleanup?: (
@@ -38,7 +38,7 @@ export class InstanceRetirementCoordinator {
 
     readonly #mcp: InstanceEditorCoordinatorOptions["mcp"];
 
-    readonly #instanceConfigMapper: InstanceFactory;
+    readonly #instanceChanges: InstanceChangeHub;
 
     readonly #instanceRegistry: InstanceRegistry;
 
@@ -48,8 +48,7 @@ export class InstanceRetirementCoordinator {
             options.reconcileContextInstanceCleanup;
         this.#engine = options.engine;
         this.#mcp = options.mcp;
-        this.#instanceConfigMapper =
-            options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
     }
 
@@ -83,9 +82,11 @@ export class InstanceRetirementCoordinator {
         }
         await cleanup.assertInstanceCleanupSettled(instanceName);
 
-        const skipRuntimeRetirement =
-            this.#assertInstanceDeletable(instanceName);
         const descriptor = this.#instanceRegistry.get(instanceName);
+        const skipRuntimeRetirement = assertInstanceDeletable(
+            instanceName,
+            descriptor,
+        );
         const nextConfig = this.#engine.validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.filter(
@@ -117,8 +118,9 @@ export class InstanceRetirementCoordinator {
         if (descriptor !== undefined) {
             cleanup.retainDescriptor(instanceName, descriptor);
             await this.#instanceRegistry
-                .retireGeneration(instanceName, descriptor)
+                .remove(instanceName, descriptor)
                 .catch((error) => cleanupFailures.push(error));
+            this.#instanceChanges.publish("registry");
         }
         try {
             this.#mcp?.unregisterInstance(instanceName);
@@ -147,7 +149,7 @@ export class InstanceRetirementCoordinator {
     async cleanupCommittedInstanceChange(
         existing: ControlConfig["instances"][number] | undefined,
         next: ControlConfig["instances"][number] | undefined,
-        descriptor: ReturnType<InstanceRegistry["get"]>,
+        descriptor: InstanceDescriptor,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
         if (
@@ -182,7 +184,7 @@ export class InstanceRetirementCoordinator {
 
     async cleanupCommittedDelete(
         existing: ControlConfig["instances"][number],
-        descriptor: ReturnType<InstanceRegistry["get"]>,
+        descriptor: InstanceDescriptor,
         skipRuntimeRetirement: boolean,
         cleanup: InstanceCleanupDebt,
     ): Promise<unknown[]> {
@@ -191,7 +193,7 @@ export class InstanceRetirementCoordinator {
             descriptor ??
             (this.#reconcileContextInstanceCleanup === undefined
                 ? undefined
-                : this.#instanceConfigMapper.map(existing));
+                : createInstance(existing));
         if (cleanupDescriptor !== undefined) {
             cleanup.retainDescriptor(existing.name, cleanupDescriptor);
         }
@@ -214,11 +216,13 @@ export class InstanceRetirementCoordinator {
             .retireGenerationResources(existing)
             .catch((error) => failures.push(error));
         failures.push(...(await this.notification.retireDelete(existing)));
-        await this.#state
-            .retireForDelete(cleanupDescriptor, skipRuntimeRetirement)
+        await retireInstanceForDelete(
+            cleanupDescriptor,
+            skipRuntimeRetirement,
+        )
             .catch((error) => failures.push(error));
         if (cleanupDescriptor !== undefined) {
-            await closeDescriptorResourcesBestEffort(cleanupDescriptor).catch(
+            await closeInstanceResources(cleanupDescriptor).catch(
                 (error) => failures.push(error),
             );
             cleanup.releaseDescriptor(existing.name);

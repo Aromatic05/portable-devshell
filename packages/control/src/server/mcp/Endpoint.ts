@@ -4,11 +4,11 @@ import type {
 } from "@portable-devshell/mcp";
 import type { ControlMcpAuthConfig } from "@portable-devshell/shared";
 
-import type { InstanceDescriptor } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core";
 
 export class McpEndpointFactory {
     map(
-        descriptor: InstanceDescriptor,
+        descriptor: Instance,
         auth: ControlMcpAuthConfig = { mode: "none" },
         workspaceEnabled = true,
     ): McpHostInstanceConfig {

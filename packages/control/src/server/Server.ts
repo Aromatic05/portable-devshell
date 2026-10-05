@@ -1,6 +1,5 @@
 import type { ControlConfig } from "@portable-devshell/shared";
 import type { ControlConfigStore } from "../config/store/index.js";
-import type { InstanceRegistryFactory } from "@portable-devshell/core";
 import type { McpRuntimeFactory } from "./mcp/Runtime.js";
 import { ControlRuntimeFactory } from "./runtime/Factory.js";
 import type { ControlRuntime } from "./runtime/Runtime.js";
@@ -10,7 +9,6 @@ import { ControlSocketFile } from "@portable-devshell/shared";
 export interface ControlServerOptions {
     configStore?: ControlConfigStore;
     homeDirectory?: string;
-    instanceRegistryBuilder?: InstanceRegistryFactory;
     mcpWiringService?: McpRuntimeFactory;
     runtimeFactory?: ControlRuntimeFactory;
     startupDiagnostic?: (message: string) => void;
@@ -29,7 +27,6 @@ export class ControlServer {
         this.#state = new ControlRuntimeState({
             configStore: options.configStore,
             homeDirectory: options.homeDirectory,
-            instanceRegistryFactory: options.instanceRegistryBuilder,
         });
         this.#runtimeFactory =
             options.runtimeFactory ??

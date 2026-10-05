@@ -9,6 +9,7 @@ import {
 } from "@portable-devshell/mcp/tool";
 import type { JsonValue } from "@portable-devshell/shared";
 
+import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ArtifactImageApi } from "../Api.js";
 import { artifactViewImageDefinition } from "./Definition.js";
 import { readArtifactViewImageInput } from "./Input.js";
@@ -16,6 +17,7 @@ import { readArtifactViewImageInput } from "./Input.js";
 export function installArtifactTools(
     artifact: ArtifactImageApi,
     instances: InstanceRegistry,
+    changes: InstanceChangeHub,
     hooks: ToolCallHooks,
 ): () => void {
     const registrations = new Map<string, McpToolRegistration>();
@@ -43,7 +45,7 @@ export function installArtifactTools(
     };
 
     sync();
-    const stopSync = instances.onChange(sync);
+    const stopSync = changes.onChange(sync);
     const unregisterExecute = hooks.registerExecute(
         definition.name,
         async (_callId, input, value, signal) => {

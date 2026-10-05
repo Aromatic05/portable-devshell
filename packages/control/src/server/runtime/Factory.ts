@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 import {
     ControlPathHome,
@@ -32,6 +33,7 @@ import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { ContextModule } from "@portable-devshell/core/context";
 import { McpControlModule } from "../mcp/Module.js";
+import { ControlWebRuntime } from "../web/Runtime.js";
 import { ConfigEditorCoordinator } from "../../config/editor/index.js";
 import { ConfigEngine } from "../../config/engine/index.js";
 import { HttpEndpointPreflight } from "../../config/engine/Http.js";
@@ -133,6 +135,7 @@ export class ControlRuntimeFactory {
                     await contextTransport.reconcileInstance(instance);
                 },
                 instanceRegistry: options.state.instances,
+                instanceChanges: options.state.instanceChanges,
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({
@@ -141,6 +144,7 @@ export class ControlRuntimeFactory {
                 configStore: options.state.configStore,
                 getConfig: () => options.state.requireConfig(),
                 homeDirectory: options.state.homeDirectory,
+                instanceChanges: options.state.instanceChanges,
                 instanceRegistry: options.state.instances,
                 mcp: mcp.instancePort,
                 mutationRunner: options.state.configMutations,
@@ -246,6 +250,13 @@ export class ControlRuntimeFactory {
                     extensionPaths.registryFile,
                 ),
             });
+            const web = new ControlWebRuntime({
+                config: options.state.requireConfig(),
+                extensions,
+                mcp,
+                oauthDirectory: join(controlPaths.oauthDir, "web"),
+                paths: extensionPaths,
+            });
             const reverse = new ConnectionModule({
                 mcp: {
                     host: mcp.host,
@@ -274,6 +285,7 @@ export class ControlRuntimeFactory {
                 extensions,
                 instanceCreate,
                 instanceEditor,
+                instanceChanges: options.state.instanceChanges,
                 instances: options.state.instances,
                 mcp,
                 restart: options.restart,
@@ -281,6 +293,7 @@ export class ControlRuntimeFactory {
                 processSubscriptions,
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
+                web,
             });
         } catch (error) {
             try {

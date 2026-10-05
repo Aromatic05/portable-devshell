@@ -4,7 +4,7 @@ import type {
     OperationalOverviewAlert,
 } from "@portable-devshell/shared";
 
-import type { InstanceDescriptor } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core";
 import {
     OperationalOverviewInstanceCollector,
     type OperationalOverviewInstanceCollection,
@@ -24,7 +24,7 @@ import {
 const activityLimit = 20;
 
 export interface OperationalOverviewRegistryPort {
-    list(): readonly InstanceDescriptor[];
+    list(): readonly Instance[];
 }
 
 export interface OperationalOverviewApprovalPort {
@@ -33,7 +33,7 @@ export interface OperationalOverviewApprovalPort {
 
 export interface OperationalOverviewInstanceCollectorPort {
     collect(
-        descriptor: InstanceDescriptor,
+        descriptor: Instance,
         now: Date,
     ): Promise<OperationalOverviewInstanceCollection>;
 }

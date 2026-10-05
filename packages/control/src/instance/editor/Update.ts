@@ -11,8 +11,9 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import { InstanceFactory } from "@portable-devshell/core";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import { createInstance } from "@portable-devshell/core";
+import type { Instance, InstanceRegistry } from "@portable-devshell/core";
+import { InstanceChangeHub } from "../Change.js";
 import type { InstanceMcpRuntimePort } from "../Mcp.js";
 import {
     type ConfigEngine,
@@ -29,8 +30,8 @@ import type { InstanceCleanupDebt } from "./retirement/Debt.js";
 import { closeDescriptorResourcesBestEffort } from "./retirement/State.js";
 
 type InstanceConfig = ControlConfig["instances"][number];
-type InstanceDescriptor = ReturnType<InstanceRegistry["get"]>;
-export type PreparedInstanceDescriptor = ReturnType<InstanceFactory["map"]>;
+type InstanceDescriptor = Instance | undefined;
+export type PreparedInstanceDescriptor = Instance;
 
 export interface InstanceConfigUpdatePlan {
     readonly authChanged: boolean;
@@ -43,7 +44,7 @@ export interface InstanceConfigUpdatePlan {
 
 export class InstanceReconfigurationCoordinator {
     readonly #engine: ConfigEngine;
-    readonly #instanceConfigMapper: InstanceFactory;
+    readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
@@ -55,8 +56,7 @@ export class InstanceReconfigurationCoordinator {
         cleanup: InstanceCleanupDebt,
     ) {
         this.#engine = options.engine;
-        this.#instanceConfigMapper =
-            options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcp = options.mcp;
         this.#retirement = retirement;
@@ -278,11 +278,11 @@ export class InstanceReconfigurationCoordinator {
 
     async #applyPersistedChanges(input: {
         currentConfig: ControlConfig;
-        descriptor: ReturnType<InstanceRegistry["get"]>;
+        descriptor: InstanceDescriptor;
         existing?: ControlConfig["instances"][number];
         instance?: ControlConfig["instances"][number];
         nextConfig: ControlConfig;
-        preparedDescriptor?: ReturnType<InstanceFactory["map"]>;
+        preparedDescriptor?: Instance;
         rebuildRequired: boolean;
         runtimeChanges: ConfigRuntimeChangeSet;
     }): Promise<boolean> {
@@ -352,37 +352,33 @@ export class InstanceReconfigurationCoordinator {
 
     async #restoreInstanceRuntime(
         existing: ControlConfig["instances"][number],
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        descriptor: InstanceDescriptor,
+        preparedDescriptor: Instance | undefined,
     ): Promise<void> {
         const failures: unknown[] = [];
         if (descriptor === undefined) {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
-                    .retireGeneration(existing.name, current)
+                    .remove(existing.name, current)
                     .catch((error) => failures.push(error));
         } else {
             try {
                 const current = this.#instanceRegistry.get(existing.name);
                 if (current !== undefined && current !== descriptor) {
-                    await this.#instanceRegistry.retireGeneration(
+                    await this.#instanceRegistry.remove(
                         existing.name,
                         current,
                     );
                 }
-                descriptor.mcpContextMode = existing.mcp.contextMode;
-                descriptor.enabled = existing.enabled;
-                descriptor.mcpEnabled = existing.mcp.enabled;
-                descriptor.mcpPath = existing.mcp.path;
-                descriptor.modelExtensions = [...existing.extensions.model];
-                if (this.#instanceRegistry.get(existing.name) === descriptor)
-                    this.#instanceRegistry.update(descriptor);
-                else this.#instanceRegistry.add(descriptor);
+                descriptor.update(existing);
+                if (this.#instanceRegistry.get(existing.name) !== descriptor)
+                    this.#instanceRegistry.add(descriptor);
             } catch (error) {
                 failures.push(error);
             }
         }
+        this.#instanceChanges.publish("registry");
         if (
             preparedDescriptor !== undefined &&
             preparedDescriptor !== descriptor
@@ -400,33 +396,37 @@ export class InstanceReconfigurationCoordinator {
 
     #prepareInstanceDescriptor(
         instance: ControlConfig["instances"][number],
-        descriptor: ReturnType<InstanceRegistry["get"]>,
+        descriptor: InstanceDescriptor,
         rebuildRequired: boolean,
-    ): ReturnType<InstanceFactory["map"]> | undefined {
+    ): Instance | undefined {
         if (!instance.enabled) return undefined;
         if (descriptor === undefined || rebuildRequired)
-            return this.#instanceConfigMapper.map(instance);
+            return createInstance(instance);
         return undefined;
     }
 
     async #applyInstanceConfig(
         existing: ControlConfig["instances"][number],
         instance: ControlConfig["instances"][number],
-        descriptor: ReturnType<InstanceRegistry["get"]>,
+        descriptor: InstanceDescriptor,
         rebuildRequired: boolean,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        preparedDescriptor: Instance | undefined,
     ): Promise<void> {
         if (!instance.enabled) {
-            if (descriptor !== undefined)
-                await this.#instanceRegistry.retireGeneration(
+            if (descriptor !== undefined) {
+                await this.#instanceRegistry.remove(
                     instance.name,
                     descriptor,
                 );
+                this.#instanceChanges.publish("registry");
+            }
             return;
         }
         if (descriptor === undefined) {
-            if (preparedDescriptor !== undefined)
+            if (preparedDescriptor !== undefined) {
                 this.#instanceRegistry.add(preparedDescriptor);
+                this.#instanceChanges.publish("registry");
+            }
             return;
         }
         if (rebuildRequired) {
@@ -434,18 +434,16 @@ export class InstanceReconfigurationCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            await this.#instanceRegistry.retireGeneration(
+            await this.#instanceRegistry.remove(
                 instance.name,
                 descriptor,
             );
+            this.#instanceChanges.publish("registry");
             return;
         }
-        descriptor.mcpContextMode = instance.mcp.contextMode;
-        descriptor.enabled = true;
-        descriptor.mcpEnabled = instance.mcp.enabled;
-        descriptor.mcpPath = instance.mcp.path;
-        descriptor.modelExtensions = [...instance.extensions.model];
-        this.#instanceRegistry.update(descriptor);
+        descriptor.update(instance);
+        descriptor.approval.setPolicy(instance.approvalPolicy);
+        this.#instanceChanges.publish("registry");
     }
 
     async syncMcpEndpoint(instanceName: string): Promise<void> {
@@ -474,8 +472,8 @@ export class InstanceReconfigurationCoordinator {
 
     async #persistInstanceConfig(
         config: ControlConfig,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
-        currentDescriptor: ReturnType<InstanceRegistry["get"]>,
+        preparedDescriptor: Instance | undefined,
+        currentDescriptor: InstanceDescriptor,
     ): Promise<void> {
         try {
             await this.#engine.persist(config);
@@ -500,8 +498,8 @@ export class InstanceReconfigurationCoordinator {
     async #cleanupCommittedInstanceChange(
         existing: ControlConfig["instances"][number] | undefined,
         next: ControlConfig["instances"][number] | undefined,
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        descriptor: InstanceDescriptor,
+        preparedDescriptor: Instance | undefined,
         rebuildRequired: boolean,
     ): Promise<unknown[]> {
         const failures = await this.#retirement.cleanupCommittedInstanceChange(
@@ -527,6 +525,7 @@ export class InstanceReconfigurationCoordinator {
             if (!generationCleanupFailed) {
                 try {
                     this.#instanceRegistry.add(preparedDescriptor);
+                    this.#instanceChanges.publish("registry");
                     await this.syncMcpEndpoint(existing.name);
                 } catch (error) {
                     failures.push(error);
@@ -535,10 +534,11 @@ export class InstanceReconfigurationCoordinator {
                         preparedDescriptor
                     ) {
                         await this.#instanceRegistry
-                            .retireGeneration(existing.name, preparedDescriptor)
+                            .remove(existing.name, preparedDescriptor)
                             .catch((cleanupError) =>
                                 failures.push(cleanupError),
                             );
+                        this.#instanceChanges.publish("registry");
                         await this.syncMcpEndpoint(existing.name).catch(
                             (cleanupError) => failures.push(cleanupError),
                         );

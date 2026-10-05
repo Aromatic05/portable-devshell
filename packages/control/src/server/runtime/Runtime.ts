@@ -11,7 +11,8 @@ import {
 } from "@portable-devshell/shared";
 
 import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core";
+import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
 import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
@@ -66,6 +67,7 @@ export interface ControlRuntimeOptions {
     extensions: ExtensionHost;
     instanceCreate: InstanceCreateCoordinator;
     instanceEditor: InstanceEditorCoordinator;
+    instanceChanges: InstanceChangeHub;
     instances: InstanceRegistry;
     mcp: McpControlModule;
     restart: () => Promise<void>;
@@ -73,6 +75,7 @@ export interface ControlRuntimeOptions {
     processSubscriptions?: ProcessSubscriptionManager;
     shutdown: () => Promise<void>;
     socketPath: string;
+    web: ControlWebRuntime;
 }
 
 export class ControlRuntime {
@@ -164,6 +167,7 @@ export class ControlRuntime {
             installArtifactTools(
                 options.artifact.service,
                 options.instances,
+                options.instanceChanges,
                 toolCalls.hooks,
             ),
         );
@@ -183,6 +187,7 @@ export class ControlRuntime {
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
+            instanceChanges: options.instanceChanges,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
@@ -218,11 +223,7 @@ export class ControlRuntime {
         this.#socketListener = new ControlSocketListener({
             socketPath: options.socketPath,
         });
-        this.#web = new ControlWebRuntime({
-            extensions: this.#extensions,
-            host: this.#mcp,
-            paths: this.#extensionPaths,
-        });
+        this.#web = options.web;
         const listeners: ControlTransportListener[] = [this.#socketListener];
         if (this.#web.listener !== undefined)
             listeners.push(this.#web.listener);
@@ -284,6 +285,7 @@ export class ControlRuntime {
             }
             await this.#instanceEditor.reconcileCleanupDebt();
             await this.#mcp.start();
+            await this.#web.startHost();
             await this.#contexts.reconcile();
         } catch (error) {
             try {
@@ -315,6 +317,7 @@ export class ControlRuntime {
             failures.push(error);
         }
         await this.#transport.close().catch((error) => failures.push(error));
+        await this.#web.stopHost().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));
@@ -325,9 +328,9 @@ export class ControlRuntime {
             failures.push(error);
         }
         await this.#artifact.stop().catch((error) => failures.push(error));
-        await this.#instances
-            .stopOwned()
-            .catch((error) => failures.push(error));
+        await stopOwnedInstances(this.#instances).catch((error) =>
+            failures.push(error),
+        );
         try {
             this.#routes.dispose();
         } catch (error) {
@@ -342,5 +345,32 @@ export class ControlRuntime {
                 "Control runtime failed to stop cleanly.",
             );
         }
+    }
+}
+
+async function stopOwnedInstances(
+    instances: InstanceRegistry,
+): Promise<void> {
+    const failures: Error[] = [];
+    const ownedWorkers = new Map<WorkerInstance, string>();
+    for (const instance of instances.list()) {
+        for (const worker of instance.ownedWorkers())
+            ownedWorkers.set(worker, instance.name);
+    }
+    for (const [worker, name] of ownedWorkers) {
+        try {
+            await worker.stop();
+            instances.get(name)?.clearOwnedWorker(worker);
+        } catch (error) {
+            failures.push(
+                error instanceof Error ? error : new Error(String(error)),
+            );
+        }
+    }
+    if (failures.length > 0) {
+        throw new AggregateError(
+            failures,
+            `Failed to stop ${failures.length} worker instance(s).`,
+        );
     }
 }

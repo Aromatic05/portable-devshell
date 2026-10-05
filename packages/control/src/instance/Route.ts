@@ -15,10 +15,7 @@ import {
 
 import { requirePort, routeModule } from "../Port.js";
 import type { InstanceChange, InstanceChangeHub } from "./Change.js";
-import {
-    InstanceConnectionService,
-    type InstanceRegistry,
-} from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core";
 
 export interface InstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
@@ -48,7 +45,6 @@ export interface InstanceConfigRouteModuleOptions {
 export function createInstanceConfigRouteModule(
     options: InstanceConfigRouteModuleOptions,
 ): ControlPortDefinition {
-    const connections = new InstanceConnectionService(options.registry);
     const create = () =>
         requirePort(options.create, "Instance creation is not available.");
     const editor = () =>
@@ -58,10 +54,15 @@ export function createInstanceConfigRouteModule(
         {
             acquireInstanceReference: async (request) => {
                 const input = readInstanceReference(request.payload);
-                const lease = await connections.acquire(
-                    input.instanceName,
-                    input.reference,
-                );
+                const instance = options.registry.get(input.instanceName);
+                if (instance === undefined)
+                    throw createRemoteError({
+                        code: controlErrorCodes.instanceNotFound,
+                        details: { instance: input.instanceName },
+                        message: `Instance ${input.instanceName} was not found.`,
+                        retryable: false,
+                    });
+                const lease = await instance.acquireReference(input.reference);
                 return lease.snapshot as unknown as JsonValue;
             },
             listInstances: () => readInstances(options) as never,
@@ -89,7 +90,9 @@ export function createInstanceConfigRouteModule(
                 await editor().deleteInstance(request.payload),
             releaseInstanceReference: async (request) => {
                 const input = readInstanceReference(request.payload);
-                await connections.release(input.instanceName, input.reference);
+                await options.registry
+                    .get(input.instanceName)
+                    ?.releaseReference(input.reference);
                 return {};
             },
             updateInstance: async (request) =>

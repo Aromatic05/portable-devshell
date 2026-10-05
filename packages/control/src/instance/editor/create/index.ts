@@ -1,58 +1,29 @@
 import {
-    ConfigInputError,
-    configInputError,
     createRemoteError,
-    defaultConfigNormalizeContext,
     controlErrorCodes,
-    formatConfigPath,
-    normalizeConfigInstanceDraft,
-    parseConfigInstanceDraft,
     type ControlConfig,
     type ControlInstanceConfig,
-    type InstanceContainerPresetSchema,
     type InstanceCreateResult,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { InstanceFactory } from "@portable-devshell/core";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import {
+    createInstance,
+    discoverSshConfigHosts,
+    normalizeInstanceCreateDraft,
+    resolveInstanceCreateSchema,
+    summarizeInstanceCreate,
+    type InstanceRegistry,
+} from "@portable-devshell/core";
 import type { InstanceMcpRuntimePort } from "../../Mcp.js";
+import { InstanceChangeHub } from "../../Change.js";
 import { ControlConfigValidator } from "../../../config/engine/Validator.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
 } from "../../../config/engine/Lock.js";
-import { listInstanceCreateProviders } from "./ProviderCatalog.js";
-import { discoverSshConfigHosts } from "./SshConfig.js";
-
-const containerPresets =
-    defaultConfigNormalizeContext.containerPresets satisfies readonly InstanceContainerPresetSchema[];
-
-const instanceCreateSchema: InstanceCreateSchema = {
-    container: {
-        defaultMode: "preset",
-        modes: [
-            "preset",
-            "dockerfile",
-            "compose",
-            "existingImage",
-            "existingStoppedContainer",
-        ],
-        presets: containerPresets,
-    },
-    defaultMcpContextMode: "openai-session",
-    defaultModelExtensions:
-        defaultConfigNormalizeContext.defaultModelExtensions,
-    defaultEnabled: defaultConfigNormalizeContext.defaultEnabled,
-    defaultMcpEnabled: defaultConfigNormalizeContext.defaultMcpEnabled,
-    defaultProvider: "local",
-    defaultSecurityMode: defaultConfigNormalizeContext.defaultSecurityMode,
-    providers: ["local", "ssh", "docker", "podman", "reverse"],
-    sshHosts: [],
-};
-
 interface ControlConfigWriter {
     write(config: ControlConfig, homeDirectory?: string): Promise<void>;
 }
@@ -62,7 +33,7 @@ export interface InstanceCreateCoordinatorOptions {
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     homeDirectory?: string;
-    instanceConfigMapper?: InstanceFactory;
+    instanceChanges: InstanceChangeHub;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
     mcp?: InstanceMcpRuntimePort;
@@ -77,7 +48,7 @@ export class InstanceCreateCoordinator {
     readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #homeDirectory?: string;
-    readonly #instanceConfigMapper: InstanceFactory;
+    readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #mutationRunner: ControlConfigMutationRunner;
@@ -92,8 +63,7 @@ export class InstanceCreateCoordinator {
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#homeDirectory = options.homeDirectory;
-        this.#instanceConfigMapper =
-            options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcp = options.mcp;
         this.#mutationRunner =
@@ -105,29 +75,32 @@ export class InstanceCreateCoordinator {
     }
 
     getSchema(): InstanceCreateSchema {
-        const providers = listInstanceCreateProviders(this.#platform);
         const hasLocal = this.#getConfig().instances.some(
             (instance) => instance.provider === "local",
         );
-        return {
-            ...instanceCreateSchema,
-            defaultProvider:
-                hasLocal && providers.includes("ssh") ? "ssh" : "local",
-            providers,
+        return resolveInstanceCreateSchema({
+            hasLocal,
+            platform: this.#platform,
             sshHosts: this.#sshHosts(),
-        };
+        });
     }
 
     validateDraft(params: JsonValue | undefined): InstanceCreateSummary {
-        const normalized = this.#normalizeDraft(params);
+        const normalized = normalizeInstanceCreateDraft(
+            params,
+            this.#platform,
+        );
         this.#validateMergedConfig(normalized);
-        return toSummary(normalized);
+        return summarizeInstanceCreate(normalized);
     }
 
     async createInstance(
         params: JsonValue | undefined,
     ): Promise<InstanceCreateResult> {
-        const normalized = this.#normalizeDraft(params);
+        const normalized = normalizeInstanceCreateDraft(
+            params,
+            this.#platform,
+        );
         return await this.#mutationRunner.runExclusive(
             async () => await this.#createNormalized(normalized),
         );
@@ -139,7 +112,7 @@ export class InstanceCreateCoordinator {
         const previousConfig = this.#getConfig();
         const nextConfig = this.#validateMergedConfig(normalized);
         const descriptor = normalized.enabled
-            ? this.#instanceConfigMapper.map(normalized)
+            ? createInstance(normalized)
             : undefined;
         let persisted = false;
 
@@ -159,6 +132,7 @@ export class InstanceCreateCoordinator {
             }
 
             this.#instanceRegistry.add(descriptor);
+            this.#instanceChanges.publish("registry");
             if (nextConfig.mcp.enabled && normalized.mcp.enabled) {
                 this.#mcp?.registerInstance(
                     normalized.name,
@@ -176,7 +150,8 @@ export class InstanceCreateCoordinator {
         } catch (error) {
             const failures: unknown[] = [error];
             this.#mcp?.unregisterInstance(normalized.name);
-            this.#instanceRegistry.delete(normalized.name);
+            await this.#instanceRegistry.remove(normalized.name);
+            this.#instanceChanges.publish("registry");
             if (persisted) {
                 try {
                     await this.#configStore.write(
@@ -221,57 +196,7 @@ export class InstanceCreateCoordinator {
         }
     }
 
-    #normalizeDraft(params: JsonValue | undefined): ControlInstanceConfig {
-        return this.#readConfigInput(() => {
-            const draft = parseConfigInstanceDraft(params);
-            if (
-                !listInstanceCreateProviders(this.#platform).includes(
-                    draft.provider,
-                )
-            ) {
-                throw configInputError(
-                    "semantic",
-                    ["provider"],
-                    "config.instance.providerUnsupported",
-                    `is not supported on ${this.#platform}`,
-                );
-            }
-            const createDraft =
-                draft.mcp?.auth === undefined
-                    ? {
-                          ...draft,
-                          mcp: {
-                              ...draft.mcp,
-                              auth: "oauth2" as const,
-                              oauth2: {
-                                  requiredScopes: ["mcp"],
-                                  resourceName: draft.name,
-                              },
-                          },
-                      }
-                    : draft;
-            return normalizeConfigInstanceDraft(createDraft);
-        });
-    }
 
-    #readConfigInput<T>(read: () => T): T {
-        try {
-            return read();
-        } catch (error) {
-            if (!(error instanceof ConfigInputError)) throw error;
-            throw createRemoteError({
-                code: controlErrorCodes.configInvalid,
-                cause: error,
-                details: {
-                    fieldPath: formatConfigPath(error.issue.path),
-                    issueCode: error.issue.code,
-                    phase: error.issue.phase,
-                },
-                message: error.message,
-                retryable: false,
-            });
-        }
-    }
 }
 
 function toConfigInvalidError(error: unknown): Error {
@@ -303,62 +228,3 @@ function isStructuredError(
     );
 }
 
-function toSummary(instance: ControlInstanceConfig): InstanceCreateSummary {
-    return {
-        ...(instance.approvalPolicy === undefined
-            ? {}
-            : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
-        ...(instance.container === undefined
-            ? {}
-            : { container: redactContainerSecrets(instance.container) }),
-        ...(instance.dockerBinary === undefined
-            ? {}
-            : { dockerBinary: instance.dockerBinary }),
-        ...(instance.env === undefined
-            ? {}
-            : { env: redactSecretRecord(instance.env) }),
-        extensions: { model: [...instance.extensions.model] },
-        ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
-        ...(instance.podmanBinary === undefined
-            ? {}
-            : { podmanBinary: instance.podmanBinary }),
-        enabled: instance.enabled,
-        mcp: {
-            auth: {
-                mode: instance.mcp.auth.mode,
-                ...(instance.mcp.auth.mode === "oauth2"
-                    ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
-                    : {}),
-            },
-            contextMode: instance.mcp.contextMode,
-            enabled: instance.mcp.enabled,
-            path: instance.mcp.path,
-        },
-        name: instance.name,
-        provider: instance.provider,
-        security: {
-            mode: instance.security.mode,
-        },
-        ...(instance.ssh === undefined ? {} : { ssh: { ...instance.ssh } }),
-        ...(instance.tools === undefined
-            ? {}
-            : { tools: structuredClone(instance.tools) }),
-    };
-}
-
-function redactContainerSecrets(
-    container: ControlInstanceConfig["container"],
-): NonNullable<ControlInstanceConfig["container"]> {
-    const copy = structuredClone(container!);
-    if ("env" in copy && copy.env !== undefined)
-        copy.env = redactSecretRecord(copy.env);
-    return copy;
-}
-
-function redactSecretRecord(
-    record: Record<string, string>,
-): Record<string, string> {
-    return Object.fromEntries(
-        Object.keys(record).map((key) => [key, "********"]),
-    );
-}

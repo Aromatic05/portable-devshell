@@ -11,14 +11,13 @@ import {
     createCoreConfigRegistry,
 } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import { InstanceRegistry } from "@portable-devshell/core";
-import { InstanceRegistryFactory } from "@portable-devshell/core";
+import { InstanceRegistry, createInstance } from "@portable-devshell/core";
+import { InstanceChangeHub } from "../../instance/Change.js";
 
 export interface ControlRuntimeStateOptions {
     configRegistry?: ConfigRegistry;
     configStore?: ControlConfigStore;
     homeDirectory?: string;
-    instanceRegistryFactory?: InstanceRegistryFactory;
 }
 
 export class ControlRuntimeState {
@@ -27,7 +26,7 @@ export class ControlRuntimeState {
     readonly configStore: ControlConfigStore;
     readonly configMutations = new ControlConfigMutationLock();
     readonly homeDirectory?: string;
-    readonly #instanceRegistryFactory: InstanceRegistryFactory;
+    readonly instanceChanges = new InstanceChangeHub();
     #config?: ControlConfig;
     #instances = new InstanceRegistry([]);
     #restartControlRequired = false;
@@ -39,8 +38,6 @@ export class ControlRuntimeState {
             options.configStore ??
             new ControlConfigStore({ registry: this.configRegistry });
         this.homeDirectory = options.homeDirectory;
-        this.#instanceRegistryFactory =
-            options.instanceRegistryFactory ?? new InstanceRegistryFactory();
     }
 
     get config(): ControlConfig | undefined {
@@ -58,7 +55,11 @@ export class ControlRuntimeState {
     async load(): Promise<void> {
         const config = await this.configStore.readOrCreate(this.homeDirectory);
         this.#config = config;
-        this.#instances = this.#instanceRegistryFactory.build(config);
+        this.#instances = new InstanceRegistry(
+            config.instances
+                .filter((instance) => instance.enabled)
+                .map((instance) => createInstance(instance)),
+        );
         this.#restartControlRequired = false;
     }
 

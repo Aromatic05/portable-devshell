@@ -10,12 +10,14 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 import {
-    InstanceFactory,
+    closeInstanceResources,
+    createInstance,
+    type Instance,
     type InstanceRegistry,
 } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
-import { closeDescriptorResourcesBestEffort } from "./State.js";
+import { InstanceChangeHub } from "../../Change.js";
 import type { InstanceRetirementCoordinator } from "./index.js";
 
 export interface InstanceCleanupDebtRecord {
@@ -189,13 +191,10 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
 
 export class InstanceCleanupDebt {
     readonly #cleanupDebts: InstanceCleanupDebtStore;
-    readonly #cleanupOnlyDescriptors = new Map<
-        string,
-        ReturnType<InstanceRegistry["get"]>
-    >();
+    readonly #cleanupOnlyDescriptors = new Map<string, Instance | undefined>();
     readonly #mcp: InstanceEditorCoordinatorOptions["mcp"];
     readonly #engine: ConfigEngine;
-    readonly #instanceConfigMapper: InstanceFactory;
+    readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
@@ -210,16 +209,15 @@ export class InstanceCleanupDebt {
         );
         this.#engine = options.engine;
         this.#mcp = options.mcp;
+        this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
-        this.#instanceConfigMapper =
-            options.instanceConfigMapper ?? new InstanceFactory();
         this.#retirement = retirement;
         this.#syncMcpEndpoint = syncMcpEndpoint;
     }
 
     retainDescriptor(
         instance: string,
-        descriptor: ReturnType<InstanceFactory["map"]>,
+        descriptor: Instance,
     ): void {
         this.#cleanupOnlyDescriptors.set(instance, descriptor);
     }
@@ -273,8 +271,8 @@ export class InstanceCleanupDebt {
     async cleanupCommittedInstanceChangeWithDebt(
         existing: ControlConfig["instances"][number] | undefined,
         next: ControlConfig["instances"][number] | undefined,
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        descriptor: Instance | undefined,
+        preparedDescriptor: Instance | undefined,
         rebuildRequired: boolean,
         cleanup: () => Promise<unknown[]>,
     ): Promise<void> {
@@ -337,10 +335,11 @@ export class InstanceCleanupDebt {
         let candidate = this.#instanceRegistry.get(record.instance.name);
         if (candidate !== undefined) {
             try {
-                await this.#instanceRegistry.retireGeneration(
+                await this.#instanceRegistry.remove(
                     record.instance.name,
                     candidate,
                 );
+                this.#instanceChanges.publish("registry");
             } catch (error) {
                 failures.push(error);
                 return failures;
@@ -352,7 +351,7 @@ export class InstanceCleanupDebt {
             .catch((error) => failures.push(error));
         if (failures.length > 0) {
             if (candidate !== undefined) {
-                await closeDescriptorResourcesBestEffort(candidate).catch(
+                await closeInstanceResources(candidate).catch(
                     (error) => failures.push(error),
                 );
             }
@@ -365,13 +364,14 @@ export class InstanceCleanupDebt {
                     instance.name === record.instance.name && instance.enabled,
             );
             if (configured !== undefined) {
-                candidate = this.#instanceConfigMapper.map(configured);
+                candidate = createInstance(configured);
             }
         }
         if (candidate === undefined) return failures;
 
         try {
             this.#instanceRegistry.add(candidate);
+            this.#instanceChanges.publish("registry");
             await this.#syncMcpEndpoint(record.instance.name);
         } catch (error) {
             failures.push(error);
@@ -379,13 +379,14 @@ export class InstanceCleanupDebt {
                 this.#instanceRegistry.get(record.instance.name) === candidate
             ) {
                 await this.#instanceRegistry
-                    .retireGeneration(record.instance.name, candidate)
+                    .remove(record.instance.name, candidate)
                     .catch((cleanupError) => failures.push(cleanupError));
+                this.#instanceChanges.publish("registry");
                 await this.#syncMcpEndpoint(record.instance.name).catch(
                     (cleanupError) => failures.push(cleanupError),
                 );
             }
-            await closeDescriptorResourcesBestEffort(candidate).catch(
+            await closeInstanceResources(candidate).catch(
                 (cleanupError) => failures.push(cleanupError),
             );
         }
@@ -399,8 +400,8 @@ export class InstanceCleanupDebt {
         const descriptor =
             record.operation === "delete"
                 ? (this.#cleanupOnlyDescriptors.get(record.instance.name) ??
-                  this.#instanceConfigMapper.map(record.instance))
-                : this.#instanceConfigMapper.map(record.instance);
+                  createInstance(record.instance))
+                : createInstance(record.instance);
         if (record.operation === "delete") {
             this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
             try {
@@ -438,7 +439,7 @@ export class InstanceCleanupDebt {
                 .notifyDeleted(record.instance)
                 .catch((error) => failures.push(error));
         }
-        await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
+        await closeInstanceResources(descriptor).catch((error) =>
             failures.push(error),
         );
         if (record.operation === "delete") {

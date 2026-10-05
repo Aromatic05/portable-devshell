@@ -1,4 +1,5 @@
 import {
+    mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
     JsonValue,
@@ -9,7 +10,8 @@ import { routeModule } from "../Port.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import {
     createInstanceHost,
-    createInstanceToolIngressHost,
+    createConnectionRouteModule,
+    createToolIngressHost,
     InstanceRegistry,
     ProcessSubscriptionManager,
     TerminalSessionService,
@@ -101,6 +103,7 @@ export interface ControlRouteRegistryOptions {
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
+    instanceChanges?: InstanceChangeHub;
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
@@ -122,7 +125,7 @@ export interface ControlRouteRegistryOptions {
 export class ControlRouteRegistry {
     readonly #configChanges: ConfigChangeHub;
     readonly #overview: OperationalOverviewPort;
-    readonly #instanceChanges = new InstanceChangeHub();
+    readonly #instanceChanges: InstanceChangeHub;
     readonly #options: ControlRouteRegistryOptions;
     readonly #subscriptions: ProcessSubscriptionManager;
     readonly #terminals = new TerminalSessionService();
@@ -135,6 +138,8 @@ export class ControlRouteRegistry {
     constructor(options: ControlRouteRegistryOptions) {
         this.#options = options;
         this.#configChanges = options.configChanges ?? new ConfigChangeHub();
+        this.#instanceChanges =
+            options.instanceChanges ?? new InstanceChangeHub();
         this.#subscriptions =
             options.processSubscriptions ?? new ProcessSubscriptionManager();
         this.#overview =
@@ -160,8 +165,7 @@ export class ControlRouteRegistry {
                 }
             },
         );
-        this.#unsubscribeInstances = options.instances.onChange(() => {
-            this.#instanceChanges.publish("registry");
+        this.#unsubscribeInstances = this.#instanceChanges.onChange(() => {
             this.#rebuild();
         });
     }
@@ -200,7 +204,7 @@ export class ControlRouteRegistry {
         const definitions: ControlHostDefinition[] = [
             {
                 host: "@control",
-                ports: mergePortDefinitionsByName([
+                ports: mergeControlPortsByName([
                     createServerRouteModule({
                         instanceCount: () =>
                             this.#options.instances.list().length,
@@ -270,16 +274,14 @@ export class ControlRouteRegistry {
         ];
 
         if (this.#options.toolCalls !== undefined) {
-            definitions.push(
-                createInstanceToolIngressHost(this.#options.toolCalls),
-            );
+            definitions.push(createToolIngressHost(this.#options.toolCalls));
         }
 
         for (const descriptor of descriptors) {
             definitions.push(
                 createInstanceHost({
                     descriptor,
-                    extensionModules:
+                    extensionPorts:
                         this.#options.extensionRoutes?.modules("instance") ??
                         [],
                     registry: this.#options.instances,
@@ -287,53 +289,10 @@ export class ControlRouteRegistry {
                     terminalMaxUnackedBytes:
                         this.#options.terminalMaxUnackedBytes,
                     terminals: this.#terminals,
-                    toolCalls: this.#options.toolCalls,
-                    toolProvenance: this.#options.toolProvenance,
                 }),
             );
         }
 
         return definitions;
     }
-}
-
-function mergePortDefinitions(
-    ...definitions: readonly ControlPortDefinition[]
-): ControlPortDefinition {
-    const first = definitions[0];
-    if (first === undefined)
-        throw new Error("Cannot merge an empty port list.");
-    if (definitions.some((definition) => definition.name !== first.name))
-        throw new Error("Cannot merge ports with different names.");
-    const operations = definitions.flatMap(
-        (definition) => definition.operations,
-    );
-    const streams = definitions.flatMap(
-        (definition) => definition.streams ?? [],
-    );
-    const names = new Set<string>();
-    for (const operation of [...operations, ...streams]) {
-        if (names.has(operation.name))
-            throw new Error(
-                `Duplicate ${first.name} operation: ${operation.name}`,
-            );
-        names.add(operation.name);
-    }
-    return {
-        name: first.name,
-        operations,
-        ...(streams.length === 0 ? {} : { streams }),
-    };
-}
-
-function mergePortDefinitionsByName(
-    definitions: readonly ControlPortDefinition[],
-): ControlPortDefinition[] {
-    const groups = new Map<string, ControlPortDefinition[]>();
-    for (const definition of definitions) {
-        const group = groups.get(definition.name) ?? [];
-        group.push(definition);
-        groups.set(definition.name, group);
-    }
-    return [...groups.values()].map((group) => mergePortDefinitions(...group));
 }
