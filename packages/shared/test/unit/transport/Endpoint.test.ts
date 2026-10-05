@@ -120,6 +120,30 @@ test("Endpoint routes Rpc across host:port and Envelope fragmentation", async (t
     assert.equal(await clientRpc.request("echo", message), message);
 });
 
+test("Rpc handler can call back through the same connection", async (t) => {
+    const { client, server } = await endpoints();
+    t.after(() => {
+        client.close();
+        server.close();
+    });
+    const serverRpc = new Rpc(server.bind("core"), {
+        register: async (message, context) => ({
+            registered: await context.request("describe", message),
+        }),
+    });
+    const clientRpc = new Rpc(await client.connect("worker", "core"), {
+        describe: (message) => ({ definition: message }),
+    });
+    t.after(() => {
+        clientRpc.close();
+        serverRpc.close();
+    });
+
+    assert.deepEqual(await clientRpc.request("register", { name: "todo_read" }), {
+        registered: { definition: { name: "todo_read" } },
+    });
+});
+
 test("Endpoint wildcard host preserves the concrete RPC destination and exact routes win", async (t) => {
     const { client, server } = await endpoints();
     t.after(() => {
