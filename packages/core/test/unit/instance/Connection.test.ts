@@ -1,198 +1,144 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceConnectionService } from "../../../src/instance/Connection.ts";
-import { InstanceRegistry } from "../../../src/instance/Registry.ts";
-import type { InstanceDescriptor } from "../../../src/instance/Descriptor.ts";
+import { Instance } from "../../../src/instance/Instance.ts";
+import type { WorkerInstance } from "../../../src/instance/runtime/index.ts";
 
-test("instance connection service shares one managed Worker across MCP and Agent references", async () => {
+function instance(worker: object): Instance {
+    return new Instance({
+        enabled: true,
+        mcpEnabled: true,
+        mcpPath: "/worker-a/mcp",
+        modelExtensions: [],
+        name: "worker-a",
+        provider: "local",
+        worker: worker as unknown as WorkerInstance,
+    });
+}
+
+test("instance shares one managed Worker across MCP and Agent references", async () => {
     let ready = false;
     let starts = 0;
     let stops = 0;
-    const registry = new InstanceRegistry([
-        {
-            enabled: true,
-            name: "worker-a",
-            worker: {
-                managementMode: "controllerManaged",
-                snapshot() {
-                    return { ready };
-                },
-                async start() {
-                    starts += 1;
-                    ready = true;
-                    return { ready: true };
-                },
-                async stop() {
-                    stops += 1;
-                    ready = false;
-                    return { ready: false };
-                },
-            },
-        } as never,
-    ]);
-    const connections = new InstanceConnectionService(registry);
+    const worker = {
+        managementMode: "controllerManaged",
+        snapshot() {
+            return { daemonState: ready ? "running" : "stopped", ready };
+        },
+        async start() {
+            starts += 1;
+            ready = true;
+            return { daemonState: "running", ready };
+        },
+        async stop() {
+            stops += 1;
+            ready = false;
+            return { daemonState: "stopped", ready };
+        },
+    };
+    const current = instance(worker);
 
-    const mcp = await connections.acquire("worker-a", "ctx:mcp");
-    const agent = await connections.acquire("worker-a", "agent:ag-1");
+    const mcp = await current.acquireReference("ctx:mcp");
+    const agent = await current.acquireReference("agent:ag-1");
 
     assert.equal(starts, 1);
     assert.equal(mcp.worker, agent.worker);
-
-    await connections.release("worker-a", "ctx:mcp");
+    await current.releaseReference("ctx:mcp");
     assert.equal(stops, 0);
-    await connections.release("worker-a", "agent:ag-1");
+    await current.releaseReference("agent:ag-1");
     assert.equal(stops, 1);
 });
 
-test("instance connection references remain bound to the Worker generation they acquired", async () => {
-    const stopped: string[] = [];
-    const worker = (generation: string) => {
-        let ready = false;
-        return {
-            managementMode: "controllerManaged" as const,
-            snapshot() {
-                return {
-                    daemonState: ready ? "running" : "stopped",
-                    ready,
-                };
-            },
-            async start() {
-                ready = true;
-                return { daemonState: "running", ready: true };
-            },
-            async stop() {
-                stopped.push(generation);
-                ready = false;
-                return { daemonState: "stopped", ready: false };
-            },
-        };
-    };
-    const first = worker("first");
-    const second = worker("second");
-    const firstDescriptor = {
-        enabled: true,
-        name: "worker-a",
-        worker: first,
-    } as never;
-    const secondDescriptor = {
-        enabled: true,
-        name: "worker-a",
-        worker: second,
-    } as never;
-    const registry = new InstanceRegistry([firstDescriptor]);
-    const connections = new InstanceConnectionService(registry);
-
-    await connections.acquire("worker-a", "ctx:first");
-    await registry.retireGeneration("worker-a", firstDescriptor);
-    registry.add(secondDescriptor);
-    await connections.acquire("worker-a", "ctx:second");
-
-    await connections.release("worker-a", "ctx:first");
-    assert.deepEqual(stopped, ["first"]);
-    assert.equal(second.snapshot().ready, true);
-
-    await connections.release("worker-a", "ctx:second");
-    assert.deepEqual(stopped, ["first", "second"]);
-});
-
-test("retiring committed generation references allows the same Context to attach to the replacement", async () => {
-    const worker = (): InstanceDescriptor["worker"] =>
-        ({
-            managementMode: "controllerManaged" as const,
-            snapshot() {
-                return { daemonState: "running", ready: true };
-            },
-            async stop() {
-                return { daemonState: "stopped", ready: false };
-            },
-        }) as InstanceDescriptor["worker"];
-    const first = worker();
-    const second = worker();
-    const firstDescriptor = {
-        enabled: true,
-        name: "worker-a",
-        worker: first,
-    } as never;
-    const secondDescriptor = {
-        enabled: true,
-        name: "worker-a",
-        worker: second,
-    } as never;
-    const registry = new InstanceRegistry([firstDescriptor]);
-    const connections = new InstanceConnectionService(registry);
-
-    await connections.acquire("worker-a", "ctx:same");
-    await registry.retireGeneration("worker-a", firstDescriptor);
-    registry.add(secondDescriptor);
-    registry.retireConnectionReferences("worker-a", first);
-
-    const replacement = await connections.acquire("worker-a", "ctx:same");
-    assert.equal(replacement.worker, second);
-});
-
-test("instance connection rejects a late acquire after its generation is retired", async () => {
+test("instance references keep an owned Worker running until the final release", async () => {
     let ready = false;
-    let signalStart!: () => void;
-    let finishStart!: () => void;
     let stops = 0;
+    const current = instance({
+        managementMode: "controllerManaged",
+        snapshot() {
+            return { daemonState: ready ? "running" : "stopped", ready };
+        },
+        async start() {
+            ready = true;
+            return { daemonState: "running", ready };
+        },
+        async stop() {
+            stops += 1;
+            ready = false;
+            return { daemonState: "stopped", ready };
+        },
+    });
+
+    await current.acquireReference("ctx:first");
+    await current.acquireReference("ctx:second");
+    await current.releaseReference("ctx:first");
+    assert.equal(stops, 0);
+    assert.equal(ready, true);
+    await current.releaseReference("ctx:second");
+    assert.equal(stops, 1);
+    assert.equal(ready, false);
+});
+
+test("self-managed instance references never stop the externally owned Worker", async () => {
+    let stops = 0;
+    const current = instance({
+        managementMode: "selfManaged",
+        snapshot() {
+            return { daemonState: "running", ready: true };
+        },
+        async refreshStatus() {
+            return { daemonState: "running", ready: true };
+        },
+        async stop() {
+            stops += 1;
+            return { daemonState: "stopped", ready: false };
+        },
+    });
+
+    await current.acquireReference("ctx:reverse");
+    await current.releaseReference("ctx:reverse");
+
+    assert.equal(stops, 0);
+});
+
+test("retiring an instance fences a pending acquire and stops its late start", async () => {
+    let ready = false;
+    let stops = 0;
+    let enterStart!: () => void;
+    let finishStart!: () => void;
     const startEntered = new Promise<void>((resolve) => {
-        signalStart = resolve;
+        enterStart = resolve;
     });
     const startGate = new Promise<void>((resolve) => {
         finishStart = resolve;
     });
-    const descriptor = {
-        enabled: true,
-        name: "worker-a",
-        worker: {
-            managementMode: "controllerManaged" as const,
-            snapshot() {
-                return {
-                    daemonState: ready ? "running" : "stopped",
-                    ready,
-                };
-            },
-            async start() {
-                signalStart();
-                await startGate;
-                ready = true;
-                return { daemonState: "running", ready: true };
-            },
-            async stop() {
-                stops += 1;
-                ready = false;
-                return { daemonState: "stopped", ready: false };
-            },
+    const current = instance({
+        managementMode: "controllerManaged",
+        snapshot() {
+            return { daemonState: ready ? "running" : "stopped", ready };
         },
-    } as never;
-    const registry = new InstanceRegistry([descriptor]);
-    const connections = new InstanceConnectionService(registry);
+        async start() {
+            enterStart();
+            await startGate;
+            ready = true;
+            return { daemonState: "running", ready };
+        },
+        async stop() {
+            stops += 1;
+            ready = false;
+            return { daemonState: "stopped", ready };
+        },
+    });
 
-    const acquire = connections.acquire("worker-a", "ctx:late");
+    const acquire = current.acquireReference("ctx:late");
     await startEntered;
-    let retired = false;
-    const retirement = registry
-        .retireGeneration("worker-a", descriptor)
-        .then(() => {
-            retired = true;
-        });
-
-    assert.equal(registry.get("worker-a"), undefined);
-    await Promise.resolve();
-    assert.equal(retired, false);
-
+    const retirement = current.retire();
     finishStart();
-    await assert.rejects(
-        acquire,
-        (error: unknown) =>
-            (error as { code?: string }).code === "instance.conflict",
+
+    await assert.rejects(acquire, (error: unknown) =>
+        (error as { code?: string }).code === "instance.conflict",
     );
     await retirement;
-
     assert.equal(stops, 1);
-    assert.equal(
-        registry.releaseConnectionReference("worker-a", "ctx:late"),
-        undefined,
-    );
+    assert.equal(ready, false);
+    assert.equal(current.retired, true);
 });

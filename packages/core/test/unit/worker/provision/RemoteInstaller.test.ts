@@ -16,11 +16,10 @@ import test from "node:test";
 
 import { RemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
-import {
-    WorkerInstallerRemote,
-    getWorkerTargetByKey,
-    type WorkerAsset,
-} from "@portable-devshell/core/testing";
+import type { WorkerConnection } from "../../../../src/instance/transport/endpoint/channel/worker/index.ts";
+import { WorkerInstallerRemote } from "../../../../src/instance/runtime/provision/install/Remote.ts";
+import { getWorkerTargetByKey } from "../../../../src/instance/runtime/provision/Target.ts";
+import type { WorkerAsset } from "../../../../src/instance/runtime/provision/Asset.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test(
@@ -90,7 +89,10 @@ test(
         );
         await assert.rejects(
             secondInstaller.ensure("devshell-worker"),
-            /injected-alias-switch-failure/u,
+            (error: unknown) =>
+                error instanceof RemoteError &&
+                error.cause instanceof Error &&
+                /injected-alias-switch-failure/u.test(error.cause.message),
         );
         assert.equal(await readlink(executable), previousTarget);
     },
@@ -176,31 +178,57 @@ function createInstaller(
     path: string,
 ): WorkerInstallerRemote {
     return new WorkerInstallerRemote({
-        createContext: (operation, command) => ({
-            command: [...command],
-            commandDisplay: command.join(" "),
-            operation,
-            provider: "test-remote",
-        }),
-        createProviderError: (context, cause, options) =>
-            new RemoteError({
-                code: options?.errorCode ?? runtimeErrorCodes.providerFailed,
-                cause,
-                details: {
-                    command: context.commandDisplay,
-                    operation: context.operation,
-                    provider: context.provider,
-                },
-                message: cause instanceof Error ? cause.message : String(cause),
-                retryable: false,
-            }),
-        probeTarget: async () => target,
         resolver: { resolve: async () => asset } as never,
-        spawnShell: (commandLine, stdio) =>
-            spawn("sh", ["-c", commandLine], {
-                env: { ...process.env, HOME: home, PATH: path },
-                stdio,
-            }),
+        provider: "test-remote",
+        connection: {
+            async runCommand(operation, command, options) {
+                const child = spawn(command[0]!, command.slice(1), {
+                    env: { ...process.env, HOME: home, PATH: path },
+                    stdio: ["pipe", "pipe", "pipe"],
+                });
+                let stdout = "";
+                let stderr = "";
+                child.stdout.setEncoding("utf8");
+                child.stderr.setEncoding("utf8");
+                child.stdout.on("data", (chunk: string) => {
+                    stdout += chunk;
+                });
+                child.stderr.on("data", (chunk: string) => {
+                    stderr += chunk;
+                });
+                if (options?.input !== undefined)
+                    child.stdin.end(options.input);
+                else child.stdin.end();
+                return await new Promise((resolve, reject) => {
+                    child.once("error", reject);
+                    child.once("close", (exitCode, signal) =>
+                        resolve({
+                            details: {
+                                command: [...command],
+                                commandDisplay: command.join(" "),
+                                operation,
+                                provider: "test-remote",
+                                ...(signal === null ? {} : { signal }),
+                                ...(stderr.length === 0
+                                    ? {}
+                                    : { stderrTail: stderr }),
+                                ...(stdout.length === 0
+                                    ? {}
+                                    : { stdoutTail: stdout }),
+                                exitCode,
+                            },
+                            exitCode,
+                            signal: signal ?? undefined,
+                            stderr,
+                            stdout,
+                        }),
+                    );
+                });
+            },
+            async openChannel() {
+                throw new Error("not used by WorkerInstallerRemote tests");
+            },
+        } satisfies WorkerConnection,
     });
 }
 

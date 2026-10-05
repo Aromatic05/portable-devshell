@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
-import { InstanceStateMachine } from "@portable-devshell/core/testing";
+import { InstanceStateMachine } from "../../../../src/instance/runtime/supervision/State.ts";
 
 test("InstanceStateMachine derives ready running stale failed and stopped snapshots", () => {
     const stateMachine = new InstanceStateMachine(

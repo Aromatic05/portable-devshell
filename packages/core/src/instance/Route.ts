@@ -12,35 +12,25 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { createApprovalRouteModule } from "../approval/transport/Route.js";
 import { requirePort, routeModule } from "../Port.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { WorkerInstance } from "./runtime/index.js";
-import type { ReverseCredentials } from "./transport/endpoint/channel/reverse/credential/Credentials.js";
 import type { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
-import { createTerminalRouteModule } from "../terminal/Route.js";
-import type { TerminalSessionService } from "../terminal/Service.js";
+import type { ReverseCredentials } from "./transport/endpoint/channel/reverse/credential/Credentials.js";
 import type { Instance } from "./Instance.js";
 import type { InstanceRegistry } from "./Registry.js";
-import type { InstanceEventSource } from "./runtime/supervision/Event.js";
 
 export interface InstanceRouteOptions {
     descriptor: Instance;
     extensionPorts?: readonly ControlPortDefinition[];
     registry: InstanceRegistry;
     subscriptions: ProcessSubscriptionManager;
-    terminalMaxUnackedBytes?: number;
-    terminals: TerminalSessionService;
 }
 
 export function createInstanceHost(
     options: InstanceRouteOptions,
 ): ControlHostDefinition {
     const { descriptor } = options;
-    const events: InstanceEventSource = {
-        cursor: () => descriptor.worker.snapshot().lastSeq,
-        subscribe: (fromSeq) => descriptor.worker.subscribe(fromSeq),
-    };
     const ports = mergeControlPortsByName([
         createProcessRouteModule(
             {
@@ -52,22 +42,6 @@ export function createInstanceHost(
             options.subscriptions,
         ),
         ...(options.extensionPorts ?? []),
-        createApprovalRouteModule(
-            {
-                approval: descriptor.approval,
-                events,
-                name: descriptor.name,
-            },
-            options.subscriptions,
-        ),
-        createTerminalRouteModule({
-            backend: descriptor.terminal,
-            instance: descriptor.name,
-            ...(options.terminalMaxUnackedBytes === undefined
-                ? {}
-                : { maxUnackedBytes: options.terminalMaxUnackedBytes }),
-            sessions: options.terminals,
-        }),
     ]);
     return {
         host: asInstanceName(descriptor.name),

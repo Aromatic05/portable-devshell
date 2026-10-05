@@ -14,11 +14,9 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-    WorkerInstallerLocal,
-    getWorkerTargetByKey,
-    type WorkerAsset,
-} from "@portable-devshell/core/testing";
+import { WorkerInstallerLocal } from "../../../../src/instance/runtime/provision/install/Local.ts";
+import { getWorkerTargetByKey } from "../../../../src/instance/runtime/provision/Target.ts";
+import type { WorkerAsset } from "../../../../src/instance/runtime/provision/Asset.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test(

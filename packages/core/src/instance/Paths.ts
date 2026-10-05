@@ -8,15 +8,7 @@ export class InstancePaths {
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
     readonly messageDatabaseFile: string;
-    /**
-     * @compat comment-json-v1-path
-     * @removeAt 0.7.10
-     */
-    readonly contextMessagesFile: string;
     readonly goalsFile: string;
-    readonly legacyEventsFile: string;
-    readonly legacyLogsFile: string;
-    readonly legacyToolCallsFile: string;
     readonly todoFile: string;
     readonly waitsFile: string;
     readonly workerConfigFile: string;
@@ -30,18 +22,8 @@ export class InstancePaths {
             this.controlWorkerDir,
             "message.sqlite3",
         );
-        this.contextMessagesFile = join(
-            this.controlWorkerDir,
-            "context-messages.json",
-        );
         this.goalsFile = join(this.controlWorkerDir, "goals.json");
         this.auditDatabaseFile = join(this.controlWorkerDir, "audit.sqlite3");
-        this.legacyEventsFile = join(this.controlWorkerDir, "events.jsonl");
-        this.legacyLogsFile = join(this.controlWorkerDir, "logs.jsonl");
-        this.legacyToolCallsFile = join(
-            this.controlWorkerDir,
-            "tool-calls.jsonl",
-        );
         this.todoFile = join(this.controlWorkerDir, "todo.json");
         this.waitsFile = join(this.controlWorkerDir, "detached-waits.json");
         this.workerConfigFile = join(this.instanceRootDir, "config.toml");

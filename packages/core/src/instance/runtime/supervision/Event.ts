@@ -33,7 +33,15 @@ export interface InstanceEventSource {
     ): InstanceEventStreamGap | InstanceEventStreamSlice;
 }
 
-export class InstanceEventBuffer {
+export interface InstanceEventPort {
+    cursor(): number;
+    append(event: InstanceEventInput): Promise<InstanceEventRecord>;
+    readFrom(
+        fromSeq?: number,
+    ): InstanceEventStreamGap | InstanceEventStreamSlice;
+}
+
+export class InstanceEventBuffer implements InstanceEventPort, InstanceEventSource {
     readonly #instanceName: InstanceName;
     readonly #capacity: number;
     #appendTail: Promise<void> = Promise.resolve();

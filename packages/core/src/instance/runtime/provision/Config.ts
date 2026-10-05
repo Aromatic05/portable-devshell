@@ -42,7 +42,6 @@ export interface WorkerInstanceConfigCommon {
     name: InstanceName;
     homeDirectory?: string;
     env?: NodeJS.ProcessEnv;
-    eventBufferSize?: number;
     handshake?: Partial<WorkerHandshakeParams>;
 }
 
@@ -60,7 +59,6 @@ export type WorkerInstanceConfig =
 
 export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon {
     effectiveSecurityMode: EffectiveSecurityMode;
-    eventBufferSize: number;
     handshake: WorkerHandshakeParams;
     managementMode: WorkerManagementMode;
     runtime?: WorkerRuntime;
@@ -75,7 +73,6 @@ export function resolveWorkerInstanceConfig(
     return {
         ...config,
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
-        eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {
             protocolRange: WORKER_PROTOCOL_RANGE,
             clientName: "portable-devshell",

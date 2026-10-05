@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerInstance } from "@portable-devshell/core/testing";
+import type { WorkerInstance } from "../../../src/instance/runtime/index.ts";
 import type {
     ControlPortContext,
     ControlStreamMessage,
@@ -9,7 +9,7 @@ import type {
     MessageStream,
 } from "@portable-devshell/shared";
 
-import { ProcessSubscriptionManager } from "../../../src/process/Subscription.ts";
+import { ProcessSubscriptionManager } from "../../../src/instance/runtime/supervision/Subscription.ts";
 
 test("ProcessSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new ProcessSubscriptionManager(5);

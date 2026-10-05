@@ -9,19 +9,19 @@ import {
 import {
     normalizeLifecycleStatus,
     parseWorkerStatus,
-} from "../../../../src/worker/instance/lifecycle/Status.ts";
+} from "../../../../src/instance/runtime/supervision/Status.ts";
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
-} from "../../../../src/worker/instance/tool/Error.ts";
-import { throwIfToolCallAborted } from "../../../../src/toolcall/Error.ts";
+} from "../../../../src/toolcall/execution/Error.ts";
+import { throwIfToolCallAborted } from "../../../../src/toolcall/execution/Error.ts";
 import {
     asBashToolResult,
     asCommandResult,
     commandResultOutput,
     readByteLength,
     stripCommandStreams,
-} from "../../../../src/worker/instance/tool/record/Result.ts";
+} from "../../../../src/toolcall/execution/record/Result.ts";
 
 test("worker lifecycle status normalization maps ready to running and preserves terminal states", () => {
     assert.equal(normalizeLifecycleStatus("ready"), "running");

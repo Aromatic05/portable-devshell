@@ -3,6 +3,41 @@ import type {
     ContextEnvironment,
     ContextExternalBinding,
 } from "@portable-devshell/shared";
+import type { WorkerInstance } from "../instance/runtime/index.js";
+
+export type ContextWorkerPort = Pick<
+    WorkerInstance,
+    | "handshake"
+    | "prepareExtensionResource"
+    | "prepareWorkspace"
+    | "readAlerts"
+    | "releaseAlerts"
+    | "snapshot"
+    | "touchAlerts"
+    | "touchTemporaryDirectory"
+>;
+
+export interface ContextInstanceLeasePort {
+    readonly instance: { readonly worker: ContextWorkerPort };
+    release(): void;
+}
+
+export interface ContextInstanceReferencePort {
+    readonly snapshot: ReturnType<WorkerInstance["snapshot"]>;
+    readonly worker: ContextWorkerPort;
+}
+
+export interface ContextInstancePort {
+    acquireLease(): ContextInstanceLeasePort;
+    acquireReference(
+        reference: string,
+    ): Promise<ContextInstanceReferencePort>;
+    releaseReference(reference: string): Promise<void>;
+}
+
+export interface ContextInstancesPort {
+    get(name: string): ContextInstancePort | undefined;
+}
 
 export interface PreparedEnvironmentFacts {
     projectMemoryAgentFile: string;

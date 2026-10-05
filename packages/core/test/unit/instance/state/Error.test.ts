@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    InstanceStateMachine,
-    WorkerInstance,
-    WORKER_PROTOCOL_VERSION,
-} from "@portable-devshell/core/testing";
+import { InstanceEventBuffer } from "../../../../src/instance/runtime/supervision/Event.ts";
+import { InstanceStateMachine } from "../../../../src/instance/runtime/supervision/State.ts";
+import { WorkerInstance } from "../../../../src/instance/runtime/index.ts";
+import { WORKER_PROTOCOL_VERSION } from "../../../../src/instance/transport/packet/Client.ts";
+import { resolveWorkerInstanceConfig } from "../../../../src/instance/runtime/provision/Config.ts";
+import { TransportConnection } from "../../../../src/instance/transport/endpoint/Connection.ts";
 import {
     Endpoint,
     asInstanceName,
@@ -133,7 +134,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
     });
 });
 
-test("WorkerInstance preserves catalog failures during startup", async () => {
+test("WorkerInstance preserves protocol tool-list failures", async () => {
     const instance = createInstance({
         listTools: async () => {
             throw createRemoteError({
@@ -145,7 +146,7 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
         },
     });
 
-    await assert.rejects(instance.start(), (error: unknown) => {
+    await assert.rejects(instance.readWorkerTools(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal(
             (error as { code?: string }).code,
@@ -182,23 +183,12 @@ function createInstance(
         }>;
     }>,
 ): WorkerInstance {
-    const boundEndpoint = new Endpoint();
-    const endpoint = {
-        bind: boundEndpoint.bind.bind(boundEndpoint),
-        connected: true,
-        disconnect() {},
-        onTransportClose: () => () => undefined,
-        reconnect: async () => undefined,
-    };
+    const instanceName = asInstanceName("demo-local");
+    const endpoint = new Endpoint();
+    const transportConnection = new TransportConnection(async () => {
+        throw new Error("not used by command failure tests");
+    });
     return new WorkerInstance({
-        auditDatabase: {
-            close: () => undefined,
-        } as never,
-        catalog: {
-            hasSchema: () => false,
-            listTools: () => [],
-            refresh: () => [],
-        } as never,
         commandClient: {
             start:
                 commands.start ??
@@ -214,52 +204,26 @@ function createInstance(
                 commands.stop ??
                 (async () => ({ exitCode: 0, stderr: "", stdout: "{}" })),
         } as never,
-        config: {
-            handshake: {
-                clientName: "portable-devshell",
-                clientVersion: "0.1.0",
-                protocolRange: {
-                    min: WORKER_PROTOCOL_VERSION,
-                    max: WORKER_PROTOCOL_VERSION,
-                },
-            },
-            name: asInstanceName("demo-local"),
-        } as never,
-        eventBuffer: {
-            append: async () => ({ seq: 1 }),
-        } as never,
-        logStore: {
-            append: async () => undefined,
-            read: async () => [],
-        } as never,
+        config: resolveWorkerInstanceConfig({
+            name: instanceName,
+            runtime: {} as never,
+            transportConnection,
+        }),
+        events: new InstanceEventBuffer(instanceName, 8),
         protocolClient: {
             handshake: async () => ({
+                capabilities: { cancel: true, streaming: true, tools: true },
+                homeDirectory: "/tmp",
                 instance: "demo-local",
+                platform: { arch: "x64", os: "linux" },
                 protocolVersion: WORKER_PROTOCOL_VERSION,
-                workspace: "/tmp/workspace",
                 workerVersion: "0.0.0",
             }),
             listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true }),
         } as never,
-        endpoint: endpoint as never,
-        stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
-        terminalClient: {} as never,
-        transportConnection: {
-            close: () => undefined,
-        } as never,
-        toolCallScheduler: {} as never,
-        toolCallHistory: {
-            read: async () => [],
-        } as never,
-        toolInvoker: {
-            invoke: async () => {
-                throw createRemoteError({
-                    code: "core.providerFailed",
-                    message: "unused",
-                    retryable: false,
-                });
-            },
-        } as never,
+        endpoint,
+        stateMachine: new InstanceStateMachine(instanceName),
+        transportConnection,
     });
 }

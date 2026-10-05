@@ -12,9 +12,9 @@ import type {
     ContextRecordPort,
 } from "@portable-devshell/shared";
 
-import type { InstanceLease } from "../../instance/Instance.js";
-import type { InstanceRegistry } from "../../instance/Registry.js";
 import type {
+    ContextInstanceLeasePort,
+    ContextInstancesPort,
     ContextEnvironmentPort,
     PreparedEnvironmentFacts,
 } from "../Port.js";
@@ -23,13 +23,13 @@ import { ContextCleanupService } from "./Cleanup.js";
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
     readonly #cleanup: ContextCleanupService;
-    readonly #instances: InstanceRegistry;
+    readonly #instances: ContextInstancesPort;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
         contextRegistry: ContextRecordPort & ContextCleanupLedgerPort;
         cleanup: ContextCleanupService;
-        instances: InstanceRegistry;
+        instances: ContextInstancesPort;
     }) {
         this.#registry = options.contextRegistry;
         this.#cleanup = options.cleanup;
@@ -337,7 +337,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             await this.#registry.discard(ctxId);
     }
 
-    #requireGeneration(instance: string): InstanceLease {
+    #requireGeneration(instance: string): ContextInstanceLeasePort {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

@@ -12,8 +12,8 @@ import {
     createConnectionChangedEventData,
     createReadyChangedEventData,
     createStatusChangedEventData,
-    InstanceEventBuffer,
     type InstanceEventInput,
+    type InstanceEventPort,
     type InstanceEventStreamGap,
     type InstanceEventStreamSlice,
 } from "./Event.js";
@@ -105,17 +105,18 @@ export class InstanceStateMachine {
 
 export class WorkerInstanceState {
     readonly #config: ResolvedWorkerInstanceConfig;
-    readonly #eventBuffer: InstanceEventBuffer;
+    readonly #events: InstanceEventPort;
     readonly #stateMachine: InstanceStateMachine;
 
     constructor(options: {
         config: ResolvedWorkerInstanceConfig;
-        eventBuffer: InstanceEventBuffer;
+        events: InstanceEventPort;
         stateMachine: InstanceStateMachine;
     }) {
         this.#config = options.config;
-        this.#eventBuffer = options.eventBuffer;
+        this.#events = options.events;
         this.#stateMachine = options.stateMachine;
+        this.#stateMachine.apply({ lastSeq: this.#events.cursor() });
     }
 
     snapshot(reverse?: ReverseInstanceStatus): InstanceSnapshot {
@@ -127,11 +128,11 @@ export class WorkerInstanceState {
     }
 
     subscribe(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
-        return this.#eventBuffer.readFrom(fromSeq);
+        return this.#events.readFrom(fromSeq);
     }
 
     async appendEvent(type: InstanceEventInput["type"], data?: JsonValue) {
-        const event = await this.#eventBuffer.append({
+        const event = await this.#events.append({
             at: new Date().toISOString(),
             data,
             type,

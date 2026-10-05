@@ -10,9 +10,11 @@ import {
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
 
-import type { ContextService } from "../service/index.js";
-import type { InstanceLease } from "../../instance/Instance.js";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { ContextApi } from "../Api.js";
+import type {
+    ContextInstanceLeasePort,
+    ContextInstancesPort,
+} from "../Port.js";
 import {
     environmentInfoToolName,
     remoteEnvironmentToolName,
@@ -23,10 +25,10 @@ import {
 } from "./Input.js";
 
 export function installContextTools(
-    contexts: ContextService,
+    contexts: ContextApi,
     hooks: ToolCallHooks,
     options: {
-        instances: InstanceRegistry;
+        instances: ContextInstancesPort;
         modelCommands?(instance: string): readonly string[];
     },
 ): () => void {
@@ -48,14 +50,14 @@ export function installContextTools(
 }
 
 class ContextToolRuntime {
-    readonly #contexts: ContextService;
-    readonly #instances: InstanceRegistry;
+    readonly #contexts: ContextApi;
+    readonly #instances: ContextInstancesPort;
     readonly #modelCommands: (instance: string) => readonly string[];
 
     constructor(
-        contexts: ContextService,
+        contexts: ContextApi,
         options: {
-            instances: InstanceRegistry;
+            instances: ContextInstancesPort;
             modelCommands?(instance: string): readonly string[];
         },
     ) {
@@ -409,7 +411,7 @@ class ContextToolRuntime {
         return context.principal ?? "local";
     }
 
-    #requireGeneration(instance: string): InstanceLease {
+    #requireGeneration(instance: string): ContextInstanceLeasePort {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

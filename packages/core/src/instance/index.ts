@@ -3,12 +3,7 @@ import {
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
-import { createInstanceApprovalService } from "../approval/index.js";
-import type { ApprovalApi } from "../approval/Api.js";
-import { createInstanceTerminalBackend } from "../terminal/index.js";
-import type { TerminalBackend } from "../terminal/Backend.js";
 import { Instance } from "./Instance.js";
-import { InstancePaths } from "./Paths.js";
 import { resolveWorkerHomeDirectory } from "./runtime/provision/Home.js";
 import {
     WorkerRuntimeFactory,
@@ -16,7 +11,7 @@ import {
 } from "./runtime/provision/Factory.js";
 import { ReverseProvision } from "./runtime/provision/install/provider/Reverse.js";
 import { WorkerInstance } from "./runtime/index.js";
-import { InstanceEventBuffer } from "./runtime/supervision/Event.js";
+import type { InstanceEventPort } from "./runtime/supervision/Event.js";
 import { WorkerCommandClient } from "./runtime/execution/Command.js";
 import { WorkerProtocolClient } from "./transport/packet/Client.js";
 import { InstanceStateMachine } from "./runtime/supervision/State.js";
@@ -29,42 +24,26 @@ import {
 
 export { Instance, type InstanceFields, type InstanceLease, type InstanceReferenceLease } from "./Instance.js";
 export { InstanceRegistry } from "./Registry.js";
+export type {
+    InstanceEventInput,
+    InstanceEventPort,
+    InstanceEventStreamGap,
+    InstanceEventStreamSlice,
+} from "./runtime/supervision/Event.js";
 
-export function createInstance(config: ControlInstanceConfig): Instance {
+export function createInstance(
+    config: ControlInstanceConfig,
+    dependencies: { events: InstanceEventPort },
+): Instance {
     const homeDirectory = resolveWorkerHomeDirectory();
-    const instanceName = asInstanceName(config.name);
-    const paths = new InstancePaths(instanceName, homeDirectory);
     const reverse =
         config.provider === "reverse" ? new ReverseProvision() : undefined;
     const worker = createWorkerInstance(
         toWorkerConfig(config, reverse, homeDirectory),
-    );
-    let approvalService: ApprovalApi | undefined;
-    let approvalPolicy = config.approvalPolicy;
-    let terminalBackend: TerminalBackend | undefined;
-    const approval = lazyMethods(
-        () =>
-            (approvalService ??= createInstanceApprovalService({
-                appendEvent: async (type, data) =>
-                    await worker.appendControlEvent(type, data),
-                instanceName,
-                paths,
-                policy: approvalPolicy,
-            })),
-        {
-            close: () => approvalService?.close(),
-            setPolicy: (policy) => {
-                approvalPolicy = policy;
-                approvalService?.setPolicy(policy);
-            },
-        },
-    );
-    const terminal = lazyMethods(() =>
-        (terminalBackend ??= createInstanceTerminalBackend(worker)),
+        dependencies.events,
     );
 
     return new Instance({
-        approval,
         enabled: config.enabled,
         mcpContextMode: config.mcp.contextMode,
         mcpEnabled: config.mcp.enabled,
@@ -75,12 +54,14 @@ export function createInstance(config: ControlInstanceConfig): Instance {
         ...(reverse === undefined
             ? {}
             : { reverseConnection: reverse.transportConnection }),
-        terminal,
         worker,
     });
 }
 
-function createWorkerInstance(config: WorkerInstanceConfig): WorkerInstance {
+function createWorkerInstance(
+    config: WorkerInstanceConfig,
+    events: InstanceEventPort,
+): WorkerInstance {
     const resolved = resolveWorkerInstanceConfig(config);
     const transportConnection = resolved.transportConnection;
     const workerHost = `${resolved.name}-worker`;
@@ -100,10 +81,7 @@ function createWorkerInstance(config: WorkerInstanceConfig): WorkerInstance {
                       resolved.env,
                   ),
         config: resolved,
-        eventBuffer: new InstanceEventBuffer(
-            resolved.name,
-            resolved.eventBufferSize,
-        ),
+        events,
         endpoint,
         protocolClient,
         stateMachine: new InstanceStateMachine(resolved.name),
@@ -125,7 +103,6 @@ function toWorkerConfig(
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
             DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
         },
-        eventBufferSize: instance.logs?.eventBufferSize,
         effectiveSecurityMode,
         homeDirectory,
         name: asInstanceName(instance.name),
@@ -182,19 +159,4 @@ function toRuntimeOptions(
                 `reverse instance ${instance.name} does not use command transport`,
             );
     }
-}
-
-function lazyMethods<T extends object>(
-    load: () => T,
-    overrides: Partial<T> = {},
-): T {
-    return new Proxy(overrides as T, {
-        get(target, property) {
-            if (Reflect.has(target, property))
-                return Reflect.get(target, property);
-            const loaded = load();
-            const value = Reflect.get(loaded, property);
-            return typeof value === "function" ? value.bind(loaded) : value;
-        },
-    });
 }

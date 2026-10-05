@@ -5,8 +5,6 @@ import {
     type ControlMcpContextMode,
 } from "@portable-devshell/shared";
 
-import type { ApprovalApi } from "../approval/Api.js";
-import type { TerminalBackend } from "../terminal/Backend.js";
 import type { WorkerInstance } from "./runtime/index.js";
 import type { TransportConnection } from "./transport/endpoint/Connection.js";
 
@@ -21,7 +19,6 @@ export interface InstanceReferenceLease {
 }
 
 export interface InstanceFields {
-    approval: ApprovalApi;
     enabled: boolean;
     mcpContextMode?: ControlMcpContextMode;
     mcpEnabled: boolean;
@@ -30,16 +27,13 @@ export interface InstanceFields {
     name: string;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
     reverseConnection?: TransportConnection;
-    terminal: TerminalBackend;
     worker: WorkerInstance;
 }
 
 export class Instance {
-    readonly #approval: ApprovalApi;
     readonly #name: string;
     readonly #provider: InstanceFields["provider"];
     readonly #reverseConnection?: TransportConnection;
-    readonly #terminal: TerminalBackend;
     readonly #worker: WorkerInstance;
     #enabled: boolean;
     #mcpContextMode?: ControlMcpContextMode;
@@ -51,10 +45,10 @@ export class Instance {
     readonly #ownedWorkers = new Set<WorkerInstance>();
     readonly #references = new Map<WorkerInstance, Set<string>>();
     #retired = false;
+    #retirementPromise?: Promise<void>;
     readonly #waiters = new Set<() => void>();
 
     constructor(fields: InstanceFields) {
-        this.#approval = fields.approval;
         this.#enabled = fields.enabled;
         this.#mcpContextMode = fields.mcpContextMode;
         this.#mcpEnabled = fields.mcpEnabled;
@@ -63,12 +57,7 @@ export class Instance {
         this.#name = fields.name;
         this.#provider = fields.provider;
         this.#reverseConnection = fields.reverseConnection;
-        this.#terminal = fields.terminal;
         this.#worker = fields.worker;
-    }
-
-    get approval(): ApprovalApi {
-        return this.#approval;
     }
 
     get enabled(): boolean {
@@ -101,10 +90,6 @@ export class Instance {
 
     get reverseConnection(): TransportConnection | undefined {
         return this.#reverseConnection;
-    }
-
-    get terminal(): TerminalBackend {
-        return this.#terminal;
     }
 
     get worker(): WorkerInstance {
@@ -146,14 +131,35 @@ export class Instance {
         };
     }
 
-    async retire(): Promise<void> {
+    retire(beforeDrain?: () => Promise<void>): Promise<void> {
+        if (this.#retirementPromise !== undefined)
+            return this.#retirementPromise;
         this.#retired = true;
+        this.#retirementPromise = Promise.resolve().then(
+            async () => await this.#retire(beforeDrain),
+        );
+        const retirement = this.#retirementPromise;
+        void retirement.catch(() => {
+            if (this.#retirementPromise === retirement)
+                this.#retirementPromise = undefined;
+        });
+        return this.#retirementPromise;
+    }
+
+    async #retire(beforeDrain?: () => Promise<void>): Promise<void> {
+        let retirementFailure: unknown;
+        try {
+            await beforeDrain?.();
+        } catch (error) {
+            retirementFailure = error;
+        }
         if (this.#admitted > 0) {
             await new Promise<void>((resolve) => {
                 if (this.#admitted === 0) resolve();
                 else this.#waiters.add(resolve);
             });
         }
+        if (retirementFailure !== undefined) throw retirementFailure;
     }
 
     async acquireReference(reference: string): Promise<InstanceReferenceLease> {

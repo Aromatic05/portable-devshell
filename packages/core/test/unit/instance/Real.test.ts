@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn as nodeSpawn, spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
@@ -25,21 +25,19 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 import {
-    WorkerTransportDriverLocal,
-    WorkerBinary,
-    WorkerInstanceFactory,
-    type WorkerInstance,
-    WORKER_PROTOCOL_VERSION,
-    type WorkerCommandResult,
-    type WorkerTransport,
-} from "@portable-devshell/core/testing";
-import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { ToolCallPipeline } from "../../../src/toolcall/Pipeline.ts";
-import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
+import { createToolCallRuntime } from "../../../src/toolcall/index.ts";
+import { WorkerInstance } from "../../../src/instance/runtime/index.ts";
+import { WORKER_PROTOCOL_VERSION } from "../../../src/instance/transport/packet/Client.ts";
+import {
+    createTestWorkerInstance,
+    createTestWorkerToolRuntime,
+    type TestWorkerTransport,
+} from "../../support/WorkerInstance.ts";
+import type { WorkerCommandResult } from "../../../src/instance/runtime/execution/Command.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -176,8 +174,7 @@ test(
         const runtimeDirectory =
             await createTestTempDirectory("instance-runtime");
         const instanceName = asInstanceName(`task-6-${process.pid}`);
-        const factory = new WorkerInstanceFactory();
-        const instance = factory.create({
+        const instance = createTestWorkerInstance({
             env: {
                 ...process.env,
                 HOME: homeDirectory,
@@ -186,10 +183,7 @@ test(
             },
             homeDirectory,
             name: instanceName,
-            transport: new WorkerTransportDriverLocal({
-                workerBinary: new WorkerBinary(workerBinaryPath!),
-                spawnFunction: nodeSpawn,
-            }),
+            workerBinaryPath: workerBinaryPath!,
         });
 
         t.after(async () => {
@@ -207,14 +201,14 @@ test(
         assert.equal(started.ready, true);
         assert.equal(instance.handshake?.instance, instanceName);
         assert.equal(instance.handshake?.homeDirectory, homeDirectory);
-        const bashRun = instance
-            .listTools()
-            .find((tool) => tool.name === "bash_run");
+        const bashRun = (await instance.readWorkerTools()).find(
+            (tool) => tool.name === "bash_run",
+        );
         assert.notEqual(bashRun, undefined);
         assert.notEqual(bashRun?.inputSchema, undefined);
-        const fileGlob = instance
-            .listTools()
-            .find((tool) => tool.name === "file_glob");
+        const fileGlob = (await instance.readWorkerTools()).find(
+            (tool) => tool.name === "file_glob",
+        );
         assert.notEqual(fileGlob, undefined);
         const fileGlobSchema = fileGlob?.inputSchema as {
             anyOf?: unknown;
@@ -237,7 +231,6 @@ test(
                 "instance.statusChanged",
                 "instance.connectionChanged",
                 "worker.transportConnected",
-                "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
@@ -285,7 +278,7 @@ test(
         }
         await writeFile(`${workspacePath}/source.bin`, source);
 
-        const instance = new WorkerInstanceFactory().create({
+        const instance = createTestWorkerInstance({
             env: {
                 ...process.env,
                 HOME: homeDirectory,
@@ -294,10 +287,7 @@ test(
             },
             homeDirectory,
             name: instanceName,
-            transport: new WorkerTransportDriverLocal({
-                workerBinary: new WorkerBinary(workerBinaryPath!),
-                spawnFunction: nodeSpawn,
-            }),
+            workerBinaryPath: workerBinaryPath!,
         });
         t.after(async () => {
             await instance.stop();
@@ -371,7 +361,7 @@ test(
         const address = server.address();
         assert.ok(address !== null && typeof address !== "string");
 
-        const instance = new WorkerInstanceFactory().create({
+        const instance = createTestWorkerInstance({
             env: {
                 ...process.env,
                 HOME: homeDirectory,
@@ -380,10 +370,7 @@ test(
             },
             homeDirectory,
             name: instanceName,
-            transport: new WorkerTransportDriverLocal({
-                workerBinary: new WorkerBinary(workerBinaryPath!),
-                spawnFunction: nodeSpawn,
-            }),
+            workerBinaryPath: workerBinaryPath!,
         });
         t.after(async () => {
             await instance.stop();
@@ -616,7 +603,7 @@ socket.on("error", (error) => {
             { mode: 0o700 },
         );
 
-        const instance = new WorkerInstanceFactory().create({
+        const instance = createTestWorkerInstance({
             env: {
                 ...process.env,
                 HOME: homeDirectory,
@@ -625,10 +612,7 @@ socket.on("error", (error) => {
             },
             homeDirectory,
             name: asInstanceName(`rsync-worker-${process.pid}`),
-            transport: new WorkerTransportDriverLocal({
-                workerBinary: new WorkerBinary(workerBinaryPath!),
-                spawnFunction: nodeSpawn,
-            }),
+            workerBinaryPath: workerBinaryPath!,
         });
         const bridgeServer = createNetServer({ allowHalfOpen: true });
         const bridgeCompleted = new Promise<void>((resolve, reject) => {
@@ -700,7 +684,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     const startGate = new Promise<void>((resolve) => {
         releaseStart = resolve;
     });
-    const transport: WorkerTransport = {
+    const transport: TestWorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             commands.push(command);
@@ -714,7 +698,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
             return await harness.transport.runWorkerCommand(command, options);
         },
     };
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("serialized-lifecycle"),
         transport,
@@ -738,18 +722,38 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     }
 });
 
-test("WorkerInstance runs control-owned tool operations through ToolCall Hooks while the worker is stopped", async () => {
+test("control-owned tool operations are audited while the worker is stopped", async () => {
     const homeDirectory = await createTestTempDirectory("control-audit");
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("control-audit"),
         transport: harness.transport,
     });
-
-    const ingress = new ToolCallPipeline({
-        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence() }),
-        resolveTarget: () => instance.toolCallTarget(),
+    const toolRuntime = createTestWorkerToolRuntime({
+        homeDirectory,
+        instanceName: asInstanceName("control-audit"),
+        worker: instance,
+    });
+    const ingress = createToolCallRuntime({
+        resolveTarget: () => toolRuntime.execution.target(),
+    });
+    ingress.hooks.registerExecute("todo_read", async () => ({ revision: 7 }));
+    ingress.hooks.registerExecute("instance_status", async () => {
+        const error = new Error("missing instance");
+        Object.assign(error, {
+            code: controlErrorCodes.instanceNotFound,
+            retryable: false,
+        });
+        throw error;
+    });
+    ingress.hooks.registerExecute("artifact_transfer", async () => {
+        const error = new Error("client cancelled");
+        Object.assign(error, {
+            code: runtimeErrorCodes.toolCallCancelled,
+            retryable: true,
+        });
+        throw error;
     });
 
     try {
@@ -758,29 +762,20 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
             requestId: "request-control-audit",
             source: "mcp",
         } as const;
-        const completed = await ingress.callOperation(
+        const completed = await ingress.api.call(
             asInstanceName("control-audit"),
             "todo_read",
             {},
             context,
-            async () => ({ revision: 7 }),
         );
         assert.deepEqual(completed, { revision: 7 });
 
         await assert.rejects(
-            ingress.callOperation(
+            ingress.api.call(
                 asInstanceName("control-audit"),
                 "instance_status",
                 { instance: "missing" },
                 context,
-                async () => {
-                    const error = new Error("missing instance");
-                    Object.assign(error, {
-                        code: controlErrorCodes.instanceNotFound,
-                        retryable: false,
-                    });
-                    throw error;
-                },
             ),
             (error: unknown) => {
                 assert.equal(
@@ -792,19 +787,11 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
         );
 
         await assert.rejects(
-            ingress.callOperation(
+            ingress.api.call(
                 asInstanceName("control-audit"),
                 "artifact_transfer",
                 { operation: "status", transferId: "transfer-1" },
                 context,
-                async () => {
-                    const error = new Error("client cancelled");
-                    Object.assign(error, {
-                        code: runtimeErrorCodes.toolCallCancelled,
-                        retryable: true,
-                    });
-                    throw error;
-                },
             ),
             (error: unknown) => {
                 assert.equal(
@@ -815,7 +802,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
             },
         );
 
-        const records = await instance.readToolCalls();
+        const records = await toolRuntime.execution.readToolCalls();
         assert.deepEqual(
             records.map((record) => ({
                 ctxId: record.ctxId,
@@ -890,6 +877,9 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
         assert.deepEqual(records[0]?.output, { revision: 7 });
     } finally {
+        ingress.close();
+        await toolRuntime.execution.close();
+        await toolRuntime.audit.close();
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -898,14 +888,20 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
 test("WorkerInstance trusted internal tool invocation does not record ingress audit", async () => {
     const homeDirectory = await createTestTempDirectory("internal-boundary");
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("internal-boundary"),
         transport: harness.transport,
     });
+    const toolRuntime = createTestWorkerToolRuntime({
+        homeDirectory,
+        instanceName: asInstanceName("internal-boundary"),
+        worker: instance,
+    });
     try {
         await instance.start();
-        const internal = instance.invokeToolInternal(
+        await toolRuntime.execution.refreshTools();
+        const internal = toolRuntime.execution.invokeInternal(
             "bash_run",
             { command: "pwd" },
             cliToolCallContext,
@@ -918,8 +914,10 @@ test("WorkerInstance trusted internal tool invocation does not record ingress au
         });
 
         assert.equal(jsonRecord(await internal)?.stdout, "/tmp/workspace\n");
-        assert.deepEqual(await instance.readToolCalls(), []);
+        assert.deepEqual(await toolRuntime.execution.readToolCalls(), []);
     } finally {
+        await toolRuntime.execution.close();
+        await toolRuntime.audit.close();
         await instance.stop();
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -930,22 +928,25 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
     const homeDirectory = await createTestTempDirectory("instance-harness");
     const harness = createWorkerInstanceHarness();
     const instanceName = asInstanceName("task-6-harness");
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: instanceName,
         transport: harness.transport,
     });
-
-    const ingress = new ToolCallPipeline({
-        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence() }),
-        resolveTarget: () => instance.toolCallTarget(),
+    const toolRuntime = createTestWorkerToolRuntime({
+        homeDirectory,
+        instanceName,
+        worker: instance,
+    });
+    const ingress = createToolCallRuntime({
+        resolveTarget: () => toolRuntime.execution.target(),
     });
 
     try {
         const stdout = "x".repeat(240);
 
         await assert.rejects(
-            ingress.call(
+            ingress.api.call(
                 asInstanceName("task-6-harness"),
                 "bash_run",
                 { command: "pwd" },
@@ -962,21 +963,22 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
 
         const started = await instance.start();
         assert.equal(started.ready, true);
+        await toolRuntime.execution.refreshTools();
 
-        const firstCall = ingress.call(
+        const firstCall = ingress.api.call(
             asInstanceName("task-6-harness"),
             "bash_run",
             { command: "pwd" },
             cliToolCallContext,
         );
-        const secondCall = ingress.call(
+        const secondCall = ingress.api.call(
             asInstanceName("task-6-harness"),
             "bash_run",
             { command: "ls" },
             cliToolCallContext,
         );
         await harness.waitForMethodCount("bash_run", 2);
-        const runningRecords = await instance.readToolCalls({
+        const runningRecords = await toolRuntime.execution.readToolCalls({
             status: "running",
         });
         assert.deepEqual(
@@ -1008,7 +1010,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         const secondResult = await secondCall;
         assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
-        const invalidCall = ingress.call(
+        const invalidCall = ingress.api.call(
             asInstanceName("task-6-harness"),
             "bash_run",
             { bad: true } as JsonValue,
@@ -1024,7 +1026,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             return true;
         });
 
-        const records = await instance.readToolCalls();
+        const records = await toolRuntime.execution.readToolCalls();
         assert.deepEqual(
             records.map((record) => record.status),
             ["failed", "completed", "completed", "failed"],
@@ -1039,7 +1041,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(records[3]?.error, "tool.invalidArguments");
         assert.deepEqual(
             (
-                await instance.readToolCalls({
+                await toolRuntime.execution.readToolCalls({
                     after: records[2]?.callId,
                     limit: 1,
                     status: "failed",
@@ -1049,7 +1051,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             [records[3]?.callId],
         );
 
-        const logs = await instance.readLogs();
+        const logs = await toolRuntime.execution.readLogs();
         assert.equal(logs.length, 2);
         assert.equal(logs[0]?.stream, "stdout");
         assert.equal(logs[0]?.message, stdout);
@@ -1063,12 +1065,11 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
-            replay.events.slice(0, 8).map((event) => event.type),
+            replay.events.slice(0, 7).map((event) => event.type),
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
                 "worker.transportConnected",
-                "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
@@ -1153,6 +1154,9 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
 
         await instance.stop();
     } finally {
+        ingress.close();
+        await toolRuntime.execution.close();
+        await toolRuntime.audit.close();
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -1162,7 +1166,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     const homeDirectory = await createTestTempDirectory(
         "instance-start-failure",
     );
-    const transport: WorkerTransport = {
+    const transport: TestWorkerTransport = {
         async connectWorkerChannel() {
             throw new Error(
                 "channel must not be connected after a failed start",
@@ -1178,7 +1182,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         },
         async installWorker(): Promise<void> {},
     };
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-start-failure"),
         transport,
@@ -1223,7 +1227,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         "instance-stop-failure",
     );
     const harness = createWorkerInstanceHarness();
-    const transport: WorkerTransport = {
+    const transport: TestWorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             if (command === "stop") {
@@ -1236,7 +1240,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
             return await harness.transport.runWorkerCommand(command, options);
         },
     };
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-stop-failure"),
         transport,
@@ -1275,7 +1279,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
 test("WorkerInstance refreshStatus updates snapshot from worker status without auto start", async () => {
     const homeDirectory = await createTestTempDirectory("instance-refresh");
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-refresh"),
         transport: harness.transport,
@@ -1292,7 +1296,7 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
         assert.equal(running.daemonState, "running");
         assert.equal(running.connectionState, "connected");
         assert.equal(running.ready, true);
-        assert.equal(instance.listTools()[0]?.name, "bash_run");
+        assert.equal((await instance.readWorkerTools())[0]?.name, "bash_run");
 
         harness.setStatus("stale");
         const stale = await instance.refreshStatus();
@@ -1308,7 +1312,6 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
                 "instance.statusChanged",
                 "instance.connectionChanged",
                 "worker.transportConnected",
-                "worker.schemaRefreshed",
                 "instance.connectionChanged",
                 "instance.readyChanged",
                 "instance.statusChanged",
@@ -1327,7 +1330,7 @@ test("WorkerInstance refreshStatus on a connected instance keeps ready without a
         "instance-refresh-connected",
     );
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-refresh-connected"),
         transport: harness.transport,
@@ -1369,7 +1372,7 @@ test("WorkerInstance refreshStatus on a connected instance keeps ready without a
 test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", async () => {
     const homeDirectory = await createTestTempDirectory("instance-reconnect");
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-reconnect"),
         transport: harness.transport,
@@ -1378,7 +1381,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     try {
         await instance.start();
         assert.deepEqual(
-            instance.listTools()[0]?.inputSchema,
+            (await instance.readWorkerTools())[0]?.inputSchema,
             toolSchemaFor("command"),
         );
 
@@ -1393,14 +1396,15 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
             },
         ]);
         harness.disconnect();
-        await harness.waitForMethodCount("tools.list", 2);
+        await harness.waitForMethodCount("worker.handshake", 2);
         await waitFor(
             () => instance.snapshot().connectionState === "connected",
         );
-
         assert.equal(instance.snapshot().connectionState, "connected");
+        const refreshedTools = await instance.readWorkerTools();
+        await harness.waitForMethodCount("tools.list", 2);
         assert.deepEqual(
-            instance.listTools()[0]?.inputSchema,
+            refreshedTools[0]?.inputSchema,
             toolSchemaFor("cwd"),
         );
 
@@ -1412,7 +1416,6 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
                 "instance.statusChanged",
                 "instance.connectionChanged",
                 "worker.transportConnected",
-                "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
@@ -1421,7 +1424,6 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
                 "instance.connectionChanged",
                 "instance.readyChanged",
                 "worker.transportConnected",
-                "worker.schemaRefreshed",
                 "instance.connectionChanged",
                 "instance.readyChanged",
             ],
@@ -1437,7 +1439,7 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
         "instance-reconnect-retry",
     );
     const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
+    const instance = createTestWorkerInstance({
         homeDirectory,
         name: asInstanceName("task-6-reconnect-retry"),
         transport: harness.transport,
@@ -1448,11 +1450,12 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
         harness.failNextRpcConnections();
         harness.disconnect();
 
-        await harness.waitForMethodCount("tools.list", 2);
+        await harness.waitForMethodCount("worker.handshake", 2);
         await waitFor(
             () => instance.snapshot().connectionState === "connected",
         );
         assert.equal(instance.snapshot().connectionState, "connected");
+        assert.equal((await instance.readWorkerTools()).length, 1);
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -1473,7 +1476,7 @@ function createWorkerInstanceHarness(): {
     fail: (method: string, code: string) => void;
     failNextRpcConnections: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
-    transport: WorkerTransport;
+    transport: TestWorkerTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
     setStatus: (status: "running" | "stale" | "stopped") => void;
@@ -1533,7 +1536,7 @@ function createWorkerInstanceHarness(): {
         active.endpoint.close();
     };
 
-    const transport: WorkerTransport = {
+    const transport: TestWorkerTransport = {
         async connectWorkerChannel(options) {
             if (rpcConnectFailures > 0) {
                 rpcConnectFailures -= 1;

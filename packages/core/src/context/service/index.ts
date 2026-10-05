@@ -1,6 +1,8 @@
 import type { ContextChangeHub } from "../registry/Change.js";
-import type { InstanceLease } from "../../instance/Instance.js";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type {
+    ContextInstanceLeasePort,
+    ContextInstancesPort,
+} from "../Port.js";
 import {
     contextErrorCodes,
     createRemoteError,
@@ -21,13 +23,13 @@ export class ContextService {
     readonly registry: ContextRecordSourcePort;
     readonly environment: ContextEnvironmentPort;
     readonly cleanup: ContextLifecycleCleanupPort;
-    readonly #instances: InstanceRegistry;
+    readonly #instances: ContextInstancesPort;
 
     constructor(options: {
         registry: ContextRecordSourcePort;
         environment: ContextEnvironmentPort;
         cleanup: ContextLifecycleCleanupPort;
-        instances: InstanceRegistry;
+        instances: ContextInstancesPort;
     }) {
         this.registry = options.registry;
         this.environment = options.environment;
@@ -108,7 +110,7 @@ export class ContextService {
             if (environment.workspace === undefined) continue;
             const instance = this.#instances.get(environment.instance);
             if (instance === undefined) continue;
-            let lease: InstanceLease;
+            let lease: ContextInstanceLeasePort;
             try {
                 lease = instance.acquireLease();
             } catch {

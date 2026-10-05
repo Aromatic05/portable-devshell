@@ -2,6 +2,7 @@ import type { WorkerRuntime } from "../Command.js";
 import { runWorkerCommand, type WorkerChannelOptions, type WorkerCommandName, type WorkerCommandOptions, type WorkerCommandResult } from "../Command.js";
 import { WorkerBinary } from "../../Binary.js";
 import { ContainerInstall } from "../../provision/install/provider/Container.js";
+import { createContainerWorkerEnvironment } from "../../../transport/endpoint/channel/worker/Container.js";
 
 export class ContainerExecution implements WorkerRuntime {
     readonly #install: ContainerInstall;
@@ -11,6 +12,7 @@ export class ContainerExecution implements WorkerRuntime {
     }
 
     async connectChannel(options: WorkerChannelOptions) {
+        this.#validateEnvironment(options.env);
         await this.#install.ensureReady("connectChannel");
         const built = new WorkerBinary(
             await this.#install.resolveExecutable(),
@@ -34,6 +36,7 @@ export class ContainerExecution implements WorkerRuntime {
         command: WorkerCommandName,
         options: WorkerCommandOptions,
     ): Promise<WorkerCommandResult> {
+        this.#validateEnvironment(options.env);
         let preparedRuntimeRetire = false;
 
         switch (command) {
@@ -86,6 +89,15 @@ export class ContainerExecution implements WorkerRuntime {
             if (preparedRuntimeRetire)
                 await this.#install.finishRuntimeRetire();
         }
+    }
+
+    #validateEnvironment(env: NodeJS.ProcessEnv | undefined): void {
+        createContainerWorkerEnvironment({
+            env,
+            platform: process.platform,
+            processEnvironment: process.env,
+            provider: this.#install.provider,
+        });
     }
 
     #syntheticResult(

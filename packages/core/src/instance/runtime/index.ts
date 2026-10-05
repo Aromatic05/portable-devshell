@@ -6,6 +6,7 @@ import {
     type JsonValue,
     type ReverseEnrollmentState,
     type ReverseTransport,
+    type ToolDefinition,
 } from "@portable-devshell/shared";
 
 import type {
@@ -63,7 +64,7 @@ import type {
 import { WorkerTerminal } from "../transport/packet/Terminal.js";
 import type { InstanceStateMachine } from "./supervision/State.js";
 import type { InstanceSnapshot } from "./supervision/State.js";
-import type { InstanceEventBuffer } from "./supervision/Event.js";
+import type { InstanceEventPort } from "./supervision/Event.js";
 import type { ResolvedWorkerInstanceConfig } from "./provision/Config.js";
 import { WorkerInstanceConnection } from "./supervision/Connection.js";
 import { WorkerInstanceSupervision } from "./supervision/Recovery.js";
@@ -75,7 +76,7 @@ import { WorkerInstanceState } from "./supervision/State.js";
 interface WorkerInstanceDependencies {
     commandClient?: WorkerCommandClient;
     config: ResolvedWorkerInstanceConfig;
-    eventBuffer: InstanceEventBuffer;
+    events: InstanceEventPort;
     endpoint: Endpoint;
     protocolClient: WorkerProtocolClient;
     stateMachine: InstanceStateMachine;
@@ -86,6 +87,7 @@ export class WorkerInstance {
     readonly #artifact: WorkerArtifact;
     readonly #commandSessions: WorkerCommandSessionBridge;
     readonly #config: ResolvedWorkerInstanceConfig;
+    readonly #endpoint: Endpoint;
     readonly #connection: WorkerInstanceConnection;
     readonly #lifecycle: WorkerInstanceLifecycle;
     readonly #protocolClient: WorkerProtocolClient;
@@ -98,10 +100,11 @@ export class WorkerInstance {
 
     constructor(dependencies: WorkerInstanceDependencies) {
         this.#config = dependencies.config;
+        this.#endpoint = dependencies.endpoint;
         this.#protocolClient = dependencies.protocolClient;
         this.#state = new WorkerInstanceState({
             config: this.#config,
-            eventBuffer: dependencies.eventBuffer,
+            events: dependencies.events,
             stateMachine: dependencies.stateMachine,
         });
         const workerHost = `${this.#config.name}-worker`;
@@ -164,6 +167,14 @@ export class WorkerInstance {
 
     snapshot(): InstanceSnapshot {
         return this.#state.snapshot(this.#connection.snapshotReverse());
+    }
+
+    get endpoint(): Endpoint {
+        return this.#endpoint;
+    }
+
+    async readWorkerTools(): Promise<readonly ToolDefinition[]> {
+        return (await this.#protocolClient.listTools()).tools;
     }
 
     get managementMode(): ResolvedWorkerInstanceConfig["managementMode"] {

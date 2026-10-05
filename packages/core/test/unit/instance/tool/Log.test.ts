@@ -5,12 +5,12 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
-import { AuditDatabase } from "../../../../src/storage/audit/database/Database.ts";
+import { AuditDatabase } from "../../../../src/audit/database/index.ts";
 import {
     type InstanceLogEntry,
     LogStoreInstance,
-} from "../../../../src/storage/log/Store.ts";
-import { WorkerInstanceToolLog } from "../../../../src/worker/instance/tool/record/Log.ts";
+} from "../../../../src/audit/log/index.ts";
+import { WorkerInstanceToolLog } from "../../../../src/toolcall/execution/record/Log.ts";
 
 test("WorkerInstanceToolLog chunks large streams without changing their content", async () => {
     const appended: Array<{

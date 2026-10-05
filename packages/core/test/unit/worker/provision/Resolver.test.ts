@@ -5,15 +5,9 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import {
-    WorkerAssetResolver,
-    getWorkerTargetByKey,
-    mapUnameWorkerTarget,
-    probeLocalWorkerTarget,
-    resolveWorkerDevshellHomeDirectory,
-    resolveWorkerHomeDirectory,
-    supportedWorkerTargets,
-} from "@portable-devshell/core/testing";
+import { WorkerAssetResolver } from "../../../../src/instance/runtime/provision/Asset.ts";
+import { getWorkerTargetByKey, mapUnameWorkerTarget, probeLocalWorkerTarget, supportedWorkerTargets } from "../../../../src/instance/runtime/provision/Target.ts";
+import { resolveWorkerDevshellHomeDirectory, resolveWorkerHomeDirectory } from "../../../../src/instance/runtime/provision/Home.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test("WorkerTargetMapper maps supported uname values to canonical keys", () => {
