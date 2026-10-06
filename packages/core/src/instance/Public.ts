@@ -19,12 +19,5 @@ export {
     retireInstanceForDelete,
 } from "./model/Retirement.js";
 export { InstanceRetirementNotification } from "./runtime/provision/Retirement.js";
-export {
-    discoverSshConfigHosts,
-    listInstanceCreateProviders,
-    normalizeInstanceCreateDraft,
-    resolveInstanceCreateSchema,
-    summarizeInstanceCreate,
-} from "./runtime/provision/Config.js";
 export { WORKER_PROTOCOL_RANGE } from "./transport/packet/Client.js";
 export { TransportConnection } from "./transport/endpoint/Connection.js";
