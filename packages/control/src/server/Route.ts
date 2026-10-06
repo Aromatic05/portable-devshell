@@ -3,6 +3,7 @@ import {
     mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
+    createToolIngressHost,
     type ToolCallIngressPort,
     type ToolCallProvenanceApi,
     JsonValue,
@@ -11,7 +12,7 @@ import {
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core";
-import { createToolIngressHost } from "@portable-devshell/core";
+
 import {
     createTerminalSessionRuntime,
     type TerminalSessionApi,
@@ -26,7 +27,7 @@ import {
 import {
     createTuiPageRouteModule,
     type TuiPagePort,
-} from "../extension/api/point/tui/Endpoint.js";
+} from "../extension/api/point/tui/index.js";
 import type { ConfigEditorPort } from "../config/Route.js";
 import { createConfigRouteModule } from "../config/Route.js";
 import { ConfigChangeHub } from "../config/change/Config.js";

@@ -1,6 +1,6 @@
-import { createToolRouteModule } from "@portable-devshell/core";
 import {
     createToolCallRuntime,
+    createToolRouteModule,
     type ToolCallApi,
     type ToolCallRuntime,
 } from "@portable-devshell/shared";
@@ -24,8 +24,8 @@ import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import type { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { createDebugRuntime } from "../../debug/index.js";
 import type { DebugRuntime } from "../../debug/Api.js";
-import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
-import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
+import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
+import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
 import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/index.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
@@ -33,8 +33,8 @@ import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
 import type { ExtensionRuntime } from "../../extension/Api.js";
 import { ExtensionInstallService } from "../../extension/install/index.js";
-import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/Binding.js";
-import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewrite.js";
+import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/index.js";
+import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/index.js";
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
 import { createOperationalOverviewRuntime } from "../../overview/index.js";
@@ -51,7 +51,7 @@ import {
     type ContextRuntime,
 } from "@portable-devshell/core";
 import type { McpControlModule } from "../mcp/Module.js";
-import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
+import { McpExtensionService } from "../../extension/api/point/mcp/index.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
 import type { InstanceRuntimeRegistry } from "@portable-devshell/core";
 import type { ToolCallRegistry } from "../../toolcall/Api.js";

@@ -1,11 +1,10 @@
-import type { ToolCallExecutionRuntime, ToolCallExecutionRuntimeOptions, ToolCallProvenanceApi, ToolCallProvenanceOptions } from "./Api.js";
+import type { ToolCallExecutionRuntime, ToolCallExecutionRuntimeOptions } from "./Api.js";
 import { WorkerInstanceTool } from "./execution/Tool.js";
 
 import { ToolCallHistory } from "./execution/record/History.js";
 import { WorkerToolCallScheduler } from "./execution/Scheduler.js";
 import { WorkerToolCatalog } from "./worker/Catalog.js";
 import { WorkerToolInvoker } from "./worker/Invoker.js";
-import { ToolCallProvenanceStore } from "./execution/record/Provenance.js";
 
 export function createToolCallExecutionRuntime(
     options: ToolCallExecutionRuntimeOptions,
@@ -60,11 +59,4 @@ export function createToolCallExecutionRuntime(
             await closePromise;
         },
     };
-}
-
-export function createToolCallProvenanceRuntime(
-    filePath: string,
-    options: ToolCallProvenanceOptions = {},
-): ToolCallProvenanceApi {
-    return new ToolCallProvenanceStore(filePath, options);
 }

@@ -1,12 +1,12 @@
-import {
-    createRemoteError,
-    controlErrorCodes,
-    type JsonValue,
-    type ToolCallQuery,
-    type ToolCallRecord,
-    type ToolCallSource,
-    type ToolCallStatus,
-} from "@portable-devshell/shared";
+import { createRemoteError } from "../../transport/Error.js";
+import { controlErrorCodes } from "../../types/Error.js";
+import type { JsonValue } from "../../types/Json.js";
+import type {
+    ToolCallQuery,
+    ToolCallRecord,
+    ToolCallSource,
+    ToolCallStatus,
+} from "./Model.js";
 
 const DEFAULT_TOOL_CALL_READ_LIMIT = 200;
 const MAX_TOOL_CALL_READ_LIMIT = 1_000;

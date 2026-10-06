@@ -14,8 +14,8 @@ import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import type { ToolCallApi } from "@portable-devshell/shared";
 import {
     createToolCallProvenanceRuntime,
-} from "@portable-devshell/core";
-import type { ToolCallProvenanceApi } from "@portable-devshell/shared";
+    type ToolCallProvenanceApi,
+} from "@portable-devshell/shared";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";

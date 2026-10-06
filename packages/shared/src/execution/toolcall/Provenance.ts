@@ -11,12 +11,12 @@ import {
     writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { ToolCallRecord } from "@portable-devshell/shared";
+import type { ToolCallRecord } from "./Type.js";
 import type {
     ToolCallProvenanceApi,
     ToolCallProvenanceOptions,
     ToolCallProvenanceRecord,
-} from "../../Api.js";
+} from "./Api.js";
 import { randomUUID } from "node:crypto";
 import {
     constants as zlibConstants,
@@ -566,4 +566,11 @@ export function serializeRecords(
         records.map((record) => JSON.stringify(record)).join("\n") +
         (records.length === 0 ? "" : "\n")
     );
+}
+
+export function createToolCallProvenanceRuntime(
+    filePath: string,
+    options: ToolCallProvenanceOptions = {},
+): ToolCallProvenanceApi {
+    return new ToolCallProvenanceStore(filePath, options);
 }
