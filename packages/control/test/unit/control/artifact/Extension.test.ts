@@ -85,7 +85,9 @@ async function harness(t: test.TestContext) {
         homeDirectory: home,
         instances: {
             get(name: string) {
-                return name === "remote-one" ? { worker: target } : undefined;
+                return name === "remote-one"
+                    ? { worker: { artifact: target } }
+                    : undefined;
             },
         } as never,
     });
@@ -97,28 +99,28 @@ async function harness(t: test.TestContext) {
     return { runtime, source, target };
 }
 
-test("Extension assets use the Artifact core to transfer a Control-owned directory", async (t) => {
+test("Artifact runtime transfers a Control-owned directory through the host endpoint", async (t) => {
     const h = await harness(t);
 
-    const result = await h.runtime.transferExtensionAsset("skill", {
-        sourcePath: h.source,
-        target: {
+    const result = await h.runtime.transferHostPath(
+        h.source,
+        {
             instance: "remote-one",
             path: "./review",
             workspace: "/remote/skills",
         },
-    });
+    );
 
     assert.equal(
         result.transferredBytes,
         Buffer.concat(h.target.chunks).length,
     );
     assert.ok(result.transferredBytes > 0);
-    assert.equal("transferId" in result, false);
+    assert.equal(result.status, "completed");
     assert.equal(h.target.events.includes("artifact.transferCompleted"), false);
 });
 
-test("Artifact callers cannot forge the private Extension host authority", async (t) => {
+test("Artifact callers cannot forge the private host transfer authority", async (t) => {
     const h = await harness(t);
 
     await assert.rejects(
@@ -132,7 +134,7 @@ test("Artifact callers cannot forge the private Extension host authority", async
                 targetPath: "./review",
                 targetWorkspace: "/remote/skills",
             },
-            "@extension-asset:guessed",
+            "@host-artifact:guessed",
         ),
         /Instance host was not found/u,
     );

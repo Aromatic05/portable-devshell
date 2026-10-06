@@ -5,10 +5,9 @@ import { join } from "node:path";
 import {
     createRemoteError,
     controlErrorCodes,
+    type ArtifactTargetDescriptor,
+    type ArtifactTransferRecord,
 } from "@portable-devshell/shared";
-import type {
-    ExtensionAssetProjectionResult,
-} from "@portable-devshell/extension/asset";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
 import { ArtifactHostBridge } from "./host/Bridge.js";
@@ -16,7 +15,6 @@ import { ArtifactService } from "./Service.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
 import type {
-    ArtifactProjectionInput,
     ArtifactRuntime,
     ArtifactRuntimeOptions,
 } from "./Api.js";
@@ -26,7 +24,7 @@ class ArtifactRuntimeState implements ArtifactRuntime {
     readonly #controlPaths: ControlPathHome;
     readonly #homeDirectory: string;
     readonly #instances: InstanceRegistry;
-    readonly #extensionAssetAuthorities = new Set<string>();
+    readonly #hostTransferAuthorities = new Set<string>();
     #bridge?: ArtifactHostBridge;
     #service?: ArtifactService;
 
@@ -75,31 +73,30 @@ class ArtifactRuntimeState implements ArtifactRuntime {
         this.#bridge = undefined;
     }
 
-    async transferExtensionAsset(
-        extensionId: string,
-        input: {
-            overwrite?: boolean;
-            signal?: AbortSignal;
-            sourcePath: string;
-            target: { instance: string; path: string; workspace: string };
-        },
-    ): Promise<ExtensionAssetProjectionResult> {
-        input.signal?.throwIfAborted();
-        const authority = `@extension-asset:${randomUUID()}`;
-        this.#extensionAssetAuthorities.add(authority);
+    async transferHostPath(
+        sourcePath: string,
+        target: ArtifactTargetDescriptor,
+        overwrite?: boolean,
+        signal?: AbortSignal,
+    ): Promise<ArtifactTransferRecord> {
+        signal?.throwIfAborted();
+        if (target.workspace === undefined)
+            throw new TypeError("Host Artifact transfer target requires a workspace.");
+        const authority = `@host-artifact:${randomUUID()}`;
+        this.#hostTransferAuthorities.add(authority);
         try {
             const started = await this.service.startTransfer(
                 {
                     instance: "host",
                     operation: "start",
-                    ...(input.overwrite === undefined
+                    ...(overwrite === undefined
                         ? {}
-                        : { overwrite: input.overwrite }),
-                    sourcePath: input.sourcePath,
-                    sourceWorkspace: input.sourcePath,
-                    targetInstance: input.target.instance,
-                    targetPath: input.target.path,
-                    targetWorkspace: input.target.workspace,
+                        : { overwrite }),
+                    sourcePath,
+                    sourceWorkspace: sourcePath,
+                    targetInstance: target.instance,
+                    targetPath: target.path,
+                    targetWorkspace: target.workspace,
                 },
                 authority,
             );
@@ -109,62 +106,31 @@ class ArtifactRuntimeState implements ArtifactRuntime {
                     .cancelTransfer(transferId)
                     .catch(() => undefined);
             };
-            input.signal?.addEventListener("abort", abort, { once: true });
+            signal?.addEventListener("abort", abort, { once: true });
             try {
                 const completed =
                     await this.service.waitForTransfer(transferId);
-                input.signal?.throwIfAborted();
+                signal?.throwIfAborted();
                 if (completed.status !== "completed") {
                     throw new Error(
                         completed.failure?.message ??
-                            `Extension ${extensionId} asset transfer ${transferId} ended with status ${completed.status}.`,
+                            `Host Artifact transfer ${transferId} ended with status ${completed.status}.`,
                     );
                 }
-                return Object.freeze({
-                    transferredBytes: completed.transferredBytes,
-                });
+                return completed;
             } finally {
-                input.signal?.removeEventListener("abort", abort);
+                signal?.removeEventListener("abort", abort);
             }
         } finally {
-            this.#extensionAssetAuthorities.delete(authority);
+            this.#hostTransferAuthorities.delete(authority);
         }
-    }
-
-    async projectExtensionAsset(
-        extensionId: string,
-        input: ArtifactProjectionInput,
-    ): Promise<ExtensionAssetProjectionResult> {
-        input.signal?.throwIfAborted();
-        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(input.target.key) || input.target.key === "." || input.target.key === "..")
-            throw new TypeError("Extension asset key must be a single logical entry name.");
-        const descriptor = this.#instances.get(input.target.instance);
-        if (descriptor === undefined)
-            throw new Error(`Instance ${input.target.instance} is unavailable.`);
-        const lease = descriptor.acquireLease();
-        try {
-            const prepared = await lease.instance.worker.prepareExtensionResource({
-                collection: input.target.collection,
-                extensionId,
-            });
-            return await this.transferExtensionAsset(extensionId, {
-                overwrite: input.overwrite,
-                signal: input.signal,
-                sourcePath: input.sourcePath,
-                target: {
-                    instance: input.target.instance,
-                    path: join(prepared.directory, input.target.key),
-                    workspace: prepared.directory,
-                },
-            });
-        } finally { lease.release(); }
     }
 
     #resolveEndpoint(name: string, authorityInstance?: string) {
         if (name !== "host") return this.#instances.get(name)?.worker.artifact;
         if (authorityInstance === undefined || this.#bridge === undefined)
             return undefined;
-        if (!this.#extensionAssetAuthorities.has(authorityInstance))
+        if (!this.#hostTransferAuthorities.has(authorityInstance))
             return undefined;
         return this.#bridge.endpointFor({
             authorityInstance,

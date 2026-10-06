@@ -19,23 +19,17 @@ import {
     type ExtensionInstallLimits,
 } from "../../../install/Policy.js";
 
-export interface ExtensionAssetProjectionPortInput {
-    overwrite?: boolean;
-    signal?: AbortSignal;
-    sourcePath: string;
-    target: ExtensionAssetProjectionInput["target"];
-}
-
-export type ExtensionAssetProjectionPort = (
-    input: ExtensionAssetProjectionPortInput,
-) => Promise<ExtensionAssetProjectionResult>;
-
 export interface ExtensionAssetCapabilityControlOptions {
     allowed: boolean;
     dataDirectory: string;
     extensionId: string;
     limits?: Partial<ExtensionInstallLimits>;
-    project?: ExtensionAssetProjectionPort;
+    project?: (input: {
+        overwrite?: boolean;
+        signal?: AbortSignal;
+        sourcePath: string;
+        target: ExtensionAssetProjectionInput["target"];
+    }) => Promise<ExtensionAssetProjectionResult>;
 }
 
 export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability {
@@ -43,7 +37,7 @@ export class ExtensionAssetCapabilityControl implements ExtensionAssetCapability
     readonly #dataDirectory: string;
     readonly #extensionId: string;
     readonly #limits: ExtensionInstallLimits;
-    readonly #project?: ExtensionAssetProjectionPort;
+    readonly #project?: ExtensionAssetCapabilityControlOptions["project"];
 
     constructor(options: ExtensionAssetCapabilityControlOptions) {
         this.#allowed = options.allowed;

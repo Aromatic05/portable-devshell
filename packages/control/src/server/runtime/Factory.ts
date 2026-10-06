@@ -199,11 +199,49 @@ export class ControlRuntimeFactory {
                             limits: resolveControlExtensionAssetLimits(
                                 extensionId,
                             ),
-                            project: async (input) =>
-                                await artifact.projectExtensionAsset(
-                                    extensionId,
-                                    input,
-                                ),
+                            project: async (input) => {
+                                const descriptor =
+                                    options.state.instances.get(
+                                        input.target.instance,
+                                    );
+                                if (descriptor === undefined)
+                                    throw new Error(
+                                        `Instance ${input.target.instance} is unavailable.`,
+                                    );
+                                const lease = descriptor.acquireLease();
+                                try {
+                                    const prepared =
+                                        await lease.instance.worker.prepareExtensionResource(
+                                            {
+                                                collection:
+                                                    input.target.collection,
+                                                extensionId,
+                                            },
+                                        );
+                                    const completed =
+                                        await artifact.transferHostPath(
+                                            input.sourcePath,
+                                            {
+                                                instance:
+                                                    input.target.instance,
+                                                path: join(
+                                                    prepared.directory,
+                                                    input.target.key,
+                                                ),
+                                                workspace:
+                                                    prepared.directory,
+                                            },
+                                            input.overwrite,
+                                            input.signal,
+                                        );
+                                    return {
+                                        transferredBytes:
+                                            completed.transferredBytes,
+                                    };
+                                } finally {
+                                    lease.release();
+                                }
+                            },
                         }),
                     configFactory: ({
                         declaration,
