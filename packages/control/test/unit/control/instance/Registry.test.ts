@@ -11,7 +11,7 @@ import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import { McpEndpointFactory } from "../../../../src/server/mcp/Endpoint.ts";
 import { McpRuntimeFactory } from "../../../../src/server/mcp/Runtime.ts";
 import { McpRuntimeState } from "@portable-devshell/mcp";
-import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,

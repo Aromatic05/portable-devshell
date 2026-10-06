@@ -18,7 +18,7 @@ import { createToolCallExecutionRuntime, type ToolCallDispatchRequest, type Tool
 import {
     type ToolCallDefinitionRegistration,
     type ToolCallRegistry,
-} from "../toolcall/Public.js";
+} from "../toolcall/Api.js";
 import type {
     InstanceRuntime,
     InstanceRuntimeOptions,

@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ToolDefinition } from "@portable-devshell/shared";
-import {
-    allToolCallInstances,
-    createToolCallRegistry,
-} from "../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
 
 const environInfo = tool("environ_info");
 const bashRun = tool("bash_run", ["execute"]);
@@ -14,17 +11,12 @@ const todoRead = tool("todo_read");
 
 test("ToolCallRegistry overlays global definitions onto each instance", () => {
     const registry = createToolCallRegistry();
-    const control = registry.register(allToolCallInstances, [environInfo]);
+    const control = registry.registerAll([environInfo]);
     const worker = registry.register("local", [bashRun]);
 
     assert.deepEqual(
-        registry
-            .list("local")
-            .map((entry) => [entry.scope, entry.definition.name]),
-        [
-            [allToolCallInstances, "environ_info"],
-            ["local", "bash_run"],
-        ],
+        registry.list("local").map((entry) => entry.definition.name),
+        ["environ_info", "bash_run"],
     );
     assert.deepEqual(
         registry.list("remote").map((entry) => entry.definition.name),
@@ -46,7 +38,7 @@ test("ToolCallRegistry overlays global definitions onto each instance", () => {
 
 test("ToolCallRegistry rejects overlapping duplicate names atomically", () => {
     const registry = createToolCallRegistry();
-    registry.register(allToolCallInstances, [todoRead]);
+    registry.registerAll([todoRead]);
     assert.throws(
         () => registry.register("local", [todoRead]),
         /more than once/iu,

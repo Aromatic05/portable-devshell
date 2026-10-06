@@ -12,7 +12,7 @@ import {
     type ControlWebAuthConfig,
 } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../../extension/Public.js";
+import type { ExtensionRuntime } from "../../extension/Api.js";
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";

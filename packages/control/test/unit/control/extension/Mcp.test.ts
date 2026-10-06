@@ -8,7 +8,7 @@ import {
 import type { InstanceName } from "@portable-devshell/shared";
 
 import { McpExtensionService } from "../../../../src/extension/api/point/mcp/Service.ts";
-import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 
 test("MCP Extension tools publish definitions and execute through ToolCall hooks", async () => {
     let releases = 0;

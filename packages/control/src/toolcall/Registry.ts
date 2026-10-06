@@ -13,7 +13,7 @@ import type {
     ToolCallRegistry,
 } from "./Api.js";
 
-export const allToolCallInstances = "*" as const;
+const allToolCallInstances = "*" as const;
 
 interface StoredRegistration {
     definitions: Map<string, ToolDefinition>;
@@ -91,6 +91,12 @@ export class ToolCallRegistryState implements ToolCallRegistry {
                 registration.definitions = replacement.definitions;
             },
         };
+    }
+
+    registerAll(
+        definitions: readonly ToolDefinition[],
+    ): ToolCallDefinitionRegistration {
+        return this.register(allToolCallInstances, definitions);
     }
 
     list(instance: string): readonly ToolCallDefinitionEntry[] {

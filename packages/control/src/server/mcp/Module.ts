@@ -20,8 +20,8 @@ import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
-import type { ArtifactRuntime } from "../../artifact/Public.js";
-import type { ToolCallRegistry } from "../../toolcall/Public.js";
+import type { ArtifactRuntime } from "../../artifact/Api.js";
+import type { ToolCallRegistry } from "../../toolcall/Api.js";
 
 export interface McpControlModuleOptions {
     artifact: ArtifactRuntime;

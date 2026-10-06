@@ -22,7 +22,8 @@ import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
 import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import type { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import { createDebugRuntime, type DebugRuntime } from "../../debug/Public.js";
+import { createDebugRuntime } from "../../debug/index.js";
+import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
 import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
@@ -30,19 +31,19 @@ import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
-import type { ExtensionRuntime } from "../../extension/Public.js";
+import type { ExtensionRuntime } from "../../extension/Api.js";
 import { ExtensionInstallService } from "../../extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/Binding.js";
 import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewrite.js";
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
-import { createOperationalOverviewRuntime } from "../../overview/Public.js";
+import { createOperationalOverviewRuntime } from "../../overview/index.js";
 import { OperationalOverviewInstanceCollector } from "../../overview/collector/Instance.js";
 import { ControlTransportServer } from "../transport/endpoint/Server.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
 import { ControlSocketListener } from "../transport/channel/Socket.js";
 import { ControlRouteRegistry } from "../Route.js";
-import type { ArtifactRuntime } from "../../artifact/Public.js";
+import type { ArtifactRuntime } from "../../artifact/Api.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import {
     createContextRouteModule,
@@ -52,8 +53,8 @@ import {
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
-import type { InstanceRuntimeRegistry } from "../../instance/Public.js";
-import type { ToolCallRegistry } from "../../toolcall/Public.js";
+import type { InstanceRuntimeRegistry } from "../../instance/Api.js";
+import type { ToolCallRegistry } from "../../toolcall/Api.js";
 
 export interface ControlRuntimeOptions {
     instanceRuntimes: InstanceRuntimeRegistry;

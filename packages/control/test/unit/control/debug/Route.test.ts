@@ -6,10 +6,8 @@ import type {
     ControlPortContext,
 } from "@portable-devshell/shared";
 
-import {
-    createDebugRouteModule,
-    type DebugApi,
-} from "../../../../src/debug/Public.ts";
+import { createDebugRouteModule } from "../../../../src/debug/Public.ts";
+import type { DebugApi } from "../../../../src/debug/Api.ts";
 
 function context(
     peer: "cli" | "tui" | "web",

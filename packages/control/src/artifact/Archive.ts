@@ -12,6 +12,10 @@ import { extract, pack, type Headers, type Pack } from "tar-stream";
 import { createRemoteError } from "@portable-devshell/shared";
 
 import { createArtifactHasher, updateManifestHash } from "./host/Hash.js";
+import type {
+    ArtifactDirectoryArchiveLimits,
+    ArtifactDirectoryManifestResult,
+} from "./Api.js";
 
 interface SourceEntry {
     absolutePath: string;
@@ -29,18 +33,6 @@ interface ManifestEntry {
     modifiedAtSeconds: number;
     relativePath: string;
     size: number;
-}
-
-export interface ArtifactDirectoryManifestResult {
-    entryCount: number;
-    logicalBytes: number;
-    manifestBlake3: string;
-}
-
-export interface ArtifactDirectoryArchiveLimits {
-    maxEntries?: number;
-    maxFileBytes?: number;
-    maxLogicalBytes?: number;
 }
 
 export async function createArtifactDirectoryArchive(

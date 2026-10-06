@@ -19,7 +19,7 @@ import type {
     ArtifactTransferStartInput,
 } from "@portable-devshell/shared";
 
-import type { ArtifactManagementApi } from "../../../../artifact/Public.js";
+import type { ArtifactManagementApi } from "../../../../artifact/Api.js";
 
 export interface ExtensionArtifactCapabilityControlOptions {
     allowed: boolean;

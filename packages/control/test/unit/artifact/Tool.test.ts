@@ -8,9 +8,9 @@ import {
 } from "@portable-devshell/core/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
-import type { ArtifactImageApi } from "../../../src/artifact/Public.ts";
+import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
-import { createToolCallRegistry } from "../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
 
 function createHooks() {
     const executes = new Map<

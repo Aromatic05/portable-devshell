@@ -4,7 +4,7 @@ import test from "node:test";
 import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ToolCallContext } from "@portable-devshell/shared";
 
-import { createDebugRuntime } from "../../../../src/debug/Public.ts";
+import { createDebugRuntime } from "../../../../src/debug/index.ts";
 
 function context(ctxId: string): ToolCallContext {
     return {

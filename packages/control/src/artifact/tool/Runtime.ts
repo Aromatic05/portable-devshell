@@ -4,11 +4,10 @@ import {
 } from "@portable-devshell/core/toolcall";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { InstanceChangeHub } from "../../instance/Change.js";
 import {
     type ToolCallDefinitionRegistration,
     type ToolCallRegistry,
-} from "../../toolcall/Public.js";
+} from "../../toolcall/Api.js";
 import type { ArtifactImageApi } from "../Api.js";
 import { artifactViewImageDefinition } from "./Definition.js";
 import { readArtifactViewImageInput } from "./Input.js";
@@ -16,7 +15,7 @@ import { readArtifactViewImageInput } from "./Input.js";
 export function installArtifactTools(
     artifact: ArtifactImageApi,
     instances: InstanceRegistry,
-    changes: InstanceChangeHub,
+    changes: { onChange(listener: () => void): () => void },
     hooks: ToolCallRegistry,
 ): () => void {
     const registrations = new Map<string, ToolCallDefinitionRegistration>();

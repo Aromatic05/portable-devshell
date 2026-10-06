@@ -55,6 +55,18 @@ export interface ArtifactRuntimeOptions {
     instances: InstanceRegistry;
 }
 
+export interface ArtifactDirectoryManifestResult {
+    entryCount: number;
+    logicalBytes: number;
+    manifestBlake3: string;
+}
+
+export interface ArtifactDirectoryArchiveLimits {
+    maxEntries?: number;
+    maxFileBytes?: number;
+    maxLogicalBytes?: number;
+}
+
 export interface ArtifactSnapshot {
     lastSeq: number;
     shares: ArtifactShareResult[];

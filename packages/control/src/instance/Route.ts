@@ -1,8 +1,4 @@
 import type {
-    ControlConfig,
-    InstanceCreateResult,
-    InstanceCreateSchema,
-    InstanceCreateSummary,
     InstanceListEntry,
     JsonValue,
     ControlPortDefinition,
@@ -14,33 +10,8 @@ import {
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../Port.js";
-import type { InstanceChange, InstanceChangeHub } from "./Change.js";
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
-
-export interface InstanceCreatePort {
-    createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
-    getSchema(): InstanceCreateSchema;
-    validateDraft(params?: JsonValue): InstanceCreateSummary;
-}
-
-export interface InstanceEditorPort {
-    deleteInstance(params?: JsonValue): Promise<JsonValue>;
-    disableInstance(params?: JsonValue): Promise<JsonValue>;
-    enableInstance(params?: JsonValue): Promise<JsonValue>;
-    updateInstanceConfig(params?: JsonValue): Promise<JsonValue>;
-}
-
-export interface InstanceConfigRouteModuleOptions {
-    /**
-     * Persistent revision feed signalled by composition after the registry or
-     * a list-affecting Config commit has been applied.
-     */
-    changes: InstanceChangeHub;
-    configuredInstances?: () => readonly ControlConfig["instances"][number][];
-    create?: InstanceCreatePort;
-    editor?: InstanceEditorPort;
-    registry: InstanceRegistry;
-}
+import type { InstanceChange } from "./Change.js";
+import type { InstanceConfigRouteModuleOptions } from "./Api.js";
 
 export function createInstanceConfigRouteModule(
     options: InstanceConfigRouteModuleOptions,

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
-import { createInstanceRuntimeRegistry } from "../../../../src/instance/Public.ts";
-import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
+import { createInstanceRuntimeRegistry } from "../../../../src/instance/index.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test("finalize retries a failed worker close without reopening the retired generation", async (t) => {

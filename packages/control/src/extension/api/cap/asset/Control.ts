@@ -13,7 +13,7 @@ import type {
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive,
-} from "../../../../artifact/Archive.js";
+} from "../../../../artifact/Public.js";
 import {
     resolveExtensionInstallLimits,
     type ExtensionInstallLimits,

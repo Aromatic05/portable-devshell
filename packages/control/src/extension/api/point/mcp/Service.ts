@@ -17,9 +17,8 @@ import type {
 
 import type { ExtensionHost } from "../../../host/Host.js";
 import {
-    allToolCallInstances,
     type ToolCallRegistry,
-} from "../../../../toolcall/Public.js";
+} from "../../../../toolcall/Api.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<
@@ -43,7 +42,7 @@ export class McpExtensionService {
     }
 
     install(hooks: ToolCallRegistry): () => void {
-        const definitions = hooks.register(allToolCallInstances, []);
+        const definitions = hooks.registerAll([]);
         const executes = new Map<string, () => void>();
         const sync = () => {
             const tools = this.#definitions();

@@ -4,7 +4,7 @@ import {
 } from "@portable-devshell/extension/web";
 import type { WebPageDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../../../../extension/Public.js";
+import type { ExtensionRuntime } from "../../../../extension/Api.js";
 
 export class WebExtensionPageCatalog {
     readonly #extensions: Pick<ExtensionRuntime, "listDeclarations">;

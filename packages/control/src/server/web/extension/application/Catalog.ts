@@ -1,7 +1,7 @@
 import type { WebApplicationDeclaration } from "@portable-devshell/extension/web";
 import type { WebApplicationDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../../../../extension/Public.js";
+import type { ExtensionRuntime } from "../../../../extension/Api.js";
 
 export class WebApplicationCatalog {
     readonly #extensions: Pick<ExtensionRuntime, "listDeclarations">;

@@ -21,7 +21,7 @@ import { ControlWebRuntime } from "../../../../src/server/web/Runtime.ts";
 import { createContextRuntime } from "@portable-devshell/core/context";
 import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
-import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import {
     createTestIpcPath,
     ipcEndpointAcceptsConnections,

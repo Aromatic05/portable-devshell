@@ -10,7 +10,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { createArtifactRuntime } from "../../../../src/artifact/Public.ts";
+import { createArtifactRuntime } from "../../../../src/artifact/index.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryArtifactReceiver {

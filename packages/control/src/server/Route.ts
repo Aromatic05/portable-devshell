@@ -15,7 +15,7 @@ import {
     type TerminalSessionApi,
 } from "@portable-devshell/core/terminal";
 
-import type { ArtifactRouteApi } from "../artifact/Public.js";
+import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
 import {
     createCliRouteModule,
@@ -28,20 +28,22 @@ import {
 import type { ConfigEditorPort } from "../config/Route.js";
 import { createConfigRouteModule } from "../config/Route.js";
 import { ConfigChangeHub } from "../config/change/Config.js";
-import { createDebugRouteModule, type DebugApi } from "../debug/Public.js";
+import { createDebugRouteModule } from "../debug/Public.js";
+import type { DebugApi } from "../debug/Api.js";
 import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
 import type { ExtensionControlPort } from "../extension/manager/Port.js";
 import type {
     InstanceCreatePort,
     InstanceEditorPort,
-} from "../instance/Route.js";
+    InstanceConfigRouteModuleOptions,
+} from "../instance/Api.js";
 import {
     createInstanceConfigRouteModule,
-    type InstanceConfigRouteModuleOptions,
-} from "../instance/Route.js";
+} from "../instance/Public.js";
 import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "../auth/Route.js";
-import { createOperationalOverviewRouteModule, type OperationalOverviewApi } from "../overview/Public.js";
+import { createOperationalOverviewRouteModule } from "../overview/Public.js";
+import type { OperationalOverviewApi } from "../overview/Api.js";
 import type { ReverseCredentials } from "@portable-devshell/core/instance";
 import {
     createWebApplicationRouteModule,

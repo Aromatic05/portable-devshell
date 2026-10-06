@@ -8,7 +8,7 @@ import {
     createContextTransport,
     createServerTransport,
 } from "@portable-devshell/shared";
-import { createExtensionRuntime } from "../../extension/Public.js";
+import { createExtensionRuntime } from "../../extension/index.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
 import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/Control.js";
 import {
@@ -27,7 +27,7 @@ import { ExtensionRegistryStore } from "../../extension/state/Store.js";
 import { ExtensionConfigControl } from "../../extension/api/cap/config/Control.js";
 import { createControlExtensionPointRegistry } from "../../extension/registration/Points.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
-import { createArtifactRuntime } from "../../artifact/Public.js";
+import { createArtifactRuntime } from "../../artifact/index.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { createContextRuntime } from "@portable-devshell/core/context";

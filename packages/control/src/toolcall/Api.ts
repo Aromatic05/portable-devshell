@@ -20,6 +20,9 @@ export interface ToolCallRegistry extends ToolCallRegistration {
         scope: string,
         definitions: readonly ToolDefinition[],
     ): ToolCallDefinitionRegistration;
+    registerAll(
+        definitions: readonly ToolDefinition[],
+    ): ToolCallDefinitionRegistration;
     list(instance: string): readonly ToolCallDefinitionEntry[];
     get(
         instance: string,

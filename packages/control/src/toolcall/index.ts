@@ -1,10 +1,5 @@
 import type { ToolCallRegistry } from "./Api.js";
-import {
-    allToolCallInstances,
-    ToolCallRegistryState,
-} from "./Registry.js";
-
-export { allToolCallInstances };
+import { ToolCallRegistryState } from "./Registry.js";
 
 export function createToolCallRegistry(): ToolCallRegistry {
     return new ToolCallRegistryState();

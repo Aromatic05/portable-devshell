@@ -2,6 +2,7 @@ import type { ApprovalRuntime } from "@portable-devshell/core/approval";
 import type { AuditRuntime } from "@portable-devshell/core/audit";
 import type {
     Instance,
+    InstanceRegistry,
     WorkerWorkspacePrepareResult,
 } from "@portable-devshell/core/instance";
 import type { TaskRuntime } from "@portable-devshell/core/task";
@@ -12,11 +13,37 @@ import type {
     ToolCallTarget,
 } from "@portable-devshell/core/toolcall";
 import type {
+    ControlConfig,
     ControlInstanceConfig,
+    InstanceCreateResult,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type { ToolCallRegistry } from "../toolcall/Public.js";
+import type { ToolCallRegistry } from "../toolcall/Api.js";
+import type { InstanceChangeHub } from "./Change.js";
+
+export interface InstanceCreatePort {
+    createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
+    getSchema(): InstanceCreateSchema;
+    validateDraft(params?: JsonValue): InstanceCreateSummary;
+}
+
+export interface InstanceEditorPort {
+    deleteInstance(params?: JsonValue): Promise<JsonValue>;
+    disableInstance(params?: JsonValue): Promise<JsonValue>;
+    enableInstance(params?: JsonValue): Promise<JsonValue>;
+    updateInstanceConfig(params?: JsonValue): Promise<JsonValue>;
+}
+
+export interface InstanceConfigRouteModuleOptions {
+    changes: InstanceChangeHub;
+    configuredInstances?: () => readonly ControlConfig["instances"][number][];
+    create?: InstanceCreatePort;
+    editor?: InstanceEditorPort;
+    registry: InstanceRegistry;
+}
 
 export interface InstanceRuntime {
     readonly approval: ApprovalRuntime;

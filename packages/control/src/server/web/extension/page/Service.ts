@@ -8,7 +8,7 @@ import type {
     WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../../../../extension/Public.js";
+import type { ExtensionRuntime } from "../../../../extension/Api.js";
 import { WebExtensionPageCatalog } from "./Catalog.js";
 import { validateWebPageSnapshot } from "./Snapshot.js";
 

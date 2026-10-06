@@ -11,7 +11,7 @@ import { Instance, type Instance } from "@portable-devshell/core/instance";
 import type { OperationalOverviewInstanceData } from "../../../src/overview/collector/Instance.ts";
 import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
 
-import { createOperationalOverviewRuntime } from "../../../src/overview/Public.ts";
+import { createOperationalOverviewRuntime } from "../../../src/overview/index.ts";
 
 const now = new Date("2026-07-31T00:00:00.000Z");
 const healthySystemCollector = {

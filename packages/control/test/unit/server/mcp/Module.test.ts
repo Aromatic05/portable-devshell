@@ -10,7 +10,7 @@ import {
 
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
-import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 
 test("hot enabling and disabling MCP updates status and OAuth approval exposure", async (t) => {
     const homeDirectory = await createTestTempDirectory("mcp-hot-enable-status");

@@ -120,7 +120,7 @@ test("runtime composition failure closes loaded instance domains before retry", 
     config.instances = [normalizeConfigInstanceDraft({ name: "local", provider: "local" })];
     const failure = new Error("composition failed");
     const generations: import("@portable-devshell/core/instance").Instance[] = [];
-    const runtimes: import("../../../src/instance/Public.ts").InstanceRuntime[] = [];
+    const runtimes: import("../../../src/instance/Api.ts").InstanceRuntime[] = [];
     const server = new ControlServer({
         configStore: { async readOrCreate() { return config; } } as never,
         homeDirectory: root,
