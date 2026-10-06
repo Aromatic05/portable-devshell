@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { InstanceRegistry } from "../instance/Registry.js";
+import type { InstanceRegistry } from "../instance/Api.js";
 import type {
     ArtifactImageContent,
     ArtifactSnapshot,

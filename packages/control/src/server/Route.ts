@@ -1,4 +1,4 @@
-import type { InstanceRegistry } from "../instance/Registry.js";
+import type { InstanceRegistry } from "../instance/Api.js";
 import { routeModule, mergeControlPortsByName, type ControlHostDefinition, type ControlPortDefinition, JsonValue, } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";

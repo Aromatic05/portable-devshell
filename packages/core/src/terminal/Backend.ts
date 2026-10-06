@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerExecution } from "../instance/runtime/Api.js";
+import type { WorkerExecution } from "../instance/Api.js";
 import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,

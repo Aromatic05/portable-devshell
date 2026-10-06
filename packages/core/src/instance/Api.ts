@@ -233,3 +233,5 @@ export interface WorkerCommandInteractiveSession {
     readInput(): Promise<Buffer | undefined>;
     writeOutput(chunk: string): Promise<void> | void;
 }
+
+export type { WorkerExecution, WorkerInstance } from "./runtime/Api.js";

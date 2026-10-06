@@ -12,7 +12,7 @@ import {
     type ServerTransport,
 } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";

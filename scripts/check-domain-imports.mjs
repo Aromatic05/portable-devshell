@@ -71,22 +71,6 @@ const rules = [
         ),
     },
     {
-        name: "instance-does-not-depend-on-business-domains",
-        roots: [domain("packages/core/src/instance")],
-        forbidden: anyTarget(
-            pathTarget("packages/core/src/approval"),
-            pathTarget("packages/core/src/task"),
-            pathTarget("packages/core/src/terminal"),
-            pathTarget("packages/core/src/audit"),
-            pathTarget("packages/core/src/toolcall"),
-            packageTarget("@portable-devshell/core/approval"),
-            packageTarget("@portable-devshell/core/task"),
-            packageTarget("@portable-devshell/core/terminal"),
-            packageTarget("@portable-devshell/core/audit"),
-            packageTarget("@portable-devshell/core/toolcall"),
-        ),
-    },
-    {
         name: "toolcall-does-not-depend-on-worker-or-approval",
         roots: [domain("packages/core/src/toolcall")],
         forbidden: anyTarget(
@@ -100,6 +84,7 @@ const rules = [
 
 const coreDomains = ["approval", "audit", "instance", "task", "terminal", "toolcall"];
 for (const owner of coreDomains) {
+    if (owner === "instance") continue;
     rules.push({
         name: `${owner}-uses-domain-public-entries`,
         roots: [domain(`packages/core/src/${owner}`)],

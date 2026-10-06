@@ -1,5 +1,5 @@
 import type { Instance } from "@portable-devshell/core";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import type { ToolCallRegistration } from "@portable-devshell/shared";
 import {
     contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";

@@ -66,6 +66,14 @@ domain/
     └── ...
 ```
 
+## Instance composition
+
+`packages/core` 整体以 `Instance` 为核心 domain；`packages/core/src/instance` 中的 `State` 是各功能域的导入表，`Route` 是单个 Instance host 的端点装配处。
+
+因此 `instance` 作为 composition owner 可以直接挂载 `approval`、`audit`、`task`、`terminal`、`toolcall` 的生命周期、route 与内部实现入口。这种依赖用于构造一个完整的 Instance，不应被改造成 Control 侧的二次 registry、service locator 或 facade。
+
+除此之外，普通 domain 之间的类型依赖和运行时调用仍应分别通过目标 domain 的 `Api.ts` 与 `Public.ts`，不得借 composition 例外扩大依赖面。
+
 ## 约束边界
 
 除此之外，不定义更多通用的 domain 内部组织规则。

@@ -1,4 +1,5 @@
 import type { InstanceRegistry } from "./Registry.js";
+export type { InstanceRegistry } from "./Registry.js";
 import type {
     ControlConfig,
     InstanceCreateResult,

@@ -23,7 +23,7 @@ import {
     STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../../../instance/Registry.js";
+import type { InstanceRegistry } from "../../../../instance/Api.js";
 import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 export interface ExtensionInstanceCreatePort {

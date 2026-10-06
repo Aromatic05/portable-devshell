@@ -1,4 +1,4 @@
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import type { ContextEnvironmentCleanup, ContextRecord, } from "@portable-devshell/shared";
 
 import type {

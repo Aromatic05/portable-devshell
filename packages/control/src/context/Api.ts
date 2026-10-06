@@ -1,4 +1,4 @@
-import type { InstanceRegistry } from "../instance/Registry.js";
+import type { InstanceRegistry } from "../instance/Api.js";
 import type { ContextBinding, ContextEnvironment, ContextEnvironmentBinding, ContextEnvironmentCleanup, ContextExternalBinding, ContextInstanceReference, ContextMaskedInstance, ContextQuery, ContextRecord, ContextResolveInput, ContextSnapshot, ContextValidationBinding, JsonValue, } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 

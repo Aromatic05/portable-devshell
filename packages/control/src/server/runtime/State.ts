@@ -1,4 +1,4 @@
-import { InstanceRegistry } from "../../instance/Registry.js";
+import { InstanceRegistry } from "../../instance/Public.js";
 import { createRemoteError, controlErrorCodes, type ControlConfig, } from "@portable-devshell/shared";
 
 import { ControlConfigStore } from "../../config/store/index.js";

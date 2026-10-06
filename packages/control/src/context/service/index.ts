@@ -1,5 +1,5 @@
 import type { Instance } from "@portable-devshell/core";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import type { ContextLifecycleCleanupPort, ContextRecordSourcePort, } from "../Api.js";
 import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort } from "../Api.js";

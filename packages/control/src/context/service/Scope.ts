@@ -1,5 +1,5 @@
 import type { Instance } from "@portable-devshell/core";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import { contextErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextEnvironment, type ContextEnvironmentCleanup, type ContextExternalBinding, } from "@portable-devshell/shared";
 import type {
     ContextCleanupLedgerPort, ContextEnvironmentPort, ContextRecordPort, PreparedEnvironmentFacts, } from "../Api.js";

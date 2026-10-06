@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceRegistry } from "../../instance/Api.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 
 export class McpRuntimeFactory {
