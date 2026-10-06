@@ -5,11 +5,9 @@ import test from "node:test";
 
 import {
     createContextRuntime,
-    type ContextInstancesPort,
 } from "@portable-devshell/core/context";
 import {
     InstanceRegistry,
-    Instance,
     type WorkerInstance,
 } from "@portable-devshell/core/instance";
 import {
@@ -100,34 +98,9 @@ for (const descriptorState of ["present", "missing"] as const) {
                 provider: "local",
             }),
         ]);
-        let cleanupDescriptor: Instance | undefined;
-        const contextInstances: ContextInstancesPort = {
-            get: (name) => {
-                const descriptor =
-                    cleanupDescriptor?.name === name
-                        ? cleanupDescriptor
-                        : instances.get(name);
-                if (descriptor === undefined) return undefined;
-                return {
-                    acquireLease: () => ({
-                        instance: { worker: descriptor.worker },
-                        release() {},
-                    }),
-                    async acquireReference(reference) {
-                        return {
-                            snapshot: descriptor.worker.snapshot(),
-                            worker: descriptor.worker,
-                        };
-                    },
-                    async releaseReference(reference) {
-                        await descriptor.releaseReference(reference);
-                    },
-                };
-            },
-        };
         const contexts = createContextRuntime({
             contextFile: join(home, "contexts.json"),
-            instances: contextInstances,
+            instances,
         });
         await contexts.initialize();
         const context = await contexts.api.registry.create({ principal: "local" });
@@ -173,13 +146,16 @@ for (const descriptorState of ["present", "missing"] as const) {
             instanceChanges: new InstanceChangeHub(),
             instanceRegistry: instances,
             reconcileContextInstanceCleanup: async (instance, descriptor) => {
-                cleanupDescriptor = descriptor ?? instances.get(instance);
+                const cleanupDescriptor = descriptor ?? instances.get(instance);
                 if (
                     cleanupDescriptor !== undefined &&
                     !cleanupDescriptor.worker.snapshot().ready
                 )
                     await cleanupDescriptor.worker.start();
-                await contexts.api.cleanup.reconcileInstance(instance);
+                await contexts.api.cleanup.reconcileInstance(
+                    instance,
+                    cleanupDescriptor,
+                );
             },
             retireRuntimeInstance: async () => {},
             finalizeRuntimeInstance: async (descriptor) => {

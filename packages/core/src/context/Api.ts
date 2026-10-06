@@ -7,10 +7,11 @@ import type {
     ContextSnapshot,
     JsonValue,
 } from "@portable-devshell/shared";
+import type { Instance, InstanceRegistry } from "../instance/Public.js";
 
 export interface ContextCleanupPort {
     reconcile(ctxId?: string): Promise<void>;
-    reconcileInstance(instance: string): Promise<void>;
+    reconcileInstance(instance: string, target?: Instance): Promise<void>;
 }
 
 export interface PreparedEnvironmentFacts {
@@ -98,7 +99,7 @@ export interface ContextApi {
 
 export interface ContextRuntimeOptions {
     contextFile: string;
-    instances: ContextInstancesPort;
+    instances: InstanceRegistry;
 }
 
 export interface ContextRuntime {
@@ -106,40 +107,4 @@ export interface ContextRuntime {
     initialize(): Promise<void>;
     reconcile(): Promise<void>;
     close(): void;
-}
-
-import type { WorkerInstance } from "../instance/Public.js";
-
-export type ContextWorkerPort = Pick<
-    WorkerInstance,
-    | "handshake"
-    | "prepareExtensionResource"
-    | "prepareWorkspace"
-    | "readAlerts"
-    | "releaseAlerts"
-    | "snapshot"
-    | "touchAlerts"
-    | "touchTemporaryDirectory"
->;
-
-export interface ContextInstanceLeasePort {
-    readonly instance: { readonly worker: ContextWorkerPort };
-    release(): void;
-}
-
-export interface ContextInstanceReferencePort {
-    readonly snapshot: ReturnType<WorkerInstance["snapshot"]>;
-    readonly worker: ContextWorkerPort;
-}
-
-export interface ContextInstancePort {
-    acquireLease(): ContextInstanceLeasePort;
-    acquireReference(
-        reference: string,
-    ): Promise<ContextInstanceReferencePort>;
-    releaseReference(reference: string): Promise<void>;
-}
-
-export interface ContextInstancesPort {
-    get(name: string): ContextInstancePort | undefined;
 }

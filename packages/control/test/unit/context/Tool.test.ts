@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ToolCallHooks } from "@portable-devshell/core/toolcall";
+import {
+    Instance,
+    InstanceRegistry,
+    type WorkerInstance,
+} from "@portable-devshell/core/instance";
 import type { InstanceName, JsonValue } from "@portable-devshell/shared";
 
 import {
@@ -24,7 +29,7 @@ test("Context owns environ tool definitions with structured environment output",
     assert.deepEqual(platform.required, ["arch", "os"]);
 });
 
-test("Context installs wildcard definitions and executes environ_info through ToolCall hook", async () => {
+test("Context registers definitions and executes environ_info through ToolCall hook", async () => {
     const executes = new Map<
         string,
         Parameters<ToolCallHooks["registerExecute"]>[1]
@@ -39,7 +44,6 @@ test("Context installs wildcard definitions and executes environ_info through To
             executes.set(name, execute);
             return () => executes.delete(name);
         },
-        registerReview: () => () => undefined,
         registerToolName: (
             name: string,
             handle: Parameters<ToolCallHooks["registerToolName"]>[1],
@@ -47,7 +51,8 @@ test("Context installs wildcard definitions and executes environ_info through To
             toolNames.set(name, handle);
             return () => toolNames.delete(name);
         },
-    } as ToolCallHooks;
+        registerReview: () => () => undefined,
+    } as unknown as ToolCallHooks;
     const record = {
         createdAt: "2026-10-04T00:00:00.000Z",
         ctxId: "ctx-1",
@@ -120,18 +125,17 @@ test("Context installs wildcard definitions and executes environ_info through To
     };
 
     const uninstall = installContextTools(contexts, hooks, {
-        instances: {
-            get: () => ({
-                acquireLease: () => ({
-                    instance: { worker } as never,
-                    release() {},
-                }),
-                async acquireReference() {
-                    throw new Error("Unexpected remote instance reference.");
-                },
-                async releaseReference() {},
+        instances: new InstanceRegistry([
+            new Instance({
+                enabled: true,
+                mcpEnabled: true,
+                mcpPath: "/local/mcp",
+                modelExtensions: [],
+                name: "local",
+                provider: "local",
+                worker: worker as unknown as WorkerInstance,
             }),
-        },
+        ]),
     });
     try {
         assert.equal(

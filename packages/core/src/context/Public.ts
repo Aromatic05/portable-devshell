@@ -1,11 +1,4 @@
 export type * from "./Api.js";
-export type {
-    ContextInstancePort,
-    ContextInstancesPort,
-    ContextInstanceLeasePort,
-    ContextInstanceReferencePort,
-    ContextWorkerPort,
-} from "./Api.js";
 export { createContextRuntime } from "./index.js";
 export type { ContextRuntime, ContextRuntimeOptions } from "./Api.js";
 export { createContextRouteModule } from "./Route.js";

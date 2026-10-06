@@ -134,8 +134,17 @@ export class ControlRuntimeFactory {
                 detachContextInstance: async (instance) => {
                     await contextTransport.detachInstance(instance);
                 },
-                reconcileContextInstanceCleanup: async (instance) => {
-                    await contextTransport.reconcileInstance(instance);
+                reconcileContextInstanceCleanup: async (instance, descriptor) => {
+                    if (
+                        descriptor !== undefined &&
+                        !descriptor.worker.snapshot().ready
+                    ) {
+                        await descriptor.worker.start();
+                    }
+                    await contexts.api.cleanup.reconcileInstance(
+                        instance,
+                        descriptor,
+                    );
                 },
                 instanceRegistry: options.state.instances,
                 instanceChanges: options.state.instanceChanges,

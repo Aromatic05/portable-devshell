@@ -10,7 +10,7 @@ import {
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
-import type { ContextInstanceLeasePort, ContextInstancesPort } from "../Api.js";
+import type { InstanceLease, InstanceRegistry } from "../../instance/Public.js";
 import {
     contextToolDefinitions,
     environmentInfoToolName,
@@ -25,7 +25,7 @@ export function installContextTools(
     contexts: ContextApi,
     hooks: ToolCallHooks,
     options: {
-        instances: ContextInstancesPort;
+        instances: InstanceRegistry;
         modelCommands?(instance: string): readonly string[];
     },
 ): () => void {
@@ -52,13 +52,13 @@ export function installContextTools(
 
 class ContextToolRuntime {
     readonly #contexts: ContextApi;
-    readonly #instances: ContextInstancesPort;
+    readonly #instances: InstanceRegistry;
     readonly #modelCommands: (instance: string) => readonly string[];
 
     constructor(
         contexts: ContextApi,
         options: {
-            instances: ContextInstancesPort;
+            instances: InstanceRegistry;
             modelCommands?(instance: string): readonly string[];
         },
     ) {
@@ -412,7 +412,7 @@ class ContextToolRuntime {
         return context.principal ?? "local";
     }
 
-    #requireGeneration(instance: string): ContextInstanceLeasePort {
+    #requireGeneration(instance: string): InstanceLease {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({
