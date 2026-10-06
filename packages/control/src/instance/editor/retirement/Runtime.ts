@@ -1,6 +1,8 @@
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
-
-import type { Instance } from "./Instance.js";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
+import type { Instance } from "@portable-devshell/core";
 
 export function assertInstanceDeletable(
     instanceName: string,
@@ -45,21 +47,6 @@ export async function retireInstanceForDelete(
         throw new AggregateError(
             failures,
             `Instance ${descriptor.config.name} delete cleanup was incomplete.`,
-        );
-    }
-}
-
-export async function closeInstanceResources(
-    descriptor: Instance,
-): Promise<void> {
-    const failures: unknown[] = [];
-    await descriptor.worker.supervision
-        .close()
-        .catch((error: unknown) => failures.push(error));
-    if (failures.length > 0) {
-        throw new AggregateError(
-            failures,
-            `Failed to close instance ${descriptor.config.name} resources.`,
         );
     }
 }

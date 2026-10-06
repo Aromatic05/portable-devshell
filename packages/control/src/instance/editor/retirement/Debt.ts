@@ -4,7 +4,8 @@ import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
     createRemoteError, normalizeConfigInstanceDraft, parseConfigInstanceDraft, toConfigInstanceDraft, type ControlConfig, runtimeErrorCodes, } from "@portable-devshell/shared";
-import { retireInstanceForDelete, type Instance } from "@portable-devshell/core";
+import type { Instance } from "@portable-devshell/core";
+import { retireInstanceForDelete } from "./Runtime.js";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";

@@ -13,11 +13,5 @@ export {
 export type { InstanceState } from "./model/State.js";
 export type { InstanceLease } from "./model/Lifecycle.js";
 export { resolveWorkerHomeDirectory } from "./runtime/provision/Home.js";
-export {
-    assertInstanceDeletable,
-    closeInstanceResources,
-    retireInstanceForDelete,
-} from "./model/Retirement.js";
-export { InstanceRetirementNotification } from "./runtime/provision/Retirement.js";
 export { WORKER_PROTOCOL_RANGE } from "./transport/packet/Client.js";
 export { TransportConnection } from "./transport/endpoint/Connection.js";
