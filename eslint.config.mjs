@@ -2,6 +2,38 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+const noIndexReexport = {
+    meta: {
+        type: "problem",
+        docs: {
+            description: "forbid re-exporting declarations from index modules",
+        },
+        messages: {
+            forbidden:
+                "Do not re-export from index modules; export from the owning module directly.",
+        },
+        schema: [],
+    },
+    create(context) {
+        const check = (node) => {
+            const source = node.source?.value;
+            if (typeof source !== "string") return;
+            if (!/(?:^|\/)index(?:\.[cm]?[jt]sx?)?$/u.test(source)) return;
+            context.report({ messageId: "forbidden", node });
+        };
+        return {
+            ExportAllDeclaration: check,
+            ExportNamedDeclaration: check,
+        };
+    },
+};
+
+const architecture = {
+    rules: {
+        "no-index-reexport": noIndexReexport,
+    },
+};
+
 export default [
     {
         ignores: [
@@ -15,6 +47,14 @@ export default [
     },
     js.configs.recommended,
     ...tseslint.configs.recommended,
+    {
+        plugins: {
+            architecture,
+        },
+        rules: {
+            "architecture/no-index-reexport": "error",
+        },
+    },
     {
         files: ["**/*.{js,mjs,cjs}"],
         languageOptions: {
