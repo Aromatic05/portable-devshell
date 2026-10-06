@@ -4,7 +4,7 @@ import type { ApprovalEvaluationApi, ApprovalEvaluationError } from "../Api.js";
 
 export function registerApprovalToolCallReview(
     hooks: ToolCallHooks,
-    resolve: (instance: string) => ApprovalEvaluationApi | undefined,
+    approval: ApprovalEvaluationApi,
 ): () => void {
     return hooks.registerReview({
         hook: "510-approval",
@@ -14,10 +14,8 @@ export function registerApprovalToolCallReview(
             return { decision: "continue" };
         }
 
-        const service = resolve(input.value.context.instance);
-        if (service === undefined) return { decision: "continue" };
         const { source, requestId, ctxId, workspace } = input.value.context;
-        const evaluation = await service.evaluate(
+        const evaluation = await approval.evaluate(
             {
                 callId: input.callId,
                 source,

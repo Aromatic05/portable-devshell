@@ -1,4 +1,4 @@
-import type { ToolCallRegistration } from "../../../toolcall/Api.js";
+import type { ToolCallHooks } from "../../../toolcall/Api.js";
 import {
     contextErrorCodes,
     createRemoteError,
@@ -8,24 +8,17 @@ import {
 } from "@portable-devshell/shared";
 
 import type { TaskApi } from "../../Api.js";
-import { todoToolDefinitions } from "./Definition.js";
 import { readTodoToolInput } from "./Input.js";
 
 export function installTodoTools(
-    hooks: ToolCallRegistration,
-    resolveTask: (instance: string) => TaskApi | undefined,
+    hooks: ToolCallHooks,
+    task: TaskApi,
 ): () => void {
-    const unregisterDefinitions = todoToolDefinitions().map((definition) =>
-        hooks.registerToolName(definition.name, () => definition),
-    );
     const unregisterRead = hooks.registerExecute(
         "todo_read",
         async (_callId, input, value, signal) => {
             signal?.throwIfAborted();
-            const result = await requireTask(
-                value.context.instance,
-                resolveTask,
-            ).todo.read(readTodoToolInput(input));
+            const result = await task.todo.read(readTodoToolInput(input));
             signal?.throwIfAborted();
             return result as unknown as JsonValue;
         },
@@ -34,7 +27,6 @@ export function installTodoTools(
         "todo_write",
         async (_callId, input, value, signal) => {
             signal?.throwIfAborted();
-            const task = requireTask(value.context.instance, resolveTask);
             const ctxId = requireCtxId(value.context.ctxId);
             const written = await task.todo.write(
                 input as unknown as TodoWriteInput,
@@ -47,22 +39,7 @@ export function installTodoTools(
     return () => {
         unregisterWrite();
         unregisterRead();
-        for (const unregister of unregisterDefinitions.reverse()) unregister();
     };
-}
-
-function requireTask(
-    instance: string,
-    resolveTask: (instance: string) => TaskApi | undefined,
-): TaskApi {
-    const task = resolveTask(instance);
-    if (task !== undefined) return task;
-    throw createRemoteError({
-        code: runtimeErrorCodes.instanceNotReady,
-        details: { instance },
-        message: `Instance ${instance} task runtime is unavailable.`,
-        retryable: false,
-    });
 }
 
 function requireCtxId(ctxId: string | undefined): string {

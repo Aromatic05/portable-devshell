@@ -9,13 +9,9 @@ import { WAIT_SYNC_MS } from "./index.js";
 
 export function installWaitToolCallRewrite(
     hooks: ToolCallHooks,
-    resolveWait: (instance: string) => WaitApi | undefined,
+    wait: WaitApi,
 ): () => void {
-    return hooks.registerContributor((context) => {
-        const wait = resolveWait(context.instance);
-        if (wait === undefined)
-            return { release() {} };
-        return {
+    return hooks.registerContributor(() => ({
             rewrites: [
                 {
                     hook: "520-wait-detach",
@@ -34,8 +30,7 @@ export function installWaitToolCallRewrite(
                 },
             ],
             release() {},
-        };
-    });
+        }));
 }
 
 function rewriteInbound(value: ToolCallHookValue): ToolCallHookValue {

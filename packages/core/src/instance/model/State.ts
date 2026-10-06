@@ -7,13 +7,19 @@ import {
     type InstanceEventRecord,
     type InstanceName,
     type JsonValue,
+    createToolCallRuntime,
+    type ToolCallRuntime,
 } from "@portable-devshell/shared";
 
 import type { ApprovalRuntime } from "../../approval/Api.js";
 import { createApprovalRuntime } from "../../approval/index.js";
+import { registerApprovalToolCallReview } from "../../approval/execution/ToolCallReview.js";
 import type { AuditRuntime } from "../../audit/Api.js";
 import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
+import { installTodoTools } from "../../task/todo/tool/Runtime.js";
+import { todoToolDefinitions } from "../../task/todo/tool/Definition.js";
+import { installWaitToolCallRewrite } from "../../task/wait/Runtime.js";
 import type { TerminalRuntime } from "../../terminal/Api.js";
 import { createTerminalRuntime } from "../../terminal/index.js";
 import type {
@@ -104,11 +110,14 @@ export class InstanceState {
     readonly task: TaskRuntime;
     readonly terminal: TerminalRuntime;
     readonly tools: ToolCallExecutionRuntime;
+    readonly toolCalls: ToolCallRuntime;
     readonly #eventLog: InstanceEventLog;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #resolveInstance: () => Instance;
     readonly #toolDefinitions = new InstanceToolCatalog();
-    readonly #toolRegistration: InstanceToolDefinitionRegistration;
+    readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
+    readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
+    readonly #toolCallUnregister: readonly (() => void)[];
     readonly #toolSessions = new Map<string, string>();
     readonly #worker: WorkerInstance;
     #closePromise?: Promise<void>;
@@ -158,7 +167,34 @@ export class InstanceState {
             paths,
         });
         this.terminal = createTerminalRuntime(worker);
-        this.#toolRegistration = this.#toolDefinitions.register([]);
+        this.#workerToolRegistration = this.#toolDefinitions.register([]);
+        this.#domainToolRegistration = this.#toolDefinitions.register(
+            todoToolDefinitions(),
+        );
+        this.toolCalls = createToolCallRuntime({
+            resolveTarget: (target) => {
+                if (target !== instanceName) {
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.instanceConflict,
+                        details: { instance: target },
+                        message: `Tool call target ${target} does not match instance ${instanceName}.`,
+                        retryable: false,
+                    });
+                }
+                return this.target();
+            },
+        });
+        this.#toolCallUnregister = [
+            registerApprovalToolCallReview(
+                this.toolCalls.hooks,
+                this.approval.api,
+            ),
+            installTodoTools(this.toolCalls.hooks, this.task.api),
+            installWaitToolCallRewrite(
+                this.toolCalls.hooks,
+                this.task.api.wait,
+            ),
+        ];
     }
 
     get instance(): Instance {
@@ -193,7 +229,7 @@ export class InstanceState {
             );
         const definitions = await this.tools.refreshTools();
         if (this.#retired) return;
-        this.#toolRegistration.replace(definitions);
+        this.#workerToolRegistration.replace(definitions);
         this.task.resume();
     }
 
@@ -241,7 +277,7 @@ export class InstanceState {
         if (this.#retired) return;
         if (this.#worker.supervision.snapshot().ready)
             await this.refreshTools();
-        else this.#toolRegistration.replace([]);
+        else this.#workerToolRegistration.replace([]);
     }
 
     async #retire(): Promise<void> {
@@ -256,10 +292,14 @@ export class InstanceState {
         };
         await close(() => this.approval.close());
         await close(() => this.task.close());
+        for (const unregister of [...this.#toolCallUnregister].reverse())
+            await close(() => unregister());
+        await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
         for (const connectionId of this.#toolSessions.keys())
             await close(async () => await this.releaseToolSession(connectionId));
-        await close(() => this.#toolRegistration.dispose());
+        await close(() => this.#workerToolRegistration.dispose());
+        await close(() => this.#domainToolRegistration.dispose());
         if (failures.length > 0)
             throw new AggregateError(
                 failures,
