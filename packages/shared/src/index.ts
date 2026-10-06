@@ -109,3 +109,5 @@ export { createTaskTransport, type TaskTransport } from "./workspace/task/Transp
 export { GoalViewModel, TodoViewModel } from "./workspace/task/ViewModel.js";
 
 export { ProcessSubscriptionManager } from "./execution/process/Subscription.js";
+
+export { WORKER_PROTOCOL_RANGE, WORKER_PROTOCOL_VERSION } from "./types/Worker.js";

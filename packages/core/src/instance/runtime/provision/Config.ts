@@ -1,13 +1,13 @@
 import type { WorkerHandshakeParams } from "../../Api.js";
-import type {
-    ControlInstanceAlertsConfig,
-    EffectiveSecurityMode,
-    InstanceName,
+import {
+    WORKER_PROTOCOL_RANGE,
+    type ControlInstanceAlertsConfig,
+    type EffectiveSecurityMode,
+    type InstanceName,
 } from "@portable-devshell/shared";
 
 import type { TransportConnection } from "../../transport/endpoint/Connection.js";
 import type { WorkerRuntime } from "../execution/Command.js";
-import { WORKER_PROTOCOL_RANGE } from "../../transport/packet/Client.js";
 
 export type WorkerManagementMode = "controllerManaged" | "selfManaged";
 
