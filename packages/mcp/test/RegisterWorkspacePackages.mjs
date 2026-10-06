@@ -80,7 +80,7 @@ const workspacePackages = new Map([
     ],
     [
         "@portable-devshell/core/context",
-        new URL("../../core/src/context/Public.ts", import.meta.url).href,
+        new URL("../../control/src/context/Public.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/core/task",

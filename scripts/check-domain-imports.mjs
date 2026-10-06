@@ -87,17 +87,6 @@ const rules = [
         ),
     },
     {
-        name: "context-does-not-depend-on-mcp",
-        roots: [domain("packages/core/src/context")],
-        forbidden: anyTarget(
-            packageTargetExcept(
-                "@portable-devshell/mcp",
-                "@portable-devshell/mcp/tool",
-            ),
-            pathTarget("packages/mcp/src"),
-        ),
-    },
-    {
         name: "toolcall-does-not-depend-on-worker-or-approval",
         roots: [domain("packages/core/src/toolcall")],
         forbidden: anyTarget(
@@ -109,7 +98,7 @@ const rules = [
     },
 ];
 
-const coreDomains = ["approval", "audit", "context", "instance", "task", "terminal", "toolcall"];
+const coreDomains = ["approval", "audit", "instance", "task", "terminal", "toolcall"];
 for (const owner of coreDomains) {
     rules.push({
         name: `${owner}-uses-domain-public-entries`,

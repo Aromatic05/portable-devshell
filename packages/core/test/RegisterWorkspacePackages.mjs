@@ -63,10 +63,6 @@ const workspacePackages = new Map([
         new URL("../src/toolcall/Public.ts", import.meta.url).href,
     ],
     [
-        "@portable-devshell/core/context",
-        new URL("../src/context/Public.ts", import.meta.url).href,
-    ],
-    [
         "@portable-devshell/core/task",
         new URL("../src/task/Public.ts", import.meta.url).href,
     ],

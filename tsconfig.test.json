@@ -68,7 +68,7 @@
                 "./packages/core/src/approval/Public.ts"
             ],
             "@portable-devshell/core/context": [
-                "./packages/core/src/context/Public.ts"
+                "./packages/control/src/context/Public.ts"
             ],
             "@portable-devshell/core/task": [
                 "./packages/core/src/task/Public.ts"
