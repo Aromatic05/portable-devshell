@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/core/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
-import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
+import type { ArtifactImageApi } from "../../../src/artifact/Public.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
 import { createToolCallRegistry } from "../../../src/toolcall/Public.ts";
 

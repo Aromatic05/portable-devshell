@@ -7,25 +7,21 @@ import {
     controlErrorCodes,
 } from "@portable-devshell/shared";
 import type {
-    ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
 } from "@portable-devshell/extension/asset";
-import type { ExtensionAssetProjectionPortInput } from "../extension/api/cap/asset/Control.js";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
 import { ArtifactHostBridge } from "./host/Bridge.js";
 import { ArtifactService } from "./Service.js";
 import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
+import type {
+    ArtifactProjectionInput,
+    ArtifactRuntime,
+    ArtifactRuntimeOptions,
+} from "./Api.js";
 
-export interface ArtifactModuleOptions {
-    config: () => ControlConfig;
-    controlPaths: ControlPathHome;
-    homeDirectory?: string;
-    instances: InstanceRegistry;
-}
-
-export class ArtifactModule {
+class ArtifactRuntimeState implements ArtifactRuntime {
     readonly #config: () => ControlConfig;
     readonly #controlPaths: ControlPathHome;
     readonly #homeDirectory: string;
@@ -34,7 +30,7 @@ export class ArtifactModule {
     #bridge?: ArtifactHostBridge;
     #service?: ArtifactService;
 
-    constructor(options: ArtifactModuleOptions) {
+    constructor(options: ArtifactRuntimeOptions) {
         this.#config = options.config;
         this.#controlPaths = options.controlPaths;
         this.#homeDirectory = options.homeDirectory ?? homedir();
@@ -66,7 +62,7 @@ export class ArtifactModule {
     }
 
     installHttpRoute(
-        server: Parameters<ArtifactHttpRoute["install"]>[0],
+        server: Parameters<ArtifactRuntime["installHttpRoute"]>[0],
     ): void {
         new ArtifactHttpRoute(this.service, {
             publicBaseUrl: this.#config().mcp.publicBaseUrl,
@@ -137,7 +133,7 @@ export class ArtifactModule {
 
     async projectExtensionAsset(
         extensionId: string,
-        input: ExtensionAssetProjectionPortInput,
+        input: ArtifactProjectionInput,
     ): Promise<ExtensionAssetProjectionResult> {
         input.signal?.throwIfAborted();
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(input.target.key) || input.target.key === "." || input.target.key === "..")
@@ -176,6 +172,12 @@ export class ArtifactModule {
             securityMode: "disabled",
         });
     }
+}
+
+export function createArtifactRuntime(
+    options: ArtifactRuntimeOptions,
+): ArtifactRuntime {
+    return new ArtifactRuntimeState(options);
 }
 
 function artifactShareUrl(config: ControlConfig, token: string): string {

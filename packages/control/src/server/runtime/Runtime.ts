@@ -42,7 +42,7 @@ import { ControlTransportServer } from "../transport/endpoint/Server.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
 import { ControlSocketListener } from "../transport/channel/Socket.js";
 import { ControlRouteRegistry } from "../Route.js";
-import type { ArtifactModule } from "../../artifact/Module.js";
+import type { ArtifactRuntime } from "../../artifact/Public.js";
 import { installArtifactTools } from "../../artifact/tool/Runtime.js";
 import {
     createContextRouteModule,
@@ -63,7 +63,7 @@ export interface ControlRuntimeOptions {
         endpoint: Endpoint;
         server: ServerTransport;
     };
-    artifact: ArtifactModule;
+    artifact: ArtifactRuntime;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
@@ -88,7 +88,7 @@ export class ControlRuntime {
     readonly #instanceRuntimes: InstanceRuntimeRegistry;
     readonly #toolCallRuntime: ToolCallRuntime;
     readonly #contexts: ContextRuntime;
-    readonly #artifact: ArtifactModule;
+    readonly #artifact: ArtifactRuntime;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #transport: ControlTransportServer;
     readonly #debug: DebugPatchService;

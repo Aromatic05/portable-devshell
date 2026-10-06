@@ -27,7 +27,7 @@ import { ExtensionRegistryStore } from "../../extension/state/Store.js";
 import { ExtensionConfigControl } from "../../extension/api/cap/config/Control.js";
 import { createControlExtensionPointRegistry } from "../../extension/registration/Points.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
-import { ArtifactModule } from "../../artifact/Module.js";
+import { createArtifactRuntime } from "../../artifact/Public.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
 import { createContextRuntime } from "@portable-devshell/core/context";
@@ -66,7 +66,7 @@ export class ControlRuntimeFactory {
         const controlPaths = new ControlPathHome(
             options.state.homeDirectory ?? homedir(),
         );
-        const artifact = new ArtifactModule({
+        const artifact = createArtifactRuntime({
             config: () => options.state.requireConfig(),
             controlPaths,
             homeDirectory: options.state.homeDirectory,

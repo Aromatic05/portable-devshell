@@ -10,7 +10,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { ArtifactModule } from "../../../../src/artifact/Module.ts";
+import { createArtifactRuntime } from "../../../../src/artifact/Public.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class MemoryArtifactReceiver {
@@ -79,7 +79,7 @@ async function harness(t: test.TestContext) {
     await writeFile(join(source, "SKILL.md"), "# Review\n", "utf8");
     const target = new MemoryArtifactReceiver();
     const config = createDefaultControlConfig();
-    const runtime = new ArtifactModule({
+    const runtime = createArtifactRuntime({
         config: () => config,
         controlPaths: new ControlPathHome(home),
         homeDirectory: home,
@@ -147,7 +147,7 @@ test("Artifact startup can be retried after initialization is repaired", async (
     await mkdir(join(artifacts, "shares"), { recursive: true });
     await writeFile(join(artifacts, "transfers"), "blocked", "utf8");
     const config = createDefaultControlConfig();
-    const runtime = new ArtifactModule({
+    const runtime = createArtifactRuntime({
         config: () => config,
         controlPaths: new ControlPathHome(home),
         homeDirectory: home,

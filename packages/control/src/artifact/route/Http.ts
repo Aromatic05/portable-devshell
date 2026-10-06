@@ -1,13 +1,12 @@
 import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { HttpHost } from "@portable-devshell/mcp";
 import {
     artifactErrorCodes,
     toRemoteErrorBody,
 } from "@portable-devshell/shared";
 
-import type { ArtifactShareHttpApi } from "../Api.js";
+import type { ArtifactHttpHost, ArtifactShareHttpApi } from "../Api.js";
 
 const ROUTE_SUFFIX = "/artifacts/share";
 const HTTP_CHUNK_BYTES = 512 * 1024;
@@ -32,7 +31,7 @@ export class ArtifactHttpRoute {
         this.#routeBase = artifactShareRoute(options?.publicBaseUrl);
     }
 
-    install(server: HttpHost): void {
+    install(server: ArtifactHttpHost): void {
         const path = `${this.#routeBase}/:token`;
         server.registerRawRoute("head", path, async (request, response) => {
             await this.#handle(request, response, true);

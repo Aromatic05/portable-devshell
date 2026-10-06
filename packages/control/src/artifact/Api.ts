@@ -1,3 +1,10 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import type { InstanceRegistry } from "@portable-devshell/core/instance";
+import type {
+    ExtensionAssetProjectionInput,
+    ExtensionAssetProjectionResult,
+} from "@portable-devshell/extension/asset";
 import type {
     ArtifactShareInput,
     ArtifactShareResult,
@@ -9,10 +16,44 @@ import type {
     ArtifactTransferStartInput,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
+    ControlConfig,
+    ControlPathHome,
     JsonValue,
     MessageStream,
     WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/shared";
+
+export interface ArtifactHttpHost {
+    registerRawRoute(
+        method: "delete" | "get" | "head" | "options" | "post",
+        path: string,
+        handler: (
+            request: IncomingMessage,
+            response: ServerResponse,
+        ) => void | Promise<void>,
+    ): () => void;
+}
+
+export interface ArtifactExtensionTransferInput {
+    overwrite?: boolean;
+    signal?: AbortSignal;
+    sourcePath: string;
+    target: { instance: string; path: string; workspace: string };
+}
+
+export interface ArtifactProjectionInput {
+    overwrite?: boolean;
+    signal?: AbortSignal;
+    sourcePath: string;
+    target: ExtensionAssetProjectionInput["target"];
+}
+
+export interface ArtifactRuntimeOptions {
+    config: () => ControlConfig;
+    controlPaths: ControlPathHome;
+    homeDirectory?: string;
+    instances: InstanceRegistry;
+}
 
 export interface ArtifactSnapshot {
     lastSeq: number;
@@ -82,4 +123,19 @@ export interface ArtifactApi
     extends ArtifactRouteApi,
         ArtifactShareHttpApi {
     retireInstance(instance: string): Promise<void>;
+}
+
+export interface ArtifactRuntime {
+    readonly service: ArtifactApi;
+    installHttpRoute(server: ArtifactHttpHost): void;
+    projectExtensionAsset(
+        extensionId: string,
+        input: ArtifactProjectionInput,
+    ): Promise<ExtensionAssetProjectionResult>;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    transferExtensionAsset(
+        extensionId: string,
+        input: ArtifactExtensionTransferInput,
+    ): Promise<ExtensionAssetProjectionResult>;
 }

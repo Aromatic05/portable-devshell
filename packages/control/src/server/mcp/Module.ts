@@ -20,11 +20,11 @@ import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
-import type { ArtifactModule } from "../../artifact/Module.js";
+import type { ArtifactRuntime } from "../../artifact/Public.js";
 import type { ToolCallRegistry } from "../../toolcall/Public.js";
 
 export interface McpControlModuleOptions {
-    artifact: ArtifactModule;
+    artifact: ArtifactRuntime;
     config: ControlConfig;
     contextTransport: ContextTransport;
     controlPaths: ControlPathHome;
@@ -41,7 +41,7 @@ export class McpControlModule {
     #host?: McpHost;
     readonly #factory: McpRuntimeFactory;
     readonly #instances: InstanceRegistry;
-    readonly #artifact: ArtifactModule;
+    readonly #artifact: ArtifactRuntime;
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
     readonly #toolRegistry: ToolCallRegistry;

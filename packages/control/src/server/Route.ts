@@ -15,7 +15,7 @@ import {
     type TerminalSessionApi,
 } from "@portable-devshell/core/terminal";
 
-import type { ArtifactRouteApi } from "../artifact/Api.js";
+import type { ArtifactRouteApi } from "../artifact/Public.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
 import {
     createCliRouteModule,
