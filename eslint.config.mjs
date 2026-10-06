@@ -140,6 +140,58 @@ const publicRuntimeOnly = {
     },
 };
 
+const publicNoIndexImport = {
+    meta: {
+        type: "problem",
+        docs: { description: "forbid Public.ts from importing lifecycle index modules" },
+        messages: {
+            forbidden: "Public.ts may not import index modules; lifecycle stays at index.ts.",
+        },
+        schema: [],
+    },
+    create(context) {
+        return {
+            ImportDeclaration(node) {
+                const source = node.source.value;
+                if (
+                    typeof source === "string" &&
+                    /(?:^|\/)index(?:\.[cm]?[jt]sx?)?$/u.test(source)
+                ) context.report({ messageId: "forbidden", node });
+            },
+        };
+    },
+};
+
+const noTypeImportFromPublic = {
+    meta: {
+        type: "problem",
+        docs: { description: "forbid core type imports through Public.ts" },
+        messages: {
+            forbidden: "Import core contracts from Api.ts or their owner, not Public.ts.",
+        },
+        schema: [],
+    },
+    create(context) {
+        const isPublic = (value) =>
+            typeof value === "string" &&
+            /(?:^|\/)Public(?:\.[cm]?[jt]sx?)?$/u.test(value);
+        return {
+            ImportDeclaration(node) {
+                if (!isPublic(node.source.value)) return;
+                if (
+                    node.importKind === "type" ||
+                    node.specifiers.some((specifier) => specifier.importKind === "type")
+                ) context.report({ messageId: "forbidden", node });
+            },
+            TSImportType(node) {
+                const source = node.argument?.literal?.value ?? node.argument?.value;
+                if (isPublic(source))
+                    context.report({ messageId: "forbidden", node });
+            },
+        };
+    },
+};
+
 const noCoreSubpathImport = {
     meta: {
         type: "problem",
@@ -189,7 +241,9 @@ const architecture = {
         "api-type-only": apiTypeOnly,
         "no-core-subpath-import": noCoreSubpathImport,
         "no-index-reexport": noIndexReexport,
+        "no-type-import-from-public": noTypeImportFromPublic,
         "public-explicit-exports": publicExplicitExports,
+        "public-no-index-import": publicNoIndexImport,
         "public-runtime-only": publicRuntimeOnly,
     },
 };
@@ -277,7 +331,14 @@ export default [
         ],
         rules: {
             "architecture/public-explicit-exports": "error",
+            "architecture/public-no-index-import": "error",
             "architecture/public-runtime-only": "error",
+        },
+    },
+    {
+        files: ["packages/core/src/**/*.{ts,tsx,mts,cts}"],
+        rules: {
+            "architecture/no-type-import-from-public": "error",
         },
     },
     {

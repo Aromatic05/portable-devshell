@@ -1,7 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export * from "./builtin/index.js";
 
 /**
  * Thin builtin payload root for the currently executing package form.
