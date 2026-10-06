@@ -1,2 +1,4 @@
-export { createInstance } from "./instance/index.js";
-export { Instance } from "./instance/Public.js";
+import { createInstance } from "./instance/index.js";
+import { Instance } from "./instance/Public.js";
+
+export { createInstance, Instance };
