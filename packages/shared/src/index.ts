@@ -74,6 +74,7 @@ export type {
     ToolNameHandle,
 } from "./execution/toolcall/Api.js";
 export { createToolCallRuntime, presentToolCallResult } from "./execution/toolcall/Runtime.js";
+export { createToolCallTargetTransport, serveToolCallTargetDispatch } from "./execution/toolcall/TargetTransport.js";
 export { createToolIngressHost, createToolIngressRouteModule, createToolRouteModule } from "./execution/toolcall/Route.js";
 export { createToolCallProvenanceRuntime } from "./execution/toolcall/Provenance.js";
 export { attachToolCallErrorPayload, readToolCallErrorPayload } from "./execution/toolcall/Type.js";

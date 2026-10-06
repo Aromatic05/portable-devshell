@@ -1,5 +1,6 @@
 import {
     createToolCallRuntime,
+    createToolCallTargetTransport,
     type ToolCallApi,
     type ToolCallRuntime,
 } from "@portable-devshell/shared";
@@ -45,11 +46,9 @@ import type { ContextRuntime } from "../../context/Api.js";
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/index.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
-import type { InstanceRuntimeRegistry } from "@portable-devshell/core";
 import type { ToolCallRegistry } from "../../toolcall/Api.js";
 
 export interface ControlRuntimeOptions {
-    instanceRuntimes: InstanceRuntimeRegistry;
     contexts: ContextRuntime;
     contextTransport: ContextTransport;
     internalControl: {
@@ -76,7 +75,6 @@ export interface ControlRuntimeOptions {
 }
 
 export class ControlRuntime {
-    readonly #instanceRuntimes: InstanceRuntimeRegistry;
     readonly #toolCallRuntime: ToolCallRuntime;
     readonly #contexts: ContextRuntime;
     readonly #artifact: ArtifactRuntime;
@@ -98,7 +96,6 @@ export class ControlRuntime {
     readonly #web: ControlWebRuntime;
 
     constructor(options: ControlRuntimeOptions) {
-        this.#instanceRuntimes = options.instanceRuntimes;
         this.#contexts = options.contexts;
         this.#artifact = options.artifact;
         this.#builtinExtensionSources = Object.freeze([
@@ -109,13 +106,12 @@ export class ControlRuntime {
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#instanceEditor = options.instanceEditor;
-        const runtimeFor = (name: string) => {
-            const descriptor = options.instances.get(name);
-            if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-            return options.instanceRuntimes.get(descriptor);
-        };
         const toolCalls = createToolCallRuntime({
-            resolveTarget: (name) => runtimeFor(name).target(),
+            resolveTarget: (name) =>
+                createToolCallTargetTransport(
+                    options.internalControl.endpoint,
+                    name,
+                ),
         });
         this.#toolCallRegistryUnbind = options.toolCalls.bind(toolCalls.hooks);
         this.#toolCallRuntime = toolCalls;
@@ -324,7 +320,6 @@ export class ControlRuntime {
         await stopOwnedInstances(this.#instances).catch((error) =>
             failures.push(error),
         );
-        await this.#instanceRuntimes.close().catch((error) => failures.push(error));
         this.#toolCallRuntime.close();
         this.#contexts.close();
         try {

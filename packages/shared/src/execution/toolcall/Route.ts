@@ -14,6 +14,7 @@ import {
     type ControlPortDefinition,
 } from "../../transport/endpoint/route/Control.js";
 import type {
+    ToolCallDispatchRequest,
     ToolCallIngressPort,
     ToolCallProvenanceApi,
 } from "./Api.js";
@@ -24,6 +25,7 @@ import {
     type ToolEvent,
 } from "./Model.js";
 import { readToolCallErrorPayload, type ToolDefinition } from "./Type.js";
+import { serveToolCallTargetDispatch } from "./TargetTransport.js";
 import {
     limitToolCallResponse,
     readToolCall,
@@ -56,6 +58,7 @@ interface ToolRouteInstancePort {
             sinceMs: number,
             untilMs: number,
         ): Promise<{ count: number; latest?: ToolCallRecord }>;
+        dispatchToolCall?(request: ToolCallDispatchRequest): Promise<JsonValue>;
         releaseToolSession(connectionId: string): Promise<void>;
     } & Partial<ToolRouteEventPort>;
 }
@@ -214,6 +217,18 @@ export function createToolRouteModule(
             },
         },
         {
+            ...(instance.worker.dispatchToolCall === undefined
+                ? {}
+                : {
+                      dispatch: async (stream, request, context) =>
+                          await serveToolCallTargetDispatch(
+                              stream,
+                              request.payload,
+                              requireInstanceName(instance),
+                              instance.worker.dispatchToolCall!,
+                              context.signal,
+                          ),
+                  }),
             ...(subscriptions === undefined
                 ? {}
                 : {
