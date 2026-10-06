@@ -7,7 +7,7 @@ import type {
 import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
-import { McpEndpointWorker } from "../endpoint/Endpoint.js";
+import { McpEndpoint } from "../endpoint/Endpoint.js";
 import type { ToolCallIngressPort } from "../endpoint/call/Port.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import type { McpToolSource } from "../endpoint/tool/Source.js";
@@ -17,21 +17,11 @@ import { McpAppActionStore } from "../mcpapp/ActionStore.js";
 import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
-export interface WorkerInstanceLike {
-    appendMcpToolCalled(
-        toolName: string,
-        context: { ctxId?: string; requestId?: string },
-    ): Promise<void>;
-    snapshot(): { ready?: boolean };
-}
-
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
     contextMode?: ControlMcpContextMode;
     name: string;
     path?: string;
-    worker: WorkerInstanceLike;
-    workspaceEnabled?: boolean;
 }
 
 export interface McpHostConfig {
@@ -204,7 +194,7 @@ export class McpHost {
         this.#liveRouteCleanups.get(instance.name)?.();
         this.#liveRouteCleanups.delete(instance.name);
         const binding = new McpEndpointBinding(
-            new McpEndpointWorker({
+            new McpEndpoint({
                 auth: instance.auth,
                 context: this.#contexts,
                 contextMode: instance.contextMode ?? "explicit",
@@ -212,7 +202,6 @@ export class McpHost {
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,
                 tools: this.#runtimeState.tools,
-                worker: instance.worker,
             }),
             this.#config.serverVersion,
         );

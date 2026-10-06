@@ -53,7 +53,6 @@ export class McpRuntimeFactory {
                       return this.#mapper.map(
                           descriptor,
                           instance.mcp.auth,
-                          instance.workspace.enabled,
                       );
                   })
             : [];

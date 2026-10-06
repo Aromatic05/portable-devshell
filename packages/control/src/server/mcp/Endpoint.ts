@@ -10,24 +10,12 @@ export class McpEndpointFactory {
     map(
         descriptor: Instance,
         auth: ControlMcpAuthConfig = { mode: "none" },
-        workspaceEnabled = true,
     ): McpHostInstanceConfig {
         return {
             auth: toMcpAuthConfig(auth),
             contextMode: descriptor.mcpContextMode ?? "explicit",
             name: descriptor.name,
             path: descriptor.mcpPath,
-            worker: {
-                snapshot: () => descriptor.worker.snapshot(),
-                appendMcpToolCalled: async (toolName, context) => {
-                    await descriptor.worker.appendControlEvent("mcp.toolCalled", {
-                        toolName,
-                        ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
-                        ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
-                    });
-                },
-            },
-            workspaceEnabled,
         };
     }
 }

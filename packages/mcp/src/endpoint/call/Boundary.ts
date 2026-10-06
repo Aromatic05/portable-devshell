@@ -6,29 +6,6 @@ import {
     type ToolCallPresentation,
 } from "@portable-devshell/shared";
 
-const DEFAULT_READY_WAIT_MS = 5_000;
-const DEFAULT_READY_POLL_MS = 50;
-
-export function assertMcpEndpointReady(
-    worker: { snapshot(): { ready?: boolean } },
-    instanceName: string,
-): void {
-    if (!worker.snapshot().ready) {
-        throw createRemoteError({
-            code: runtimeErrorCodes.instanceNotReady,
-            details: { instance: instanceName },
-            message: `Instance ${instanceName} is not ready.`,
-            retryable: false,
-        });
-    }
-}
-
-function isNotReadyError(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error
-        ? (error as { code?: unknown }).code === runtimeErrorCodes.instanceNotReady
-        : false;
-}
-
 export function mcpEndpointToolNotExposed(
     toolName: string,
     instanceName: string,

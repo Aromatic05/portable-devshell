@@ -21,18 +21,18 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
-import { McpEndpointWorker } from "./Endpoint.js";
+import { McpEndpoint } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
 
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;
     readonly #nodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
-    readonly #worker: McpEndpointWorker;
+    readonly #endpoint: McpEndpoint;
 
-    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0") {
+    constructor(endpoint: McpEndpoint, serverVersion = "0.0.0") {
         this.#serverVersion = serverVersion;
-        this.#worker = worker;
+        this.#endpoint = endpoint;
         /**
          * @compat mcp-stateless-transport
          * @removeAt 0.7.10
@@ -46,7 +46,7 @@ export class McpEndpointBinding {
     }
 
     get instanceName(): string {
-        return this.#worker.instanceName;
+        return this.#endpoint.instanceName;
     }
 
     async handleRequest(
@@ -58,8 +58,8 @@ export class McpEndpointBinding {
     }
 
     #createServer(): Server {
-        const resources = this.#worker.listResources();
-        const appResources = this.#worker.hasAppResources();
+        const resources = this.#endpoint.listResources();
+        const appResources = this.#endpoint.hasAppResources();
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -82,7 +82,7 @@ export class McpEndpointBinding {
             }));
 
             server.setRequestHandler("resources/read", async (request) => {
-                const content = await this.#worker.readResource(
+                const content = await this.#endpoint.readResource(
                     request.params.uri,
                 );
                 if (content === undefined) {
@@ -109,7 +109,7 @@ export class McpEndpointBinding {
         server.setRequestHandler("tools/list", async () => {
             try {
                 return {
-                    tools: this.#worker.listTools().map(toProtocolTool),
+                    tools: this.#endpoint.listTools().map(toProtocolTool),
                 };
             } catch (error) {
                 throw toMcpError(error);
@@ -124,7 +124,7 @@ export class McpEndpointBinding {
                     ...(requestMeta === undefined ? {} : { requestMeta }),
                     requestId: toRequestId(ctx.mcpReq.id),
                 };
-                const result = await this.#worker.callTool(
+                const result = await this.#endpoint.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
@@ -244,7 +244,7 @@ function readToolCallComments(
 }
 
 function toProtocolTool(
-    tool: ReturnType<McpEndpointWorker["listTools"]>[number],
+    tool: ReturnType<McpEndpoint["listTools"]>[number],
 ): Tool {
     if (
         typeof tool.inputSchema !== "object" ||

@@ -28,18 +28,12 @@ import {
     readMcpProvenanceInput,
     readMcpRoutedInput,
 } from "../tool/Input.js";
-import type { McpEndpointCallContext, McpEndpointWorkerPort, ToolCallIngressPort } from "../call/Port.js";
+import type { McpEndpointCallContext, ToolCallIngressPort } from "../call/Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../call/Boundary.js";
 import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
-import {
-    assertMcpEndpointReady,
-    mcpEndpointToolNotExposed,
-} from "../call/Boundary.js";
+import { mcpEndpointToolNotExposed } from "../call/Boundary.js";
 
-export type {
-    McpEndpointCallContext,
-    McpEndpointWorkerPort,
-} from "../call/Port.js";
+export type { McpEndpointCallContext } from "../call/Port.js";
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
@@ -48,7 +42,6 @@ export interface McpEndpointDispatchOptions {
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
     tools: ToolCallIngressPort;
-    worker: McpEndpointWorkerPort;
 }
 
 interface McpAcceptedCall {
@@ -62,7 +55,6 @@ export class McpEndpointDispatch {
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
-    readonly #worker: McpEndpointWorkerPort;
     readonly #tools: ToolCallIngressPort;
 
     constructor(options: McpEndpointDispatchOptions) {
@@ -72,15 +64,7 @@ export class McpEndpointDispatch {
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
         this.#toolProvenance = options.toolProvenance;
-        this.#worker = options.worker;
         this.#tools = options.tools;
-    }
-
-    assertReady(
-        worker: Pick<McpEndpointWorkerPort, "snapshot"> = this.#worker,
-        instanceName: string = this.#instanceName,
-    ): void {
-        assertMcpEndpointReady(worker, instanceName);
     }
 
     async callTool(
@@ -213,7 +197,6 @@ export class McpEndpointDispatch {
             touch: touchContext,
         });
         const workspaceAdvice: string[] = [];
-        await this.#appendMcpToolCalled(instance, value.toolName, value.context);
         if (hasToolProvenance(provenance) && this.#toolProvenance !== undefined) {
             await this.#toolProvenance.record({ callId, ...provenance, instance }).catch(() => undefined);
         }
@@ -252,17 +235,6 @@ export class McpEndpointDispatch {
             touch,
         });
         return { input: contextInput.input, record };
-    }
-
-    async #appendMcpToolCalled(
-        instance: string,
-        toolName: string,
-        context: { requestId?: string; ctxId?: string },
-    ): Promise<void> {
-        if (instance === this.#instanceName) {
-            await this.#worker.appendMcpToolCalled(toolName, context);
-            return;
-        }
     }
 
 }

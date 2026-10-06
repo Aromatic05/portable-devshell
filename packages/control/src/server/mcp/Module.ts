@@ -80,11 +80,11 @@ export class McpControlModule {
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         const endpointFactory = new McpEndpointFactory();
         this.instancePort = {
-            registerInstance: (instance, auth, workspaceEnabled = true) => {
+            registerInstance: (instance, auth) => {
                 const descriptor = options.instances.get(instance);
                 if (descriptor === undefined) return;
                 this.#host?.registerInstance(
-                    endpointFactory.map(descriptor, auth, workspaceEnabled),
+                    endpointFactory.map(descriptor, auth),
                 );
             },
             unregisterInstance: (instance) => {

@@ -522,7 +522,6 @@ export class InstanceReconfigurationCoordinator {
         this.#mcp.registerInstance(
             instanceName,
             instance.mcp.auth,
-            instance.workspace.enabled,
         );
     }
 
