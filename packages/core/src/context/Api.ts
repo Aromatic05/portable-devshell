@@ -1,13 +1,101 @@
 import type {
+    ContextBinding,
     ContextEnvironment,
+    ContextEnvironmentBinding,
+    ContextEnvironmentCleanup,
     ContextExternalBinding,
+    ContextInstanceReference,
+    ContextMaskedInstance,
+    ContextQuery,
     ContextRecord,
-    ContextRegistryPort,
     ContextResolveInput,
     ContextSnapshot,
+    ContextValidationBinding,
     JsonValue,
 } from "@portable-devshell/shared";
 import type { Instance, InstanceRegistry } from "../instance/Public.js";
+
+export interface ContextCleanupLedgerPort {
+    listCleanupPending(): Promise<ContextRecord[]>;
+    listEnvironmentCleanup(
+        ctxId?: string,
+    ): Promise<Array<{ cleanup: ContextEnvironmentCleanup; ctxId: string }>>;
+    recordEnvironmentCleanup(
+        ctxId: string,
+        cleanup: ContextEnvironmentCleanup,
+    ): Promise<void>;
+    settleCleanup(ctxId: string): Promise<void>;
+    settleEnvironmentCleanup(
+        ctxId: string,
+        cleanup: ContextEnvironmentCleanup,
+    ): Promise<void>;
+}
+
+export interface ContextRecordPort {
+    initialize(): Promise<void>;
+    create(binding: ContextBinding): Promise<ContextRecord>;
+    lookupExternal(
+        external: ContextExternalBinding,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord | undefined>;
+    lookup(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validateAndTouch(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validate(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    validateForInstance(ctxId: string, instance: string): Promise<ContextRecord>;
+    assertInstanceAvailable(ctxId: string, instance: string): Promise<void>;
+    attachEnvironment(
+        ctxId: string,
+        binding: ContextEnvironmentBinding,
+        external?: {
+            bindings: readonly ContextExternalBinding[];
+            principal: string;
+        },
+    ): Promise<ContextRecord>;
+    resolveEnvironment(
+        ctxId: string,
+        instance: string,
+    ): Promise<ContextEnvironment | undefined>;
+    detachEnvironment(ctxId: string, instance: string): Promise<ContextRecord>;
+    detachInstance(instance: string): Promise<ContextRecord[]>;
+    referenceInstance(
+        ctxId: string,
+        instance: string,
+    ): Promise<ContextInstanceReference | undefined>;
+    resolveRemoteInstanceHandle(ctxId: string, handle: string): Promise<string>;
+    maskRemoteInstance(
+        ctxId: string,
+        handle: string,
+    ): Promise<ContextMaskedInstance>;
+    list(query?: ContextQuery): Promise<ContextRecord[]>;
+    disable(ctxId: string): Promise<ContextRecord>;
+    discard(ctxId: string): Promise<ContextRecord>;
+    renewForPrincipal(
+        ctxId: string,
+        binding: ContextValidationBinding,
+    ): Promise<ContextRecord>;
+    renew(ctxId: string): Promise<ContextRecord>;
+    updateWorkerState(
+        ctxId: string,
+        instance: string,
+        binding: Pick<
+            ContextEnvironmentBinding,
+            "temporaryDirectory" | "workspace"
+        >,
+    ): Promise<ContextRecord>;
+}
+
+export interface ContextRegistryPort extends
+    ContextRecordPort,
+    ContextCleanupLedgerPort {}
 
 export interface ContextCleanupPort {
     reconcile(ctxId?: string): Promise<void>;

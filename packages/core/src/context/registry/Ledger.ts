@@ -1,8 +1,8 @@
 import type {
-    ContextCleanupLedgerPort,
     ContextEnvironmentCleanup,
     ContextRecord,
 } from "@portable-devshell/shared";
+import type { ContextCleanupLedgerPort } from "../Api.js";
 import type { ContextStatePort } from "./Record.js";
 import {
     invalidContext,

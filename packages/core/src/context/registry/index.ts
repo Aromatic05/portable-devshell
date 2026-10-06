@@ -36,10 +36,10 @@ import {
     type ContextMaskedInstance,
     type ContextQuery,
     type ContextRecord,
-    type ContextRegistryPort,
     type ContextSnapshot,
     type ContextValidationBinding,
 } from "@portable-devshell/shared";
+import type { ContextRegistryPort } from "../Api.js";
 
 import { upgradeContextDocument } from "./Record.js";
 

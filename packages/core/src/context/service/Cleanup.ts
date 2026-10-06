@@ -1,11 +1,13 @@
 import type {
-    ContextCleanupLedgerPort,
-    ContextRecordPort,
     ContextEnvironmentCleanup,
     ContextRecord,
 } from "@portable-devshell/shared";
 
-import type { ContextLifecycleCleanupPort } from "../Api.js";
+import type {
+    ContextCleanupLedgerPort,
+    ContextLifecycleCleanupPort,
+    ContextRecordPort,
+} from "../Api.js";
 import type { Instance, InstanceLease, InstanceRegistry } from "../../instance/Public.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
