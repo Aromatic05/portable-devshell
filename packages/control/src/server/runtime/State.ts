@@ -13,7 +13,7 @@ import {
 import { ConfigChangeHub } from "../../config/change/Config.js";
 import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceChangeHub } from "../../instance/Change.js";
-import { InstanceRuntimeRegistry } from "./Instance.js";
+import { createInstanceRuntimeRegistry, type InstanceRuntimeRegistry } from "../../instance/Public.js";
 import { createToolCallRegistry } from "../../toolcall/Public.js";
 
 export interface ControlRuntimeStateOptions {
@@ -42,10 +42,10 @@ export class ControlRuntimeState {
             options.configStore ??
             new ControlConfigStore({ registry: this.configRegistry });
         this.homeDirectory = options.homeDirectory;
-        this.instanceRuntimes = new InstanceRuntimeRegistry(
-            options.homeDirectory,
-            this.toolCalls,
-        );
+        this.instanceRuntimes = createInstanceRuntimeRegistry({
+            homeDirectory: options.homeDirectory,
+            toolCalls: this.toolCalls,
+        });
     }
 
     get config(): ControlConfig | undefined {

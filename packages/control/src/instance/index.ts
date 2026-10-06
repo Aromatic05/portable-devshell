@@ -18,9 +18,15 @@ import { createToolCallExecutionRuntime, type ToolCallDispatchRequest, type Tool
 import {
     type ToolCallDefinitionRegistration,
     type ToolCallRegistry,
-} from "../../toolcall/Public.js";
+} from "../toolcall/Public.js";
+import type {
+    InstanceRuntime,
+    InstanceRuntimeOptions,
+    InstanceRuntimeRegistry,
+    InstanceRuntimeRegistryOptions,
+} from "./Api.js";
 
-export class InstanceRuntime {
+class InstanceRuntimeState implements InstanceRuntime {
     readonly instance: Instance;
     readonly audit: AuditRuntime;
     readonly approval: ApprovalRuntime;
@@ -34,11 +40,8 @@ export class InstanceRuntime {
     readonly #toolSessions = new Map<string, string>();
     #retired = false;
 
-    constructor(
-        config: ControlInstanceConfig,
-        homeDirectory: string,
-        toolCalls: ToolCallRegistry,
-    ) {
+    constructor(options: InstanceRuntimeOptions) {
+        const { config, homeDirectory, toolCalls } = options;
         const instanceName = asInstanceName(config.name);
         const paths = new InstancePaths(instanceName, homeDirectory);
         this.audit = createAuditRuntime({
@@ -205,25 +208,22 @@ export class InstanceRuntime {
     }
 }
 
-export class InstanceRuntimeRegistry {
+class InstanceRuntimeRegistryState implements InstanceRuntimeRegistry {
     readonly #homeDirectory: string;
     readonly #runtimes = new Map<Instance, InstanceRuntime>();
     readonly #toolCalls: ToolCallRegistry;
 
-    constructor(
-        homeDirectory = homedir(),
-        toolCalls: ToolCallRegistry,
-    ) {
-        this.#homeDirectory = homeDirectory;
-        this.#toolCalls = toolCalls;
+    constructor(options: InstanceRuntimeRegistryOptions) {
+        this.#homeDirectory = options.homeDirectory ?? homedir();
+        this.#toolCalls = options.toolCalls;
     }
 
     create(config: ControlInstanceConfig): Instance {
-        const runtime = new InstanceRuntime(
+        const runtime = createInstanceRuntime({
             config,
-            this.#homeDirectory,
-            this.#toolCalls,
-        );
+            homeDirectory: this.#homeDirectory,
+            toolCalls: this.#toolCalls,
+        });
         this.#runtimes.set(runtime.instance, runtime);
         return runtime.instance;
     }
@@ -252,4 +252,16 @@ export class InstanceRuntimeRegistry {
         if (failures.length > 0)
             throw new AggregateError(failures, "Instance domains failed to close.");
     }
+}
+
+export function createInstanceRuntime(
+    options: InstanceRuntimeOptions,
+): InstanceRuntime {
+    return new InstanceRuntimeState(options);
+}
+
+export function createInstanceRuntimeRegistry(
+    options: InstanceRuntimeRegistryOptions,
+): InstanceRuntimeRegistry {
+    return new InstanceRuntimeRegistryState(options);
 }

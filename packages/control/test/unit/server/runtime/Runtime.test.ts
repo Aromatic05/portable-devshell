@@ -311,6 +311,7 @@ function createControlRuntime(
         restart: async () => undefined,
         reverse: { service: undefined, install() {}, stop() {} } as never,
         shutdown: async () => undefined,
+        toolCalls: createToolCallRegistry(),
         ...overrides,
         mcp: mergeOwner(mcp, overrides.mcp),
         web: mergeOwner(web, overrides.web),

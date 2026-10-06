@@ -1,6 +1,6 @@
 import type { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import type { DebugPatchLoadRequest, JsonValue } from "@portable-devshell/shared";
-import type { InstanceRuntime } from "../server/runtime/Instance.js";
+import type { InstanceRuntime } from "../instance/Public.js";
 import { DebugPatchManager } from "./Patch.js";
 
 type ToolCallDispatchRequest = Parameters<InstanceRuntime["callTool"]>[0];
