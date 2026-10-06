@@ -5,8 +5,10 @@ import {
     type ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../Api.js";
-import type { ExtensionControlPort } from "./Port.js";
+import type {
+    ExtensionControlPort,
+    ExtensionRuntime,
+} from "../Api.js";
 import {
     REQUIRED_BUILTIN_EXTENSION_IDS,
     type ExtensionInstallService,

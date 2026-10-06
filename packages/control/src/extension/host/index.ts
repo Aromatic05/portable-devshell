@@ -40,11 +40,10 @@ import {
 import type {
     ExtensionGenerationLoader,
     ExtensionRegistrationLease,
-    ExtensionRuntime,
     ExtensionRuntimeOptions,
 } from "../Api.js";
 
-export class ExtensionHost implements ExtensionRuntime {
+export class ExtensionHost {
     readonly #changeHub?: ExtensionChangeHub;
     #publicVisibility = new Map<string, string>();
     readonly #active = new Map<string, ExtensionGeneration>();
@@ -549,7 +548,7 @@ export class ExtensionHost implements ExtensionRuntime {
                 extensions: Object.entries(this.#requireRegistry().extensions)
                     .sort(([left], [right]) => left.localeCompare(right))
                     .map(([id, entry]): ExtensionPublicRuntimeRecord => {
-                        const { retired, ...record } = this.#record(id, entry, true);
+                        const { retired: _retired, ...record } = this.#record(id, entry, true);
                         return record;
                     }),
                 revision: changeHub.revision,
@@ -562,7 +561,7 @@ export class ExtensionHost implements ExtensionRuntime {
         if (this.#changeHub === undefined || this.#registrySnapshot === undefined) return;
         const next = new Map<string, string>();
         for (const [id, entry] of Object.entries(this.#registrySnapshot.extensions)) {
-            const { retired, ...record } = this.#record(id, entry, true);
+            const { retired: _retired, ...record } = this.#record(id, entry, true);
             next.set(id, JSON.stringify({
                 record,
                 declarations: this.#started && !this.#stopping

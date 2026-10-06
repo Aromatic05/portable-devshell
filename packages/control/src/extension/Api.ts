@@ -1,6 +1,7 @@
 import type { ExtensionManifest } from "@portable-devshell/extension";
 import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
 import type {
+    ExtensionRemoveResult,
     ExtensionPublicRuntimeRecord,
     ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
@@ -12,6 +13,7 @@ import type { ExtensionPointRegistry } from "./registration/PointRegistry.js";
 import type { ExtensionRuntimeRegistration } from "./registration/Registration.js";
 import type { ExtensionChangeHub } from "./manager/Change.js";
 import type { ExtensionRegistryPort } from "./state/Store.js";
+import type { ExtensionPathLayout } from "./state/Layout.js";
 
 export interface ExtensionGenerationLoader {
     readonly points: ExtensionPointRegistry;
@@ -25,7 +27,17 @@ export interface ExtensionRegistrationLease {
     registration: ExtensionRuntimeRegistration;
 }
 
+export interface ExtensionControlPort {
+    disable(id: string): Promise<void>;
+    enable(id: string): Promise<void>;
+    install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
+    list(): Promise<ExtensionRuntimeRecord[]>;
+    reload(id: string): Promise<void>;
+    remove(id: string, purge: boolean): Promise<ExtensionRemoveResult>;
+}
+
 export interface ExtensionRuntime {
+    readonly control: ExtensionControlPort;
     acquire(id: string): ExtensionGenerationLease;
     acquireRegistration(
         pointId: string,
@@ -38,6 +50,11 @@ export interface ExtensionRuntime {
     disable(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     forget(id: string): Promise<void>;
+    generationDirectory(id: string, generation: string): string;
+    installBuiltin(
+        id: string,
+        sourcePath: string,
+    ): Promise<ExtensionRuntimeRecord>;
     list(): Promise<ExtensionRuntimeRecord[]>;
     listDeclarations(pointId: string): readonly ExtensionCatalogRegistration[];
     onChange(listener: () => void): () => void;
@@ -59,5 +76,6 @@ export interface ExtensionRuntimeOptions {
     changeHub?: ExtensionChangeHub;
     configRegistry?: ConfigRegistry;
     loader: ExtensionGenerationLoader;
+    paths: ExtensionPathLayout;
     registry: ExtensionRegistryPort;
 }

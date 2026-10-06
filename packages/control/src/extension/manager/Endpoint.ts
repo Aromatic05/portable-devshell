@@ -13,7 +13,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ExtensionChangeHub } from "./Change.js";
-import type { ExtensionControlPort } from "./Port.js";
+import type { ExtensionControlPort } from "../Api.js";
 
 export function createExtensionRouteModule(
     port: ExtensionControlPort,

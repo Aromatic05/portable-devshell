@@ -15,17 +15,15 @@ import type { HttpHost } from "@portable-devshell/mcp";
 import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
 import type { ExtensionRuntime } from "../../../../extension/Api.js";
-import type { ExtensionPathLayout } from "../../../../extension/state/Layout.js";
 import type { ControlWebSessionService } from "../../auth/Session.js";
 
 export interface ExtensionWebGatewayOptions {
     basePath: string;
     extensions: Pick<
         ExtensionRuntime,
-        "acquireRegistration" | "listDeclarations"
+        "acquireRegistration" | "generationDirectory" | "listDeclarations"
     >;
     loginPath: string;
-    paths: ExtensionPathLayout;
 }
 
 interface ExtensionWebRequestTarget {
@@ -43,13 +41,11 @@ export class ExtensionWebGateway {
     readonly #basePath: string;
     readonly #extensions: ExtensionWebGatewayOptions["extensions"];
     readonly #loginPath: string;
-    readonly #paths: ExtensionPathLayout;
 
     constructor(options: ExtensionWebGatewayOptions) {
         this.#basePath = normalizeBasePath(options.basePath);
         this.#extensions = options.extensions;
         this.#loginPath = normalizeLoginPath(options.loginPath);
-        this.#paths = options.paths;
     }
 
     install(http: HttpHost, sessions: ControlWebSessionService): () => void {
@@ -109,7 +105,7 @@ export class ExtensionWebGateway {
                         ).source;
                         if (source.kind === "files") {
                             const directory = resolve(
-                                this.#paths.generationDirectory(
+                                this.#extensions.generationDirectory(
                                     extensionId,
                                     lease.generation,
                                 ),

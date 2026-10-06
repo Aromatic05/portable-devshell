@@ -1,21 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { dirname, join } from "node:path";
 import { createServer as createNetServer } from "node:net";
 import test from "node:test";
-
-import {
-    EXTENSION_API_VERSION,
-    EXTENSION_MANIFEST_SCHEMA_VERSION,
-} from "@portable-devshell/extension";
 
 import { ControlPathHome, Endpoint, LocalChannel, ServerSession, type JsonValue, createDefaultControlConfig, createEmptyMessagePreferences, createServerTransport, createToolTransport, type ControlConfig } from "@portable-devshell/shared";
 import { CONTROL_WEB_RPC_PATH, CONTROL_WEB_SESSION_PATH } from "@portable-devshell/shared/testing";
 
 import { ControlRuntime, type ControlRuntimeOptions } from "../../../../src/server/runtime/Runtime.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
-import { ExtensionPathLayout } from "../../../../src/extension/state/Layout.ts";
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { ControlWebRuntime } from "../../../../src/server/web/Runtime.ts";
 import { createContextRuntime } from "@portable-devshell/core/context";
@@ -44,7 +38,6 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
             service: undefined,
@@ -102,7 +95,6 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         instances: {
             list: () => [],
@@ -191,7 +183,6 @@ test("runtime registers one Extension generation retirement handler", async (t) 
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
-        extensionPaths: testExtensionPaths(),
         extensions: {
             ...testExtensionSurface(),
             async retireInstanceGeneration(instance: string) {
@@ -300,7 +291,6 @@ function createControlRuntime(
         configEditor: noOpEditor as never,
         contexts: testContexts(join(dirname(overrides.socketPath), "contexts.json")),
         contextTransport: {} as never,
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         instanceCreate: {} as never,
         instanceEditor: noOpEditor as never,
@@ -326,12 +316,31 @@ function mergeOwner<T extends object>(fallback: T, override: unknown): T {
 }
 
 function testExtensionSurface() {
+    const control = {
+        async disable() {},
+        async enable() {},
+        async install() {
+            throw new Error("Unexpected Extension install.");
+        },
+        async list() {
+            return [];
+        },
+        async reload() {},
+        async remove() {
+            return { id: "", purged: false, removed: true };
+        },
+    };
     return {
+        control,
         async acquireRegistration() {
             throw new Error("No test Extension registration.");
         },
         async disable() {},
         async enable() {},
+        generationDirectory(id: string, generation: string) {
+            return `/extensions/${id}/${generation}`;
+        },
+        async installBuiltin() {},
         listDeclarations() {
             return [];
         },
@@ -353,13 +362,6 @@ function testExtensions() {
     return testExtensionSurface() as never;
 }
 
-function testExtensionPaths() {
-    return {
-        generationDirectory: (id: string, generation: string) =>
-            `/extensions/${id}/${generation}`,
-    } as never;
-}
-
 test("runtime stop attempts every remaining cleanup after failures", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-failure");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
@@ -367,7 +369,6 @@ test("runtime stop attempts every remaining cleanup after failures", async (t) =
     const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
             service: undefined,
@@ -445,7 +446,6 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
     const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
@@ -519,7 +519,6 @@ test("Web hot replacement preserves the original failure when host rollback also
             join("/tmp", `runtime-context-${Date.now()}.json`),
         ),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
@@ -607,13 +606,11 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         extensions: testExtensions(),
         mcp: mcp as never,
         oauthDirectory: join(runtimeDir, "oauth"),
-        paths: testExtensionPaths(),
     });
     const runtime = createControlRuntime({
         config: () => config,
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
             service: undefined,
@@ -670,7 +667,6 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const runtime = createControlRuntime({
         contexts: testContexts(join(runtimeDir, "contexts.json")),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
         instances: {
@@ -749,7 +745,6 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         extensions: testExtensions(),
         mcp,
         oauthDirectory: controlPaths.oauthDir,
-        paths: testExtensionPaths(),
     });
     const runtime = createControlRuntime({
         config: () => persisted,
@@ -758,7 +753,6 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
             contextFile: controlPaths.contextsFile,
             instances,
         }),
-        extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
         instances,
@@ -865,78 +859,22 @@ async function reserveTcpPort(): Promise<number> {
     return address.port;
 }
 
-test("runtime installs builtin Extensions through the normal installer after opening the Control channel", async (t) => {
+test("runtime installs builtin Extensions through the Extension runtime after opening the Control channel", async (t) => {
     const root = await createTestTempDirectory("runtime-builtin-extension");
     const socketPath = createTestIpcPath("control-runtime-builtin", root);
     const source = join(root, "builtin-source");
-    await mkdir(source, { recursive: true });
-    await writeFile(
-        join(source, "devshell-extension.json"),
-        `${JSON.stringify({
-            activation: "lazy",
-            apiVersion: EXTENSION_API_VERSION,
-            capabilities: [],
-            entry: "extension.mjs",
-            id: "skill",
-            name: "Skill builtin",
-            schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
-            version: "1.0.0",
-        })}\n`,
-        "utf8",
-    );
-    await writeFile(
-        join(source, "extension.mjs"),
-        "export function activate() { return { dispose() {} }; }\n",
-        "utf8",
-    );
-
-    const extensionPaths = new ExtensionPathLayout({
-        dataHome: join(root, "data"),
-        homeDirectory: join(root, "home"),
-        runtimeRoot: join(root, "runtime"),
-    });
-    let selectedGeneration: string | undefined;
+    let installedSource: string | undefined;
     const extensions = {
-        async acquireRegistration() {
-            throw new Error("No test Extension registration.");
-        },
-        async selectGeneration(id: string, generation: string) {
+        ...testExtensionSurface(),
+        async installBuiltin(id: string, path: string) {
             assert.equal(id, "skill");
             assert.equal(
                 await ipcEndpointAcceptsConnections(socketPath),
                 true,
             );
-            selectedGeneration = generation;
+            installedSource = path;
+            return {} as never;
         },
-        async disable() {},
-        async enable() {},
-        async forget() {},
-        listDeclarations() {
-            return [];
-        },
-        async list() {
-            return selectedGeneration === undefined
-                ? []
-                : [
-                      {
-                          enabled: true,
-                          id: "skill",
-                          retired: [],
-                          selectedGeneration,
-                          state: "installed",
-                          version: "1.0.0",
-                      },
-                  ];
-        },
-        onChange() {
-            return () => undefined;
-        },
-        async contextEnvironmentRetired() {},
-        async reload() {},
-        async retireInstanceGeneration() {},
-        async start() {},
-        async stop() {},
-        async waitForDrain() {},
     } as never;
     const runtime = createControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
@@ -946,7 +884,6 @@ test("runtime installs builtin Extensions through the normal installer after ope
             async stop() {},
         } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
-        extensionPaths,
         extensions,
         instances: {
             list: () => [],
@@ -972,7 +909,7 @@ test("runtime installs builtin Extensions through the normal installer after ope
     });
 
     await runtime.start();
-    assert.match(selectedGeneration ?? "", /^v1\.0\.0-[0-9a-f]{64}$/u);
+    assert.equal(installedSource, source);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), true);
 });
 
@@ -985,40 +922,16 @@ test("runtime keeps the Control channel closed when builtin Extension installati
         root,
     );
     const source = join(root, "invalid-builtin");
-    await mkdir(source, { recursive: true });
     const runtime = createControlRuntime({
         contexts: testContexts(join(root, "contexts.json")),
         configChanges: new ConfigChangeHub(),
         artifact: { service: undefined, async stop() {} } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
-        extensionPaths: new ExtensionPathLayout({
-            dataHome: join(root, "data"),
-            homeDirectory: join(root, "home"),
-            runtimeRoot: join(root, "runtime"),
-        }),
         extensions: {
-            async acquireRegistration() {
-                throw new Error("No test Extension registration.");
+            ...testExtensionSurface(),
+            async installBuiltin() {
+                throw new Error("missing devshell-extension.json");
             },
-            async disable() {},
-            async enable() {},
-            async forget() {},
-            listDeclarations() {
-                return [];
-            },
-            async list() {
-                return [];
-            },
-            onChange() {
-                return () => undefined;
-            },
-            async contextEnvironmentRetired() {},
-            async reload() {},
-            async retireInstanceGeneration() {},
-            async selectGeneration() {},
-            async start() {},
-            async stop() {},
-            async waitForDrain() {},
         } as never,
         instances: {
             list: () => [],
@@ -1152,7 +1065,6 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
             join("/tmp", `runtime-context-${Date.now()}.json`),
         ),
         configChanges: new ConfigChangeHub(),
-        extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,
         instances: instances as never,

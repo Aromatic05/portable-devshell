@@ -27,15 +27,12 @@ import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
 import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
-import { ExtensionControlService } from "../../extension/manager/index.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
 import type { ExtensionRuntime } from "../../extension/Api.js";
-import { ExtensionInstallService } from "../../extension/install/index.js";
 import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/index.js";
 import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/index.js";
-import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
 import { createOperationalOverviewRuntime } from "../../overview/index.js";
 import { OperationalOverviewInstanceCollector } from "../../overview/collector/Instance.js";
@@ -69,7 +66,6 @@ export interface ControlRuntimeOptions {
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
-    extensionPaths: ExtensionPathLayout;
     extensions: ExtensionRuntime;
     instanceCreate: InstanceCreateCoordinator;
     instanceEditor: InstanceEditorCoordinator;
@@ -93,8 +89,6 @@ export class ControlRuntime {
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #transport: ControlTransportServer;
     readonly #debug: DebugRuntime;
-    readonly #extensionControl: ExtensionControlService;
-    readonly #extensionPaths: ExtensionPathLayout;
     readonly #extensions: ExtensionRuntime;
     readonly #instances: InstanceRegistry;
     readonly #internalControlEndpoint: Endpoint;
@@ -116,15 +110,7 @@ export class ControlRuntime {
         this.#builtinExtensionSources = Object.freeze([
             ...(options.builtinExtensionSources ?? []),
         ]);
-        this.#extensionPaths = options.extensionPaths;
         this.#extensions = options.extensions;
-        this.#extensionControl = new ExtensionControlService({
-            host: this.#extensions,
-            installer: new ExtensionInstallService({
-                host: this.#extensions,
-                paths: this.#extensionPaths,
-            }),
-        });
         this.#instances = options.instances;
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
@@ -226,7 +212,7 @@ export class ControlRuntime {
                 ];
             },
             debug: this.#debug,
-            extension: this.#extensionControl,
+            extension: this.#extensions.control,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
@@ -328,7 +314,7 @@ export class ControlRuntime {
             await this.#internalControlServer.hello();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
-                await this.#extensionControl.installBuiltin(
+                await this.#extensions.installBuiltin(
                     source.id,
                     source.path,
                 );

@@ -15,8 +15,6 @@ import {
 
 import { McpControlModule } from "../../../src/server/mcp/Module.ts";
 import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
-import { ExtensionHost } from "../../../src/extension/host/index.ts";
-import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ConfigEngine } from "../../../src/config/engine/index.ts";
 import { ConfigEditorCoordinator } from "../../../src/config/editor/index.ts";
 import { InstanceEditorCoordinator } from "../../../src/instance/editor/index.ts";
@@ -599,10 +597,11 @@ test("shared listener Web auth changes require an explicit control restart witho
 function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControlModule): ControlWebRuntime {
     return new ControlWebRuntime({
         config,
-        extensions: { points: { list: () => [] } } as unknown as ExtensionHost,
+        extensions: {
+            generationDirectory: () => "",
+        } as never,
         mcp,
         oauthDirectory: join(new ControlPathHome(homeDirectory).oauthDir, "web"),
-        paths: new ExtensionPathLayout({ homeDirectory }),
     });
 }
 

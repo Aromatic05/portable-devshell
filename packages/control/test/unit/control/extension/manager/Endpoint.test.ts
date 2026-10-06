@@ -8,7 +8,7 @@ import {
     createExtensionRouteModule,
 } from "../../../../../src/extension/manager/Endpoint.ts";
 
-import type { ExtensionControlPort } from "../../../../../src/extension/manager/Port.ts";
+import type { ExtensionControlPort } from "../../../../../src/extension/Api.ts";
 
 function createPort(): ExtensionControlPort {
     return {

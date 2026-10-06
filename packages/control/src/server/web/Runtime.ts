@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import {
     McpOAuthProtectedResource,
     HttpHost,
@@ -13,7 +11,6 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ExtensionRuntime } from "../../extension/Api.js";
-import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
 import { resolveControlWebAssetsDirectory } from "./Assets.js";
@@ -41,7 +38,6 @@ export interface ControlWebRuntimeOptions {
     extensions: ExtensionRuntime;
     mcp: ControlWebMcpPort;
     oauthDirectory: string;
-    paths: ExtensionPathLayout;
 }
 
 interface WebRuntimeGeneration {
@@ -60,14 +56,12 @@ export class ControlWebRuntime {
     #listener?: ControlWebSocketListener;
     readonly #mcp: ControlWebMcpPort;
     readonly #oauthDirectory: string;
-    readonly #paths: ExtensionPathLayout;
     #publicBaseUrl?: string;
 
     constructor(options: ControlWebRuntimeOptions) {
         this.#extensions = options.extensions;
         this.#mcp = options.mcp;
         this.#oauthDirectory = options.oauthDirectory;
-        this.#paths = options.paths;
         this.#auth = options.config.web.auth;
         this.#enabled = options.config.web.enabled;
         this.#publicBaseUrl = options.config.web.enabled
@@ -226,7 +220,6 @@ export class ControlWebRuntime {
                         basePath: `${basePath}/extensions`,
                         extensions: this.#extensions,
                         loginPath: `${basePath}/`,
-                        paths: this.#paths,
                     }).install(host, webSessions),
                 sessions,
             }),

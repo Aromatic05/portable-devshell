@@ -311,6 +311,7 @@ export class ControlRuntimeFactory {
                     points: extensionPoints,
                     toolCallDecorator: mcp.toolProvenance,
                 }),
+                paths: extensionPaths,
                 registry: new ExtensionRegistryStore(
                     extensionPaths.registryFile,
                 ),
@@ -320,7 +321,6 @@ export class ControlRuntimeFactory {
                 extensions,
                 mcp,
                 oauthDirectory: join(controlPaths.oauthDir, "web"),
-                paths: extensionPaths,
             });
             const reverse = new ConnectionModule({
                 mcp: {
@@ -347,7 +347,6 @@ export class ControlRuntimeFactory {
                 config: () => options.state.requireConfig(),
                 configChanges: options.state.configChanges,
                 configEditor,
-                extensionPaths,
                 extensions,
                 instanceCreate,
                 instanceEditor,

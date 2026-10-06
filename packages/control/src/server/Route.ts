@@ -34,7 +34,7 @@ import { ConfigChangeHub } from "../config/change/Config.js";
 import { createDebugRouteModule } from "../debug/Public.js";
 import type { DebugApi } from "../debug/Api.js";
 import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
-import type { ExtensionControlPort } from "../extension/manager/Port.js";
+import type { ExtensionControlPort } from "../extension/Api.js";
 import type {
     InstanceCreatePort,
     InstanceEditorPort,
