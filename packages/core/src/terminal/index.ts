@@ -1,4 +1,4 @@
-import type { WorkerInstance } from "../instance/Public.js";
+import type { WorkerInstance } from "../instance/Api.js";
 import { WorkerTerminalBackend } from "./Backend.js";
 import { TerminalSessionService } from "./Service.js";
 import type {

@@ -8,7 +8,7 @@ import {
 } from "@portable-devshell/extension/mcp";
 import {
     presentToolCallResult,
-} from "@portable-devshell/core/toolcall";
+} from "@portable-devshell/core";
 import type {
     JsonValue,
     ToolCallPresentation,

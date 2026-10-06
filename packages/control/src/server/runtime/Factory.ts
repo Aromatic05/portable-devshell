@@ -30,7 +30,7 @@ import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
-import { createContextRuntime } from "@portable-devshell/core/context";
+import { createContextRuntime } from "@portable-devshell/core";
 import { McpControlModule } from "../mcp/Module.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
 import { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -38,7 +38,7 @@ import { ConfigEngine } from "../../config/engine/index.js";
 import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import { ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
+import { ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];

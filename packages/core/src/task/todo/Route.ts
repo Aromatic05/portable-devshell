@@ -14,7 +14,7 @@ import type {
 import { isTaskEventType } from "@portable-devshell/shared";
 import { routeModule } from "../../Port.js";
 import type { TodoApi } from "../Api.js";
-import type { InstanceEventSource } from "../../instance/Public.js";
+import type { InstanceEventSource } from "../../instance/Api.js";
 
 interface TodoTaskRouteSubscriptionPort {
     subscribe(

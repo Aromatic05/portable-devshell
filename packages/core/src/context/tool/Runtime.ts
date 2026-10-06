@@ -1,4 +1,4 @@
-import type { ToolCallRegistration } from "../../toolcall/Public.js";
+import type { ToolCallRegistration } from "../../toolcall/Api.js";
 import {
     contextErrorCodes,
     controlErrorCodes,
@@ -10,7 +10,8 @@ import {
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
-import type { InstanceLease, InstanceRegistry } from "../../instance/Public.js";
+import type { InstanceLease } from "../../instance/Api.js";
+import type { InstanceRegistry } from "../../instance/Registry.js";
 import {
     contextToolDefinitions,
     environmentInfoToolName,

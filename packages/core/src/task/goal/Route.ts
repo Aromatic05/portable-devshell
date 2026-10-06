@@ -5,7 +5,7 @@ import type {
 
 import { routeModule } from "../../Port.js";
 import type { GoalApi } from "../Api.js";
-import type { InstanceEventSource } from "../../instance/Public.js";
+import type { InstanceEventSource } from "../../instance/Api.js";
 
 interface GoalTaskRouteInstancePort {
     events: Pick<InstanceEventSource, "cursor">;

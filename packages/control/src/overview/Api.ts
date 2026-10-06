@@ -1,4 +1,4 @@
-import type { Instance } from "@portable-devshell/core/instance";
+import type { Instance } from "@portable-devshell/core";
 import type {
     OAuthApprovalRequest,
     OperationalOverview,

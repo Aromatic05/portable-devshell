@@ -5,11 +5,11 @@ import type {
     ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { LogQuery } from "../../../audit/Public.js";
+import type { LogQuery } from "../../../audit/Api.js";
 import type {
     InstanceLogEntry,
     AuditLogs,
-} from "../../../audit/Public.js";
+} from "../../../audit/Api.js";
 import { toEventData } from "./Event.js";
 
 const LOG_CHUNK_CODE_UNITS = 256 * 1024;

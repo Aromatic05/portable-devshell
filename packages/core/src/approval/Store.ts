@@ -1,4 +1,4 @@
-import type { StateStore } from "../audit/Public.js";
+import type { StateStore } from "../audit/Api.js";
 import type { ApprovalRequest } from "@portable-devshell/shared";
 
 import type { ApprovalStorePort } from "./execution/Service.js";

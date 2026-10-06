@@ -6,7 +6,7 @@ import {
     type JsonValue,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
-import { assertInstanceDeletable, InstanceRetirementNotification, retireInstanceForDelete, type Instance, type InstanceRegistry } from "@portable-devshell/core/instance";
+import { assertInstanceDeletable, InstanceRetirementNotification, retireInstanceForDelete, type Instance, type InstanceRegistry } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";

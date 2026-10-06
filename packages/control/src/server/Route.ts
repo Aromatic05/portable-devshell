@@ -8,12 +8,12 @@ import {
 import { negotiateControlProtocol } from "./Protocol.js";
 import { routeModule } from "../Port.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
-import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core/instance";
-import { createToolIngressHost, type ToolCallIngressPort, type ToolCallProvenanceApi } from "@portable-devshell/core/toolcall";
+import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core";
+import { createToolIngressHost, type ToolCallIngressPort, type ToolCallProvenanceApi } from "@portable-devshell/core";
 import {
     createTerminalSessionRuntime,
     type TerminalSessionApi,
-} from "@portable-devshell/core/terminal";
+} from "@portable-devshell/core";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/Module.js";
@@ -44,7 +44,7 @@ import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "../auth/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Public.js";
 import type { OperationalOverviewApi } from "../overview/Api.js";
-import type { ReverseCredentials } from "@portable-devshell/core/instance";
+import type { ReverseCredentials } from "@portable-devshell/core";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,

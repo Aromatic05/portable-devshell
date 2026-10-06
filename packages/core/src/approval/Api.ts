@@ -1,6 +1,6 @@
 import type { ApprovalEventType, InstanceName } from "@portable-devshell/shared";
 import type { ApprovalPolicy } from "@portable-devshell/shared/config";
-import type { StateStore } from "../audit/Public.js";
+import type { StateStore } from "../audit/Api.js";
 import type {
     ApprovalDecision,
     ApprovalDecisionBy,

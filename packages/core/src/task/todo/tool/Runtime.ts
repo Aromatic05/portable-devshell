@@ -1,4 +1,4 @@
-import type { ToolCallRegistration } from "../../../toolcall/Public.js";
+import type { ToolCallRegistration } from "../../../toolcall/Api.js";
 import {
     contextErrorCodes,
     createRemoteError,

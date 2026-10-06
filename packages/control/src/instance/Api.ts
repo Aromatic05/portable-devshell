@@ -1,6 +1,6 @@
 import type {
     InstanceRegistry,
-} from "@portable-devshell/core/instance";
+} from "@portable-devshell/core";
 import type {
     ControlConfig,
     InstanceCreateResult,

@@ -17,7 +17,7 @@ import type {
     AuditToolCallFailureSummary,
     InstanceLogEntry,
     LogQuery,
-} from "../audit/Public.js";
+} from "../audit/Api.js";
 
 export type { ToolCallApi };
 export type ToolCallIngressPort = Pick<ToolCallApi, "call">;

@@ -8,7 +8,9 @@ import type {
     ContextLifecycleCleanupPort,
     ContextRecordPort,
 } from "../Api.js";
-import type { Instance, InstanceLease, InstanceRegistry } from "../../instance/Public.js";
+import type { InstanceLease } from "../../instance/Api.js";
+import type { Instance } from "../../instance/Instance.js";
+import type { InstanceRegistry } from "../../instance/Registry.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &

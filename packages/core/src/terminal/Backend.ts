@@ -1,10 +1,10 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerInstance } from "../instance/Public.js";
+import type { WorkerInstance } from "../instance/Api.js";
 import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
-} from "../instance/Public.js";
+} from "../instance/Api.js";
 import type {
     TerminalBackend,
     TerminalBackendOpenInput,

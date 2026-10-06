@@ -3,7 +3,7 @@ import {
     controlErrorCodes,
     type JsonValue,
 } from "@portable-devshell/shared";
-import type { ApprovalDecisionInput } from "../Api.js";
+import type { ApprovalDecisionInput } from "./Api.js";
 
 export function readApprovalId(
     payload: JsonValue | undefined,

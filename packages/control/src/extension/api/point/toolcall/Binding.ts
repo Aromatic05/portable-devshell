@@ -1,7 +1,7 @@
 import type {
     ToolCallHooks,
     ToolCallHookValue,
-} from "@portable-devshell/core/toolcall";
+} from "@portable-devshell/core";
 import {
     review,
     rewrite,

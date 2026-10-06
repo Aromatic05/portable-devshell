@@ -8,7 +8,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import { diffConfigPaths, parseConfigPath, setConfigPathValue } from "../Path.js";
-import type { ConfigEngine, ConfigRuntimeChangeSet } from "../engine/index.js";
+import type { ConfigEngine } from "../engine/index.js";
+import type { ConfigRuntimeChangeSet } from "../engine/Api.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
 
 export class ConfigGlobalPatch {

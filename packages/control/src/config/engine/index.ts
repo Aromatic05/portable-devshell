@@ -21,42 +21,11 @@ import {
 } from "../domain/Registry.js";
 import { ConfigChangeHub } from "../change/Config.js";
 import { diffConfigPaths } from "../Path.js";
-
-export interface ConfigRuntimeChangeSet {
-    instanceAuth: boolean;
-    mcp: boolean;
-    web: boolean;
-}
-
-export interface ControlConfigWriter {
-    write(config: ControlConfig, homeDirectory?: string): Promise<void>;
-}
-
-export interface ConfigEngineOptions {
-    changeHub?: ConfigChangeHub;
-    configStore: ControlConfigWriter;
-    getConfig: () => ControlConfig;
-    getRestartControlRequired?: () => boolean;
-    homeDirectory?: string;
-    markRestartControlRequired?: () => void;
-    mutationRunner?: ControlConfigMutationRunner;
-    registry?: ConfigRegistry;
-    runtimeApply?: {
-        apply(
-            previous: ControlConfig,
-            next: ControlConfig,
-            changes: ConfigRuntimeChangeSet,
-        ): Promise<boolean>;
-    };
-    runtimePreflight?: {
-        assertAvailable(
-            previous: ControlConfig,
-            next: ControlConfig,
-        ): Promise<void>;
-    };
-    setConfig: (config: ControlConfig) => void;
-    validator?: ControlConfigValidator;
-}
+import type {
+    ConfigEngineOptions,
+    ConfigRuntimeChangeSet,
+    ControlConfigWriter,
+} from "./Api.js";
 
 export class ConfigEngine {
     readonly #changeHub?: ConfigChangeHub;

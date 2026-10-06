@@ -13,7 +13,7 @@ import type {
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
 import { ArtifactHostBridge } from "./host/Bridge.js";
 import { ArtifactService } from "./Service.js";
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
+import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
 import type {
     ArtifactProjectionInput,

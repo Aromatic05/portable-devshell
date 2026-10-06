@@ -11,13 +11,13 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import type { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
+import type { Instance, InstanceRegistry } from "@portable-devshell/core";
 import { InstanceChangeHub } from "../Change.js";
 import type { InstanceMcpRuntimePort } from "../Mcp.js";
 import {
     type ConfigEngine,
-    type ConfigRuntimeChangeSet,
 } from "../../config/engine/index.js";
+import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
 import {
     requiresWorkerRebuild,
     toWorkerReconfigureInput,

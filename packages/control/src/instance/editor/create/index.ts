@@ -9,7 +9,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { discoverSshConfigHosts, normalizeInstanceCreateDraft, resolveInstanceCreateSchema, summarizeInstanceCreate, type Instance, type InstanceRegistry } from "@portable-devshell/core/instance";
+import { discoverSshConfigHosts, normalizeInstanceCreateDraft, resolveInstanceCreateSchema, summarizeInstanceCreate, type Instance, type InstanceRegistry } from "@portable-devshell/core";
 import type { InstanceMcpRuntimePort } from "../../Mcp.js";
 import { InstanceChangeHub } from "../../Change.js";
 import { ControlConfigValidator } from "../../../config/engine/Validator.js";

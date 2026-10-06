@@ -7,11 +7,11 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type { LogQuery } from "../../audit/Public.js";
+import type { LogQuery } from "../../audit/Api.js";
 import type {
     InstanceLogEntry,
     AuditLogs,
-} from "../../audit/Public.js";
+} from "../../audit/Api.js";
 import type { ToolCallHistory } from "./record/History.js";
 import type { WorkerToolInvoker } from "../worker/Invoker.js";
 import type { WorkerToolCallScheduler } from "./Scheduler.js";

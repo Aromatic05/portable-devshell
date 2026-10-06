@@ -1,13 +1,12 @@
 import type { JsonValue } from "@portable-devshell/shared";
-import { ConfigEngine, type ConfigEngineOptions } from "../engine/index.js";
+import { ConfigEngine } from "../engine/index.js";
+import type { ConfigEngineOptions } from "../engine/Api.js";
 import { ConfigDraftValidator } from "./Draft.js";
 import { ConfigGlobalPatch } from "./GlobalPatch.js";
 import {
     ConfigBatchEditor,
     type ConfigBatchInstancePort,
 } from "./Batch.js";
-
-export type { ConfigRuntimeChangeSet } from "../engine/index.js";
 
 export interface ConfigEditorCoordinatorOptions extends ConfigEngineOptions {
     engine?: ConfigEngine;

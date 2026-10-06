@@ -9,14 +9,14 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type { ConfigRuntimeChangeSet } from "../../config/engine/index.js";
+import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import type { ToolCallApi } from "@portable-devshell/shared";
 import {
     createToolCallProvenanceRuntime,
     type ToolCallProvenanceApi,
-} from "@portable-devshell/core/toolcall";
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
+} from "@portable-devshell/core";
+import type { InstanceRegistry } from "@portable-devshell/core";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";

@@ -7,7 +7,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type { AuditToolCalls, AuditToolCallFailureSummary } from "../../../audit/Public.js";
+import type { AuditToolCalls, AuditToolCallFailureSummary } from "../../../audit/Api.js";
 
 interface ActiveToolCall {
     callId: string;

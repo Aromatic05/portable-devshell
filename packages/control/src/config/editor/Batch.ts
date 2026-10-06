@@ -7,7 +7,8 @@ import {
     type ControlConfig,
     type JsonValue,
 } from "@portable-devshell/shared";
-import type { ConfigEngine, ConfigRuntimeChangeSet } from "../engine/index.js";
+import type { ConfigEngine } from "../engine/index.js";
+import type { ConfigRuntimeChangeSet } from "../engine/Api.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
 import { coupledRuntimeChanges } from "./GlobalPatch.js";
 

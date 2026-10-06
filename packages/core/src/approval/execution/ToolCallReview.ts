@@ -1,5 +1,5 @@
 import type { JsonValue } from "@portable-devshell/shared";
-import type { ToolCallHooks } from "../../toolcall/Public.js";
+import type { ToolCallHooks } from "../../toolcall/Api.js";
 import type { ApprovalEvaluationApi, ApprovalEvaluationError } from "../Api.js";
 
 export function registerApprovalToolCallReview(

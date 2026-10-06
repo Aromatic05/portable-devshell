@@ -8,7 +8,7 @@ import type {
     ConfigBatchInstancePlan,
     ConfigBatchInstancePort,
 } from "../../config/editor/Batch.js";
-import type { ConfigRuntimeChangeSet } from "../../config/engine/index.js";
+import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
 import { InstanceReconfigurationCoordinator } from "./Update.js";
 import { InstanceCleanupDebt } from "./retirement/Debt.js";
 import { InstanceRetirementCoordinator } from "./retirement/index.js";

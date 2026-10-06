@@ -5,7 +5,7 @@ import {
     type ToolCallReviewHook,
     type ToolCallExecutor,
     type ToolNameHandle,
-} from "@portable-devshell/core/toolcall";
+} from "@portable-devshell/core";
 import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
 import type {
     ToolCallDefinitionEntry,

@@ -3,11 +3,11 @@ import {
     type ToolCallApi,
     type ToolCallRuntime,
     createToolRouteModule,
-} from "@portable-devshell/core/toolcall";
-import { registerApprovalToolCallReview, createApprovalRouteModule } from "@portable-devshell/core/approval";
-import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "@portable-devshell/core/task";
-import { createTerminalRouteModule } from "@portable-devshell/core/terminal";
-import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core/task";
+} from "@portable-devshell/core";
+import { registerApprovalToolCallReview, createApprovalRouteModule } from "@portable-devshell/core";
+import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "@portable-devshell/core";
+import { createTerminalRouteModule } from "@portable-devshell/core";
+import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core";
 
 import {
     type ContextTransport,
@@ -16,7 +16,7 @@ import {
     type ServerTransport,
 } from "@portable-devshell/shared";
 
-import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core/instance";
+import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core";
 import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -26,7 +26,7 @@ import { createDebugRuntime } from "../../debug/index.js";
 import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
-import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
+import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
 import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
@@ -49,7 +49,7 @@ import {
     createContextRouteModule,
     installContextTools,
     type ContextRuntime,
-} from "@portable-devshell/core/context";
+} from "@portable-devshell/core";
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 import { ControlWebRuntime } from "../web/Runtime.js";

@@ -23,8 +23,8 @@ import {
     STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
-import type { ProcessSubscriptionManager } from "@portable-devshell/core/instance";
+import type { InstanceRegistry } from "@portable-devshell/core";
+import type { ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ExtensionInstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;

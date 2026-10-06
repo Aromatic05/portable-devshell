@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
+import type { InstanceRegistry } from "@portable-devshell/core";
 import type {
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
