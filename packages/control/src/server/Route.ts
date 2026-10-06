@@ -3,20 +3,13 @@ import {
     mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
-    createToolIngressHost,
-    type ToolCallIngressPort,
-    type ToolCallProvenanceApi,
     JsonValue,
 } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
-import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core";
+import { createConnectionRouteModule, InstanceRegistry } from "@portable-devshell/core";
 
-import {
-    createTerminalSessionRuntime,
-    type TerminalSessionApi,
-} from "@portable-devshell/core";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
 import { createArtifactRouteModule } from "../artifact/route/index.js";
@@ -107,17 +100,12 @@ export interface ControlRouteRegistryOptions {
     instanceEditor?: InstanceEditorPort;
     configuredInstances?: InstanceConfigRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
-    instancePorts?: (descriptor: Instance, sessions: TerminalSessionApi) => readonly ControlPortDefinition[];
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
     overview: OperationalOverviewApi;
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentials;
-    processSubscriptions?: ProcessSubscriptionManager;
     shutdown(): Promise<void> | void;
-    terminalMaxUnackedBytes?: number;
-    toolCalls?: ToolCallIngressPort;
-    toolProvenance?: ToolCallProvenanceApi;
     tuiPages?: TuiPagePort;
     webApplications?: WebApplicationCatalogPort;
     webPages?: WebPagePort;
@@ -128,8 +116,6 @@ export class ControlRouteRegistry {
     readonly #overview: OperationalOverviewApi;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #options: ControlRouteRegistryOptions;
-    readonly #subscriptions: ProcessSubscriptionManager;
-    readonly #terminals = createTerminalSessionRuntime();
     readonly #unsubscribeExtensions: () => void;
     readonly #unsubscribeConfigChanges: () => void;
     readonly #unsubscribeInstances: () => void;
@@ -141,8 +127,6 @@ export class ControlRouteRegistry {
         this.#configChanges = options.configChanges ?? new ConfigChangeHub();
         this.#instanceChanges =
             options.instanceChanges ?? new InstanceChangeHub();
-        this.#subscriptions =
-            options.processSubscriptions ?? new ProcessSubscriptionManager();
         this.#overview = options.overview;
         this.#hosts = this.#build();
         this.#unsubscribeExtensions =
@@ -176,19 +160,18 @@ export class ControlRouteRegistry {
     }
 
     connectionClosed(connectionId: string): void {
-        this.#subscriptions.unsubscribeConnection(connectionId);
+        for (const instance of this.#options.instances.list())
+            instance.connectionClosed(connectionId);
     }
 
     async retireInstance(instance: string): Promise<void> {
         await this.#options.extensionRoutes?.retireInstance(instance);
-        await this.#terminals.api.closeInstance(instance);
     }
 
     dispose(): void {
         this.#unsubscribeExtensions();
         this.#unsubscribeConfigChanges();
         this.#unsubscribeInstances();
-        this.#terminals.close();
     }
 
     #rebuild(): void {
@@ -270,20 +253,11 @@ export class ControlRouteRegistry {
             },
         ];
 
-        if (this.#options.toolCalls !== undefined) {
-            definitions.push(createToolIngressHost(this.#options.toolCalls));
-        }
-
         for (const descriptor of descriptors) {
             definitions.push(
-                createInstanceHost({
-                    descriptor,
-                    extensionPorts:
-                        [...(this.#options.extensionRoutes?.modules("instance") ?? []),
-                            ...(this.#options.instancePorts?.(descriptor, this.#terminals.api) ?? [])],
-                    registry: this.#options.instances,
-                    subscriptions: this.#subscriptions,
-                }),
+                descriptor.host(
+                    this.#options.extensionRoutes?.modules("instance") ?? [],
+                ),
             );
         }
 

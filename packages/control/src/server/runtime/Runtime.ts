@@ -1,13 +1,8 @@
 import {
     createToolCallRuntime,
-    createToolRouteModule,
     type ToolCallApi,
     type ToolCallRuntime,
 } from "@portable-devshell/shared";
-import { registerApprovalToolCallReview, createApprovalRouteModule } from "@portable-devshell/core";
-import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "@portable-devshell/core";
-import { createTerminalRouteModule } from "@portable-devshell/core";
-import { installTodoTools, installWaitToolCallRewrite } from "@portable-devshell/core";
 
 import {
     type ContextTransport,
@@ -26,7 +21,7 @@ import { createDebugRuntime } from "../../debug/index.js";
 import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
-import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
+import type { ConnectionModule } from "@portable-devshell/core";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
@@ -75,7 +70,6 @@ export interface ControlRuntimeOptions {
     toolCalls: ToolCallRegistry;
     restart: () => Promise<void>;
     reverse: ConnectionModule;
-    processSubscriptions?: ProcessSubscriptionManager;
     shutdown: () => Promise<void>;
     socketPath: string;
     web: ControlWebRuntime;
@@ -132,9 +126,6 @@ export class ControlRuntime {
         );
         this.#toolCallHookUnregister = [
             extensionToolCalls.install(options.toolCalls),
-            registerApprovalToolCallReview(options.toolCalls, (name) => runtimeFor(name).approval.api),
-            installTodoTools(options.toolCalls, (name) => runtimeFor(name).task.api),
-            installWaitToolCallRewrite(options.toolCalls, (name) => runtimeFor(name).task.api.wait),
         ];
         this.#mcp = options.mcp;
         this.#mcp.setToolCalls(this.#toolCalls);
@@ -147,8 +138,6 @@ export class ControlRuntime {
             instances: options.instances,
             target: (descriptor) => options.instanceRuntimes.get(descriptor),
         });
-        const processSubscriptions =
-            options.processSubscriptions ?? new ProcessSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(
             this.#extensions,
             {
@@ -188,29 +177,6 @@ export class ControlRuntime {
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
             controlPorts: [createContextRouteModule(options.contexts.api)],
-            instancePorts: (descriptor, sessions) => {
-                const runtime = options.instanceRuntimes.get(descriptor);
-                const events = {
-                    cursor: () => descriptor.worker.snapshot().lastSeq,
-                    subscribe: (fromSeq?: number) => descriptor.worker.subscribe(fromSeq),
-                };
-                return [
-                    createApprovalRouteModule({ approval: runtime.approval.api, events, name: descriptor.name }, processSubscriptions),
-                    createTerminalRouteModule({ backend: runtime.terminal.api, instance: descriptor.name, sessions }),
-                    createGoalTaskRouteModule({ events, goal: runtime.task.api.goal }),
-                    createTodoTaskRouteModule({ events, name: descriptor.name, todo: runtime.task.api.todo }, processSubscriptions),
-                    createToolRouteModule({
-                        name: descriptor.name,
-                        worker: {
-                            readWorkerTools: async () => runtime.tools.listTools(),
-                            prepareWorkspace: (workspace, connectionId) => runtime.openToolSession(workspace, connectionId),
-                            readToolCalls: (query) => runtime.tools.readToolCalls(query),
-                            releaseToolSession: (connectionId) => runtime.releaseToolSession(connectionId),
-                            subscribe: events.subscribe,
-                        },
-                    }, options.mcp.toolProvenance, this.#toolCalls, processSubscriptions),
-                ];
-            },
             debug: this.#debug,
             extension: this.#extensions.control,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
@@ -223,20 +189,14 @@ export class ControlRuntime {
             overview: createOperationalOverviewRuntime({
                 instanceCollector: new OperationalOverviewInstanceCollector({
                     activityLimit: 20,
-                    instanceData: descriptor => {
-                        const runtime = options.instanceRuntimes.get(descriptor);
-                        return { approval: runtime.approval.api, task: runtime.task.api, tools: runtime.tools };
-                    },
+                    endpoint: options.internalControl.endpoint,
                 }),
                 instances: options.instances,
                 oauthApprovals: () => options.mcp.oauthApprovals,
             }),
             restart: options.restart,
             reverse: options.reverse.service,
-            processSubscriptions,
             shutdown: options.shutdown,
-            toolCalls: this.#toolCalls,
-            toolProvenance: options.mcp.toolProvenance,
             tuiPages: new TuiExtensionPageService(this.#extensions),
             webApplications: new WebApplicationCatalog(this.#extensions),
             webPages: new WebExtensionPageService(this.#extensions),
