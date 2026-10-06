@@ -36,7 +36,8 @@ import { ConfigEngine } from "../../config/engine/index.js";
 import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import { createInstance, ConnectionModule } from "@portable-devshell/core";
+import { createInstance } from "@portable-devshell/core";
+import { ConnectionModule } from "../../reverse/index.js";
 import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 export interface ControlRuntimeFactoryOptions {

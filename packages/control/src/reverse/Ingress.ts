@@ -18,7 +18,7 @@ import type {
     ReverseHttpHost,
     ReverseInstanceLookup,
 } from "./Api.js";
-import { ReverseSseChannel } from "../transport/endpoint/channel/reverse/SseChannel.js";
+import { ReverseSseChannel } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "./credential/Store.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";

@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 
-import { ChannelBase } from "@portable-devshell/shared";
+import { ChannelBase } from "./Channel.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 

@@ -6,7 +6,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { ReverseInstanceLookup } from "../Api.js";
-import type { Instance } from "../../model/Instance.js";
+import type { Instance } from "@portable-devshell/core";
 import { ReverseCredentialStore } from "./Store.js";
 
 export class ReverseCredentials {

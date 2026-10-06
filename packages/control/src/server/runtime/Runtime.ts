@@ -22,7 +22,7 @@ import { createDebugRuntime } from "../../debug/index.js";
 import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
-import type { ConnectionModule } from "@portable-devshell/core";
+import type { ConnectionModule } from "../../reverse/index.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";

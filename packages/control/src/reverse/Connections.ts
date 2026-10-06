@@ -11,9 +11,8 @@ import {
 
 import { ReverseCredentialStore } from "./credential/Store.js";
 import type { ReverseInstanceLookup } from "./Api.js";
-import type { Instance } from "../model/Instance.js";
-import type { InstanceLease } from "../model/Lifecycle.js";
-import { ReverseSseChannel } from "../transport/endpoint/channel/reverse/SseChannel.js";
+import type { Instance } from "@portable-devshell/core";
+import { ReverseSseChannel } from "@portable-devshell/shared";
 
 interface ActiveReverseConnection {
     channel: Channel;
@@ -212,7 +211,7 @@ export class ReverseConnections {
         if (instance === undefined) {
             throw retiredGeneration(identity.descriptor.config.name);
         }
-        let lease: InstanceLease;
+        let lease: { instance: Instance; release(): void };
         try {
             lease = instance.lifecycle.acquireLease();
         } catch {

@@ -1,5 +1,4 @@
 import {
-    requirePort,
     routeModule,
     asInstanceName,
     createRemoteError,
@@ -21,7 +20,6 @@ import { createTodoTaskRouteModule } from "../task/todo/Route.js";
 import { createTerminalRouteModule } from "../terminal/Route.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
-import type { ReverseCredentials } from "./reverse/credential/Credentials.js";
 import type { Instance } from "./model/Instance.js";
 
 export interface InstanceRouteOptions {
@@ -233,40 +231,4 @@ function invalid(message: string) {
         message,
         retryable: false,
     });
-}
-
-export function createConnectionRouteModule(
-    service?: ReverseCredentials,
-): ControlPortDefinition {
-    const connection = () =>
-        requirePort(service, "Connection management is not available.");
-    return routeModule("connection", {
-        createCode: async (request) =>
-            (await connection().createDeviceCode(
-                readReverseInstanceName(request.payload),
-            )) as never,
-        rotateToken: async (request) =>
-            (await connection().rotateDeviceToken(
-                readReverseInstanceName(request.payload),
-            )) as never,
-        revokeToken: async (request) =>
-            (await connection().revokeDeviceToken(
-                readReverseInstanceName(request.payload),
-            )) as never,
-    });
-}
-
-function readReverseInstanceName(params?: JsonValue): string {
-    if (
-        !isRecord(params) ||
-        typeof params.instance !== "string" ||
-        params.instance.length === 0
-    ) {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "Reverse connection operation requires instance.",
-            retryable: false,
-        });
-    }
-    return params.instance;
 }

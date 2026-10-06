@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 
 import type { ControlConfig, InstanceName } from "@portable-devshell/shared";
 
-import type { Instance } from "../model/Instance.js";
+import type { Instance } from "@portable-devshell/core";
 
 export interface ReverseConnectionIdentity {
     credentialToken: string;
