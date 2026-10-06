@@ -9,11 +9,11 @@ import type { JsonValue } from "../../types/Json.js";
 import type {
     ArtifactEvent,
     ArtifactEventType,
+    ArtifactImageContent,
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
     ArtifactSnapshot,
-    ArtifactStoredImageResult,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -28,7 +28,7 @@ export interface ArtifactTransport {
         input: ArtifactShareInput,
     ): Promise<ArtifactShareResult>;
     getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
-    readImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    readImage(imageRef: string): Promise<ArtifactImageContent>;
     revokeShare(shareId: string): Promise<ArtifactShareRevokeResult>;
     snapshot(): Promise<ArtifactSnapshot>;
     startTransfer(
@@ -57,7 +57,7 @@ export function createArtifactTransport(endpoint: Endpoint): ArtifactTransport {
         getTransfer: (transferId) =>
             port.request<ArtifactTransferRecord>("getTransfer", { transferId }),
         readImage: (imageRef) =>
-            port.request<ArtifactStoredImageResult>("readImage", { imageRef }),
+            port.request<ArtifactImageContent>("readImage", { imageRef }),
         revokeShare: (shareId) =>
             port.request<ArtifactShareRevokeResult>("revokeShare", { shareId }),
         snapshot: () => port.request<ArtifactSnapshot>("snapshot"),

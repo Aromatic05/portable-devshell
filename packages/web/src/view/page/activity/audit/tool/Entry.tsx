@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
     ApprovalRequest,
-    ArtifactStoredImageResult,
+    ArtifactImageContent,
     InstanceLogEntry,
     ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -34,7 +34,7 @@ export function ToolCallEntry({
     initiallyOpen?: boolean;
     logs: readonly InstanceLogEntry[];
     now?: number;
-    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    onLoadImage(imageRef: string): Promise<ArtifactImageContent>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onDecideApproval(
         approval: ApprovalRequest,
@@ -198,13 +198,13 @@ function ToolCallDetails({
     call: ToolCallRecord;
     disabled: boolean;
     logs: readonly InstanceLogEntry[];
-    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    onLoadImage(imageRef: string): Promise<ArtifactImageContent>;
     onRefresh(): Promise<void>;
 }) {
     const output = resolveToolCallOutput(call, logs);
     const imageMetadata = artifactImageMetadata(call);
     const imageRef = imageMetadata?.imageRef;
-    const [image, setImage] = useState<ArtifactStoredImageResult>();
+    const [image, setImage] = useState<ArtifactImageContent>();
     const [imageFailure, setImageFailure] = useState<string>();
     const [imageLoading, setImageLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);

@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { createEmptyMessagePreferences, type ArtifactStoredImageResult } from "@portable-devshell/shared";
+import { createEmptyMessagePreferences, type ArtifactImageContent } from "@portable-devshell/shared";
 import { type ServerSessionStatus } from "@portable-devshell/shared/testing";
 
 import { WebDomainProvider } from "../../src/app/domain/Context.js";
@@ -137,7 +137,7 @@ export class WebTestDomains {
     readonly artifactTransport = {
         readImage: async (
             _imageRef: string,
-        ): Promise<ArtifactStoredImageResult | undefined> => undefined,
+        ): Promise<ArtifactImageContent | undefined> => undefined,
     };
     readonly context = Object.assign(
         new TestDomainSource({

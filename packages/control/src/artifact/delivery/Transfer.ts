@@ -9,9 +9,7 @@ import {
 } from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
-    ArtifactTransferCancelInput,
     ArtifactTransferFailure,
-    ArtifactTransferLookupInput,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -276,20 +274,8 @@ export class ArtifactTransferService {
         }
     }
 
-    async lookupTransfer(
-        input: ArtifactTransferLookupInput,
-    ): Promise<ArtifactTransferResult> {
-        return {
-            operation: "status",
-            transfer: this.getTransfer(input.transferId),
-        };
-    }
-
-    async cancelTransfer(
-        input: ArtifactTransferCancelInput | string,
-    ): Promise<ArtifactTransferResult> {
+    async cancelTransfer(transferId: string): Promise<ArtifactTransferResult> {
         this.#assertInitialized();
-        const transferId = typeof input === "string" ? input : input.transferId;
         const transfer = this.#transfers.get(transferId);
         if (transfer === undefined) {
             throw transferNotFound(transferId);

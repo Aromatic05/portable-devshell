@@ -8,7 +8,7 @@ import {
 import {
     compactContextId,
     type ApprovalRequest,
-    type ArtifactStoredImageResult,
+    type ArtifactImageContent,
     type InstanceListEntry,
     type ContextRecord,
     type ToolCallRecord,
@@ -345,7 +345,7 @@ function ToolCallActivity({
         decision: "approve" | "deny",
     ): Promise<void>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
-    onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    onLoadImage(imageRef: string): Promise<ArtifactImageContent>;
     onRefresh(): Promise<void>;
 }) {
     const runtimeState = useDomainSnapshot(domains.runtime(call.instance));

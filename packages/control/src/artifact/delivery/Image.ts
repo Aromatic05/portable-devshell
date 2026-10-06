@@ -6,7 +6,7 @@ import {
 } from "@portable-devshell/shared";
 import type {
     ArtifactImageMediaType,
-    ArtifactStoredImageResult,
+    ArtifactImageContent,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
 } from "@portable-devshell/shared";
@@ -59,7 +59,7 @@ export class ArtifactImageService {
         await this.#store.initialize();
     }
 
-    async read(imageRef: string): Promise<ArtifactStoredImageResult> {
+    async read(imageRef: string): Promise<ArtifactImageContent> {
         return await this.#store.read(imageRef);
     }
 
@@ -299,7 +299,7 @@ export class ArtifactImageStore {
     async persist(
         bytes: Buffer,
         mediaType: ArtifactImageMediaType,
-    ): Promise<ArtifactStoredImageResult> {
+    ): Promise<ArtifactImageContent> {
         const blake3 = await artifactBlake3(bytes);
         const imageRef = `${blake3}.${extensionForMediaType(mediaType)}`;
         const directory = join(this.#root, blake3.slice(0, 2));
@@ -315,7 +315,7 @@ export class ArtifactImageStore {
         return result(blake3, imageRef, mediaType, bytes);
     }
 
-    async read(imageRef: string): Promise<ArtifactStoredImageResult> {
+    async read(imageRef: string): Promise<ArtifactImageContent> {
         const parsed = parseImageRef(imageRef);
         const path = join(this.#root, parsed.blake3.slice(0, 2), imageRef);
         let bytes: Buffer;
@@ -399,7 +399,7 @@ function result(
     imageRef: string,
     mediaType: ArtifactImageMediaType,
     bytes: Buffer,
-): ArtifactStoredImageResult {
+): ArtifactImageContent {
     return {
         blake3,
         bytes: bytes.length,

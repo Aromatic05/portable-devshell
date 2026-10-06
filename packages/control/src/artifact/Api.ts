@@ -6,12 +6,11 @@ import type {
     ExtensionAssetProjectionResult,
 } from "@portable-devshell/extension/asset";
 import type {
+    ArtifactImageContent,
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
     ArtifactPayloadChunk,
-    ArtifactStoredImageResult,
-    ArtifactTransferCancelInput,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -80,7 +79,7 @@ export interface ArtifactShareAccess {
 }
 
 export interface ArtifactImageApi {
-    readImage(imageRef: string): Promise<ArtifactStoredImageResult>;
+    readImage(imageRef: string): Promise<ArtifactImageContent>;
     viewImage(
         input: ArtifactViewImageInput,
         defaultInstance: string,
@@ -101,9 +100,7 @@ export interface ArtifactManagementApi {
     ): Promise<ArtifactTransferResult>;
     getTransfer(transferId: string): ArtifactTransferRecord;
     listTransfers(): ArtifactTransferRecord[];
-    cancelTransfer(
-        input: ArtifactTransferCancelInput | string,
-    ): Promise<ArtifactTransferResult>;
+    cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
     waitForTransfer(transferId: string): Promise<ArtifactTransferRecord>;
 }
 

@@ -15,8 +15,6 @@ export interface ArtifactImageContent {
     mediaType: ArtifactImageMediaType;
 }
 
-export type ArtifactStoredImageResult = ArtifactImageContent;
-
 export type ArtifactViewImageInput =
     | {
           handle: string;
@@ -114,13 +112,11 @@ export function recoverArtifactTransferStatus(
     return "interrupted";
 }
 
-export type ArtifactSourceType = "artifact" | "file" | "directory";
-
 export interface ArtifactSourceDescriptor {
     handle?: string;
     instance: string;
     path?: string;
-    type?: ArtifactSourceType;
+    type?: "artifact" | "file" | "directory";
     workspace?: string;
 }
 
@@ -130,26 +126,22 @@ export interface ArtifactTargetDescriptor {
     workspace?: string;
 }
 
-export interface ArtifactPayloadDescriptorBase {
+export type ArtifactPayloadDescriptor = {
     mediaType: string;
     name: string;
     payloadBlake3: string;
     payloadBytes: number;
-}
-
-export interface ArtifactBytePayloadDescriptor extends ArtifactPayloadDescriptorBase {
-    type: "stdout" | "stderr" | "file";
-}
-
-export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescriptorBase {
-    entryCount: number;
-    logicalBytes: number;
-    manifestBlake3: string;
-    type: "directoryArchive";
-}
-
-export type ArtifactPayloadDescriptor =
-    ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
+} & (
+    | {
+          type: "stdout" | "stderr" | "file";
+      }
+    | {
+          entryCount: number;
+          logicalBytes: number;
+          manifestBlake3: string;
+          type: "directoryArchive";
+      }
+);
 
 export interface ArtifactPayloadChunk {
     bytes: Uint8Array;
@@ -161,7 +153,7 @@ export interface ArtifactPayloadChunk {
     totalBytes: number;
 }
 
-export type ArtifactTransferSourceInput =
+export type ArtifactTransferStartInput = (
     | {
           handle: string;
           instance?: string;
@@ -172,25 +164,14 @@ export type ArtifactTransferSourceInput =
           instance?: string;
           sourcePath: string;
           sourceWorkspace: string;
-      };
-
-export type ArtifactTransferStartInput = ArtifactTransferSourceInput & {
+      }
+) & {
     operation: "start";
     overwrite?: boolean;
     targetInstance: string;
     targetPath: string;
     targetWorkspace: string;
 };
-
-export interface ArtifactTransferLookupInput {
-    operation: "status";
-    transferId: string;
-}
-
-export interface ArtifactTransferCancelInput {
-    operation: "cancel";
-    transferId: string;
-}
 
 export interface ArtifactTransferFailure {
     code: string;

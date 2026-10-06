@@ -4,12 +4,10 @@ import {
 } from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
+    ArtifactImageContent,
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
-    ArtifactStoredImageResult,
-    ArtifactTransferCancelInput,
-    ArtifactTransferLookupInput,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -136,7 +134,7 @@ export class ArtifactService implements ArtifactApi {
         return await this.#imageService.view(input, defaultInstance, signal);
     }
 
-    async readImage(imageRef: string): Promise<ArtifactStoredImageResult> {
+    async readImage(imageRef: string): Promise<ArtifactImageContent> {
         if (!this.#initialized) {
             throw new Error("ArtifactService is not initialized.");
         }
@@ -331,16 +329,8 @@ export class ArtifactService implements ArtifactApi {
         }
     }
 
-    async lookupTransfer(
-        input: ArtifactTransferLookupInput,
-    ): Promise<ArtifactTransferResult> {
-        return await this.#transferService.lookupTransfer(input);
-    }
-
-    async cancelTransfer(
-        input: ArtifactTransferCancelInput | string,
-    ): Promise<ArtifactTransferResult> {
-        return await this.#transferService.cancelTransfer(input);
+    async cancelTransfer(transferId: string): Promise<ArtifactTransferResult> {
+        return await this.#transferService.cancelTransfer(transferId);
     }
 
     async waitForTransfer(transferId: string): Promise<ArtifactTransferRecord> {
