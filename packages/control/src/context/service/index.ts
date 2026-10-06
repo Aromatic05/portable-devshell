@@ -4,8 +4,7 @@ import type {
 } from "../Api.js";
 import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort } from "../Api.js";
-import type { InstanceLease } from "../../instance/model/Lifecycle.js";
-import type { InstanceRegistry } from "../../instance/model/Registry.js";
+import type { InstanceLease, InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextService {
     readonly registry: ContextRecordSourcePort;

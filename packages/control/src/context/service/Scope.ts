@@ -14,8 +14,7 @@ import type {
     PreparedEnvironmentFacts,
 } from "../Api.js";
 import { ContextCleanupService } from "./Cleanup.js";
-import type { InstanceLease } from "../../instance/model/Lifecycle.js";
-import type { InstanceRegistry } from "../../instance/model/Registry.js";
+import type { InstanceLease, InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;

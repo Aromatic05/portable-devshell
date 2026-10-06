@@ -26,7 +26,7 @@ import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
-import { createContextRuntime } from "@portable-devshell/core";
+import { createContextRuntime } from "../../context/index.js";
 import { McpControlModule } from "../mcp/Module.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
 import { ConfigEditorCoordinator } from "../../config/editor/index.js";

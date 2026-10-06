@@ -45,8 +45,8 @@ import { installArtifactTools } from "../../artifact/tool/index.js";
 import {
     createContextRouteModule,
     installContextTools,
-    type ContextRuntime,
-} from "@portable-devshell/core";
+} from "../../context/Public.js";
+import type { ContextRuntime } from "../../context/Api.js";
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/index.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
