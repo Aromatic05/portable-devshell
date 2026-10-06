@@ -112,6 +112,7 @@ export class Instance {
 
     update(instance: ControlInstanceConfig): void {
         this.#config = toInstanceConfig(instance);
+        this.#state.approval.setPolicy(instance.approvalPolicy);
     }
 
     host(extensionPorts: readonly ControlPortDefinition[] = []): ControlHostDefinition {

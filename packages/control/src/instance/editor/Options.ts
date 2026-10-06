@@ -21,8 +21,4 @@ export interface InstanceEditorCoordinatorOptions {
     ) => Promise<void>;
     retireRuntimeInstance(descriptor: Instance): Promise<void>;
     finalizeRuntimeInstance(descriptor: Instance): Promise<void>;
-    updateApprovalPolicy(
-        instance: string,
-        policy: ControlConfig["instances"][number]["approvalPolicy"],
-    ): Promise<void>;
 }

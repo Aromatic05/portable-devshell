@@ -51,7 +51,6 @@ export class InstanceReconfigurationCoordinator {
     readonly #cleanup: InstanceCleanupDebt;
     readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
-    readonly #updateApprovalPolicy: InstanceEditorCoordinatorOptions["updateApprovalPolicy"];
 
     constructor(
         options: InstanceEditorCoordinatorOptions,
@@ -67,7 +66,6 @@ export class InstanceReconfigurationCoordinator {
         this.#cleanup = cleanup;
         this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
-        this.#updateApprovalPolicy = options.updateApprovalPolicy;
     }
 
     async createUpdatePlan(
@@ -414,12 +412,6 @@ export class InstanceReconfigurationCoordinator {
                 failures.push(error);
             }
         }
-        if (restored !== undefined) {
-            await this.#updateApprovalPolicy(
-                existing.name,
-                existing.approvalPolicy,
-            ).catch((error) => failures.push(error));
-        }
         this.#instanceChanges.publish("registry");
         if (
             preparedDescriptor !== undefined &&
@@ -498,7 +490,6 @@ export class InstanceReconfigurationCoordinator {
         }
         descriptor.update(instance);
         await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
-        await this.#updateApprovalPolicy(instance.name, instance.approvalPolicy);
         this.#instanceChanges.publish("registry");
     }
 

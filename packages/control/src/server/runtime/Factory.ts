@@ -117,11 +117,6 @@ export class ControlRuntimeFactory {
                 createRuntimeInstance: (config) => options.state.instanceRuntimes.create(config),
                 retireRuntimeInstance: (descriptor) => options.state.instanceRuntimes.retire(descriptor),
                 finalizeRuntimeInstance: (descriptor) => options.state.instanceRuntimes.finalize(descriptor),
-                updateApprovalPolicy: async (name, policy) => {
-                    const descriptor = options.state.instances.get(name);
-                    if (descriptor !== undefined)
-                        options.state.instanceRuntimes.get(descriptor).approval.setPolicy(policy);
-                },
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
                 detachContextInstance: async (instance) => {
