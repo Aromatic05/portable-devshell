@@ -19,12 +19,6 @@ export class McpEndpointFactory {
             path: descriptor.mcpPath,
             worker: {
                 snapshot: () => descriptor.worker.snapshot(),
-                appendMcpSessionClosed: async (sessionId) => {
-                    await descriptor.worker.appendControlEvent("mcp.sessionClosed", { sessionId });
-                },
-                appendMcpSessionOpened: async (sessionId) => {
-                    await descriptor.worker.appendControlEvent("mcp.sessionOpened", { sessionId });
-                },
                 appendMcpToolCalled: async (toolName, context) => {
                     await descriptor.worker.appendControlEvent("mcp.toolCalled", {
                         toolName,
@@ -32,12 +26,6 @@ export class McpEndpointFactory {
                         ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
                     });
                 },
-                prepareExtensionResource: (input) => descriptor.worker.prepareExtensionResource(input),
-                prepareWorkspace: (workspace) => descriptor.worker.prepareWorkspace(workspace),
-                readAlerts: (workspace) => descriptor.worker.readAlerts(workspace),
-                releaseAlerts: (workspace) => descriptor.worker.releaseAlerts(workspace),
-                touchAlerts: (workspace) => descriptor.worker.touchAlerts(workspace),
-                touchTemporaryDirectory: (path) => descriptor.worker.touchTemporaryDirectory(path),
             },
             workspaceEnabled,
         };
