@@ -2,6 +2,7 @@ import {
     bootstrapToolNamespace,
     toolNamespace,
     type ContextTransport,
+    type ToolCallApi,
     type ToolCallHookValue,
     type JsonValue,
     type ContextEnvironment,
@@ -28,7 +29,7 @@ import {
     readMcpProvenanceInput,
     readMcpRoutedInput,
 } from "../tool/Input.js";
-import type { McpEndpointCallContext, ToolCallIngressPort } from "../call/Port.js";
+import type { McpEndpointCallContext } from "../call/Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../call/Boundary.js";
 import type { McpToolProvenanceRecorder } from "../tool/Provenance.js";
 import { mcpEndpointToolNotExposed } from "../call/Boundary.js";
@@ -41,7 +42,7 @@ export interface McpEndpointDispatchOptions {
     contextSelector?: McpContextSelector;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
-    tools: ToolCallIngressPort;
+    tools: ToolCallApi;
 }
 
 interface McpAcceptedCall {
@@ -55,7 +56,7 @@ export class McpEndpointDispatch {
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #toolProvenance?: McpToolProvenanceRecorder;
-    readonly #tools: ToolCallIngressPort;
+    readonly #tools: ToolCallApi;
 
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;

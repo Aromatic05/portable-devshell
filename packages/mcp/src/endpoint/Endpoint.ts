@@ -2,6 +2,7 @@ import type {
     ContextTransport,
     ControlMcpContextMode,
     JsonValue,
+    ToolCallApi,
     ToolDefinition,
 } from "@portable-devshell/shared";
 
@@ -13,10 +14,7 @@ import { McpExtensionRegistry } from "./extension/Registry.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
-import type {
-    McpEndpointCallContext,
-    ToolCallIngressPort,
-} from "./call/Port.js";
+import type { McpEndpointCallContext } from "./call/Port.js";
 import type { McpEndpointResult } from "./call/Boundary.js";
 
 export type { McpEndpointCallContext } from "./call/Port.js";
@@ -29,7 +27,7 @@ export interface McpEndpointOptions {
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
     toolSource: McpToolSource;
-    tools: ToolCallIngressPort;
+    tools: ToolCallApi;
 }
 
 export class McpEndpoint {

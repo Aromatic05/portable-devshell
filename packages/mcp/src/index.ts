@@ -3,8 +3,7 @@ export { type McpAuthConfig, type McpOAuthApprovalConfig } from "./auth/Config.j
 export { McpOAuthProtectedResource } from "./auth/oauth/Resource.js";
 export { McpOAuthApprovalService } from "./auth/oauth/interaction/Approval.js";
 export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } from "./auth/oauth/provider/Provider.js";
-export { type ToolCallIngressPort } from "./endpoint/call/Port.js";
 export { type McpToolProvenanceRecorder } from "./endpoint/tool/Provenance.js";
-export { type McpToolSource, type McpToolSourceEntry } from "./endpoint/tool/Source.js";
+export { type McpToolSource } from "./endpoint/tool/Source.js";
 export { McpHost, type McpHostInstanceConfig, McpRuntimeState } from "./host/Host.js";
 export { HttpHost } from "./host/Http.js";

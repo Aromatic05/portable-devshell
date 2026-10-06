@@ -1,4 +1,8 @@
-import type { ContextTransport, ControlMcpContextMode } from "@portable-devshell/shared";
+import type {
+    ContextTransport,
+    ControlMcpContextMode,
+    ToolCallApi,
+} from "@portable-devshell/shared";
 import type {
     McpAuthConfig,
     McpOAuth2Config,
@@ -8,7 +12,6 @@ import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpoint } from "../endpoint/Endpoint.js";
-import type { ToolCallIngressPort } from "../endpoint/call/Port.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import type { McpToolSource } from "../endpoint/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
@@ -38,7 +41,7 @@ export interface McpHostConfig {
 }
 
 export class McpRuntimeState {
-    readonly tools: ToolCallIngressPort;
+    readonly tools: ToolCallApi;
     readonly context: ContextTransport;
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
@@ -49,7 +52,7 @@ export class McpRuntimeState {
 
     constructor(config: {
         context: ContextTransport;
-        tools: ToolCallIngressPort;
+        tools: ToolCallApi;
         storageDir?: string;
         mcpAppLeaseFile?: string;
     }) {
