@@ -3,8 +3,8 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ArtifactHostPayloadStore } from "../../../../../src/artifact/host/storage/PayloadStore.ts";
-import { ArtifactHostReceiveStore } from "../../../../../src/artifact/host/storage/ReceiveStore.ts";
+import { ArtifactHostPayloadStore } from "../../../../../src/artifact/host/PayloadStore.ts";
+import { ArtifactHostReceiveStore } from "../../../../../src/artifact/host/ReceiveStore.ts";
 import type { ArtifactHostAccessContext } from "../../../../../src/artifact/host/Model.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 

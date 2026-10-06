@@ -14,15 +14,15 @@ import {
     readImagePayloadSourceInput,
     readSourceInstance,
     sourceDescriptor,
-} from "../Source.js";
+} from "./Source.js";
 import {
     DEFAULT_ARTIFACT_CHUNK_BYTES,
     requireArtifactEndpoint,
-} from "../Service.js";
-import type { ArtifactServiceOptions } from "../Service.js";
+} from "./Service.js";
+import type { ArtifactServiceOptions } from "./Service.js";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { artifactBlake3 } from "../host/Hash.js";
+import { artifactBlake3 } from "./host/Hash.js";
 
 export const MAX_ARTIFACT_IMAGE_BYTES = 10 * 1024 * 1024;
 

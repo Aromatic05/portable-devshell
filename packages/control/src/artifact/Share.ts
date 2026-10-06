@@ -11,12 +11,12 @@ import {
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { ArtifactRecordStore } from "../RecordStore.js";
+import { ArtifactRecordStore } from "./RecordStore.js";
 import {
     readSharePayloadSourceInput,
     readSourceInstance,
     sourceDescriptor,
-} from "../Source.js";
+} from "./Source.js";
 import {
     ARTIFACT_RECORD_VERSION,
     DEFAULT_ARTIFACT_SHARE_TTL_SECONDS,
@@ -25,7 +25,7 @@ import {
     type ArtifactEventRecorder,
     type ArtifactServiceOptions,
     type StoredArtifactShare,
-} from "../Service.js";
+} from "./Service.js";
 export interface ArtifactShareAccess {
     payloadId: string;
     share: ArtifactShareResult;

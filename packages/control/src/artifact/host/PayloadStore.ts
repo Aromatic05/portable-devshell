@@ -27,9 +27,9 @@ import {
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
-import { createArtifactDirectoryArchive } from "../../Archive.js";
-import { artifactHashFile, createArtifactHasher } from "../Hash.js";
-import type { ArtifactHostAccessContext } from "../Model.js";
+import { createArtifactDirectoryArchive } from "../Archive.js";
+import { artifactHashFile, createArtifactHasher } from "./Hash.js";
+import type { ArtifactHostAccessContext } from "./Model.js";
 
 const RECORD_VERSION = 1;
 const MAX_READ_BYTES = 1024 * 1024;

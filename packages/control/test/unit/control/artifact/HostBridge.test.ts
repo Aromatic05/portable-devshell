@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import type { ArtifactPayloadDescriptor } from "@portable-devshell/shared";
-import { ArtifactHostBridge } from "../../../../src/artifact/host/Bridge.ts";
+import { ArtifactHostBridge } from "../../../../src/artifact/host/index.ts";
 import { type ArtifactHostAccessContext } from "../../../../src/artifact/host/Model.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 

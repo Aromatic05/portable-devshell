@@ -10,7 +10,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
-import { ArtifactHostBridge } from "./host/Bridge.js";
+import { ArtifactHostBridge } from "./host/index.js";
 import { ArtifactService } from "./Service.js";
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";

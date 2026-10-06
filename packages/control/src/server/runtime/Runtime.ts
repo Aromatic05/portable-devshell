@@ -44,7 +44,7 @@ import type { ControlTransportListener } from "../transport/channel/Listener.js"
 import { ControlSocketListener } from "../transport/channel/Socket.js";
 import { ControlRouteRegistry } from "../Route.js";
 import type { ArtifactRuntime } from "../../artifact/Api.js";
-import { installArtifactTools } from "../../artifact/Public.js";
+import { installArtifactTools } from "../../artifact/tool/index.js";
 import {
     createContextRouteModule,
     installContextTools,

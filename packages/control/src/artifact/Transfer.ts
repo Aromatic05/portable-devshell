@@ -15,25 +15,25 @@ import type {
     JsonValue,
     WorkerArtifactApi,
 } from "@portable-devshell/shared";
-import { ArtifactRecordStore } from "../RecordStore.js";
+import { ArtifactRecordStore } from "./RecordStore.js";
 import {
     readSourceInstance,
     readTransferPayloadSourceInput,
     sourceTypeFromPayload,
     validateTransferStart,
-} from "../Source.js";
+} from "./Source.js";
 import {
     ARTIFACT_RECORD_VERSION,
     ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
     DEFAULT_ARTIFACT_CHUNK_BYTES,
     requireArtifactEndpoint,
-} from "../Service.js";
+} from "./Service.js";
 import type {
     ArtifactEventRecorder,
     ArtifactServiceOptions,
     ArtifactServiceSchedule,
     StoredArtifactTransfer,
-} from "../Service.js";
+} from "./Service.js";
 
 export interface ArtifactTransferServiceOptions {
     chunkBytes?: number;

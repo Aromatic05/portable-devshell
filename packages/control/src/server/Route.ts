@@ -16,7 +16,7 @@ import {
 } from "@portable-devshell/core";
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";
-import { createArtifactRouteModule } from "../artifact/Public.js";
+import { createArtifactRouteModule } from "../artifact/route/index.js";
 import {
     createCliRouteModule,
     type CliCommandPort,

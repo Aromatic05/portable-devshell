@@ -9,7 +9,7 @@ import {
 import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
 import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
-import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
+import { installArtifactTools } from "../../../src/artifact/tool/index.ts";
 import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
 
 function createHooks() {

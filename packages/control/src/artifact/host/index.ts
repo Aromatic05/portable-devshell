@@ -6,8 +6,8 @@ import {
 } from "@portable-devshell/shared";
 
 import { artifactBlake3 } from "./Hash.js";
-import { ArtifactHostPayloadStore } from "./storage/PayloadStore.js";
-import { ArtifactHostReceiveStore } from "./storage/ReceiveStore.js";
+import { ArtifactHostPayloadStore } from "./PayloadStore.js";
+import { ArtifactHostReceiveStore } from "./ReceiveStore.js";
 import type {
     ArtifactHostAccessContext,
     ArtifactHostBridgeOptions,

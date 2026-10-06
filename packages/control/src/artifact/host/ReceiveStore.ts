@@ -18,8 +18,8 @@ import {
     type ArtifactPayloadDescriptor,
 } from "@portable-devshell/shared";
 
-import { extractArtifactDirectoryArchive } from "../../Archive.js";
-import { artifactHashFile } from "../Hash.js";
+import { extractArtifactDirectoryArchive } from "../Archive.js";
+import { artifactHashFile } from "./Hash.js";
 
 const RECORD_VERSION = 1;
 const DEFAULT_MAX_ACTIVE_RECEIVES = 256;

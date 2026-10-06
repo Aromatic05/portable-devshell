@@ -24,12 +24,12 @@ import {
     DEFAULT_ARTIFACT_EVENT_HISTORY_LIMIT,
 } from "./EventLog.js";
 import { ArtifactRecordStore } from "./RecordStore.js";
-import { ArtifactImageService } from "./delivery/Image.js";
+import { ArtifactImageService } from "./Image.js";
 import {
     ArtifactShareService,
     type ArtifactShareAccess,
-} from "./delivery/Share.js";
-import { ArtifactTransferService } from "./delivery/Transfer.js";
+} from "./Share.js";
+import { ArtifactTransferService } from "./Transfer.js";
 import type { ArtifactApi } from "./Api.js";
 
 export class ArtifactService implements ArtifactApi {
