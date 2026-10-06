@@ -25,12 +25,12 @@ import {
 } from "./EventLog.js";
 import { ArtifactRecordStore } from "./RecordStore.js";
 import { ArtifactImageService } from "./delivery/Image.js";
-import { ArtifactShareService } from "./delivery/Share.js";
+import {
+    ArtifactShareService,
+    type ArtifactShareAccess,
+} from "./delivery/Share.js";
 import { ArtifactTransferService } from "./delivery/Transfer.js";
-import type {
-    ArtifactApi,
-    ArtifactShareAccess,
-} from "./Api.js";
+import type { ArtifactApi } from "./Api.js";
 
 export class ArtifactService implements ArtifactApi {
     readonly #eventLog: ArtifactEventLog;

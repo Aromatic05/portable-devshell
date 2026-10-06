@@ -128,6 +128,32 @@ for (const owner of coreDomains) {
     });
 }
 
+const controlPublicDomains = [
+    "artifact",
+    "debug",
+    "extension",
+    "instance",
+    "overview",
+    "toolcall",
+];
+for (const owner of controlPublicDomains) {
+    rules.push({
+        name: `${owner}-uses-control-domain-public-entries`,
+        roots: [domain(`packages/control/src/${owner}`)],
+        forbidden: (candidate, entry) =>
+            controlPublicDomains.some((target) => {
+                if (
+                    target === owner ||
+                    !under(candidate, domain(`packages/control/src/${target}`))
+                ) return false;
+                const entryFile = entry.typeOnly ? "Api" : "Public";
+                return candidate !== domain(
+                    `packages/control/src/${target}/${entryFile}`,
+                );
+            }),
+    });
+}
+
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 for (const sourceRoot of rules.flatMap((rule) => rule.roots)) {

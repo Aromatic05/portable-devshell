@@ -11,7 +11,6 @@ import type {
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
-    ArtifactPayloadChunk,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -19,7 +18,6 @@ import type {
     ArtifactViewImageResult,
     ControlConfig,
     ControlPathHome,
-    JsonValue,
     MessageStream,
 } from "@portable-devshell/shared";
 
@@ -67,12 +65,6 @@ export interface ArtifactDirectoryArchiveLimits {
     maxLogicalBytes?: number;
 }
 
-export interface ArtifactShareAccess {
-    payloadId: string;
-    share: ArtifactShareResult;
-    sourceInstance: string;
-}
-
 export interface ArtifactImageApi {
     readImage(imageRef: string): Promise<ArtifactImageContent>;
     viewImage(
@@ -99,21 +91,6 @@ export interface ArtifactManagementApi {
     waitForTransfer(transferId: string): Promise<ArtifactTransferRecord>;
 }
 
-export interface ArtifactShareHttpApi {
-    resolveShare(token: string): Promise<ArtifactShareAccess>;
-    beginShareDownload(token: string): Promise<ArtifactShareAccess>;
-    readSharePayload(
-        access: ArtifactShareAccess,
-        offsetBytes: number,
-        maxBytes: number,
-    ): Promise<ArtifactPayloadChunk>;
-    finishShareDownload(
-        token: string,
-        completed: boolean,
-        details?: JsonValue,
-    ): Promise<void>;
-}
-
 export interface ArtifactRouteApi extends ArtifactImageApi, ArtifactManagementApi {
     snapshot(): ArtifactSnapshot;
     subscribe(
@@ -123,9 +100,7 @@ export interface ArtifactRouteApi extends ArtifactImageApi, ArtifactManagementAp
     ): Promise<void>;
 }
 
-export interface ArtifactApi
-    extends ArtifactRouteApi,
-        ArtifactShareHttpApi {
+export interface ArtifactApi extends ArtifactRouteApi {
     retireInstance(instance: string): Promise<void>;
 }
 

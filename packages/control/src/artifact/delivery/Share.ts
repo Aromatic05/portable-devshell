@@ -26,7 +26,11 @@ import {
     type ArtifactServiceOptions,
     type StoredArtifactShare,
 } from "../Service.js";
-import type { ArtifactShareAccess } from "../Api.js";
+export interface ArtifactShareAccess {
+    payloadId: string;
+    share: ArtifactShareResult;
+    sourceInstance: string;
+}
 
 export interface ArtifactShareServiceOptions {
     recordEvent: ArtifactEventRecorder;

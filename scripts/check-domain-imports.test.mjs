@@ -41,3 +41,30 @@ test("domain import checker rejects instance-to-task and toolcall-to-approval im
         ]);
     }
 });
+
+test("domain import checker rejects Control domain private imports", async () => {
+    const extensionFixture = await mkdtemp(
+        join(root, "packages/control/src/extension/.domain-check-"),
+    );
+
+    try {
+        await writeFile(
+            join(extensionFixture, "Rejects.ts"),
+            'import "../../artifact/Archive.js";\n',
+        );
+
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+
+        assert.equal(result.status, 1);
+        assert.match(
+            result.stderr,
+            /extension-uses-control-domain-public-entries/u,
+        );
+    } finally {
+        await rm(extensionFixture, { force: true, recursive: true });
+    }
+});
