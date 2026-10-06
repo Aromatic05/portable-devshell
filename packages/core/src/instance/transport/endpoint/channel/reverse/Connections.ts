@@ -1,4 +1,4 @@
-import type { ReverseConnectionIdentity } from "../../../../Api.js";
+import type { ReverseConnectionIdentity } from "./Api.js";
 import type { Channel } from "@portable-devshell/shared";
 import {
     createRemoteError,
@@ -10,7 +10,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ReverseCredentialStore } from "./credential/Store.js";
-import type { ReverseInstanceLookup, ReverseInstance } from "../../../../Api.js";
+import type { ReverseInstanceLookup, ReverseInstance } from "./Api.js";
 import { ReverseSseChannel } from "./SseChannel.js";
 
 interface ActiveReverseConnection {

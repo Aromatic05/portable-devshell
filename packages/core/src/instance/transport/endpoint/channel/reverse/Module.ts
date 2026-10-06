@@ -1,4 +1,4 @@
-import type { ConnectionModuleOptions } from "../../../../Api.js";
+import type { ConnectionModuleOptions } from "./Api.js";
 import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 
 

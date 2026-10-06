@@ -17,7 +17,7 @@ import type {
     ReverseConnectionIdentity,
     ReverseHttpHost,
     ReverseInstanceLookup,
-} from "../../../../Api.js";
+} from "./Api.js";
 import { ReverseSseChannel } from "./SseChannel.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
 

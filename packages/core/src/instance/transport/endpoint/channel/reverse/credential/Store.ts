@@ -1,4 +1,7 @@
-import type { ReverseEnrollmentCredential, StoredReverseDeviceCode } from "../../../../../Api.js";
+import type {
+    ReverseEnrollmentCredential,
+    StoredReverseDeviceCode,
+} from "../Api.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
     access,
