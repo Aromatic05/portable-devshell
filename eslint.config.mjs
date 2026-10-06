@@ -162,6 +162,31 @@ const publicNoIndexImport = {
     },
 };
 
+const publicOwnerOnly = {
+    meta: {
+        type: "problem",
+        docs: { description: "keep Public.ts exports inside the owning domain" },
+        messages: {
+            forbidden: "Public.ts may only export runtime values owned by its own directory tree.",
+        },
+        schema: [],
+    },
+    create(context) {
+        const owner = dirname(context.filename).replaceAll("\\", "/");
+        const check = (node) => {
+            const source = node.source?.value;
+            if (typeof source !== "string") return;
+            const target = resolve(dirname(context.filename), source).replaceAll("\\", "/");
+            if (target === owner || target.startsWith(`${owner}/`)) return;
+            context.report({ messageId: "forbidden", node });
+        };
+        return {
+            ExportAllDeclaration: check,
+            ExportNamedDeclaration: check,
+        };
+    },
+};
+
 const noTypeImportFromPublic = {
     meta: {
         type: "problem",
@@ -182,6 +207,17 @@ const noTypeImportFromPublic = {
                     node.importKind === "type" ||
                     node.specifiers.some((specifier) => specifier.importKind === "type")
                 ) context.report({ messageId: "forbidden", node });
+            },
+            ExportNamedDeclaration(node) {
+                if (!isPublic(node.source?.value)) return;
+                if (
+                    node.exportKind === "type" ||
+                    node.specifiers.some((specifier) => specifier.exportKind === "type")
+                ) context.report({ messageId: "forbidden", node });
+            },
+            ExportAllDeclaration(node) {
+                if (isPublic(node.source.value) && node.exportKind === "type")
+                    context.report({ messageId: "forbidden", node });
             },
             TSImportType(node) {
                 const source = node.argument?.literal?.value ?? node.argument?.value;
@@ -244,6 +280,7 @@ const architecture = {
         "no-type-import-from-public": noTypeImportFromPublic,
         "public-explicit-exports": publicExplicitExports,
         "public-no-index-import": publicNoIndexImport,
+        "public-owner-only": publicOwnerOnly,
         "public-runtime-only": publicRuntimeOnly,
     },
 };
@@ -274,6 +311,7 @@ export default [
         rules: {
             "architecture/no-core-subpath-import": "error",
             "architecture/no-index-reexport": "error",
+            "architecture/no-type-import-from-public": "error",
         },
     },
     {
@@ -332,13 +370,8 @@ export default [
         rules: {
             "architecture/public-explicit-exports": "error",
             "architecture/public-no-index-import": "error",
+            "architecture/public-owner-only": "error",
             "architecture/public-runtime-only": "error",
-        },
-    },
-    {
-        files: ["packages/core/src/**/*.{ts,tsx,mts,cts}"],
-        rules: {
-            "architecture/no-type-import-from-public": "error",
         },
     },
     {
