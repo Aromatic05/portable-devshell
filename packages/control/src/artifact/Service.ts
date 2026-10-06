@@ -5,6 +5,7 @@ import {
 import type {
     ArtifactEventType,
     ArtifactImageContent,
+    ArtifactSnapshot,
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
@@ -29,7 +30,6 @@ import { ArtifactTransferService } from "./delivery/Transfer.js";
 import type {
     ArtifactApi,
     ArtifactShareAccess,
-    ArtifactSnapshot,
 } from "./Api.js";
 
 export class ArtifactService implements ArtifactApi {

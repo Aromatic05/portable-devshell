@@ -33,14 +33,6 @@ export interface ArtifactViewImageResult extends ArtifactImageContent {
     source: ArtifactSourceDescriptor;
 }
 
-const artifactShareStates = [
-    "active",
-    "exhausted",
-    "expired",
-    "revoked",
-] as const;
-export type ArtifactShareState = (typeof artifactShareStates)[number];
-
 export type ArtifactShareInput =
     | {
           expiresInSeconds?: number;
@@ -68,7 +60,7 @@ export interface ArtifactShareResult {
     mediaType: string;
     shareId: string;
     source: ArtifactSourceDescriptor;
-    state: ArtifactShareState;
+    state: "active" | "exhausted" | "expired" | "revoked";
     url: string;
 }
 
@@ -173,16 +165,14 @@ export type ArtifactTransferStartInput = (
     targetWorkspace: string;
 };
 
-export interface ArtifactTransferFailure {
-    code: string;
-    message: string;
-    retryable: boolean;
-}
-
 export interface ArtifactTransferRecord {
     completedAt?: string;
     createdAt: string;
-    failure?: ArtifactTransferFailure;
+    failure?: {
+        code: string;
+        message: string;
+        retryable: boolean;
+    };
     payload?: ArtifactPayloadDescriptor;
     source: ArtifactSourceDescriptor;
     startedAt?: string;

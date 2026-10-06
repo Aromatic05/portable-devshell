@@ -7,6 +7,7 @@ import type {
 } from "@portable-devshell/extension/asset";
 import type {
     ArtifactImageContent,
+    ArtifactSnapshot,
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
@@ -64,12 +65,6 @@ export interface ArtifactDirectoryArchiveLimits {
     maxEntries?: number;
     maxFileBytes?: number;
     maxLogicalBytes?: number;
-}
-
-export interface ArtifactSnapshot {
-    lastSeq: number;
-    shares: ArtifactShareResult[];
-    transfers: ArtifactTransferRecord[];
 }
 
 export interface ArtifactShareAccess {

@@ -9,7 +9,6 @@ import {
 } from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
-    ArtifactTransferFailure,
     ArtifactTransferRecord,
     ArtifactTransferResult,
     ArtifactTransferStartInput,
@@ -940,7 +939,7 @@ function validatePayloadChunk(
     }
 }
 
-function failureFromError(error: unknown): ArtifactTransferFailure {
+function failureFromError(error: unknown) {
     const body = toRemoteErrorBody(error);
     if (body !== undefined) {
         return {
