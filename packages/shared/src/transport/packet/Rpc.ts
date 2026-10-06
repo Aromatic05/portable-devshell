@@ -15,11 +15,6 @@ export interface RpcContext {
     readonly peer: Address;
     readonly requestId: string;
     readonly signal: AbortSignal;
-    request<T = Message>(
-        method: string,
-        message?: Message,
-        signal?: AbortSignal,
-    ): Promise<T>;
     afterReply(action: () => Promise<void> | void): void;
 }
 
@@ -90,15 +85,7 @@ export class Rpc {
     ): Promise<T> {
         if (!(this.#target instanceof Connection))
             throw new Error("RPC request requires a Connection.");
-        return await this.#requestTo(this.#target, method, message, signal);
-    }
-
-    async #requestTo<T = Message>(
-        connection: Connection,
-        method: string,
-        message?: Message,
-        signal?: AbortSignal,
-    ): Promise<T> {
+        const connection = this.#target;
         signal?.throwIfAborted();
         const id = crypto.randomUUID();
         const response = new Promise<Message | undefined>((resolve, reject) =>
@@ -222,8 +209,6 @@ export class Rpc {
                     afterReply: (action) => afterReply.push(action),
                     local,
                     peer,
-                    request: (method, message, signal) =>
-                        this.#requestTo(connection, method, message, signal),
                     requestId: packet.id,
                     signal: controller.signal,
                 });

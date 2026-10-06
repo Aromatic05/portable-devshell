@@ -12,7 +12,7 @@ export * from "./endpoint/extension/Registry.js";
 export * from "./endpoint/extension/McpApp.js";
 export * from "./endpoint/call/Port.js";
 export * from "./endpoint/tool/Catalog.js";
-export * from "./endpoint/tool/Registry.js";
+export * from "./endpoint/tool/Source.js";
 export * from "./endpoint/tool/Metadata.js";
 export * from "./endpoint/tool/Schema.js";
 

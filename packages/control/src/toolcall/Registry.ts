@@ -1,32 +1,73 @@
+import {
+    type ToolCallHookContributor,
+    type ToolCallHooks,
+    type ToolCallRegistration,
+    type ToolCallReviewHook,
+    type ToolCallExecutor,
+    type ToolNameHandle,
+} from "@portable-devshell/core/toolcall";
 import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
 
-export const mcpAllInstances = "*" as const;
+export const allToolCallInstances = "*" as const;
 
-export type McpToolRegistrationScope = string;
-
-export interface McpToolRegistryEntry {
+export interface ToolCallDefinitionEntry {
     definition: ToolDefinition;
-    scope: McpToolRegistrationScope;
+    scope: string;
 }
 
-export interface McpToolRegistration {
+export interface ToolCallDefinitionRegistration {
     replace(definitions: readonly ToolDefinition[]): void;
     dispose(): void;
 }
 
 interface StoredRegistration {
-    readonly id: symbol;
     definitions: Map<string, ToolDefinition>;
-    readonly scope: McpToolRegistrationScope;
+    readonly id: symbol;
+    readonly scope: string;
 }
 
-export class McpToolRegistry {
+export class ToolCallRegistry implements ToolCallRegistration {
+    #hooks?: ToolCallHooks;
     readonly #registrations = new Map<symbol, StoredRegistration>();
 
+    bind(hooks: ToolCallHooks): () => void {
+        if (this.#hooks !== undefined)
+            throw new Error("Control ToolCall registry is already bound.");
+        this.#hooks = hooks;
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            if (this.#hooks === hooks) this.#hooks = undefined;
+        };
+    }
+
+    registerContributor(contributor: ToolCallHookContributor): () => void {
+        return this.#requireHooks().registerContributor(contributor);
+    }
+
+    registerExecute(toolName: string, execute: ToolCallExecutor): () => void {
+        return this.#requireHooks().registerExecute(toolName, execute);
+    }
+
+    registerReview(review: ToolCallReviewHook): () => void {
+        return this.#requireHooks().registerReview(review);
+    }
+
+    registerToolName(toolName: string, handle: ToolNameHandle): () => void {
+        const definition = handle();
+        if (definition.name !== toolName)
+            throw new Error(
+                `Tool definition ${definition.name} does not match registered name ${toolName}.`,
+            );
+        const registration = this.register(allToolCallInstances, [definition]);
+        return () => registration.dispose();
+    }
+
     register(
-        scope: McpToolRegistrationScope,
+        scope: string,
         definitions: readonly ToolDefinition[],
-    ): McpToolRegistration {
+    ): ToolCallDefinitionRegistration {
         validateScope(scope);
         const id = Symbol(scope);
         const registration: StoredRegistration = {
@@ -45,7 +86,7 @@ export class McpToolRegistry {
             },
             replace: (next) => {
                 if (disposed)
-                    throw new Error("MCP tool registration is already disposed.");
+                    throw new Error("ToolCall definition registration is already disposed.");
                 const replacement: StoredRegistration = {
                     definitions: normalizeDefinitions(next),
                     id,
@@ -57,12 +98,12 @@ export class McpToolRegistry {
         };
     }
 
-    list(instance: string): readonly McpToolRegistryEntry[] {
+    list(instance: string): readonly ToolCallDefinitionEntry[] {
         validateInstance(instance);
-        const entries: McpToolRegistryEntry[] = [];
+        const entries: ToolCallDefinitionEntry[] = [];
         for (const registration of this.#registrations.values()) {
             if (
-                registration.scope !== mcpAllInstances &&
+                registration.scope !== allToolCallInstances &&
                 registration.scope !== instance
             )
                 continue;
@@ -76,10 +117,18 @@ export class McpToolRegistry {
         return entries;
     }
 
-    get(instance: string, toolName: string): McpToolRegistryEntry | undefined {
+    get(
+        instance: string,
+        toolName: string,
+    ): ToolCallDefinitionEntry | undefined {
         return this.list(instance).find(
             (entry) => entry.definition.name === toolName,
         );
+    }
+
+    #requireHooks(): ToolCallHooks {
+        if (this.#hooks !== undefined) return this.#hooks;
+        throw new Error("Control ToolCall registry is not bound.");
     }
 
     #assertNoConflicts(
@@ -87,19 +136,20 @@ export class McpToolRegistry {
         replacing?: symbol,
     ): void {
         for (const current of this.#registrations.values()) {
-            if (current.id === replacing || !scopesOverlap(current.scope, candidate.scope))
+            if (
+                current.id === replacing ||
+                !scopesOverlap(current.scope, candidate.scope)
+            )
                 continue;
             for (const toolName of candidate.definitions.keys()) {
                 if (!current.definitions.has(toolName)) continue;
                 throw new Error(
-                    `MCP tool ${toolName} is registered more than once for overlapping scopes ${current.scope} and ${candidate.scope}.`,
+                    `Tool ${toolName} is registered more than once for overlapping scopes ${current.scope} and ${candidate.scope}.`,
                 );
             }
         }
     }
 }
-
-export const mcpTools = new McpToolRegistry();
 
 function normalizeDefinitions(
     definitions: readonly ToolDefinition[],
@@ -109,7 +159,7 @@ function normalizeDefinitions(
         validateDefinition(definition);
         if (normalized.has(definition.name))
             throw new Error(
-                `MCP tool ${definition.name} is registered more than once in the same registration.`,
+                `Tool ${definition.name} is registered more than once in the same registration.`,
             );
         normalized.set(definition.name, structuredClone(definition));
     }
@@ -120,24 +170,24 @@ function validateDefinition(definition: ToolDefinition): void {
     const namespace = toolNamespace(definition.name);
     if (namespace === undefined || definition.group !== namespace)
         throw new Error(
-            `MCP tool ${definition.name} group ${definition.group} must match its namespace.`,
+            `Tool ${definition.name} group ${definition.group} must match its namespace.`,
         );
 }
 
 function validateScope(scope: string): void {
-    if (scope === mcpAllInstances) return;
+    if (scope === allToolCallInstances) return;
     validateInstance(scope);
 }
 
 function validateInstance(instance: string): void {
-    if (instance.length === 0 || instance === mcpAllInstances)
-        throw new Error("MCP tool instance scope must be a non-empty instance name.");
+    if (instance.length === 0 || instance === allToolCallInstances)
+        throw new Error("ToolCall instance scope must be a non-empty instance name.");
 }
 
 function scopesOverlap(left: string, right: string): boolean {
     return (
-        left === mcpAllInstances ||
-        right === mcpAllInstances ||
+        left === allToolCallInstances ||
+        right === allToolCallInstances ||
         left === right
     );
 }

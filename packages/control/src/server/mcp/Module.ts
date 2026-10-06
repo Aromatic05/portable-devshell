@@ -21,7 +21,7 @@ import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ArtifactModule } from "../../artifact/Module.js";
-import { McpToolNameTransport } from "./Tool.js";
+import type { ToolCallRegistry } from "../../toolcall/index.js";
 
 export interface McpControlModuleOptions {
     artifact: ArtifactModule;
@@ -30,6 +30,7 @@ export interface McpControlModuleOptions {
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     instances: InstanceRegistry;
+    toolRegistry: ToolCallRegistry;
 }
 
 export class McpControlModule {
@@ -43,7 +44,7 @@ export class McpControlModule {
     readonly #artifact: ArtifactModule;
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
-    readonly #toolNames: McpToolNameTransport;
+    readonly #toolRegistry: ToolCallRegistry;
     #toolCalls?: ToolCallApi;
     #applyWebConfig?: (
         previous: ControlConfig,
@@ -60,7 +61,7 @@ export class McpControlModule {
         this.#instances = options.instances;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
-        this.#toolNames = new McpToolNameTransport();
+        this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpRuntimeState({
             context: options.contextTransport,
             tools: { call: (...args) => {
@@ -97,6 +98,7 @@ export class McpControlModule {
             storageDir: options.controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,
+            toolSource: this.#toolRegistry,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
         if (this.#host !== undefined)
@@ -109,14 +111,6 @@ export class McpControlModule {
 
     setToolCalls(tools: ToolCallApi): void {
         this.#toolCalls = tools;
-    }
-
-    get registerToolName() {
-        return this.#toolNames.registerToolName;
-    }
-
-    async flushToolNames(): Promise<void> {
-        await this.#toolNames.flush();
     }
 
     get oauthApproval(): ControlConfig["mcp"]["oauth2"] {
@@ -147,6 +141,7 @@ export class McpControlModule {
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,
+            toolSource: this.#toolRegistry,
             mcpAppLeaseFile: this.#controlPaths.mcpAppLeasesFile,
         });
         const previous = this.#host;
@@ -272,7 +267,6 @@ export class McpControlModule {
     }
 
     async start(): Promise<void> {
-        await this.#toolNames.flush();
         await this.#host?.start();
     }
 
@@ -282,11 +276,6 @@ export class McpControlModule {
         await this.toolProvenance
             .flush()
             .catch((error) => failures.push(error));
-        try {
-            this.#toolNames.close();
-        } catch (error) {
-            failures.push(error);
-        }
         if (failures.length > 0) {
             throw new AggregateError(failures, "MCP module shutdown failed.");
         }

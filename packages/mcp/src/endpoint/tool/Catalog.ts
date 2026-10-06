@@ -28,11 +28,10 @@ import {
     withMcpInstanceTarget,
     withMcpProvenance,
 } from "./Input.js";
-import {
-    mcpTools,
-    type McpToolRegistry,
-    type McpToolRegistryEntry,
-} from "./Registry.js";
+import type {
+    McpToolSource,
+    McpToolSourceEntry,
+} from "./Source.js";
 
 export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
@@ -40,11 +39,11 @@ export interface McpEndpointCatalogOptions {
     bootstrapPresentationResourceUri?: string;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
-    registry?: McpToolRegistry;
+    source: McpToolSource;
 }
 
 export interface McpEndpointCatalogSnapshot {
-    entries: readonly McpToolRegistryEntry[];
+    entries: readonly McpToolSourceEntry[];
     instanceRoutingEnabled: boolean;
 }
 
@@ -54,7 +53,7 @@ export class McpEndpointCatalog {
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
-    readonly #registry: McpToolRegistry;
+    readonly #source: McpToolSource;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
 
     constructor(options: McpEndpointCatalogOptions) {
@@ -65,12 +64,12 @@ export class McpEndpointCatalog {
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
         this.#instanceRoutingEnabled = options.instanceRoutingEnabled === true;
-        this.#registry = options.registry ?? mcpTools;
+        this.#source = options.source;
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
         return {
-            entries: this.#registry.list(this.#instanceName),
+            entries: this.#source.list(this.#instanceName),
             instanceRoutingEnabled: this.#instanceRoutingEnabled,
         };
     }
@@ -88,11 +87,11 @@ export class McpEndpointCatalog {
         toolName: string,
         instanceName: string = this.#instanceName,
     ): ToolDefinition | undefined {
-        return this.#registry.get(instanceName, toolName)?.definition;
+        return this.#source.get(instanceName, toolName)?.definition;
     }
 
-    getEntry(toolName: string): McpToolRegistryEntry | undefined {
-        return this.#registry.get(this.#instanceName, toolName);
+    getEntry(toolName: string): McpToolSourceEntry | undefined {
+        return this.#source.get(this.#instanceName, toolName);
     }
 
     adapt(tool: ToolDefinition): McpTool {
@@ -158,7 +157,7 @@ export class McpEndpointCatalog {
     }
 
     #withRoutingTarget(
-        entry: McpToolRegistryEntry,
+        entry: McpToolSourceEntry,
         instanceRoutingEnabled: boolean,
     ): ToolDefinition {
         return instanceRoutingEnabled && entry.scope !== "*"

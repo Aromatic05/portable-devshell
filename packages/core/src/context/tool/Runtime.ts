@@ -1,4 +1,4 @@
-import type { ToolCallHooks } from "../../toolcall/Public.js";
+import type { ToolCallRegistration } from "../../toolcall/Public.js";
 import {
     contextErrorCodes,
     controlErrorCodes,
@@ -23,7 +23,7 @@ import {
 
 export function installContextTools(
     contexts: ContextApi,
-    hooks: ToolCallHooks,
+    hooks: ToolCallRegistration,
     options: {
         instances: InstanceRegistry;
         modelCommands?(instance: string): readonly string[];

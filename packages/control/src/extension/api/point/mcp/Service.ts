@@ -8,9 +8,7 @@ import {
 } from "@portable-devshell/extension/mcp";
 import {
     presentToolCallResult,
-    type ToolCallHooks,
 } from "@portable-devshell/core/toolcall";
-import { mcpAllInstances, mcpTools } from "@portable-devshell/mcp/tool";
 import type {
     JsonValue,
     ToolCallPresentation,
@@ -18,6 +16,10 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../../../host/Host.js";
+import {
+    allToolCallInstances,
+    type ToolCallRegistry,
+} from "../../../../toolcall/index.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<
@@ -40,8 +42,8 @@ export class McpExtensionService {
         this.#extensions = extensions;
     }
 
-    install(hooks: ToolCallHooks): () => void {
-        const definitions = mcpTools.register(mcpAllInstances, []);
+    install(hooks: ToolCallRegistry): () => void {
+        const definitions = hooks.register(allToolCallInstances, []);
         const executes = new Map<string, () => void>();
         const sync = () => {
             const tools = this.#definitions();

@@ -8,7 +8,7 @@ import type {
 import type { McpAuthConfig } from "../auth/Config.js";
 import { createMcpContextSelector } from "../context/Selector.js";
 import type { McpTool } from "./tool/Schema.js";
-import type { McpToolRegistry } from "./tool/Registry.js";
+import type { McpToolSource } from "./tool/Source.js";
 import { McpExtensionRegistry } from "./extension/Registry.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
@@ -32,7 +32,7 @@ export interface McpEndpointWorkerOptions {
     extensions?: McpExtensionRegistry;
     instanceName: string;
     toolProvenance?: McpToolProvenanceRecorder;
-    toolRegistry?: McpToolRegistry;
+    toolSource: McpToolSource;
     tools: ToolCallIngressPort;
     worker: McpEndpointWorkerPort;
 }
@@ -55,7 +55,7 @@ export class McpEndpointWorker {
                 this.#extensions.environmentPresentation()?.resourceUri,
             contextSelector,
             instanceName: options.instanceName,
-            registry: options.toolRegistry,
+            source: options.toolSource,
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,

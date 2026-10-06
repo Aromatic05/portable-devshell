@@ -3,6 +3,7 @@ import {
     McpRuntimeState,
     resolvePortableDevshellApplicationVersion,
     type McpOAuthApprovalConfig,
+    type McpToolSource,
     type McpToolProvenanceRecorder,
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
@@ -29,6 +30,7 @@ export class McpRuntimeFactory {
             runtimeState?: McpRuntimeState;
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
+            toolSource: McpToolSource;
             mcpAppLeaseFile?: string;
         },
     ): McpHost | undefined {
@@ -74,6 +76,7 @@ export class McpRuntimeFactory {
                 ...(options?.toolProvenance === undefined
                     ? {}
                     : { toolProvenance: options.toolProvenance }),
+                toolSource: options.toolSource,
                 ...(options?.mcpAppLeaseFile === undefined
                     ? {}
                     : {

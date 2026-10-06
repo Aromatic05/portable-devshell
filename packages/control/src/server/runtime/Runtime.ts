@@ -53,6 +53,7 @@ import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
 import type { InstanceRuntimeRegistry } from "./Instance.js";
+import type { ToolCallRegistry } from "../../toolcall/index.js";
 
 export interface ControlRuntimeOptions {
     instanceRuntimes: InstanceRuntimeRegistry;
@@ -74,6 +75,7 @@ export interface ControlRuntimeOptions {
     instanceChanges: InstanceChangeHub;
     instances: InstanceRegistry;
     mcp: McpControlModule;
+    toolCalls: ToolCallRegistry;
     restart: () => Promise<void>;
     reverse: ConnectionModule;
     processSubscriptions?: ProcessSubscriptionManager;
@@ -102,6 +104,7 @@ export class ControlRuntime {
     readonly #routes: ControlRouteRegistry;
     readonly #socketListener: ControlSocketListener;
     readonly #toolCallHookUnregister: Array<() => void>;
+    readonly #toolCallRegistryUnbind: () => void;
     readonly #toolCalls: ToolCallApi;
     readonly #web: ControlWebRuntime;
 
@@ -131,9 +134,9 @@ export class ControlRuntime {
             return options.instanceRuntimes.get(descriptor);
         };
         const toolCalls = createToolCallRuntime({
-            registerToolName: options.mcp.registerToolName,
             resolveTarget: (name) => runtimeFor(name).target(),
         });
+        this.#toolCallRegistryUnbind = options.toolCalls.bind(toolCalls.hooks);
         this.#toolCallRuntime = toolCalls;
         this.#toolCalls = toolCalls.api;
         const extensionToolCalls = new ToolCallExtensionBinding(
@@ -141,16 +144,16 @@ export class ControlRuntime {
             new ToolCallSecretRewrite(options.config),
         );
         this.#toolCallHookUnregister = [
-            extensionToolCalls.install(toolCalls.hooks),
-            registerApprovalToolCallReview(toolCalls.hooks, (name) => runtimeFor(name).approval.api),
-            installTodoTools(toolCalls.hooks, (name) => runtimeFor(name).task.api),
-            installWaitToolCallRewrite(toolCalls.hooks, (name) => runtimeFor(name).task.api.wait),
+            extensionToolCalls.install(options.toolCalls),
+            registerApprovalToolCallReview(options.toolCalls, (name) => runtimeFor(name).approval.api),
+            installTodoTools(options.toolCalls, (name) => runtimeFor(name).task.api),
+            installWaitToolCallRewrite(options.toolCalls, (name) => runtimeFor(name).task.api.wait),
         ];
         this.#mcp = options.mcp;
         this.#mcp.setToolCalls(this.#toolCalls);
         const extensionMcpTools = new McpExtensionService(this.#extensions);
         this.#toolCallHookUnregister.push(
-            extensionMcpTools.install(toolCalls.hooks),
+            extensionMcpTools.install(options.toolCalls),
         );
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances, (descriptor) => options.instanceRuntimes.get(descriptor));
@@ -171,7 +174,7 @@ export class ControlRuntime {
                 .map((command) => command.id);
         };
         this.#toolCallHookUnregister.push(
-            installContextTools(options.contexts.api, toolCalls.hooks, {
+            installContextTools(options.contexts.api, options.toolCalls, {
                 instances: options.instances,
                 modelCommands,
             }),
@@ -181,7 +184,7 @@ export class ControlRuntime {
                 options.artifact.service,
                 options.instances,
                 options.instanceChanges,
-                toolCalls.hooks,
+                options.toolCalls,
             ),
         );
         this.#routes = new ControlRouteRegistry({
@@ -354,7 +357,11 @@ export class ControlRuntime {
                 failures.push(error);
             }
         }
-        await this.#mcp.flushToolNames().catch((error) => failures.push(error));
+        try {
+            this.#toolCallRegistryUnbind();
+        } catch (error) {
+            failures.push(error);
+        }
         try {
             this.#internalControlEndpoint.close();
         } catch (error) {

@@ -1,6 +1,6 @@
 import { ToolCallHookRegistry } from "./registration/index.js";
 
-import type { ToolCallExecutionRuntime, ToolCallExecutionRuntimeOptions, ToolCallProvenanceApi, ToolCallProvenanceOptions, ToolCallRuntime, ToolCallTargetResolver, ToolNameRegistrar } from "./Api.js";
+import type { ToolCallExecutionRuntime, ToolCallExecutionRuntimeOptions, ToolCallProvenanceApi, ToolCallProvenanceOptions, ToolCallRuntime, ToolCallTargetResolver } from "./Api.js";
 import { ToolCallPipeline } from "./execution/Pipeline.js";
 
 
@@ -13,10 +13,9 @@ import { WorkerToolInvoker } from "./worker/Invoker.js";
 import { ToolCallProvenanceStore } from "./execution/record/Provenance.js";
 
 export function createToolCallRuntime(options: {
-    registerToolName?: ToolNameRegistrar;
     resolveTarget: ToolCallTargetResolver;
 }): ToolCallRuntime {
-    const hooks = new ToolCallHookRegistry(options.registerToolName);
+    const hooks = new ToolCallHookRegistry();
     return {
         api: new ToolCallPipeline({
             hooks: hooks.provider(),

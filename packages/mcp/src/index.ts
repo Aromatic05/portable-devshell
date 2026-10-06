@@ -6,6 +6,6 @@ export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } f
 export { type McpEndpointWorkerPort } from "./endpoint/call/Port.js";
 export { type ToolCallIngressPort } from "./endpoint/call/Port.js";
 export { type McpToolProvenanceRecorder } from "./endpoint/tool/Provenance.js";
-export { mcpAllInstances, mcpTools, McpToolRegistry, type McpToolRegistration, type McpToolRegistrationScope, type McpToolRegistryEntry } from "./endpoint/tool/Registry.js";
+export { type McpToolSource, type McpToolSourceEntry } from "./endpoint/tool/Source.js";
 export { McpHost, type McpHostInstanceConfig, McpRuntimeState, type WorkerInstanceLike } from "./host/Host.js";
 export { HttpHost } from "./host/Http.js";

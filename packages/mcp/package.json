@@ -13,10 +13,6 @@
         "./testing": {
             "types": "./dist/testing.d.ts",
             "default": "./dist/testing.js"
-        },
-        "./tool": {
-            "types": "./dist/endpoint/tool/Public.d.ts",
-            "default": "./dist/endpoint/tool/Public.js"
         }
     },
     "files": [

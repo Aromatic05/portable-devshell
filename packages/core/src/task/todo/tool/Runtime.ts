@@ -1,4 +1,4 @@
-import type { ToolCallHooks } from "../../../toolcall/Public.js";
+import type { ToolCallRegistration } from "../../../toolcall/Public.js";
 import {
     contextErrorCodes,
     createRemoteError,
@@ -12,7 +12,7 @@ import { todoToolDefinitions } from "./Definition.js";
 import { readTodoToolInput } from "./Input.js";
 
 export function installTodoTools(
-    hooks: ToolCallHooks,
+    hooks: ToolCallRegistration,
     resolveTask: (instance: string) => TaskApi | undefined,
 ): () => void {
     const unregisterDefinitions = todoToolDefinitions().map((definition) =>

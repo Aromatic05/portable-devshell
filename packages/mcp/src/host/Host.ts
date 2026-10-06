@@ -10,6 +10,7 @@ import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
 import type { ToolCallIngressPort } from "../endpoint/call/Port.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
+import type { McpToolSource } from "../endpoint/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
 import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
 import { McpAppActionStore } from "../mcpapp/ActionStore.js";
@@ -42,6 +43,7 @@ export interface McpHostConfig {
     serverVersion?: string;
     storageDir?: string;
     toolProvenance?: McpToolProvenanceRecorder;
+    toolSource: McpToolSource;
     mcpAppLeaseFile?: string;
 }
 
@@ -208,6 +210,7 @@ export class McpHost {
                 contextMode: instance.contextMode ?? "explicit",
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
+                toolSource: this.#config.toolSource,
                 tools: this.#runtimeState.tools,
                 worker: instance.worker,
             }),

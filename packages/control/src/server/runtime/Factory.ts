@@ -101,6 +101,7 @@ export class ControlRuntimeFactory {
                 controlPaths,
                 factory: this.#mcpFactory,
                 instances: options.state.instances,
+                toolRegistry: options.state.toolCalls,
             });
             const configEngine = new ConfigEngine({
                 configStore: options.state.configStore,
@@ -315,6 +316,7 @@ export class ControlRuntimeFactory {
                 instanceChanges: options.state.instanceChanges,
                 instances: options.state.instances,
                 mcp,
+                toolCalls: options.state.toolCalls,
                 restart: options.restart,
                 reverse,
                 processSubscriptions,

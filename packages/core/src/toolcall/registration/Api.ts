@@ -14,6 +14,6 @@ export type {
     ToolCallReviewResult,
     ToolCallRewriteHook,
     ToolCallRewriteInput,
+    ToolCallRegistration,
     ToolNameHandle,
-    ToolNameRegistrar,
 } from "../Api.js";

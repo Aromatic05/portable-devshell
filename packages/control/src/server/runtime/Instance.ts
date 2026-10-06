@@ -15,7 +15,10 @@ import { createTaskRuntime, type TaskRuntime } from "@portable-devshell/core/tas
 import { createTerminalRuntime, type TerminalRuntime } from "@portable-devshell/core/terminal";
 import { createAuditRuntime, type AuditRuntime } from "@portable-devshell/core/audit";
 import { createToolCallExecutionRuntime, type ToolCallDispatchRequest, type ToolCallExecutionRuntime, type ToolCallTarget } from "@portable-devshell/core/toolcall";
-import { mcpTools, type McpToolRegistration } from "@portable-devshell/mcp/tool";
+import {
+    type ToolCallDefinitionRegistration,
+    type ToolCallRegistry,
+} from "../../toolcall/index.js";
 
 export class InstanceRuntime {
     readonly instance: Instance;
@@ -24,14 +27,18 @@ export class InstanceRuntime {
     readonly task: TaskRuntime;
     readonly terminal: TerminalRuntime;
     readonly tools: ToolCallExecutionRuntime;
-    readonly #toolRegistration: McpToolRegistration;
+    readonly #toolRegistration: ToolCallDefinitionRegistration;
     readonly #flushEvents: () => Promise<void>;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
     readonly #toolSessions = new Map<string, string>();
     #retired = false;
 
-    constructor(config: ControlInstanceConfig, homeDirectory: string) {
+    constructor(
+        config: ControlInstanceConfig,
+        homeDirectory: string,
+        toolCalls: ToolCallRegistry,
+    ) {
         const instanceName = asInstanceName(config.name);
         const paths = new InstancePaths(instanceName, homeDirectory);
         this.audit = createAuditRuntime({
@@ -106,7 +113,7 @@ export class InstanceRuntime {
             paths,
         });
         this.terminal = createTerminalRuntime(this.instance.worker);
-        this.#toolRegistration = mcpTools.register(config.name, []);
+        this.#toolRegistration = toolCalls.register(config.name, []);
     }
 
     async refreshTools(): Promise<void> {
@@ -201,13 +208,22 @@ export class InstanceRuntime {
 export class InstanceRuntimeRegistry {
     readonly #homeDirectory: string;
     readonly #runtimes = new Map<Instance, InstanceRuntime>();
+    readonly #toolCalls: ToolCallRegistry;
 
-    constructor(homeDirectory = homedir()) {
+    constructor(
+        homeDirectory = homedir(),
+        toolCalls: ToolCallRegistry,
+    ) {
         this.#homeDirectory = homeDirectory;
+        this.#toolCalls = toolCalls;
     }
 
     create(config: ControlInstanceConfig): Instance {
-        const runtime = new InstanceRuntime(config, this.#homeDirectory);
+        const runtime = new InstanceRuntime(
+            config,
+            this.#homeDirectory,
+            this.#toolCalls,
+        );
         this.#runtimes.set(runtime.instance, runtime);
         return runtime.instance;
     }
