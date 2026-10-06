@@ -34,9 +34,6 @@ export type {
     ToolNameHandle,
     ToolCallExecutor,
     ToolCallIngressPort,
-    ToolRouteEventPort,
-    ToolRouteInstancePort,
-    ToolRouteSubscriptionPort,
 } from "./Api.js";
 export {
     presentToolCallResult,

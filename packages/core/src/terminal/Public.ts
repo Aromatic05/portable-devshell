@@ -14,8 +14,6 @@ export type {
     TerminalOpenRequest,
     TerminalProcess,
     TerminalProcessExit,
-    TerminalRouteModule,
-    TerminalRouteModuleOptions,
     TerminalRuntime,
     TerminalSessionApi,
     TerminalSessionRuntime,

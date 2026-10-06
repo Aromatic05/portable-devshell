@@ -1,9 +1,16 @@
 import {
     createRemoteError,
     controlErrorCodes,
+    STREAM_GAP_CODE,
+    type ControlPortContext,
     isToolCallEvent,
     type ControlPortDefinition,
+    type InstanceEventRecord,
     type JsonValue,
+    type MessageStream,
+    type ToolCallQuery,
+    type ToolCallRecord,
+    type ToolDefinition,
     type ToolEvent,
 } from "@portable-devshell/shared";
 
@@ -16,13 +23,37 @@ import {
 import type {
     ToolCallIngressPort,
     ToolCallProvenanceApi,
-    ToolRouteEventPort,
-    ToolRouteInstancePort,
-    ToolRouteSubscriptionPort,
 } from "../../Api.js";
 import {
     createToolIngressRouteModule,
 } from "./Route.js";
+
+interface ToolRouteEventPort {
+    subscribe(fromSeq?: number):
+        | { kind: "events"; events: InstanceEventRecord[]; lastSeq: number }
+        | { kind: "gap"; code: typeof STREAM_GAP_CODE; fromSeq: number; lastSeq: number; nextSeq: number };
+}
+
+interface ToolRouteInstancePort {
+    name?: string;
+    worker: {
+        readWorkerTools(): Promise<readonly ToolDefinition[]>;
+        prepareWorkspace(workspace: string, connectionId: string): Promise<{ workspace: string }>;
+        readToolCalls(query: ToolCallQuery): Promise<ToolCallRecord[]>;
+        releaseToolSession(connectionId: string): Promise<void>;
+    } & Partial<ToolRouteEventPort>;
+}
+
+interface ToolRouteSubscriptionPort {
+    subscribe(
+        stream: MessageStream,
+        context: ControlPortContext,
+        instanceName: string,
+        instance: ToolRouteEventPort,
+        fromSeq: number,
+        projectEvent?: (event: InstanceEventRecord) => ToolEvent | undefined,
+    ): Promise<void>;
+}
 
 export function createToolRouteModule(
     instance: ToolRouteInstancePort,

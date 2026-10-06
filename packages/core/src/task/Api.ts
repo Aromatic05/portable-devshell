@@ -1,5 +1,3 @@
-import type { ControlPortContext, InstanceEventRecord, MessageStream, TaskEvent } from "@portable-devshell/shared";
-import type { InstanceEventSource } from "../instance/Public.js";
 import type { InstanceName, ToolCallContext } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
@@ -73,26 +71,4 @@ export interface TaskRuntime {
     readonly api: TaskApi;
     close(): Promise<void>;
     resume(): void;
-}
-
-export interface GoalTaskRouteInstancePort {
-    events: Pick<InstanceEventSource, "cursor">;
-    goal: Pick<GoalApi, "list">;
-}
-
-export interface TodoTaskRouteSubscriptionPort {
-    subscribe(
-        stream: MessageStream,
-        context: ControlPortContext,
-        instanceName: string,
-        instance: Pick<InstanceEventSource, "subscribe">,
-        fromSeq: number,
-        projectEvent?: (event: InstanceEventRecord) => TaskEvent | undefined,
-    ): Promise<void>;
-}
-
-export interface TodoTaskRouteInstancePort {
-    events: InstanceEventSource;
-    name: string;
-    todo: Pick<TodoApi, "delete" | "read">;
 }

@@ -1,11 +1,37 @@
-import type { TodoTaskRouteSubscriptionPort, TodoTaskRouteInstancePort } from "../Api.js";
 import {
     createRemoteError,
     controlErrorCodes,
 } from "@portable-devshell/shared";
-import type { JsonValue, ControlPortDefinition, TaskEvent, TodoReadInput } from "@portable-devshell/shared";
+import type {
+    ControlPortContext,
+    ControlPortDefinition,
+    InstanceEventRecord,
+    JsonValue,
+    MessageStream,
+    TaskEvent,
+    TodoReadInput,
+} from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
 import { routeModule } from "../../Port.js";
+import type { TodoApi } from "../Api.js";
+import type { InstanceEventSource } from "../../instance/Public.js";
+
+interface TodoTaskRouteSubscriptionPort {
+    subscribe(
+        stream: MessageStream,
+        context: ControlPortContext,
+        instanceName: string,
+        instance: Pick<InstanceEventSource, "subscribe">,
+        fromSeq: number,
+        projectEvent?: (event: InstanceEventRecord) => TaskEvent | undefined,
+    ): Promise<void>;
+}
+
+interface TodoTaskRouteInstancePort {
+    events: InstanceEventSource;
+    name: string;
+    todo: Pick<TodoApi, "delete" | "read">;
+}
 
 
 

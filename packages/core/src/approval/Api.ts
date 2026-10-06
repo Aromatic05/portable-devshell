@@ -1,5 +1,3 @@
-import type { ApprovalEvent, ControlPortContext, InstanceEventRecord, MessageStream } from "@portable-devshell/shared";
-import type { InstanceEventSource } from "../instance/Public.js";
 import type { ApprovalEventType, InstanceName } from "@portable-devshell/shared";
 import type { ApprovalPolicy } from "@portable-devshell/shared/config";
 import type { StateStore } from "../audit/Public.js";
@@ -83,29 +81,4 @@ export interface ApprovalRuntime {
     close(): void;
     retire(reason?: string): Promise<void>;
     setPolicy(policy: ApprovalPolicy | undefined): void;
-}
-
-export interface ApprovalRouteSubscriptionPort {
-    subscribe(
-        stream: MessageStream,
-        context: ControlPortContext,
-        instanceName: string,
-        instance: Pick<InstanceEventSource, "subscribe">,
-        fromSeq: number,
-        projectEvent?: (
-            event: InstanceEventRecord,
-        ) => ApprovalEvent | undefined,
-    ): Promise<void>;
-}
-
-export interface ApprovalRouteInstancePort {
-    approval: Pick<
-        ApprovalApi,
-        | "decideApproval"
-        | "getApproval"
-        | "listApprovals"
-        | "listPendingApprovals"
-    >;
-    events: InstanceEventSource;
-    name: string;
 }

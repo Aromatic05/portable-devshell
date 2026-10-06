@@ -2,8 +2,6 @@ import type {
     InstanceName,
     JsonValue,
     Endpoint,
-    ControlPortContext,
-    InstanceEventRecord,
     ToolCallPresentation,
     ToolCallQuery,
     ToolCallRecord,
@@ -13,8 +11,6 @@ import type {
     ToolDefinition,
     ToolEvent,
     ToolCallApi,
-    MessageStream,
-    STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
 import type {
     AuditApi,
@@ -185,33 +181,6 @@ export interface ToolCallExecutionRuntime {
     ): Promise<JsonValue>;
     refreshTools(): Promise<ToolDefinition[]>;
     close(): Promise<void>;
-}
-
-export interface ToolRouteEventPort {
-    subscribe(fromSeq?: number):
-        | { kind: "events"; events: InstanceEventRecord[]; lastSeq: number }
-        | { kind: "gap"; code: typeof STREAM_GAP_CODE; fromSeq: number; lastSeq: number; nextSeq: number };
-}
-
-export interface ToolRouteInstancePort {
-    name?: string;
-    worker: {
-        readWorkerTools(): Promise<readonly ToolDefinition[]>;
-        prepareWorkspace(workspace: string, connectionId: string): Promise<{ workspace: string }>;
-        readToolCalls(query: ToolCallQuery): Promise<ToolCallRecord[]>;
-        releaseToolSession(connectionId: string): Promise<void>;
-    } & Partial<ToolRouteEventPort>;
-}
-
-export interface ToolRouteSubscriptionPort {
-    subscribe(
-        stream: MessageStream,
-        context: ControlPortContext,
-        instanceName: string,
-        instance: ToolRouteEventPort,
-        fromSeq: number,
-        projectEvent?: (event: InstanceEventRecord) => ToolEvent | undefined,
-    ): Promise<void>;
 }
 
 export interface ToolCallProvenanceRecord {

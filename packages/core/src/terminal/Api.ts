@@ -1,5 +1,4 @@
 import type {
-    ControlPortDefinition,
     TerminalOutputFrame,
     TerminalSessionDescriptor,
 } from "@portable-devshell/shared";
@@ -104,12 +103,3 @@ export interface TerminalSessionRuntime {
 export interface TerminalRuntime {
     readonly api: TerminalBackend;
 }
-
-export interface TerminalRouteModuleOptions {
-    backend: TerminalBackend;
-    instance: string;
-    maxUnackedBytes?: number;
-    sessions: TerminalSessionApi;
-}
-
-export type TerminalRouteModule = ControlPortDefinition;
