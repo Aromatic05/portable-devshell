@@ -1,4 +1,3 @@
-import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 import type {
     ArtifactShareInput,
     ArtifactShareResult,
@@ -12,6 +11,7 @@ import type {
     ArtifactViewImageResult,
     JsonValue,
     MessageStream,
+    WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/shared";
 
 export interface ArtifactSnapshot {

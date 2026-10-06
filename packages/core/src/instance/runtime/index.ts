@@ -1,5 +1,5 @@
 import type { WorkerInstance as WorkerInstanceApi } from "../Api.js";
-import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice, WorkerExecProcessInput, WorkerTcpConnectInput, WorkerCommandSessionClose, WorkerCommandSessionCompletion, WorkerCommandSessionOpen, WorkerCommandSessionOutput, WorkerAlertsReadResult, WorkerExtensionResourcePrepareInput, WorkerExtensionResourcePrepareResult, WorkerHandshakeResult, WorkerWorkspacePrepareResult, WorkerArtifactDirectPushInput, WorkerArtifactDirectPushResult, WorkerArtifactDirectReceiveOpenInput, WorkerArtifactDirectReceiveOpenResult, WorkerArtifactPayloadOpenInput, WorkerArtifactPayloadOpenResult, WorkerArtifactPayloadReadInput, WorkerArtifactPayloadReadResult, WorkerArtifactReceiveBeginInput, WorkerArtifactReceiveBeginResult, WorkerArtifactReceiveFinishResult, WorkerArtifactReceiveWriteInput, WorkerArtifactReceiveWriteResult, WorkerTerminalAttachResult, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification, WorkerTerminalOpenInput, InstanceEventPort } from "../Api.js";
+import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice, WorkerExecProcessInput, WorkerTcpConnectInput, WorkerCommandSessionClose, WorkerCommandSessionCompletion, WorkerCommandSessionOpen, WorkerCommandSessionOutput, WorkerAlertsReadResult, WorkerExtensionResourcePrepareInput, WorkerExtensionResourcePrepareResult, WorkerHandshakeResult, WorkerWorkspacePrepareResult, WorkerTerminalAttachResult, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification, WorkerTerminalOpenInput, InstanceEventPort } from "../Api.js";
 import {
     type Endpoint,
     type MessageStream,
@@ -9,6 +9,19 @@ import {
     type ReverseEnrollmentState,
     type ReverseTransport,
     type ToolDefinition,
+    type WorkerArtifactDirectPushInput,
+    type WorkerArtifactDirectPushResult,
+    type WorkerArtifactDirectReceiveOpenInput,
+    type WorkerArtifactDirectReceiveOpenResult,
+    type WorkerArtifactPayloadOpenInput,
+    type WorkerArtifactPayloadOpenResult,
+    type WorkerArtifactPayloadReadInput,
+    type WorkerArtifactPayloadReadResult,
+    type WorkerArtifactReceiveBeginInput,
+    type WorkerArtifactReceiveBeginResult,
+    type WorkerArtifactReceiveFinishResult,
+    type WorkerArtifactReceiveWriteInput,
+    type WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/shared";
 
 

@@ -13,10 +13,14 @@ import {
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import type { WorkerArtifactReceiveBeginInput, WorkerArtifactReceiveBeginResult, WorkerArtifactReceiveFinishResult, WorkerArtifactReceiveWriteInput, WorkerArtifactReceiveWriteResult } from "@portable-devshell/core/instance";
 import {
     createRemoteError,
     type ArtifactPayloadDescriptor,
+    type WorkerArtifactReceiveBeginInput,
+    type WorkerArtifactReceiveBeginResult,
+    type WorkerArtifactReceiveFinishResult,
+    type WorkerArtifactReceiveWriteInput,
+    type WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/shared";
 
 import { extractArtifactDirectoryArchive } from "../../Archive.js";

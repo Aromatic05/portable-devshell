@@ -16,6 +16,7 @@ import type {
     ArtifactTransferResult,
     ArtifactTransferStartInput,
     JsonValue,
+    WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/shared";
 import { ArtifactRecordStore } from "../RecordStore.js";
 import {
@@ -37,7 +38,6 @@ import type {
     ArtifactServiceSchedule,
     StoredArtifactTransfer,
 } from "../Service.js";
-import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core/instance";
 
 export interface ArtifactTransferServiceOptions {
     chunkBytes?: number;

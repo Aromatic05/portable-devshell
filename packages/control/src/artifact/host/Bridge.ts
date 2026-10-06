@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
-import type { WorkerArtifactPayloadOpenInput, WorkerArtifactReceiveBeginInput } from "@portable-devshell/core/instance";
-import { createRemoteError } from "@portable-devshell/shared";
+import { createRemoteError, type WorkerArtifactPayloadOpenInput, type WorkerArtifactReceiveBeginInput } from "@portable-devshell/shared";
 
 import type { ArtifactServiceEndpoint } from "../Service.js";
 import { artifactBlake3 } from "./Hash.js";
