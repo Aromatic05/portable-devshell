@@ -1,6 +1,6 @@
 import type { ControlPortDefinition } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../../Port.js";
+import { requirePort, routeModule } from "@portable-devshell/shared";
 import {
     readArtifactImageRef,
     readArtifactShareInput,

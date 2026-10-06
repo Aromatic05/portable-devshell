@@ -4,12 +4,13 @@ import type {
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 import {
+    requirePort,
+    routeModule,
     asInstanceName,
     createRemoteError,
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../Port.js";
 import type { InstanceChange } from "./Change.js";
 import type { InstanceConfigRouteModuleOptions } from "./Api.js";
 

@@ -1,4 +1,5 @@
 import {
+    routeModule,
     createRemoteError,
     STREAM_GAP_CODE,
     type JsonValue,
@@ -11,7 +12,6 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
 import type {
     TerminalAttachment,
     TerminalBackend,

@@ -12,7 +12,7 @@ import type {
     TuiPageSnapshot,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../../Port.js";
+import { routeModule } from "@portable-devshell/shared";
 import type { ExtensionHost } from "../../../host/Host.js";
 
 export interface TuiPagePort {

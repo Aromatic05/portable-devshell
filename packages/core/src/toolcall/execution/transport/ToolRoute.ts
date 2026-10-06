@@ -1,4 +1,5 @@
 import {
+    routeModule,
     createRemoteError,
     controlErrorCodes,
     STREAM_GAP_CODE,
@@ -14,7 +15,6 @@ import {
     type ToolEvent,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../Port.js";
 import {
     limitToolCallResponse,
     readToolCallQuery,

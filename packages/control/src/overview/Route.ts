@@ -3,7 +3,7 @@ import type {
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
+import { routeModule } from "@portable-devshell/shared";
 import type { OperationalOverviewApi } from "./Api.js";
 
 export function createOperationalOverviewRouteModule(

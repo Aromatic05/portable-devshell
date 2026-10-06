@@ -1,4 +1,6 @@
 import {
+    requirePort,
+    routeModule,
     createRemoteError,
     controlErrorCodes,
     type ControlPortDefinition,
@@ -6,7 +8,6 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../Port.js";
 import { ConfigChangeHub, type ConfigCommittedChange } from "./change/Config.js";
 
 export interface ConfigEditorPort {

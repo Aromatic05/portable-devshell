@@ -55,7 +55,7 @@ export { createPortClient, type PortClient } from "./transport/endpoint/PortClie
 export { type Channel, ChannelBase, StreamChannel } from "./transport/endpoint/channel/Channel.js";
 export { LocalChannel } from "./transport/endpoint/channel/Local.js";
 export { WebChannel, WebServerChannel, type WebSocketClientLike } from "./transport/endpoint/channel/Web.js";
-export { mergeControlPorts, mergeControlPortsByName, type ControlHostDefinition, type ControlPeerSubject, type ControlPortContext, type ControlPortDefinition, type ControlPortHandler, type ControlPortStreamHandler, type ControlStreamMessage } from "./transport/endpoint/route/Control.js";
+export { routeModule, requirePort, mergeControlPorts, mergeControlPortsByName, type ControlHostDefinition, type ControlPeerSubject, type ControlPortContext, type ControlPortDefinition, type ControlPortHandler, type ControlPortStreamHandler, type ControlStreamMessage } from "./transport/endpoint/route/Control.js";
 export { Port } from "./transport/endpoint/route/Route.js";
 export { Event } from "./transport/packet/Event.js";
 export { Rpc, type RpcContext } from "./transport/packet/Rpc.js";

@@ -1,4 +1,5 @@
 import {
+    routeModule,
     mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
@@ -6,7 +7,6 @@ import {
 } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
-import { routeModule } from "../Port.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core";
 import { createToolIngressHost, type ToolCallIngressPort, type ToolCallProvenanceApi } from "@portable-devshell/core";

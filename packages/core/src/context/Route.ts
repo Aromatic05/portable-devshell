@@ -12,11 +12,12 @@ import type {
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 import {
+    requirePort,
+    routeModule,
     createRemoteError,
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../Port.js";
 
 type ContextAdminRegistryPort = Pick<
     ContextRecordSourcePort,

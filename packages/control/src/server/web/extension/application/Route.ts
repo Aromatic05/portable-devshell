@@ -1,5 +1,6 @@
 import type { WebPageRequest } from "@portable-devshell/extension/web";
 import {
+    routeModule,
     createRemoteError,
     controlErrorCodes,
     type JsonValue,
@@ -10,7 +11,6 @@ import {
     type WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../../Port.js";
 
 export interface WebApplicationCatalogPort {
     list(): readonly WebApplicationDescriptor[];

@@ -1,4 +1,5 @@
 import {
+    routeModule,
     RemoteError,
     createRemoteError,
     controlErrorCodes,
@@ -7,7 +8,6 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../Port.js";
 import { readToolCallErrorPayload } from "../ErrorPayload.js";
 import { readToolCall } from "./Input.js";
 import type { ToolCallIngressPort } from "../../Api.js";

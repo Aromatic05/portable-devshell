@@ -1,4 +1,5 @@
 import {
+    routeModule,
     createRemoteError,
     controlErrorCodes,
 } from "@portable-devshell/shared";
@@ -12,7 +13,6 @@ import type {
     TodoReadInput,
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
-import { routeModule } from "../../Port.js";
 import type { TodoApi } from "../Api.js";
 import type { InstanceEventSource } from "../../instance/Api.js";
 

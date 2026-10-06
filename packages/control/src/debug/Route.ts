@@ -1,4 +1,5 @@
 import {
+    routeModule,
     createRemoteError,
     controlErrorCodes,
     type DebugPatchLoadRequest,
@@ -7,7 +8,6 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
 import type { DebugApi } from "./Api.js";
 
 export function createDebugRouteModule(

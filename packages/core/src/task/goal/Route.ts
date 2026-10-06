@@ -3,7 +3,7 @@ import type {
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../Port.js";
+import { routeModule } from "@portable-devshell/shared";
 import type { GoalApi } from "../Api.js";
 import type { InstanceEventSource } from "../../instance/Api.js";
 

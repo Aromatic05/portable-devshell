@@ -14,7 +14,7 @@ import type {
 } from "@portable-devshell/shared";
 import { isApprovalEventType } from "@portable-devshell/shared";
 
-import { routeModule } from "../Port.js";
+import { routeModule } from "@portable-devshell/shared";
 import type { ApprovalApi } from "./Api.js";
 import type { InstanceEventSource } from "../instance/Api.js";
 

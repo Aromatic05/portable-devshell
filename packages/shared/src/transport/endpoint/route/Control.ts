@@ -1,6 +1,9 @@
 // Shared route-definition vocabulary used by provider-side host/port routing.
 // Request and response semantics stay in the owning domain Contract.
 
+import { controlErrorCodes } from "../../../types/Error.js";
+import { createRemoteError } from "../../Error.js";
+
 import type { ControlClientKind } from "../../../control/server/Model.js";
 import type { JsonValue } from "../../../types/Json.js";
 import type { MessageStream } from "../../packet/Stream.js";
@@ -96,4 +99,37 @@ export function mergeControlPortsByName(
         groups.set(port.name, group);
     }
     return [...groups.values()].map((group) => mergeControlPorts(...group));
+}
+
+export function routeModule(
+    name: string,
+    operations: Record<string, ControlPortHandler>,
+    streams: Record<string, ControlPortStreamHandler> = {},
+): ControlPortDefinition {
+    return {
+        name,
+        operations: Object.entries(operations).map(([operation, handle]) => ({
+            name: operation,
+            handle,
+        })),
+        ...(Object.keys(streams).length === 0
+            ? {}
+            : {
+                  streams: Object.entries(streams).map(
+                      ([operation, handle]) => ({
+                          name: operation,
+                          handle,
+                      }),
+                  ),
+              }),
+    };
+}
+
+export function requirePort<T>(port: T | undefined, message: string): T {
+    if (port !== undefined) return port;
+    throw createRemoteError({
+        code: controlErrorCodes.methodNotFound,
+        message,
+        retryable: false,
+    });
 }

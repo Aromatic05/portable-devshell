@@ -6,6 +6,7 @@ import type {
     CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 import {
+    routeModule,
     createRemoteError,
     controlErrorCodes,
     toRemoteErrorBody,
@@ -17,7 +18,6 @@ import {
     type ControlStreamMessage,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../../Port.js";
 import { CliCommandStreamIo } from "./command/Io.js";
 
 export interface CliCommandPort {

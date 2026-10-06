@@ -1,4 +1,6 @@
 import {
+    requirePort,
+    routeModule,
     asInstanceName,
     createRemoteError,
     controlErrorCodes,
@@ -12,7 +14,6 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../Port.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { WorkerInstance } from "./runtime/index.js";
 import type { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
