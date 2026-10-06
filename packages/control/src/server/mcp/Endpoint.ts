@@ -13,9 +13,9 @@ export class McpEndpointFactory {
     ): McpHostInstanceConfig {
         return {
             auth: toMcpAuthConfig(auth),
-            contextMode: descriptor.mcpContextMode ?? "explicit",
-            name: descriptor.name,
-            path: descriptor.mcpPath,
+            contextMode: descriptor.config.mcpContextMode ?? "explicit",
+            name: descriptor.config.name,
+            path: descriptor.config.mcpPath,
         };
     }
 }

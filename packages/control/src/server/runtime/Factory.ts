@@ -129,9 +129,9 @@ export class ControlRuntimeFactory {
                 reconcileContextInstanceCleanup: async (instance, descriptor) => {
                     if (
                         descriptor !== undefined &&
-                        !descriptor.worker.snapshot().ready
+                        !descriptor.worker.supervision.snapshot().ready
                     ) {
-                        await descriptor.worker.start();
+                        await descriptor.worker.supervision.lifecycle.start();
                     }
                     await contexts.api.cleanup.reconcileInstance(
                         instance,
@@ -201,10 +201,10 @@ export class ControlRuntimeFactory {
                                 throw new Error(
                                     `Instance ${input.target.instance} is unavailable.`,
                                 );
-                            const lease = descriptor.acquireLease();
+                            const lease = descriptor.lifecycle.acquireLease();
                             try {
                                 const prepared =
-                                    await lease.instance.worker.prepareExtensionResource(
+                                    await lease.instance.worker.execution.environment.prepareExtensionResource(
                                         {
                                             collection:
                                                 input.target.collection,

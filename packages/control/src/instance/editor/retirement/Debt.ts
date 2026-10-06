@@ -419,9 +419,9 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-        if (!descriptor.retired) {
+        if (!descriptor.lifecycle.retired) {
             await descriptor
-                .retire(async () => {
+                .lifecycle.retire(async () => {
                     await this.#retireRuntimeInstance(descriptor);
                 })
                 .catch((error) => failures.push(error));
@@ -440,7 +440,7 @@ export class InstanceCleanupDebt {
                 ?.retireMcpApp(record.instance.name)
                 .catch((error) => failures.push(error));
             try {
-                await descriptor.worker.stop();
+                await descriptor.worker.supervision.lifecycle.stop();
                 workerRetirementSucceeded = true;
             } catch (error) {
                 failures.push(error);

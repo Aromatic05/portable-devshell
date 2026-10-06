@@ -19,14 +19,14 @@ export class ExtensionToolCallHistoryCapabilityControl implements ToolCallHistor
 
     async listInstances(): Promise<readonly string[]> {
         this.#assertAllowed();
-        return this.options.instances.list().map((instance) => instance.name).sort();
+        return this.options.instances.list().map((instance) => instance.config.name).sort();
     }
 
     async read(instance: string, query?: ToolCallHistoryQuery): Promise<readonly ToolCallHistoryRecord[]> {
         this.#assertAllowed();
         const descriptor = this.options.instances.get(instance);
         if (descriptor === undefined) throw new Error(`Instance ${instance} is unavailable.`);
-        const lease = descriptor.acquireLease();
+        const lease = descriptor.lifecycle.acquireLease();
         try {
             const boundedQuery = query === undefined ? undefined : {
                 ...query,

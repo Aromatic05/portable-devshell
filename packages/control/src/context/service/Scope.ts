@@ -1,3 +1,4 @@
+import type { Instance } from "@portable-devshell/core";
 import type { InstanceRegistry } from "../../instance/Registry.js";
 import { contextErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextEnvironment, type ContextEnvironmentCleanup, type ContextExternalBinding, } from "@portable-devshell/shared";
 import type {
@@ -321,7 +322,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             await this.#registry.discard(ctxId);
     }
 
-    #requireGeneration(instance: string): { release(): void } {
+    #requireGeneration(instance: string): { instance: Instance; release(): void } {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

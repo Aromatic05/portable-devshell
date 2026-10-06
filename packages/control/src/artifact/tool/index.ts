@@ -23,8 +23,8 @@ export function installArtifactTools(
         const exposed = new Set(
             instances
                 .list()
-                .filter((instance) => instance.mcpEnabled)
-                .map((instance) => instance.name),
+                .filter((instance) => instance.config.mcpEnabled)
+                .map((instance) => instance.config.name),
         );
         for (const [instance, registration] of registrations) {
             if (exposed.has(instance)) continue;

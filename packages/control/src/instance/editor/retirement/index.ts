@@ -156,7 +156,7 @@ export class InstanceRetirementCoordinator {
             existing.enabled
         ) {
             const instanceDisabled = !next.enabled;
-            if (descriptor.retired) {
+            if (descriptor.lifecycle.retired) {
                 await this.notification
                     .retireGenerationResources(existing)
                     .catch((error) => failures.push(error));
@@ -213,7 +213,7 @@ export class InstanceRetirementCoordinator {
             failures.push(error);
             return failures;
         }
-        if (descriptor?.retired) {
+        if (descriptor?.lifecycle.retired) {
             await this.notification
                 .retireGenerationResources(existing)
                 .catch((error) => failures.push(error));

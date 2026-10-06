@@ -8,10 +8,7 @@ import {
     type ConfigEngine,
 } from "../../config/engine/index.js";
 import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
-import {
-    requiresWorkerRebuild,
-    toWorkerReconfigureInput,
-} from "../../config/engine/Result.js";
+import { requiresWorkerRebuild } from "../../config/engine/Result.js";
 
 import type { InstanceEditorCoordinatorOptions } from "./Options.js";
 import type { InstanceRetirementCoordinator } from "./retirement/index.js";
@@ -93,7 +90,7 @@ export class InstanceReconfigurationCoordinator {
 
     assertUpdateReady(plan: InstanceConfigUpdatePlan): void {
         if (!plan.rebuildRequired || plan.descriptor === undefined) return;
-        const snapshot = plan.descriptor.worker.snapshot();
+        const snapshot = plan.descriptor.worker.supervision.snapshot();
         if (snapshot.daemonState === "stopped") return;
         throw createRemoteError({
             code: runtimeErrorCodes.instanceConflict,
@@ -364,7 +361,7 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         const failures: unknown[] = [];
         let restored: Instance | undefined;
-        if (descriptor === undefined || descriptor.retired) {
+        if (descriptor === undefined || descriptor.lifecycle.retired) {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
@@ -392,9 +389,6 @@ export class InstanceReconfigurationCoordinator {
                     );
                 }
                 descriptor.update(existing);
-                await descriptor.worker.reconfigure(
-                    toWorkerReconfigureInput(existing),
-                );
                 if (this.#instanceRegistry.get(existing.name) !== descriptor)
                     this.#instanceRegistry.add(descriptor);
                 restored = descriptor;
@@ -414,7 +408,7 @@ export class InstanceReconfigurationCoordinator {
                 (error) => failures.push(error),
             );
         }
-        if (descriptor?.retired && descriptor !== restored) {
+        if (descriptor?.lifecycle.retired && descriptor !== restored) {
             await closeDescriptorResourcesBestEffort(
                 descriptor,
                 this.#finalizeRuntimeInstance,
@@ -479,7 +473,6 @@ export class InstanceReconfigurationCoordinator {
             return;
         }
         descriptor.update(instance);
-        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         this.#instanceChanges.publish("registry");
     }
 
@@ -527,7 +520,7 @@ export class InstanceReconfigurationCoordinator {
             } catch (cleanupError) {
                 throw new AggregateError(
                     [error, cleanupError],
-                    `Configuration persistence failed and prepared instance ${preparedDescriptor.name} cleanup was incomplete.`,
+                    `Configuration persistence failed and prepared instance ${preparedDescriptor.config.name} cleanup was incomplete.`,
                 );
             }
             throw error;
@@ -554,10 +547,10 @@ export class InstanceReconfigurationCoordinator {
             descriptor !== undefined
         ) {
             let stopped =
-                descriptor.worker.managementMode === "selfManaged";
+                descriptor.worker.supervision.managementMode === "selfManaged";
             if (!stopped) {
                 try {
-                    await descriptor.worker.stop();
+                    await descriptor.worker.supervision.lifecycle.stop();
                     stopped = true;
                 } catch (error) {
                     failures.push(error);
@@ -662,7 +655,7 @@ export class InstanceReconfigurationCoordinator {
     #assertInstanceStopped(instance: string, operation: string): void {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) return;
-        const snapshot = descriptor.worker.snapshot();
+        const snapshot = descriptor.worker.supervision.snapshot();
         if (snapshot.daemonState === "stopped") return;
         throw createRemoteError({
             code: runtimeErrorCodes.instanceConflict,

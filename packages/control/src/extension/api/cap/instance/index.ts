@@ -74,21 +74,21 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
 
     async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).acquireLease();
-        try { return toSnapshot(lease.instance.worker.snapshot()); }
+        const lease = this.#require(name).lifecycle.acquireLease();
+        try { return toSnapshot(lease.instance.worker.supervision.snapshot()); }
         finally { lease.release(); }
     }
 
     async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).acquireLease();
-        try { return toSnapshot(await lease.instance.worker.refreshStatus()); }
+        const lease = this.#require(name).lifecycle.acquireLease();
+        try { return toSnapshot(await lease.instance.worker.supervision.recovery.refreshStatus()); }
         finally { lease.release(); }
     }
 
     async readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]> {
         this.#assertAllowed();
-        const lease = this.#require(name).acquireLease();
+        const lease = this.#require(name).lifecycle.acquireLease();
         try { return (await this.#readLogs(name, query)).map(toLogEntry); }
         finally { lease.release(); }
     }
@@ -106,7 +106,7 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
                 provider: configured.provider,
                 ...(descriptor === undefined
                     ? {}
-                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
+                    : { snapshot: toSnapshot(descriptor.worker.supervision.snapshot()) }),
             };
         });
     }
@@ -117,7 +117,7 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
         if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 0)
             throw new TypeError("Instance event watch fromSeq must be a non-negative integer.");
         const descriptor = this.#require(name);
-        const source = { subscribe: (fromSeq: number) => descriptor.worker.subscribe(fromSeq) };
+        const source = { subscribe: (fromSeq: number) => descriptor.worker.supervision.state.subscribe(fromSeq) };
         const types = watch.eventTypes === undefined ? undefined : new Set(watch.eventTypes);
         let fromSeq = watch.fromSeq;
         if (watch.onSeed !== undefined) {
@@ -215,7 +215,7 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
     async start(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
         const descriptor = this.#require(name);
-        if (!descriptor.enabled) {
+        if (!descriptor.config.enabled) {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceConflict,
                 details: { instance: name, operation: "start" },
@@ -223,10 +223,10 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
                 retryable: false,
             });
         }
-        const lease = descriptor.acquireLease();
+        const lease = descriptor.lifecycle.acquireLease();
         try {
-            const snapshot = await lease.instance.worker.start();
-            lease.instance.markOwned();
+            const snapshot = await lease.instance.worker.supervision.lifecycle.start();
+            lease.instance.lifecycle.markOwned();
             return toSnapshot(snapshot);
         }
         finally { lease.release(); }
@@ -234,10 +234,10 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
 
     async stop(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).acquireLease();
+        const lease = this.#require(name).lifecycle.acquireLease();
         try {
-            const snapshot = await lease.instance.worker.stop();
-            lease.instance.clearOwned();
+            const snapshot = await lease.instance.worker.supervision.lifecycle.stop();
+            lease.instance.lifecycle.clearOwned();
             return toSnapshot(snapshot);
         }
         finally { lease.release(); }
@@ -271,9 +271,9 @@ export class ExtensionInstanceEventPublishCapabilityControl implements Extension
     async appendEvent(name: string, type: string, data?: ExtensionJsonValue): Promise<void> {
         if (!this.options.allowed)
             throw new Error(`Extension ${this.options.extensionId} did not declare the instance.events.publish capability.`);
-        const lease = requireInstance(this.options.instances, name).acquireLease();
+        const lease = requireInstance(this.options.instances, name).lifecycle.acquireLease();
         try {
-            await lease.instance.worker.appendControlEvent(requireEventType(type), data as JsonValue | undefined);
+            await lease.instance.worker.supervision.state.appendEvent(requireEventType(type), data as JsonValue | undefined);
         } finally { lease.release(); }
     }
 }

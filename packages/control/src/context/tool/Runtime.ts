@@ -1,3 +1,4 @@
+import type { Instance } from "@portable-devshell/core";
 import type { InstanceRegistry } from "../../instance/Registry.js";
 import type { ToolCallRegistration } from "@portable-devshell/shared";
 import {
@@ -390,7 +391,7 @@ class ContextToolRuntime {
         return context.principal ?? "local";
     }
 
-    #requireGeneration(instance: string): { release(): void } {
+    #requireGeneration(instance: string): { instance: Instance; release(): void } {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

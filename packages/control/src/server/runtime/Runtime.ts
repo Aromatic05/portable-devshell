@@ -139,7 +139,7 @@ export class ControlRuntime {
         );
         const modelCommands = (instance: string): readonly string[] => {
             const allowed =
-                options.instances.get(instance)?.modelExtensions ?? [];
+                options.instances.get(instance)?.config.modelExtensions ?? [];
             return modelCliCommands
                 .list()
                 .filter((command) => allowed.includes(command.extensionId))

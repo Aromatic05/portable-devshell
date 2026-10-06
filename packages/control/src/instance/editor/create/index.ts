@@ -184,7 +184,7 @@ export class InstanceCreateCoordinator {
                         .catch((cleanupError) => failures.push(cleanupError));
                 } else {
                     await descriptor
-                        .retire(async () =>
+                        .lifecycle.retire(async () =>
                             await this.#retireRuntimeInstance(descriptor),
                         )
                         .catch((cleanupError) => failures.push(cleanupError));

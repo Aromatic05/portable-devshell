@@ -207,7 +207,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             throw new Error(
                 `Instance ${cleanup.instance} is unavailable for alert cleanup.`,
             );
-        let lease: { release(): void };
+        let lease: { instance: Instance; release(): void };
         try {
             lease = instance.lifecycle.acquireLease();
         } catch {

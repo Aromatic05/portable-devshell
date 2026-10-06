@@ -1,6 +1,5 @@
 import {
     type ControlConfig,
-    type ControlInstanceAlertsConfig,
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
@@ -108,33 +107,6 @@ function listenerId(host: string, port: number): string {
     return `${host}:${port}`;
 }
 
-export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
-    alerts?: ControlInstanceAlertsConfig;
-    effectiveSecurityMode: "disabled" | "workspace";
-    env?: NodeJS.ProcessEnv;
-} {
-    const effectiveSecurityMode = instance.security.mode;
-
-    return {
-        alerts:
-            instance.alerts === undefined
-                ? undefined
-                : {
-                      ...instance.alerts,
-                      scripts: instance.alerts.scripts?.map((script) => ({
-                          ...script,
-                          command: [...script.command],
-                      })),
-                  },
-        effectiveSecurityMode,
-        env: {
-            ...instance.env,
-            DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
-            DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
-        },
-    };
-}
-
 export function requiresWorkerRebuild(
     previous: ControlInstanceConfig,
     next: ControlInstanceConfig,
@@ -145,6 +117,8 @@ export function requiresWorkerRebuild(
         stableStringify(previous.container) !== stableStringify(next.container),
         previous.dockerBinary !== next.dockerBinary,
         previous.podmanBinary !== next.podmanBinary,
+        stableStringify(previous.alerts) !== stableStringify(next.alerts),
+        stableStringify(previous.env) !== stableStringify(next.env),
         previous.security.mode !== next.security.mode,
         stableStringify(previous.logs) !== stableStringify(next.logs),
         stableStringify(previous.tools) !== stableStringify(next.tools),

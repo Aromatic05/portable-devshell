@@ -41,14 +41,14 @@ export class McpRuntimeFactory {
         const endpoints = config.mcp.enabled
             ? registry
                   .list()
-                  .filter((descriptor) => descriptor.mcpEnabled)
+                  .filter((descriptor) => descriptor.config.mcpEnabled)
                   .map((descriptor) => {
                       const instance = config.instances.find(
-                          (entry) => entry.name === descriptor.name,
+                          (entry) => entry.name === descriptor.config.name,
                       );
                       if (instance === undefined)
                           throw new Error(
-                              `Missing config for MCP instance ${descriptor.name}.`,
+                              `Missing config for MCP instance ${descriptor.config.name}.`,
                           );
                       return this.#mapper.map(
                           descriptor,
