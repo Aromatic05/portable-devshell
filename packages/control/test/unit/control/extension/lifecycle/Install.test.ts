@@ -20,9 +20,9 @@ import { controlErrorCodes } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/artifact/Archive.ts";
-import { ExtensionHost } from "../../../../../src/extension/host/Host.ts";
-import { ExtensionControlService } from "../../../../../src/extension/manager/Operations.ts";
-import { ExtensionInstallService } from "../../../../../src/extension/install/Service.ts";
+import { ExtensionHost } from "../../../../../src/extension/host/index.ts";
+import { ExtensionControlService } from "../../../../../src/extension/manager/index.ts";
+import { ExtensionInstallService } from "../../../../../src/extension/install/index.ts";
 import { ExtensionLoader } from "../../../../../src/extension/discovery/Loader.ts";
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../../../src/extension/state/Store.ts";

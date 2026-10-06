@@ -7,7 +7,7 @@ import {
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 
-import { ExtensionHost } from "../../../../../src/extension/host/Host.ts";
+import { ExtensionHost } from "../../../../../src/extension/host/index.ts";
 import { ExtensionChangeHub } from "../../../../../src/extension/manager/Change.ts";
 import { readExtensionSnapshot } from "../../../../../src/extension/manager/Snapshot.ts";
 import { ExtensionPointRegistry } from "../../../../../src/extension/registration/PointRegistry.ts";

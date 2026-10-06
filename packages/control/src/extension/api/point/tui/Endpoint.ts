@@ -13,7 +13,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import { routeModule } from "@portable-devshell/shared";
-import type { ExtensionHost } from "../../../host/Host.js";
+import type { ExtensionHost } from "../../../host/index.js";
 
 export interface TuiPagePort {
     invoke(

@@ -16,7 +16,7 @@ import {
     type ControlRouteScope,
 } from "@portable-devshell/extension/control";
 
-import type { ExtensionHost } from "../../../host/Host.js";
+import type { ExtensionHost } from "../../../host/index.js";
 
 export class ControlExtensionRouteService {
     readonly #activeStreams = new Set<{

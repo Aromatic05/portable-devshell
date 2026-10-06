@@ -7,7 +7,7 @@ import type {
     ExtensionWorkerRuntime,
 } from "../api/cap/Assembly.js";
 import type { ExtensionConfigRuntime } from "../api/cap/config/Control.js";
-import type { ExtensionSandboxHost } from "../sandbox/bridge/Host.js";
+import type { ExtensionSandboxHost } from "../sandbox/bridge/index.js";
 import { isDirectoryNotEmpty, isMissing } from "./Paths.js";
 
 export async function throwInProcessActivationFailure(

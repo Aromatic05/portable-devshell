@@ -2,7 +2,7 @@ import type {
     ExtensionRuntime,
     ExtensionRuntimeOptions,
 } from "./Api.js";
-import { ExtensionHost } from "./host/Host.js";
+import { ExtensionHost } from "./host/index.js";
 
 export function createExtensionRuntime(
     options: ExtensionRuntimeOptions,

@@ -19,7 +19,7 @@ import {
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
-} from "../sandbox/bridge/Host.js";
+} from "../sandbox/bridge/index.js";
 import type { ExtensionSandboxReadyDescriptor } from "../sandbox/bridge/Protocol.js";
 import {
     disposeInProcessGeneration,

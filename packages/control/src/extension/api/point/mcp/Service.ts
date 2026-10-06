@@ -15,7 +15,7 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../host/Host.js";
+import type { ExtensionHost } from "../../../host/index.js";
 import {
     type ToolCallRegistry,
 } from "../../../../toolcall/Api.js";

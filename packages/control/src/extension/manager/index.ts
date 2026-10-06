@@ -10,7 +10,7 @@ import type { ExtensionControlPort } from "./Port.js";
 import {
     REQUIRED_BUILTIN_EXTENSION_IDS,
     type ExtensionInstallService,
-} from "../install/Service.js";
+} from "../install/index.js";
 
 export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: Pick<

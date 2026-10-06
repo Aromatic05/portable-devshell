@@ -15,7 +15,7 @@ import {
 } from "@portable-devshell/extension/toolcall";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../host/Host.js";
+import type { ExtensionHost } from "../../../host/index.js";
 import { ToolCallSecretRewrite } from "../../interface/secret/Rewrite.js";
 
 type ToolCallHookContributor = Parameters<

@@ -15,8 +15,8 @@ import { createControlExtensionPointRegistry } from "../../../src/extension/regi
 import { CliExtensionCommandService } from "../../../src/extension/api/point/cli/command/Service.ts";
 import { ExtensionContextObserveCapabilityControl } from "../../../src/extension/api/cap/context/Control.ts";
 import { ExtensionLoader } from "../../../src/extension/discovery/Loader.ts";
-import { ExtensionHost } from "../../../src/extension/host/Host.ts";
-import { ExtensionInstallService } from "../../../src/extension/install/Service.ts";
+import { ExtensionHost } from "../../../src/extension/host/index.ts";
+import { ExtensionInstallService } from "../../../src/extension/install/index.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
 import { Instance, InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";

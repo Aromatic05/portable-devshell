@@ -15,7 +15,7 @@ import {
 
 import { McpControlModule } from "../../../src/server/mcp/Module.ts";
 import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
-import { ExtensionHost } from "../../../src/extension/host/Host.ts";
+import { ExtensionHost } from "../../../src/extension/host/index.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ConfigEngine } from "../../../src/config/engine/index.ts";
 import { ConfigEditorCoordinator } from "../../../src/config/editor/index.ts";

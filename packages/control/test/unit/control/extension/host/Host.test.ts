@@ -14,7 +14,7 @@ import { ExtensionPointRegistry } from "../../../../../src/extension/registratio
 import {
     ExtensionHost,
     type ExtensionGenerationLoader,
-} from "../../../../../src/extension/host/Host.ts";
+} from "../../../../../src/extension/host/index.ts";
 import {
     cloneExtensionRegistry,
     type ExtensionRegistrySnapshot,
