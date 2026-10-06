@@ -13,7 +13,7 @@ import { readExtensionSnapshot } from "../../../../../src/extension/manager/Snap
 import { ExtensionPointRegistry } from "../../../../../src/extension/registration/PointRegistry.ts";
 import { cloneExtensionRegistry, type ExtensionRegistrySnapshot } from "../../../../../src/extension/state/Model.ts";
 import { tuiPagesExtensionPointDefinition } from "../../../../../src/extension/api/point/tui/Declaration.ts";
-import { TuiExtensionPageService } from "../../../../../src/extension/api/point/tui/Endpoint.ts";
+import { TuiExtensionPageService } from "../../../../../src/extension/api/point/tui/index.ts";
 
 test("manager snapshot keeps public records and page catalogs within the host atomic read", async (context) => {
     let registry: ExtensionRegistrySnapshot = {

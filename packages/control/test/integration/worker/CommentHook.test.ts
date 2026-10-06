@@ -18,7 +18,7 @@ import { createToolCallScope } from "../../../../core/src/toolcall/execution/Con
 import { ToolCallHookRegistry } from "../../../../core/src/toolcall/registration/index.ts";
 import { ToolCallPipeline } from "../../../../core/src/toolcall/execution/Pipeline.ts";
 import { ToolCallExecutionTarget } from "../../../../core/src/toolcall/execution/ExecutionTarget.ts";
-import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/Binding.ts";
+import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/index.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";

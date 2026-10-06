@@ -5,7 +5,7 @@ import { secretRewriteInterfaceOperation } from "@portable-devshell/extension/se
 import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import { ToolCallSecretRewrite } from "../../../../../../../src/extension/api/interface/secret/Rewrite.ts";
+import { ToolCallSecretRewrite } from "../../../../../../../src/extension/api/interface/secret/index.ts";
 
 const signal = new AbortController().signal;
 const tokenReference = "$" + "{SECRET:TOKEN}";

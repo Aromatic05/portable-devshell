@@ -12,7 +12,7 @@ import type {
 import { asInstanceName } from "@portable-devshell/shared";
 import { ToolCallHookRegistry } from "../../../../../../../../core/src/toolcall/registration/index.ts";
 
-import { ToolCallExtensionBinding } from "../../../../../../../src/extension/api/point/toolcall/Binding.ts";
+import { ToolCallExtensionBinding } from "../../../../../../../src/extension/api/point/toolcall/index.ts";
 import {
     toolCallReviewSandboxCodec,
     toolCallRewriteSandboxCodec,
