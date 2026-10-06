@@ -10,7 +10,7 @@ import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
 import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
-import { ToolCallRegistry } from "../../../src/toolcall/index.ts";
+import { createToolCallRegistry } from "../../../src/toolcall/Public.ts";
 
 function createHooks() {
     const executes = new Map<
@@ -41,7 +41,7 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         list: () => descriptors,
     } as unknown as InstanceRegistry;
     const { hooks } = createHooks();
-    const registry = new ToolCallRegistry();
+    const registry = createToolCallRegistry();
     const unbind = registry.bind(hooks);
     const uninstall = installArtifactTools(
         {} as ArtifactImageApi,
@@ -100,7 +100,7 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         onChange: () => () => undefined,
     } as unknown as InstanceRegistry;
     const { executes, hooks } = createHooks();
-    const registry = new ToolCallRegistry();
+    const registry = createToolCallRegistry();
     const unbind = registry.bind(hooks);
     const uninstall = installArtifactTools(
         artifact,

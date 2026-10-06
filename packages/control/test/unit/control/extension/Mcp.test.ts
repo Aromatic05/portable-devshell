@@ -8,7 +8,7 @@ import {
 import type { InstanceName } from "@portable-devshell/shared";
 
 import { McpExtensionService } from "../../../../src/extension/api/point/mcp/Service.ts";
-import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
 
 test("MCP Extension tools publish definitions and execute through ToolCall hooks", async () => {
     let releases = 0;
@@ -95,7 +95,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
         registerReview: () => () => undefined,
     } as ToolCallHooks;
 
-    const registry = new ToolCallRegistry();
+    const registry = createToolCallRegistry();
     const unbind = registry.bind(hooks);
     const uninstall = service.install(registry);
     try {

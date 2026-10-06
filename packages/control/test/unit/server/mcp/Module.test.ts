@@ -10,7 +10,7 @@ import {
 
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
-import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
 
 test("hot enabling and disabling MCP updates status and OAuth approval exposure", async (t) => {
     const homeDirectory = await createTestTempDirectory("mcp-hot-enable-status");
@@ -30,7 +30,7 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
         status,
     };
     let config = createDefaultControlConfig();
-    const toolRegistry = new ToolCallRegistry();
+    const toolRegistry = createToolCallRegistry();
     const runtime = new McpControlModule({
         artifact: { service: {}, installHttpRoute() {} } as never,
         config,

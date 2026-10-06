@@ -21,7 +21,7 @@ import { ControlWebRuntime } from "../../../../src/server/web/Runtime.ts";
 import { createContextRuntime } from "@portable-devshell/core/context";
 import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
-import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
+import { createToolCallRegistry } from "../../../../src/toolcall/Public.ts";
 import {
     createTestIpcPath,
     ipcEndpointAcceptsConnections,
@@ -741,7 +741,7 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         contextTransport: {} as never,
         controlPaths,
         instances,
-        toolRegistry: new ToolCallRegistry(),
+        toolRegistry: createToolCallRegistry(),
     });
     const web = new ControlWebRuntime({
         config: persisted,

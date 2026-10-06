@@ -18,7 +18,7 @@ import { createToolCallExecutionRuntime, type ToolCallDispatchRequest, type Tool
 import {
     type ToolCallDefinitionRegistration,
     type ToolCallRegistry,
-} from "../../toolcall/index.js";
+} from "../../toolcall/Public.js";
 
 export class InstanceRuntime {
     readonly instance: Instance;

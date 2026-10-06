@@ -19,7 +19,7 @@ import type { ExtensionHost } from "../../../host/Host.js";
 import {
     allToolCallInstances,
     type ToolCallRegistry,
-} from "../../../../toolcall/index.js";
+} from "../../../../toolcall/Public.js";
 
 export class McpExtensionService {
     readonly #extensions: Pick<

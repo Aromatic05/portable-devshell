@@ -14,7 +14,7 @@ import { ConfigChangeHub } from "../../config/change/Config.js";
 import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceChangeHub } from "../../instance/Change.js";
 import { InstanceRuntimeRegistry } from "./Instance.js";
-import { ToolCallRegistry } from "../../toolcall/index.js";
+import { createToolCallRegistry } from "../../toolcall/Public.js";
 
 export interface ControlRuntimeStateOptions {
     configRegistry?: ConfigRegistry;
@@ -30,7 +30,7 @@ export class ControlRuntimeState {
     readonly homeDirectory?: string;
     readonly instanceChanges = new InstanceChangeHub();
     readonly instanceRuntimes: InstanceRuntimeRegistry;
-    readonly toolCalls = new ToolCallRegistry();
+    readonly toolCalls = createToolCallRegistry();
     #config?: ControlConfig;
     #instances = new InstanceRegistry([]);
     #restartControlRequired = false;

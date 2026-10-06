@@ -1,6 +1,11 @@
-export {
+import type { ToolCallRegistry } from "./Api.js";
+import {
     allToolCallInstances,
-    ToolCallRegistry,
-    type ToolCallDefinitionEntry,
-    type ToolCallDefinitionRegistration,
+    ToolCallRegistryState,
 } from "./Registry.js";
+
+export { allToolCallInstances };
+
+export function createToolCallRegistry(): ToolCallRegistry {
+    return new ToolCallRegistryState();
+}

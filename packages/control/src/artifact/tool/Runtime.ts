@@ -8,7 +8,7 @@ import type { InstanceChangeHub } from "../../instance/Change.js";
 import {
     type ToolCallDefinitionRegistration,
     type ToolCallRegistry,
-} from "../../toolcall/index.js";
+} from "../../toolcall/Public.js";
 import type { ArtifactImageApi } from "../Api.js";
 import { artifactViewImageDefinition } from "./Definition.js";
 import { readArtifactViewImageInput } from "./Input.js";

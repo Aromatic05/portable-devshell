@@ -7,18 +7,13 @@ import {
     type ToolNameHandle,
 } from "@portable-devshell/core/toolcall";
 import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
+import type {
+    ToolCallDefinitionEntry,
+    ToolCallDefinitionRegistration,
+    ToolCallRegistry,
+} from "./Api.js";
 
 export const allToolCallInstances = "*" as const;
-
-export interface ToolCallDefinitionEntry {
-    definition: ToolDefinition;
-    scope: string;
-}
-
-export interface ToolCallDefinitionRegistration {
-    replace(definitions: readonly ToolDefinition[]): void;
-    dispose(): void;
-}
 
 interface StoredRegistration {
     definitions: Map<string, ToolDefinition>;
@@ -26,7 +21,7 @@ interface StoredRegistration {
     readonly scope: string;
 }
 
-export class ToolCallRegistry implements ToolCallRegistration {
+export class ToolCallRegistryState implements ToolCallRegistry {
     #hooks?: ToolCallHooks;
     readonly #registrations = new Map<symbol, StoredRegistration>();
 
