@@ -30,7 +30,7 @@ import { ExtensionControlService } from "../../extension/manager/Operations.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
-import type { ExtensionHost } from "../../extension/host/Host.js";
+import type { ExtensionRuntime } from "../../extension/Public.js";
 import { ExtensionInstallService } from "../../extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/Binding.js";
 import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewrite.js";
@@ -69,7 +69,7 @@ export interface ControlRuntimeOptions {
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
     extensionPaths: ExtensionPathLayout;
-    extensions: ExtensionHost;
+    extensions: ExtensionRuntime;
     instanceCreate: InstanceCreateCoordinator;
     instanceEditor: InstanceEditorCoordinator;
     instanceChanges: InstanceChangeHub;
@@ -94,7 +94,7 @@ export class ControlRuntime {
     readonly #debug: DebugRuntime;
     readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
-    readonly #extensions: ExtensionHost;
+    readonly #extensions: ExtensionRuntime;
     readonly #instances: InstanceRegistry;
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;

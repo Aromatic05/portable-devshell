@@ -12,7 +12,7 @@ import {
     type ControlWebAuthConfig,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../extension/host/Host.js";
+import type { ExtensionRuntime } from "../../extension/Public.js";
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
@@ -38,7 +38,7 @@ export interface ControlWebTransportPort {
 
 export interface ControlWebRuntimeOptions {
     config: ControlConfig;
-    extensions: ExtensionHost;
+    extensions: ExtensionRuntime;
     mcp: ControlWebMcpPort;
     oauthDirectory: string;
     paths: ExtensionPathLayout;
@@ -52,7 +52,7 @@ interface WebRuntimeGeneration {
 
 export class ControlWebRuntime {
     #auth: ControlWebAuthConfig;
-    readonly #extensions: ExtensionHost;
+    readonly #extensions: ExtensionRuntime;
     #enabled: boolean;
     #flow?: ControlWebOAuthFlow;
     #flowUninstall?: () => void;

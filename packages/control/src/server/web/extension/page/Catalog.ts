@@ -4,12 +4,12 @@ import {
 } from "@portable-devshell/extension/web";
 import type { WebPageDescriptor } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../extension/host/Host.js";
+import type { ExtensionRuntime } from "../../../../extension/Public.js";
 
 export class WebExtensionPageCatalog {
-    readonly #extensions: Pick<ExtensionHost, "listDeclarations">;
+    readonly #extensions: Pick<ExtensionRuntime, "listDeclarations">;
 
-    constructor(extensions: Pick<ExtensionHost, "listDeclarations">) {
+    constructor(extensions: Pick<ExtensionRuntime, "listDeclarations">) {
         this.#extensions = extensions;
     }
 

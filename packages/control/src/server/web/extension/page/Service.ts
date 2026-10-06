@@ -8,17 +8,17 @@ import type {
     WebPageSnapshot,
 } from "@portable-devshell/shared";
 
-import type { ExtensionHost } from "../../../../extension/host/Host.js";
+import type { ExtensionRuntime } from "../../../../extension/Public.js";
 import { WebExtensionPageCatalog } from "./Catalog.js";
 import { validateWebPageSnapshot } from "./Snapshot.js";
 
 export class WebExtensionPageService {
     readonly #catalog: WebExtensionPageCatalog;
-    readonly #extensions: Pick<ExtensionHost, "acquireRegistration">;
+    readonly #extensions: Pick<ExtensionRuntime, "acquireRegistration">;
 
     constructor(
         extensions: Pick<
-            ExtensionHost,
+            ExtensionRuntime,
             "acquireRegistration" | "listDeclarations"
         >,
     ) {

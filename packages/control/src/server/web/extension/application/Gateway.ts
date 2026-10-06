@@ -14,13 +14,16 @@ import type { Duplex } from "node:stream";
 import type { HttpHost } from "@portable-devshell/mcp";
 import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
-import type { ExtensionHost } from "../../../../extension/host/Host.js";
+import type { ExtensionRuntime } from "../../../../extension/Public.js";
 import type { ExtensionPathLayout } from "../../../../extension/state/Layout.js";
 import type { ControlWebSessionService } from "../../auth/Session.js";
 
 export interface ExtensionWebGatewayOptions {
     basePath: string;
-    extensions: ExtensionHost;
+    extensions: Pick<
+        ExtensionRuntime,
+        "acquireRegistration" | "listDeclarations"
+    >;
     loginPath: string;
     paths: ExtensionPathLayout;
 }
@@ -38,7 +41,7 @@ interface ResolvedProxyTarget {
 
 export class ExtensionWebGateway {
     readonly #basePath: string;
-    readonly #extensions: ExtensionHost;
+    readonly #extensions: ExtensionWebGatewayOptions["extensions"];
     readonly #loginPath: string;
     readonly #paths: ExtensionPathLayout;
 

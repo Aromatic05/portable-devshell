@@ -8,7 +8,7 @@ import {
     createContextTransport,
     createServerTransport,
 } from "@portable-devshell/shared";
-import { ExtensionHost } from "../../extension/host/Host.js";
+import { createExtensionRuntime } from "../../extension/Public.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
 import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/Control.js";
 import {
@@ -182,7 +182,7 @@ export class ControlRuntimeFactory {
                 registry: options.state.configRegistry,
                 setConfig: (config) => options.state.setConfig(config),
             });
-            const extensions = new ExtensionHost({
+            const extensions = createExtensionRuntime({
                 configRegistry: options.state.configRegistry,
                 loader: new ExtensionLoader({
                     artifactFactory: ({ allowed, extensionId }) =>

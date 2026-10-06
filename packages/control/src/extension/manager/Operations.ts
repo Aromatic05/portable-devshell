@@ -5,19 +5,25 @@ import {
     type ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
+import type { ExtensionRuntime } from "../Api.js";
 import type { ExtensionControlPort } from "./Port.js";
-import type { ExtensionHost } from "../host/Host.js";
 import {
     REQUIRED_BUILTIN_EXTENSION_IDS,
     type ExtensionInstallService,
 } from "../install/Service.js";
 
 export class ExtensionControlService implements ExtensionControlPort {
-    readonly #host: ExtensionHost;
+    readonly #host: Pick<
+        ExtensionRuntime,
+        "disable" | "enable" | "list" | "reload"
+    >;
     readonly #installer: ExtensionInstallService;
 
     constructor(options: {
-        host: ExtensionHost;
+        host: Pick<
+            ExtensionRuntime,
+            "disable" | "enable" | "list" | "reload"
+        >;
         installer: ExtensionInstallService;
     }) {
         this.#host = options.host;
