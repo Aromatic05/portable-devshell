@@ -203,7 +203,7 @@ export class TuiRuntimeControlOperations {
 
     async deleteTodo(instance: string, taskId: string): Promise<void> {
         await this.#request(
-            this.options.clients.task.deleteTodo(instance, taskId),
+            this.options.clients.task(instance).deleteTodo(taskId),
             `todo.delete:${instance}:${taskId}`,
         );
         await this.#refreshBestEffort(`todo:${instance}`, async () => {

@@ -83,7 +83,7 @@ export async function executeControlLifecycle(
                 await context.negotiate();
             }
             for (const entry of restore)
-                await context.clients.runtime.start(entry.name);
+                await context.clients.runtime(entry.name).start();
             context.writeValue(status, renderControlStatus(status));
             return true;
         }

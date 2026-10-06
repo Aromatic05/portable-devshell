@@ -27,7 +27,6 @@ export class ProcessViewModel {
     readonly #listeners = new Set<() => void>();
     readonly #transport: ProcessTransport;
     #generation = 0;
-    #instance?: string;
     #published: ProcessViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ProcessViewModelState = emptyState();
@@ -46,27 +45,24 @@ export class ProcessViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    async load(instance: string): Promise<void> {
-        this.#instance = instance;
+    async load(): Promise<void> {
         const generation = ++this.#generation;
-        const envelope = await this.#transport.refresh(instance);
+        const envelope = await this.#transport.refresh();
         if (generation !== this.#generation) return;
         this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
         this.#ensureSubscription(envelope.lastSeq + 1);
     }
 
     async refresh(): Promise<void> {
-        const instance = this.#requireInstance();
         const generation = this.#generation;
-        const envelope = await this.#transport.refresh(instance);
+        const envelope = await this.#transport.refresh();
         if (generation !== this.#generation) return;
         this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
     }
 
     async start(options: ProcessStartOptions = {}): Promise<InstanceSnapshot> {
-        const instance = this.#requireInstance();
         const generation = ++this.#generation;
-        const handle = await this.#transport.start(instance, options);
+        const handle = await this.#transport.start(options);
         const snapshot = await handle.snapshot;
         if (generation !== this.#generation) return snapshot;
         this.#applySnapshot(snapshot, snapshot.lastSeq);
@@ -75,9 +71,8 @@ export class ProcessViewModel {
     }
 
     async stop(): Promise<InstanceSnapshot> {
-        const instance = this.#requireInstance();
         const generation = ++this.#generation;
-        const snapshot = await this.#transport.stop(instance);
+        const snapshot = await this.#transport.stop();
         if (generation !== this.#generation) return snapshot;
         this.#applySnapshot(snapshot, snapshot.lastSeq);
         void this.refresh().catch(() => undefined);
@@ -85,9 +80,8 @@ export class ProcessViewModel {
     }
 
     async readLogs(query?: InstanceLogQuery): Promise<InstanceLogEntry[]> {
-        const instance = this.#requireInstance();
         const generation = this.#generation;
-        const logs = await this.#transport.readLogs(instance, query);
+        const logs = await this.#transport.readLogs(query);
         if (generation !== this.#generation) return logs;
         this.#state = { ...this.#state, logs, logsLoaded: true };
         this.#emit();
@@ -96,7 +90,6 @@ export class ProcessViewModel {
 
     close(): void {
         this.#generation += 1;
-        this.#instance = undefined;
         if (this.#refreshTimer !== undefined) {
             clearTimeout(this.#refreshTimer);
             this.#refreshTimer = undefined;
@@ -110,7 +103,6 @@ export class ProcessViewModel {
 
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
-        const instance = this.#requireInstance();
         this.#subscription = new InstanceEventSubscription<ProcessEvent>(
             fromSeq,
             {
@@ -120,7 +112,7 @@ export class ProcessViewModel {
                     this.#state = { ...this.#state, connection: status };
                     this.#emit();
                 },
-                open: (cursor) => this.#transport.subscribe(instance, cursor),
+                open: (cursor) => this.#transport.subscribe(cursor),
             },
         );
         this.#subscription.start();
@@ -149,8 +141,7 @@ export class ProcessViewModel {
 
     async #recover(): Promise<number | undefined> {
         try {
-            const instance = this.#requireInstance();
-            const envelope = await this.#transport.refresh(instance);
+            const envelope = await this.#transport.refresh();
             this.#applySnapshot(envelope.snapshot, envelope.lastSeq);
             return envelope.lastSeq + 1;
         } catch {
@@ -166,12 +157,6 @@ export class ProcessViewModel {
             snapshot,
         };
         this.#emit();
-    }
-
-    #requireInstance(): string {
-        if (this.#instance === undefined)
-            throw new Error("Process view model is not loaded.");
-        return this.#instance;
     }
 
     #emit(): void {

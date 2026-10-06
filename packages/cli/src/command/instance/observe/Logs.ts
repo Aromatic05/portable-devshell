@@ -6,13 +6,12 @@ import { followCliCommandWatchStream } from "./Stream.js";
 export class CliCommandWatchLogs {
     async execute(
         runtime: CliClientRuntime,
-        instance: string,
         onEntries: (entries: InstanceLogEntry[]) => Promise<void> | void,
         maxEvents?: number,
     ): Promise<void> {
         let nextLogSeq = 1;
         const emitNewLogs = async () => {
-            const entries = await runtime.readLogs(instance, {
+            const entries = await runtime.readLogs({
                 fromSeq: nextLogSeq,
             });
             if (entries.length > 0) {
@@ -22,13 +21,13 @@ export class CliCommandWatchLogs {
         };
         await followCliCommandWatchStream({
             async loadFromSeq() {
-                const snapshot = await runtime.snapshot(instance);
+                const snapshot = await runtime.snapshot();
                 await emitNewLogs();
                 return snapshot.lastSeq + 1;
             },
             maxEvents,
             onEvent: emitNewLogs,
-            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq),
+            subscribe: (fromSeq) => runtime.subscribe(fromSeq),
         });
     }
 }
@@ -59,16 +58,13 @@ export async function executeInstanceLogs(
                 : "instance logs --follow",
         );
         await new CliCommandWatchLogs().execute(
-            context.clients.runtime,
-            command.instance,
+            context.clients.runtime(command.instance),
             async (entries) =>
                 context.writeRecords(entries, renderInstanceLogs(entries)),
             context.followEventLimit,
         );
     } else {
-        const entries = await context.clients.runtime.readLogs(
-            command.instance,
-        );
+        const entries = await context.clients.runtime(command.instance).readLogs();
         context.writeRecords(entries, renderInstanceLogs(entries));
     }
     return true;

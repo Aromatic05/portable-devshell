@@ -146,7 +146,7 @@ function InstanceTodos({
     const todoState = useDomainSnapshot(todo);
 
     useEffect(() => {
-        void todo.load(instance);
+        void todo.load();
     }, [todo, instance]);
 
     return (

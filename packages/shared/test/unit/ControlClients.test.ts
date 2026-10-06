@@ -52,15 +52,15 @@ test("tool transport routes all operations through the target instance tool port
         sessions.close();
         endpoint.close();
     });
-    const tool = createToolTransport(endpoint);
+    const nonexistent = createToolTransport(endpoint, "nonexistent");
+    const existing = createToolTransport(endpoint, "existing");
     assert.deepEqual(
-        await tool.call("nonexistent", "file_read", { path: "a" }, "/workspace"),
+        await nonexistent.call("file_read", { path: "a" }, "/workspace"),
         { ok: true },
     );
     const progress: unknown[] = [];
     assert.deepEqual(
-        await tool.callStreaming(
-            "nonexistent",
+        await nonexistent.callStreaming(
             "file_read",
             { path: "b" },
             "/workspace",
@@ -73,12 +73,12 @@ test("tool transport routes all operations through the target instance tool port
         { ok: true },
     );
     assert.deepEqual(progress, [{ step: 1 }]);
-    assert.deepEqual(await tool.openSession("existing", "/requested"), {
+    assert.deepEqual(await existing.openSession("/requested"), {
         tools: [],
         workspace: "/canonical",
     });
-    assert.deepEqual(await tool.closeSession("existing"), {});
-    assert.deepEqual(await tool.listCalls("existing", { limit: 5 }), []);
+    assert.deepEqual(await existing.closeSession(), {});
+    assert.deepEqual(await existing.listCalls({ limit: 5 }), []);
     assert.deepEqual(connections, [
         { host: "nonexistent", port: "tool" },
         { host: "nonexistent", port: "tool" },

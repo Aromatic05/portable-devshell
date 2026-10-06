@@ -67,18 +67,11 @@ export class WebDomainSession {
     readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #todos = new Map<string, TodoViewModel>();
-    readonly #approvalTransport;
     readonly #messageTransport: MessageTransport;
-    readonly #runtimeTransport;
-    readonly #taskTransport;
 
     constructor(options: WebDomainSessionOptions) {
         this.#endpoint = new Endpoint({ connectChannel: options.connectChannel });
-        this.#runtimeTransport = createProcessTransport(this.#endpoint);
-        this.#approvalTransport = createApprovalTransport(this.#endpoint);
         this.#messageTransport = createMessageTransport(this.#endpoint);
-        this.#taskTransport = createTaskTransport(this.#endpoint);
-        const toolTransport = createToolTransport(this.#endpoint);
 
         this.server = new ServerSession(
             this.#endpoint,
@@ -112,11 +105,20 @@ export class WebDomainSession {
         this.messages = new MessageViewModel({
             transport: this.#messageTransport,
         });
-        this.goals = new GoalViewModel({ transport: this.#taskTransport });
+        this.goals = new GoalViewModel({
+            transport: (instance) =>
+                createTaskTransport(this.#endpoint, instance),
+        });
         this.toolCalls = new ToolCallViewModel({
             cursor: async (instance) =>
-                (await this.#runtimeTransport.snapshot(instance)).lastSeq,
-            transport: toolTransport,
+                (
+                    await createProcessTransport(
+                        this.#endpoint,
+                        instance,
+                    ).snapshot()
+                ).lastSeq,
+            transport: (instance) =>
+                createToolTransport(this.#endpoint, instance),
         });
         this.reverse = createConnectionTransport(this.#endpoint);
     }
@@ -124,7 +126,9 @@ export class WebDomainSession {
     runtime(instance: string): ProcessViewModel {
         let viewModel = this.#runtimes.get(instance);
         if (viewModel === undefined) {
-            viewModel = new ProcessViewModel(this.#runtimeTransport);
+            viewModel = new ProcessViewModel(
+                createProcessTransport(this.#endpoint, instance),
+            );
             this.#runtimes.set(instance, viewModel);
         }
         return viewModel;
@@ -133,7 +137,9 @@ export class WebDomainSession {
     approval(instance: string): ApprovalViewModel {
         let viewModel = this.#approvals.get(instance);
         if (viewModel === undefined) {
-            viewModel = new ApprovalViewModel(this.#approvalTransport);
+            viewModel = new ApprovalViewModel(
+                createApprovalTransport(this.#endpoint, instance),
+            );
             this.#approvals.set(instance, viewModel);
         }
         return viewModel;
@@ -142,7 +148,9 @@ export class WebDomainSession {
     todo(instance: string): TodoViewModel {
         let viewModel = this.#todos.get(instance);
         if (viewModel === undefined) {
-            viewModel = new TodoViewModel(this.#taskTransport);
+            viewModel = new TodoViewModel(
+                createTaskTransport(this.#endpoint, instance),
+            );
             this.#todos.set(instance, viewModel);
         }
         return viewModel;

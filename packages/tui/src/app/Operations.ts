@@ -109,8 +109,8 @@ export interface TuiRuntimeOperationClients {
     instance: InstanceTransport;
     reverse: ConnectionTransport;
     server: ServerTransport;
-    task: TaskTransport;
-    tool: ToolTransport;
+    task(instance: string): TaskTransport;
+    tool(instance: string): ToolTransport;
 }
 
 export interface TuiRuntimeOperationContext {

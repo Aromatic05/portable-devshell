@@ -221,15 +221,12 @@ export async function executeToolCommand(
     switch (command.kind) {
         case "approval.list":
             context.writeJson(
-                await context.clients.approval.list(command.instance),
+                await context.clients.approval(command.instance).list(),
             );
             return true;
         case "approval.show":
             context.writeJson(
-                await context.clients.approval.get(
-                    command.instance,
-                    command.approvalId,
-                ),
+                await context.clients.approval(command.instance).get(command.approvalId),
             );
             return true;
         case "approval.decide": {
@@ -241,8 +238,7 @@ export async function executeToolCommand(
                           "approval policy patch",
                       );
             context.writeJson(
-                await context.clients.approval.decide(
-                    command.instance,
+                await context.clients.approval(command.instance).decide(
                     command.approvalId,
                     command.decision,
                     {
@@ -260,8 +256,7 @@ export async function executeToolCommand(
         }
         case "tool.calls":
             context.writeJson(
-                await context.clients.tool.listCalls(
-                    command.instance,
+                await context.clients.tool(command.instance).listCalls(
                     command.callId === undefined
                         ? {
                               ...(command.after === undefined
@@ -281,8 +276,7 @@ export async function executeToolCommand(
                 command.inputSource,
                 "tool input",
             );
-            const result = await context.clients.tool.call(
-                command.instance,
+            const result = await context.clients.tool(command.instance).call(
                 command.toolName,
                 input,
                 command.workspace,

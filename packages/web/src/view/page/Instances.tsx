@@ -350,7 +350,7 @@ function InstanceDetail({
         setRefreshingInstance(entry.name);
         void domains
             .runtime(entry.name)
-            .load(entry.name)
+            .load()
             .catch((error: unknown) => {
                 if (refreshGeneration.current === generation)
                     setDetailFailure(
@@ -496,7 +496,7 @@ function InstanceDetail({
                                 setRefreshingInstance(entry.name);
                                 void domains
                                     .runtime(entry.name)
-                                    .load(entry.name)
+                                    .load()
                                     .catch((error: unknown) => {
                                         if (
                                             refreshGeneration.current ===

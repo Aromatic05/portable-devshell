@@ -29,13 +29,13 @@ interface PendingOperation {
 }
 
 export class TuiControlTerminalPtyFactory {
-    readonly #client: TuiControlTerminalClient;
+    readonly #client: (instance: string) => TuiControlTerminalClient;
     readonly #operationAckTimeoutMs: number;
     readonly #workspaceForInstance: (instance: string) => string;
     readonly #sessions = new Map<string, StoredTerminalIdentity>();
 
     constructor(options: {
-        client: TuiControlTerminalClient;
+        client(instance: string): TuiControlTerminalClient;
         operationAckTimeoutMs?: number;
         workspaceForInstance(instance: string): string;
     }) {
@@ -57,8 +57,7 @@ export class TuiControlTerminalPtyFactory {
         return (command, _args, options) => {
             const targetInstance = instance ?? command;
             return new TuiControlTerminalPty({
-                client: this.#client,
-                instance: targetInstance,
+                client: this.#client(targetInstance),
                 operationAckTimeoutMs: this.#operationAckTimeoutMs,
                 options,
                 readIdentity: () => this.#sessions.get(targetInstance),
@@ -76,7 +75,7 @@ export class TuiControlTerminalPtyFactory {
         if (identity === undefined || identity.state !== "running") {
             return undefined;
         }
-        const killed = await this.#client.kill(instance, {
+        const killed = await this.#client(instance).kill({
             generation: identity.generation,
             terminalId: identity.terminalId,
             version: identity.version,
@@ -104,7 +103,6 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     readonly #exitListeners = new Set<
         (event: { exitCode: number; signal?: number }) => void
     >();
-    readonly #instance: string;
     readonly #operationAckTimeoutMs: number;
     readonly #options: TuiTerminalPtyOptions;
     readonly #workspace: string;
@@ -120,7 +118,6 @@ class TuiControlTerminalPty implements TuiTerminalPty {
 
     constructor(options: {
         client: TuiControlTerminalClient;
-        instance: string;
         operationAckTimeoutMs: number;
         options: TuiTerminalPtyOptions;
         readIdentity(): StoredTerminalIdentity | undefined;
@@ -128,7 +125,6 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         writeIdentity(identity: StoredTerminalIdentity): void;
     }) {
         this.#client = options.client;
-        this.#instance = options.instance;
         this.#operationAckTimeoutMs = options.operationAckTimeoutMs;
         this.#options = options.options;
         this.#workspace = options.workspace;
@@ -172,7 +168,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     async #connect(): Promise<void> {
         let identity = this.#readIdentity();
         if (identity === undefined || identity.state !== "running") {
-            identity = await this.#client.open(this.#instance, {
+            identity = await this.#client.open({
                 cols: this.#options.columns,
                 rows: this.#options.rows,
                 workspace: this.#workspace,
@@ -183,7 +179,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         // durable server output from the beginning so reopening the terminal
         // restores the screen instead of resuming after unseen output.
         const fromSeq = 0;
-        const stream = await this.#client.attach(this.#instance, {
+        const stream = await this.#client.attach({
             fromSeq,
             generation: identity.generation,
             terminalId: identity.terminalId,

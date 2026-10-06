@@ -120,7 +120,7 @@ export class WebStore {
         const runtime = this.domains.runtime(instance);
         await Promise.all([
             this.domains.toolCalls.load(instance),
-            runtime.load(instance).then(() => runtime.readLogs()),
+            runtime.load().then(() => runtime.readLogs()),
         ]);
     }
 
@@ -136,8 +136,8 @@ export class WebStore {
             instances.map(async (instance) => {
                 const runtime = this.domains.runtime(instance);
                 await Promise.all([
-                    runtime.load(instance).then(() => runtime.readLogs()),
-                    this.domains.approval(instance).load(instance),
+                    runtime.load().then(() => runtime.readLogs()),
+                    this.domains.approval(instance).load(),
                     this.domains.toolCalls.load(instance),
                     this.domains.messageHistory.refreshInstance(instance),
                     this.domains.messages.refreshInstance(instance),
@@ -173,7 +173,7 @@ export class WebStore {
             generation,
             async () => {
                 const approval = this.domains.approval(instance);
-                await approval.load(instance);
+                await approval.load();
                 await approval.decide(approvalId, decision);
             },
         );
@@ -250,7 +250,7 @@ export class WebStore {
             generation,
             async () => {
                 const todo = this.domains.todo(instance);
-                await todo.load(instance);
+                await todo.load();
                 await todo.delete(taskId);
             },
         );
@@ -272,7 +272,7 @@ export class WebStore {
             generation,
             async (signal) => {
                 const runtime = this.domains.runtime(instance);
-                await runtime.load(instance);
+                await runtime.load();
                 await runtime.stop();
                 if (signal.aborted || !this.#current(generation)) return;
                 await runtime.start({ signal });
@@ -500,7 +500,7 @@ export class WebStore {
             generation,
             async (signal) => {
                 const runtime = this.domains.runtime(instance);
-                await runtime.load(instance);
+                await runtime.load();
                 if (action === "start") await runtime.start({ signal });
                 else await runtime.stop();
             },

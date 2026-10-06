@@ -20,25 +20,20 @@ export type CliClientRuntime = Omit<
     ProcessTransport,
     "start" | "subscribe"
 > & {
-    start(
-        instance: string,
-        relay?: CliClientRuntimeTerminalRelay,
-    ): Promise<InstanceSnapshot>;
-    subscribe(instance: string, fromSeq: number): Promise<CliClientEventStream>;
+    start(relay?: CliClientRuntimeTerminalRelay): Promise<InstanceSnapshot>;
+    subscribe(fromSeq: number): Promise<CliClientEventStream>;
 };
 
 export function createCliRuntimeAdapter(
     endpoint: Endpoint,
+    instance: string,
     runtime: ProcessTransport,
 ): CliClientRuntime {
     return {
         ...runtime,
-        start: async (instance, relay) =>
-            await startInteractive(endpoint, instance, relay),
-        subscribe: async (instance, fromSeq) =>
-            new CliClientEventStream(
-                await runtime.subscribe(instance, fromSeq),
-            ),
+        start: async (relay) => await startInteractive(endpoint, instance, relay),
+        subscribe: async (fromSeq) =>
+            new CliClientEventStream(await runtime.subscribe(fromSeq)),
     };
 }
 

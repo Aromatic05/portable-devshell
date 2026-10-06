@@ -48,10 +48,7 @@ import { createCliCommandAdapter, type CliClientCommand } from "./Command.js";
 export interface CliClientOptions extends ControlChannelOptions {}
 
 export type CliClientTodo = Pick<TaskTransport, "deleteTodo" | "getTodo"> & {
-    subscribe(
-        instance: string,
-        fromSeq: number,
-    ): Promise<CliClientEventStream<TaskEvent>>;
+    subscribe(fromSeq: number): Promise<CliClientEventStream<TaskEvent>>;
 };
 
 /**
@@ -60,7 +57,7 @@ export type CliClientTodo = Pick<TaskTransport, "deleteTodo" | "getTodo"> & {
  * aggregate snapshot or subscription policy.
  */
 export interface CliClients {
-    approval: ApprovalTransport;
+    approval(instance: string): ApprovalTransport;
     cli: CliClientCommand;
     config: ConfigTransport;
     context: ContextTransport;
@@ -71,10 +68,10 @@ export interface CliClients {
     mcp: AuthTransport;
     overview: OverviewTransport;
     reverse: ConnectionTransport;
-    runtime: CliClientRuntime;
+    runtime(instance: string): CliClientRuntime;
     server: ServerTransport;
-    todo: CliClientTodo;
-    tool: ToolTransport;
+    todo(instance: string): CliClientTodo;
+    tool(instance: string): ToolTransport;
     close(): void;
     reconnect(): Promise<void>;
 }
@@ -83,10 +80,8 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
     const endpoint = new Endpoint({
         connectChannel: (signal) => connectControlChannel(options, signal),
     });
-    const runtime: ProcessTransport = createProcessTransport(endpoint);
-    const task = createTaskTransport(endpoint);
     return {
-        approval: createApprovalTransport(endpoint),
+        approval: (instance) => createApprovalTransport(endpoint, instance),
         cli: createCliCommandAdapter(
             endpoint,
             createCliCommandTransport(endpoint),
@@ -100,17 +95,24 @@ export function createCliClients(options: CliClientOptions = {}): CliClients {
         mcp: createAuthTransport(endpoint),
         overview: createOverviewTransport(endpoint),
         reverse: createConnectionTransport(endpoint),
-        runtime: createCliRuntimeAdapter(endpoint, runtime),
-        server: createServerTransport(endpoint, { clientKind: "cli" }),
-        todo: {
-            deleteTodo: task.deleteTodo,
-            getTodo: task.getTodo,
-            subscribe: async (instance, fromSeq) =>
-                new CliClientEventStream(
-                    await task.subscribe(instance, fromSeq),
-                ),
+        runtime: (instance) => {
+            const runtime: ProcessTransport = createProcessTransport(
+                endpoint,
+                instance,
+            );
+            return createCliRuntimeAdapter(endpoint, instance, runtime);
         },
-        tool: createToolTransport(endpoint),
+        server: createServerTransport(endpoint, { clientKind: "cli" }),
+        todo: (instance) => {
+            const task = createTaskTransport(endpoint, instance);
+            return {
+                deleteTodo: task.deleteTodo,
+                getTodo: task.getTodo,
+                subscribe: async (fromSeq) =>
+                    new CliClientEventStream(await task.subscribe(fromSeq)),
+            };
+        },
+        tool: (instance) => createToolTransport(endpoint, instance),
         close: () => endpoint.close(),
         reconnect: async () => await endpoint.reconnect(),
     };

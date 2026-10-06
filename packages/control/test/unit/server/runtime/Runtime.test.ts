@@ -1198,10 +1198,10 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         endpoint,
         createServerTransport(endpoint, { clientKind: "cli" }),
     );
-    const tools = createToolTransport(endpoint);
+    const tools = createToolTransport(endpoint, "nonexistent");
     t.after(() => service.close());
     await service.connect();
-    const first = await tools.call("nonexistent", "file_read", {}, "/workspace");
+    const first = await tools.call("file_read", {}, "/workspace");
     assert.deepEqual(first, { instance: "existing" });
     assert.deepEqual(events, [
         "review:nonexistent",
@@ -1215,7 +1215,6 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     events.length = 0;
     reviewDecision = "reject";
     const rejected = (await tools.call(
-        "nonexistent",
         "file_read",
         {},
         "/workspace",
@@ -1233,7 +1232,7 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
     targetInstance = "added";
     events.length = 0;
     assert.deepEqual(
-        await tools.call("nonexistent", "file_read", {}, "/workspace"),
+        await tools.call("file_read", {}, "/workspace"),
         { instance: "added" },
     );
     assert.deepEqual(events, [

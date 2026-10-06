@@ -118,8 +118,7 @@ export class TuiRuntimeTmuxOperations {
         input: JsonValue,
     ): Promise<Record<string, JsonValue>> {
         const feedback = (await withRequestTimeout(
-            this.options.clients.tool.call(
-                instance,
+            this.options.clients.tool(instance).call(
                 toolName,
                 input,
                 workspace,

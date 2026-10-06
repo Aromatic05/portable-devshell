@@ -73,7 +73,7 @@ export class TuiRuntimeExecutionOperations {
             instance,
             async () => {
                 const approval = this.options.domains.approval(instance);
-                await approval.load(instance);
+                await approval.load();
                 await approval.decide(approvalId, decision);
                 await this.#refreshInstanceBestEffort(instance);
             },
@@ -92,8 +92,7 @@ export class TuiRuntimeExecutionOperations {
                 const parsed = JSON.parse(input) as JsonValue;
                 const workspace = this.#requireHomeDirectory(instance);
                 const feedback = (await this.#request(
-                    this.options.clients.tool.call(
-                        instance,
+                    this.options.clients.tool(instance).call(
                         toolName,
                         parsed,
                         workspace,
@@ -136,7 +135,7 @@ export class TuiRuntimeExecutionOperations {
         commandId: string,
     ): Promise<void> {
         const runtime = this.options.domains.runtime(instance);
-        await runtime.load(instance);
+        await runtime.load();
         await runtime.start({
             onOutput: (chunk) =>
                 this.options.store.appendRelayOutput(commandId, chunk),
@@ -149,7 +148,7 @@ export class TuiRuntimeExecutionOperations {
 
     async #stopInstance(instance: string): Promise<void> {
         const runtime = this.options.domains.runtime(instance);
-        await runtime.load(instance);
+        await runtime.load();
         await runtime.stop();
     }
 

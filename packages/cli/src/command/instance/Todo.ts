@@ -6,13 +6,12 @@ import { followCliCommandWatchStream } from "./observe/Stream.js";
 export class CliCommandInstanceTodo {
     async execute(
         todoClient: CliClientTodo,
-        instance: string,
         follow: boolean,
         onTodo: (todo: TodoReadResult) => Promise<void> | void,
         maxEvents?: number,
     ): Promise<void> {
         const load = async () => {
-            const envelope = await todoClient.getTodo(instance);
+            const envelope = await todoClient.getTodo();
             await onTodo(envelope.todo);
             return envelope.lastSeq + 1;
         };
@@ -24,9 +23,9 @@ export class CliCommandInstanceTodo {
             loadFromSeq: load,
             maxEvents,
             async onEvent() {
-                await onTodo((await todoClient.getTodo(instance)).todo);
+                await onTodo((await todoClient.getTodo()).todo);
             },
-            subscribe: (fromSeq) => todoClient.subscribe(instance, fromSeq),
+            subscribe: (fromSeq) => todoClient.subscribe(fromSeq),
         });
     }
 }
@@ -107,10 +106,7 @@ export async function executeTodoCommand(
 ): Promise<boolean> {
     if (command.kind === "todo.delete") {
         context.writeJson(
-            await context.clients.todo.deleteTodo(
-                command.instance,
-                command.taskId,
-            ),
+            await context.clients.todo(command.instance).deleteTodo(command.taskId),
         );
         return true;
     }
@@ -118,8 +114,7 @@ export async function executeTodoCommand(
     if (command.follow)
         context.requireStreamingOutput("instance todo --follow");
     await new CliCommandInstanceTodo().execute(
-        context.clients.todo,
-        command.instance,
+        context.clients.todo(command.instance),
         command.follow,
         async (todo) => context.writeValue(todo, renderInstanceTodo(todo)),
         context.followEventLimit,

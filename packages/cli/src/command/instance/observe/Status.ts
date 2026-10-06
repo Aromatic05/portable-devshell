@@ -6,21 +6,20 @@ import { followCliCommandWatchStream } from "./Stream.js";
 export class CliCommandWatchStatus {
     async execute(
         runtime: CliClientRuntime,
-        instance: string,
         onSnapshot: (snapshot: InstanceSnapshot) => Promise<void> | void,
         maxEvents?: number,
     ): Promise<void> {
         await followCliCommandWatchStream({
             async loadFromSeq() {
-                const envelope = await runtime.snapshot(instance);
+                const envelope = await runtime.snapshot();
                 await onSnapshot(envelope.snapshot);
                 return envelope.lastSeq + 1;
             },
             maxEvents,
             async onEvent() {
-                await onSnapshot((await runtime.refresh(instance)).snapshot);
+                await onSnapshot((await runtime.refresh()).snapshot);
             },
-            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq),
+            subscribe: (fromSeq) => runtime.subscribe(fromSeq),
         });
     }
 }
@@ -35,8 +34,7 @@ export async function executeWatchStatus(
     if (command.kind !== "watch.status") return false;
     context.requireStreamingOutput("watch status");
     await new CliCommandWatchStatus().execute(
-        context.clients.runtime,
-        command.instance,
+        context.clients.runtime(command.instance),
         async (snapshot) =>
             context.writeValue(snapshot, renderInstanceSnapshot(snapshot)),
         context.followEventLimit,

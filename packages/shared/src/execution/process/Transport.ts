@@ -1,10 +1,7 @@
 // Thin typed process transport over the generic endpoint port client.
 
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
-import {
-    createPortClient,
-    type PortClient,
-} from "../../transport/endpoint/PortClient.js";
+import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
 import {
@@ -36,45 +33,34 @@ export interface ProcessStartHandle {
 }
 
 export interface ProcessTransport {
-    readLogs(
-        instance: string,
-        query?: InstanceLogQuery,
-    ): Promise<InstanceLogEntry[]>;
-    refresh(instance: string): Promise<InstanceProcessEnvelope>;
-    snapshot(instance: string): Promise<InstanceProcessEnvelope>;
-    start(
-        instance: string,
-        options?: ProcessStartOptions,
-    ): Promise<ProcessStartHandle>;
-    stop(instance: string): Promise<InstanceSnapshot>;
-    subscribe(
-        instance: string,
-        fromSeq: number,
-    ): Promise<InstanceEventStreamPort<ProcessEvent>>;
+    readLogs(query?: InstanceLogQuery): Promise<InstanceLogEntry[]>;
+    refresh(): Promise<InstanceProcessEnvelope>;
+    snapshot(): Promise<InstanceProcessEnvelope>;
+    start(options?: ProcessStartOptions): Promise<ProcessStartHandle>;
+    stop(): Promise<InstanceSnapshot>;
+    subscribe(fromSeq: number): Promise<InstanceEventStreamPort<ProcessEvent>>;
 }
 
-export function createProcessTransport(endpoint: Endpoint): ProcessTransport {
-    const port = (instance: string): PortClient =>
-        createPortClient(endpoint, instance, PROCESS_PORT);
+export function createProcessTransport(
+    endpoint: Endpoint,
+    instance: string,
+): ProcessTransport {
+    const instanceName = asInstanceName(instance);
+    const port = createPortClient(endpoint, instanceName, PROCESS_PORT);
     const open = (
-        instance: string,
         operation: string,
         payload?: JsonValue,
-    ): Promise<MessageStream> => port(instance).open(operation, payload);
+    ): Promise<MessageStream> => port.open(operation, payload);
     return {
-        readLogs: (instance, query) =>
-            port(instance).request<InstanceLogEntry[]>("readLogs", query),
-        refresh: (instance) =>
-            port(instance).request<InstanceProcessEnvelope>("refresh"),
-        snapshot: (instance) =>
-            port(instance).request<InstanceProcessEnvelope>("snapshot"),
-        start: (instance, options = {}) =>
-            startProcess(() => open(instance, "start"), options),
-        stop: (instance) => port(instance).request<InstanceSnapshot>("stop"),
-        subscribe: async (instance, fromSeq) =>
+        readLogs: (query) => port.request<InstanceLogEntry[]>("readLogs", query),
+        refresh: () => port.request<InstanceProcessEnvelope>("refresh"),
+        snapshot: () => port.request<InstanceProcessEnvelope>("snapshot"),
+        start: (options = {}) => startProcess(() => open("start"), options),
+        stop: () => port.request<InstanceSnapshot>("stop"),
+        subscribe: async (fromSeq) =>
             new InstanceEventStream<ProcessEvent>(
-                asInstanceName(instance),
-                await open(instance, "subscribe", { fromSeq }),
+                instanceName,
+                await open("subscribe", { fromSeq }),
             ),
     };
 }

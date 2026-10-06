@@ -38,9 +38,9 @@ export interface StandaloneDevshellPiOptions {
 
 interface StandaloneControlSession {
     instance: InstanceTransport;
-    runtime: ProcessTransport;
     service: ServerTransport;
-    tool: ToolTransport;
+    runtime(instance: string): ProcessTransport;
+    tool(instance: string): ToolTransport;
     close(): void;
 }
 
@@ -148,12 +148,11 @@ export async function openStandaloneDevshellPiToolSession(
         );
         if (selected === undefined)
             throw new Error(`Unknown devshell instance: ${instance}`);
+        const runtime = control.runtime(instance);
+        const tool = control.tool(instance);
         if (!selected.snapshot.ready)
-            await (await control.runtime.start(instance)).snapshot;
-        const opened = await control.tool.openSession(
-            instance,
-            requested.workspace,
-        );
+            await (await runtime.start()).snapshot;
+        const opened = await tool.openSession(requested.workspace);
         const tools = opened.tools.map((tool) => ({
             description: tool.description,
             inputSchema: tool.inputSchema,
@@ -166,8 +165,7 @@ export async function openStandaloneDevshellPiToolSession(
             tools,
             async callTool(toolName, input, operationId, signal, onProgress) {
                 signal?.throwIfAborted();
-                const result = await control.tool.callStreaming(
-                    instance,
+                const result = await tool.callStreaming(
                     toolName,
                     input,
                     opened.workspace,
@@ -180,7 +178,7 @@ export async function openStandaloneDevshellPiToolSession(
                 if (closed) return;
                 closed = true;
                 try {
-                    await control.tool.closeSession(instance);
+                    await tool.closeSession();
                 } finally {
                     control.close();
                 }
@@ -257,9 +255,9 @@ function createStandaloneControl(
     });
     return {
         instance: createInstanceTransport(endpoint),
-        runtime: createProcessTransport(endpoint),
+        runtime: (instance) => createProcessTransport(endpoint, instance),
         service: createServerTransport(endpoint, { clientKind: "cli" }),
-        tool: createToolTransport(endpoint),
+        tool: (instance) => createToolTransport(endpoint, instance),
         close: () => endpoint.close(),
     };
 }

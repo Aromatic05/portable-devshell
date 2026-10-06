@@ -3,10 +3,7 @@ import {
     type InstanceEventStreamPort,
 } from "../../client/Stream.js";
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
-import {
-    createPortClient,
-    type PortClient,
-} from "../../transport/endpoint/PortClient.js";
+import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import { asInstanceName } from "../../types/Instance.js";
 import type {
     GoalSnapshotEnvelope,
@@ -16,34 +13,29 @@ import type {
 } from "./Model.js";
 
 export interface TaskTransport {
-    deleteTodo(
-        instance: string,
-        taskId: string,
-    ): Promise<Record<string, never>>;
-    getGoals(instance: string): Promise<GoalSnapshotEnvelope>;
-    getTodo(instance: string, input?: TodoReadInput): Promise<TodoReadEnvelope>;
-    subscribe(
-        instance: string,
-        fromSeq: number,
-    ): Promise<InstanceEventStreamPort<TaskEvent>>;
+    deleteTodo(taskId: string): Promise<Record<string, never>>;
+    getGoals(): Promise<GoalSnapshotEnvelope>;
+    getTodo(input?: TodoReadInput): Promise<TodoReadEnvelope>;
+    subscribe(fromSeq: number): Promise<InstanceEventStreamPort<TaskEvent>>;
 }
 
-export function createTaskTransport(endpoint: Endpoint): TaskTransport {
-    const port = (instance: string): PortClient =>
-        createPortClient(endpoint, instance, "task");
+export function createTaskTransport(
+    endpoint: Endpoint,
+    instance: string,
+): TaskTransport {
+    const instanceName = asInstanceName(instance);
+    const port = createPortClient(endpoint, instanceName, "task");
     return {
-        deleteTodo: (instance, taskId) =>
-            port(instance).request<Record<string, never>>("deleteTodo", {
+        deleteTodo: (taskId) =>
+            port.request<Record<string, never>>("deleteTodo", {
                 taskId,
             }),
-        getGoals: (instance) =>
-            port(instance).request<GoalSnapshotEnvelope>("getGoals"),
-        getTodo: (instance, input) =>
-            port(instance).request<TodoReadEnvelope>("getTodo", input),
-        subscribe: async (instance, fromSeq) =>
+        getGoals: () => port.request<GoalSnapshotEnvelope>("getGoals"),
+        getTodo: (input) => port.request<TodoReadEnvelope>("getTodo", input),
+        subscribe: async (fromSeq) =>
             new InstanceEventStream<TaskEvent>(
-                asInstanceName(instance),
-                await port(instance).open("subscribe", { fromSeq }),
+                instanceName,
+                await port.open("subscribe", { fromSeq }),
             ),
     };
 }

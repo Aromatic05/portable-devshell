@@ -108,7 +108,7 @@ export async function executeInit(
 
     let snapshot: InstanceSnapshot | undefined;
     if (localInstance.enabled) {
-        snapshot = await context.clients.runtime.start(localInstance.name, {
+        snapshot = await context.clients.runtime(localInstance.name).start({
             input: context.stdin,
             output: context.stderr,
         });

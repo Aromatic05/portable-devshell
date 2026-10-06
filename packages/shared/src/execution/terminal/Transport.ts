@@ -3,10 +3,7 @@
 // TerminalAttachment (seed/output/ack plus input and resize).
 
 import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
-import {
-    createPortClient,
-    type PortClient,
-} from "../../transport/endpoint/PortClient.js";
+import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import type { MessageStream } from "../../transport/packet/Stream.js";
 import type { JsonValue } from "../../types/Json.js";
 import type { EventStreamEnvelope } from "../../client/Stream.js";
@@ -41,41 +38,29 @@ export interface TerminalAttachment {
 }
 
 export interface TerminalTransport {
-    attach(
-        instance: string,
-        input: TerminalAttachInput,
-    ): Promise<TerminalAttachment>;
+    attach(input: TerminalAttachInput): Promise<TerminalAttachment>;
     get(
-        instance: string,
         identity: Pick<TerminalVersionedIdentity, "generation" | "terminalId">,
     ): Promise<TerminalSessionDescriptor>;
-    kill(
-        instance: string,
-        identity: TerminalVersionedIdentity,
-    ): Promise<TerminalSessionDescriptor>;
-    list(instance: string): Promise<TerminalSessionDescriptor[]>;
-    open(
-        instance: string,
-        input: TerminalOpenInput,
-    ): Promise<TerminalOpenResult>;
+    kill(identity: TerminalVersionedIdentity): Promise<TerminalSessionDescriptor>;
+    list(): Promise<TerminalSessionDescriptor[]>;
+    open(input: TerminalOpenInput): Promise<TerminalOpenResult>;
 }
 
-export function createTerminalTransport(endpoint: Endpoint): TerminalTransport {
-    const port = (instance: string): PortClient =>
-        createPortClient(endpoint, instance, TERMINAL_PORT);
+export function createTerminalTransport(
+    endpoint: Endpoint,
+    instance: string,
+): TerminalTransport {
+    const port = createPortClient(endpoint, instance, TERMINAL_PORT);
     return {
-        attach: async (instance, input) =>
+        attach: async (input) =>
             new MessageStreamTerminalAttachment(
-                await port(instance).open("attach", input),
+                await port.open("attach", input),
             ),
-        get: (instance, identity) =>
-            port(instance).request<TerminalSessionDescriptor>("get", identity),
-        kill: (instance, identity) =>
-            port(instance).request<TerminalSessionDescriptor>("kill", identity),
-        list: (instance) =>
-            port(instance).request<TerminalSessionDescriptor[]>("list"),
-        open: (instance, input) =>
-            port(instance).request<TerminalOpenResult>("open", input),
+        get: (identity) => port.request<TerminalSessionDescriptor>("get", identity),
+        kill: (identity) => port.request<TerminalSessionDescriptor>("kill", identity),
+        list: () => port.request<TerminalSessionDescriptor[]>("list"),
+        open: (input) => port.request<TerminalOpenResult>("open", input),
     };
 }
 

@@ -78,23 +78,17 @@ export class TuiDomainSession {
     readonly messageTransport: MessageTransport;
     readonly reverse: ConnectionTransport;
     readonly serverTransport: ServerTransport;
-    readonly terminalTransport: TerminalTransport;
-    readonly taskTransport: TaskTransport;
-    readonly toolTransport: ToolTransport;
 
     readonly #approvals = new Map<string, ApprovalViewModel>();
+    readonly #endpoint: Endpoint;
     readonly #runtimes = new Map<string, ProcessViewModel>();
     readonly #todos = new Map<string, TodoViewModel>();
-    readonly #approvalTransport: ApprovalTransport;
-    readonly #runtimeTransport: ProcessTransport;
 
     constructor(options: TuiClientOptions = {}) {
         const endpoint = new Endpoint({
             connectChannel: (signal) => connectControlChannel(options, signal),
         });
-        this.#runtimeTransport = createProcessTransport(endpoint);
-        this.#approvalTransport = createApprovalTransport(endpoint);
-        this.terminalTransport = createTerminalTransport(endpoint);
+        this.#endpoint = endpoint;
 
         this.serverTransport = createServerTransport(endpoint, {
             clientKind: "tui",
@@ -126,13 +120,13 @@ export class TuiDomainSession {
         this.messages = new MessageViewModel({
             transport: this.messageTransport,
         });
-        this.taskTransport = createTaskTransport(endpoint);
-        this.goals = new GoalViewModel({ transport: this.taskTransport });
-        this.toolTransport = createToolTransport(endpoint);
+        this.goals = new GoalViewModel({
+            transport: (instance) => createTaskTransport(endpoint, instance),
+        });
         this.toolCalls = new ToolCallViewModel({
             cursor: async (instance) =>
-                (await this.#runtimeTransport.snapshot(instance)).lastSeq,
-            transport: this.toolTransport,
+                (await createProcessTransport(endpoint, instance).snapshot()).lastSeq,
+            transport: (instance) => createToolTransport(endpoint, instance),
         });
         this.reverse = createConnectionTransport(endpoint);
     }
@@ -140,7 +134,9 @@ export class TuiDomainSession {
     runtime(instance: string): ProcessViewModel {
         let viewModel = this.#runtimes.get(instance);
         if (viewModel === undefined) {
-            viewModel = new ProcessViewModel(this.#runtimeTransport);
+            viewModel = new ProcessViewModel(
+                createProcessTransport(this.#endpoint, instance),
+            );
             this.#runtimes.set(instance, viewModel);
         }
         return viewModel;
@@ -149,7 +145,9 @@ export class TuiDomainSession {
     approval(instance: string): ApprovalViewModel {
         let viewModel = this.#approvals.get(instance);
         if (viewModel === undefined) {
-            viewModel = new ApprovalViewModel(this.#approvalTransport);
+            viewModel = new ApprovalViewModel(
+                createApprovalTransport(this.#endpoint, instance),
+            );
             this.#approvals.set(instance, viewModel);
         }
         return viewModel;
@@ -158,10 +156,24 @@ export class TuiDomainSession {
     todo(instance: string): TodoViewModel {
         let viewModel = this.#todos.get(instance);
         if (viewModel === undefined) {
-            viewModel = new TodoViewModel(this.taskTransport);
+            viewModel = new TodoViewModel(
+                createTaskTransport(this.#endpoint, instance),
+            );
             this.#todos.set(instance, viewModel);
         }
         return viewModel;
+    }
+
+    terminalTransport(instance: string): TerminalTransport {
+        return createTerminalTransport(this.#endpoint, instance);
+    }
+
+    taskTransport(instance: string): TaskTransport {
+        return createTaskTransport(this.#endpoint, instance);
+    }
+
+    toolTransport(instance: string): ToolTransport {
+        return createToolTransport(this.#endpoint, instance);
     }
 
     releaseInstance(instance: string): void {

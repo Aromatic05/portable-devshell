@@ -57,7 +57,7 @@ interface ToolCallViewModelOptions {
     refreshDelayMs?: number;
     retryBaseMs?: number;
     retryMaxMs?: number;
-    transport: ToolTransport;
+    transport(instance: string): ToolTransport;
 }
 
 export class ToolCallViewModel {
@@ -73,7 +73,7 @@ export class ToolCallViewModel {
         string,
         InstanceEventSubscription<ToolEvent>
     >();
-    readonly #transport: ToolTransport;
+    readonly #transport: (instance: string) => ToolTransport;
     readonly #versions = new Map<string, number>();
     #epoch = 0;
     #published: ToolCallViewModelState = emptyState();
@@ -137,7 +137,7 @@ export class ToolCallViewModel {
     ): Promise<ToolCallRecord[]> {
         const callIds = detailCallIds(selector);
         if (callIds.length === 0) return [];
-        return this.#transport.listCalls(instance, {
+        return this.#transport(instance).listCalls({
             callIds,
             includeInput: true,
             includeOutput: true,
@@ -152,7 +152,7 @@ export class ToolCallViewModel {
         input: JsonValue,
         workspace: string,
     ): Promise<JsonValue> {
-        return this.#transport.call(instance, toolName, input, workspace);
+        return this.#transport(instance).call(toolName, input, workspace);
     }
 
     callStreaming(
@@ -162,8 +162,7 @@ export class ToolCallViewModel {
         workspace: string,
         options?: ToolCallOptions,
     ): Promise<JsonValue> {
-        return this.#transport.callStreaming(
-            instance,
+        return this.#transport(instance).callStreaming(
             toolName,
             input,
             workspace,
@@ -219,7 +218,7 @@ export class ToolCallViewModel {
         const version = this.#nextVersion(key);
         const query = listQuery(this.#queries.get(instance));
         try {
-            const calls = await this.#transport.listCalls(instance, query);
+            const calls = await this.#transport(instance).listCalls(query);
             if (!this.#valid(key, version, epoch)) return false;
             this.#updateInstance(instance, (state) => ({
                 ...state,
@@ -252,7 +251,7 @@ export class ToolCallViewModel {
                 }));
                 this.#emit();
             },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
+            open: (cursor) => this.#transport(instance).subscribe(cursor),
             retryBaseMs: this.#retryBaseMs,
             retryMaxMs: this.#retryMaxMs,
         });

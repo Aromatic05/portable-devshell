@@ -222,7 +222,7 @@ export class TuiRuntime {
         this.keyDispatcher = new TuiKeyDispatcher();
         if (dependencies.terminal === undefined) {
             this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
-                client: domains.terminalTransport,
+                client: (instance) => domains.terminalTransport(instance),
                 workspaceForInstance: (instance) =>
                     this.#requireInstanceHome(instance),
             });
@@ -242,8 +242,8 @@ export class TuiRuntime {
             instance: domains.instanceTransport,
             reverse: domains.reverse,
             server: domains.serverTransport,
-            task: domains.taskTransport,
-            tool: domains.toolTransport,
+            task: (instance: string) => domains.taskTransport(instance),
+            tool: (instance: string) => domains.toolTransport(instance),
         };
         this.#operations = new TuiRuntimeOperations({
             clients: operationClients,

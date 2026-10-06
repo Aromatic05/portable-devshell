@@ -55,26 +55,21 @@ export async function executeInstanceLifecycle(
         }
         case "instance.status": {
             const snapshot = (
-                await context.clients.runtime.snapshot(command.instance)
+                await context.clients.runtime(command.instance).snapshot()
             ).snapshot;
             context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
             return true;
         }
         case "instance.start": {
-            const snapshot = await context.clients.runtime.start(
-                command.instance,
-                {
+            const snapshot = await context.clients.runtime(command.instance).start({
                     input: context.stdin,
                     output: context.stderr,
-                },
-            );
+                });
             context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
             return true;
         }
         case "instance.stop": {
-            const snapshot = await context.clients.runtime.stop(
-                command.instance,
-            );
+            const snapshot = await context.clients.runtime(command.instance).stop();
             context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
             return true;
         }

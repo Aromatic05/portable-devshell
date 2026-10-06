@@ -26,7 +26,6 @@ export class ApprovalViewModel {
     readonly #listeners = new Set<() => void>();
     readonly #transport: ApprovalTransport;
     #generation = 0;
-    #instance?: string;
     #published: ApprovalViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ApprovalViewModelState = emptyState();
@@ -45,10 +44,9 @@ export class ApprovalViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    async load(instance: string): Promise<void> {
-        this.#instance = instance;
+    async load(): Promise<void> {
         const generation = ++this.#generation;
-        const result = await this.#transport.snapshot(instance, {
+        const result = await this.#transport.snapshot({
             pendingOnly: true,
         });
         if (generation !== this.#generation) return;
@@ -57,10 +55,8 @@ export class ApprovalViewModel {
     }
 
     async refresh(): Promise<void> {
-        if (this.#instance === undefined) return;
-        const instance = this.#instance;
         const generation = this.#generation;
-        const result = await this.#transport.snapshot(instance, {
+        const result = await this.#transport.snapshot({
             pendingOnly: true,
         });
         if (generation !== this.#generation) return;
@@ -72,12 +68,10 @@ export class ApprovalViewModel {
         decision: ApprovalDecisionValue,
         options?: ApprovalDecisionOptions,
     ): Promise<ApprovalRequest> {
-        const instance = this.#requireInstance();
         const generation = this.#generation;
         this.#remove(approvalId);
         try {
             const decided = await this.#transport.decide(
-                instance,
                 approvalId,
                 decision,
                 options,
@@ -96,12 +90,11 @@ export class ApprovalViewModel {
     }
 
     get(approvalId: string): Promise<ApprovalRequest> {
-        return this.#transport.get(this.#requireInstance(), approvalId);
+        return this.#transport.get(approvalId);
     }
 
     close(): void {
         this.#generation += 1;
-        this.#instance = undefined;
         if (this.#refreshTimer !== undefined) {
             clearTimeout(this.#refreshTimer);
             this.#refreshTimer = undefined;
@@ -115,7 +108,6 @@ export class ApprovalViewModel {
 
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
-        const instance = this.#requireInstance();
         this.#subscription = new InstanceEventSubscription<ApprovalEvent>(
             fromSeq,
             {
@@ -125,7 +117,7 @@ export class ApprovalViewModel {
                     this.#state = { ...this.#state, status };
                     this.#emit();
                 },
-                open: (cursor) => this.#transport.subscribe(instance, cursor),
+                open: (cursor) => this.#transport.subscribe(cursor),
             },
         );
         this.#subscription.start();
@@ -141,8 +133,7 @@ export class ApprovalViewModel {
 
     async #recover(): Promise<number | undefined> {
         try {
-            const instance = this.#requireInstance();
-            const result = await this.#transport.snapshot(instance, {
+            const result = await this.#transport.snapshot({
                 pendingOnly: true,
             });
             this.#apply(result.approvals, result.lastSeq);
@@ -172,12 +163,6 @@ export class ApprovalViewModel {
             status: this.#state.status,
         };
         this.#emit();
-    }
-
-    #requireInstance(): string {
-        if (this.#instance === undefined)
-            throw new Error("Approval view model is not loaded.");
-        return this.#instance;
     }
 
     #emit(): void {

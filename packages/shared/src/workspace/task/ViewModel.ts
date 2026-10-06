@@ -27,7 +27,7 @@ interface GoalViewModelOptions {
     refreshDelayMs?: number;
     retryBaseMs?: number;
     retryMaxMs?: number;
-    transport: TaskTransport;
+    transport(instance: string): TaskTransport;
 }
 export class GoalViewModel {
     readonly #listeners = new Set<() => void>();
@@ -40,7 +40,7 @@ export class GoalViewModel {
         string,
         InstanceEventSubscription<TaskEvent>
     >();
-    readonly #transport: TaskTransport;
+    readonly #transport: (instance: string) => TaskTransport;
     readonly #versions = new Map<string, number>();
     #epoch = 0;
     #published: GoalViewModelState = emptyState();
@@ -129,7 +129,7 @@ export class GoalViewModel {
         const key = instanceKey(instance);
         const version = this.#nextVersion(key);
         try {
-            const envelope = await this.#transport.getGoals(instance);
+            const envelope = await this.#transport(instance).getGoals();
             if (!this.#valid(key, version, epoch)) return undefined;
             this.#updateInstance(instance, (state) => ({
                 ...state,
@@ -166,7 +166,7 @@ export class GoalViewModel {
                 }));
                 this.#emit();
             },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
+            open: (cursor) => this.#transport(instance).subscribe(cursor),
             retryBaseMs: this.#retryBaseMs,
             retryMaxMs: this.#retryMaxMs,
         });
@@ -269,7 +269,6 @@ export class TodoViewModel {
     readonly #transport: TaskTransport;
     #generation = 0;
     #input?: TodoReadInput;
-    #instance?: string;
     #published: TodoViewModelState = emptyTodoState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: TodoViewModelState = emptyTodoState();
@@ -288,34 +287,29 @@ export class TodoViewModel {
         return () => this.#listeners.delete(listener);
     }
 
-    async load(instance: string, input?: TodoReadInput): Promise<void> {
-        this.#instance = instance;
+    async load(input?: TodoReadInput): Promise<void> {
         this.#input = input;
         const generation = ++this.#generation;
-        const envelope = await this.#transport.getTodo(instance, input);
+        const envelope = await this.#transport.getTodo(input);
         if (generation !== this.#generation) return;
         this.#apply(envelope.todo, envelope.lastSeq);
         this.#ensureSubscription(envelope.lastSeq + 1);
     }
 
     async refresh(): Promise<void> {
-        if (this.#instance === undefined) return;
-        const instance = this.#instance;
         const generation = this.#generation;
-        const envelope = await this.#transport.getTodo(instance, this.#input);
+        const envelope = await this.#transport.getTodo(this.#input);
         if (generation !== this.#generation) return;
         this.#apply(envelope.todo, envelope.lastSeq);
     }
 
     async delete(taskId: string): Promise<void> {
-        const instance = this.#requireInstance();
-        await this.#transport.deleteTodo(instance, taskId);
+        await this.#transport.deleteTodo(taskId);
         await this.refresh();
     }
 
     close(): void {
         this.#generation += 1;
-        this.#instance = undefined;
         this.#input = undefined;
         if (this.#refreshTimer !== undefined) {
             clearTimeout(this.#refreshTimer);
@@ -330,7 +324,6 @@ export class TodoViewModel {
 
     #ensureSubscription(fromSeq: number): void {
         if (this.#subscription !== undefined) return;
-        const instance = this.#requireInstance();
         this.#subscription = new InstanceEventSubscription<TaskEvent>(fromSeq, {
             onEvent: (event: TaskEvent) => {
                 if (isTodoEvent(event.type)) this.#scheduleRefresh();
@@ -340,7 +333,7 @@ export class TodoViewModel {
                 this.#state = { ...this.#state, status };
                 this.#emit();
             },
-            open: (cursor) => this.#transport.subscribe(instance, cursor),
+            open: (cursor) => this.#transport.subscribe(cursor),
         });
         this.#subscription.start();
     }
@@ -355,11 +348,7 @@ export class TodoViewModel {
 
     async #recover(): Promise<number | undefined> {
         try {
-            const instance = this.#requireInstance();
-            const envelope = await this.#transport.getTodo(
-                instance,
-                this.#input,
-            );
+            const envelope = await this.#transport.getTodo(this.#input);
             this.#apply(envelope.todo, envelope.lastSeq);
             return envelope.lastSeq + 1;
         } catch {
@@ -375,12 +364,6 @@ export class TodoViewModel {
             todo,
         };
         this.#emit();
-    }
-
-    #requireInstance(): string {
-        if (this.#instance === undefined)
-            throw new Error("Todo view model is not loaded.");
-        return this.#instance;
     }
 
     #emit(): void {

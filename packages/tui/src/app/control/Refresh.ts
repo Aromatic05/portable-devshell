@@ -8,9 +8,9 @@ export async function refreshTuiInstance(
 ): Promise<void> {
     const runtime = domains.runtime(instance);
     await Promise.all([
-        runtime.load(instance),
-        domains.approval(instance).load(instance),
-        domains.todo(instance).load(instance),
+        runtime.load(),
+        domains.approval(instance).load(),
+        domains.todo(instance).load(),
         domains.goals.load(instance),
     ]);
 }
@@ -22,8 +22,8 @@ export async function refreshTuiAudit(
     const runtime = domains.runtime(instance);
     await Promise.all([
         domains.context.refresh(),
-        runtime.load(instance).then(() => runtime.readLogs()),
-        domains.approval(instance).load(instance),
+        runtime.load().then(() => runtime.readLogs()),
+        domains.approval(instance).load(),
         domains.toolCalls.load(instance),
         domains.messageHistory.refreshInstance(instance),
         domains.messages.refreshInstance(instance),
@@ -48,7 +48,7 @@ export async function refreshTuiTodo(
     input?: TodoReadInput,
 ): Promise<void> {
     await Promise.all([
-        domains.todo(instance).load(instance, input),
+        domains.todo(instance).load(input),
         domains.goals.load(instance),
     ]);
 }
