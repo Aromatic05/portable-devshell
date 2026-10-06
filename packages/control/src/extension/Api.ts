@@ -1,4 +1,3 @@
-import type { ExtensionManifest } from "@portable-devshell/extension";
 import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
 import type {
     ExtensionRemoveResult,
@@ -6,20 +5,9 @@ import type {
     ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
-import type { ConfigRegistry } from "../config/domain/Registry.js";
 import type { ExtensionCatalogRegistration } from "./discovery/Catalog.js";
-import type { ExtensionGeneration, ExtensionGenerationLease } from "./registration/Generation.js";
-import type { ExtensionPointRegistry } from "./registration/PointRegistry.js";
+import type { ExtensionGenerationLease } from "./registration/Generation.js";
 import type { ExtensionRuntimeRegistration } from "./registration/Registration.js";
-import type { ExtensionChangeHub } from "./manager/Change.js";
-import type { ExtensionRegistryPort } from "./state/Store.js";
-import type { ExtensionPathLayout } from "./state/Layout.js";
-
-export interface ExtensionGenerationLoader {
-    readonly points: ExtensionPointRegistry;
-    load(id: string, generation: string): Promise<ExtensionGeneration>;
-    readManifest(id: string, generation: string): Promise<ExtensionManifest>;
-}
 
 export interface ExtensionRegistrationLease {
     extensionId: string;
@@ -70,12 +58,4 @@ export interface ExtensionRuntime {
     start(): Promise<void>;
     stop(): Promise<void>;
     waitForDrain(id: string): Promise<void>;
-}
-
-export interface ExtensionRuntimeOptions {
-    changeHub?: ExtensionChangeHub;
-    configRegistry?: ConfigRegistry;
-    loader: ExtensionGenerationLoader;
-    paths: ExtensionPathLayout;
-    registry: ExtensionRegistryPort;
 }

@@ -4,6 +4,7 @@ import type {
     ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 import type { ExtensionChangeHub } from "../manager/Change.js";
+import type { ConfigRegistry } from "../../config/domain/Registry.js";
 
 import {
     ExtensionGeneration,
@@ -19,6 +20,7 @@ import {
     type ExtensionCatalogRegistration,
 } from "../discovery/Catalog.js";
 import { ExtensionRetirementTracker } from "../registration/Retirement.js";
+import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionConfigPublisher } from "./ConfigPublisher.js";
 import {
     ExtensionCandidatePublicationError,
@@ -37,11 +39,20 @@ import {
     projectExtensionRuntimeRecord,
     type ExtensionFailureRecord,
 } from "./Record.js";
-import type {
-    ExtensionGenerationLoader,
-    ExtensionRegistrationLease,
-    ExtensionRuntimeOptions,
-} from "../Api.js";
+import type { ExtensionRegistrationLease } from "../Api.js";
+
+export interface ExtensionGenerationLoader {
+    readonly points: ExtensionPointRegistry;
+    load(id: string, generation: string): Promise<ExtensionGeneration>;
+    readManifest(id: string, generation: string): Promise<ExtensionManifest>;
+}
+
+export interface ExtensionHostOptions {
+    changeHub?: ExtensionChangeHub;
+    configRegistry?: ConfigRegistry;
+    loader: ExtensionGenerationLoader;
+    registry: ExtensionRegistryPort;
+}
 
 export class ExtensionHost {
     readonly #changeHub?: ExtensionChangeHub;
@@ -60,7 +71,7 @@ export class ExtensionHost {
     #started = false;
     #stopping = false;
 
-    constructor(options: ExtensionRuntimeOptions) {
+    constructor(options: ExtensionHostOptions) {
         this.#changeHub = options.changeHub;
         this.#catalog = new ExtensionCatalog(options.loader.points);
         this.#config = new ExtensionConfigPublisher(options.configRegistry);

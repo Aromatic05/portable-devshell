@@ -1,11 +1,18 @@
 import type {
     ExtensionControlPort,
     ExtensionRuntime,
-    ExtensionRuntimeOptions,
 } from "./Api.js";
-import { ExtensionHost } from "./host/index.js";
+import {
+    ExtensionHost,
+    type ExtensionHostOptions,
+} from "./host/index.js";
 import { ExtensionInstallService } from "./install/index.js";
 import { ExtensionControlService } from "./manager/index.js";
+import { ExtensionPathLayout } from "./state/Layout.js";
+
+type ExtensionRuntimeOptions = ExtensionHostOptions & {
+    paths: ExtensionPathLayout;
+};
 
 class ExtensionRuntimeState extends ExtensionHost implements ExtensionRuntime {
     readonly control: ExtensionControlPort;
