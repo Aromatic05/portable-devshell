@@ -42,7 +42,9 @@ export class ExtensionChangeHub {
         for (const listener of [...this.#listeners]) {
             try {
                 listener(change);
-            } catch {}
+            } catch {
+                continue;
+            }
         }
         return this.#revision;
     }
