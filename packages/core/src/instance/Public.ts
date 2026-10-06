@@ -4,7 +4,6 @@ export { ReverseCredentials } from "./reverse/credential/Credentials.js";
 export { ReverseCredentialStore } from "./reverse/credential/Store.js";
 export { ConnectionModule } from "./reverse/index.js";
 export { createInstanceHost, createConnectionRouteModule } from "./Route.js";
-export { InstanceRegistry } from "./model/Registry.js";
 export { InstancePaths } from "./model/Paths.js";
 export { InstanceLifecycle } from "./model/Lifecycle.js";
 export {
@@ -27,6 +26,5 @@ export {
     resolveInstanceCreateSchema,
     summarizeInstanceCreate,
 } from "./runtime/provision/Config.js";
-export { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
 export { WORKER_PROTOCOL_RANGE } from "./transport/packet/Client.js";
 export { TransportConnection } from "./transport/endpoint/Connection.js";

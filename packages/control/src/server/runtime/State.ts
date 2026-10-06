@@ -1,17 +1,12 @@
-import {
-    createRemoteError,
-    controlErrorCodes,
-    type ControlConfig,
-} from "@portable-devshell/shared";
+import { InstanceRegistry } from "../../instance/Registry.js";
+import { createRemoteError, controlErrorCodes, type ControlConfig, } from "@portable-devshell/shared";
 
 import { ControlConfigStore } from "../../config/store/index.js";
 import { ControlConfigMutationLock } from "../../config/engine/Lock.js";
 import {
-    ConfigRegistry,
-    createCoreConfigRegistry,
-} from "../../config/domain/Registry.js";
+    ConfigRegistry, createCoreConfigRegistry, } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import { createInstance, InstanceRegistry } from "@portable-devshell/core";
+import { createInstance } from "@portable-devshell/core";
 import { InstanceChangeHub } from "../../instance/Change.js";
 import { createToolCallRegistry } from "../../toolcall/index.js";
 

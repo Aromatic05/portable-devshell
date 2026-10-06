@@ -1,15 +1,7 @@
-import {
-    createRemoteError,
-    controlErrorCodes,
-    type ControlConfig,
-    type ControlInstanceConfig,
-    type InstanceCreateResult,
-    type InstanceCreateSchema,
-    type InstanceCreateSummary,
-    type JsonValue,
-} from "@portable-devshell/shared";
+import type { InstanceRegistry } from "../../Registry.js";
+import { createRemoteError, controlErrorCodes, type ControlConfig, type ControlInstanceConfig, type InstanceCreateResult, type InstanceCreateSchema, type InstanceCreateSummary, type JsonValue, } from "@portable-devshell/shared";
 
-import { discoverSshConfigHosts, normalizeInstanceCreateDraft, resolveInstanceCreateSchema, summarizeInstanceCreate, type Instance, type InstanceRegistry } from "@portable-devshell/core";
+import { discoverSshConfigHosts, normalizeInstanceCreateDraft, resolveInstanceCreateSchema, summarizeInstanceCreate, type Instance } from "@portable-devshell/core";
 import type { InstanceMcpRuntimePort } from "../../Mcp.js";
 import { InstanceChangeHub } from "../../Change.js";
 import { ControlConfigValidator } from "../../../config/engine/Validator.js";

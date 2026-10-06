@@ -1,19 +1,6 @@
-import type {
-    ContextBinding,
-    ContextEnvironment,
-    ContextEnvironmentBinding,
-    ContextEnvironmentCleanup,
-    ContextExternalBinding,
-    ContextInstanceReference,
-    ContextMaskedInstance,
-    ContextQuery,
-    ContextRecord,
-    ContextResolveInput,
-    ContextSnapshot,
-    ContextValidationBinding,
-    JsonValue,
-} from "@portable-devshell/shared";
-import type { Instance, InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../instance/Registry.js";
+import type { ContextBinding, ContextEnvironment, ContextEnvironmentBinding, ContextEnvironmentCleanup, ContextExternalBinding, ContextInstanceReference, ContextMaskedInstance, ContextQuery, ContextRecord, ContextResolveInput, ContextSnapshot, ContextValidationBinding, JsonValue, } from "@portable-devshell/shared";
+import type { Instance } from "@portable-devshell/core";
 
 export interface ContextCleanupLedgerPort {
     listCleanupPending(): Promise<ContextRecord[]>;

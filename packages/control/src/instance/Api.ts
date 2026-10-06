@@ -1,6 +1,4 @@
-import type {
-    InstanceRegistry,
-} from "@portable-devshell/core";
+import type { InstanceRegistry } from "./Registry.js";
 import type {
     ControlConfig,
     InstanceCreateResult,

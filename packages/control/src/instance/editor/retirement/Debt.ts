@@ -1,15 +1,10 @@
+import type { InstanceRegistry } from "../../Registry.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-    createRemoteError,
-    normalizeConfigInstanceDraft,
-    parseConfigInstanceDraft,
-    toConfigInstanceDraft,
-    type ControlConfig,
-    runtimeErrorCodes,
-} from "@portable-devshell/shared";
-import { retireInstanceForDelete, type Instance, type InstanceRegistry } from "@portable-devshell/core";
+    createRemoteError, normalizeConfigInstanceDraft, parseConfigInstanceDraft, toConfigInstanceDraft, type ControlConfig, runtimeErrorCodes, } from "@portable-devshell/shared";
+import { retireInstanceForDelete, type Instance } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";

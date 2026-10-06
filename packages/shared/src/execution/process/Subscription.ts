@@ -1,12 +1,22 @@
-import type { InstanceEventSource } from "../../Api.js";
-import { createRemoteError, STREAM_GAP_CODE } from "@portable-devshell/shared";
-import type {
-    InstanceEventRecord,
-    JsonValue,
-    ControlPortContext,
-    MessageStream,
-} from "@portable-devshell/shared";
+import { createRemoteError } from "../../transport/Error.js";
+import { STREAM_GAP_CODE } from "../../client/Stream.js";
+import type { InstanceEventRecord } from "../../client/Stream.js";
+import type { JsonValue } from "../../types/Json.js";
+import type { ControlPortContext } from "../../transport/endpoint/route/Control.js";
+import type { MessageStream } from "../../transport/packet/Stream.js";
 
+
+interface ProcessEventSource {
+    subscribe(fromSeq?: number):
+        | {
+              code: typeof STREAM_GAP_CODE;
+              fromSeq: number;
+              kind: "gap";
+              lastSeq: number;
+              nextSeq: number;
+          }
+        | { events: InstanceEventRecord[]; kind: "events"; lastSeq: number };
+}
 
 export type ProcessEventProjector = (
     event: InstanceEventRecord,
@@ -15,7 +25,7 @@ export type ProcessEventProjector = (
 export interface ProcessSubscription {
     connectionId: string;
     projectEvent?: ProcessEventProjector;
-    instance: Pick<InstanceEventSource, "subscribe">;
+    instance: ProcessEventSource;
     instanceName: string;
     nextSeq: number;
     requestId: string;

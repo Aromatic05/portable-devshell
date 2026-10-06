@@ -16,7 +16,7 @@ import {
     createToolCallProvenanceRuntime,
     type ToolCallProvenanceApi,
 } from "@portable-devshell/shared";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../../instance/Registry.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";

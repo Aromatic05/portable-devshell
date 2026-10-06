@@ -1,14 +1,9 @@
-import {
-    routeModule,
-    mergeControlPortsByName,
-    type ControlHostDefinition,
-    type ControlPortDefinition,
-    JsonValue,
-} from "@portable-devshell/shared";
+import type { InstanceRegistry } from "../instance/Registry.js";
+import { routeModule, mergeControlPortsByName, type ControlHostDefinition, type ControlPortDefinition, JsonValue, } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
-import { createConnectionRouteModule, InstanceRegistry } from "@portable-devshell/core";
+import { createConnectionRouteModule } from "@portable-devshell/core";
 
 
 import type { ArtifactRouteApi } from "../artifact/Api.js";

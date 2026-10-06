@@ -1,18 +1,9 @@
-import type {
-    ContextEnvironmentCleanup,
-    ContextRecord,
-} from "@portable-devshell/shared";
+import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { ContextEnvironmentCleanup, ContextRecord, } from "@portable-devshell/shared";
 
 import type {
-    ContextCleanupLedgerPort,
-    ContextLifecycleCleanupPort,
-    ContextRecordPort,
-} from "../Api.js";
-import type {
-    Instance,
-    InstanceLease,
-    InstanceRegistry,
-} from "@portable-devshell/core";
+    ContextCleanupLedgerPort, ContextLifecycleCleanupPort, ContextRecordPort, } from "../Api.js";
+import type { Instance } from "@portable-devshell/core";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &
@@ -216,7 +207,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             throw new Error(
                 `Instance ${cleanup.instance} is unavailable for alert cleanup.`,
             );
-        let lease: InstanceLease;
+        let lease: { release(): void };
         try {
             lease = instance.lifecycle.acquireLease();
         } catch {

@@ -1,16 +1,8 @@
+import type { InstanceRegistry } from "../../instance/Registry.js";
 import type { ToolCallRegistration } from "@portable-devshell/shared";
 import {
-    contextErrorCodes,
-    controlErrorCodes,
-    createRemoteError,
-    runtimeErrorCodes,
-    type JsonValue,
-    type ContextRecord,
-    type ToolCallContext,
-    type ToolCallExternalBinding,
-} from "@portable-devshell/shared";
+    contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
-import type { InstanceLease, InstanceRegistry } from "@portable-devshell/core";
 import {
     contextToolDefinitions,
     environmentInfoToolName,
@@ -398,7 +390,7 @@ class ContextToolRuntime {
         return context.principal ?? "local";
     }
 
-    #requireGeneration(instance: string): InstanceLease {
+    #requireGeneration(instance: string): { release(): void } {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

@@ -33,7 +33,7 @@ import type {
     WorkerWorkspacePrepareResult,
 } from "../Api.js";
 import type { WorkerInstance } from "../runtime/Api.js";
-import { ProcessSubscriptionManager } from "../runtime/supervision/Subscription.js";
+import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { WorkerProtocolClient } from "../transport/packet/Client.js";
 import type { Instance } from "./Instance.js";
 import type { InstancePaths } from "./Paths.js";

@@ -1,20 +1,8 @@
-import {
-    contextErrorCodes,
-    createRemoteError,
-    runtimeErrorCodes,
-    type JsonValue,
-    type ContextEnvironment,
-    type ContextEnvironmentCleanup,
-    type ContextExternalBinding,
-} from "@portable-devshell/shared";
+import type { InstanceRegistry } from "../../instance/Registry.js";
+import { contextErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextEnvironment, type ContextEnvironmentCleanup, type ContextExternalBinding, } from "@portable-devshell/shared";
 import type {
-    ContextCleanupLedgerPort,
-    ContextEnvironmentPort,
-    ContextRecordPort,
-    PreparedEnvironmentFacts,
-} from "../Api.js";
+    ContextCleanupLedgerPort, ContextEnvironmentPort, ContextRecordPort, PreparedEnvironmentFacts, } from "../Api.js";
 import { ContextCleanupService } from "./Cleanup.js";
-import type { InstanceLease, InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
@@ -333,7 +321,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             await this.#registry.discard(ctxId);
     }
 
-    #requireGeneration(instance: string): InstanceLease {
+    #requireGeneration(instance: string): { release(): void } {
         const target = this.#instances.get(instance);
         if (target === undefined) {
             throw createRemoteError({

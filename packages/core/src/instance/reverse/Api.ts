@@ -4,7 +4,6 @@ import type { Duplex } from "node:stream";
 import type { ControlConfig, InstanceName } from "@portable-devshell/shared";
 
 import type { Instance } from "../model/Instance.js";
-import type { InstanceRegistry } from "../model/Registry.js";
 
 export interface ReverseConnectionIdentity {
     credentialToken: string;
@@ -64,7 +63,7 @@ interface ConnectionMcpPort {
 
 interface ConnectionStatePort {
     readonly homeDirectory?: string;
-    readonly instances: InstanceRegistry;
+    readonly instances: ReverseInstanceLookup;
     requireConfig(): ControlConfig;
 }
 

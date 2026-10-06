@@ -1,10 +1,7 @@
-import type {
-    ContextLifecycleCleanupPort,
-    ContextRecordSourcePort,
-} from "../Api.js";
+import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { ContextLifecycleCleanupPort, ContextRecordSourcePort, } from "../Api.js";
 import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort } from "../Api.js";
-import type { InstanceLease, InstanceRegistry } from "@portable-devshell/core";
 
 export class ContextService {
     readonly registry: ContextRecordSourcePort;
@@ -97,7 +94,7 @@ export class ContextService {
             if (environment.workspace === undefined) continue;
             const instance = this.#instances.get(environment.instance);
             if (instance === undefined) continue;
-            let lease: InstanceLease;
+            let lease: { release(): void };
             try {
                 lease = instance.lifecycle.acquireLease();
             } catch {

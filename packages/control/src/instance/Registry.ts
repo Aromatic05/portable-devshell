@@ -1,4 +1,4 @@
-import type { Instance } from "./Instance.js";
+import type { Instance } from "@portable-devshell/core";
 
 export class InstanceRegistry {
     readonly #instances = new Map<string, Instance>();

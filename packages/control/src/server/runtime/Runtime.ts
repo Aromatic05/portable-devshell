@@ -12,7 +12,7 @@ import {
     type ServerTransport,
 } from "@portable-devshell/shared";
 
-import type { InstanceRegistry, WorkerInstance } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../../instance/Registry.js";
 import type { InstanceChangeHub } from "../../instance/Change.js";
 import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
@@ -317,7 +317,7 @@ export class ControlRuntime {
             failures.push(error);
         }
         await this.#artifact.stop().catch((error) => failures.push(error));
-        await stopOwnedInstances(this.#instances).catch((error) =>
+        await closeInstances(this.#instances).catch((error) =>
             failures.push(error),
         );
         this.#toolCallRuntime.close();
@@ -339,29 +339,22 @@ export class ControlRuntime {
     }
 }
 
-async function stopOwnedInstances(
-    instances: InstanceRegistry,
-): Promise<void> {
-    const failures: Error[] = [];
-    const ownedWorkers = new Map<WorkerInstance, string>();
+async function closeInstances(instances: InstanceRegistry): Promise<void> {
+    const failures: unknown[] = [];
     for (const instance of instances.list()) {
-        for (const worker of instance.ownedWorkers())
-            ownedWorkers.set(worker, instance.name);
-    }
-    for (const [worker, name] of ownedWorkers) {
-        try {
-            await worker.stop();
-            instances.get(name)?.clearOwnedWorker(worker);
-        } catch (error) {
-            failures.push(
-                error instanceof Error ? error : new Error(String(error)),
-            );
+        for (const worker of instance.lifecycle.ownedWorkers()) {
+            try {
+                await worker.supervision.lifecycle.stop();
+                instance.lifecycle.clearOwnedWorker(worker);
+            } catch (error) {
+                failures.push(error);
+            }
         }
+        await instance.close().catch((error) => failures.push(error));
     }
-    if (failures.length > 0) {
+    if (failures.length > 0)
         throw new AggregateError(
             failures,
-            `Failed to stop ${failures.length} worker instance(s).`,
+            `Failed to close ${failures.length} instance resource(s).`,
         );
-    }
 }

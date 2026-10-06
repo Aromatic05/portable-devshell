@@ -14,7 +14,7 @@ import type {
 import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../../../instance/Registry.js";
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { ExtensionConfigRuntime } from "./config/index.js";

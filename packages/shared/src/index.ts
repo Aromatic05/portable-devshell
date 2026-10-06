@@ -107,3 +107,5 @@ export { type ActiveTodoSummary, type GoalActivityKind, type GoalContinuationInp
 export { projectTodoTaskSummaries } from "./workspace/task/Projection.js";
 export { createTaskTransport, type TaskTransport } from "./workspace/task/Transport.js";
 export { GoalViewModel, TodoViewModel } from "./workspace/task/ViewModel.js";
+
+export { ProcessSubscriptionManager } from "./execution/process/Subscription.js";

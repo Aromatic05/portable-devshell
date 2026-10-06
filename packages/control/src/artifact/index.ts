@@ -12,7 +12,7 @@ import {
 import { ArtifactHttpRoute, artifactShareRoute } from "./route/Http.js";
 import { ArtifactHostBridge } from "./host/index.js";
 import { ArtifactService } from "./Service.js";
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../instance/Registry.js";
 import type { ControlConfig, ControlPathHome } from "@portable-devshell/shared";
 import type {
     ArtifactRuntime,

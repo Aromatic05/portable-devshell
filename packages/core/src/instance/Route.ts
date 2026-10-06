@@ -20,7 +20,7 @@ import { createGoalTaskRouteModule } from "../task/goal/Route.js";
 import { createTodoTaskRouteModule } from "../task/todo/Route.js";
 import { createTerminalRouteModule } from "../terminal/Route.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
-import type { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
+import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { ReverseCredentials } from "./reverse/credential/Credentials.js";
 import type { Instance } from "./model/Instance.js";
 

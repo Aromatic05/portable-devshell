@@ -1,4 +1,4 @@
-import type { InstanceRegistry } from "@portable-devshell/core";
+import type { InstanceRegistry } from "../../instance/Registry.js";
 import { presentToolCallResult } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 
