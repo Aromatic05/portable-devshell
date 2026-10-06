@@ -20,27 +20,7 @@
             "@portable-devshell/shared/toolcall": [
                 "./packages/shared/dist/execution/toolcall/Type.d.ts"
             ],
-            "@portable-devshell/core/audit": [
-                "./packages/core/dist/audit/Public.d.ts"
-            ],
-            "@portable-devshell/core/toolcall": [
-                "./packages/core/dist/toolcall/Public.d.ts"
-            ],
-            "@portable-devshell/core/approval": [
-                "./packages/core/dist/approval/Public.d.ts"
-            ],
-            "@portable-devshell/core/context": [
-                "./packages/core/dist/context/Public.d.ts"
-            ],
-            "@portable-devshell/core/task": [
-                "./packages/core/dist/task/Public.d.ts"
-            ],
-            "@portable-devshell/core/terminal": [
-                "./packages/core/dist/terminal/Public.d.ts"
-            ],
-            "@portable-devshell/core/instance": [
-                "./packages/core/dist/instance/Public.d.ts"
-            ],
+            "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"
             ],

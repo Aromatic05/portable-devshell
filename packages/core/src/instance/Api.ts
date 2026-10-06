@@ -1,13 +1,4 @@
-import type { Channel, ControlInstanceAlertsConfig, ControlInstanceConfig, ControlMcpContextMode, Endpoint, InstanceEventRecord, InstanceSnapshot, JsonValue, MessageStream, ReverseEnrollmentState, ReverseTransport, ToolDefinition, WorkerArtifactApi, STREAM_GAP_CODE } from "@portable-devshell/shared";
-import type { ApprovalRuntime } from "../approval/Api.js";
-import type { AuditRuntime } from "../audit/Api.js";
-import type { TaskRuntime } from "../task/Api.js";
-import type { TerminalRuntime } from "../terminal/Api.js";
-import type {
-    ToolCallDispatchRequest,
-    ToolCallExecutionRuntime,
-    ToolCallTarget,
-} from "../toolcall/Api.js";
+import type { Channel, ControlInstanceAlertsConfig, ControlMcpContextMode, Endpoint, InstanceEventRecord, InstanceSnapshot, JsonValue, MessageStream, ReverseEnrollmentState, ReverseTransport, ToolDefinition, WorkerArtifactApi, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type { Instance } from "./Instance.js";
 import type { TransportConnection } from "./transport/endpoint/Connection.js";
 
@@ -363,49 +354,5 @@ export interface WorkerCommandInteractiveSession {
     writeOutput(chunk: string): Promise<void> | void;
 }
 
-export interface InstanceRuntime {
-    readonly approval: ApprovalRuntime;
-    readonly audit: AuditRuntime;
-    readonly instance: Instance;
-    readonly task: TaskRuntime;
-    readonly terminal: TerminalRuntime;
-    readonly tools: ToolCallExecutionRuntime;
-    callTool(request: ToolCallDispatchRequest): Promise<JsonValue>;
-    close(): Promise<void>;
-    openToolSession(
-        workspace: string,
-        connectionId: string,
-    ): Promise<WorkerWorkspacePrepareResult>;
-    prepareRetirement(): Promise<void>;
-    refreshTools(): Promise<void>;
-    releaseToolSession(connectionId: string): Promise<void>;
-    retire(): Promise<void>;
-    target(): ToolCallTarget;
-}
-
-export interface InstanceRuntimeOptions {
-    config: ControlInstanceConfig;
-    homeDirectory: string;
-    toolCalls: {
-        register(
-            scope: string,
-            definitions: readonly ToolDefinition[],
-        ): {
-            replace(definitions: readonly ToolDefinition[]): void;
-            dispose(): void;
-        };
-    };
-}
-
-export interface InstanceRuntimeRegistry {
-    close(): Promise<void>;
-    create(config: ControlInstanceConfig): Instance;
-    finalize(instance: Instance): Promise<void>;
-    get(instance: Instance): InstanceRuntime;
-    retire(instance: Instance): Promise<void>;
-}
-
-export interface InstanceRuntimeRegistryOptions {
-    homeDirectory?: string;
-    toolCalls: InstanceRuntimeOptions["toolCalls"];
-}
+export type { Instance } from "./Instance.js";
+export type { InstanceRegistry } from "./Registry.js";

@@ -13,8 +13,7 @@ import type {
     ContextValidationBinding,
     JsonValue,
 } from "@portable-devshell/shared";
-import type { Instance } from "../instance/Instance.js";
-import type { InstanceRegistry } from "../instance/Registry.js";
+import type { Instance, InstanceRegistry } from "../instance/Api.js";
 
 export interface ContextCleanupLedgerPort {
     listCleanupPending(): Promise<ContextRecord[]>;

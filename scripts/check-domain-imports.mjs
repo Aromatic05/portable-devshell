@@ -114,11 +114,17 @@ for (const owner of coreDomains) {
     rules.push({
         name: `${owner}-uses-domain-public-entries`,
         roots: [domain(`packages/core/src/${owner}`)],
-        forbidden: (candidate) => coreDomains.some((target) =>
-            target !== owner &&
-            under(candidate, domain(`packages/core/src/${target}`)) &&
-            candidate !== domain(`packages/core/src/${target}/Public`),
-        ),
+        forbidden: (candidate, entry) =>
+            coreDomains.some((target) => {
+                if (
+                    target === owner ||
+                    !under(candidate, domain(`packages/core/src/${target}`))
+                ) return false;
+                const entryFile = entry.typeOnly ? "Api" : "Public";
+                return candidate !== domain(
+                    `packages/core/src/${target}/${entryFile}`,
+                );
+            }),
     });
 }
 
@@ -148,22 +154,36 @@ function imports(sourceFile, text) {
         sourceFile.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
     const result = [];
-    const record = (node) => {
+    const record = (node, typeOnly = false) => {
         if (!ts.isStringLiteralLike(node)) return;
         result.push({
             line:
                 source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
             specifier: node.text,
+            typeOnly,
         });
     };
     const visit = (node) => {
-        if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-            if (node.moduleSpecifier !== undefined) record(node.moduleSpecifier);
+        if (ts.isImportDeclaration(node)) {
+            const clause = node.importClause;
+            const typeOnly =
+                clause?.isTypeOnly === true ||
+                (clause?.name === undefined &&
+                    clause?.namedBindings !== undefined &&
+                    ts.isNamedImports(clause.namedBindings) &&
+                    clause.namedBindings.elements.length > 0 &&
+                    clause.namedBindings.elements.every(
+                        (element) => element.isTypeOnly,
+                    ));
+            record(node.moduleSpecifier, typeOnly);
+        } else if (ts.isExportDeclaration(node)) {
+            if (node.moduleSpecifier !== undefined)
+                record(node.moduleSpecifier, node.isTypeOnly);
         } else if (
             ts.isImportTypeNode(node) &&
             ts.isLiteralTypeNode(node.argument)
         ) {
-            record(node.argument.literal);
+            record(node.argument.literal, true);
         } else if (
             ts.isCallExpression(node) &&
             node.expression.kind === ts.SyntaxKind.ImportKeyword &&
@@ -178,12 +198,29 @@ function imports(sourceFile, text) {
 }
 
 const failures = [];
+const corePackagePath = domain("packages/core/package.json");
+const corePackage = JSON.parse(await readFile(corePackagePath, "utf8"));
+const coreExports = Object.keys(corePackage.exports ?? {});
+if (coreExports.length !== 1 || coreExports[0] !== ".") {
+    failures.push({
+        file: relative(root, corePackagePath),
+        line: 1,
+        rule: "core-exposes-package-root-only",
+        message: `exports must contain only ".", found ${JSON.stringify(coreExports)}`,
+    });
+}
+
 for (const rule of rules) {
     for (const sourceRoot of rule.roots) {
         for (const file of await sourceFiles(sourceRoot)) {
             const text = await readFile(file, "utf8");
             for (const entry of imports(file, text)) {
-                if (!rule.forbidden(resolveTarget(file, entry.specifier))) continue;
+                if (
+                    !rule.forbidden(
+                        resolveTarget(file, entry.specifier),
+                        entry,
+                    )
+                ) continue;
                 failures.push({
                     file: relative(root, file),
                     line: entry.line,
@@ -198,7 +235,8 @@ for (const rule of rules) {
 if (failures.length > 0) {
     for (const failure of failures) {
         console.error(
-            `${failure.file}:${failure.line} ${failure.rule}: forbidden import ${JSON.stringify(failure.specifier)}`,
+            failure.message ??
+                `${failure.file}:${failure.line} ${failure.rule}: forbidden import ${JSON.stringify(failure.specifier)}`,
         );
     }
     process.exitCode = 1;

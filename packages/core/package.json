@@ -7,34 +7,6 @@
         ".": {
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
-        },
-        "./audit": {
-            "types": "./dist/audit/Public.d.ts",
-            "default": "./dist/audit/Public.js"
-        },
-        "./toolcall": {
-            "types": "./dist/toolcall/Public.d.ts",
-            "default": "./dist/toolcall/Public.js"
-        },
-        "./approval": {
-            "types": "./dist/approval/Public.d.ts",
-            "default": "./dist/approval/Public.js"
-        },
-        "./context": {
-            "types": "./dist/context/Public.d.ts",
-            "default": "./dist/context/Public.js"
-        },
-        "./task": {
-            "types": "./dist/task/Public.d.ts",
-            "default": "./dist/task/Public.js"
-        },
-        "./terminal": {
-            "types": "./dist/terminal/Public.d.ts",
-            "default": "./dist/terminal/Public.js"
-        },
-        "./instance": {
-            "types": "./dist/instance/Public.d.ts",
-            "default": "./dist/instance/Public.js"
         }
     },
     "files": [

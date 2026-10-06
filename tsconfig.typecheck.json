@@ -56,27 +56,7 @@
             "@portable-devshell/shared/toolcall": [
                 "./packages/shared/src/execution/toolcall/Type.ts"
             ],
-            "@portable-devshell/core/audit": [
-                "./packages/core/src/audit/Public.ts"
-            ],
-            "@portable-devshell/core/toolcall": [
-                "./packages/core/src/toolcall/Public.ts"
-            ],
-            "@portable-devshell/core/approval": [
-                "./packages/core/src/approval/Public.ts"
-            ],
-            "@portable-devshell/core/context": [
-                "./packages/core/src/context/Public.ts"
-            ],
-            "@portable-devshell/core/task": [
-                "./packages/core/src/task/Public.ts"
-            ],
-            "@portable-devshell/core/terminal": [
-                "./packages/core/src/terminal/Public.ts"
-            ],
-            "@portable-devshell/core/instance": [
-                "./packages/core/src/instance/Public.ts"
-            ],
+            "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/agent-extension": [
                 "./extensions/agent/src/index.ts"
             ],

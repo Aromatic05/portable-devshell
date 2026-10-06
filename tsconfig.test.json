@@ -57,6 +57,7 @@
             "@portable-devshell/shared/toolcall": [
                 "./packages/shared/src/execution/toolcall/Type.ts"
             ],
+            "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/core/audit": [
                 "./packages/core/src/audit/Public.ts"
             ],

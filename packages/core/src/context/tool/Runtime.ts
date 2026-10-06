@@ -10,8 +10,7 @@ import {
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
-import type { InstanceLease } from "../../instance/Api.js";
-import type { InstanceRegistry } from "../../instance/Registry.js";
+import type { InstanceLease, InstanceRegistry } from "../../instance/Api.js";
 import {
     contextToolDefinitions,
     environmentInfoToolName,
