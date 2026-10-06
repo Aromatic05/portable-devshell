@@ -1,9 +1,9 @@
 import type { ExtensionCatalogSnapshot, ExtensionSnapshot } from "@portable-devshell/shared";
 
-import type { ExtensionRuntime } from "../Api.js";
+import type { ExtensionHost } from "../host/index.js";
 
 export function readExtensionSnapshot(
-    host: Pick<ExtensionRuntime, "readPublicState">,
+    host: Pick<ExtensionHost, "readPublicState">,
     catalogs: () => ExtensionCatalogSnapshot,
 ): Promise<ExtensionSnapshot> {
     return host.readPublicState(({ extensions, revision }) => ({

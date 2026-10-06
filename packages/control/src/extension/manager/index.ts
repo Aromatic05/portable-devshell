@@ -7,8 +7,8 @@ import {
 
 import type {
     ExtensionControlPort,
-    ExtensionRuntime,
 } from "../Api.js";
+import type { ExtensionHost } from "../host/index.js";
 import {
     REQUIRED_BUILTIN_EXTENSION_IDS,
     type ExtensionInstallService,
@@ -16,14 +16,14 @@ import {
 
 export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: Pick<
-        ExtensionRuntime,
+        ExtensionHost,
         "disable" | "enable" | "list" | "reload"
     >;
     readonly #installer: ExtensionInstallService;
 
     constructor(options: {
         host: Pick<
-            ExtensionRuntime,
+            ExtensionHost,
             "disable" | "enable" | "list" | "reload"
         >;
         installer: ExtensionInstallService;
