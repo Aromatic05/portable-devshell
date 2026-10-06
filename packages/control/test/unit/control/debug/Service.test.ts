@@ -4,7 +4,7 @@ import test from "node:test";
 import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
 import type { ToolCallContext } from "@portable-devshell/shared";
 
-import { DebugPatchService } from "../../../../src/debug/Service.ts";
+import { createDebugRuntime } from "../../../../src/debug/Public.ts";
 
 function context(ctxId: string): ToolCallContext {
     return {
@@ -39,7 +39,7 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
             worker: {} as never,
         }),
     ]);
-    const service = new DebugPatchService(registry, () => runtime);
+    const service = createDebugRuntime({ instances: registry, target: () => runtime });
     const patch = await service.load({
         scope: { ctxId: "ctx-own", toolName: "file_read" },
         source: `(event) =>
@@ -84,7 +84,7 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
     assert.equal(record?.lastInvocation?.label, "own-context-probe");
 
     await service.unload(patch.patchId);
-    await service.dispose();
+    await service.close();
 });
 
 test("DebugPatchService rejects worker patches without an explicit Context scope", async () => {
@@ -104,7 +104,7 @@ test("DebugPatchService rejects worker patches without an explicit Context scope
             worker: {} as never,
         }),
     ]);
-    const service = new DebugPatchService(registry, () => runtime);
+    const service = createDebugRuntime({ instances: registry, target: () => runtime });
 
     await assert.rejects(
         service.load({
@@ -114,5 +114,5 @@ test("DebugPatchService rejects worker patches without an explicit Context scope
         /require a ctxId scope/iu,
     );
 
-    await service.dispose();
+    await service.close();
 });

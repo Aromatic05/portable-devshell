@@ -1,17 +1,13 @@
 import type {
     JsonValue,
-    OperationalOverview,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../Port.js";
-
-export interface OperationalOverviewPort {
-    read(): Promise<OperationalOverview>;
-}
+import type { OperationalOverviewApi } from "./Api.js";
 
 export function createOperationalOverviewRouteModule(
-    overview: OperationalOverviewPort,
+    overview: OperationalOverviewApi,
 ): ControlPortDefinition {
     return routeModule("overview", {
         get: async () => (await overview.read()) as unknown as JsonValue,

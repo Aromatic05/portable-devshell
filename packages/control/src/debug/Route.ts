@@ -2,25 +2,16 @@ import {
     createRemoteError,
     controlErrorCodes,
     type DebugPatchLoadRequest,
-    type DebugPatchSummary,
-    type DebugTargetSummary,
     type JsonValue,
     type ControlPortContext,
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../Port.js";
-
-export interface DebugPatchPort {
-    listPatches(): DebugPatchSummary[];
-    listTargets(): DebugTargetSummary[];
-    load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary>;
-    release(patchId: string): DebugPatchSummary;
-    unload(patchId: string): Promise<DebugPatchSummary>;
-}
+import type { DebugApi } from "./Api.js";
 
 export function createDebugRouteModule(
-    port: DebugPatchPort,
+    port: DebugApi,
 ): ControlPortDefinition {
     return routeModule("debug", {
         list: (_request, context) => {

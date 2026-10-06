@@ -11,7 +11,7 @@ import { Instance, type Instance } from "@portable-devshell/core/instance";
 import type { OperationalOverviewInstanceData } from "../../../src/overview/collector/Instance.ts";
 import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
 
-import { OperationalOverviewService } from "../../../src/overview/Service.ts";
+import { createOperationalOverviewRuntime } from "../../../src/overview/Public.ts";
 
 const now = new Date("2026-07-31T00:00:00.000Z");
 const healthySystemCollector = {
@@ -149,7 +149,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         })],
         ["failed-one", instanceData()],
     ]);
-    const overview = await new OperationalOverviewService({
+    const overview = await createOperationalOverviewRuntime({
         instanceCollector: collector((descriptor) => data.get(descriptor.name)!),
         instances: { list: () => [ready, failed] },
         now: () => now,
@@ -270,7 +270,7 @@ test("operational overview treats a deliberately stopped instance as neutral whi
         },
     );
 
-    const overview = await new OperationalOverviewService({
+    const overview = await createOperationalOverviewRuntime({
         instances: { list: () => [stopped, starting] },
         instanceCollector: collector(() => instanceData()),
         now: () => now,
@@ -364,7 +364,7 @@ test("operational overview counts the full 24 hour failure window while bounding
             },
     });
 
-    const overview = await new OperationalOverviewService({
+    const overview = await createOperationalOverviewRuntime({
         instances: { list: () => [descriptor] },
         instanceCollector: collector(() => data),
         now: () => now,
@@ -399,7 +399,7 @@ test("operational overview coalesces concurrent reads without caching later refr
     const firstGate = new Promise<void>((resolve) => {
         releaseFirst = resolve;
     });
-    const service = new OperationalOverviewService({
+    const service = createOperationalOverviewRuntime({
         instanceCollector: {
             async collect() {
                 collectCount += 1;
@@ -443,7 +443,7 @@ test("operational overview coalesces concurrent reads without caching later refr
 });
 
 test("controller resource alerts participate in overall health", async () => {
-    const service = new OperationalOverviewService({
+    const service = createOperationalOverviewRuntime({
         instances: { list: () => [] },
         instanceCollector: collector(() => instanceData()),
         now: () => now,
@@ -504,7 +504,7 @@ test("operational overview isolates snapshot and todo collection failures per in
         },
     );
 
-    const overview = await new OperationalOverviewService({
+    const overview = await createOperationalOverviewRuntime({
         instanceCollector: collector((descriptor) => descriptor.name === "todo-broken"
             ? instanceData({ readTodos: () => { throw new Error("todo store unavailable"); } })
             : instanceData()),
@@ -551,7 +551,7 @@ test("operational overview remains available when one collection source fails", 
             }),
         },
     );
-    const overview = await new OperationalOverviewService({
+    const overview = await createOperationalOverviewRuntime({
         instanceCollector: collector(() => instanceData({
             readApprovals: async () => {
                 throw new Error("approval store unavailable");

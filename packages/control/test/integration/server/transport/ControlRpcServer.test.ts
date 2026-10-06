@@ -37,7 +37,7 @@ import {
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
 import { ControlConfigStore } from "../../../../src/config/store/index.ts";
-import { DebugPatchService } from "../../../../src/debug/Service.ts";
+import { createDebugRuntime } from "../../../../src/debug/Public.ts";
 import { InstanceRegistry } from "@portable-devshell/core";
 import { InstanceRegistryFactory } from "@portable-devshell/core";
 import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
@@ -264,7 +264,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     const socketPath = createTestIpcPath("control-debug-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
-    const debug = new DebugPatchService(registry);
+    const debug = createDebugRuntime({ instances: registry, target: (instance) => instance.worker });
     const routes = new ControlRouteRegistry({
         debug,
         instanceDomains: createTestInstanceDomainRuntime(),
@@ -276,7 +276,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     t.after(async () => {
         await cleanupInOrder(
             () => server.stop(),
-            () => debug.dispose(),
+            () => debug.close(),
             () => routes.dispose(),
             () => rm(directory, { force: true, recursive: true }),
         );

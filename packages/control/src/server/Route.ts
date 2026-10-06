@@ -28,7 +28,7 @@ import {
 import type { ConfigEditorPort } from "../config/Route.js";
 import { createConfigRouteModule } from "../config/Route.js";
 import { ConfigChangeHub } from "../config/change/Config.js";
-import { createDebugRouteModule, type DebugPatchPort } from "../debug/Route.js";
+import { createDebugRouteModule, type DebugApi } from "../debug/Public.js";
 import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
 import type { ExtensionControlPort } from "../extension/manager/Port.js";
 import type {
@@ -41,8 +41,7 @@ import {
 } from "../instance/Route.js";
 import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "../auth/Route.js";
-import type { OperationalOverviewPort } from "../overview/Route.js";
-import { createOperationalOverviewRouteModule } from "../overview/Route.js";
+import { createOperationalOverviewRouteModule, type OperationalOverviewApi } from "../overview/Public.js";
 import type { ReverseCredentials } from "@portable-devshell/core/instance";
 import {
     createWebApplicationRouteModule,
@@ -95,7 +94,7 @@ export interface ControlRouteRegistryOptions {
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;
     controlPorts?: readonly ControlPortDefinition[];
-    debug?: DebugPatchPort;
+    debug?: DebugApi;
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
@@ -106,7 +105,7 @@ export interface ControlRouteRegistryOptions {
     instancePorts?: (descriptor: Instance, sessions: TerminalSessionApi) => readonly ControlPortDefinition[];
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
-    overview: OperationalOverviewPort;
+    overview: OperationalOverviewApi;
     restart?: () => Promise<void> | void;
     reverse?: ReverseCredentials;
     processSubscriptions?: ProcessSubscriptionManager;
@@ -121,7 +120,7 @@ export interface ControlRouteRegistryOptions {
 
 export class ControlRouteRegistry {
     readonly #configChanges: ConfigChangeHub;
-    readonly #overview: OperationalOverviewPort;
+    readonly #overview: OperationalOverviewApi;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #options: ControlRouteRegistryOptions;
     readonly #subscriptions: ProcessSubscriptionManager;

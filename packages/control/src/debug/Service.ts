@@ -2,10 +2,11 @@ import type { Instance, InstanceRegistry } from "@portable-devshell/core/instanc
 import type { DebugPatchLoadRequest, JsonValue } from "@portable-devshell/shared";
 import type { InstanceRuntime } from "../instance/Public.js";
 import { DebugPatchManager } from "./Patch.js";
+import type { DebugRuntime } from "./Api.js";
 
 type ToolCallDispatchRequest = Parameters<InstanceRuntime["callTool"]>[0];
 
-export class DebugPatchService {
+export class DebugPatchService implements DebugRuntime {
     readonly #manager = new DebugPatchManager();
     readonly #registered = new Set<string>();
 
@@ -36,7 +37,7 @@ export class DebugPatchService {
         this.#registered.delete(name);
     }
 
-    async dispose(): Promise<void> { await this.#manager.dispose(); }
+    async close(): Promise<void> { await this.#manager.dispose(); }
 
     #sync(): void {
         for (const instance of this.instances.list()) {

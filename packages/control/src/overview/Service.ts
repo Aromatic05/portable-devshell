@@ -1,13 +1,8 @@
 import type {
-    OAuthApprovalRequest,
     OperationalOverview,
     OperationalOverviewAlert,
 } from "@portable-devshell/shared";
 
-import type { Instance } from "@portable-devshell/core/instance";
-import {
-    type OperationalOverviewInstanceCollection,
-} from "./collector/Instance.js";
 import {
     OperationalOverviewSystemCollector,
     type OperationalOverviewSystemCollection,
@@ -19,39 +14,18 @@ import {
     readOperationalHealth,
     sortOperationalAlerts,
 } from "./collector/Policy.js";
+import type {
+    OperationalOverviewApprovalPort,
+    OperationalOverviewInstanceCollectorPort,
+    OperationalOverviewRegistryPort,
+    OperationalOverviewRuntime,
+    OperationalOverviewRuntimeOptions,
+    OperationalOverviewSystemCollectorPort,
+} from "./Api.js";
 
 const activityLimit = 20;
 
-export interface OperationalOverviewRegistryPort {
-    list(): readonly Instance[];
-}
-
-export interface OperationalOverviewApprovalPort {
-    list(): Promise<readonly OAuthApprovalRequest[]>;
-}
-
-export interface OperationalOverviewInstanceCollectorPort {
-    collect(
-        descriptor: Instance,
-        now: Date,
-    ): Promise<OperationalOverviewInstanceCollection>;
-}
-
-export interface OperationalOverviewSystemCollectorPort {
-    collect(): Promise<OperationalOverviewSystemCollection>;
-}
-
-export interface OperationalOverviewServiceOptions {
-    instanceCollector: OperationalOverviewInstanceCollectorPort;
-    instances: OperationalOverviewRegistryPort;
-    now?: () => Date;
-    oauthApprovals?: () => OperationalOverviewApprovalPort | undefined;
-    processId?: () => number;
-    systemCollector?: OperationalOverviewSystemCollectorPort;
-    uptimeSeconds?: () => number;
-}
-
-export class OperationalOverviewService {
+export class OperationalOverviewService implements OperationalOverviewRuntime {
     #inFlight?: Promise<OperationalOverview>;
     readonly #instanceCollector: OperationalOverviewInstanceCollectorPort;
     readonly #instances: OperationalOverviewRegistryPort;
@@ -61,7 +35,7 @@ export class OperationalOverviewService {
     readonly #systemCollector: OperationalOverviewSystemCollectorPort;
     readonly #uptimeSeconds: () => number;
 
-    constructor(options: OperationalOverviewServiceOptions) {
+    constructor(options: OperationalOverviewRuntimeOptions) {
         this.#instanceCollector = options.instanceCollector;
         this.#instances = options.instances;
         this.#now = options.now ?? (() => new Date());

@@ -8,8 +8,8 @@ import type {
 
 import {
     createDebugRouteModule,
-    type DebugPatchPort,
-} from "../../../../src/debug/Route.ts";
+    type DebugApi,
+} from "../../../../src/debug/Public.ts";
 
 function context(
     peer: "cli" | "tui" | "web",
@@ -36,7 +36,7 @@ function patch(): DebugPatchSummary {
     };
 }
 
-function port(): DebugPatchPort {
+function port(): DebugApi {
     return {
         listPatches: () => [patch()],
         listTargets: () => [

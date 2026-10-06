@@ -22,7 +22,7 @@ import type { ConfigChangeHub } from "../../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
 import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import type { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import { DebugPatchService } from "../../debug/Service.js";
+import { createDebugRuntime, type DebugRuntime } from "../../debug/Public.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/Service.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/Endpoint.js";
 import { type ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core/instance";
@@ -36,7 +36,7 @@ import { ToolCallExtensionBinding } from "../../extension/api/point/toolcall/Bin
 import { ToolCallSecretRewrite } from "../../extension/api/interface/secret/Rewrite.js";
 import type { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../extension/install/BuiltinSource.js";
-import { OperationalOverviewService } from "../../overview/Service.js";
+import { createOperationalOverviewRuntime } from "../../overview/Public.js";
 import { OperationalOverviewInstanceCollector } from "../../overview/collector/Instance.js";
 import { ControlTransportServer } from "../transport/endpoint/Server.js";
 import type { ControlTransportListener } from "../transport/channel/Listener.js";
@@ -91,7 +91,7 @@ export class ControlRuntime {
     readonly #artifact: ArtifactRuntime;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #transport: ControlTransportServer;
-    readonly #debug: DebugPatchService;
+    readonly #debug: DebugRuntime;
     readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
     readonly #extensions: ExtensionHost;
@@ -156,7 +156,10 @@ export class ControlRuntime {
             extensionMcpTools.install(options.toolCalls),
         );
         this.#reverse = options.reverse;
-        this.#debug = new DebugPatchService(options.instances, (descriptor) => options.instanceRuntimes.get(descriptor));
+        this.#debug = createDebugRuntime({
+            instances: options.instances,
+            target: (descriptor) => options.instanceRuntimes.get(descriptor),
+        });
         const processSubscriptions =
             options.processSubscriptions ?? new ProcessSubscriptionManager();
         const modelCliCommands = new CliExtensionCommandService(
@@ -230,7 +233,7 @@ export class ControlRuntime {
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
-            overview: new OperationalOverviewService({
+            overview: createOperationalOverviewRuntime({
                 instanceCollector: new OperationalOverviewInstanceCollector({
                     activityLimit: 20,
                     instanceData: descriptor => {
@@ -371,7 +374,7 @@ export class ControlRuntime {
         await this.#web.stopHost().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
-        await this.#debug.dispose().catch((error) => failures.push(error));
+        await this.#debug.close().catch((error) => failures.push(error));
         this.#web.stop();
         try {
             this.#reverse.stop();
