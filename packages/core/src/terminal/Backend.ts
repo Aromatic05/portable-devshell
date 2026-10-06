@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerInstance } from "../instance/Api.js";
+import type { WorkerExecution } from "../instance/runtime/Api.js";
 import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
@@ -14,18 +14,7 @@ import type {
     TerminalProcessExit,
 } from "./Api.js";
 
-export type WorkerTerminalPort = Pick<
-    WorkerInstance,
-    | "attachTerminal"
-    | "killTerminal"
-    | "listTerminals"
-    | "onTransportConnected"
-    | "onTransportDisconnected"
-    | "onTerminalNotification"
-    | "openTerminal"
-    | "resizeTerminal"
-    | "writeTerminal"
->;
+export type WorkerTerminalPort = WorkerExecution["terminal"];
 
 export class WorkerTerminalBackend implements TerminalBackend {
     constructor(private readonly options: { worker: WorkerTerminalPort }) {}
@@ -33,7 +22,7 @@ export class WorkerTerminalBackend implements TerminalBackend {
     async open(
         input: TerminalBackendOpenInput,
     ): Promise<TerminalBackendOpenResult> {
-        const descriptor = await this.options.worker.openTerminal({
+        const descriptor = await this.options.worker.open({
             cols: input.cols,
             ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
@@ -52,7 +41,7 @@ export class WorkerTerminalBackend implements TerminalBackend {
     }
 
     async recover(): Promise<TerminalBackendSession[]> {
-        const descriptors = (await this.options.worker.listTerminals()).filter(
+        const descriptors = (await this.options.worker.list()).filter(
             (descriptor) => descriptor.state === "running",
         );
         return await Promise.all(
@@ -94,15 +83,15 @@ class WorkerTerminalProcess implements TerminalProcess {
     ) {
         this.#worker = worker;
         this.#descriptor = descriptor;
-        this.#unsubscribeNotification = worker.onTerminalNotification(
+        this.#unsubscribeNotification = worker.onNotification(
             (notification) => {
                 this.#acceptNotification(notification);
             },
         );
-        this.#unsubscribeConnected = worker.onTransportConnected(() => {
+        this.#unsubscribeConnected = worker.onConnected(() => {
             if (!this.#closed) this.#scheduleResume();
         });
-        this.#unsubscribeDisconnected = worker.onTransportDisconnected(() => {
+        this.#unsubscribeDisconnected = worker.onDisconnected(() => {
             // The remote PTY remains owned by the worker process. Reattach after the
             // next authenticated reverse channel activation instead of fabricating exit.
         });
@@ -120,7 +109,7 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async kill(): Promise<void> {
         await this.#serialize(async () => {
-            const result = await this.#worker.killTerminal(this.#identity());
+            const result = await this.#worker.kill(this.#identity());
             this.#acceptOperationIdentity(result);
             if (result.version >= this.#descriptor.version) {
                 this.#descriptor = result;
@@ -151,7 +140,7 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async resize(cols: number, rows: number): Promise<void> {
         await this.#serialize(async () => {
-            const result = await this.#worker.resizeTerminal({
+            const result = await this.#worker.resize({
                 ...this.#identity(),
                 cols,
                 rows,
@@ -172,7 +161,7 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async write(data: string): Promise<void> {
         await this.#serialize(async () => {
-            const result = await this.#worker.writeTerminal({
+            const result = await this.#worker.write({
                 ...this.#identity(),
                 data: Buffer.from(data, "utf8").toString("base64"),
             });
@@ -227,7 +216,7 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     async #resume(): Promise<void> {
         if (this.#closed) return;
-        const attached = await this.#worker.attachTerminal({
+        const attached = await this.#worker.attach({
             fromSeq: this.#lastSeq,
             generation: this.#descriptor.generation,
             terminalId: this.#descriptor.terminalId,

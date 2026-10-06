@@ -14,7 +14,8 @@ import type {
     PreparedEnvironmentFacts,
 } from "../Api.js";
 import { ContextCleanupService } from "./Cleanup.js";
-import type { InstanceLease, InstanceRegistry } from "../../instance/Api.js";
+import type { InstanceLease } from "../../instance/model/Lifecycle.js";
+import type { InstanceRegistry } from "../../instance/model/Registry.js";
 
 export class ContextEnvironmentService implements ContextEnvironmentPort {
     readonly #registry: ContextRecordPort & ContextCleanupLedgerPort;
@@ -58,7 +59,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             let attached = false;
             let committed = false;
             try {
-                prepared = await worker.prepareWorkspace(workspace);
+                prepared = await worker.execution.environment.prepareWorkspace(workspace);
                 await beforeCommit?.(prepared);
                 signal?.throwIfAborted();
                 await this.#registry.attachEnvironment(
@@ -135,7 +136,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                 const worker = generation.instance.worker;
                 if (stored?.temporaryDirectory !== undefined) {
                     try {
-                        await worker.touchTemporaryDirectory(
+                        await worker.execution.environment.touchTemporaryDirectory(
                             stored.temporaryDirectory,
                         );
                         return stored;
@@ -144,7 +145,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                     }
                 }
 
-                const prepared = await worker.prepareWorkspace(selected);
+                const prepared = await worker.execution.environment.prepareWorkspace(selected);
                 const updated = await this.#registry.updateWorkerState(
                     ctxId,
                     instance,
@@ -197,7 +198,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                         retryable: false,
                     });
                 const { snapshot, worker } =
-                    await target.acquireReference(ctxId);
+            await target.lifecycle.acquireReference(ctxId);
                 const connection = snapshot as unknown as Record<
                     string,
                     JsonValue
@@ -217,11 +218,11 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                     previous.temporaryDirectory !== undefined
                 ) {
                     try {
-                        await worker.touchTemporaryDirectory(
+                        await worker.execution.environment.touchTemporaryDirectory(
                             previous.temporaryDirectory,
                         );
                         signal?.throwIfAborted();
-                        const alerts = await worker.touchAlerts(workspace);
+                        const alerts = await worker.execution.environment.touchAlerts(workspace);
                         return {
                             ...connection,
                             instance,
@@ -240,14 +241,14 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                     }
                 }
 
-                const prepared = await worker.prepareWorkspace(workspace);
+                const prepared = await worker.execution.environment.prepareWorkspace(workspace);
                 await this.#registry.recordEnvironmentCleanup(ctxId, {
                     instance,
                     kind: "alerts",
                     workspace: prepared.workspace,
                 });
                 signal?.throwIfAborted();
-                const alerts = await worker.readAlerts(prepared.workspace);
+                const alerts = await worker.execution.environment.readAlerts(prepared.workspace);
                 signal?.throwIfAborted();
                 await this.#registry.attachEnvironment(ctxId, {
                     instance,
@@ -344,7 +345,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             });
         }
         try {
-            return target.acquireLease();
+            return target.lifecycle.acquireLease();
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

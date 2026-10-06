@@ -4,7 +4,8 @@ import type {
 } from "../Api.js";
 import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort } from "../Api.js";
-import type { InstanceLease, InstanceRegistry } from "../../instance/Api.js";
+import type { InstanceLease } from "../../instance/model/Lifecycle.js";
+import type { InstanceRegistry } from "../../instance/model/Registry.js";
 
 export class ContextService {
     readonly registry: ContextRecordSourcePort;
@@ -99,14 +100,14 @@ export class ContextService {
             if (instance === undefined) continue;
             let lease: InstanceLease;
             try {
-                lease = instance.acquireLease();
+                lease = instance.lifecycle.acquireLease();
             } catch {
                 continue;
             }
             try {
                 const worker = lease.instance.worker;
-                if (worker.snapshot().ready === true)
-                    await worker.touchAlerts(environment.workspace);
+                if (worker.supervision.snapshot().ready === true)
+                    await worker.execution.environment.touchAlerts(environment.workspace);
             } finally {
                 lease.release();
             }

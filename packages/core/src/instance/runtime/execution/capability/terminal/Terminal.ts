@@ -1,4 +1,4 @@
-import type { WorkerTerminalDescriptor, WorkerTerminalOpenInput, WorkerTerminalIdentity, WorkerTerminalAttachResult, WorkerTerminalNotification } from "../../Api.js";
+import type { WorkerTerminalDescriptor, WorkerTerminalOpenInput, WorkerTerminalIdentity, WorkerTerminalAttachResult, WorkerTerminalNotification } from "../../../../Api.js";
 import {
     Endpoint,
     Event,

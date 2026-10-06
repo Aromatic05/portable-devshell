@@ -1,18 +1,9 @@
 import type { ConnectionModuleOptions } from "./Api.js";
 import { createRemoteError, controlErrorCodes } from "@portable-devshell/shared";
 
-
 import { ReverseIngress } from "./Ingress.js";
 import { ReverseCredentials } from "./credential/Credentials.js";
 import { ReverseCredentialStore } from "./credential/Store.js";
-
-
-
-
-
-
-
-
 
 export class ConnectionModule {
     readonly service?: ReverseCredentials;

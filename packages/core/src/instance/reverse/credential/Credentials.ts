@@ -5,7 +5,8 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import type { ReverseInstanceLookup, ReverseInstance } from "../Api.js";
+import type { ReverseInstanceLookup } from "../Api.js";
+import type { Instance } from "../../model/Instance.js";
 import { ReverseCredentialStore } from "./Store.js";
 
 export class ReverseCredentials {
@@ -67,7 +68,7 @@ export class ReverseCredentials {
         this.#disconnect?.(instance);
     }
 
-    #requireReverseInstance(instance: string): ReverseInstance {
+    #requireReverseInstance(instance: string): Instance {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
             throw createRemoteError({
@@ -77,7 +78,7 @@ export class ReverseCredentials {
                 retryable: false,
             });
         }
-        if (descriptor.provider !== "reverse") {
+        if (descriptor.config.provider !== "reverse") {
             throw createRemoteError({
                 code: runtimeErrorCodes.reverseInstanceNotReverse,
                 details: { instance },

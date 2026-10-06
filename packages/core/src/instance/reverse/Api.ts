@@ -3,30 +3,17 @@ import type { Duplex } from "node:stream";
 
 import type { ControlConfig, InstanceName } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../../../Registry.js";
-import type { TransportConnection } from "../../Connection.js";
+import type { Instance } from "../model/Instance.js";
+import type { InstanceRegistry } from "../model/Registry.js";
 
 export interface ReverseConnectionIdentity {
     credentialToken: string;
-    descriptor: ReverseInstance;
+    descriptor: Instance;
     generation: number;
 }
 
-export interface ReverseInstance {
-    name: string;
-    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
-    reverseConnection?: TransportConnection;
-}
-
-export interface ReverseInstanceHandle extends ReverseInstance {
-    acquireLease(): {
-        readonly instance: ReverseInstance;
-        release(): void;
-    };
-}
-
 export interface ReverseInstanceLookup {
-    get(instanceName: string): ReverseInstanceHandle | undefined;
+    get(instanceName: string): Instance | undefined;
 }
 
 export interface ReverseEnrollmentCredential {

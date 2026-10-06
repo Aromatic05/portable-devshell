@@ -10,8 +10,10 @@ import {
 } from "@portable-devshell/shared";
 
 import { ReverseCredentialStore } from "./credential/Store.js";
-import type { ReverseInstanceLookup, ReverseInstance } from "./Api.js";
-import { ReverseSseChannel } from "./SseChannel.js";
+import type { ReverseInstanceLookup } from "./Api.js";
+import type { Instance } from "../model/Instance.js";
+import type { InstanceLease } from "../model/Lifecycle.js";
+import { ReverseSseChannel } from "../transport/endpoint/channel/reverse/SseChannel.js";
 
 interface ActiveReverseConnection {
     channel: Channel;
@@ -20,11 +22,9 @@ interface ActiveReverseConnection {
 }
 
 interface ReverseGenerationLease {
-    readonly descriptor: ReverseInstance;
+    readonly descriptor: Instance;
     release(): void;
 }
-
-
 
 export interface ReverseConnectionsOptions {
     credentialStore: ReverseCredentialStore;
@@ -51,11 +51,11 @@ export class ReverseConnections {
             body.deviceCode,
         );
         const descriptor = this.#requireReverseInstance(credential.instance);
-        this.disconnect(descriptor.name);
+        this.disconnect(descriptor.config.name);
         return {
             controllerUrl: this.#publicBaseUrl,
             deviceToken: credential.deviceToken,
-            instance: descriptor.name,
+            instance: descriptor.config.name,
         };
     }
 
@@ -88,12 +88,12 @@ export class ReverseConnections {
         let generation: ReverseGenerationLease | undefined;
         try {
             generation = this.#acquireIdentityGeneration(identity);
-            await this.#exclusive(identity.descriptor.name, async () => {
+            await this.#exclusive(identity.descriptor.config.name, async () => {
                 this.#assertRunning(channel);
                 let active: ActiveReverseConnection | undefined;
                 const authenticated =
                     await this.#credentialStore.withAuthenticatedToken(
-                        identity.descriptor.name,
+                        identity.descriptor.config.name,
                         identity.credentialToken,
                         async () => {
                             this.#assertRunning(channel);
@@ -105,9 +105,9 @@ export class ReverseConnections {
                         },
                     );
                 if (!authenticated || active === undefined) {
-                    throw invalidDeviceToken(identity.descriptor.name);
+                    throw invalidDeviceToken(identity.descriptor.config.name);
                 }
-                await identity.descriptor.reverseConnection!.attach(channel, {
+                await identity.descriptor.worker.provision.reverseConnection!.attach(channel, {
                     generation: identity.generation,
                     transport,
                 });
@@ -125,7 +125,7 @@ export class ReverseConnections {
         transport: "sse" | "wss",
         channel: Channel,
     ): ActiveReverseConnection {
-        const previous = this.#active.get(identity.descriptor.name);
+        const previous = this.#active.get(identity.descriptor.config.name);
         const previousGeneration = previous?.generation ?? 0;
 
         if (
@@ -137,7 +137,7 @@ export class ReverseConnections {
                 code: runtimeErrorCodes.reverseGenerationInvalid,
                 details: {
                     generation: identity.generation,
-                    instance: identity.descriptor.name,
+                    instance: identity.descriptor.config.name,
                     previousGeneration,
                 },
                 message: `Connection generation must be greater than ${previousGeneration}.`,
@@ -150,10 +150,10 @@ export class ReverseConnections {
             generation: identity.generation,
             transport,
         };
-        this.#active.set(identity.descriptor.name, active);
+        this.#active.set(identity.descriptor.config.name, active);
         channel.onClose(() => {
-            if (this.#active.get(identity.descriptor.name) === active) {
-                this.#active.delete(identity.descriptor.name);
+            if (this.#active.get(identity.descriptor.config.name) === active) {
+                this.#active.delete(identity.descriptor.config.name);
             }
         });
         return active;
@@ -174,7 +174,7 @@ export class ReverseConnections {
                 });
             }
 
-            const active = this.#active.get(identity.descriptor.name);
+            const active = this.#active.get(identity.descriptor.config.name);
             if (
                 active === undefined ||
                 active.transport !== "sse" ||
@@ -208,15 +208,15 @@ export class ReverseConnections {
     #acquireIdentityGeneration(
         identity: ReverseConnectionIdentity,
     ): ReverseGenerationLease {
-        const instance = this.#instanceRegistry.get(identity.descriptor.name);
+        const instance = this.#instanceRegistry.get(identity.descriptor.config.name);
         if (instance === undefined) {
-            throw retiredGeneration(identity.descriptor.name);
+            throw retiredGeneration(identity.descriptor.config.name);
         }
-        let lease: { readonly instance: ReverseInstance; release(): void };
+        let lease: InstanceLease;
         try {
-            lease = instance.acquireLease();
+            lease = instance.lifecycle.acquireLease();
         } catch {
-            throw retiredGeneration(identity.descriptor.name);
+            throw retiredGeneration(identity.descriptor.config.name);
         }
         if (lease.instance === identity.descriptor) {
             return {
@@ -225,7 +225,7 @@ export class ReverseConnections {
             };
         }
         lease.release();
-        throw retiredGeneration(identity.descriptor.name);
+        throw retiredGeneration(identity.descriptor.config.name);
     }
 
     disconnect(instance: string): void {
@@ -257,7 +257,7 @@ export class ReverseConnections {
         });
     }
 
-    #requireReverseInstance(instance: string): ReverseInstance {
+    #requireReverseInstance(instance: string): Instance {
         const descriptor = this.#instanceRegistry.get(instance);
         if (descriptor === undefined) {
             throw createRemoteError({
@@ -268,8 +268,8 @@ export class ReverseConnections {
             });
         }
         if (
-            descriptor.provider !== "reverse" ||
-            descriptor.reverseConnection === undefined
+            descriptor.config.provider !== "reverse" ||
+            descriptor.worker.provision.reverseConnection === undefined
         ) {
             throw createRemoteError({
                 code: runtimeErrorCodes.reverseInstanceNotReverse,

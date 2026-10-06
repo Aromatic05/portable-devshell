@@ -1,18 +1,24 @@
-export { Instance } from "./Instance.js";
-export { ReverseConnections } from "./transport/endpoint/channel/reverse/Connections.js";
-export { ReverseCredentials } from "./transport/endpoint/channel/reverse/credential/Credentials.js";
-export { ReverseCredentialStore } from "./transport/endpoint/channel/reverse/credential/Store.js";
-export { ConnectionModule } from "./transport/endpoint/channel/reverse/Module.js";
+export { Instance } from "./model/Instance.js";
+export { ReverseConnections } from "./reverse/Connections.js";
+export { ReverseCredentials } from "./reverse/credential/Credentials.js";
+export { ReverseCredentialStore } from "./reverse/credential/Store.js";
+export { ConnectionModule } from "./reverse/index.js";
 export { createInstanceHost, createConnectionRouteModule } from "./Route.js";
-export { InstanceRegistry } from "./Registry.js";
-export { InstancePaths } from "./Paths.js";
+export { InstanceRegistry } from "./model/Registry.js";
+export { InstancePaths } from "./model/Paths.js";
+export { InstanceLifecycle } from "./model/Lifecycle.js";
+export {
+    InstanceToolCatalog,
+    type InstanceToolDefinitionRegistration,
+} from "./model/Tools.js";
+export type { InstanceState } from "./model/State.js";
 export { resolveWorkerHomeDirectory } from "./runtime/provision/Home.js";
 export {
     assertInstanceDeletable,
     closeInstanceResources,
-    InstanceRetirementNotification,
     retireInstanceForDelete,
-} from "./runtime/provision/Retirement.js";
+} from "./model/Retirement.js";
+export { InstanceRetirementNotification } from "./runtime/provision/Retirement.js";
 export {
     discoverSshConfigHosts,
     listInstanceCreateProviders,

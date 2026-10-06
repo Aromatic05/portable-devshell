@@ -15,11 +15,11 @@ import {
 } from "@portable-devshell/shared";
 
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
-import type { WorkerInstance } from "./runtime/index.js";
+import type { WorkerSupervision } from "./runtime/Api.js";
 import type { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
-import type { ReverseCredentials } from "./transport/endpoint/channel/reverse/credential/Credentials.js";
-import type { Instance } from "./Instance.js";
-import type { InstanceRegistry } from "./Registry.js";
+import type { ReverseCredentials } from "./reverse/credential/Credentials.js";
+import type { Instance } from "./model/Instance.js";
+import type { InstanceRegistry } from "./model/Registry.js";
 
 export interface InstanceRouteOptions {
     descriptor: Instance;
@@ -35,8 +35,8 @@ export function createInstanceHost(
     const ports = mergeControlPortsByName([
         createProcessRouteModule(
             {
-                enabled: descriptor.enabled,
-                name: descriptor.name,
+                enabled: descriptor.config.enabled,
+                name: descriptor.config.name,
                 worker: descriptor.worker,
             },
             options.registry,
@@ -45,7 +45,7 @@ export function createInstanceHost(
         ...(options.extensionPorts ?? []),
     ]);
     return {
-        host: asInstanceName(descriptor.name),
+        host: asInstanceName(descriptor.config.name),
         ports: fenceGeneration(ports, descriptor),
     };
 }
@@ -59,7 +59,7 @@ function fenceGeneration(
         operations: port.operations.map((operation) => ({
             ...operation,
             handle: async (request, context) => {
-                const generation = descriptor.acquireLease();
+                const generation = descriptor.lifecycle.acquireLease();
                 try {
                     return await operation.handle(request, context);
                 } finally {
@@ -73,7 +73,7 @@ function fenceGeneration(
                   streams: port.streams.map((operation) => ({
                       ...operation,
                       handle: async (stream, request, context) => {
-                          const generation = descriptor.acquireLease();
+                          const generation = descriptor.lifecycle.acquireLease();
                           try {
                               return await operation.handle(
                                   stream,
@@ -92,14 +92,12 @@ function fenceGeneration(
 export interface ProcessRouteInstancePort {
     enabled: boolean;
     name: string;
-    worker: Pick<
-        WorkerInstance,
-        | "refreshStatus"
-        | "snapshot"
-        | "startInteractive"
-        | "stop"
-        | "subscribe"
-    >;
+    worker: {
+        supervision: Pick<
+            WorkerSupervision,
+            "lifecycle" | "recovery" | "state" | "snapshot"
+        >;
+    };
 }
 
 export function createProcessRouteModule(
@@ -111,22 +109,24 @@ export function createProcessRouteModule(
         "process",
         {
             snapshot: () => {
-                const snapshot = instance.worker.snapshot();
+                const snapshot = instance.worker.supervision.snapshot();
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
                 } as unknown as JsonValue;
             },
             refresh: async () => {
-                const snapshot = await instance.worker.refreshStatus();
+                const snapshot =
+                    await instance.worker.supervision.recovery.refreshStatus();
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
                 } as unknown as JsonValue;
             },
             stop: async () => {
-                const result = await instance.worker.stop();
-                registry.get(instance.name)?.clearOwned();
+                const result =
+                    await instance.worker.supervision.lifecycle.stop();
+                registry.get(instance.name)?.lifecycle.clearOwned();
                 if (!instance.enabled) {
                     await registry.remove(instance.name);
                 }
@@ -155,8 +155,11 @@ export function createProcessRouteModule(
                     stream.send({ name: "output", payload: { chunk } }),
                 );
                 try {
-                    const result = await instance.worker.startInteractive(relay);
-                    registry.get(instance.name)?.markOwned();
+                    const result =
+                        await instance.worker.supervision.lifecycle.startInteractive(
+                            relay,
+                        );
+                    registry.get(instance.name)?.lifecycle.markOwned();
                     await stream.close(result as unknown as JsonValue);
                 } finally {
                     offData();
@@ -170,7 +173,7 @@ export function createProcessRouteModule(
                     stream,
                     context,
                     instance.name,
-                    instance.worker,
+                    instance.worker.supervision.state,
                     readProcessSubscriptionFromSeq(request.payload),
                     (event) =>
                         isProcessEventType(event.type)

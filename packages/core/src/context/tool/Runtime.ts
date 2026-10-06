@@ -10,7 +10,8 @@ import {
     type ToolCallExternalBinding,
 } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
-import type { InstanceLease, InstanceRegistry } from "../../instance/Api.js";
+import type { InstanceLease } from "../../instance/model/Lifecycle.js";
+import type { InstanceRegistry } from "../../instance/model/Registry.js";
 import {
     contextToolDefinitions,
     environmentInfoToolName,
@@ -106,26 +107,12 @@ class ContextToolRuntime {
             const generation = this.#requireGeneration(context.instance);
             try {
                 const worker = generation.instance.worker;
-                const handshake = worker.handshake;
+                const handshake = worker.supervision.handshake;
                 if (handshake === undefined)
                     throw createRemoteError({
                         code: runtimeErrorCodes.workerHandshakeFailed,
                         details: { instance: context.instance },
                         message: `Worker handshake is unavailable for ${context.instance}.`,
-                        retryable: true,
-                    });
-                if (worker.prepareExtensionResource === undefined)
-                    throw createRemoteError({
-                        code: runtimeErrorCodes.workerHandshakeFailed,
-                        details: { instance: context.instance },
-                        message: `Extension resource preparation is unavailable for ${context.instance}.`,
-                        retryable: true,
-                    });
-                if (worker.readAlerts === undefined)
-                    throw createRemoteError({
-                        code: runtimeErrorCodes.workerHandshakeFailed,
-                        details: { instance: context.instance },
-                        message: `Alert reading is unavailable for ${context.instance}.`,
                         retryable: true,
                     });
 
@@ -146,13 +133,13 @@ class ContextToolRuntime {
                               }),
                         beforeCommit: async (facts) => {
                             skillsDirectory = (
-                                await worker.prepareExtensionResource!({
+                                await worker.execution.environment.prepareExtensionResource({
                                     collection: "managed",
                                     extensionId: "skill",
                                 })
                             ).directory;
                             alertCleanupWorkspace = facts.workspace;
-                            alerts = (await worker.readAlerts!(facts.workspace))
+                            alerts = (await worker.execution.environment.readAlerts(facts.workspace))
                                 .advice;
                         },
                         signal,
@@ -423,7 +410,7 @@ class ContextToolRuntime {
             });
         }
         try {
-            return target.acquireLease();
+            return target.lifecycle.acquireLease();
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

@@ -8,11 +8,9 @@ import type {
     ContextLifecycleCleanupPort,
     ContextRecordPort,
 } from "../Api.js";
-import type {
-    Instance,
-    InstanceLease,
-    InstanceRegistry,
-} from "../../instance/Api.js";
+import type { InstanceLease } from "../../instance/model/Lifecycle.js";
+import type { Instance } from "../../instance/model/Instance.js";
+import type { InstanceRegistry } from "../../instance/model/Registry.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &
@@ -173,10 +171,10 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             );
             if (stillOwned) return true;
             const instance =
-                target?.name === cleanup.instance
+                target?.config.name === cleanup.instance
                     ? target
                     : this.#instances.get(cleanup.instance);
-            await instance?.releaseReference(ctxId);
+            await instance?.lifecycle.releaseReference(ctxId);
             return true;
         }
 
@@ -205,9 +203,9 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         if (cleanup.workspace === undefined)
             throw new Error("Alert cleanup requires a workspace.");
 
-        const explicit = target?.name === cleanup.instance ? target : undefined;
+        const explicit = target?.config.name === cleanup.instance ? target : undefined;
         if (explicit !== undefined) {
-            await explicit.worker.releaseAlerts(cleanup.workspace);
+            await explicit.worker.execution.environment.releaseAlerts(cleanup.workspace);
             return true;
         }
 
@@ -218,14 +216,14 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             );
         let lease: InstanceLease;
         try {
-            lease = instance.acquireLease();
+            lease = instance.lifecycle.acquireLease();
         } catch {
             throw new Error(
                 `Instance ${cleanup.instance} is unavailable for alert cleanup.`,
             );
         }
         try {
-            await lease.instance.worker.releaseAlerts(cleanup.workspace);
+            await lease.instance.worker.execution.environment.releaseAlerts(cleanup.workspace);
         } finally {
             lease.release();
         }

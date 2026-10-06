@@ -1,6 +1,5 @@
-import type { Channel, ControlInstanceAlertsConfig, ControlMcpContextMode, Endpoint, InstanceEventRecord, InstanceSnapshot, JsonValue, MessageStream, ReverseEnrollmentState, ReverseTransport, ToolDefinition, WorkerArtifactApi, STREAM_GAP_CODE } from "@portable-devshell/shared";
-import type { Instance } from "./Instance.js";
-import type { TransportConnection } from "./transport/endpoint/Connection.js";
+import type { InstanceEventRecord, JsonValue, STREAM_GAP_CODE } from "@portable-devshell/shared";
+
 
 export interface InstanceEventInput {
     at: string;
@@ -230,129 +229,7 @@ export interface WorkerExecProcessInput {
     cwd?: string;
 }
 
-export interface InstanceLease {
-    readonly instance: Instance;
-    release(): void;
-}
-
-export interface InstanceReferenceLease {
-    snapshot: ReturnType<WorkerInstance["snapshot"]>;
-    worker: WorkerInstance;
-}
-
-export interface InstanceFields {
-    enabled: boolean;
-    mcpContextMode?: ControlMcpContextMode;
-    mcpEnabled: boolean;
-    mcpPath: string;
-    modelExtensions: readonly string[];
-    name: string;
-    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
-    reverseConnection?: TransportConnection;
-    worker: WorkerInstance;
-}
-
-export interface WorkerInstance {
-    readonly artifact: WorkerArtifactApi;
-    snapshot(): InstanceSnapshot;
-    readonly endpoint: Endpoint;
-    readWorkerTools(): Promise<readonly ToolDefinition[]>;
-    readonly managementMode: "controllerManaged" | "selfManaged";
-    retireProviderResources(): Promise<void>;
-    retireRuntime(): Promise<void>;
-    setReverseEnrollmentState(
-        enrollmentState: ReverseEnrollmentState,
-    ): Promise<InstanceSnapshot>;
-    acceptReverseChannel(
-        channel: Channel,
-        input: {
-            connectedAt?: string;
-            generation: number;
-            transport: ReverseTransport;
-        },
-    ): Promise<InstanceSnapshot>;
-    connectTcp(
-        input: WorkerTcpConnectInput,
-        signal?: AbortSignal,
-    ): Promise<MessageStream>;
-    execProcess(
-        input: WorkerExecProcessInput,
-        signal?: AbortSignal,
-    ): Promise<MessageStream>;
-    openTerminal(
-        input: WorkerTerminalOpenInput,
-    ): Promise<WorkerTerminalDescriptor>;
-    prepareWorkspace(
-        workspace: string,
-    ): Promise<WorkerWorkspacePrepareResult>;
-    readAlerts(
-        workspace: string,
-    ): Promise<WorkerAlertsReadResult>;
-    touchAlerts(
-        workspace: string,
-    ): Promise<WorkerAlertsReadResult>;
-    releaseAlerts(workspace: string): Promise<void>;
-    touchTemporaryDirectory(path: string): Promise<void>;
-    attachTerminal(input: {
-        fromSeq: number;
-        generation: number;
-        terminalId: string;
-    }): Promise<WorkerTerminalAttachResult>;
-    writeTerminal(
-        input: WorkerTerminalIdentity & { data: string },
-    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
-    resizeTerminal(
-        input: WorkerTerminalIdentity & { cols: number; rows: number },
-    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
-    killTerminal(
-        input: WorkerTerminalIdentity,
-    ): Promise<WorkerTerminalDescriptor>;
-    listTerminals(): Promise<WorkerTerminalDescriptor[]>;
-    onTerminalNotification(
-        listener: (notification: WorkerTerminalNotification) => void,
-    ): () => void;
-    onTransportConnected(listener: () => void): () => void;
-    onTransportDisconnected(listener: (error: Error) => void): () => void;
-    onCommandSessionOpen(
-        listener: (request: WorkerCommandSessionOpen) => void,
-    ): () => void;
-    onCommandSessionClose(
-        listener: (request: WorkerCommandSessionClose) => void,
-    ): () => void;
-    writeCommandSessionOutput(
-        output: WorkerCommandSessionOutput,
-    ): Promise<void>;
-    completeCommandSession(
-        completion: WorkerCommandSessionCompletion,
-    ): Promise<void>;
-    appendControlEvent(
-        type: InstanceEventInput["type"],
-        data?: JsonValue,
-    ): Promise<InstanceEventRecord>;
-    prepareExtensionResource(
-        input: WorkerExtensionResourcePrepareInput,
-    ): Promise<WorkerExtensionResourcePrepareResult>;
-    start(): Promise<InstanceSnapshot>;
-    startInteractive(
-        interactiveSession?: WorkerCommandInteractiveSession,
-    ): Promise<InstanceSnapshot>;
-    stop(): Promise<InstanceSnapshot>;
-    refreshStatus(): Promise<InstanceSnapshot>;
-    reconfigure(input: {
-        alerts?: ControlInstanceAlertsConfig;
-        effectiveSecurityMode: "disabled" | "workspace";
-        env?: NodeJS.ProcessEnv;
-    }): Promise<void>;
-    subscribe(fromSeq?: number): InstanceEventStreamGap | InstanceEventStreamSlice;
-    close(): Promise<void>;
-    readonly handshake: WorkerHandshakeResult | undefined;
-    reconnectTransport(): Promise<InstanceSnapshot>;
-}
-
 export interface WorkerCommandInteractiveSession {
     readInput(): Promise<Buffer | undefined>;
     writeOutput(chunk: string): Promise<void> | void;
 }
-
-export type { Instance } from "./Instance.js";
-export type { InstanceRegistry } from "./Registry.js";

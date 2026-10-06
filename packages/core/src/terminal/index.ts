@@ -1,4 +1,4 @@
-import type { WorkerInstance } from "../instance/Api.js";
+import type { WorkerInstance } from "../instance/runtime/Api.js";
 import { WorkerTerminalBackend } from "./Backend.js";
 import { TerminalSessionService } from "./Service.js";
 import type {
@@ -8,7 +8,7 @@ import type {
 } from "./Api.js";
 
 export function createTerminalRuntime(worker: WorkerInstance): TerminalRuntime {
-    return { api: new WorkerTerminalBackend({ worker }) };
+    return { api: new WorkerTerminalBackend({ worker: worker.execution.terminal }) };
 }
 
 export function createTerminalSessionRuntime(

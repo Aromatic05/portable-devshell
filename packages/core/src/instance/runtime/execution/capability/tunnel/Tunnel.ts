@@ -1,4 +1,4 @@
-import type { WorkerTcpConnectInput, WorkerExecProcessInput } from "../../Api.js";
+import type { WorkerTcpConnectInput, WorkerExecProcessInput } from "../../../../Api.js";
 import {
     Endpoint,
     Stream,

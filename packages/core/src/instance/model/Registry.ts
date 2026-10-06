@@ -5,7 +5,7 @@ export class InstanceRegistry {
 
     constructor(instances: readonly Instance[]) {
         for (const instance of instances) {
-            this.#instances.set(instance.name, instance);
+            this.#instances.set(instance.config.name, instance);
         }
     }
 
@@ -14,12 +14,12 @@ export class InstanceRegistry {
     }
 
     add(instance: Instance): void {
-        if (this.#instances.has(instance.name)) {
+        if (this.#instances.has(instance.config.name)) {
             throw new Error(
-                `Cannot add active instance generation ${instance.name}; remove the current generation first.`,
+                `Cannot add active instance generation ${instance.config.name}; remove the current generation first.`,
             );
         }
-        this.#instances.set(instance.name, instance);
+        this.#instances.set(instance.config.name, instance);
     }
 
     async remove(
@@ -32,7 +32,7 @@ export class InstanceRegistry {
         if (expected !== undefined && instance !== expected) {
             throw new Error(`Cannot remove stale instance generation ${name}.`);
         }
-        const retiring = instance.retire(async () => {
+        const retiring = instance.lifecycle.retire(async () => {
             await beforeDrain?.(instance);
         });
         this.#instances.delete(name);
