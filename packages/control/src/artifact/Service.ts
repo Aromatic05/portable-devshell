@@ -1,7 +1,3 @@
-import {
-    createRemoteError,
-    controlErrorCodes,
-} from "@portable-devshell/shared";
 import type {
     ArtifactEventType,
     ArtifactImageContent,
@@ -42,6 +38,12 @@ export class ArtifactService implements ArtifactApi {
     #cleanupPending = false;
 
     constructor(options: ArtifactServiceOptions) {
+        const chunkBytes = options.chunkBytes ?? DEFAULT_ARTIFACT_CHUNK_BYTES;
+        if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
+            throw new TypeError(
+                "Artifact chunkBytes must be a positive integer.",
+            );
+        }
         const terminalHistoryLimit =
             options.terminalHistoryLimit ??
             DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT;
@@ -56,7 +58,11 @@ export class ArtifactService implements ArtifactApi {
         this.#eventLog = new ArtifactEventLog(
             options.eventHistoryLimit ?? DEFAULT_ARTIFACT_EVENT_HISTORY_LIMIT,
         );
-        this.#imageService = new ArtifactImageService(options);
+        this.#imageService = new ArtifactImageService({
+            chunkBytes,
+            resolveEndpoint: options.resolveEndpoint,
+            storageDir: options.storageDir,
+        });
         this.#recordStore = new ArtifactRecordStore(options.storageDir);
         this.#shareService = new ArtifactShareService({
             recordEvent: (instance, type, data) =>
@@ -67,7 +73,7 @@ export class ArtifactService implements ArtifactApi {
             terminalHistoryLimit,
         });
         this.#transferService = new ArtifactTransferService({
-            chunkBytes: options.chunkBytes,
+            chunkBytes,
             directTransfer: options.directTransfer,
             recordEvent: (instance, type, data) =>
                 this.#recordEvent(instance, type, data),
@@ -346,21 +352,10 @@ export class ArtifactService implements ArtifactApi {
     }
 }
 
-export const ARTIFACT_RECORD_VERSION = 1;
+const DEFAULT_ARTIFACT_CHUNK_BYTES = 2 * 1024 * 1024;
+const DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT = 256;
 
-export const DEFAULT_ARTIFACT_CHUNK_BYTES = 2 * 1024 * 1024;
-
-export const DEFAULT_ARTIFACT_SHARE_TTL_SECONDS = 60 * 60;
-
-export const MAX_ARTIFACT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
-
-export const ARTIFACT_TRANSFER_PAYLOAD_TTL_MS = 24 * 60 * 60 * 1000;
-
-export const DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT = 256;
-
-export type ArtifactServiceSchedule = (task: () => void) => void;
-
-export interface ArtifactServiceOptions {
+interface ArtifactServiceOptions {
     chunkBytes?: number;
     directTransfer?: boolean;
     eventHistoryLimit?: number;
@@ -368,57 +363,8 @@ export interface ArtifactServiceOptions {
         instance: string,
         authorityInstance?: string,
     ) => WorkerArtifactApi | undefined;
-    schedule?: ArtifactServiceSchedule;
+    schedule?: (task: () => void) => void;
     shareUrl: (token: string) => string;
     storageDir: string;
     terminalHistoryLimit?: number;
 }
-
-/** Records one logical artifact event into the global sequence. */
-export type ArtifactEventRecorder = (
-    instance: string,
-    type: ArtifactEventType,
-    data?: JsonValue,
-) => void;
-
-export function requireArtifactEndpoint(
-    resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"],
-    instance: string,
-    authorityInstance: string,
-): WorkerArtifactApi {
-    const endpoint = resolveEndpoint(instance, authorityInstance);
-    if (endpoint !== undefined) {
-        return endpoint;
-    }
-
-    throw createRemoteError({
-        code: controlErrorCodes.instanceNotFound,
-        message: `Instance ${instance} was not found.`,
-        retryable: false,
-        details: { instance },
-    });
-}
-
-export interface StoredArtifactShare {
-    authorityInstance: string;
-    payloadClosed: boolean;
-    payloadId: string;
-    result: ArtifactShareResult;
-    sourceInstance: string;
-    terminalAtMs?: number;
-    token: string;
-    version: number;
-}
-
-export interface StoredArtifactTransfer {
-    cancelRequested: boolean;
-    defaultInstance: string;
-    payloadId?: string;
-    receiveId?: string;
-    record: ArtifactTransferRecord;
-    request: ArtifactTransferStartInput;
-    version: number;
-}
-
-export type ArtifactPayloadSourceInput =
-    { handle: string } | { path: string; workspace: string };

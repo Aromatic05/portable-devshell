@@ -10,11 +10,34 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import {
-    ARTIFACT_RECORD_VERSION,
-    type StoredArtifactShare,
-    type StoredArtifactTransfer,
-} from "./Service.js";
+import type {
+    ArtifactShareResult,
+    ArtifactTransferRecord,
+    ArtifactTransferStartInput,
+} from "@portable-devshell/shared";
+
+export const ARTIFACT_RECORD_VERSION = 1;
+
+export interface StoredArtifactShare {
+    authorityInstance: string;
+    payloadClosed: boolean;
+    payloadId: string;
+    result: ArtifactShareResult;
+    sourceInstance: string;
+    terminalAtMs?: number;
+    token: string;
+    version: number;
+}
+
+export interface StoredArtifactTransfer {
+    cancelRequested: boolean;
+    defaultInstance: string;
+    payloadId?: string;
+    receiveId?: string;
+    record: ArtifactTransferRecord;
+    request: ArtifactTransferStartInput;
+    version: number;
+}
 
 export class ArtifactRecordStore {
     readonly #sharesDir: string;

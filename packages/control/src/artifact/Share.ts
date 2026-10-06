@@ -8,35 +8,39 @@ import {
     type ArtifactShareResult,
     type ArtifactShareRevokeResult,
     type JsonValue,
+    type WorkerArtifactApi,
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { ArtifactRecordStore } from "./RecordStore.js";
+import {
+    ARTIFACT_RECORD_VERSION,
+    ArtifactRecordStore,
+    type StoredArtifactShare,
+} from "./RecordStore.js";
+import type { ArtifactEventRecorder } from "./EventLog.js";
 import {
     readSharePayloadSourceInput,
     readSourceInstance,
+    requireArtifactEndpoint,
     sourceDescriptor,
 } from "./Source.js";
-import {
-    ARTIFACT_RECORD_VERSION,
-    DEFAULT_ARTIFACT_SHARE_TTL_SECONDS,
-    MAX_ARTIFACT_SHARE_TTL_SECONDS,
-    requireArtifactEndpoint,
-    type ArtifactEventRecorder,
-    type ArtifactServiceOptions,
-    type StoredArtifactShare,
-} from "./Service.js";
+
+const DEFAULT_ARTIFACT_SHARE_TTL_SECONDS = 60 * 60;
+const MAX_ARTIFACT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export interface ArtifactShareAccess {
     payloadId: string;
     share: ArtifactShareResult;
     sourceInstance: string;
 }
 
-export interface ArtifactShareServiceOptions {
+interface ArtifactShareServiceOptions {
     recordEvent: ArtifactEventRecorder;
     recordStore: ArtifactRecordStore;
-    resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
-    shareUrl: ArtifactServiceOptions["shareUrl"];
+    resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => WorkerArtifactApi | undefined;
+    shareUrl: (token: string) => string;
     terminalHistoryLimit: number;
 }
 
@@ -44,8 +48,8 @@ export class ArtifactShareService {
     readonly #activeDownloads = new Map<string, number>();
     readonly #recordEvent: ArtifactEventRecorder;
     readonly #recordStore: ArtifactRecordStore;
-    readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
-    readonly #shareUrl: ArtifactServiceOptions["shareUrl"];
+    readonly #resolveEndpoint: ArtifactShareServiceOptions["resolveEndpoint"];
+    readonly #shareUrl: ArtifactShareServiceOptions["shareUrl"];
     readonly #terminalHistoryLimit: number;
     readonly #shares = new Map<string, StoredArtifactShare>();
     readonly #shareIdsByToken = new Map<string, string>();

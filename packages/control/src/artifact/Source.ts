@@ -6,9 +6,29 @@ import {
     type ArtifactSourceDescriptor,
     type ArtifactTransferStartInput,
     type ArtifactViewImageInput,
+    type WorkerArtifactApi,
 } from "@portable-devshell/shared";
 
-import type { ArtifactPayloadSourceInput } from "./Service.js";
+type ArtifactPayloadSourceInput =
+    { handle: string } | { path: string; workspace: string };
+
+export function requireArtifactEndpoint(
+    resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => WorkerArtifactApi | undefined,
+    instance: string,
+    authorityInstance: string,
+): WorkerArtifactApi {
+    const endpoint = resolveEndpoint(instance, authorityInstance);
+    if (endpoint !== undefined) return endpoint;
+    throw createRemoteError({
+        code: controlErrorCodes.instanceNotFound,
+        message: `Instance ${instance} was not found.`,
+        retryable: false,
+        details: { instance },
+    });
+}
 
 export function readImagePayloadSourceInput(
     input: ArtifactViewImageInput,

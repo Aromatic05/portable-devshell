@@ -15,37 +15,35 @@ import type {
     JsonValue,
     WorkerArtifactApi,
 } from "@portable-devshell/shared";
-import { ArtifactRecordStore } from "./RecordStore.js";
+import {
+    ARTIFACT_RECORD_VERSION,
+    ArtifactRecordStore,
+    type StoredArtifactTransfer,
+} from "./RecordStore.js";
+import type { ArtifactEventRecorder } from "./EventLog.js";
 import {
     readSourceInstance,
     readTransferPayloadSourceInput,
+    requireArtifactEndpoint,
     sourceTypeFromPayload,
     validateTransferStart,
 } from "./Source.js";
-import {
-    ARTIFACT_RECORD_VERSION,
-    ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
-    DEFAULT_ARTIFACT_CHUNK_BYTES,
-    requireArtifactEndpoint,
-} from "./Service.js";
-import type {
-    ArtifactEventRecorder,
-    ArtifactServiceOptions,
-    ArtifactServiceSchedule,
-    StoredArtifactTransfer,
-} from "./Service.js";
 
-export interface ArtifactTransferServiceOptions {
-    chunkBytes?: number;
+interface ArtifactTransferServiceOptions {
+    chunkBytes: number;
     directTransfer?: boolean;
     recordEvent: ArtifactEventRecorder;
     recordStore: ArtifactRecordStore;
-    resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
-    schedule?: ArtifactServiceOptions["schedule"];
+    resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => WorkerArtifactApi | undefined;
+    schedule?: (task: () => void) => void;
     terminalHistoryLimit: number;
 }
 
 const MAX_ARTIFACT_DIRECT_CHUNK_BYTES = 1024 * 1024;
+const ARTIFACT_TRANSFER_PAYLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class ArtifactTransferService {
     readonly #recordEvent: ArtifactEventRecorder;
@@ -63,7 +61,7 @@ export class ArtifactTransferService {
     #cleanupPending = false;
 
     constructor(options: ArtifactTransferServiceOptions) {
-        const chunkBytes = options.chunkBytes ?? DEFAULT_ARTIFACT_CHUNK_BYTES;
+        const chunkBytes = options.chunkBytes;
         if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
             throw new TypeError(
                 "Artifact chunkBytes must be a positive integer.",
@@ -465,7 +463,7 @@ interface ArtifactTransferExecutorOptions {
         instance: string,
         authorityInstance?: string,
     ) => WorkerArtifactApi | undefined;
-    schedule: ArtifactServiceSchedule;
+    schedule: (task: () => void) => void;
 }
 
 class ArtifactTransferCancelledError extends Error {
@@ -489,7 +487,7 @@ export class ArtifactTransferExecutor {
     readonly #onTerminal: ArtifactTransferExecutorOptions["onTerminal"];
     readonly #persistTransfer: ArtifactTransferExecutorOptions["persistTransfer"];
     readonly #resolveEndpoint: ArtifactTransferExecutorOptions["resolveEndpoint"];
-    readonly #schedule: ArtifactServiceSchedule;
+    readonly #schedule: (task: () => void) => void;
     readonly #commitBarriers = new Set<Promise<void>>();
     readonly #controllers = new Map<string, AbortController>();
     readonly #runningTransfers = new Set<string>();

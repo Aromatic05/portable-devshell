@@ -8,6 +8,12 @@ import type { ArtifactEventType, JsonValue } from "@portable-devshell/shared";
 
 export const DEFAULT_ARTIFACT_EVENT_HISTORY_LIMIT = 256;
 
+export type ArtifactEventRecorder = (
+    instance: string,
+    type: ArtifactEventType,
+    data?: JsonValue,
+) => void;
+
 export interface ArtifactLogEvent {
     at: string;
     data?: JsonValue;

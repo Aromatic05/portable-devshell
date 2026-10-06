@@ -10,7 +10,7 @@ import type {
     MessageStream,
     WorkerArtifactApi,
 } from "@portable-devshell/shared";
-import { ArtifactService, type ArtifactServiceSchedule } from "../../../../src/artifact/Service.ts";
+import { ArtifactService } from "../../../../src/artifact/Service.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const png = Buffer.from(
@@ -588,7 +588,7 @@ test("queued transfer resumes after restart while active transfer becomes interr
     const storageDir = await createTestTempDirectory("artifact-recovery");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const scheduled: Array<() => void> = [];
-    const manualSchedule: ArtifactServiceSchedule = (task) =>
+    const manualSchedule = (task: () => void) =>
         scheduled.push(task);
     const source = new MemoryArtifactEndpoint(Buffer.from("queued"));
     const target = new MemoryArtifactEndpoint(Buffer.alloc(0));

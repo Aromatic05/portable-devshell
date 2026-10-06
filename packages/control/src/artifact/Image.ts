@@ -9,17 +9,14 @@ import type {
     ArtifactImageContent,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
+    WorkerArtifactApi,
 } from "@portable-devshell/shared";
 import {
     readImagePayloadSourceInput,
     readSourceInstance,
+    requireArtifactEndpoint,
     sourceDescriptor,
 } from "./Source.js";
-import {
-    DEFAULT_ARTIFACT_CHUNK_BYTES,
-    requireArtifactEndpoint,
-} from "./Service.js";
-import type { ArtifactServiceOptions } from "./Service.js";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { artifactBlake3 } from "./host/Hash.js";
@@ -32,25 +29,24 @@ const MAX_ARTIFACT_IMAGE_CHUNK_BYTES = 1024 * 1024;
 
 export class ArtifactImageService {
     readonly #chunkBytes: number;
-    readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
+    readonly #resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => WorkerArtifactApi | undefined;
     readonly #store: ArtifactImageStore;
 
-    constructor(
-        options: Pick<
-            ArtifactServiceOptions,
-            "chunkBytes" | "resolveEndpoint" | "storageDir"
-        >,
-    ) {
-        const requestedChunkBytes = options.chunkBytes;
-        this.#chunkBytes =
-            typeof requestedChunkBytes === "number" &&
-            Number.isSafeInteger(requestedChunkBytes) &&
-            requestedChunkBytes > 0
-                ? Math.min(requestedChunkBytes, MAX_ARTIFACT_IMAGE_CHUNK_BYTES)
-                : Math.min(
-                      DEFAULT_ARTIFACT_CHUNK_BYTES,
-                      MAX_ARTIFACT_IMAGE_CHUNK_BYTES,
-                  );
+    constructor(options: {
+        chunkBytes: number;
+        resolveEndpoint: (
+            instance: string,
+            authorityInstance?: string,
+        ) => WorkerArtifactApi | undefined;
+        storageDir: string;
+    }) {
+        this.#chunkBytes = Math.min(
+            options.chunkBytes,
+            MAX_ARTIFACT_IMAGE_CHUNK_BYTES,
+        );
         this.#resolveEndpoint = options.resolveEndpoint;
         this.#store = new ArtifactImageStore(options.storageDir);
     }
