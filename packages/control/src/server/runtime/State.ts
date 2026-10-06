@@ -11,10 +11,12 @@ import {
     createCoreConfigRegistry,
 } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import { InstanceRegistry } from "@portable-devshell/core/instance";
+import {
+    createInstanceRuntimeRegistry,
+    InstanceRegistry,
+    type InstanceRuntimeRegistry,
+} from "@portable-devshell/core";
 import { InstanceChangeHub } from "../../instance/Change.js";
-import type { InstanceRuntimeRegistry } from "../../instance/Api.js";
-import { createInstanceRuntimeRegistry } from "../../instance/index.js";
 import { createToolCallRegistry } from "../../toolcall/index.js";
 
 export interface ControlRuntimeStateOptions {

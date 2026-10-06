@@ -1,6 +1,9 @@
-import type { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
+import type {
+    Instance,
+    InstanceRegistry,
+    InstanceRuntime,
+} from "@portable-devshell/core";
 import type { DebugPatchLoadRequest, JsonValue } from "@portable-devshell/shared";
-import type { InstanceRuntime } from "../instance/Api.js";
 import { DebugPatchManager } from "./Patch.js";
 import type { DebugRuntime } from "./Api.js";
 

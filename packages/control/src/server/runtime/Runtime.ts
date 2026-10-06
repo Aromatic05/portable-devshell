@@ -53,7 +53,7 @@ import {
 import type { McpControlModule } from "../mcp/Module.js";
 import { McpExtensionService } from "../../extension/api/point/mcp/Service.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
-import type { InstanceRuntimeRegistry } from "../../instance/Api.js";
+import type { InstanceRuntimeRegistry } from "@portable-devshell/core";
 import type { ToolCallRegistry } from "../../toolcall/Api.js";
 
 export interface ControlRuntimeOptions {

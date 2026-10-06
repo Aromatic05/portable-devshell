@@ -4,6 +4,10 @@
     "private": true,
     "type": "module",
     "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        },
         "./audit": {
             "types": "./dist/audit/Public.d.ts",
             "default": "./dist/audit/Public.js"
