@@ -1,4 +1,3 @@
-export { presentToolCallResult } from "./execution/Presentation.js";
 export {
     createToolIngressHost,
     createToolIngressRouteModule,

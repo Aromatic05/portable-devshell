@@ -6,9 +6,7 @@ import {
     type McpToolInvocationContext,
     type McpToolResult,
 } from "@portable-devshell/extension/mcp";
-import {
-    presentToolCallResult,
-} from "@portable-devshell/core";
+import { presentToolCallResult } from "@portable-devshell/shared";
 import type {
     JsonValue,
     ToolCallPresentation,

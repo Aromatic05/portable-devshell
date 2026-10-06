@@ -73,6 +73,7 @@ export type {
     ToolCallTargetResolver,
     ToolNameHandle,
 } from "./execution/toolcall/Api.js";
+export { createToolCallRuntime, presentToolCallResult } from "./execution/toolcall/Runtime.js";
 export { attachToolCallErrorPayload, readToolCallErrorPayload } from "./execution/toolcall/Type.js";
 export { snapshotJson } from "./types/JsonSnapshot.js";
 export { createRemoteError, errorMessage, RemoteError, type RemoteErrorBody, toRemoteError, toRemoteErrorBody, TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE } from "./transport/Error.js";

@@ -20,8 +20,10 @@ import type {
 } from "./Scheduler.js";
 import type {
     ToolCallDispatchRequest,
+    ToolCallHookContext,
+    ToolCallHookValue,
     ToolCallTarget,
-} from "./Pipeline.js";
+} from "@portable-devshell/shared";
 import { createErrorFromBody } from "./Error.js";
 import { attachToolCallErrorPayload } from "./ErrorPayload.js";
 import {
@@ -29,10 +31,6 @@ import {
     runOutboundPipeline,
     runOutboundReview,
 } from "./hook/Outbound.js";
-import type {
-    ToolCallHookContext,
-    ToolCallHookValue,
-} from "./hook/Review.js";
 import type { ToolCallHookSequenceApi } from "../Api.js";
 import { getErrorCode } from "./Error.js";
 import {

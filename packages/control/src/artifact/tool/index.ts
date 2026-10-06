@@ -1,7 +1,5 @@
 import type { InstanceRegistry } from "@portable-devshell/core";
-import {
-    presentToolCallResult,
-} from "@portable-devshell/core";
+import { presentToolCallResult } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import {

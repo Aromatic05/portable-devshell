@@ -17,7 +17,7 @@ import type { WorkerToolInvoker } from "../worker/Invoker.js";
 import type { WorkerToolCallScheduler } from "./Scheduler.js";
 import { WorkerInstanceToolAudit } from "./record/Audit.js";
 import { ToolCallExecutionTarget } from "./ExecutionTarget.js";
-import type { ToolCallTarget } from "./Pipeline.js";
+import type { ToolCallTarget } from "@portable-devshell/shared";
 import { WorkerInstanceToolLog } from "./record/Log.js";
 
 export interface WorkerToolOptions {

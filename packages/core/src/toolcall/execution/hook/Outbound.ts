@@ -5,7 +5,7 @@ import {
 
 import { createErrorFromBody } from "../Error.js";
 import { attachToolCallErrorPayload } from "../ErrorPayload.js";
-import type { ToolCallHookValue } from "./Review.js";
+import type { ToolCallHookValue } from "@portable-devshell/shared";
 import type { ToolCallHookSequenceApi } from "../../Api.js";
 
 export async function runOutboundReview(
