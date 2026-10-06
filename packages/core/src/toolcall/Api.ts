@@ -1,16 +1,13 @@
 import type {
+    Endpoint,
     InstanceName,
     JsonValue,
-    Endpoint,
-    ToolCallPresentation,
+    ToolCallContext,
     ToolCallQuery,
     ToolCallRecord,
-    ToolCallHookContext,
-    ToolCallHookKind,
-    ToolCallHookValue,
+    ToolCallTarget,
     ToolDefinition,
     ToolEvent,
-    ToolCallApi,
 } from "@portable-devshell/shared";
 import type {
     AuditApi,
@@ -19,137 +16,36 @@ import type {
     LogQuery,
 } from "../audit/Api.js";
 
-export type { ToolCallApi };
-export type ToolCallIngressPort = Pick<ToolCallApi, "call">;
-
-export type ToolCallHookDirection = "inbound" | "outbound";
-
-export type { ToolCallHookContext, ToolCallHookKind, ToolCallHookValue };
-
-export interface ToolCallReviewInput {
-    readonly callId: string;
-    readonly direction: ToolCallHookDirection;
-    readonly value: Readonly<ToolCallHookValue>;
-}
-
-export interface ToolCallReviewError {
-    readonly code: string;
-    readonly details?: JsonValue;
-}
-
-export interface ToolCallReviewResult {
-    readonly decision: "continue" | "reject";
-    readonly error?: ToolCallReviewError;
-    readonly reason?: string;
-}
-
-export interface ToolCallRewriteInput {
-    readonly callId: string;
-    readonly direction: ToolCallHookDirection;
-    readonly value: ToolCallHookValue;
-}
-
-export interface ToolCallHookSequenceApi {
-    review(input: ToolCallReviewInput): Promise<ToolCallReviewResult>;
-    rewrite(input: ToolCallRewriteInput): Promise<ToolCallHookValue>;
-}
-
-export type ToolCallExecutor = (
-    callId: string,
-    input: JsonValue,
-    value: Readonly<ToolCallHookValue>,
-    signal?: AbortSignal,
-    onProgress?: (progress: JsonValue) => void,
-) =>
-    | Promise<JsonValue | ToolCallPresentedResult>
-    | JsonValue
-    | ToolCallPresentedResult;
-
-export type ToolNameHandle = () => ToolDefinition;
-
-export interface ToolCallPresentedResult {
-    readonly type: "presented-tool-call-result";
-    readonly presentation: ToolCallPresentation;
-    readonly result: JsonValue;
-}
-
-export interface ToolCallDispatchRequest {
-    readonly callId: string;
-    readonly execute?: ToolCallExecutor;
-    readonly hooks: ToolCallHookSequenceApi;
-    readonly invocationInput?: (
-        input: JsonValue,
-        callId: string,
-        finalValue: ToolCallHookValue,
-    ) => Promise<JsonValue> | JsonValue;
-    readonly onProgress?: (progress: JsonValue) => void;
-    readonly recording: "caller" | "host";
-    readonly signal?: AbortSignal;
-    readonly transformResult?: (
-        result: JsonValue,
-        callId: string,
-        presentation?: ToolCallPresentation,
-    ) => Promise<JsonValue>;
-    readonly value: ToolCallHookValue;
-}
-
-export interface ToolCallTarget {
-    dispatch(request: ToolCallDispatchRequest): Promise<JsonValue>;
-}
-
-export type ToolCallTargetResolver = (instance: InstanceName) => ToolCallTarget;
-
-export interface ToolCallHookRuntime {
-    readonly recording: "caller" | "host";
-    readonly signal: AbortSignal;
-}
-
-export interface ToolCallReviewHook {
-    readonly hook: string;
-    readonly id: string;
-    readonly owner?: string;
-    readonly review: (
-        input: ToolCallReviewInput,
-        runtime: ToolCallHookRuntime,
-    ) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
-}
-
-export interface ToolCallRewriteHook {
-    readonly hook: string;
-    readonly id: string;
-    readonly owner?: string;
-    readonly rewrite: (
-        input: ToolCallRewriteInput,
-        runtime: ToolCallHookRuntime,
-    ) => Promise<ToolCallHookValue> | ToolCallHookValue;
-}
-
-export interface ToolCallHookContribution {
-    readonly reviews?: readonly ToolCallReviewHook[];
-    readonly rewrites?: readonly ToolCallRewriteHook[];
-    release(): void;
-}
-
-export type ToolCallHookContributor = (
-    context: ToolCallHookContext,
-    runtime: ToolCallHookRuntime,
-) => Promise<ToolCallHookContribution> | ToolCallHookContribution;
-
-export interface ToolCallHooks {
-    registerContributor(contributor: ToolCallHookContributor): () => void;
-    registerExecute(toolName: string, execute: ToolCallExecutor): () => void;
-    registerReview(review: ToolCallReviewHook): () => void;
-}
-
-export interface ToolCallRegistration extends ToolCallHooks {
-    registerToolName(toolName: string, handle: ToolNameHandle): () => void;
-}
-
-export interface ToolCallRuntime {
-    readonly api: import("@portable-devshell/shared").ToolCallApi;
-    readonly hooks: ToolCallHooks;
-    close(): void;
-}
+export type {
+    ToolCallApi,
+    ToolCallDispatchRequest,
+    ToolCallExecutor,
+    ToolCallHookContext,
+    ToolCallHookContribution,
+    ToolCallHookContributor,
+    ToolCallHookDirection,
+    ToolCallHookKind,
+    ToolCallHookRuntime,
+    ToolCallHookSequenceApi,
+    ToolCallHooks,
+    ToolCallHookValue,
+    ToolCallIngressPort,
+    ToolCallPresentedResult,
+    ToolCallProvenanceApi,
+    ToolCallProvenanceOptions,
+    ToolCallProvenanceRecord,
+    ToolCallRegistration,
+    ToolCallReviewError,
+    ToolCallReviewHook,
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+    ToolCallRewriteHook,
+    ToolCallRewriteInput,
+    ToolCallRuntime,
+    ToolCallTarget,
+    ToolCallTargetResolver,
+    ToolNameHandle,
+} from "@portable-devshell/shared";
 
 export interface ToolCallExecutionRuntimeOptions {
     appendEvent(
@@ -176,33 +72,9 @@ export interface ToolCallExecutionRuntime {
     invokeInternal(
         toolName: string,
         input: JsonValue,
-        context?: import("@portable-devshell/shared").ToolCallContext,
+        context?: ToolCallContext,
         signal?: AbortSignal,
     ): Promise<JsonValue>;
     refreshTools(): Promise<ToolDefinition[]>;
     close(): Promise<void>;
-}
-
-export interface ToolCallProvenanceRecord {
-    readonly callId: string;
-    readonly explanation?: string;
-    readonly instance: string;
-    readonly purpose?: string;
-}
-
-export interface ToolCallProvenanceApi {
-    record(record: ToolCallProvenanceRecord): Promise<void>;
-    decorate(
-        instance: string,
-        records: readonly ToolCallRecord[],
-    ): Promise<ToolCallRecord[]>;
-    warmup(): Promise<void>;
-    flush(): Promise<void>;
-}
-
-export interface ToolCallProvenanceOptions {
-    coldMaxBytes?: number;
-    hotMaxBytes?: number;
-    now?: () => number;
-    retentionDays?: number;
 }

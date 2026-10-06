@@ -1,8 +1,8 @@
 import type {
     ToolCallHooks,
     ToolCallRegistration,
-} from "@portable-devshell/core";
-import type { ToolDefinition } from "@portable-devshell/shared";
+    ToolDefinition,
+} from "@portable-devshell/shared";
 
 export interface ToolCallDefinitionEntry {
     definition: ToolDefinition;

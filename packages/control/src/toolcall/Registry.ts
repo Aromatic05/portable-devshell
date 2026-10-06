@@ -1,12 +1,13 @@
 import {
+    toolNamespace,
+    type ToolCallExecutor,
     type ToolCallHookContributor,
     type ToolCallHooks,
     type ToolCallRegistration,
     type ToolCallReviewHook,
-    type ToolCallExecutor,
+    type ToolDefinition,
     type ToolNameHandle,
-} from "@portable-devshell/core";
-import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
+} from "@portable-devshell/shared";
 import type {
     ToolCallDefinitionEntry,
     ToolCallDefinitionRegistration,

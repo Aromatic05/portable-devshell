@@ -46,7 +46,33 @@ export { resolveToolOutput, toolCallOutcome, toolCallOutput } from "./execution/
 export { createToolTransport, type ToolTransport } from "./execution/toolcall/Transport.js";
 export { ToolCallViewModel } from "./execution/toolcall/ViewModel.js";
 export { type ToolCallContext, type ToolCallExternalBinding, type ToolCallHookContext, type ToolCallHookKind, type ToolCallHookValue, type ToolCallPresentation, type ToolCallPresentationContent, type ToolCallRecord, type ToolDefinition } from "./execution/toolcall/Type.js";
-export type { ToolCallApi } from "./execution/toolcall/Api.js";
+export type {
+    ToolCallApi,
+    ToolCallDispatchRequest,
+    ToolCallExecutor,
+    ToolCallHookContribution,
+    ToolCallHookContributor,
+    ToolCallHookDirection,
+    ToolCallHookRuntime,
+    ToolCallHookSequenceApi,
+    ToolCallHooks,
+    ToolCallIngressPort,
+    ToolCallPresentedResult,
+    ToolCallProvenanceApi,
+    ToolCallProvenanceOptions,
+    ToolCallProvenanceRecord,
+    ToolCallRegistration,
+    ToolCallReviewError,
+    ToolCallReviewHook,
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+    ToolCallRewriteHook,
+    ToolCallRewriteInput,
+    ToolCallRuntime,
+    ToolCallTarget,
+    ToolCallTargetResolver,
+    ToolNameHandle,
+} from "./execution/toolcall/Api.js";
 export { attachToolCallErrorPayload, readToolCallErrorPayload } from "./execution/toolcall/Type.js";
 export { snapshotJson } from "./types/JsonSnapshot.js";
 export { createRemoteError, errorMessage, RemoteError, type RemoteErrorBody, toRemoteError, toRemoteErrorBody, TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE } from "./transport/Error.js";

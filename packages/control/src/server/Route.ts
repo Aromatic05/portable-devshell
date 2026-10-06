@@ -3,13 +3,15 @@ import {
     mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
+    type ToolCallIngressPort,
+    type ToolCallProvenanceApi,
     JsonValue,
 } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import { createInstanceHost, createConnectionRouteModule, InstanceRegistry, ProcessSubscriptionManager, type Instance } from "@portable-devshell/core";
-import { createToolIngressHost, type ToolCallIngressPort, type ToolCallProvenanceApi } from "@portable-devshell/core";
+import { createToolIngressHost } from "@portable-devshell/core";
 import {
     createTerminalSessionRuntime,
     type TerminalSessionApi,
