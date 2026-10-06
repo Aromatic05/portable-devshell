@@ -48,7 +48,7 @@ const ARTIFACT_TRANSFER_PAYLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 export class ArtifactTransferService {
     readonly #recordEvent: ArtifactEventRecorder;
     readonly #recordStore: ArtifactRecordStore;
-    readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
+    readonly #resolveEndpoint: ArtifactTransferServiceOptions["resolveEndpoint"];
     readonly #terminalHistoryLimit: number;
     readonly #transferExecutor: ArtifactTransferExecutor;
     readonly #transfers = new Map<string, StoredArtifactTransfer>();
