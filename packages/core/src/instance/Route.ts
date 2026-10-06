@@ -64,6 +64,8 @@ export function createInstanceHost(
                     prepareWorkspace: (workspace, connectionId) =>
                         state.openToolSession(workspace, connectionId),
                     readToolCalls: (query) => state.tools.readToolCalls(query),
+                    readToolCallFailureSummary: (sinceMs, untilMs) =>
+                        state.tools.readToolCallFailureSummary(sinceMs, untilMs),
                     releaseToolSession: (connectionId) =>
                         state.releaseToolSession(connectionId),
                     subscribe: events.subscribe,

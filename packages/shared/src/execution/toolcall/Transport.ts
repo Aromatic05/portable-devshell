@@ -40,6 +40,10 @@ export interface ToolTransport {
     ): Promise<JsonValue>;
     closeSession(): Promise<Record<string, never>>;
     listCalls(query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+    readFailureSummary(
+        sinceMs: number,
+        untilMs: number,
+    ): Promise<{ count: number; latest?: ToolCallRecord }>;
     openSession(workspace: string): Promise<ToolSessionOpenResult>;
     subscribe(fromSeq: number): Promise<InstanceEventStreamPort<ToolEvent>>;
 }
@@ -73,6 +77,11 @@ export function createToolTransport(
         },
         closeSession: () => port.request<Record<string, never>>("closeSession", {}),
         listCalls: (query) => port.request<ToolCallRecord[]>("listCalls", query),
+        readFailureSummary: (sinceMs, untilMs) =>
+            port.request<{ count: number; latest?: ToolCallRecord }>(
+                "failureSummary",
+                { sinceMs, untilMs },
+            ),
         openSession: (workspace) =>
             port.request<ToolSessionOpenResult>("openSession", {
                 workspace,

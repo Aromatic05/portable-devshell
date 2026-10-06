@@ -52,6 +52,10 @@ interface ToolRouteInstancePort {
             connectionId: string,
         ): Promise<{ workspace: string }>;
         readToolCalls(query: ToolCallQuery): Promise<ToolCallRecord[]>;
+        readToolCallFailureSummary(
+            sinceMs: number,
+            untilMs: number,
+        ): Promise<{ count: number; latest?: ToolCallRecord }>;
         releaseToolSession(connectionId: string): Promise<void>;
     } & Partial<ToolRouteEventPort>;
 }
@@ -185,6 +189,28 @@ export function createToolRouteModule(
                     decorated,
                     query,
                 ) as unknown as JsonValue;
+            },
+            failureSummary: async (request) => {
+                const payload = request.payload;
+                if (
+                    typeof payload !== "object" ||
+                    payload === null ||
+                    Array.isArray(payload) ||
+                    typeof payload.sinceMs !== "number" ||
+                    typeof payload.untilMs !== "number" ||
+                    !Number.isFinite(payload.sinceMs) ||
+                    !Number.isFinite(payload.untilMs)
+                ) {
+                    throw createRemoteError({
+                        code: controlErrorCodes.invalidTarget,
+                        message: "tool.failureSummary requires finite sinceMs and untilMs.",
+                        retryable: false,
+                    });
+                }
+                return (await instance.worker.readToolCallFailureSummary(
+                    payload.sinceMs,
+                    payload.untilMs,
+                )) as unknown as JsonValue;
             },
         },
         {
