@@ -134,10 +134,7 @@ export class ControlRuntime {
             extensionMcpTools.install(options.toolCalls),
         );
         this.#reverse = options.reverse;
-        this.#debug = createDebugRuntime({
-            instances: options.instances,
-            target: (descriptor) => options.instanceRuntimes.get(descriptor),
-        });
+        this.#debug = createDebugRuntime();
         const modelCliCommands = new CliExtensionCommandService(
             this.#extensions,
             {
@@ -204,11 +201,6 @@ export class ControlRuntime {
         this.#instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceGeneration(instance.name);
-            },
-        );
-        this.#instanceEditor.registerInstanceGenerationRetirement(
-            async (instance) => {
-                await this.#debug.retireInstance(instance.name);
             },
         );
         this.#instanceEditor.registerInstanceGenerationRetirement(

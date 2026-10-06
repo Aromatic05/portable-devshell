@@ -1,4 +1,3 @@
-import type { Instance, InstanceRegistry } from "@portable-devshell/core";
 import type {
     DebugPatchLoadRequest,
     DebugPatchSummary,
@@ -15,10 +14,4 @@ export interface DebugApi {
 
 export interface DebugRuntime extends DebugApi {
     close(): Promise<void>;
-    retireInstance(name: string): Promise<void>;
-}
-
-export interface DebugRuntimeOptions {
-    instances: InstanceRegistry;
-    target(instance: Instance): object;
 }
