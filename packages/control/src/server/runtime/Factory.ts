@@ -21,11 +21,7 @@ import {
     type BuiltinExtensionSource,
 } from "../../extension/install/BuiltinSource.js";
 import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
-import { ExtensionLoader } from "../../extension/discovery/Loader.js";
-import { ExtensionPathLayout } from "../../extension/state/Layout.js";
-import { ExtensionRegistryStore } from "../../extension/state/Store.js";
 import { ExtensionConfigControl } from "../../extension/api/cap/config/index.js";
-import { createControlExtensionPointRegistry } from "../../extension/registration/Points.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";
 import { ControlRuntime } from "./Runtime.js";
@@ -74,10 +70,6 @@ export class ControlRuntimeFactory {
         });
         try {
             await artifact.start();
-            const extensionPaths = new ExtensionPathLayout({
-                homeDirectory: options.state.homeDirectory,
-            });
-            const extensionPoints = createControlExtensionPointRegistry();
             const processSubscriptions = new ProcessSubscriptionManager();
             const internalEndpoint = new Endpoint({
                 connectChannel: (signal) =>
@@ -184,137 +176,132 @@ export class ControlRuntimeFactory {
             });
             const extensions = createExtensionRuntime({
                 configRegistry: options.state.configRegistry,
-                loader: new ExtensionLoader({
-                    artifactFactory: ({ allowed, extensionId }) =>
-                        new ExtensionArtifactCapabilityControl({
-                            allowed,
+                pathOptions: {
+                    homeDirectory: options.state.homeDirectory,
+                },
+                artifactFactory: ({ allowed, extensionId }) =>
+                    new ExtensionArtifactCapabilityControl({
+                        allowed,
+                        extensionId,
+                        service: artifact.service,
+                    }),
+                assetsFactory: ({ allowed, dataDirectory, extensionId }) =>
+                    new ExtensionAssetCapabilityControl({
+                        allowed,
+                        dataDirectory,
+                        extensionId,
+                        limits: resolveControlExtensionAssetLimits(
                             extensionId,
-                            service: artifact.service,
-                        }),
-                    assetsFactory: ({ allowed, dataDirectory, extensionId }) =>
-                        new ExtensionAssetCapabilityControl({
-                            allowed,
-                            dataDirectory,
-                            extensionId,
-                            limits: resolveControlExtensionAssetLimits(
-                                extensionId,
-                            ),
-                            project: async (input) => {
-                                const descriptor =
-                                    options.state.instances.get(
-                                        input.target.instance,
+                        ),
+                        project: async (input) => {
+                            const descriptor =
+                                options.state.instances.get(
+                                    input.target.instance,
+                                );
+                            if (descriptor === undefined)
+                                throw new Error(
+                                    `Instance ${input.target.instance} is unavailable.`,
+                                );
+                            const lease = descriptor.acquireLease();
+                            try {
+                                const prepared =
+                                    await lease.instance.worker.prepareExtensionResource(
+                                        {
+                                            collection:
+                                                input.target.collection,
+                                            extensionId,
+                                        },
                                     );
-                                if (descriptor === undefined)
-                                    throw new Error(
-                                        `Instance ${input.target.instance} is unavailable.`,
+                                const completed =
+                                    await artifact.transferHostPath(
+                                        input.sourcePath,
+                                        {
+                                            instance:
+                                                input.target.instance,
+                                            path: join(
+                                                prepared.directory,
+                                                input.target.key,
+                                            ),
+                                            workspace:
+                                                prepared.directory,
+                                        },
+                                        input.overwrite,
+                                        input.signal,
                                     );
-                                const lease = descriptor.acquireLease();
-                                try {
-                                    const prepared =
-                                        await lease.instance.worker.prepareExtensionResource(
-                                            {
-                                                collection:
-                                                    input.target.collection,
-                                                extensionId,
-                                            },
-                                        );
-                                    const completed =
-                                        await artifact.transferHostPath(
-                                            input.sourcePath,
-                                            {
-                                                instance:
-                                                    input.target.instance,
-                                                path: join(
-                                                    prepared.directory,
-                                                    input.target.key,
-                                                ),
-                                                workspace:
-                                                    prepared.directory,
-                                            },
-                                            input.overwrite,
-                                            input.signal,
-                                        );
-                                    return {
-                                        transferredBytes:
-                                            completed.transferredBytes,
-                                    };
-                                } finally {
-                                    lease.release();
-                                }
-                            },
-                        }),
-                    configFactory: ({
+                                return {
+                                    transferredBytes:
+                                        completed.transferredBytes,
+                                };
+                            } finally {
+                                lease.release();
+                            }
+                        },
+                    }),
+                configFactory: ({
+                    declaration,
+                    extensionId,
+                    generation,
+                    stateDirectory,
+                }) =>
+                    new ExtensionConfigControl({
+                        changeHub: options.state.configChanges,
                         declaration,
                         extensionId,
                         generation,
+                        mutationRunner: options.state.configMutations,
+                        readCoreConfig: () => options.state.requireConfig(),
+                        registry: options.state.configRegistry,
                         stateDirectory,
-                    }) =>
-                        new ExtensionConfigControl({
-                            changeHub: options.state.configChanges,
-                            declaration,
-                            extensionId,
-                            generation,
-                            mutationRunner: options.state.configMutations,
-                            readCoreConfig: () => options.state.requireConfig(),
-                            registry: options.state.configRegistry,
-                            stateDirectory,
-                            updateCoreConfig: async (patch) =>
-                                await configEditor.updateCorePaths(patch),
-                        }),
-                    contextObserveFactory: ({ allowed, extensionId }) =>
-                        new ExtensionContextObserveCapabilityControl({
-                            allowed,
-                            extensionId,
-                            listContexts: async (query) =>
-                                await contextTransport.list(query),
-                        }),
-                    instanceFactory: ({
-                        extensionId,
-                        manageAllowed,
-                        observeAllowed,
-                    }) => ({
-                        manage: new ExtensionInstanceManageCapabilityControl({
-                            allowed: manageAllowed,
-                            create: instanceCreate,
-                            editor: instanceEditor,
-                            extensionId,
-                            instances: options.state.instances,
-                        }),
-                        observe: new ExtensionInstanceObserveCapabilityControl({
-                            allowed: observeAllowed,
-                            extensionId,
-                            instances: options.state.instances,
-                            listConfigured: () =>
-                                options.state
-                                    .requireConfig()
-                                    .instances.map((instance) => ({
-                                        enabled: instance.enabled,
-                                        mcpEnabled: instance.mcp.enabled,
-                                        name: instance.name,
-                                        provider: instance.provider,
-                                    })),
-                            subscriptions: processSubscriptions,
-                            readLogs: async (name, query) => {
-                                const descriptor = options.state.instances.get(name);
-                                if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-                                return options.state.instanceRuntimes.get(descriptor).tools.readLogs(query);
-                            },
-                        }),
+                        updateCoreConfig: async (patch) =>
+                            await configEditor.updateCorePaths(patch),
                     }),
-                    instances: options.state.instances,
-                    readToolCalls: async (name, query) => {
-                        const descriptor = options.state.instances.get(name);
-                        if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-                        return options.state.instanceRuntimes.get(descriptor).tools.readToolCalls(query);
-                    },
-                    paths: extensionPaths,
-                    points: extensionPoints,
-                    toolCallDecorator: mcp.toolProvenance,
+                contextObserveFactory: ({ allowed, extensionId }) =>
+                    new ExtensionContextObserveCapabilityControl({
+                        allowed,
+                        extensionId,
+                        listContexts: async (query) =>
+                            await contextTransport.list(query),
+                    }),
+                instanceFactory: ({
+                    extensionId,
+                    manageAllowed,
+                    observeAllowed,
+                }) => ({
+                    manage: new ExtensionInstanceManageCapabilityControl({
+                        allowed: manageAllowed,
+                        create: instanceCreate,
+                        editor: instanceEditor,
+                        extensionId,
+                        instances: options.state.instances,
+                    }),
+                    observe: new ExtensionInstanceObserveCapabilityControl({
+                        allowed: observeAllowed,
+                        extensionId,
+                        instances: options.state.instances,
+                        listConfigured: () =>
+                            options.state
+                                .requireConfig()
+                                .instances.map((instance) => ({
+                                    enabled: instance.enabled,
+                                    mcpEnabled: instance.mcp.enabled,
+                                    name: instance.name,
+                                    provider: instance.provider,
+                                })),
+                        subscriptions: processSubscriptions,
+                        readLogs: async (name, query) => {
+                            const descriptor = options.state.instances.get(name);
+                            if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
+                            return options.state.instanceRuntimes.get(descriptor).tools.readLogs(query);
+                        },
+                    }),
                 }),
-                paths: extensionPaths,
-                registry: new ExtensionRegistryStore(
-                    extensionPaths.registryFile,
-                ),
+                instances: options.state.instances,
+                readToolCalls: async (name, query) => {
+                    const descriptor = options.state.instances.get(name);
+                    if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
+                    return options.state.instanceRuntimes.get(descriptor).tools.readToolCalls(query);
+                },
+                toolCallDecorator: mcp.toolProvenance,
             });
             const web = new ControlWebRuntime({
                 config: options.state.requireConfig(),
