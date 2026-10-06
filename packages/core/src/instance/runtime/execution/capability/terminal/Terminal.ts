@@ -140,7 +140,3 @@ function readInteger(value: JsonValue | undefined): number | undefined {
 function readString(value: JsonValue | undefined): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
-
-function asResult<T>(value: JsonValue): T {
-    return value as T;
-}

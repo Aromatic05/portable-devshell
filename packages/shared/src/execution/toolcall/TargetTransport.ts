@@ -287,7 +287,7 @@ async function invokeCallback(
             )
                 throw new TypeError("Invalid ToolCall invocationInput callback payload.");
             return await request.invocationInput(
-                payload.input,
+                payload.input as JsonValue,
                 payload.callId,
                 readHookValue(payload.finalValue),
             );
@@ -303,7 +303,7 @@ async function invokeCallback(
                 throw new TypeError("Invalid ToolCall execute callback payload.");
             return (await request.execute(
                 payload.callId,
-                payload.input,
+                payload.input as JsonValue,
                 readHookValue(payload.value),
                 request.signal,
                 onProgress,
@@ -315,7 +315,7 @@ async function invokeCallback(
             if (typeof payload.callId !== "string" || payload.result === undefined)
                 throw new TypeError("Invalid ToolCall transformResult callback payload.");
             return await request.transformResult(
-                payload.result,
+                payload.result as JsonValue,
                 payload.callId,
                 payload.presentation as ToolCallPresentation | undefined,
             );
@@ -443,7 +443,7 @@ function readCallbackMessage(value: unknown): CallbackMessage {
     return {
         id: input.id,
         kind: input.kind,
-        payload: input.payload,
+        payload: input.payload as JsonValue,
     };
 }
 
@@ -544,8 +544,8 @@ function streamFailure(error: StreamError | undefined): Error {
     });
 }
 
-function record(value: unknown): Record<string, any> | undefined {
+function record(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as Record<string, any>)
+        ? (value as Record<string, unknown>)
         : undefined;
 }

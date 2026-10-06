@@ -1,5 +1,5 @@
 import type { InstanceRegistry } from "../../Registry.js";
-import { createRemoteError, controlErrorCodes, parseConfigInstanceTargetRequest, type ControlConfig, type JsonValue, runtimeErrorCodes, } from "@portable-devshell/shared";
+import { createRemoteError, controlErrorCodes, parseConfigInstanceTargetRequest, type ControlConfig, type JsonValue, } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 import { InstanceRetirementNotification } from "./Notification.js";
 import { assertInstanceDeletable, retireInstanceForDelete } from "./Runtime.js";

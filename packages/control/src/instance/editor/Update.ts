@@ -652,18 +652,7 @@ export class InstanceReconfigurationCoordinator {
         );
     }
 
-    #assertInstanceStopped(instance: string, operation: string): void {
-        const descriptor = this.#instanceRegistry.get(instance);
-        if (descriptor === undefined) return;
-        const snapshot = descriptor.worker.supervision.snapshot();
-        if (snapshot.daemonState === "stopped") return;
-        throw createRemoteError({
-            code: runtimeErrorCodes.instanceConflict,
-            details: { instance, operation, status: snapshot.status },
-            message: `Instance ${instance} must be stopped before ${operation}.`,
-            retryable: false,
-        });
-    }
+
 }
 
 function missingInstance(instanceName: string): Error {

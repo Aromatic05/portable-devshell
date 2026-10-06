@@ -1,6 +1,6 @@
 import type { InstanceName } from "../../types/Instance.js";
 import type { JsonValue } from "../../types/Json.js";
-import type { ToolCallQuery, ToolCallRecord } from "./Model.js";
+import type { ToolCallRecord } from "./Model.js";
 import type {
     ToolCallContext,
     ToolCallHookContext,

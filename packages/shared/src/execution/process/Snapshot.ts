@@ -3,8 +3,7 @@
 // read time, and subscribe resumes at lastSeq + 1.
 
 import type { JsonValue } from "../../types/Json.js";
-import type { InstanceLogEntry, InstanceLogQuery } from "./Event.js";
-import type { InstanceProcessEnvelope, InstanceSnapshot } from "./Model.js";
+import type { InstanceSnapshot } from "./Model.js";
 
 export function readInstanceSnapshot(
     value: JsonValue | undefined,

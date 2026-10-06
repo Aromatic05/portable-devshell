@@ -3,7 +3,6 @@ import {
     type ToolCallExecutor,
     type ToolCallHookContributor,
     type ToolCallHooks,
-    type ToolCallRegistration,
     type ToolCallReviewHook,
     type ToolDefinition,
     type ToolNameHandle,

@@ -1,7 +1,6 @@
 import {
     createRemoteError,
     runtimeErrorCodes,
-    type ControlConfig,
 } from "@portable-devshell/shared";
 
 import type { WorkerCommandClient } from "../execution/Command.js";

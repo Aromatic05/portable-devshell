@@ -432,11 +432,3 @@ function invalidInput(message: string): Error {
     });
 }
 
-function toStreamError(error: unknown) {
-    return createRemoteError({
-        code: STREAM_GAP_CODE,
-        cause: error,
-        message: "Terminal stream could not keep up with output.",
-        retryable: true,
-    }).toBody();
-}

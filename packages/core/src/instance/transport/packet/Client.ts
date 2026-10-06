@@ -2,8 +2,6 @@ import type { WorkerProtocolRange, WorkerHandshakeParams, WorkerPingResult, Work
 import {
     Endpoint,
     Rpc,
-    WORKER_PROTOCOL_RANGE,
-    WORKER_PROTOCOL_VERSION,
     type ControlInstanceAlertsConfig,
     type JsonValue,
 } from "@portable-devshell/shared";

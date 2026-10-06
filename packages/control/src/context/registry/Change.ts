@@ -58,6 +58,7 @@ export class ContextChangeHub {
             try {
                 listener(change);
             } catch {
+                // Listener failures do not block other Context observers.
             }
         }
         return this.#revision;

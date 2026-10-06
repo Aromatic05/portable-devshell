@@ -30,7 +30,6 @@ import {
     type ContextBinding,
     type ContextEnvironment,
     type ContextEnvironmentBinding,
-    type ContextEnvironmentCleanup,
     type ContextExternalBinding,
     type ContextInstanceReference,
     type ContextMaskedInstance,
@@ -48,7 +47,6 @@ import {
     defaultContextTtlMs,
     parseContextEnvironments,
     type ContextDocument,
-    type ContextRemoteInstanceHandle,
     type ContextStoredRecord,
     type ContextRegistryOptions,
 } from "../Model.js";
