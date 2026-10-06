@@ -33,6 +33,7 @@ import type {
     WorkerWorkspacePrepareResult,
 } from "../Api.js";
 import type { WorkerInstance } from "../runtime/Api.js";
+import { ProcessSubscriptionManager } from "../runtime/supervision/Subscription.js";
 import type { WorkerProtocolClient } from "../transport/packet/Client.js";
 import type { Instance } from "./Instance.js";
 import type { InstancePaths } from "./Paths.js";
@@ -111,6 +112,7 @@ export class InstanceState {
     readonly terminal: TerminalRuntime;
     readonly tools: ToolCallExecutionRuntime;
     readonly toolCalls: ToolCallRuntime;
+    readonly subscriptions = new ProcessSubscriptionManager();
     readonly #eventLog: InstanceEventLog;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #resolveInstance: () => Instance;
@@ -296,6 +298,8 @@ export class InstanceState {
             await close(() => unregister());
         await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
+        await close(() => this.terminal.sessions.close());
+        await close(() => this.subscriptions.close());
         for (const connectionId of this.#toolSessions.keys())
             await close(async () => await this.releaseToolSession(connectionId));
         await close(() => this.#workerToolRegistration.dispose());

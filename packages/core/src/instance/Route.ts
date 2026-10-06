@@ -4,6 +4,7 @@ import {
     asInstanceName,
     createRemoteError,
     controlErrorCodes,
+    createToolRouteModule,
     isProcessEventType,
     runtimeErrorCodes,
     type ProcessEvent,
@@ -14,38 +15,68 @@ import {
     type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
+import { createApprovalRouteModule } from "../approval/Route.js";
+import { createGoalTaskRouteModule } from "../task/goal/Route.js";
+import { createTodoTaskRouteModule } from "../task/todo/Route.js";
+import { createTerminalRouteModule } from "../terminal/Route.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
-import type { WorkerSupervision } from "./runtime/Api.js";
 import type { ProcessSubscriptionManager } from "./runtime/supervision/Subscription.js";
 import type { ReverseCredentials } from "./reverse/credential/Credentials.js";
 import type { Instance } from "./model/Instance.js";
-import type { InstanceRegistry } from "./model/Registry.js";
 
 export interface InstanceRouteOptions {
     descriptor: Instance;
     extensionPorts?: readonly ControlPortDefinition[];
-    registry: InstanceRegistry;
-    subscriptions: ProcessSubscriptionManager;
 }
 
 export function createInstanceHost(
     options: InstanceRouteOptions,
 ): ControlHostDefinition {
     const { descriptor } = options;
+    const { state } = descriptor;
+    const events = {
+        cursor: () => descriptor.worker.supervision.snapshot().lastSeq,
+        subscribe: (fromSeq?: number) =>
+            descriptor.worker.supervision.state.subscribe(fromSeq),
+    };
+    const name = descriptor.config.name;
     const ports = mergeControlPortsByName([
-        createProcessRouteModule(
+        createProcessRouteModule(descriptor, state.subscriptions),
+        createApprovalRouteModule(
+            { approval: state.approval.api, events, name },
+            state.subscriptions,
+        ),
+        createTerminalRouteModule({
+            backend: state.terminal.api,
+            instance: name,
+            sessions: state.terminal.sessions.api,
+        }),
+        createGoalTaskRouteModule({ events, goal: state.task.api.goal }),
+        createTodoTaskRouteModule(
+            { events, name, todo: state.task.api.todo },
+            state.subscriptions,
+        ),
+        createToolRouteModule(
             {
-                enabled: descriptor.config.enabled,
-                name: descriptor.config.name,
-                worker: descriptor.worker,
+                name,
+                worker: {
+                    readWorkerTools: async () => state.toolDefinitions.list(),
+                    prepareWorkspace: (workspace, connectionId) =>
+                        state.openToolSession(workspace, connectionId),
+                    readToolCalls: (query) => state.tools.readToolCalls(query),
+                    releaseToolSession: (connectionId) =>
+                        state.releaseToolSession(connectionId),
+                    subscribe: events.subscribe,
+                },
             },
-            options.registry,
-            options.subscriptions,
+            undefined,
+            state.toolCalls.api,
+            state.subscriptions,
         ),
         ...(options.extensionPorts ?? []),
     ]);
     return {
-        host: asInstanceName(descriptor.config.name),
+        host: asInstanceName(name),
         ports: fenceGeneration(ports, descriptor),
     };
 }
@@ -89,20 +120,8 @@ function fenceGeneration(
     }));
 }
 
-export interface ProcessRouteInstancePort {
-    enabled: boolean;
-    name: string;
-    worker: {
-        supervision: Pick<
-            WorkerSupervision,
-            "lifecycle" | "recovery" | "state" | "snapshot"
-        >;
-    };
-}
-
 export function createProcessRouteModule(
-    instance: ProcessRouteInstancePort,
-    registry: InstanceRegistry,
+    instance: Instance,
     subscriptions: ProcessSubscriptionManager,
 ): ControlPortDefinition {
     return routeModule(
@@ -123,26 +142,27 @@ export function createProcessRouteModule(
                     snapshot,
                 } as unknown as JsonValue;
             },
+            readLogs: async (request) =>
+                (await instance.state.tools.readLogs(
+                    request.payload as never,
+                )) as unknown as JsonValue,
             stop: async () => {
                 const result =
                     await instance.worker.supervision.lifecycle.stop();
-                registry.get(instance.name)?.lifecycle.clearOwned();
-                if (!instance.enabled) {
-                    await registry.remove(instance.name);
-                }
+                instance.lifecycle.clearOwned();
                 return result as unknown as JsonValue;
             },
         },
         {
             start: async (stream) => {
-                if (!instance.enabled)
+                if (!instance.config.enabled)
                     throw createRemoteError({
                         code: runtimeErrorCodes.instanceConflict,
                         details: {
-                            instance: instance.name,
+                            instance: instance.config.name,
                             operation: "start",
                         },
-                        message: `Instance ${instance.name} is disabled.`,
+                        message: `Instance ${instance.config.name} is disabled.`,
                         retryable: false,
                     });
                 const relay = new ProcessInteractiveSession();
@@ -159,7 +179,7 @@ export function createProcessRouteModule(
                         await instance.worker.supervision.lifecycle.startInteractive(
                             relay,
                         );
-                    registry.get(instance.name)?.lifecycle.markOwned();
+                    instance.lifecycle.markOwned();
                     await stream.close(result as unknown as JsonValue);
                 } finally {
                     offData();
@@ -172,7 +192,7 @@ export function createProcessRouteModule(
                 await subscriptions.subscribe(
                     stream,
                     context,
-                    instance.name,
+                    instance.config.name,
                     instance.worker.supervision.state,
                     readProcessSubscriptionFromSeq(request.payload),
                     (event) =>
@@ -183,7 +203,6 @@ export function createProcessRouteModule(
         },
     );
 }
-
 
 export function readProcessSubscriptionFromSeq(payload?: JsonValue): number {
     if (
@@ -198,7 +217,6 @@ export function readProcessSubscriptionFromSeq(payload?: JsonValue): number {
     }
     return payload.fromSeq;
 }
-
 
 function isRecord(
     value: JsonValue | undefined,

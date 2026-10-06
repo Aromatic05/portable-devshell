@@ -8,7 +8,10 @@ import type {
 } from "./Api.js";
 
 export function createTerminalRuntime(worker: WorkerInstance): TerminalRuntime {
-    return { api: new WorkerTerminalBackend({ worker: worker.execution.terminal }) };
+    return {
+        api: new WorkerTerminalBackend({ worker: worker.execution.terminal }),
+        sessions: createTerminalSessionRuntime(),
+    };
 }
 
 export function createTerminalSessionRuntime(

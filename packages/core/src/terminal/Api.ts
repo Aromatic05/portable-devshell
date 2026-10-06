@@ -102,4 +102,5 @@ export interface TerminalSessionRuntime {
 
 export interface TerminalRuntime {
     readonly api: TerminalBackend;
+    readonly sessions: TerminalSessionRuntime;
 }

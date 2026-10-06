@@ -1,6 +1,8 @@
 import {
     asInstanceName,
+    type ControlHostDefinition,
     type ControlInstanceConfig,
+    type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { createAuditRuntime } from "../../audit/index.js";
@@ -22,6 +24,7 @@ import {
     createInstanceEventLog,
     InstanceState,
 } from "./State.js";
+import { createInstanceHost } from "../Route.js";
 
 export interface InstanceFields {
     config: InstanceConfig;
@@ -109,6 +112,18 @@ export class Instance {
 
     update(instance: ControlInstanceConfig): void {
         this.#config = toInstanceConfig(instance);
+    }
+
+    host(extensionPorts: readonly ControlPortDefinition[] = []): ControlHostDefinition {
+        return createInstanceHost({ descriptor: this, extensionPorts });
+    }
+
+    connectionClosed(connectionId: string): void {
+        this.#state.subscriptions.unsubscribeConnection(connectionId);
+    }
+
+    async prepareRetirement(): Promise<void> {
+        await this.#state.prepareRetirement();
     }
 
     async close(): Promise<void> {

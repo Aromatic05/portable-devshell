@@ -166,6 +166,16 @@ export class ProcessSubscriptionManager {
         this.#stopPollingWhenIdle();
     }
 
+    close(): void {
+        this.#subscriptions.clear();
+        for (const watch of this.#watches.values()) watch.resolve();
+        this.#watches.clear();
+        if (this.#timer !== undefined) {
+            clearInterval(this.#timer);
+            this.#timer = undefined;
+        }
+    }
+
     #ensurePolling(): void {
         if (this.#timer !== undefined) return;
         this.#timer = setInterval(() => {
