@@ -8,7 +8,6 @@ import {
     type ArtifactShareResult,
     type ArtifactShareRevokeResult,
     type JsonValue,
-    type WorkerArtifactPayloadReadResult,
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
@@ -24,7 +23,6 @@ import {
     MAX_ARTIFACT_SHARE_TTL_SECONDS,
     requireArtifactEndpoint,
     type ArtifactEventRecorder,
-    type ArtifactServiceEndpoint,
     type ArtifactServiceOptions,
     type StoredArtifactShare,
 } from "../Service.js";
@@ -317,7 +315,7 @@ export class ArtifactShareService {
         access: ArtifactShareAccess,
         offsetBytes: number,
         maxBytes: number,
-    ): Promise<WorkerArtifactPayloadReadResult> {
+    ) {
         const share = this.#shares.get(access.share.shareId);
         const endpoint = requireArtifactEndpoint(
             this.#resolveEndpoint,

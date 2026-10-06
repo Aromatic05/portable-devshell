@@ -9,6 +9,7 @@ import type {
     ArtifactShareInput,
     ArtifactShareResult,
     ArtifactShareRevokeResult,
+    ArtifactPayloadChunk,
     ArtifactStoredImageResult,
     ArtifactTransferCancelInput,
     ArtifactTransferRecord,
@@ -20,7 +21,6 @@ import type {
     ControlPathHome,
     JsonValue,
     MessageStream,
-    WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/shared";
 
 export interface ArtifactHttpHost {
@@ -102,7 +102,7 @@ export interface ArtifactShareHttpApi {
         access: ArtifactShareAccess,
         offsetBytes: number,
         maxBytes: number,
-    ): Promise<WorkerArtifactPayloadReadResult>;
+    ): Promise<ArtifactPayloadChunk>;
     finishShareDownload(
         token: string,
         completed: boolean,

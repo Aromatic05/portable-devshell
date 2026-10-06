@@ -1,8 +1,10 @@
 import { join } from "node:path";
 
-import { createRemoteError, type WorkerArtifactPayloadOpenInput, type WorkerArtifactReceiveBeginInput } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    type WorkerArtifactApi,
+} from "@portable-devshell/shared";
 
-import type { ArtifactServiceEndpoint } from "../Service.js";
 import { artifactBlake3 } from "./Hash.js";
 import { ArtifactHostPayloadStore } from "./storage/PayloadStore.js";
 import { ArtifactHostReceiveStore } from "./storage/ReceiveStore.js";
@@ -31,20 +33,17 @@ export class ArtifactHostBridge {
         await this.#receives.initialize();
     }
 
-    endpointFor(context: ArtifactHostAccessContext): ArtifactServiceEndpoint {
+    endpointFor(context: ArtifactHostAccessContext): WorkerArtifactApi {
         return {
             abortArtifactReceive: async (receiveId) =>
                 await this.#receives.abort(receiveId),
-            beginArtifactReceive: async (
-                input: WorkerArtifactReceiveBeginInput,
-            ) => await this.#receives.begin(input),
+            beginArtifactReceive: async (input) =>
+                await this.#receives.begin(input),
             closeArtifactPayload: async (payloadId) =>
                 await this.#payloads.close(payloadId),
             finishArtifactReceive: async (receiveId) =>
                 await this.#receives.finish(receiveId),
-            openArtifactPayload: async (
-                input: WorkerArtifactPayloadOpenInput,
-            ) => {
+            openArtifactPayload: async (input) => {
                 if ("handle" in input && input.handle !== undefined) {
                     throw createRemoteError({
                         code: "artifact.hostHandleUnsupported",

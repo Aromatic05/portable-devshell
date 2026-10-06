@@ -6,7 +6,7 @@ import test, { type TestContext } from "node:test";
 import { Endpoint, Rpc, Stream, StreamChannel, asInstanceName, runtimeErrorCodes, type JsonValue } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { createAuditRuntime } from "../../../src/audit/index.ts";
-import { WorkerArtifact } from "../../../src/instance/transport/packet/Artifact.ts";
+import { createWorkerArtifact } from "../../../src/instance/transport/packet/Artifact.ts";
 import { WorkerProtocolClient } from "../../../src/instance/transport/packet/Client.ts";
 import { TransportConnection } from "../../../src/instance/transport/endpoint/Connection.ts";
 import { resolveWorkerInstanceConfig } from "../../../src/instance/runtime/provision/Config.ts";
@@ -39,15 +39,15 @@ test("worker artifact routes payload and receive lifecycle operations to the art
         "artifact.receive.abort": input => { calls.push(["abort", input]); return {}; },
     });
     t.after(() => rpc.close());
-    const artifact = new WorkerArtifact(client, "alpha-worker");
+    const artifact = createWorkerArtifact(client, "alpha-worker");
     const openInput = { expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" };
     const beginInput = { descriptor, overwrite: false, targetPath: "/tmp/result.bin", workspace: "/tmp" };
-    assert.equal((await artifact.openPayload(openInput)).payloadId, "payload-1");
+    assert.equal((await artifact.openArtifactPayload(openInput)).payloadId, "payload-1");
     await accepting;
-    await artifact.closePayload("payload-1");
-    assert.equal((await artifact.beginReceive(beginInput)).receiveId, "receive-1");
-    assert.equal((await artifact.finishReceive("receive-1")).bytes, 4);
-    await artifact.abortReceive("receive-2");
+    await artifact.closeArtifactPayload("payload-1");
+    assert.equal((await artifact.beginArtifactReceive(beginInput)).receiveId, "receive-1");
+    assert.equal((await artifact.finishArtifactReceive("receive-1")).bytes, 4);
+    await artifact.abortArtifactReceive("receive-2");
     assert.deepEqual(calls, [["open", openInput], ["close", { payloadId: "payload-1" }], ["begin", beginInput], ["finish", { receiveId: "receive-1" }], ["abort", { receiveId: "receive-2" }]]);
 });
 
@@ -70,10 +70,10 @@ test("worker artifact transfers payload bytes and receive offsets through stream
         assert.deepEqual(await stream.readMessage(), { type: "fin" });
         await stream.close({ nextOffsetBytes: 8, receivedBytes: 8, receiveId: "receive-1" });
     });
-    const artifact = new WorkerArtifact(client, "alpha-worker");
+    const artifact = createWorkerArtifact(client, "alpha-worker");
     const readInput = { maxBytes: 3, offsetBytes: 1, payloadId: "payload-1" };
-    assert.deepEqual((await artifact.readPayload(readInput)).bytes, new Uint8Array([0x65, 0x73, 0x74]));
-    assert.equal((await artifact.writeReceive({ bytes: new Uint8Array([0x74, 0x65, 0x73, 0x74]), offsetBytes: 4, receiveId: "receive-1" })).nextOffsetBytes, 8);
+    assert.deepEqual((await artifact.readArtifactPayload(readInput)).bytes, new Uint8Array([0x65, 0x73, 0x74]));
+    assert.equal((await artifact.writeArtifactReceive({ bytes: new Uint8Array([0x74, 0x65, 0x73, 0x74]), offsetBytes: 4, receiveId: "receive-1" })).nextOffsetBytes, 8);
     assert.deepEqual(calls, [["payload.read", readInput], ["receive.write", { offsetBytes: 4, receiveId: "receive-1" }]]);
 });
 
@@ -88,7 +88,7 @@ test("worker rejects artifact calls before opening a port when it is not ready",
         stateMachine: new InstanceStateMachine(name), transportConnection,
     });
     t.after(() => worker.close());
-    await assert.rejects(worker.openArtifactPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }), { code: runtimeErrorCodes.instanceNotReady });
+    await assert.rejects(worker.artifact.openArtifactPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }), { code: runtimeErrorCodes.instanceNotReady });
     assert.equal(connections, 0);
 });
 

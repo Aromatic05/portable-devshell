@@ -15,21 +15,10 @@ import type {
     ArtifactTransferStartInput,
     ArtifactViewImageInput,
     ArtifactViewImageResult,
+    ArtifactPayloadChunk,
     JsonValue,
     MessageStream,
-    WorkerArtifactDirectPushInput,
-    WorkerArtifactDirectPushResult,
-    WorkerArtifactDirectReceiveOpenInput,
-    WorkerArtifactDirectReceiveOpenResult,
-    WorkerArtifactPayloadOpenInput,
-    WorkerArtifactPayloadOpenResult,
-    WorkerArtifactPayloadReadInput,
-    WorkerArtifactPayloadReadResult,
-    WorkerArtifactReceiveBeginInput,
-    WorkerArtifactReceiveBeginResult,
-    WorkerArtifactReceiveFinishResult,
-    WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult,
+    WorkerArtifactApi,
 } from "@portable-devshell/shared";
 import {
     ArtifactEventLog,
@@ -181,7 +170,7 @@ export class ArtifactService implements ArtifactApi {
         access: ArtifactShareAccess,
         offsetBytes: number,
         maxBytes: number,
-    ): Promise<WorkerArtifactPayloadReadResult> {
+    ): Promise<ArtifactPayloadChunk> {
         return await this.#shareService.readSharePayload(
             access,
             offsetBytes,
@@ -381,38 +370,6 @@ export const DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT = 256;
 
 export type ArtifactServiceSchedule = (task: () => void) => void;
 
-export interface ArtifactServiceEndpoint {
-    abortArtifactReceive(receiveId: string): Promise<void>;
-    beginArtifactReceive(
-        input: WorkerArtifactReceiveBeginInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveBeginResult>;
-    closeArtifactPayload(payloadId: string): Promise<void>;
-    finishArtifactReceive(
-        receiveId: string,
-    ): Promise<WorkerArtifactReceiveFinishResult>;
-    openArtifactPayload(
-        input: WorkerArtifactPayloadOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadOpenResult>;
-    readArtifactPayload(
-        input: WorkerArtifactPayloadReadInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadReadResult>;
-    writeArtifactReceive(
-        input: WorkerArtifactReceiveWriteInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveWriteResult>;
-    openArtifactDirectReceive?(
-        input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactDirectReceiveOpenResult>;
-    closeArtifactDirectReceive?(receiverId: string): Promise<void>;
-    pushArtifactPayloadDirect?(
-        input: WorkerArtifactDirectPushInput,
-    ): Promise<WorkerArtifactDirectPushResult>;
-}
-
 export interface ArtifactServiceOptions {
     chunkBytes?: number;
     directTransfer?: boolean;
@@ -420,7 +377,7 @@ export interface ArtifactServiceOptions {
     resolveEndpoint: (
         instance: string,
         authorityInstance?: string,
-    ) => ArtifactServiceEndpoint | undefined;
+    ) => WorkerArtifactApi | undefined;
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;
     storageDir: string;
@@ -438,7 +395,7 @@ export function requireArtifactEndpoint(
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"],
     instance: string,
     authorityInstance: string,
-): ArtifactServiceEndpoint {
+): WorkerArtifactApi {
     const endpoint = resolveEndpoint(instance, authorityInstance);
     if (endpoint !== undefined) {
         return endpoint;

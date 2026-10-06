@@ -151,66 +151,7 @@ export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescr
 export type ArtifactPayloadDescriptor =
     ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
 
-export type WorkerArtifactPayloadOpenInput =
-    | { expiresAtMs: number; handle: string; path?: never }
-    | { expiresAtMs: number; handle?: never; path: string; workspace: string };
-
-export interface WorkerArtifactPayloadOpenResult {
-    descriptor: ArtifactPayloadDescriptor;
-    expiresAtMs: number;
-    payloadId: string;
-}
-
-export interface WorkerArtifactReceiveBeginInput {
-    descriptor: ArtifactPayloadDescriptor;
-    overwrite: boolean;
-    targetPath: string;
-    workspace: string;
-}
-
-export interface WorkerArtifactReceiveBeginResult {
-    nextOffsetBytes: number;
-    receiveId: string;
-}
-
-export interface WorkerArtifactReceiveFinishResult {
-    blake3: string;
-    bytes: number;
-    receiveId: string;
-    targetPath: string;
-}
-
-export interface WorkerArtifactDirectReceiveOpenInput {
-    expiresAtMs: number;
-    receiveId: string;
-}
-
-export interface WorkerArtifactDirectReceiveOpenResult {
-    expiresAtMs: number;
-    nextOffsetBytes: number;
-    receiverId: string;
-    urls: string[];
-}
-
-export interface WorkerArtifactDirectPushInput {
-    maxBytes: number;
-    offsetBytes: number;
-    payloadId: string;
-    urls: string[];
-}
-
-export interface WorkerArtifactDirectPushResult {
-    nextOffsetBytes: number;
-    pushedBytes: number;
-}
-
-export interface WorkerArtifactPayloadReadInput {
-    maxBytes: number;
-    offsetBytes: number;
-    payloadId: string;
-}
-
-export interface WorkerArtifactPayloadReadResult {
+export interface ArtifactPayloadChunk {
     bytes: Uint8Array;
     eof: boolean;
     nextOffsetBytes?: number;
@@ -218,18 +159,6 @@ export interface WorkerArtifactPayloadReadResult {
     payloadId: string;
     returnedBytes: number;
     totalBytes: number;
-}
-
-export interface WorkerArtifactReceiveWriteInput {
-    bytes: Uint8Array;
-    offsetBytes: number;
-    receiveId: string;
-}
-
-export interface WorkerArtifactReceiveWriteResult {
-    nextOffsetBytes: number;
-    receivedBytes: number;
-    receiveId: string;
 }
 
 export type ArtifactTransferSourceInput =

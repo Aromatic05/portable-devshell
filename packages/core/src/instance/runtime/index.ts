@@ -9,19 +9,7 @@ import {
     type ReverseEnrollmentState,
     type ReverseTransport,
     type ToolDefinition,
-    type WorkerArtifactDirectPushInput,
-    type WorkerArtifactDirectPushResult,
-    type WorkerArtifactDirectReceiveOpenInput,
-    type WorkerArtifactDirectReceiveOpenResult,
-    type WorkerArtifactPayloadOpenInput,
-    type WorkerArtifactPayloadOpenResult,
-    type WorkerArtifactPayloadReadInput,
-    type WorkerArtifactPayloadReadResult,
-    type WorkerArtifactReceiveBeginInput,
-    type WorkerArtifactReceiveBeginResult,
-    type WorkerArtifactReceiveFinishResult,
-    type WorkerArtifactReceiveWriteInput,
-    type WorkerArtifactReceiveWriteResult,
+    type WorkerArtifactApi,
 } from "@portable-devshell/shared";
 
 
@@ -31,7 +19,7 @@ import type { TransportConnection } from "../transport/endpoint/Connection.js";
 import { WorkerTunnel } from "../transport/packet/Tunnel.js";
 import { WorkerCommandSessionBridge } from "./execution/Session.js";
 import type { WorkerProtocolClient } from "../transport/packet/Client.js";
-import { WorkerArtifact } from "../transport/packet/Artifact.js";
+import { createWorkerArtifact } from "../transport/packet/Artifact.js";
 import type { Channel } from "@portable-devshell/shared";
 
 import { WorkerTerminal } from "../transport/packet/Terminal.js";
@@ -57,7 +45,7 @@ interface WorkerInstanceDependencies {
 }
 
 export class WorkerInstance implements WorkerInstanceApi {
-    readonly #artifact: WorkerArtifact;
+    readonly artifact: WorkerArtifactApi;
     readonly #commandSessions: WorkerCommandSessionBridge;
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #endpoint: Endpoint;
@@ -81,7 +69,10 @@ export class WorkerInstance implements WorkerInstanceApi {
             stateMachine: dependencies.stateMachine,
         });
         const workerHost = `${this.#config.name}-worker`;
-        this.#artifact = new WorkerArtifact(dependencies.endpoint, workerHost);
+        this.artifact = guardArtifact(
+            createWorkerArtifact(dependencies.endpoint, workerHost),
+            () => this.#assertReady(),
+        );
         this.#commandSessions = new WorkerCommandSessionBridge(
             dependencies.endpoint,
             workerHost,
@@ -319,80 +310,11 @@ export class WorkerInstance implements WorkerInstanceApi {
         return await this.#state.appendEvent(type, data);
     }
 
-    async openArtifactPayload(
-        input: WorkerArtifactPayloadOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadOpenResult> {
-        this.#assertReady();
-        return await this.#artifact.openPayload(input, signal);
-    }
-
-    async readArtifactPayload(
-        input: WorkerArtifactPayloadReadInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadReadResult> {
-        this.#assertReady();
-        return await this.#artifact.readPayload(input, signal);
-    }
-
-    async closeArtifactPayload(payloadId: string): Promise<void> {
-        this.#assertReady();
-        await this.#artifact.closePayload(payloadId);
-    }
-
     async prepareExtensionResource(
         input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult> {
         this.#assertReady();
         return await this.#protocolClient.prepareExtensionResource(input);
-    }
-
-    async beginArtifactReceive(
-        input: WorkerArtifactReceiveBeginInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveBeginResult> {
-        this.#assertReady();
-        return await this.#artifact.beginReceive(input, signal);
-    }
-
-    async writeArtifactReceive(
-        input: WorkerArtifactReceiveWriteInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveWriteResult> {
-        this.#assertReady();
-        return await this.#artifact.writeReceive(input, signal);
-    }
-
-    async finishArtifactReceive(
-        receiveId: string,
-    ): Promise<WorkerArtifactReceiveFinishResult> {
-        this.#assertReady();
-        return await this.#artifact.finishReceive(receiveId);
-    }
-
-    async abortArtifactReceive(receiveId: string): Promise<void> {
-        this.#assertReady();
-        await this.#artifact.abortReceive(receiveId);
-    }
-
-    async openArtifactDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactDirectReceiveOpenResult> {
-        this.#assertReady();
-        return await this.#artifact.openDirectReceive(input, signal);
-    }
-
-    async closeArtifactDirectReceive(receiverId: string): Promise<void> {
-        this.#assertReady();
-        await this.#artifact.closeDirectReceive(receiverId);
-    }
-
-    async pushArtifactPayloadDirect(
-        input: WorkerArtifactDirectPushInput,
-    ): Promise<WorkerArtifactDirectPushResult> {
-        this.#assertReady();
-        return await this.#artifact.pushPayloadDirect(input);
     }
 
     async start(): Promise<InstanceSnapshot> {
@@ -479,4 +401,67 @@ export class WorkerInstance implements WorkerInstanceApi {
             details: { instanceName: this.#config.name },
         });
     }
+}
+
+function guardArtifact(
+    artifact: WorkerArtifactApi,
+    assertReady: () => void,
+): WorkerArtifactApi {
+    return {
+        abortArtifactReceive: async (receiveId) => {
+            assertReady();
+            await artifact.abortArtifactReceive(receiveId);
+        },
+        beginArtifactReceive: async (input, signal) => {
+            assertReady();
+            return await artifact.beginArtifactReceive(input, signal);
+        },
+        closeArtifactPayload: async (payloadId) => {
+            assertReady();
+            await artifact.closeArtifactPayload(payloadId);
+        },
+        finishArtifactReceive: async (receiveId) => {
+            assertReady();
+            return await artifact.finishArtifactReceive(receiveId);
+        },
+        openArtifactPayload: async (input, signal) => {
+            assertReady();
+            return await artifact.openArtifactPayload(input, signal);
+        },
+        readArtifactPayload: async (input, signal) => {
+            assertReady();
+            return await artifact.readArtifactPayload(input, signal);
+        },
+        writeArtifactReceive: async (input, signal) => {
+            assertReady();
+            return await artifact.writeArtifactReceive(input, signal);
+        },
+        ...(artifact.openArtifactDirectReceive === undefined
+            ? {}
+            : {
+                  openArtifactDirectReceive: async (input, signal) => {
+                      assertReady();
+                      return await artifact.openArtifactDirectReceive!(
+                          input,
+                          signal,
+                      );
+                  },
+              }),
+        ...(artifact.closeArtifactDirectReceive === undefined
+            ? {}
+            : {
+                  closeArtifactDirectReceive: async (receiverId) => {
+                      assertReady();
+                      await artifact.closeArtifactDirectReceive!(receiverId);
+                  },
+              }),
+        ...(artifact.pushArtifactPayloadDirect === undefined
+            ? {}
+            : {
+                  pushArtifactPayloadDirect: async (input) => {
+                      assertReady();
+                      return await artifact.pushArtifactPayloadDirect!(input);
+                  },
+              }),
+    };
 }

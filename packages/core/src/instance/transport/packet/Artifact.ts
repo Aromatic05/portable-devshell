@@ -1,4 +1,8 @@
-import { createPortClient, type Endpoint, type PortClient, type WorkerArtifactPayloadOpenInput, type WorkerArtifactPayloadOpenResult, type WorkerArtifactReceiveBeginInput, type WorkerArtifactReceiveBeginResult, type WorkerArtifactReceiveFinishResult, type WorkerArtifactDirectReceiveOpenInput, type WorkerArtifactDirectReceiveOpenResult, type WorkerArtifactDirectPushInput, type WorkerArtifactDirectPushResult, type WorkerArtifactPayloadReadInput, type WorkerArtifactPayloadReadResult, type WorkerArtifactReceiveWriteInput, type WorkerArtifactReceiveWriteResult } from "@portable-devshell/shared";
+import {
+    createPortClient,
+    type Endpoint,
+    type WorkerArtifactApi,
+} from "@portable-devshell/shared";
 
 
 
@@ -26,161 +30,128 @@ import { createPortClient, type Endpoint, type PortClient, type WorkerArtifactPa
 
 
 
-export class WorkerArtifact {
-    readonly #port: PortClient;
-
-    constructor(endpoint: Endpoint, workerHost: string) {
-        this.#port = createPortClient(endpoint, workerHost, "artifact");
-    }
-
-    async openPayload(
-        input: WorkerArtifactPayloadOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadOpenResult> {
-        return await this.#port.request(
-            "artifact.payload.open",
-            input,
-            signal,
-        );
-    }
-
-    async readPayload(
-        input: WorkerArtifactPayloadReadInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadReadResult> {
-        const stream = await this.#port.open("payload.read", input, signal);
-        const chunks: Uint8Array[] = [];
-        let byteLength = 0;
-        while (true) {
-            const next = await stream.readMessage();
-            if (next.type === "data") {
-                if (next.bytes === undefined)
+export function createWorkerArtifact(
+    endpoint: Endpoint,
+    workerHost: string,
+): WorkerArtifactApi {
+    const port = createPortClient(endpoint, workerHost, "artifact");
+    return {
+        openArtifactPayload: async (input, signal) =>
+            await port.request(
+                "artifact.payload.open",
+                input,
+                signal,
+            ),
+        readArtifactPayload: async (input, signal) => {
+            const stream = await port.open("payload.read", input, signal);
+            const chunks: Uint8Array[] = [];
+            let byteLength = 0;
+            while (true) {
+                const next = await stream.readMessage();
+                if (next.type === "data") {
+                    if (next.bytes === undefined)
+                        throw new Error(
+                            "Artifact payload stream returned a message chunk.",
+                        );
+                    chunks.push(next.bytes);
+                    byteLength += next.bytes.byteLength;
+                    continue;
+                }
+                if (next.type !== "close")
                     throw new Error(
-                        "Artifact payload stream returned a message chunk.",
+                        "Artifact payload stream closed without metadata.",
                     );
-                chunks.push(next.bytes);
-                byteLength += next.bytes.byteLength;
-                continue;
+                const result = readObject(
+                    next.message,
+                    "Artifact payload stream metadata",
+                );
+                const returnedBytes = readInteger(
+                    result.returnedBytes,
+                    "returnedBytes",
+                );
+                if (returnedBytes !== byteLength)
+                    throw new Error(
+                        "Artifact payload stream byte count is invalid.",
+                    );
+                return {
+                    bytes: concat(chunks, byteLength),
+                    eof: readBoolean(result.eof, "eof"),
+                    ...(result.nextOffsetBytes == null
+                        ? {}
+                        : {
+                              nextOffsetBytes: readInteger(
+                                  result.nextOffsetBytes,
+                                  "nextOffsetBytes",
+                              ),
+                          }),
+                    offsetBytes: readInteger(result.offsetBytes, "offsetBytes"),
+                    payloadId: readString(result.payloadId, "payloadId"),
+                    returnedBytes,
+                    totalBytes: readInteger(result.totalBytes, "totalBytes"),
+                };
             }
-            if (next.type !== "close")
-                throw new Error(
-                    "Artifact payload stream closed without metadata.",
-                );
-            const result = readObject(
-                next.message,
-                "Artifact payload stream metadata",
+        },
+        closeArtifactPayload: async (payloadId) => {
+            await port.request("artifact.payload.close", { payloadId });
+        },
+        beginArtifactReceive: async (input, signal) =>
+            await port.request(
+                "artifact.receive.begin",
+                input,
+                signal,
+            ),
+        writeArtifactReceive: async (input, signal) => {
+            const stream = await port.open(
+                "receive.write",
+                {
+                    offsetBytes: input.offsetBytes,
+                    receiveId: input.receiveId,
+                },
+                signal,
             );
-            const returnedBytes = readInteger(
-                result.returnedBytes,
-                "returnedBytes",
-            );
-            if (returnedBytes !== byteLength)
-                throw new Error(
-                    "Artifact payload stream byte count is invalid.",
+            await stream.write(input.bytes);
+            await stream.finish();
+            while (true) {
+                const next = await stream.readMessage();
+                if (next.type === "data") continue;
+                if (next.type !== "close")
+                    throw new Error(
+                        "Artifact receive stream closed without metadata.",
+                    );
+                const result = readObject(
+                    next.message,
+                    "Artifact receive stream metadata",
                 );
-            return {
-                bytes: concat(chunks, byteLength),
-                eof: readBoolean(result.eof, "eof"),
-                ...(result.nextOffsetBytes == null
-                    ? {}
-                    : {
-                          nextOffsetBytes: readInteger(
-                              result.nextOffsetBytes,
-                              "nextOffsetBytes",
-                          ),
-                      }),
-                offsetBytes: readInteger(result.offsetBytes, "offsetBytes"),
-                payloadId: readString(result.payloadId, "payloadId"),
-                returnedBytes,
-                totalBytes: readInteger(result.totalBytes, "totalBytes"),
-            };
-        }
-    }
-
-    async closePayload(payloadId: string): Promise<void> {
-        await this.#port.request("artifact.payload.close", { payloadId });
-    }
-
-    async beginReceive(
-        input: WorkerArtifactReceiveBeginInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveBeginResult> {
-        return await this.#port.request(
-            "artifact.receive.begin",
-            input,
-            signal,
-        );
-    }
-
-    async writeReceive(
-        input: WorkerArtifactReceiveWriteInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveWriteResult> {
-        const stream = await this.#port.open(
-            "receive.write",
-            {
-                offsetBytes: input.offsetBytes,
-                receiveId: input.receiveId,
-            },
-            signal,
-        );
-        await stream.write(input.bytes);
-        await stream.finish();
-        while (true) {
-            const next = await stream.readMessage();
-            if (next.type === "data") continue;
-            if (next.type !== "close")
-                throw new Error(
-                    "Artifact receive stream closed without metadata.",
-                );
-            const result = readObject(
-                next.message,
-                "Artifact receive stream metadata",
-            );
-            return {
-                nextOffsetBytes: readInteger(
-                    result.nextOffsetBytes,
-                    "nextOffsetBytes",
-                ),
-                receivedBytes: readInteger(
-                    result.receivedBytes,
-                    "receivedBytes",
-                ),
-                receiveId: readString(result.receiveId, "receiveId"),
-            };
-        }
-    }
-
-    async finishReceive(
-        receiveId: string,
-    ): Promise<WorkerArtifactReceiveFinishResult> {
-        return await this.#port.request("artifact.receive.finish", { receiveId });
-    }
-
-    async abortReceive(receiveId: string): Promise<void> {
-        await this.#port.request("artifact.receive.abort", { receiveId });
-    }
-
-    async openDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactDirectReceiveOpenResult> {
-        return await this.#port.request(
-            "artifact.receive.direct.open",
-            input,
-            signal,
-        );
-    }
-
-    async closeDirectReceive(receiverId: string): Promise<void> {
-        await this.#port.request("artifact.receive.direct.close", { receiverId });
-    }
-
-    async pushPayloadDirect(
-        input: WorkerArtifactDirectPushInput,
-    ): Promise<WorkerArtifactDirectPushResult> {
-        return await this.#port.request("artifact.payload.direct.push", input);
-    }
+                return {
+                    nextOffsetBytes: readInteger(
+                        result.nextOffsetBytes,
+                        "nextOffsetBytes",
+                    ),
+                    receivedBytes: readInteger(
+                        result.receivedBytes,
+                        "receivedBytes",
+                    ),
+                    receiveId: readString(result.receiveId, "receiveId"),
+                };
+            }
+        },
+        finishArtifactReceive: async (receiveId) =>
+            await port.request("artifact.receive.finish", { receiveId }),
+        abortArtifactReceive: async (receiveId) => {
+            await port.request("artifact.receive.abort", { receiveId });
+        },
+        openArtifactDirectReceive: async (input, signal) =>
+            await port.request(
+                "artifact.receive.direct.open",
+                input,
+                signal,
+            ),
+        closeArtifactDirectReceive: async (receiverId) => {
+            await port.request("artifact.receive.direct.close", { receiverId });
+        },
+        pushArtifactPayloadDirect: async (input) =>
+            await port.request("artifact.payload.direct.push", input),
+    };
 }
 
 function concat(chunks: readonly Uint8Array[], byteLength: number): Uint8Array {

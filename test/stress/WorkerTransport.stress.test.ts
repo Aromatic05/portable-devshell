@@ -145,12 +145,12 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     });
 
     await instance.start();
-    const opened = await instance.openArtifactPayload({
+    const opened = await instance.artifact.openArtifactPayload({
         expiresAtMs: Date.now() + 120_000,
         path: "./source.bin",
         workspace,
     });
-    const receive = await instance.beginArtifactReceive({
+    const receive = await instance.artifact.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
         targetPath: "./copy.bin",
@@ -159,7 +159,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     const sourceHash = createHash("sha256");
     let offsetBytes = 0;
     while (offsetBytes < source.byteLength) {
-        const chunk = await instance.readArtifactPayload({
+        const chunk = await instance.artifact.readArtifactPayload({
             maxBytes: 1024 * 1024,
             offsetBytes,
             payloadId: opened.payloadId,
@@ -167,7 +167,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
         assert.ok(chunk.bytes.byteLength > 0);
         assert.ok(chunk.bytes.byteLength <= 1024 * 1024);
         sourceHash.update(chunk.bytes);
-        const written = await instance.writeArtifactReceive({
+        const written = await instance.artifact.writeArtifactReceive({
             bytes: chunk.bytes,
             offsetBytes,
             receiveId: receive.receiveId,
@@ -176,9 +176,9 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     }
     assert.equal(offsetBytes, source.byteLength);
     assert.equal(sourceHash.digest("hex"), digest(source));
-    const finished = await instance.finishArtifactReceive(receive.receiveId);
+    const finished = await instance.artifact.finishArtifactReceive(receive.receiveId);
     assert.equal(finished.bytes, source.byteLength);
     assert.equal(digest(await readFile(`${workspace}/copy.bin`)), digest(source));
-    await instance.closeArtifactPayload(opened.payloadId);
+    await instance.artifact.closeArtifactPayload(opened.payloadId);
     assert.equal(instance.snapshot().ready, true);
 });

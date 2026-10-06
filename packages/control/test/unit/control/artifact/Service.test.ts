@@ -8,8 +8,9 @@ import type {
     ArtifactTransferRecord,
     JsonValue,
     MessageStream,
+    WorkerArtifactApi,
 } from "@portable-devshell/shared";
-import { ArtifactService, type ArtifactServiceEndpoint, type ArtifactServiceSchedule } from "../../../../src/artifact/Service.ts";
+import { ArtifactService, type ArtifactServiceSchedule } from "../../../../src/artifact/Service.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const png = Buffer.from(
@@ -58,7 +59,7 @@ async function waitWithAbort(
     });
 }
 
-class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
+class MemoryArtifactEndpoint implements WorkerArtifactApi {
     readonly closedPayloads: string[] = [];
     readonly payloadClosed = new Deferred();
     readonly abortedReceives: string[] = [];
@@ -246,7 +247,7 @@ class DirectSourceEndpoint extends MemoryArtifactEndpoint {
     }
 }
 
-function resolver(endpoints: Record<string, ArtifactServiceEndpoint>) {
+function resolver(endpoints: Record<string, WorkerArtifactApi>) {
     return (name: string) => endpoints[name];
 }
 

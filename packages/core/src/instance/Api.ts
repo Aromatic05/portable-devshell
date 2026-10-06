@@ -1,4 +1,4 @@
-import type { Channel, ControlInstanceAlertsConfig, ControlMcpContextMode, Endpoint, InstanceEventRecord, InstanceSnapshot, JsonValue, MessageStream, ReverseEnrollmentState, ReverseTransport, ToolDefinition, WorkerArtifactDirectPushInput, WorkerArtifactDirectPushResult, WorkerArtifactDirectReceiveOpenInput, WorkerArtifactDirectReceiveOpenResult, WorkerArtifactPayloadOpenInput, WorkerArtifactPayloadOpenResult, WorkerArtifactPayloadReadInput, WorkerArtifactPayloadReadResult, WorkerArtifactReceiveBeginInput, WorkerArtifactReceiveBeginResult, WorkerArtifactReceiveFinishResult, WorkerArtifactReceiveWriteInput, WorkerArtifactReceiveWriteResult, STREAM_GAP_CODE } from "@portable-devshell/shared";
+import type { Channel, ControlInstanceAlertsConfig, ControlMcpContextMode, Endpoint, InstanceEventRecord, InstanceSnapshot, JsonValue, MessageStream, ReverseEnrollmentState, ReverseTransport, ToolDefinition, WorkerArtifactApi, STREAM_GAP_CODE } from "@portable-devshell/shared";
 import type { Instance } from "./Instance.js";
 import type { TransportConnection } from "./transport/endpoint/Connection.js";
 
@@ -253,6 +253,7 @@ export interface InstanceFields {
 }
 
 export interface WorkerInstance {
+    readonly artifact: WorkerArtifactApi;
     snapshot(): InstanceSnapshot;
     readonly endpoint: Endpoint;
     readWorkerTools(): Promise<readonly ToolDefinition[]>;
@@ -328,38 +329,9 @@ export interface WorkerInstance {
         type: InstanceEventInput["type"],
         data?: JsonValue,
     ): Promise<InstanceEventRecord>;
-    openArtifactPayload(
-        input: WorkerArtifactPayloadOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadOpenResult>;
-    readArtifactPayload(
-        input: WorkerArtifactPayloadReadInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactPayloadReadResult>;
-    closeArtifactPayload(payloadId: string): Promise<void>;
     prepareExtensionResource(
         input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult>;
-    beginArtifactReceive(
-        input: WorkerArtifactReceiveBeginInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveBeginResult>;
-    writeArtifactReceive(
-        input: WorkerArtifactReceiveWriteInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactReceiveWriteResult>;
-    finishArtifactReceive(
-        receiveId: string,
-    ): Promise<WorkerArtifactReceiveFinishResult>;
-    abortArtifactReceive(receiveId: string): Promise<void>;
-    openArtifactDirectReceive(
-        input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal,
-    ): Promise<WorkerArtifactDirectReceiveOpenResult>;
-    closeArtifactDirectReceive(receiverId: string): Promise<void>;
-    pushArtifactPayloadDirect(
-        input: WorkerArtifactDirectPushInput,
-    ): Promise<WorkerArtifactDirectPushResult>;
     start(): Promise<InstanceSnapshot>;
     startInteractive(
         interactiveSession?: WorkerCommandInteractiveSession,

@@ -9,12 +9,13 @@ import type {
     ArtifactPayloadDescriptor,
     JsonValue,
     MessageStream,
+    WorkerArtifactApi,
 } from "@portable-devshell/shared";
 import { ArtifactHttpRoute, artifactShareRoute } from "../../../src/artifact/route/Http.ts";
-import { ArtifactService, type ArtifactServiceEndpoint } from "../../../src/artifact/Service.ts";
+import { ArtifactService } from "../../../src/artifact/Service.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
-class MemoryShareEndpoint implements ArtifactServiceEndpoint {
+class MemoryShareEndpoint implements WorkerArtifactApi {
     readonly closed: string[] = [];
     readonly #bytes: Buffer;
 

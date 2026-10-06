@@ -25,8 +25,6 @@ import { randomUUID } from "node:crypto";
 import {
     createRemoteError,
     type ArtifactPayloadDescriptor,
-    type WorkerArtifactPayloadOpenResult,
-    type WorkerArtifactPayloadReadResult,
 } from "@portable-devshell/shared";
 
 import { createArtifactDirectoryArchive } from "../../Archive.js";
@@ -84,7 +82,7 @@ export class ArtifactHostPayloadStore {
         expiresAtMs: number,
         workspace: string,
         context: ArtifactHostAccessContext,
-    ): Promise<WorkerArtifactPayloadOpenResult> {
+    ) {
         const now = Date.now();
         if (
             !Number.isSafeInteger(expiresAtMs) ||
@@ -171,7 +169,7 @@ export class ArtifactHostPayloadStore {
         payloadId: string,
         offsetBytes: number,
         maxBytes: number,
-    ): Promise<WorkerArtifactPayloadReadResult> {
+    ) {
         validateId(payloadId);
         if (!Number.isSafeInteger(offsetBytes) || offsetBytes < 0) {
             throw artifactError(

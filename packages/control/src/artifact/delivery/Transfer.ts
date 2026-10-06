@@ -16,7 +16,7 @@ import type {
     ArtifactTransferResult,
     ArtifactTransferStartInput,
     JsonValue,
-    WorkerArtifactPayloadReadResult,
+    WorkerArtifactApi,
 } from "@portable-devshell/shared";
 import { ArtifactRecordStore } from "../RecordStore.js";
 import {
@@ -33,7 +33,6 @@ import {
 } from "../Service.js";
 import type {
     ArtifactEventRecorder,
-    ArtifactServiceEndpoint,
     ArtifactServiceOptions,
     ArtifactServiceSchedule,
     StoredArtifactTransfer,
@@ -480,7 +479,7 @@ interface ArtifactTransferExecutorOptions {
     resolveEndpoint: (
         instance: string,
         authorityInstance?: string,
-    ) => ArtifactServiceEndpoint | undefined;
+    ) => WorkerArtifactApi | undefined;
     schedule: ArtifactServiceSchedule;
 }
 
@@ -580,8 +579,8 @@ export class ArtifactTransferExecutor {
         const controller = new AbortController();
         this.#controllers.set(transferId, controller);
         const signal = controller.signal;
-        let sourceEndpoint: ArtifactServiceEndpoint | undefined;
-        let targetEndpoint: ArtifactServiceEndpoint | undefined;
+        let sourceEndpoint: WorkerArtifactApi | undefined;
+        let targetEndpoint: WorkerArtifactApi | undefined;
         let commitBarrier: Promise<void> | undefined;
         let resolveCommitBarrier: (() => void) | undefined;
         try {
@@ -864,8 +863,8 @@ export class ArtifactTransferExecutor {
     async #handleFailure(
         transfer: StoredArtifactTransfer,
         error: unknown,
-        sourceEndpoint?: ArtifactServiceEndpoint,
-        targetEndpoint?: ArtifactServiceEndpoint,
+        sourceEndpoint?: WorkerArtifactApi,
+        targetEndpoint?: WorkerArtifactApi,
     ): Promise<void> {
         if (transfer.receiveId !== undefined && targetEndpoint !== undefined) {
             await targetEndpoint
@@ -933,7 +932,11 @@ export class ArtifactTransferExecutor {
 }
 
 function validatePayloadChunk(
-    chunk: WorkerArtifactPayloadReadResult,
+    chunk: {
+        offsetBytes: number;
+        returnedBytes: number;
+        totalBytes: number;
+    },
     expectedOffset: number,
     totalBytes: number,
 ): void {

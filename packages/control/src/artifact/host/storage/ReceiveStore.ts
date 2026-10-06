@@ -16,11 +16,6 @@ import { randomUUID } from "node:crypto";
 import {
     createRemoteError,
     type ArtifactPayloadDescriptor,
-    type WorkerArtifactReceiveBeginInput,
-    type WorkerArtifactReceiveBeginResult,
-    type WorkerArtifactReceiveFinishResult,
-    type WorkerArtifactReceiveWriteInput,
-    type WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/shared";
 
 import { extractArtifactDirectoryArchive } from "../../Archive.js";
@@ -87,8 +82,13 @@ export class ArtifactHostReceiveStore {
     }
 
     async begin(
-        input: WorkerArtifactReceiveBeginInput,
-    ): Promise<WorkerArtifactReceiveBeginResult> {
+        input: {
+            descriptor: ArtifactPayloadDescriptor;
+            overwrite: boolean;
+            targetPath: string;
+            workspace: string;
+        },
+    ) {
         validateDescriptor(input.descriptor);
         const targetName = resolveTargetName(
             input.targetPath,
@@ -153,8 +153,12 @@ export class ArtifactHostReceiveStore {
     }
 
     async write(
-        input: WorkerArtifactReceiveWriteInput,
-    ): Promise<WorkerArtifactReceiveWriteResult> {
+        input: {
+            bytes: Uint8Array;
+            offsetBytes: number;
+            receiveId: string;
+        },
+    ) {
         validateId(input.receiveId);
         const stored = await this.#load(input.receiveId);
         if (stored.phase !== "receiving") {
@@ -212,7 +216,7 @@ export class ArtifactHostReceiveStore {
 
     async finish(
         receiveId: string,
-    ): Promise<WorkerArtifactReceiveFinishResult> {
+    ) {
         validateId(receiveId);
         const stored = await this.#load(receiveId);
         if (stored.phase !== "receiving") {

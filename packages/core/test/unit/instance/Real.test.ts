@@ -298,12 +298,12 @@ test(
         });
 
         await instance.start();
-        const opened = await instance.openArtifactPayload({
+        const opened = await instance.artifact.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
             path: "./source.bin",
             workspace: workspacePath,
         });
-        const chunk = await instance.readArtifactPayload({
+        const chunk = await instance.artifact.readArtifactPayload({
             maxBytes: source.byteLength,
             offsetBytes: 0,
             payloadId: opened.payloadId,
@@ -313,24 +313,24 @@ test(
         assert.equal(chunk.eof, true);
         assert.deepEqual(Buffer.from(chunk.bytes), source);
 
-        const receive = await instance.beginArtifactReceive({
+        const receive = await instance.artifact.beginArtifactReceive({
             descriptor: opened.descriptor,
             overwrite: false,
             targetPath: "./copy.bin",
             workspace: workspacePath,
         });
-        const written = await instance.writeArtifactReceive({
+        const written = await instance.artifact.writeArtifactReceive({
             bytes: chunk.bytes,
             offsetBytes: receive.nextOffsetBytes,
             receiveId: receive.receiveId,
         });
         assert.equal(written.receivedBytes, source.byteLength);
-        const finished = await instance.finishArtifactReceive(
+        const finished = await instance.artifact.finishArtifactReceive(
             receive.receiveId,
         );
         assert.equal(finished.bytes, source.byteLength);
         assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
-        await instance.closeArtifactPayload(opened.payloadId);
+        await instance.artifact.closeArtifactPayload(opened.payloadId);
     },
 );
 
