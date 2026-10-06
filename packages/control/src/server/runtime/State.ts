@@ -11,11 +11,7 @@ import {
     createCoreConfigRegistry,
 } from "../../config/domain/Registry.js";
 import { ConfigChangeHub } from "../../config/change/Config.js";
-import {
-    createInstanceRuntimeRegistry,
-    InstanceRegistry,
-    type InstanceRuntimeRegistry,
-} from "@portable-devshell/core";
+import { createInstance, InstanceRegistry } from "@portable-devshell/core";
 import { InstanceChangeHub } from "../../instance/Change.js";
 import { createToolCallRegistry } from "../../toolcall/index.js";
 
@@ -32,7 +28,6 @@ export class ControlRuntimeState {
     readonly configMutations = new ControlConfigMutationLock();
     readonly homeDirectory?: string;
     readonly instanceChanges = new InstanceChangeHub();
-    readonly instanceRuntimes: InstanceRuntimeRegistry;
     readonly toolCalls = createToolCallRegistry();
     #config?: ControlConfig;
     #instances = new InstanceRegistry([]);
@@ -45,10 +40,6 @@ export class ControlRuntimeState {
             options.configStore ??
             new ControlConfigStore({ registry: this.configRegistry });
         this.homeDirectory = options.homeDirectory;
-        this.instanceRuntimes = createInstanceRuntimeRegistry({
-            homeDirectory: options.homeDirectory,
-            toolCalls: this.toolCalls,
-        });
     }
 
     get config(): ControlConfig | undefined {
@@ -66,22 +57,40 @@ export class ControlRuntimeState {
     async load(): Promise<void> {
         const config = await this.configStore.readOrCreate(this.homeDirectory);
         this.#config = config;
+        const created = [];
         try {
-            this.#instances = new InstanceRegistry(
-                config.instances
-                    .filter((instance) => instance.enabled)
-                    .map((instance) => this.instanceRuntimes.create(instance)),
-            );
-        } catch (error) {
-            this.reset();
-            try {
-                await this.instanceRuntimes.close();
-            } catch (cleanupError) {
-                throw new AggregateError([error, cleanupError], "Control instance state load failed and cleanup was incomplete.");
+            for (const instance of config.instances) {
+                if (!instance.enabled) continue;
+                created.push(createInstance(instance));
             }
+            this.#instances = new InstanceRegistry(created);
+        } catch (error) {
+            const cleanupFailures: unknown[] = [];
+            for (const instance of created)
+                await instance.close().catch((cleanupError) =>
+                    cleanupFailures.push(cleanupError),
+                );
+            this.reset();
+            if (cleanupFailures.length > 0)
+                throw new AggregateError(
+                    [error, ...cleanupFailures],
+                    "Control instance state load failed and cleanup was incomplete.",
+                );
             throw error;
         }
         this.#restartControlRequired = false;
+    }
+
+
+    async closeInstances(): Promise<void> {
+        const failures: unknown[] = [];
+        for (const instance of this.#instances.list())
+            await instance.close().catch((error) => failures.push(error));
+        if (failures.length > 0)
+            throw new AggregateError(
+                failures,
+                "Control instance cleanup was incomplete.",
+            );
     }
 
     requireConfig(): ControlConfig {

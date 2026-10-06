@@ -6,7 +6,9 @@ import {
     Endpoint,
     connectControlChannel,
     createContextTransport,
+    createProcessTransport,
     createServerTransport,
+    createToolTransport,
 } from "@portable-devshell/shared";
 import { createExtensionRuntime } from "../../extension/index.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/index.js";
@@ -34,7 +36,7 @@ import { ConfigEngine } from "../../config/engine/index.js";
 import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import { ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
+import { createInstance, ConnectionModule, ProcessSubscriptionManager } from "@portable-devshell/core";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -114,9 +116,9 @@ export class ControlRuntimeFactory {
                 setConfig: (config) => options.state.setConfig(config),
             });
             const instanceEditor = new InstanceEditorCoordinator({
-                createRuntimeInstance: (config) => options.state.instanceRuntimes.create(config),
-                retireRuntimeInstance: (descriptor) => options.state.instanceRuntimes.retire(descriptor),
-                finalizeRuntimeInstance: (descriptor) => options.state.instanceRuntimes.finalize(descriptor),
+                createRuntimeInstance: (config) => createInstance(config),
+                retireRuntimeInstance: (descriptor) => descriptor.prepareRetirement(),
+                finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
                 detachContextInstance: async (instance) => {
@@ -140,9 +142,9 @@ export class ControlRuntimeFactory {
             });
             const instanceCreate = new InstanceCreateCoordinator({
                 publishConfigChange: (paths) => options.state.configChanges.publish(paths),
-                createRuntimeInstance: (config) => options.state.instanceRuntimes.create(config),
-                retireRuntimeInstance: (descriptor) => options.state.instanceRuntimes.retire(descriptor),
-                finalizeRuntimeInstance: (descriptor) => options.state.instanceRuntimes.finalize(descriptor),
+                createRuntimeInstance: (config) => createInstance(config),
+                retireRuntimeInstance: (descriptor) => descriptor.prepareRetirement(),
+                finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 assertCleanupSettled: async (instance) =>
                     await instanceEditor.assertInstanceCleanupSettled(instance),
                 configStore: options.state.configStore,
@@ -286,7 +288,10 @@ export class ControlRuntimeFactory {
                         readLogs: async (name, query) => {
                             const descriptor = options.state.instances.get(name);
                             if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-                            return options.state.instanceRuntimes.get(descriptor).tools.readLogs(query);
+                            return await createProcessTransport(
+                                internalEndpoint,
+                                name,
+                            ).readLogs(query);
                         },
                     }),
                 }),
@@ -294,7 +299,10 @@ export class ControlRuntimeFactory {
                 readToolCalls: async (name, query) => {
                     const descriptor = options.state.instances.get(name);
                     if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-                    return options.state.instanceRuntimes.get(descriptor).tools.readToolCalls(query);
+                    return await createToolTransport(
+                        internalEndpoint,
+                        name,
+                    ).listCalls(query);
                 },
                 toolCallDecorator: mcp.toolProvenance,
             });
@@ -317,7 +325,6 @@ export class ControlRuntimeFactory {
                 },
             );
             return new ControlRuntime({
-                instanceRuntimes: options.state.instanceRuntimes,
                 contexts,
                 contextTransport,
                 internalControl: {
@@ -338,7 +345,6 @@ export class ControlRuntimeFactory {
                 toolCalls: options.state.toolCalls,
                 restart: options.restart,
                 reverse,
-                processSubscriptions,
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
                 web,

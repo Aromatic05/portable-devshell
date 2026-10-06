@@ -63,7 +63,7 @@ export class ControlServer {
 
     async #start(): Promise<void> {
         if (this.#runtime !== undefined) return;
-        await this.#state.instanceRuntimes.close();
+        await this.#state.closeInstances();
         this.#startupDiagnostic("control state load started");
         await this.#state.load();
         try {
@@ -93,7 +93,7 @@ export class ControlServer {
             this.#startupDiagnostic("control runtime start completed");
         } catch (error) {
             try {
-                await this.#state.instanceRuntimes.close();
+                await this.#state.closeInstances();
             } catch (cleanupError) {
                 throw new AggregateError([error, cleanupError], "Control startup failed and instance cleanup was incomplete.");
             }
@@ -104,7 +104,7 @@ export class ControlServer {
 
     async #stop(): Promise<void> {
         const runtime = this.#runtime;
-        if (runtime === undefined) await this.#state.instanceRuntimes.close();
+        if (runtime === undefined) await this.#state.closeInstances();
         else await runtime.stop();
         this.#runtime = undefined;
         this.#state.reset();
