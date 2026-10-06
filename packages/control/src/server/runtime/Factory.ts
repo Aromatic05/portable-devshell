@@ -9,13 +9,13 @@ import {
     createServerTransport,
 } from "@portable-devshell/shared";
 import { createExtensionRuntime } from "../../extension/index.js";
-import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/Control.js";
-import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/Control.js";
+import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/index.js";
+import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/index.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../extension/api/cap/instance/Control.js";
-import { ExtensionContextObserveCapabilityControl } from "../../extension/api/cap/context/Control.js";
+} from "../../extension/api/cap/instance/index.js";
+import { ExtensionContextObserveCapabilityControl } from "../../extension/api/cap/context/index.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
@@ -24,7 +24,7 @@ import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
 import { ExtensionLoader } from "../../extension/discovery/Loader.js";
 import { ExtensionPathLayout } from "../../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../../extension/state/Store.js";
-import { ExtensionConfigControl } from "../../extension/api/cap/config/Control.js";
+import { ExtensionConfigControl } from "../../extension/api/cap/config/index.js";
 import { createControlExtensionPointRegistry } from "../../extension/registration/Points.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";

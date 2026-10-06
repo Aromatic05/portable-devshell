@@ -8,7 +8,7 @@ import type {
     ExtensionModule,
 } from "@portable-devshell/extension";
 
-import type { ExtensionCapabilitySet } from "../api/cap/Assembly.js";
+import type { ExtensionCapabilitySet } from "../api/cap/index.js";
 import { readExtensionModule } from "../Entry.js";
 import { ExtensionGeneration } from "../registration/Generation.js";
 import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";

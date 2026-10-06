@@ -11,7 +11,7 @@ import { createCoreConfigRegistry } from "../../../../../../../src/config/domain
 import {
     ExtensionConfigControl,
     extensionConfigDomainDefinition,
-} from "../../../../../../../src/extension/api/cap/config/Control.ts";
+} from "../../../../../../../src/extension/api/cap/config/index.ts";
 import { createTestTempDirectory } from "../../../../../../../../../test/TestTempDirectory.ts";
 
 const ownedDeclaration: ExtensionConfigDeclaration = {

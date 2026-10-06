@@ -12,7 +12,7 @@ import type {
 import {
     ExtensionCapabilityAssembler,
     type ExtensionCapabilityAssemblerOptions,
-} from "../api/cap/Assembly.js";
+} from "../api/cap/index.js";
 import type { ExtensionGeneration } from "../registration/Generation.js";
 import type { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";
@@ -27,11 +27,6 @@ import {
     assertPlainFile,
     resolveContainedPath,
 } from "./Paths.js";
-
-export type {
-    ExtensionProcessRuntime,
-    ExtensionWorkerRuntime,
-} from "../api/cap/Assembly.js";
 
 export interface ExtensionLoaderOptions
     extends ExtensionCapabilityAssemblerOptions,

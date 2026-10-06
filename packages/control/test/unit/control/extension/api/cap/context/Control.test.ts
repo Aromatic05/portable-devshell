@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionContextObserveCapabilityControl } from "../../../../../../../src/extension/api/cap/context/Control.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../../../../../src/extension/api/cap/context/index.ts";
 
 const contexts = [
     {

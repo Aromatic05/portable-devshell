@@ -17,15 +17,15 @@ import type { ExtensionWorkerCapability } from "@portable-devshell/extension/wor
 import type { InstanceRegistry } from "@portable-devshell/core";
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
-import type { ExtensionConfigRuntime } from "./config/Control.js";
-import { ExtensionAssetCapabilityControl } from "./asset/Control.js";
-import { ExtensionInstanceEventPublishCapabilityControl } from "./instance/Control.js";
-import { ExtensionProcessCapabilityControl } from "./process/Control.js";
+import type { ExtensionConfigRuntime } from "./config/index.js";
+import { ExtensionAssetCapabilityControl } from "./asset/index.js";
+import { ExtensionInstanceEventPublishCapabilityControl } from "./instance/index.js";
+import { ExtensionProcessCapabilityControl } from "./process/index.js";
 import { projectExtensionCapabilities } from "./Projection.js";
 import {
     ExtensionToolCallHistoryCapabilityControl,
     type ExtensionToolCallDecorator,
-} from "./toolcall/History.js";
+} from "./toolcall/index.js";
 
 export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
     closeAll(): Promise<void>;

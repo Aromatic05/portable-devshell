@@ -7,7 +7,7 @@ import {
 import {
     assertExtensionCoreConfigAccess,
     extensionConfigDomainDefinition,
-} from "../api/cap/config/Control.js";
+} from "../api/cap/config/index.js";
 
 export class ExtensionConfigPublisher {
     readonly #published = new Set<string>();

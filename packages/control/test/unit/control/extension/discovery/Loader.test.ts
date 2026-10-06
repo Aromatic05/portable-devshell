@@ -18,8 +18,8 @@ import { createControlExtensionPointRegistry } from "../../../../../src/extensio
 
 import {
     ExtensionLoader,
-    type ExtensionWorkerRuntime,
 } from "../../../../../src/extension/discovery/Loader.ts";
+import type { ExtensionWorkerRuntime } from "../../../../../src/extension/api/cap/index.ts";
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 

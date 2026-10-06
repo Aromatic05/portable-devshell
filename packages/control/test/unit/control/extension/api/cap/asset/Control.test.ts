@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createArtifactDirectoryArchive } from "../../../../../../../src/artifact/Archive.ts";
-import { ExtensionAssetCapabilityControl } from "../../../../../../../src/extension/api/cap/asset/Control.ts";
+import { ExtensionAssetCapabilityControl } from "../../../../../../../src/extension/api/cap/asset/index.ts";
 import { createTestTempDirectory } from "../../../../../../../../../test/TestTempDirectory.ts";
 
 async function harness(t: test.TestContext) {

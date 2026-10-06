@@ -8,7 +8,7 @@ import type { InstanceEventSource } from "@portable-devshell/core/instance";
 import type { ExtensionPointSandboxBridge } from "../../../../src/extension/registration/PointRegistry.ts";
 import { controlStreamsExtensionPointDefinition, controlStreamsSandboxCodec } from "../../../../src/extension/api/point/control/Stream.ts";
 import { ControlExtensionRouteService } from "../../../../src/extension/api/point/control/Dispatch.ts";
-import { ExtensionInstanceObserveCapabilityControl } from "../../../../src/extension/api/cap/instance/Control.ts";
+import { ExtensionInstanceObserveCapabilityControl } from "../../../../src/extension/api/cap/instance/index.ts";
 import { createMessageSubscriptionBinding } from "../../../../../../extensions/comment/src/message/Route.ts";
 
 const declaration = { id: "message-subscribe", module: "message", operation: "subscribe", scope: "instance" } as const;
