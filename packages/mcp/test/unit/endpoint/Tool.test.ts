@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     McpEndpointCatalog,
-    McpToolRegistry,
     McpToolSchemaAdapter,
     mcpToolAnnotations,
     mcpToolInvocationStatus,
@@ -18,33 +17,6 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         name: "bash_run",
         outputSchema: { type: "object" },
         requiredCapabilities: ["execute"],
-    };
-
-    const todoRead: ToolDefinition = {
-        description: "Read Todo",
-        group: "todo",
-        inputSchema: { type: "object" },
-        name: "todo_read",
-        outputSchema: { type: "object" },
-        requiredCapabilities: [],
-    };
-
-    const fileSync: ToolDefinition = {
-        description: "Read and write a file",
-        group: "file",
-        inputSchema: { type: "object" },
-        name: "file_sync",
-        outputSchema: { type: "object" },
-        requiredCapabilities: ["read", "write"],
-    };
-
-    const environInfo: ToolDefinition = {
-        description: "Prepare environment",
-        group: "environ",
-        inputSchema: { type: "object" },
-        name: "environ_info",
-        outputSchema: { type: "object" },
-        requiredCapabilities: [],
     };
 
     const extensionToolMeta: JsonValue = {
@@ -126,62 +98,6 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             },
         );
         assert.equal(mcpToolInvocationStatus(), undefined);
-    });
-
-    test("McpToolRegistry merges wildcard and instance scopes", () => {
-        const registry = new McpToolRegistry();
-        const control = registry.register("*", [environInfo]);
-        const worker = registry.register("local", [bashRun]);
-
-        assert.deepEqual(
-            registry
-                .list("local")
-                .map((entry) => [entry.scope, entry.definition.name]),
-            [
-                ["*", "environ_info"],
-                ["local", "bash_run"],
-            ],
-        );
-        assert.deepEqual(
-            registry.list("remote").map((entry) => entry.definition.name),
-            ["environ_info"],
-        );
-
-        worker.replace([fileSync]);
-        assert.deepEqual(
-            registry.list("local").map((entry) => entry.definition.name),
-            ["environ_info", "file_sync"],
-        );
-        control.dispose();
-        assert.deepEqual(
-            registry.list("local").map((entry) => entry.definition.name),
-            ["file_sync"],
-        );
-    });
-
-    test("McpToolRegistry rejects overlapping duplicate names atomically", () => {
-        const registry = new McpToolRegistry();
-        registry.register("*", [todoRead]);
-        assert.throws(
-            () => registry.register("local", [todoRead]),
-            /more than once/iu,
-        );
-
-        const local = registry.register("local", [bashRun]);
-        registry.register("remote", [bashRun]);
-        assert.throws(() => local.replace([todoRead]), /more than once/iu);
-        assert.equal(
-            registry.get("local", "bash_run")?.definition.name,
-            "bash_run",
-        );
-    });
-
-    test("McpToolRegistry validates tool namespace groups", () => {
-        const registry = new McpToolRegistry();
-        assert.throws(
-            () => registry.register("local", [{ ...bashRun, group: "file" }]),
-            /namespace/iu,
-        );
     });
 
     test("McpToolSchemaAdapter rejects missing schema", () => {

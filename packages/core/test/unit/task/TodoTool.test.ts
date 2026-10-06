@@ -57,7 +57,7 @@ test("task domain keeps todo as the operation namespace", () => {
     assert.equal(catalog.isTodoTool("task_read"), false);
 });
 
-import type { ToolCallHooks } from "../../../src/toolcall/registration/Api.ts";
+import type { ToolCallRegistration } from "../../../src/toolcall/registration/Api.ts";
 import type { TaskApi } from "../../../src/task/Api.ts";
 import { installTodoTools } from "../../../src/task/todo/tool/Runtime.ts";
 
@@ -65,17 +65,17 @@ test("Todo tools register for all instances and execute against the selected Tas
     const instanceName = asInstanceName("local");
     const executes = new Map<
         string,
-        Parameters<ToolCallHooks["registerExecute"]>[1]
+        Parameters<ToolCallRegistration["registerExecute"]>[1]
     >();
     const toolNames = new Map<
         string,
-        Parameters<ToolCallHooks["registerToolName"]>[1]
+        Parameters<ToolCallRegistration["registerToolName"]>[1]
     >();
     const hooks = {
         registerContributor: () => () => undefined,
         registerExecute: (
             name: string,
-            execute: Parameters<ToolCallHooks["registerExecute"]>[1],
+            execute: Parameters<ToolCallRegistration["registerExecute"]>[1],
         ) => {
             executes.set(name, execute);
             return () => executes.delete(name);
@@ -83,12 +83,12 @@ test("Todo tools register for all instances and execute against the selected Tas
         registerReview: () => () => undefined,
         registerToolName: (
             name: string,
-            handle: Parameters<ToolCallHooks["registerToolName"]>[1],
+            handle: Parameters<ToolCallRegistration["registerToolName"]>[1],
         ) => {
             toolNames.set(name, handle);
             return () => toolNames.delete(name);
         },
-    } as ToolCallHooks;
+    } as ToolCallRegistration;
     let writtenCtxId: string | undefined;
     const task = {
         todo: {

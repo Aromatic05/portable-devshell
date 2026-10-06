@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ToolCallHooks } from "@portable-devshell/core/toolcall";
+import type { ToolCallRegistration } from "@portable-devshell/core/toolcall";
 import {
     Instance,
     InstanceRegistry,
@@ -32,27 +32,27 @@ test("Context owns environ tool definitions with structured environment output",
 test("Context registers definitions and executes environ_info through ToolCall hook", async () => {
     const executes = new Map<
         string,
-        Parameters<ToolCallHooks["registerExecute"]>[1]
+        Parameters<ToolCallRegistration["registerExecute"]>[1]
     >();
     const toolNames = new Map<
         string,
-        Parameters<ToolCallHooks["registerToolName"]>[1]
+        Parameters<ToolCallRegistration["registerToolName"]>[1]
     >();
     const hooks = {
         registerContributor: () => () => undefined,
-        registerExecute: (name: string, execute: Parameters<ToolCallHooks["registerExecute"]>[1]) => {
+        registerExecute: (name: string, execute: Parameters<ToolCallRegistration["registerExecute"]>[1]) => {
             executes.set(name, execute);
             return () => executes.delete(name);
         },
         registerToolName: (
             name: string,
-            handle: Parameters<ToolCallHooks["registerToolName"]>[1],
+            handle: Parameters<ToolCallRegistration["registerToolName"]>[1],
         ) => {
             toolNames.set(name, handle);
             return () => toolNames.delete(name);
         },
         registerReview: () => () => undefined,
-    } as unknown as ToolCallHooks;
+    } as unknown as ToolCallRegistration;
     const record = {
         createdAt: "2026-10-04T00:00:00.000Z",
         ctxId: "ctx-1",

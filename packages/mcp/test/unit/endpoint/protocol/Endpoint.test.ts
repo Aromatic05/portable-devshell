@@ -19,7 +19,6 @@ import {
     McpEndpointBinding,
     McpExtensionRegistry,
     McpNativeToolResult,
-    McpToolRegistry,
     createMcpAppMcpExtension,
     mcpAppLegacyResourceUris,
     mcpAppResourceMeta,
@@ -29,6 +28,7 @@ import {
 import {
     TestMcpEndpointWorker as McpEndpointWorker,
 } from "../../../ContextRuntime.ts";
+import { TestToolSource } from "../../../support/ToolSource.ts";
 
 const fixturesDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -96,7 +96,7 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
         instanceName: "demo",
         context: harness.context,
         tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
         worker: harness.worker,
     };
 
@@ -167,7 +167,7 @@ test("tmux_run does not render a Workspace App", () => {
         context: harness.context,
         worker: harness.worker,
         tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
     })
         .listTools()
         .find((entry) => entry.name === "tmux_run");
@@ -214,7 +214,7 @@ test("MCP endpoint serves App resources and environment presentation from a gene
             context: harness.context,
             worker: harness.worker,
             tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -647,7 +647,7 @@ test("tools/call forwards stale worker arguments even when the advertised schema
             context: harness.context,
             worker: harness.worker,
             tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -803,7 +803,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         },
         context: harness.context,
         tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
         worker: harness.worker,
     });
     const bashTool = endpoint
@@ -1136,7 +1136,7 @@ function createBinding(
             context: harness.context,
             instanceName: "demo",
             tools: harness.tools,
-        toolRegistry: harness.toolRegistry,
+        toolSource: harness.toolRegistry,
             worker: harness.worker,
         }),
         options?.serverVersion,
@@ -1345,7 +1345,7 @@ function createWorkerHarness(options?: {
             outputSchema: { type: "object" },
         },
     ];
-    const toolRegistry = new McpToolRegistry();
+    const toolRegistry = new TestToolSource();
     toolRegistry.register("*", contextToolDefinitions());
     toolRegistry.register("demo", definitions);
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;

@@ -3,11 +3,12 @@ import { rm } from "node:fs/promises";
 import test from "node:test";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 import { InstanceRuntimeRegistry } from "../../../../src/server/runtime/Instance.ts";
+import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test("finalize retries a failed worker close without reopening the retired generation", async (t) => {
     const root = await createTestTempDirectory("instance-finalize-retry");
-    const registry = new InstanceRuntimeRegistry(root);
+    const registry = new InstanceRuntimeRegistry(root, new ToolCallRegistry());
     t.after(async () => {
         await registry.close();
         await rm(root, { force: true, recursive: true });
@@ -29,7 +30,7 @@ test("finalize retries a failed worker close without reopening the retired gener
 
 test("shutdown waits for admitted work and closes every instance audit", { timeout: 5000 }, async (t) => {
     const root = await createTestTempDirectory("instance-shutdown-drain");
-    const registry = new InstanceRuntimeRegistry(root);
+    const registry = new InstanceRuntimeRegistry(root, new ToolCallRegistry());
     let releaseLease = () => {};
     t.after(async () => {
         releaseLease();
@@ -59,7 +60,7 @@ test("shutdown waits for admitted work and closes every instance audit", { timeo
 
 test("retirement cancels a pending approval before waiting for its admitted call", { timeout: 5000 }, async (t) => {
     const root = await createTestTempDirectory("instance-approval-drain");
-    const registry = new InstanceRuntimeRegistry(root);
+    const registry = new InstanceRuntimeRegistry(root, new ToolCallRegistry());
     const instance = registry.create(normalizeConfigInstanceDraft({
         name: "approval-local", provider: "local", approvalPolicy: { mode: "ask" },
     }));
@@ -87,7 +88,7 @@ test("retirement cancels a pending approval before waiting for its admitted call
 
 test("instance generations resume the persisted event cursor after finalization", async (t) => {
     const root = await createTestTempDirectory("instance-event-generation");
-    const registry = new InstanceRuntimeRegistry(root);
+    const registry = new InstanceRuntimeRegistry(root, new ToolCallRegistry());
     t.after(async () => {
         await registry.close();
         await rm(root, { force: true, recursive: true });

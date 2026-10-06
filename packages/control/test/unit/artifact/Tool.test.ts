@@ -8,9 +8,9 @@ import {
 } from "@portable-devshell/core/toolcall";
 import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
-import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/Runtime.ts";
+import { ToolCallRegistry } from "../../../src/toolcall/index.ts";
 
 function createHooks() {
     const executes = new Map<
@@ -27,7 +27,6 @@ function createHooks() {
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
-        registerToolName: () => () => undefined,
     } as ToolCallHooks;
     return { executes, hooks };
 }
@@ -42,30 +41,33 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         list: () => descriptors,
     } as unknown as InstanceRegistry;
     const { hooks } = createHooks();
+    const registry = new ToolCallRegistry();
+    const unbind = registry.bind(hooks);
     const uninstall = installArtifactTools(
         {} as ArtifactImageApi,
         instances,
         changes,
-        hooks,
+        registry,
     );
     try {
         assert.equal(
-            mcpTools.get("local", "artifact_viewImage")?.definition.name,
+            registry.get("local", "artifact_viewImage")?.definition.name,
             "artifact_viewImage",
         );
-        assert.equal(mcpTools.get("hidden", "artifact_viewImage"), undefined);
+        assert.equal(registry.get("hidden", "artifact_viewImage"), undefined);
 
         descriptors = [{ mcpEnabled: true, name: "remote" }];
         changes.publish("registry");
-        assert.equal(mcpTools.get("local", "artifact_viewImage"), undefined);
+        assert.equal(registry.get("local", "artifact_viewImage"), undefined);
         assert.equal(
-            mcpTools.get("remote", "artifact_viewImage")?.definition.name,
+            registry.get("remote", "artifact_viewImage")?.definition.name,
             "artifact_viewImage",
         );
     } finally {
         uninstall();
+        unbind();
     }
-    assert.equal(mcpTools.get("remote", "artifact_viewImage"), undefined);
+    assert.equal(registry.get("remote", "artifact_viewImage"), undefined);
 });
 
 test("Artifact execute hook uses ToolCall instance/workspace and presents native image", async () => {
@@ -98,7 +100,14 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         onChange: () => () => undefined,
     } as unknown as InstanceRegistry;
     const { executes, hooks } = createHooks();
-    const uninstall = installArtifactTools(artifact, instances, new InstanceChangeHub(), hooks);
+    const registry = new ToolCallRegistry();
+    const unbind = registry.bind(hooks);
+    const uninstall = installArtifactTools(
+        artifact,
+        instances,
+        new InstanceChangeHub(),
+        registry,
+    );
     try {
         const execute = executes.get("artifact_viewImage");
         assert.ok(execute);
@@ -134,5 +143,6 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         );
     } finally {
         uninstall();
+        unbind();
     }
 });

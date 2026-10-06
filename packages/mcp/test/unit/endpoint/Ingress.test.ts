@@ -12,9 +12,9 @@ import {
 } from "@portable-devshell/shared";
 import { McpEndpointWorker } from "../../../src/endpoint/Endpoint.ts";
 import type { ToolCallIngressPort } from "../../../src/endpoint/call/Port.ts";
-import { McpToolRegistry } from "../../../src/endpoint/tool/Registry.ts";
 import { McpNativeToolResult } from "../../../src/endpoint/call/Boundary.ts";
 import { readMcpRoutedInput } from "../../../src/endpoint/tool/Input.ts";
+import { TestToolSource } from "../../support/ToolSource.ts";
 
 const contextRecord: ContextRecord = {
     createdAt: "2026-10-05T00:00:00.000Z",
@@ -43,12 +43,12 @@ test("bootstrap tools enter the shared Control ingress with the current instance
             return { bootstrapped: true };
         },
     };
-    const toolRegistry = new McpToolRegistry();
-    toolRegistry.register("*", [bootstrapTool]);
+    const toolSource = new TestToolSource();
+    toolSource.register("*", [bootstrapTool]);
     const endpoint = new McpEndpointWorker({
         context: { async resolve() { throw new Error("bootstrap must not resolve a Context"); } } as never,
         instanceName: "alpha",
-        toolRegistry,
+        toolSource,
         tools,
         worker: workerPort(),
     });
@@ -74,7 +74,7 @@ test("bootstrap tools enter the shared Control ingress with the current instance
 });
 
 test("workspace calls pass through Control callbacks and preserve worker presentation", async () => {
-    const registry = new McpToolRegistry();
+    const registry = new TestToolSource();
     registry.register("alpha", [workerTool]);
     const contextLookups: unknown[] = [];
     const workerEvents: unknown[] = [];
@@ -116,7 +116,7 @@ test("workspace calls pass through Control callbacks and preserve worker present
         } as never,
         instanceName: "alpha",
         toolProvenance: { async record(record) { provenance.push(record); } },
-        toolRegistry: registry,
+        toolSource: registry,
         tools,
         worker: {
             ...workerPort(),

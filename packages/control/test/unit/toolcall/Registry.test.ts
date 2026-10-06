@@ -3,23 +3,28 @@ import test from "node:test";
 
 import type { ToolDefinition } from "@portable-devshell/shared";
 import {
-    McpToolRegistry,
-    mcpAllInstances,
-} from "../../../src/endpoint/tool/Registry.ts";
+    allToolCallInstances,
+    ToolCallRegistry,
+} from "../../../src/toolcall/index.ts";
 
 const environInfo = tool("environ_info");
 const bashRun = tool("bash_run", ["execute"]);
 const fileRead = tool("file_read", ["read"]);
 const todoRead = tool("todo_read");
 
-test("McpToolRegistry overlays wildcard definitions onto each instance", () => {
-    const registry = new McpToolRegistry();
-    const control = registry.register(mcpAllInstances, [environInfo]);
+test("ToolCallRegistry overlays global definitions onto each instance", () => {
+    const registry = new ToolCallRegistry();
+    const control = registry.register(allToolCallInstances, [environInfo]);
     const worker = registry.register("local", [bashRun]);
 
     assert.deepEqual(
-        registry.list("local").map((entry) => [entry.scope, entry.definition.name]),
-        [[mcpAllInstances, "environ_info"], ["local", "bash_run"]],
+        registry
+            .list("local")
+            .map((entry) => [entry.scope, entry.definition.name]),
+        [
+            [allToolCallInstances, "environ_info"],
+            ["local", "bash_run"],
+        ],
     );
     assert.deepEqual(
         registry.list("remote").map((entry) => entry.definition.name),
@@ -39,9 +44,9 @@ test("McpToolRegistry overlays wildcard definitions onto each instance", () => {
     );
 });
 
-test("McpToolRegistry rejects overlapping duplicate names atomically", () => {
-    const registry = new McpToolRegistry();
-    registry.register(mcpAllInstances, [todoRead]);
+test("ToolCallRegistry rejects overlapping duplicate names atomically", () => {
+    const registry = new ToolCallRegistry();
+    registry.register(allToolCallInstances, [todoRead]);
     assert.throws(
         () => registry.register("local", [todoRead]),
         /more than once/iu,
@@ -56,8 +61,8 @@ test("McpToolRegistry rejects overlapping duplicate names atomically", () => {
     );
 });
 
-test("McpToolRegistry validates namespace groups", () => {
-    const registry = new McpToolRegistry();
+test("ToolCallRegistry validates namespace groups", () => {
+    const registry = new ToolCallRegistry();
     assert.throws(
         () => registry.register("local", [{ ...bashRun, group: "file" }]),
         /namespace/iu,

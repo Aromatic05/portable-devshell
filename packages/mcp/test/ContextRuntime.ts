@@ -38,7 +38,10 @@ import {
     createTestWorkerInstance,
     type TestWorkerInstanceFields,
 } from "../../core/test/support/WorkerInstance.ts";
-import { mcpTools } from "@portable-devshell/mcp/tool";
+import {
+    TestToolSource,
+    type TestToolRegistration,
+} from "./support/ToolSource.ts";
 
 export interface TestContextRuntime extends Omit<ContextRuntime, "close">, ContextApi {
     close(): Promise<void>;
@@ -49,6 +52,7 @@ export interface TestMcpRuntimeState {
     readonly contextTransport: ContextTransport;
     readonly state: McpRuntimeState;
     readonly toolCallRuntime: ReturnType<typeof createToolCallRuntime>;
+    readonly toolSource: TestToolSource;
     readonly closeContextTools: () => void;
     readonly oauthResource: McpRuntimeState["oauthResource"];
 }
@@ -61,6 +65,7 @@ export interface TestMcpRuntimeOptions {
     configureToolCalls?: (
         runtime: ReturnType<typeof createToolCallRuntime>,
     ) => void;
+    toolSource?: TestToolSource;
 }
 
 export function createTestContextRuntime(
@@ -136,7 +141,6 @@ export function createTestInstance(options: TestWorkerInstanceFields) {
             });
         },
     });
-    const registration = mcpTools.register(options.name, []);
     const runtime = createTestWorkerToolRuntime({
         homeDirectory: options.homeDirectory,
         instanceName: options.name,
@@ -147,10 +151,9 @@ export function createTestInstance(options: TestWorkerInstanceFields) {
         runtime,
         async start() {
             await worker.start();
-            registration.replace(await runtime.execution.refreshTools());
+            await runtime.execution.refreshTools();
         },
         async close() {
-            registration.dispose();
             await runtime.execution.close();
             await runtime.audit.close();
             await worker.stop();
@@ -181,9 +184,10 @@ export function createTestMcpRuntimeState(
             },
         })),
     });
+    const toolSource = options.toolSource ?? new TestToolSource();
     const closeContextTools = installContextTools(
         contexts,
-        toolCallRuntime.hooks,
+        toolSource.registration(toolCallRuntime.hooks),
         { instances: options.instances ?? emptyInstances() },
     );
     options.configureToolCalls?.(toolCallRuntime);
@@ -198,16 +202,19 @@ export function createTestMcpRuntimeState(
         contextTransport: context,
         state,
         toolCallRuntime,
+        toolSource,
         closeContextTools,
         oauthResource: state.oauthResource.bind(state),
     };
 }
 
-export interface TestMcpHostConfig extends McpHostConfig {
+export interface TestMcpHostConfig
+    extends Omit<McpHostConfig, "toolSource"> {
     contextFile?: string;
     tools?: ToolCallApi;
     resolveTarget?: ToolCallTargetResolver;
     configureToolCalls?: TestMcpRuntimeOptions["configureToolCalls"];
+    toolSource?: TestToolSource;
 }
 
 export class TestMcpHost extends McpHost {
@@ -215,7 +222,7 @@ export class TestMcpHost extends McpHost {
     readonly #testRuntime: TestMcpRuntimeState;
     readonly #toolRegistrations = new Map<
         string,
-        ReturnType<typeof mcpTools.register>
+        TestToolRegistration
     >();
 
     constructor(config: TestMcpHostConfig, runtime?: TestMcpRuntimeState) {
@@ -224,20 +231,24 @@ export class TestMcpHost extends McpHost {
             tools,
             resolveTarget,
             configureToolCalls,
+            toolSource: configuredToolSource,
             ...hostConfig
         } = config;
+        const toolSource =
+            configuredToolSource ?? runtime?.toolSource ?? new TestToolSource();
         const testRuntime = runtime ?? createTestMcpRuntimeState({
             contextFile,
             instances: instancesForHost(hostConfig.instances),
             tools,
             resolveTarget,
             configureToolCalls,
+            toolSource,
             storageDir: hostConfig.storageDir,
             mcpAppLeaseFile: hostConfig.mcpAppLeaseFile,
         });
         const toolRegistrations: [
             string,
-            ReturnType<typeof mcpTools.register>,
+            TestToolRegistration,
         ][] = [];
         for (const instance of config.instances) {
             const listTools = (
@@ -247,10 +258,10 @@ export class TestMcpHost extends McpHost {
             ).listTools;
             if (listTools !== undefined)
                 toolRegistrations.push(
-                    [instance.name, mcpTools.register(instance.name, listTools())],
+                    [instance.name, toolSource.register(instance.name, listTools())],
                 );
         }
-        super(hostConfig, testRuntime.state);
+        super({ ...hostConfig, toolSource }, testRuntime.state);
         for (const [name, registration] of toolRegistrations)
             this.#toolRegistrations.set(name, registration);
         this.contexts = testRuntime.contexts;
@@ -288,8 +299,12 @@ export class TestMcpHost extends McpHost {
 
 export class TestMcpEndpointWorker extends McpEndpointWorker {
     constructor(
-        options: Omit<McpEndpointWorkerOptions, "context" | "tools"> & {
+        options: Omit<
+            McpEndpointWorkerOptions,
+            "context" | "tools" | "toolSource"
+        > & {
             context?: McpEndpointWorkerOptions["context"];
+            toolSource?: McpEndpointWorkerOptions["toolSource"];
             tools?: McpEndpointWorkerOptions["tools"];
         },
     ) {
@@ -298,6 +313,7 @@ export class TestMcpEndpointWorker extends McpEndpointWorker {
         super({
             ...options,
             context: options.context ?? contextTransport,
+            toolSource: options.toolSource ?? new TestToolSource(),
             tools: options.tools ?? createTestToolCallApi(),
         });
     }

@@ -143,10 +143,6 @@ const workspacePackages = new Map([
         new URL("../src/index.ts", import.meta.url).href,
     ],
     [
-        "@portable-devshell/mcp/tool",
-        new URL("../src/endpoint/tool/Public.ts", import.meta.url).href,
-    ],
-    [
         "@portable-devshell/mcp/testing",
         new URL("../src/testing.ts", import.meta.url).href,
     ],

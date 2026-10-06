@@ -12,7 +12,6 @@ import type {
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
-import { McpToolRegistry } from "@portable-devshell/mcp";
 import type { McpToolProvenanceRecorder } from "../../../../src/endpoint/tool/Provenance.ts";
 import { contextToolDefinitions } from "@portable-devshell/core/context";
 import { todoToolDefinitions } from "../../../../../core/src/task/todo/tool/Definition.ts";
@@ -20,6 +19,7 @@ import {
     createTestMcpRuntimeState,
 } from "../../../ContextRuntime.ts";
 import { McpEndpointWorker } from "../../../../src/endpoint/Endpoint.ts";
+import { TestToolSource } from "../../../support/ToolSource.ts";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
@@ -777,10 +777,10 @@ function createManagedEndpoint(
     } = {},
 ): McpEndpointWorker {
     const state = options.contextState ?? contextState;
-    const toolRegistry = new McpToolRegistry();
+    const toolSource = new TestToolSource();
     const workerTools = worker.listTools();
     const workerToolNames = new Set(workerTools.map(({ name }) => name));
-    toolRegistry.register("main-pc", [
+    toolSource.register("main-pc", [
         ...workerTools,
         ...contextToolDefinitions(),
         ...(options.toolDefinitions ?? []).filter(
@@ -792,7 +792,7 @@ function createManagedEndpoint(
         contextMode: options.contextMode,
         instanceName: "main-pc",
         toolProvenance: options.toolProvenance,
-        toolRegistry,
+        toolSource,
         tools,
         worker,
     });

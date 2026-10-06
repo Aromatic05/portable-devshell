@@ -11,6 +11,7 @@ import { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
 import { McpEndpointFactory } from "../../../../src/server/mcp/Endpoint.ts";
 import { McpRuntimeFactory } from "../../../../src/server/mcp/Runtime.ts";
 import { McpRuntimeState } from "@portable-devshell/mcp";
+import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
 import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
@@ -72,6 +73,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
             context: { resolve: async () => { throw new Error("No Context operation expected before host start."); } } as unknown as ContextTransport,
             tools: { async call() { throw new Error("No tool call expected before host start."); } },
         }),
+        toolSource: new ToolCallRegistry(),
     });
 
     assert.ok(host !== undefined);

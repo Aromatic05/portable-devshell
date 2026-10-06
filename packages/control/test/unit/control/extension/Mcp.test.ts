@@ -5,10 +5,10 @@ import {
     presentToolCallResult,
     type ToolCallHooks,
 } from "@portable-devshell/core/toolcall";
-import { mcpTools } from "@portable-devshell/mcp/tool";
 import type { InstanceName } from "@portable-devshell/shared";
 
 import { McpExtensionService } from "../../../../src/extension/api/point/mcp/Service.ts";
+import { ToolCallRegistry } from "../../../../src/toolcall/index.ts";
 
 test("MCP Extension tools publish definitions and execute through ToolCall hooks", async () => {
     let releases = 0;
@@ -93,12 +93,13 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
-        registerToolName: () => () => undefined,
     } as ToolCallHooks;
 
-    const uninstall = service.install(hooks);
+    const registry = new ToolCallRegistry();
+    const unbind = registry.bind(hooks);
+    const uninstall = service.install(registry);
     try {
-        const tool = mcpTools.get("remote-server", "todo_report")?.definition;
+        const tool = registry.get("remote-server", "todo_report")?.definition;
         assert.equal(tool?.name, "todo_report");
         assert.equal(tool?.description, "Send progress.");
         assert.deepEqual(tool?._meta, {
@@ -143,10 +144,11 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
 
         declarations = [];
         listener?.();
-        assert.equal(mcpTools.get("remote-server", "todo_report"), undefined);
+        assert.equal(registry.get("remote-server", "todo_report"), undefined);
         assert.equal(executes.has("todo_report"), false);
     } finally {
         uninstall();
+        unbind();
     }
 });
 
