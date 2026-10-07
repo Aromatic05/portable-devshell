@@ -130,15 +130,13 @@ function reverseDescriptor(onAttach: (generation: number) => void = () => undefi
                 return { instance: descriptor, release() {} };
             },
         },
-        worker: {
-            provision: {
-                reverseConnection: {
-                    async attach(
-                        _channel: Channel,
-                        input: { generation: number },
-                    ) {
-                        onAttach(input.generation);
-                    },
+        provision: {
+            reverseConnection: {
+                async attach(
+                    _channel: Channel,
+                    input: { generation: number },
+                ) {
+                    onAttach(input.generation);
                 },
             },
         },
