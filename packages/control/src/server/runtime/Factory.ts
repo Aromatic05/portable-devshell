@@ -84,6 +84,7 @@ export class ControlRuntimeFactory {
             homeDirectory: options.homeDirectory,
             instances: options.instances.registry,
         });
+        let composedState: ControlState | undefined;
         try {
             const internalEndpoint = new Endpoint({
                 connectChannel: (signal) =>
@@ -400,6 +401,7 @@ export class ControlRuntimeFactory {
                 internalEndpoint,
                 toolRegistry,
             });
+            composedState = state;
             instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await state.extensions.retireInstanceGeneration(instance.name);
@@ -431,11 +433,12 @@ export class ControlRuntimeFactory {
             return { server, state };
         } catch (error) {
             try {
-                await artifact.stop();
+                if (composedState === undefined) await artifact.stop();
+                else await composedState.close();
             } catch (cleanupError) {
                 throw new AggregateError(
                     [error, cleanupError],
-                    "Control runtime composition failed and Artifact rollback was incomplete.",
+                    "Control composition failed and cleanup was incomplete.",
                 );
             }
             throw error;

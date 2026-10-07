@@ -123,6 +123,8 @@ export class ControlServer {
                 cleanupFailures.push(cleanupError),
             );
             if (cleanupFailures.length > 0) {
+                this.#state = state;
+                this.#server = server;
                 throw new AggregateError(
                     [error, ...cleanupFailures],
                     "Control startup failed and cleanup was incomplete.",

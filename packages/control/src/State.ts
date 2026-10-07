@@ -122,7 +122,6 @@ export class ControlState {
 
     async close(): Promise<void> {
         if (this.#closed) return;
-        this.#closed = true;
         const failures: unknown[] = [];
         for (const unregister of this.#toolCallHookUnregister.splice(0).reverse()) {
             try {
@@ -147,5 +146,6 @@ export class ControlState {
                 "Control domains failed to close cleanly.",
             );
         }
+        this.#closed = true;
     }
 }
