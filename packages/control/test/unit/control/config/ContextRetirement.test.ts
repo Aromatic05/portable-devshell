@@ -145,18 +145,8 @@ for (const descriptorState of ["present", "missing"] as const) {
             engine,
             instanceChanges: new InstanceChangeHub(),
             instanceRegistry: instances,
-            reconcileContextInstanceCleanup: async (instance, descriptor) => {
-                const cleanupDescriptor = descriptor ?? instances.get(instance);
-                if (
-                    cleanupDescriptor !== undefined &&
-                    !cleanupDescriptor.worker.snapshot().ready
-                )
-                    await cleanupDescriptor.worker.start();
-                await contexts.api.cleanup.reconcileInstance(
-                    instance,
-                    cleanupDescriptor,
-                );
-            },
+            reconcileContextInstanceCleanup: async (instance, target) =>
+                await contexts.api.cleanup.reconcileInstance(instance, target),
             retireRuntimeInstance: async () => {},
             finalizeRuntimeInstance: async (descriptor) => {
                 await descriptor.close();

@@ -1859,24 +1859,8 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
             await contexts.api.detachInstance(instance);
         },
         instanceRegistry: instances,
-        reconcileContextInstanceCleanup: async (
-            instance,
-            cleanupDescriptor: Instance | undefined,
-        ) => {
-            const currentDescriptor = requireCleanupDescriptor(cleanupDescriptor);
-            const cleanupCapability = descriptor(
-                currentDescriptor.worker as unknown as Record<string, unknown>,
-                { name: instance, mcpPath: currentDescriptor.mcpPath },
-            );
-            cleanupOnly.set(instance, cleanupCapability);
-            try {
-                if (!cleanupCapability.worker.snapshot().ready)
-                    await cleanupCapability.worker.start();
-                await contexts.api.cleanup.reconcileInstance(instance);
-            } finally {
-                cleanupOnly.delete(instance);
-            }
-        },
+        reconcileContextInstanceCleanup: async (instance, target) =>
+            await contexts.api.cleanup.reconcileInstance(instance, target),
     });
 
     await service.deleteInstance({ instanceName });
@@ -1994,24 +1978,8 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
                 createRuntimeInstance: (instance) =>
                     mapDescriptor ?? createTestInstance(instance),
                 instanceRegistry: registry,
-                reconcileContextInstanceCleanup: async (
-                    instance,
-                    cleanupDescriptor: Instance | undefined,
-                ) => {
-                    const currentDescriptor = requireCleanupDescriptor(cleanupDescriptor);
-                    const cleanupCapability = descriptor(
-                        currentDescriptor.worker as unknown as Record<string, unknown>,
-                        { name: instance, mcpPath: currentDescriptor.mcpPath },
-                    );
-                    cleanupOnly.set(instance, cleanupCapability);
-                    try {
-                        if (!cleanupCapability.worker.snapshot().ready)
-                            await cleanupCapability.worker.start();
-                        await contexts.api.cleanup.reconcileInstance(instance);
-                    } finally {
-                        cleanupOnly.delete(instance);
-                    }
-                },
+                reconcileContextInstanceCleanup: async (instance, target) =>
+                    await contexts.api.cleanup.reconcileInstance(instance, target),
             });
 
         const service = makeService(instances);

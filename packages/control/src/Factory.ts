@@ -154,23 +154,8 @@ export class ControlFactory {
                 detachContextInstance: async (instance) => {
                     await contextTransport.detachInstance(instance);
                 },
-                reconcileContextInstanceCleanup: async (instance, descriptor) => {
-                    await contexts.api.cleanup.reconcileInstance(
-                        instance,
-                        descriptor === undefined
-                            ? undefined
-                            : {
-                                  releaseAlerts: async (workspace) =>
-                                      await descriptor.environment.releaseAlerts(
-                                          workspace,
-                                      ),
-                                  releaseReference: async (reference) =>
-                                      await descriptor.supervision.ownership.releaseReference(
-                                          reference,
-                                      ),
-                              },
-                    );
-                },
+                reconcileContextInstanceCleanup: async (instance, target) =>
+                    await contexts.api.cleanup.reconcileInstance(instance, target),
                 instanceRegistry: options.instances.registry,
                 instanceChanges: options.instances.changes,
                 mcp: mcp.instancePort,

@@ -18,10 +18,7 @@ export class InstanceRetirementCoordinator {
     readonly notification = new InstanceRetirementNotification();
     readonly #detachContextInstance?: (instance: string) => Promise<void>;
 
-    readonly #reconcileContextInstanceCleanup?: (
-        instance: string,
-        descriptor?: InstanceDescriptor,
-    ) => Promise<void>;
+    readonly #reconcileContextInstanceCleanup: InstanceEditorCoordinatorOptions["reconcileContextInstanceCleanup"];
 
     readonly #engine: ConfigEngine;
 
@@ -277,7 +274,21 @@ export class InstanceRetirementCoordinator {
             }
         }
         try {
-            await this.#reconcileContextInstanceCleanup(instance, descriptor);
+            await this.#reconcileContextInstanceCleanup(
+                instance,
+                descriptor === undefined
+                    ? undefined
+                    : {
+                          releaseAlerts: async (workspace) =>
+                              await descriptor.environment.releaseAlerts(
+                                  workspace,
+                              ),
+                          releaseReference: async (reference) =>
+                              await descriptor.supervision.ownership.releaseReference(
+                                  reference,
+                              ),
+                      },
+            );
         } finally {
             if (startedForCleanup && descriptor !== undefined) {
                 await descriptor.supervision.lifecycle.stop();

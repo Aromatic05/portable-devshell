@@ -18,7 +18,10 @@ export interface InstanceEditorCoordinatorOptions {
     mcp?: InstanceMcpRuntimePort;
     reconcileContextInstanceCleanup?: (
         instance: string,
-        descriptor?: Instance,
+        target?: {
+            releaseAlerts(workspace: string): Promise<void>;
+            releaseReference(reference: string): Promise<void>;
+        },
     ) => Promise<void>;
     finalizeRuntimeInstance(descriptor: Instance): Promise<void>;
 }
