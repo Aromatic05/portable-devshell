@@ -8,6 +8,7 @@ import type {
     ToolCallTarget,
     ToolDefinition,
     ToolEvent,
+    WorkerWorkspacePrepareResult,
 } from "@portable-devshell/shared";
 import type {
     AuditApi,
@@ -56,7 +57,9 @@ export interface ToolCallExecutionRuntimeOptions {
     audit: AuditApi;
     endpoint: Endpoint;
     instanceName: InstanceName;
+    prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult>;
     readTools(): Promise<readonly ToolDefinition[]>;
+    releaseWorkspace(workspace: string): Promise<void>;
 }
 
 export interface ToolCallExecutionRuntime {
@@ -75,6 +78,11 @@ export interface ToolCallExecutionRuntime {
         context?: ToolCallContext,
         signal?: AbortSignal,
     ): Promise<JsonValue>;
+    openSession(
+        workspace: string,
+        connectionId: string,
+    ): Promise<WorkerWorkspacePrepareResult>;
+    releaseSession(connectionId: string): Promise<void>;
     refreshTools(): Promise<ToolDefinition[]>;
     close(): Promise<void>;
 }

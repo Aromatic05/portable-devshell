@@ -101,15 +101,18 @@ export class InstanceStateMachine {
 export class WorkerInstanceState {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #events: InstanceEventPort;
+    readonly #onReadyChanged: (ready: boolean) => Promise<void>;
     readonly #stateMachine: InstanceStateMachine;
 
     constructor(options: {
         config: ResolvedWorkerInstanceConfig;
         events: InstanceEventPort;
+        onReadyChanged(ready: boolean): Promise<void>;
         stateMachine: InstanceStateMachine;
     }) {
         this.#config = options.config;
         this.#events = options.events;
+        this.#onReadyChanged = options.onReadyChanged;
         this.#stateMachine = options.stateMachine;
         this.#stateMachine.apply({ lastSeq: this.#events.cursor() });
     }
@@ -164,6 +167,7 @@ export class WorkerInstanceState {
                 "instance.readyChanged",
                 createReadyChangedEventData(previous, next),
             );
+            await this.#onReadyChanged(next.ready);
         }
         return this.snapshot(reverse);
     }

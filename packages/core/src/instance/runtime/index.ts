@@ -34,6 +34,7 @@ interface WorkerInstanceDependencies {
     config: ResolvedWorkerInstanceConfig;
     events: InstanceEventPort;
     endpoint: Endpoint;
+    onReadyChanged(ready: boolean): Promise<void>;
     protocolClient: WorkerProtocolClient;
     stateMachine: InstanceStateMachine;
     transportConnection: TransportConnection;
@@ -58,6 +59,7 @@ export class WorkerInstance implements WorkerInstanceApi {
         const state = new WorkerInstanceState({
             config,
             events: dependencies.events,
+            onReadyChanged: dependencies.onReadyChanged,
             stateMachine: dependencies.stateMachine,
         });
         const workerHost = `${config.name}-worker`;

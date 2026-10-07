@@ -15,7 +15,6 @@ export interface InstanceEventLog {
 export function createInstanceEventLog(
     audit: AuditRuntime,
     instanceName: InstanceName,
-    onReadyChanged: () => Promise<void>,
 ): InstanceEventLog {
     let appendTail = Promise.resolve();
     const readEvents = (fromSeq = 1) => {
@@ -43,8 +42,6 @@ export function createInstanceEventLog(
                         seq: audit.api.events.readHighWater() + 1,
                     };
                     await audit.api.events.append(record);
-                    if (record.type === "instance.readyChanged")
-                        await onReadyChanged();
                     return record;
                 });
                 appendTail = operation.then(

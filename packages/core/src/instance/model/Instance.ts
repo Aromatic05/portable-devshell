@@ -1,6 +1,8 @@
 import {
     asInstanceName,
+    createRemoteError,
     ProcessSubscriptionManager,
+    runtimeErrorCodes,
     type ControlHostDefinition,
     type ControlInstanceConfig,
     type ControlPortDefinition,
@@ -63,13 +65,7 @@ export class Instance {
         });
         let instance!: Instance;
         let state!: InstanceState;
-        const eventLog = createInstanceEventLog(
-            audit,
-            instanceName,
-            async () => {
-                await state.handleReadyChanged();
-            },
-        );
+        const eventLog = createInstanceEventLog(audit, instanceName);
         const subscriptions = new ProcessSubscriptionManager();
         const { protocolClient, worker } = createWorkerInstance(
             toWorkerConfig(config, reverse, paths.homeDirectory),
@@ -78,15 +74,35 @@ export class Instance {
                 active: () => instance.lifecycle.active,
                 enabled: () => instance.config.enabled,
             },
+            async (ready) => {
+                await state.handleReadyChanged(ready);
+            },
         );
         state = new InstanceState({
+            acquireLease: () => instance.lifecycle.acquireLease(),
+            appendEvent: async (type, data) => {
+                await worker.supervision.state.appendEvent(type, data);
+            },
             audit,
+            assertReady: () => {
+                if (worker.supervision.snapshot().ready) return;
+                throw createRemoteError({
+                    code: runtimeErrorCodes.instanceNotReady,
+                    details: { instance: config.name },
+                    message: `Instance ${config.name} is not ready.`,
+                    retryable: false,
+                });
+            },
             config,
+            endpoint: worker.supervision.endpoint,
             instanceName,
             paths,
-            protocolClient,
-            resolveInstance: () => instance,
-            worker,
+            prepareWorkspace: (workspace) =>
+                worker.execution.environment.prepareWorkspace(workspace),
+            readTools: async () => (await protocolClient.listTools()).tools,
+            releaseWorkspace: async (workspace) =>
+                await worker.execution.environment.releaseAlerts(workspace),
+            terminal: worker.execution.terminal,
         });
         instance = new Instance({
             config: toInstanceConfig(config),
@@ -228,6 +244,7 @@ function createWorkerInstance(
         active(): boolean;
         enabled(): boolean;
     },
+    onReadyChanged: (ready: boolean) => Promise<void>,
 ): { protocolClient: WorkerProtocolClient; worker: WorkerInstance } {
     const resolved = resolveWorkerInstanceConfig(config);
     const transportConnection = resolved.transportConnection;
@@ -251,6 +268,7 @@ function createWorkerInstance(
         config: resolved,
         events,
         endpoint,
+        onReadyChanged,
         protocolClient,
         stateMachine: new InstanceStateMachine(resolved.name),
         transportConnection,

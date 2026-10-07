@@ -3,10 +3,13 @@ import {
     runtimeErrorCodes,
     type ApprovalRequest,
     type ControlInstanceConfig,
+    type Endpoint,
     type InstanceName,
     type JsonValue,
+    type ToolDefinition,
     createToolCallRuntime,
     type ToolCallRuntime,
+    type WorkerWorkspacePrepareResult,
 } from "@portable-devshell/shared";
 
 import type { ApprovalRuntime } from "../../approval/Api.js";
@@ -26,10 +29,7 @@ import type {
     ToolCallTarget,
 } from "../../toolcall/Api.js";
 import { createToolCallExecutionRuntime } from "../../toolcall/index.js";
-import type { WorkerWorkspacePrepareResult } from "../Api.js";
-import type { WorkerInstance } from "../runtime/Api.js";
-import type { WorkerProtocolClient } from "../transport/packet/Client.js";
-import type { Instance } from "./Instance.js";
+import type { WorkerTerminalPort } from "../../terminal/Api.js";
 import type { InstancePaths } from "./Paths.js";
 import {
     InstanceToolCatalog,
@@ -37,13 +37,18 @@ import {
 } from "./Tools.js";
 
 interface InstanceStateDependencies {
+    acquireLease(): { release(): void };
+    appendEvent(type: string, data?: JsonValue): Promise<void>;
     audit: AuditRuntime;
+    assertReady(): void;
     config: ControlInstanceConfig;
+    endpoint: Endpoint;
     instanceName: InstanceName;
     paths: InstancePaths;
-    protocolClient: WorkerProtocolClient;
-    resolveInstance: () => Instance;
-    worker: WorkerInstance;
+    prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult>;
+    readTools(): Promise<readonly ToolDefinition[]>;
+    releaseWorkspace(workspace: string): Promise<void>;
+    terminal: WorkerTerminalPort;
 }
 
 export class InstanceState {
@@ -53,28 +58,22 @@ export class InstanceState {
     readonly terminal: TerminalRuntime;
     readonly tools: ToolCallExecutionRuntime;
     readonly toolCalls: ToolCallRuntime;
-    readonly #protocolClient: WorkerProtocolClient;
-    readonly #resolveInstance: () => Instance;
+    readonly #acquireLease: InstanceStateDependencies["acquireLease"];
+    readonly #instanceName: InstanceName;
     readonly #toolDefinitions = new InstanceToolCatalog();
     readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
     readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
     readonly #toolCallUnregister: readonly (() => void)[];
-    readonly #toolSessions = new Map<string, string>();
-    readonly #worker: WorkerInstance;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
     #retiring = false;
 
     constructor(dependencies: InstanceStateDependencies) {
-        const { audit, config, instanceName, paths, protocolClient, worker } =
-            dependencies;
+        const { audit, config, instanceName, paths } = dependencies;
+        this.#acquireLease = dependencies.acquireLease;
+        this.#instanceName = instanceName;
         this.audit = audit;
-        this.#protocolClient = protocolClient;
-        this.#resolveInstance = dependencies.resolveInstance;
-        this.#worker = worker;
-        const appendEvent = async (type: string, data?: JsonValue) => {
-            await worker.supervision.state.appendEvent(type, data);
-        };
+        const appendEvent = dependencies.appendEvent;
         this.approval = createApprovalRuntime({
             appendEvent,
             instanceName,
@@ -83,19 +82,13 @@ export class InstanceState {
         });
         this.tools = createToolCallExecutionRuntime({
             appendEvent,
-            assertReady: () => {
-                if (worker.supervision.snapshot().ready) return;
-                throw createRemoteError({
-                    code: runtimeErrorCodes.instanceNotReady,
-                    details: { instance: config.name },
-                    message: `Instance ${config.name} is not ready.`,
-                    retryable: false,
-                });
-            },
+            assertReady: dependencies.assertReady,
             audit: audit.api,
-            endpoint: worker.supervision.endpoint,
+            endpoint: dependencies.endpoint,
             instanceName,
-            readTools: async () => (await protocolClient.listTools()).tools,
+            prepareWorkspace: dependencies.prepareWorkspace,
+            readTools: dependencies.readTools,
+            releaseWorkspace: dependencies.releaseWorkspace,
         });
         this.task = createTaskRuntime({
             appendEvent: async (type, data) => {
@@ -106,7 +99,7 @@ export class InstanceState {
                 this.tools.invokeInternal(toolName, input, context, signal),
             paths,
         });
-        this.terminal = createTerminalRuntime(worker.execution.terminal);
+        this.terminal = createTerminalRuntime(dependencies.terminal);
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
             todoToolDefinitions(),
@@ -137,10 +130,6 @@ export class InstanceState {
         ];
     }
 
-    get instance(): Instance {
-        return this.#resolveInstance();
-    }
-
     get toolDefinitions(): InstanceToolCatalog {
         return this.#toolDefinitions;
     }
@@ -152,7 +141,7 @@ export class InstanceState {
     target(): ToolCallTarget {
         return {
             dispatch: async (request) => {
-                const lease = this.instance.lifecycle.acquireLease();
+                const lease = this.#acquireLease();
                 try {
                     return await this.callTool(request);
                 } finally {
@@ -165,7 +154,7 @@ export class InstanceState {
     async refreshTools(): Promise<void> {
         if (this.#retiring)
             throw new Error(
-                `Instance ${this.instance.config.name} domains are retiring.`,
+                `Instance ${this.#instanceName} domains are retiring.`,
             );
         const definitions = await this.tools.refreshTools();
         if (this.#retiring) return;
@@ -173,27 +162,8 @@ export class InstanceState {
         this.task.resume();
     }
 
-    async openToolSession(
-        workspace: string,
-        connectionId: string,
-    ): Promise<WorkerWorkspacePrepareResult> {
-        await this.releaseToolSession(connectionId);
-        const prepared =
-            await this.#protocolClient.prepareWorkspace(workspace);
-        this.#toolSessions.set(connectionId, prepared.workspace);
-        await this.refreshTools();
-        return prepared;
-    }
-
-    async releaseToolSession(connectionId: string): Promise<void> {
-        const workspace = this.#toolSessions.get(connectionId);
-        if (workspace === undefined) return;
-        this.#toolSessions.delete(connectionId);
-        if ([...this.#toolSessions.values()].includes(workspace)) return;
-        await this.#protocolClient.releaseAlerts(workspace);
-    }
-
     async prepareRetirement(): Promise<void> {
+        this.#retiring = true;
         await this.approval.retire("Instance generation retired.");
     }
 
@@ -213,10 +183,9 @@ export class InstanceState {
         return this.#closePromise;
     }
 
-    async handleReadyChanged(): Promise<void> {
+    async handleReadyChanged(ready: boolean): Promise<void> {
         if (this.#retiring) return;
-        if (this.#worker.supervision.snapshot().ready)
-            await this.refreshTools();
+        if (ready) await this.refreshTools();
         else this.#workerToolRegistration.replace([]);
     }
 
@@ -237,14 +206,12 @@ export class InstanceState {
         await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
         await close(() => this.terminal.sessions.close());
-        for (const connectionId of this.#toolSessions.keys())
-            await close(async () => await this.releaseToolSession(connectionId));
         await close(() => this.#workerToolRegistration.dispose());
         await close(() => this.#domainToolRegistration.dispose());
         if (failures.length > 0)
             throw new AggregateError(
                 failures,
-                `Instance ${this.instance.config.name} domains failed to close.`,
+                `Instance ${this.#instanceName} domains failed to close.`,
             );
     }
 
@@ -259,7 +226,7 @@ export class InstanceState {
         if (failures.length > 0)
             throw new AggregateError(
                 failures,
-                `Instance ${this.instance.config.name} failed to close.`,
+                `Instance ${this.#instanceName} failed to close.`,
             );
     }
 }

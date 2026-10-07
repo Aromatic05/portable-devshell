@@ -28,8 +28,24 @@ export function createToolCallExecutionRuntime(
         toolCallScheduler: scheduler,
         toolInvoker: invoker,
     });
+    const sessions = new Map<string, string>();
     let closed = false;
     let closePromise: Promise<void> | undefined;
+    const releaseSession = async (connectionId: string): Promise<void> => {
+        const workspace = sessions.get(connectionId);
+        if (workspace === undefined) return;
+        sessions.delete(connectionId);
+        if ([...sessions.values()].includes(workspace)) return;
+        await options.releaseWorkspace(workspace);
+    };
+    const refreshTools = async () => {
+        if (closed)
+            throw new Error("Tool call execution runtime is closed.");
+        const tools = await options.readTools();
+        if (closed)
+            throw new Error("Tool call execution runtime is closed.");
+        return catalog.refresh(tools);
+    };
     return {
         target: () => tool.target(),
         listTools: () => catalog.listTools(),
@@ -41,19 +57,24 @@ export function createToolCallExecutionRuntime(
             tool.readToolCallFailureSummary(sinceMs, untilMs),
         invokeInternal: (toolName, input, context, signal) =>
             tool.invokeInternal(toolName, input, context, signal),
-        refreshTools: async () => {
+        openSession: async (workspace, connectionId) => {
             if (closed)
                 throw new Error("Tool call execution runtime is closed.");
-            const tools = await options.readTools();
-            if (closed)
-                throw new Error("Tool call execution runtime is closed.");
-            return catalog.refresh(tools);
+            await releaseSession(connectionId);
+            const prepared = await options.prepareWorkspace(workspace);
+            sessions.set(connectionId, prepared.workspace);
+            await refreshTools();
+            return prepared;
         },
+        releaseSession,
+        refreshTools,
         close: async () => {
             if (closePromise !== undefined) return await closePromise;
             closed = true;
             closePromise = (async () => {
                 await scheduler.close();
+                for (const connectionId of [...sessions.keys()])
+                    await releaseSession(connectionId);
                 catalog.clear();
             })();
             await closePromise;
