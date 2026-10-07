@@ -229,6 +229,9 @@ test("control tool session exposes canonical workspace and releases the connecti
             async readToolCalls() {
                 return [];
             },
+            async readToolCallFailureSummary() {
+                return { count: 0 };
+            },
             async releaseToolSession(sessionId: string) {
                 released.push(sessionId);
             },

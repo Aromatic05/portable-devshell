@@ -5,10 +5,15 @@ import type {
     ControlPortContext,
     ControlStreamMessage,
     InstanceEventRecord,
+    InstanceEventStreamGap,
+    InstanceEventStreamSlice,
     JsonValue,
     MessageStream,
 } from "@portable-devshell/shared";
-import { ProcessSubscriptionManager } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    ProcessSubscriptionManager,
+} from "@portable-devshell/shared";
 
 test("ProcessSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new ProcessSubscriptionManager(5);
@@ -87,7 +92,7 @@ test("ProcessSubscriptionManager returns stream.gap when fromSeq is unavailable"
             harness.stream,
             harness.context,
             "alpha",
-            worker as unknown as WorkerInstance,
+            worker,
             1,
         ),
         (error: unknown) => {
@@ -165,7 +170,7 @@ test("ProcessSubscriptionManager does not overlap polls while an event emit is p
         harness.stream,
         harness.context,
         "alpha",
-        worker as unknown as WorkerInstance,
+        worker,
         1,
     );
     worker.emit("toolCall.completed", { toolName: "bash_run" });
@@ -336,14 +341,16 @@ class FakeWorker {
         return this.#snapshot;
     }
 
-    subscribe(fromSeq = 1) {
+    subscribe(
+        fromSeq = 1,
+    ): InstanceEventStreamGap | InstanceEventStreamSlice {
         const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
 
         if (fromSeq < nextSeq) {
             return {
                 code: "stream.gap",
                 fromSeq,
-                kind: "gap" as const,
+                kind: "gap",
                 lastSeq: this.#lastSeq,
                 nextSeq,
             };
@@ -351,7 +358,7 @@ class FakeWorker {
 
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
-            kind: "events" as const,
+            kind: "events",
             lastSeq: this.#lastSeq,
         };
     }
@@ -360,7 +367,7 @@ class FakeWorker {
         const event = {
             at: new Date().toISOString(),
             data,
-            instanceName: this.#name,
+            instanceName: asInstanceName(this.#name),
             seq: this.#lastSeq + 1,
             type,
         };
