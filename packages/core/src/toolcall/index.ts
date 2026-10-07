@@ -72,10 +72,19 @@ export function createToolCallExecutionRuntime(
             if (closePromise !== undefined) return await closePromise;
             closed = true;
             closePromise = (async () => {
-                await scheduler.close();
+                const failures: unknown[] = [];
+                await scheduler.close().catch((error) => failures.push(error));
                 for (const connectionId of [...sessions.keys()])
-                    await releaseSession(connectionId);
+                    await releaseSession(connectionId).catch((error) =>
+                        failures.push(error),
+                    );
                 catalog.clear();
+                if (failures.length === 1) throw failures[0];
+                if (failures.length > 1)
+                    throw new AggregateError(
+                        failures,
+                        "Tool call execution runtime failed to close cleanly.",
+                    );
             })();
             await closePromise;
         },
