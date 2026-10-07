@@ -139,11 +139,6 @@ export class ControlRouteRegistry {
         return () => this.#listeners.delete(listener);
     }
 
-    connectionClosed(connectionId: string): void {
-        for (const instance of this.#options.instances.list())
-            instance.connectionClosed(connectionId);
-    }
-
     dispose(): void {
         this.#unsubscribeExtensions();
         this.#unsubscribeInstances();

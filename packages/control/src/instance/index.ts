@@ -77,6 +77,11 @@ export class ControlInstances {
         await this.#editor?.reconcileCleanupDebt();
     }
 
+    connectionClosed(connectionId: string): void {
+        for (const instance of this.#registry.list())
+            instance.connectionClosed(connectionId);
+    }
+
     async load(config: ControlConfig): Promise<void> {
         const created: Instance[] = [];
         try {

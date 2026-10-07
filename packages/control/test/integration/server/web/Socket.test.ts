@@ -41,9 +41,9 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     const closedConnections: string[] = [];
     const channels = new ControlTransportServer({
         listeners: [provider],
+        onConnectionDetached: (connectionId) =>
+            closedConnections.push(connectionId),
         routes: {
-            connectionClosed: (connectionId) =>
-                closedConnections.push(connectionId),
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -176,7 +176,6 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
             new ControlWebSocketListener({ http: host.server, sessions }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -231,7 +230,6 @@ test("web token auth exchanges the configured web bearer token for a session coo
     const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -301,7 +299,6 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
     const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -357,7 +354,6 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -426,7 +422,6 @@ test("web session expiry closes its active channel", async (t) => {
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -476,7 +471,6 @@ test("web RPC requires the canonical subprotocol", async (t) => {
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -526,7 +520,6 @@ test("web session capacity evicts the oldest browser session and closes its chan
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -594,7 +587,6 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -671,7 +663,6 @@ test("native OAuth bearer expiry closes an active Control WebSocket", async (t) 
     const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -725,7 +716,6 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
     const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },

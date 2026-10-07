@@ -244,14 +244,13 @@ test("ControlTransportServer serves the same routes through multiple channel pro
     });
     const closedConnections: string[] = [];
     const routes = {
-        connectionClosed(connectionId: string) {
-            closedConnections.push(connectionId);
-        },
         hosts: createRouteHosts,
         onChange: () => () => undefined,
     };
     const server = new ControlTransportServer({
         listeners: [socketProvider, webProvider],
+        onConnectionDetached: (connectionId) =>
+            closedConnections.push(connectionId),
         routes,
     });
     await server.start();
@@ -456,7 +455,6 @@ test("ControlTransportServer closes earlier providers when a later provider fail
     const server = new ControlTransportServer({
         listeners: [first, failure],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -471,7 +469,6 @@ test("ControlTransportServer coalesces concurrent start calls", async (t) => {
     const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -494,7 +491,6 @@ test("ControlTransportServer waits for an active start before closing providers"
     const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -517,7 +513,6 @@ test("ControlTransportServer retries providers that failed to close", async () =
     const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -536,7 +531,6 @@ test("ControlTransportServer finishes failed cleanup before restarting providers
     const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -560,7 +554,6 @@ test("ControlTransportServer coalesces restarts while failed cleanup is retried"
     const server = new ControlTransportServer({
         listeners: [provider],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },
@@ -679,7 +672,6 @@ function createRouteProvider(
     hosts: () => readonly ControlHostDefinition[] = createRouteHosts,
 ) {
     return {
-        connectionClosed() {},
         hosts,
         onChange: () => () => undefined,
     };

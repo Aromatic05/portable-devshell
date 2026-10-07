@@ -67,7 +67,6 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     const channels = new ControlTransportServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
         routes: {
-            connectionClosed() {},
             hosts: createRouteHosts,
             onChange: () => () => undefined,
         },

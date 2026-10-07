@@ -44,6 +44,7 @@ export interface ControlServerOptions {
     instanceEditor: InstanceEditorCoordinator;
     instanceChanges: InstanceChangeHub;
     instances: InstanceRegistry;
+    onConnectionDetached(connectionId: string): void;
     internalControl: {
         endpoint: Endpoint;
         server: ServerTransport;
@@ -129,6 +130,7 @@ export class ControlServer {
         if (this.#web.listener !== undefined) listeners.push(this.#web.listener);
         this.#transport = new ControlTransportServer({
             listeners,
+            onConnectionDetached: options.onConnectionDetached,
             routes: this.#routes,
         });
 

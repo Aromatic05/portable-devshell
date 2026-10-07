@@ -26,13 +26,13 @@ import type {
 } from "../channel/Listener.js";
 
 export interface ControlTransportRouteProvider {
-    connectionClosed(connectionId: string): void;
     hosts(): readonly ControlHostDefinition[];
     onChange(listener: () => void): () => void;
 }
 
 export interface ControlTransportServerOptions {
     listeners: readonly ControlTransportListener[];
+    onConnectionDetached?: (connectionId: string) => void;
     routes: ControlTransportRouteProvider;
 }
 
@@ -69,6 +69,7 @@ export class ControlTransportServer {
     readonly #ports = new Map<string, BoundPort>();
     readonly #sessions = new Map<string, Session>();
     readonly #connections = new Set<ActiveConnection>();
+    readonly #onConnectionDetached: (connectionId: string) => void;
     readonly #routes: ControlTransportRouteProvider;
     #unsubscribeRoutes?: () => void;
     #listeners: ControlTransportListener[];
@@ -84,6 +85,8 @@ export class ControlTransportServer {
                 "Control transport server requires at least one listener.",
             );
         this.#listeners = [...options.listeners];
+        this.#onConnectionDetached =
+            options.onConnectionDetached ?? (() => undefined);
         this.#routes = options.routes;
         this.#syncPorts();
     }
@@ -253,7 +256,7 @@ export class ControlTransportServer {
                 attached: (host) => this.#sessions.set(host, { admission }),
                 detached: (host) => {
                     this.#sessions.delete(host);
-                    this.#routes.connectionClosed(host);
+                    this.#onConnectionDetached(host);
                 },
             });
         } catch (error) {

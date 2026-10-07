@@ -434,6 +434,8 @@ export class ControlFactory {
                 instanceEditor: options.instances.editor,
                 instanceChanges: options.instances.changes,
                 instances: options.instances.registry,
+                onConnectionDetached: (connectionId) =>
+                    options.instances.connectionClosed(connectionId),
                 internalControl: {
                     endpoint: internalEndpoint,
                     server: serverTransport,

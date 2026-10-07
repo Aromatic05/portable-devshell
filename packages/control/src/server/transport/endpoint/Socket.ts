@@ -7,6 +7,7 @@ import {
 export type ControlRouteProvider = ControlTransportRouteProvider;
 
 export interface ControlSocketServerOptions {
+    onConnectionDetached?: (connectionId: string) => void;
     routes: ControlRouteProvider;
     socketPath: string;
 }
@@ -21,6 +22,7 @@ export class ControlSocketServer {
         });
         this.#server = new ControlTransportServer({
             listeners: [this.#listener],
+            onConnectionDetached: options.onConnectionDetached,
             routes: options.routes,
         });
     }

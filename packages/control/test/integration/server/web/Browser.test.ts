@@ -327,7 +327,6 @@ async function startBrowserRuntime(options: {
             }),
         ],
         routes: {
-            connectionClosed() {},
             hosts: () => createRouteHosts(calls),
             onChange: () => () => undefined,
         },
