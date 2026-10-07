@@ -14,7 +14,7 @@ import {
     createServerTransport,
     createToolTransport,
 } from "@portable-devshell/shared";
-import { ReverseConnections } from "@portable-devshell/core/instance/transport";
+import { ReverseConnections } from "@portable-devshell/core";
 import { createExtensionRuntime } from "./extension/index.js";
 import { ExtensionArtifactCapabilityControl } from "./extension/api/cap/artifact/index.js";
 import { ExtensionAssetCapabilityControl } from "./extension/api/cap/asset/index.js";

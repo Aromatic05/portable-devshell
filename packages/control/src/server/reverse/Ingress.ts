@@ -14,7 +14,7 @@ import {
 import {
     ReverseConnections,
     type ReverseConnectionIdentity,
-} from "@portable-devshell/core/instance/transport";
+} from "@portable-devshell/core";
 import { WebSocketServer } from "ws";
 
 import type { ReverseCredentials } from "../../instance/reverse/Credentials.js";

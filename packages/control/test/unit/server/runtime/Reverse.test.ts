@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
 
-import { ReverseConnections } from "@portable-devshell/core/instance/transport";
+import { ReverseConnections } from "@portable-devshell/core";
 
 import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
 import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";

@@ -1,5 +1,5 @@
 import { createInstance, type Instance } from "@portable-devshell/core";
-import type { ReverseConnections } from "@portable-devshell/core/instance/transport";
+import type { ReverseConnections } from "@portable-devshell/core";
 import type { ControlConfig } from "@portable-devshell/shared";
 
 import { InstanceChangeHub } from "./Change.js";

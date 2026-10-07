@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     ReverseConnections,
     type ReverseConnectionIdentity,
-} from "@portable-devshell/core/instance/transport";
+} from "@portable-devshell/core";
 import {
     asInstanceName,
     type Channel,
