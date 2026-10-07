@@ -17,6 +17,7 @@ interface StoredToolDefinitionRegistration {
  * definitions here and consumers read the merged view.
  */
 export class InstanceToolCatalog {
+    readonly #listeners = new Set<() => void>();
     readonly #registrations = new Map<
         symbol,
         StoredToolDefinitionRegistration
@@ -32,12 +33,14 @@ export class InstanceToolCatalog {
         };
         this.#assertNoConflicts(registration);
         this.#registrations.set(id, registration);
+        this.#notify();
         let disposed = false;
         return {
             dispose: () => {
                 if (disposed) return;
                 disposed = true;
                 this.#registrations.delete(id);
+                this.#notify();
             },
             replace: (next) => {
                 if (disposed)
@@ -50,8 +53,14 @@ export class InstanceToolCatalog {
                 };
                 this.#assertNoConflicts(replacement, id);
                 registration.definitions = replacement.definitions;
+                this.#notify();
             },
         };
+    }
+
+    onChange(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
     }
 
     list(): readonly ToolDefinition[] {
@@ -59,6 +68,10 @@ export class InstanceToolCatalog {
         for (const registration of this.#registrations.values())
             definitions.push(...registration.definitions.values());
         return definitions;
+    }
+
+    #notify(): void {
+        for (const listener of [...this.#listeners]) listener();
     }
 
     #assertNoConflicts(

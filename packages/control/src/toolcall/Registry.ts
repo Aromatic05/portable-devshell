@@ -192,3 +192,71 @@ function scopesOverlap(left: string, right: string): boolean {
         left === right
     );
 }
+
+export interface InstanceToolCatalogSource {
+    readonly config: { readonly mcpEnabled: boolean; readonly name: string };
+    readonly toolDefinitions: {
+        list(): readonly ToolDefinition[];
+        onChange(listener: () => void): () => void;
+    };
+}
+
+export interface InstallInstanceToolDefinitionsOptions {
+    changes: { onChange(listener: () => void): () => void };
+    hooks: ToolCallRegistry;
+    instances: { list(): readonly InstanceToolCatalogSource[] };
+}
+
+/**
+ * Projects every MCP-enabled instance's per-instance tool catalog into the
+ * Control registry, scoped by instance name. The catalog is the single source
+ * of truth for Worker-refreshed definitions, so registering it here keeps the
+ * MCP catalog consistent without copying Worker schemas.
+ */
+export function installInstanceToolDefinitions(
+    options: InstallInstanceToolDefinitionsOptions,
+): () => void {
+    const { changes, hooks, instances } = options;
+    const registrations = new Map<
+        string,
+        {
+            readonly instance: InstanceToolCatalogSource;
+            readonly registration: ToolCallDefinitionRegistration;
+            readonly unsubscribe: () => void;
+        }
+    >();
+    const sync = () => {
+        const active = new Map<string, InstanceToolCatalogSource>();
+        for (const instance of instances.list()) {
+            if (instance.config.mcpEnabled)
+                active.set(instance.config.name, instance);
+        }
+        for (const [name, entry] of registrations) {
+            if (active.get(name) === entry.instance) continue;
+            entry.unsubscribe();
+            entry.registration.dispose();
+            registrations.delete(name);
+        }
+        for (const [name, instance] of active) {
+            if (registrations.has(name)) continue;
+            const registration = hooks.register(
+                name,
+                instance.toolDefinitions.list(),
+            );
+            const unsubscribe = instance.toolDefinitions.onChange(() => {
+                registration.replace(instance.toolDefinitions.list());
+            });
+            registrations.set(name, { instance, registration, unsubscribe });
+        }
+    };
+    sync();
+    const stopSync = changes.onChange(sync);
+    return () => {
+        stopSync();
+        for (const entry of registrations.values()) {
+            entry.unsubscribe();
+            entry.registration.dispose();
+        }
+        registrations.clear();
+    };
+}

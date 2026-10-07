@@ -32,6 +32,22 @@ test("catalog merges registrations and tracks replacements", () => {
     );
 });
 
+test("catalog notifies onChange on register, replace, and dispose", () => {
+    const catalog = new InstanceToolCatalog();
+    const changes: string[][] = [];
+    const unsubscribe = catalog.onChange(() => {
+        changes.push(catalog.list().map((definition) => definition.name));
+    });
+
+    const worker = catalog.register([bashRun]);
+    worker.replace([fileRead]);
+    worker.dispose();
+    unsubscribe();
+    catalog.register([fileWrite]);
+
+    assert.deepEqual(changes, [["bash_run"], ["file_read"], []]);
+});
+
 test("catalog rejects duplicate tool names across registrations atomically", () => {
     const catalog = new InstanceToolCatalog();
     const first = catalog.register([todoRead]);

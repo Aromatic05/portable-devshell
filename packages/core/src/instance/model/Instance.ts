@@ -31,6 +31,7 @@ import { InstanceLifecycle } from "./Lifecycle.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
 import { createInstanceEventLog, type InstanceEventLog } from "./EventLog.js";
 import { InstanceState } from "./State.js";
+import type { InstanceToolCatalog } from "./Tools.js";
 import { createInstanceHost } from "../Route.js";
 
 interface InstanceFields {
@@ -139,6 +140,10 @@ export class Instance {
 
     get supervision(): WorkerSupervision {
         return this.#worker.supervision;
+    }
+
+    get toolDefinitions(): InstanceToolCatalog {
+        return this.#state.toolDefinitions;
     }
 
     get lifecycle(): InstanceLifecycle {

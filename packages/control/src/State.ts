@@ -24,6 +24,7 @@ import type { BuiltinExtensionSource } from "./extension/install/BuiltinSource.j
 import type { InstanceRegistry } from "./instance/Api.js";
 import type { InstanceChangeHub } from "./instance/Change.js";
 import type { ToolCallRegistry } from "./toolcall/Api.js";
+import { installInstanceToolDefinitions } from "./toolcall/index.js";
 
 export interface ControlStateOptions {
     artifact: ArtifactRuntime;
@@ -104,6 +105,11 @@ export class ControlState {
                 options.instanceChanges,
                 options.toolRegistry,
             ),
+            installInstanceToolDefinitions({
+                changes: options.instanceChanges,
+                hooks: options.toolRegistry,
+                instances: options.instances,
+            }),
         ];
     }
 
