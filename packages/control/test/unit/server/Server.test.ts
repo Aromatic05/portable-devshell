@@ -10,6 +10,63 @@ import {
 import { ControlServer } from "../../../src/server/Server.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
+test("ControlServer interleaves domain and server lifecycle phases in dependency order", async (t) => {
+    const xdgRuntimeDir = await createTestTempDirectory("control-server-phases");
+    t.after(async () => {
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    });
+    const events: string[] = [];
+    const server = new ControlServer({
+        configStore: {
+            async readOrCreate() {
+                return createDefaultControlConfig();
+            },
+        } as never,
+        runtimeFactory: {
+            async create() {
+                return {
+                    state: {
+                        async initialize() {
+                            events.push("state.initialize");
+                        },
+                        async start() {
+                            events.push("state.start");
+                        },
+                        async reconcile() {
+                            events.push("state.reconcile");
+                        },
+                        async close() {},
+                    },
+                    server: {
+                        async prepare() {
+                            events.push("server.prepare");
+                        },
+                        async startTransport() {
+                            events.push("server.transport");
+                        },
+                        async startHosts() {
+                            events.push("server.hosts");
+                        },
+                        async stop() {},
+                    },
+                };
+            },
+        } as never,
+        xdgRuntimeDir,
+    });
+
+    await server.start();
+    assert.deepEqual(events, [
+        "state.initialize",
+        "server.prepare",
+        "server.transport",
+        "state.start",
+        "server.hosts",
+        "state.reconcile",
+    ]);
+    await server.stop();
+});
+
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {
     const xdgRuntimeDir = await createTestTempDirectory("control-server");
     t.after(async () => {
@@ -41,7 +98,9 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
                 return {
                     state: testState(),
                     server: {
-                        async start() {
+                        async prepare() {},
+                        async startTransport() {},
+                        async startHosts() {
                             events.push(`start-${current}`);
                         },
                         async stop() {
@@ -85,7 +144,9 @@ test("failed stop preserves composed owners until a retry succeeds", async (t) =
                 return {
                     state: testState(),
                     server: {
-                        async start() {},
+                        async prepare() {},
+                        async startTransport() {},
+                        async startHosts() {},
                         async stop() {
                             stopCalls += 1;
                             if (stopCalls === 1) throw stopFailure;
@@ -188,6 +249,7 @@ test("failed startup cleanup retains instance owner for explicit stop retry", as
 
 function testState() {
     return {
+        async initialize() {},
         async start() {},
         async reconcile() {},
         async close() {},
