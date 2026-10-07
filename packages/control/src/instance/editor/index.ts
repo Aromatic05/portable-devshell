@@ -25,7 +25,9 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
         this.#retirement = new InstanceRetirementCoordinator(options);
         this.#cleanup = new InstanceCleanupDebt(
             options,
-            this.#retirement,
+            this.#retirement.hooks,
+            (instance, descriptor) =>
+                this.#retirement.prepareContextCleanup(instance, descriptor),
             (instance) => this.#updates.syncMcpEndpoint(instance),
         );
         this.#updates = new InstanceReconfigurationCoordinator(

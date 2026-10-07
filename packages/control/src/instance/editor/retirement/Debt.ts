@@ -10,7 +10,7 @@ import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";
 import { closeDescriptorResourcesBestEffort } from "./State.js";
-import type { InstanceRetirementCoordinator } from "./index.js";
+import type { InstanceRetirementHooks } from "./Hooks.js";
 
 export interface InstanceCleanupDebtRecord {
     instance: ControlConfig["instances"][number];
@@ -188,14 +188,22 @@ export class InstanceCleanupDebt {
     readonly #engine: ConfigEngine;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #retirement: InstanceRetirementCoordinator;
+    readonly #hooks: InstanceRetirementHooks;
+    readonly #prepareContextCleanup: (
+        instance: string,
+        descriptor: Instance | undefined,
+    ) => Promise<void>;
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
     readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(
         options: InstanceEditorCoordinatorOptions,
-        retirement: InstanceRetirementCoordinator,
+        hooks: InstanceRetirementHooks,
+        prepareContextCleanup: (
+            instance: string,
+            descriptor: Instance | undefined,
+        ) => Promise<void>,
         syncMcpEndpoint: (instance: string) => Promise<void>,
     ) {
         this.#cleanupDebts = new InstanceCleanupDebtStore(
@@ -205,7 +213,8 @@ export class InstanceCleanupDebt {
         this.#mcp = options.mcp;
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
-        this.#retirement = retirement;
+        this.#hooks = hooks;
+        this.#prepareContextCleanup = prepareContextCleanup;
         this.#syncMcpEndpoint = syncMcpEndpoint;
         this.#createRuntimeInstance = options.createRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
@@ -338,7 +347,7 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-        await this.#retirement.hooks
+        await this.#hooks
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
 
@@ -403,7 +412,7 @@ export class InstanceCleanupDebt {
         if (record.operation === "delete") {
             this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
             try {
-                await this.#retirement.prepareContextCleanup(
+                await this.#prepareContextCleanup(
                     record.instance.name,
                     descriptor,
                 );
@@ -415,13 +424,13 @@ export class InstanceCleanupDebt {
         if (!descriptor.lifecycle.retired) {
             await descriptor.retire().catch((error) => failures.push(error));
         }
-        await this.#retirement.hooks
+        await this.#hooks
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
         let workerRetirementSucceeded = false;
         if (record.operation === "disable") {
             failures.push(
-                ...(await this.#retirement.hooks.retireDisable(
+                ...(await this.#hooks.retireDisable(
                     record.instance,
                 )),
             );
@@ -436,7 +445,7 @@ export class InstanceCleanupDebt {
             }
         } else {
             failures.push(
-                ...(await this.#retirement.hooks.retireDelete(
+                ...(await this.#hooks.retireDelete(
                     record.instance,
                 )),
             );
