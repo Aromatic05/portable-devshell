@@ -43,6 +43,13 @@ export interface ControlDaemonLaunchOptions {
 interface ControlLifecycleStatus {
     instanceCount: number;
     pid?: number;
+    /**
+     * True once Control finished `startHosts` + `state.reconcile`. `running`
+     * only proves the RPC transport answers; `ready` proves MCP/Web listeners
+     * are accepting connections. Older Control daemons do not send this field;
+     * a missing value is treated as ready for backward compatibility.
+     */
+    ready: boolean;
     running: boolean;
 }
 
@@ -265,8 +272,11 @@ export class ControlLifecycleManager {
     async start(): Promise<ControlLifecycleStatus> {
         return await this.#lifecycleLock.runExclusive(async () => {
             const current = (await this.#probeStatus()).status;
-            if (current.running) {
+            if (current.running && current.ready) {
                 return current;
+            }
+            if (current.running) {
+                return await this.#awaitReady(this.#startWaitTimeoutMs);
             }
             if (
                 current.pid !== undefined &&
@@ -307,7 +317,7 @@ export class ControlLifecycleManager {
                 return await this.#waitFor(
                     async () => {
                         const status = await this.status();
-                        if (status.running) {
+                        if (status.running && status.ready) {
                             return status;
                         }
                         if (!this.#processIsRunning(pid)) {
@@ -400,15 +410,32 @@ export class ControlLifecycleManager {
                 status: {
                     instanceCount: result.instanceCount,
                     pid: reportedPid ?? recordedPid,
+                    ready: readReady(result),
                     running: true,
                 },
                 verifiedPid: reportedPid,
             };
         } catch {
             return {
-                status: { instanceCount: 0, pid: recordedPid, running: false },
+                status: {
+                    instanceCount: 0,
+                    pid: recordedPid,
+                    ready: false,
+                    running: false,
+                },
             };
         }
+    }
+
+    async #awaitReady(timeoutMs: number): Promise<ControlLifecycleStatus> {
+        return await this.#waitFor(
+            async () => {
+                const status = await this.status();
+                return status.running && status.ready ? status : undefined;
+            },
+            "control server did not become ready",
+            timeoutMs,
+        );
     }
 
     async logs(): Promise<string> {
@@ -668,6 +695,12 @@ function isPositiveInteger(value: unknown): value is number {
     return (
         typeof value === "number" && Number.isSafeInteger(value) && value > 0
     );
+}
+
+function readReady(result: Record<string, unknown>): boolean {
+    // Legacy Control daemons predate the readiness field; treat a missing or
+    // non-boolean value as ready so a newer CLI can still start them.
+    return typeof result.ready === "boolean" ? result.ready : true;
 }
 
 function processIsRunning(pid: number): boolean {

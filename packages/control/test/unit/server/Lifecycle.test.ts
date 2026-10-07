@@ -50,14 +50,25 @@ test("start creates control directory, socket, pid and status uses rpc", async (
         await assertPathExists(harness.paths.socketFile);
     }
     await assertPathExists(join(harness.paths.controlHomeDir, "control.pid"));
-    const startupLog = await readFile(
-        join(harness.paths.controlHomeDir, "logs", "control.startup.log"),
-        "utf8",
-    );
-    assert.match(startupLog, /STARTUP control state load started/u);
-    assert.match(startupLog, /STARTUP control runtime composition started/u);
-    assert.match(startupLog, /STARTUP control runtime start completed/u);
+    const startupLog = await waitFor(async () => {
+        const log = await readFile(
+            join(harness.paths.controlHomeDir, "logs", "control.startup.log"),
+            "utf8",
+        );
+        return /STARTUP control config load started/u.test(log) &&
+            /STARTUP control composition started/u.test(log) &&
+            /STARTUP control start completed/u.test(log) &&
+            /STARTUP control daemon start completed/u.test(log)
+            ? log
+            : undefined;
+    });
+    assert.match(startupLog, /STARTUP control config load started/u);
+    assert.match(startupLog, /STARTUP control composition started/u);
+    assert.match(startupLog, /STARTUP control start completed/u);
     assert.match(startupLog, /STARTUP control daemon start completed/u);
+
+    const controlStatus = await readControlStatus(harness.paths.socketFile);
+    assert.equal(controlStatus.ready, true);
 
     const refreshed = await harness.manager.status();
     assert.equal(refreshed.running, true);
@@ -898,6 +909,25 @@ async function listInstances(socketPath: string) {
     try {
         await createServerTransport(endpoint, { clientKind: "cli" }).hello();
         return await createInstanceTransport(endpoint).listInstances();
+    } finally {
+        endpoint.close();
+    }
+}
+
+async function readControlStatus(
+    socketPath: string,
+): Promise<{ instanceCount: number; ready?: boolean }> {
+    const endpoint = new Endpoint({
+        connectChannel: (signal) =>
+            LocalChannel.connect(socketPath, { signal }),
+    });
+    try {
+        const transport = createServerTransport(endpoint, { clientKind: "cli" });
+        await transport.hello();
+        return (await transport.status()) as {
+            instanceCount: number;
+            ready?: boolean;
+        };
     } finally {
         endpoint.close();
     }

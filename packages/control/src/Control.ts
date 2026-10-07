@@ -122,6 +122,7 @@ export class Control {
             await state.reconcile();
             this.#state = state;
             this.#server = server;
+            server.markReady();
             this.#startupDiagnostic("control start completed");
         } catch (error) {
             const cleanupFailures: unknown[] = [];

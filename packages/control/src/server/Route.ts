@@ -44,6 +44,7 @@ import {
 
 export interface ServerRouteModuleOptions {
     instanceCount(): number;
+    ready(): boolean;
     restart?: () => Promise<void> | void;
     shutdown(): Promise<void> | void;
 }
@@ -62,6 +63,7 @@ export function createServerRouteModule(
             instanceCount: options.instanceCount(),
             ok: true,
             pid: process.pid,
+            ready: options.ready(),
         }),
         shutdown: (_request, context) => {
             context.afterReply(options.shutdown);
@@ -86,6 +88,12 @@ export interface ControlRouteRegistryOptions {
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;
     controlPorts?: readonly ControlPortDefinition[];
+    /**
+     * Reports whether Control finished `startHosts` + `state.reconcile`.
+     * Defaults to `true` for bare route registries; the running server
+     * supplies its own lifecycle flag.
+     */
+    controlReady?: () => boolean;
     debug?: DebugApi;
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;
@@ -158,6 +166,7 @@ export class ControlRouteRegistry {
                     createServerRouteModule({
                         instanceCount: () =>
                             this.#options.instances.list().length,
+                        ready: this.#options.controlReady ?? (() => true),
                         restart: this.#options.restart,
                         shutdown: this.#options.shutdown,
                     }),

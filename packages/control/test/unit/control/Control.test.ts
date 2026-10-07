@@ -47,6 +47,9 @@ test("Control interleaves domain and server lifecycle phases in dependency order
                         async startHosts() {
                             events.push("server.hosts");
                         },
+                        markReady() {
+                            events.push("server.markReady");
+                        },
                         async stop() {},
                     },
                 };
@@ -63,6 +66,7 @@ test("Control interleaves domain and server lifecycle phases in dependency order
         "state.start",
         "server.hosts",
         "state.reconcile",
+        "server.markReady",
     ]);
     await server.stop();
 });
@@ -103,6 +107,7 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
                         async startHosts() {
                             events.push(`start-${current}`);
                         },
+                        markReady() {},
                         async stop() {
                             events.push(`stop-${current}`);
                             if (current === 1) await firstStopGate;
@@ -147,6 +152,7 @@ test("failed stop preserves composed owners until a retry succeeds", async (t) =
                         async prepare() {},
                         async startTransport() {},
                         async startHosts() {},
+                        markReady() {},
                         async stop() {
                             stopCalls += 1;
                             if (stopCalls === 1) throw stopFailure;

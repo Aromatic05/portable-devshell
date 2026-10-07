@@ -168,11 +168,13 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     assert.deepEqual(await lifecycle.start(), {
         instanceCount: 3,
         pid: 4321,
+        ready: true,
         running: true,
     });
     assert.deepEqual(await lifecycle.start(), {
         instanceCount: 3,
         pid: 4321,
+        ready: true,
         running: true,
     });
     assert.equal(spawnCount, 1);
@@ -182,6 +184,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     assert.deepEqual(await lifecycle.stop(), {
         instanceCount: 0,
         pid: undefined,
+        ready: false,
         running: false,
     });
     assert.equal(shutdownCount, 1);
@@ -242,9 +245,78 @@ test("control lifecycle performs one final readiness probe at the wait deadline"
         assert.deepEqual(await lifecycle.start(), {
             instanceCount: 1,
             pid: 4321,
+            ready: true,
             running: true,
         });
         assert.equal(statusCalls, 3);
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("control lifecycle start waits for ready, not just a reachable transport", async () => {
+    const root = await createTestTempDirectory("shared-lifecycle-ready");
+    let ready = false;
+    let statusCalls = 0;
+    let recordedPid: number | undefined;
+    try {
+        const lifecycle = new ControlLifecycleManager({
+            daemonModulePath: "/app/ControlDaemon.js",
+            pidFile: {
+                path: resolve(root, "control.pid"),
+                async read() {
+                    return recordedPid;
+                },
+                async remove() {
+                    recordedPid = undefined;
+                },
+                async write(pid) {
+                    recordedPid = pid;
+                },
+            },
+            processIsRunning: (pid) => pid === 4321,
+            rpcClient: {
+                async request(operation) {
+                    if (operation !== "status")
+                        throw new Error("unexpected operation");
+                    statusCalls += 1;
+                    return { instanceCount: 0, pid: 4321, ready };
+                },
+            },
+            socketFile: {
+                path: resolve(root, "control.sock"),
+                runtimeDir: root,
+                async ensureRuntimeDir() {},
+                async remove() {},
+            },
+            spawnFunction() {
+                return Object.assign(new EventEmitter(), {
+                    pid: 4321,
+                    unref() {},
+                }) as never;
+            },
+            startupLogPath: resolve(root, "control.startup.log"),
+            waitTimeoutMs: 5_000,
+        });
+
+        const starting = lifecycle.start();
+        await waitForCondition(() => statusCalls >= 3);
+        assert.equal(
+            await Promise.race([
+                starting.then(() => "resolved" as const),
+                new Promise<"pending">((resolve) =>
+                    setTimeout(() => resolve("pending"), 0),
+                ),
+            ]),
+            "pending",
+            "start returned before Control reported ready",
+        );
+
+        ready = true;
+        const status = await starting;
+        assert.equal(status.running, true);
+        assert.equal(status.ready, true);
+        assert.equal(statusCalls >= 3, true);
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -311,3 +383,15 @@ test("control lifecycle start failure includes only this startup attempt", async
         await rm(root, { force: true, recursive: true });
     }
 });
+
+async function waitForCondition(
+    predicate: () => boolean,
+    timeoutMs = 5_000,
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for condition.");
+}

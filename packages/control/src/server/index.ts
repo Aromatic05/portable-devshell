@@ -73,6 +73,7 @@ export class ControlServer {
     readonly #socketListener: ControlSocketListener;
     readonly #transport: ControlTransportServer;
     readonly #web: ControlWebRuntime;
+    #ready = false;
 
     constructor(options: ControlServerOptions) {
         this.#internalControlEndpoint = options.internalControl.endpoint;
@@ -93,6 +94,7 @@ export class ControlServer {
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
             controlPorts: [createContextRouteModule(options.contexts.api)],
+            controlReady: () => this.#ready,
             debug: options.debug,
             extension: options.extensions.control,
             extensionRoutes: this.#extensionRoutes,
@@ -166,6 +168,15 @@ export class ControlServer {
             this.#reverseIngress.install(this.#mcp.host.server);
         }
         await this.#web.startHost();
+    }
+
+    /**
+     * Marks Control fully ready. Called by `Control` after the domain
+     * `state.reconcile` that follows `startHosts`, so `core.status` does not
+     * advertise readiness while MCP/Web listeners are still coming up.
+     */
+    markReady(): void {
+        this.#ready = true;
     }
 
     async stop(): Promise<void> {
