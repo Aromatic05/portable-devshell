@@ -79,7 +79,6 @@ export class ControlRuntimeFactory {
             instances: options.state.instances,
         });
         try {
-            await artifact.start();
             const internalEndpoint = new Endpoint({
                 connectChannel: (signal) =>
                     connectControlChannel(
@@ -355,7 +354,6 @@ export class ControlRuntimeFactory {
                     credentials: reverseCredentials,
                     publicBaseUrl: reversePublicBaseUrl,
                 });
-                reverseIngress.install(reverseHost);
             }
             instanceEditor.registerInstanceDeleteRetirement(async (instance) => {
                 if (instance.provider !== "reverse") return;

@@ -305,6 +305,7 @@ export class ControlRuntime {
 
     async start(): Promise<void> {
         try {
+            await this.#artifact.start();
             await this.#web.prepare();
             await this.#contexts.initialize();
             await this.#transport.start();
@@ -318,6 +319,8 @@ export class ControlRuntime {
             }
             await this.#instanceEditor.reconcileCleanupDebt();
             await this.#mcp.start();
+            if (this.#reverseIngress !== undefined && this.#mcp.host !== undefined)
+                this.#reverseIngress.install(this.#mcp.host.server);
             await this.#web.startHost();
             await this.#contexts.reconcile();
         } catch (error) {

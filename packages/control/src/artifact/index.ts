@@ -25,38 +25,34 @@ class ArtifactRuntimeState implements ArtifactRuntime {
     readonly #homeDirectory: string;
     readonly #instances: InstanceRegistry;
     readonly #hostTransferAuthorities = new Set<string>();
-    #bridge?: ArtifactHostBridge;
-    #service?: ArtifactService;
+    readonly #bridge: ArtifactHostBridge;
+    readonly #service: ArtifactService;
 
     constructor(options: ArtifactRuntimeOptions) {
         this.#config = options.config;
         this.#controlPaths = options.controlPaths;
         this.#homeDirectory = options.homeDirectory ?? homedir();
         this.#instances = options.instances;
-    }
-
-    get service(): ArtifactService {
-        if (this.#service === undefined)
-            throw new Error("Artifact runtime is not started.");
-        return this.#service;
-    }
-
-    async start(): Promise<void> {
-        const bridge = new ArtifactHostBridge({
+        this.#bridge = new ArtifactHostBridge({
             homeDirectory: this.#homeDirectory,
             storageDir: join(this.#controlPaths.artifactsDir, "host"),
         });
-        this.#bridge = bridge;
-        await bridge.initialize();
-        const service = new ArtifactService({
+        this.#service = new ArtifactService({
             directTransfer: this.#config().control.artifactDirectTransfer,
             resolveEndpoint: (name, authorityInstance) =>
                 this.#resolveEndpoint(name, authorityInstance),
             shareUrl: (token) => artifactShareUrl(this.#config(), token),
             storageDir: this.#controlPaths.artifactsDir,
         });
-        this.#service = service;
-        await service.initialize();
+    }
+
+    get service(): ArtifactService {
+        return this.#service;
+    }
+
+    async start(): Promise<void> {
+        await this.#bridge.initialize();
+        await this.#service.initialize();
     }
 
     installHttpRoute(
@@ -68,9 +64,7 @@ class ArtifactRuntimeState implements ArtifactRuntime {
     }
 
     async stop(): Promise<void> {
-        await this.#service?.stop();
-        this.#service = undefined;
-        this.#bridge = undefined;
+        await this.#service.stop();
     }
 
     async transferHostPath(
