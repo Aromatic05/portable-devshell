@@ -1,19 +1,122 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import type { ToolCallRegistration } from "@portable-devshell/core/toolcall";
 import {
-    Instance,
-    InstanceRegistry,
-    type WorkerInstance,
-} from "@portable-devshell/core/instance";
-import type { InstanceName, JsonValue } from "@portable-devshell/shared";
+    asInstanceName,
+    type EnvironmentTransport,
+    type InstanceProcessEnvelope,
+    type InstanceRuntimeTransport,
+    type JsonValue,
+    type ProcessTransport,
+    type ToolCallExecutor,
+    type ToolCallHooks,
+} from "@portable-devshell/shared";
 
+import type { ContextApi } from "../../../src/context/Api.ts";
+import { createContextRuntime } from "../../../src/context/index.ts";
 import {
     contextToolDefinitions,
     installContextTools,
-    type ContextApi,
-} from "@portable-devshell/core/context";
+} from "../../../src/context/Public.ts";
+import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
+
+function createHooks() {
+    const executes = new Map<string, ToolCallExecutor>();
+    const hooks: ToolCallHooks = {
+        registerContributor: () => () => undefined,
+        registerExecute: (name, execute) => {
+            executes.set(name, execute);
+            return () => executes.delete(name);
+        },
+        registerReview: () => () => undefined,
+    };
+    return { executes, hooks };
+}
+
+const environmentTransport: EnvironmentTransport = {
+    async prepareExtensionResource(input) {
+        assert.deepEqual(input, {
+            collection: "managed",
+            extensionId: "skill",
+        });
+        return { directory: "/skills" };
+    },
+    async prepareWorkspace(workspace) {
+        return {
+            projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+            projectMemoryDirectory: `${workspace}/.agent`,
+            temporaryDirectory: "/tmp/context",
+            workspace,
+        };
+    },
+    async readAlerts() {
+        return { advice: [] };
+    },
+    async releaseAlerts() {},
+    async touchAlerts() {
+        return { advice: [] };
+    },
+    async touchTemporaryDirectory() {},
+};
+
+const processTransport: ProcessTransport = {
+    async readLogs() {
+        return [];
+    },
+    async refresh() {
+        return processEnvelope();
+    },
+    async snapshot() {
+        return processEnvelope();
+    },
+    async start() {
+        throw new Error("unused");
+    },
+    async stop() {
+        throw new Error("unused");
+    },
+    async subscribe() {
+        throw new Error("unused");
+    },
+};
+
+const instanceRuntimeTransport: InstanceRuntimeTransport = {
+    async acquireReference() {
+        return {};
+    },
+    async appendEvent() {},
+    async readEvents() {
+        throw new Error("unused");
+    },
+    async releaseReference() {},
+    async subscribeEvents() {
+        throw new Error("unused");
+    },
+};
+
+function processEnvelope(): InstanceProcessEnvelope {
+    return {
+        lastSeq: 0,
+        snapshot: {
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 0,
+            name: asInstanceName("local"),
+            ready: true,
+            status: "ready",
+        },
+        worker: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            platform: { arch: "x86_64", os: "linux" },
+            protocolVersion: "1",
+            version: "test",
+        },
+    };
+}
 
 test("Context owns environ tool definitions with structured environment output", () => {
     const definitions = contextToolDefinitions();
@@ -30,116 +133,65 @@ test("Context owns environ tool definitions with structured environment output",
 });
 
 test("Context registers definitions and executes environ_info through ToolCall hook", async () => {
-    const executes = new Map<
-        string,
-        Parameters<ToolCallRegistration["registerExecute"]>[1]
-    >();
-    const toolNames = new Map<
-        string,
-        Parameters<ToolCallRegistration["registerToolName"]>[1]
-    >();
-    const hooks = {
-        registerContributor: () => () => undefined,
-        registerExecute: (name: string, execute: Parameters<ToolCallRegistration["registerExecute"]>[1]) => {
-            executes.set(name, execute);
-            return () => executes.delete(name);
-        },
-        registerToolName: (
-            name: string,
-            handle: Parameters<ToolCallRegistration["registerToolName"]>[1],
-        ) => {
-            toolNames.set(name, handle);
-            return () => toolNames.delete(name);
-        },
-        registerReview: () => () => undefined,
-    } as unknown as ToolCallRegistration;
-    const record = {
-        createdAt: "2026-10-04T00:00:00.000Z",
-        ctxId: "ctx-1",
-        environments: [{ instance: "local" }],
-        expiresAt: "2026-10-05T00:00:00.000Z",
-        lastAccessedAt: "2026-10-04T00:00:00.000Z",
-        principal: "alice",
-        status: "active" as const,
-    };
+    const { executes, hooks } = createHooks();
+    const registry = createToolCallRegistry();
+    const unbind = registry.bind(hooks);
+
+    const contextFile = join(
+        tmpdir(),
+        `portable-devshell-context-${randomUUID()}.jsonl`,
+    );
+    const runtime = createContextRuntime({
+        contextFile,
+        environment: () => environmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => processTransport,
+        runtime: () => instanceRuntimeTransport,
+    });
+    await runtime.initialize();
+
     let externalPrincipal: string | undefined;
-    const contexts = {
-        cleanup: {
-            async reconcile() {},
-        },
+    let preparedCtxId: string | undefined;
+    const baseEnvironment = runtime.api.environment;
+    const contexts: ContextApi = {
+        cleanup: runtime.api.cleanup,
+        disable: (ctxId) => runtime.api.disable(ctxId),
+        detachInstance: (instance) => runtime.api.detachInstance(instance),
         environment: {
-            async prepareLocal(
-                _ctxId: string,
-                _instance: string,
-                workspace: string,
-                options: {
-                    external?: { principal: string };
-                    beforeCommit?: (prepared: {
-                        projectMemoryAgentFile: string;
-                        projectMemoryDirectory: string;
-                        temporaryDirectory: string;
-                        workspace: string;
-                    }) => Promise<void>;
-                },
-            ) {
-                externalPrincipal = options.external?.principal;
-                const prepared = {
-                    projectMemoryAgentFile: `${workspace}/var/agent-work/INDEX.md`,
-                    projectMemoryDirectory: `${workspace}/var/agent-work`,
-                    temporaryDirectory: "/tmp/context",
+            attachRemote: (ctxId, handle, workspace, signal) =>
+                baseEnvironment.attachRemote(ctxId, handle, workspace, signal),
+            ensurePrepared: (ctxId, instance, workspace) =>
+                baseEnvironment.ensurePrepared(ctxId, instance, workspace),
+            maskRemote: (ctxId, handle) =>
+                baseEnvironment.maskRemote(ctxId, handle),
+            prepareLocal: async (ctxId, instance, workspace, options) => {
+                externalPrincipal = options?.external?.principal;
+                preparedCtxId = ctxId;
+                return await baseEnvironment.prepareLocal(
+                    ctxId,
+                    instance,
                     workspace,
-                };
-                await options.beforeCommit?.(prepared);
-                return prepared;
+                    options,
+                );
             },
-            async rollbackUndisclosed() {},
+            rollbackUndisclosed: (ctxId, instance, workspace) =>
+                baseEnvironment.rollbackUndisclosed(ctxId, instance, workspace),
         },
-        registry: {
-            async create() {
-                return record;
-            },
-            async lookupExternal() {
-                return undefined;
-            },
-        },
-    } as unknown as ContextApi;
-    const worker = {
-        snapshot: () => ({ ready: true }),
-        handshake: {
-            platform: { arch: "x86_64", os: "linux" },
-        },
-        async prepareWorkspace(workspace: string) {
-            return {
-                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
-                projectMemoryDirectory: `${workspace}/.agent`,
-                temporaryDirectory: "/tmp/context",
-                workspace,
-            };
-        },
-        async prepareExtensionResource() {
-            return { directory: "/skills" };
-        },
-        async readAlerts() {
-            return { advice: [] };
-        },
+        reconcileInstance: (instance) =>
+            runtime.api.reconcileInstance(instance),
+        registry: runtime.api.registry,
+        renew: (ctxId) => runtime.api.renew(ctxId),
+        resolve: (input) => runtime.api.resolve(input),
     };
 
-    const uninstall = installContextTools(contexts, hooks, {
-        instances: new InstanceRegistry([
-            new Instance({
-                enabled: true,
-                mcpEnabled: true,
-                mcpPath: "/local/mcp",
-                modelExtensions: [],
-                name: "local",
-                provider: "local",
-                worker: worker as unknown as WorkerInstance,
-            }),
-        ]),
+    const uninstall = installContextTools(contexts, registry, {
+        environment: () => environmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => processTransport,
     });
     try {
         assert.equal(
-            (await toolNames.get("environ_info")?.())?.name,
+            registry.get("local", "environ_info")?.definition.name,
             "environ_info",
         );
         const execute = executes.get("environ_info");
@@ -151,7 +203,7 @@ test("Context registers definitions and executes environ_info through ToolCall h
                 context: {
                     contextMode: "explicit",
                     externalBindings: [{ kind: "session", value: "s-1" }],
-                    instance: "local" as InstanceName,
+                    instance: asInstanceName("local"),
                     principal: "alice",
                     source: "mcp",
                 },
@@ -160,15 +212,17 @@ test("Context registers definitions and executes environ_info through ToolCall h
                 toolName: "environ_info",
             },
         );
+        const record = result as Record<string, JsonValue>;
         assert.equal(externalPrincipal, "alice");
-        assert.equal((result as Record<string, JsonValue>).ctxId, "ctx-1");
-        assert.equal((result as Record<string, JsonValue>).workspace, "/repo");
-        assert.equal(
-            (result as Record<string, JsonValue>).skillsDirectory,
-            "/skills",
-        );
+        assert.ok(preparedCtxId !== undefined && preparedCtxId.length > 0);
+        assert.equal(record.ctxId, preparedCtxId);
+        assert.equal(record.workspace, "/repo");
+        assert.equal(record.skillsDirectory, "/skills");
     } finally {
         uninstall();
+        unbind();
+        runtime.close();
+        await rm(contextFile, { force: true });
     }
-    assert.equal(toolNames.get("environ_info"), undefined);
+    assert.equal(registry.get("local", "environ_info"), undefined);
 });

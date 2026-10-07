@@ -1,46 +1,62 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
-import type { ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
-import { createDebugRuntime } from "../../../../src/debug/index.ts";
+import { DebugPatchManager } from "../../../../src/debug/Patch.ts";
 
-function context(ctxId: string): ToolCallContext {
-    return {
-        ctxId,
-        requestId: `request-${ctxId}`,
-        source: "mcp",
-        workspace: "/workspace",
+interface ToolCallRequest {
+    signal?: AbortSignal;
+    value: {
+        context: { ctxId: string };
+        payload?: JsonValue;
+        toolName: string;
     };
 }
 
-test("DebugPatchService can hold one Context without intercepting the same tool in another Context", async () => {
-    const calls: string[] = [];
-    const runtime = {
-        async callTool(request: never) {
-            const { value, signal } = request as unknown as {
-                value: { context: ToolCallContext; toolName: string };
-                signal?: AbortSignal;
-            };
-            if (signal?.aborted === true) throw signal.reason;
-            calls.push(`${value.context.ctxId}:${value.toolName}`);
-            return { ctxId: value.context.ctxId, toolName: value.toolName };
+class WorkerTarget {
+    readonly calls: string[] = [];
+
+    async callTool(request: ToolCallRequest): Promise<JsonValue> {
+        if (request.signal?.aborted === true) throw request.signal.reason;
+        this.calls.push(
+            `${request.value.context.ctxId}:${request.value.toolName}`,
+        );
+        return {
+            ctxId: request.value.context.ctxId,
+            toolName: request.value.toolName,
+        };
+    }
+}
+
+function register(manager: DebugPatchManager, target: WorkerTarget): void {
+    manager.registerTarget("worker:demo-local", target, {
+        callTool: {
+            project: (args) => {
+                const request = args[0] as ToolCallRequest;
+                return {
+                    ctxId: request.value.context.ctxId,
+                    payload: request.value.payload ?? null,
+                    toolName: request.value.toolName,
+                };
+            },
+            scope: (args) => {
+                const request = args[0] as ToolCallRequest;
+                return {
+                    ctxId: request.value.context.ctxId,
+                    toolName: request.value.toolName,
+                };
+            },
+            signal: (args) => (args[0] as ToolCallRequest).signal,
         },
-    };
-    const registry = new InstanceRegistry([
-        new Instance({
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            modelExtensions: [],
-            name: "demo-local",
-            provider: "local",
-            worker: {} as never,
-        }),
-    ]);
-    const service = createDebugRuntime({ instances: registry, target: () => runtime });
-    const patch = await service.load({
+    });
+}
+
+test("DebugPatchManager holds one Context without intercepting the same tool in another Context", async () => {
+    const manager = new DebugPatchManager();
+    const target = new WorkerTarget();
+    register(manager, target);
+    const patch = await manager.load({
         scope: { ctxId: "ctx-own", toolName: "file_read" },
         source: `(event) =>
             event.args.toolName === "file_read"
@@ -50,69 +66,79 @@ test("DebugPatchService can hold one Context without intercepting the same tool 
     });
     const controller = new AbortController();
 
-    const invoke = async (toolName: string, payload: unknown, callContext: ToolCallContext, signal?: AbortSignal) =>
-        await runtime.callTool({ value: { toolName, payload, context: callContext }, signal } as never);
-    const ownCall = invoke("file_read", { files: [{ path: "./probe", view: "metadata" }] }, context("ctx-own"), controller.signal);
+    const invoke = (
+        toolName: string,
+        callContext: { ctxId: string },
+        signal?: AbortSignal,
+    ) =>
+        target.callTool({
+            signal,
+            value: { context: callContext, toolName },
+        });
+    const ownCall = invoke(
+        "file_read",
+        { ctxId: "ctx-own" },
+        controller.signal,
+    );
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.deepEqual(
-        await invoke(
-            "file_read",
-            { files: [{ path: "./other", view: "metadata" }] },
-            context("ctx-other"),
-        ),
+        await invoke("file_read", { ctxId: "ctx-other" }),
         { ctxId: "ctx-other", toolName: "file_read" },
     );
-    assert.deepEqual(calls, ["ctx-other:file_read"]);
-    assert.equal(service.listPatches()[0]?.invocationCount, 1);
+    assert.deepEqual(target.calls, ["ctx-other:file_read"]);
+    assert.equal(manager.listPatches()[0]?.invocationCount, 1);
 
-    assert.deepEqual(
-        await invoke("tmux_read", {}, context("ctx-own")),
-        { ctxId: "ctx-own", toolName: "tmux_read" },
-    );
-    assert.deepEqual(calls, ["ctx-other:file_read", "ctx-own:tmux_read"]);
-    assert.equal(service.listPatches()[0]?.invocationCount, 1);
+    assert.deepEqual(await invoke("tmux_read", { ctxId: "ctx-own" }), {
+        ctxId: "ctx-own",
+        toolName: "tmux_read",
+    });
+    assert.deepEqual(target.calls, [
+        "ctx-other:file_read",
+        "ctx-own:tmux_read",
+    ]);
+    assert.equal(manager.listPatches()[0]?.invocationCount, 1);
 
     controller.abort(new Error("host cancelled own Context"));
     await assert.rejects(ownCall, /host cancelled own Context/iu);
-    assert.deepEqual(calls, ["ctx-other:file_read", "ctx-own:tmux_read"]);
+    assert.deepEqual(target.calls, [
+        "ctx-other:file_read",
+        "ctx-own:tmux_read",
+    ]);
 
-    const record = service
+    const record = manager
         .listPatches()
         .find((entry) => entry.patchId === patch.patchId);
     assert.equal(record?.lastInvocation?.outcome, "aborted");
     assert.equal(record?.lastInvocation?.label, "own-context-probe");
 
-    await service.unload(patch.patchId);
-    await service.close();
+    await manager.unload(patch.patchId);
+    await manager.dispose();
 });
 
-test("DebugPatchService rejects worker patches without an explicit Context scope", async () => {
-    const runtime = {
-        async callTool() {
-            return {};
+test("DebugPatchManager rejects a scoped patch when the target cannot resolve Context scope", async () => {
+    const manager = new DebugPatchManager();
+    class PlainTarget {
+        async callTool(request: ToolCallRequest): Promise<JsonValue> {
+            return request.value.toolName;
+        }
+    }
+    const target = new PlainTarget();
+    manager.registerTarget("worker:demo-local", target, {
+        callTool: {
+            project: (args) =>
+                (args[0] as ToolCallRequest).value.toolName,
         },
-    };
-    const registry = new InstanceRegistry([
-        new Instance({
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            modelExtensions: [],
-            name: "demo-local",
-            provider: "local",
-            worker: {} as never,
-        }),
-    ]);
-    const service = createDebugRuntime({ instances: registry, target: () => runtime });
+    });
 
     await assert.rejects(
-        service.load({
+        manager.load({
+            scope: { ctxId: "ctx-own" },
             source: `() => ({ action: "continue" })`,
             target: "worker:demo-local",
         }),
-        /require a ctxId scope/iu,
+        /does not support scoped patches/iu,
     );
 
-    await service.close();
+    await manager.dispose();
 });

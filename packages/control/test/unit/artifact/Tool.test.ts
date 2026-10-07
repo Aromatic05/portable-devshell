@@ -1,50 +1,60 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import {
-    type ToolCallPresentedResult,
+    asInstanceName,
+    type ArtifactViewImageInput,
+    type ToolCallExecutor,
     type ToolCallHooks,
-} from "@portable-devshell/core/toolcall";
-import { asInstanceName } from "@portable-devshell/shared";
-import { InstanceChangeHub } from "../../../src/instance/Change.ts";
+    type ToolCallPresentedResult,
+} from "@portable-devshell/shared";
+
 import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/index.ts";
+import { InstanceChangeHub } from "../../../src/instance/Change.ts";
+import { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
 
+interface InstanceEntry {
+    config: { mcpEnabled: boolean; name: string };
+}
+
 function createHooks() {
-    const executes = new Map<
-        string,
-        Parameters<ToolCallHooks["registerExecute"]>[1]
-    >();
-    const hooks = {
+    const executes = new Map<string, ToolCallExecutor>();
+    const hooks: ToolCallHooks = {
         registerContributor: () => () => undefined,
-        registerExecute: (
-            name: string,
-            execute: Parameters<ToolCallHooks["registerExecute"]>[1],
-        ) => {
+        registerExecute: (name, execute) => {
             executes.set(name, execute);
             return () => executes.delete(name);
         },
         registerReview: () => () => undefined,
-    } as ToolCallHooks;
+    };
     return { executes, hooks };
 }
 
+function createInstances(
+    list: () => readonly InstanceEntry[],
+): InstanceRegistry {
+    const registry = new InstanceRegistry([]);
+    Object.defineProperty(registry, "list", {
+        configurable: true,
+        value: list,
+    });
+    return registry;
+}
+
 test("Artifact registers image definition for MCP-enabled instance scopes", () => {
-    let descriptors = [
-        { mcpEnabled: true, name: "local" },
-        { mcpEnabled: false, name: "hidden" },
+    let descriptors: InstanceEntry[] = [
+        { config: { mcpEnabled: true, name: "local" } },
+        { config: { mcpEnabled: false, name: "hidden" } },
     ];
     const changes = new InstanceChangeHub();
-    const instances = {
-        list: () => descriptors,
-    } as unknown as InstanceRegistry;
+    const instances = createInstances(() => descriptors);
     const { hooks } = createHooks();
     const registry = createToolCallRegistry();
     const unbind = registry.bind(hooks);
     const uninstall = installArtifactTools(
-        {} as ArtifactImageApi,
+        unusedArtifact(),
         instances,
         changes,
         registry,
@@ -56,7 +66,7 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         );
         assert.equal(registry.get("hidden", "artifact_viewImage"), undefined);
 
-        descriptors = [{ mcpEnabled: true, name: "remote" }];
+        descriptors = [{ config: { mcpEnabled: true, name: "remote" } }];
         changes.publish("registry");
         assert.equal(registry.get("local", "artifact_viewImage"), undefined);
         assert.equal(
@@ -71,34 +81,33 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
 });
 
 test("Artifact execute hook uses ToolCall instance/workspace and presents native image", async () => {
-    const calls: unknown[] = [];
-    const artifact = {
+    const calls: Array<{ input: ArtifactViewImageInput; instance: string }> = [];
+    const artifact: ArtifactImageApi = {
         async readImage() {
             throw new Error("unused");
         },
-        async viewImage(input: unknown, instance: string) {
+        async viewImage(input, instance) {
             calls.push({ input, instance });
             return {
                 blake3: "b".repeat(64),
                 bytes: 68,
                 content: "png-base64",
-                encoding: "base64" as const,
+                encoding: "base64",
                 imageRef: `${"b".repeat(64)}.png`,
-                mediaType: "image/png" as const,
+                mediaType: "image/png",
                 name: "pixel.png",
                 source: {
                     instance,
                     path: "./pixel.png",
-                    type: "file" as const,
+                    type: "file",
                     workspace: "/repo",
                 },
             };
         },
-    } as ArtifactImageApi;
-    const instances = {
-        list: () => [{ mcpEnabled: true, name: "remote" }],
-        onChange: () => () => undefined,
-    } as unknown as InstanceRegistry;
+    };
+    const instances = createInstances(() => [
+        { config: { mcpEnabled: true, name: "remote" } },
+    ]);
     const { executes, hooks } = createHooks();
     const registry = createToolCallRegistry();
     const unbind = registry.bind(hooks);
@@ -126,7 +135,10 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
                 toolName: "artifact_viewImage",
             },
         );
-        assert.equal((result as ToolCallPresentedResult).type, "presented-tool-call-result");
+        assert.equal(
+            (result as ToolCallPresentedResult).type,
+            "presented-tool-call-result",
+        );
         const presented = result as ToolCallPresentedResult;
         assert.deepEqual(calls, [
             {
@@ -146,3 +158,14 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         unbind();
     }
 });
+
+function unusedArtifact(): ArtifactImageApi {
+    return {
+        async readImage() {
+            throw new Error("unused");
+        },
+        async viewImage() {
+            throw new Error("unused");
+        },
+    };
+}
