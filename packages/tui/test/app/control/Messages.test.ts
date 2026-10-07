@@ -595,7 +595,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         const routeCalls = { contextQueue: 0 };
         const server = new ControlSocketServer({
             routes: {
-                connectionClosed() {},
                 hosts: () =>
                     createRoutes(
                         messages,
