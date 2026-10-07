@@ -4,31 +4,31 @@ import type {
     ServerTransport,
 } from "@portable-devshell/shared";
 
-import type { ControlState } from "../../State.js";
-import type { ConfigChangeHub } from "../../config/change/Config.js";
-import type { ConfigEditorCoordinator } from "../../config/editor/index.js";
-import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
-import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
-import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
-import type { InstanceRegistry } from "../../instance/Api.js";
-import type { InstanceChangeHub } from "../../instance/Change.js";
-import type { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
-import type { InstanceEditorCoordinator } from "../../instance/editor/index.js";
-import type { ReverseCredentials } from "../../instance/reverse/Credentials.js";
-import { createOperationalOverviewRuntime } from "../../overview/index.js";
-import { OperationalOverviewInstanceCollector } from "../../overview/collector/Instance.js";
-import { ControlRouteRegistry } from "../Route.js";
-import type { McpControlModule } from "../mcp/Module.js";
-import type { ReverseIngress } from "../reverse/Ingress.js";
-import type { ControlTransportListener } from "../transport/channel/Listener.js";
-import { ControlSocketListener } from "../transport/channel/Socket.js";
-import { ControlTransportServer } from "../transport/endpoint/Server.js";
-import { ControlWebRuntime } from "../web/Runtime.js";
-import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
-import { WebExtensionPageService } from "../web/extension/page/Service.js";
-import { createContextRouteModule } from "../../context/Public.js";
+import type { ControlState } from "../State.js";
+import type { ConfigChangeHub } from "../config/change/Config.js";
+import type { ConfigEditorCoordinator } from "../config/editor/index.js";
+import { CliExtensionCommandService } from "../extension/api/point/cli/command/index.js";
+import { ControlExtensionRouteService } from "../extension/api/point/control/Dispatch.js";
+import { TuiExtensionPageService } from "../extension/api/point/tui/index.js";
+import type { InstanceRegistry } from "../instance/Api.js";
+import type { InstanceChangeHub } from "../instance/Change.js";
+import type { InstanceCreateCoordinator } from "../instance/editor/create/index.js";
+import type { InstanceEditorCoordinator } from "../instance/editor/index.js";
+import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
+import { createOperationalOverviewRuntime } from "../overview/index.js";
+import { OperationalOverviewInstanceCollector } from "../overview/collector/Instance.js";
+import { ControlRouteRegistry } from "./Route.js";
+import type { McpControlModule } from "./mcp/Module.js";
+import type { ReverseIngress } from "./reverse/Ingress.js";
+import type { ControlTransportListener } from "./transport/channel/Listener.js";
+import { ControlSocketListener } from "./transport/channel/Socket.js";
+import { ControlTransportServer } from "./transport/endpoint/Server.js";
+import { ControlWebRuntime } from "./web/Runtime.js";
+import { WebApplicationCatalog } from "./web/extension/application/Catalog.js";
+import { WebExtensionPageService } from "./web/extension/page/Service.js";
+import { createContextRouteModule } from "../context/Public.js";
 
-export interface ControlServerRuntimeOptions {
+export interface ControlServerOptions {
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
@@ -52,7 +52,7 @@ export interface ControlServerRuntimeOptions {
     web: ControlWebRuntime;
 }
 
-export class ControlServerRuntime {
+export class ControlServer {
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
@@ -63,7 +63,7 @@ export class ControlServerRuntime {
     readonly #transport: ControlTransportServer;
     readonly #web: ControlWebRuntime;
 
-    constructor(options: ControlServerRuntimeOptions) {
+    constructor(options: ControlServerOptions) {
         const state = options.state;
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;

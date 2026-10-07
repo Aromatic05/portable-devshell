@@ -1,43 +1,43 @@
 import type { ControlConfig as ControlConfigDocument } from "@portable-devshell/shared";
 import { ControlSocketFile } from "@portable-devshell/shared";
 
-import type { ControlState } from "../State.js";
-import { ControlConfig } from "../config/index.js";
-import type { ControlConfigStore } from "../config/store/index.js";
-import { ControlInstances } from "../instance/index.js";
-import type { McpRuntimeFactory } from "./mcp/Runtime.js";
-import { ControlRuntimeFactory } from "./runtime/Factory.js";
-import type { ControlServerRuntime } from "./runtime/Runtime.js";
+import type { ControlState } from "./State.js";
+import { ControlConfig } from "./config/index.js";
+import type { ControlConfigStore } from "./config/store/index.js";
+import { ControlInstances } from "./instance/index.js";
+import type { McpRuntimeFactory } from "./server/mcp/Runtime.js";
+import { ControlFactory } from "./Factory.js";
+import type { ControlServer } from "./server/index.js";
 
-export interface ControlServerOptions {
+export interface ControlOptions {
     configStore?: ControlConfigStore;
     homeDirectory?: string;
     mcpWiringService?: McpRuntimeFactory;
-    runtimeFactory?: ControlRuntimeFactory;
+    factory?: ControlFactory;
     startupDiagnostic?: (message: string) => void;
     xdgRuntimeDir?: string;
 }
 
-export class ControlServer {
+export class Control {
     readonly #config: ControlConfig;
     readonly #homeDirectory?: string;
     readonly #instances: ControlInstances;
-    readonly #runtimeFactory: ControlRuntimeFactory;
+    readonly #factory: ControlFactory;
     readonly #socketFile: ControlSocketFile;
     readonly #startupDiagnostic: (message: string) => void;
     #operationTail: Promise<void> = Promise.resolve();
-    #server?: ControlServerRuntime;
+    #server?: ControlServer;
     #state?: ControlState;
 
-    constructor(options: ControlServerOptions = {}) {
+    constructor(options: ControlOptions = {}) {
         this.#config = new ControlConfig({ store: options.configStore });
         this.#instances = new ControlInstances({
             configChanges: this.#config.changes,
         });
         this.#homeDirectory = options.homeDirectory;
-        this.#runtimeFactory =
-            options.runtimeFactory ??
-            new ControlRuntimeFactory({
+        this.#factory =
+            options.factory ??
+            new ControlFactory({
                 mcpFactory: options.mcpWiringService,
             });
         this.#socketFile = new ControlSocketFile(options.xdgRuntimeDir);
@@ -78,7 +78,7 @@ export class ControlServer {
         await this.#instances.load(config);
 
         let state: ControlState | undefined;
-        let server: ControlServerRuntime | undefined;
+        let server: ControlServer | undefined;
         try {
             this.#startupDiagnostic("control composition input load completed");
             this.#startupDiagnostic(
@@ -89,7 +89,7 @@ export class ControlServer {
                 "control runtime directory initialization completed",
             );
             this.#startupDiagnostic("control composition started");
-            const composition = await this.#runtimeFactory.create({
+            const composition = await this.#factory.create({
                 config: this.#config,
                 homeDirectory: this.#homeDirectory,
                 instances: this.#instances,

@@ -2,18 +2,18 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
 import { Endpoint, LocalChannel, createInstanceTransport, createServerTransport } from "@portable-devshell/shared";
-import { ControlServer } from "../../../src/server/Server.ts";
-import { ControlRuntimeFactory } from "../../../src/server/runtime/Factory.ts";
+import { Control } from "../../../src/Control.ts";
+import { ControlFactory } from "../../../src/Factory.ts";
 import { ControlConfigStore } from "../../../src/config/store/index.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("current Control composition creates, updates and retires instances over RPC and persists restart state", async (t) => {
     const root = await createTestTempDirectory("control-instance-lifecycle");
     const store = new ControlConfigStore();
-    const server = new ControlServer({
+    const server = new Control({
         configStore: store,
         homeDirectory: root,
-        runtimeFactory: new ControlRuntimeFactory({ builtinExtensionSources: [] }),
+        factory: new ControlFactory({ builtinExtensionSources: [] }),
         xdgRuntimeDir: root,
     });
     const endpoint = new Endpoint({ connectChannel: signal => LocalChannel.connect(server.socketPath, { signal }) });

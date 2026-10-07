@@ -7,22 +7,22 @@ import {
     normalizeConfigInstanceDraft,
 } from "@portable-devshell/shared";
 
-import { ControlServer } from "../../../src/server/Server.ts";
+import { Control } from "../../../src/Control.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
-test("ControlServer interleaves domain and server lifecycle phases in dependency order", async (t) => {
+test("Control interleaves domain and server lifecycle phases in dependency order", async (t) => {
     const xdgRuntimeDir = await createTestTempDirectory("control-server-phases");
     t.after(async () => {
         await rm(xdgRuntimeDir, { force: true, recursive: true });
     });
     const events: string[] = [];
-    const server = new ControlServer({
+    const server = new Control({
         configStore: {
             async readOrCreate() {
                 return createDefaultControlConfig();
             },
         } as never,
-        runtimeFactory: {
+        factory: {
             async create() {
                 return {
                     state: {
@@ -81,13 +81,13 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
         | { restart(): Promise<void>; shutdown(): Promise<void> }
         | undefined;
     let runtimeNumber = 0;
-    const server = new ControlServer({
+    const server = new Control({
         configStore: {
             async readOrCreate() {
                 return createDefaultControlConfig();
             },
         } as never,
-        runtimeFactory: {
+        factory: {
             async create(options: {
                 restart(): Promise<void>;
                 shutdown(): Promise<void>;
@@ -132,13 +132,13 @@ test("failed stop preserves composed owners until a retry succeeds", async (t) =
     let stopCalls = 0;
     let creates = 0;
     const stopFailure = new Error("stop failed");
-    const server = new ControlServer({
+    const server = new Control({
         configStore: {
             async readOrCreate() {
                 return createDefaultControlConfig();
             },
         } as never,
-        runtimeFactory: {
+        factory: {
             async create() {
                 creates += 1;
                 return {
@@ -182,12 +182,12 @@ test("composition failure closes loaded instances before retry", async (t) => {
     ];
     const failure = new Error("composition failed");
     const generations: import("@portable-devshell/core/instance").Instance[] = [];
-    const server = new ControlServer({
+    const server = new Control({
         configStore: { async readOrCreate() { return config; } } as never,
         homeDirectory: root,
-        runtimeFactory: {
+        factory: {
             async create({ instances }: Parameters<
-                import("../../../src/server/runtime/Factory.ts").ControlRuntimeFactory["create"]
+                import("../../../src/Factory.ts").ControlFactory["create"]
             >[0]) {
                 generations.push(instances.registry.get("local")!);
                 throw failure;
@@ -214,12 +214,12 @@ test("failed startup cleanup retains instance owner for explicit stop retry", as
     const failure = new Error("composition failed");
     const cleanupFailure = new Error("instance close failed");
     let restoreInstanceClose!: () => void;
-    const server = new ControlServer({
+    const server = new Control({
         configStore: { async readOrCreate() { return config; } } as never,
         homeDirectory: root,
-        runtimeFactory: {
+        factory: {
             async create({ instances }: Parameters<
-                import("../../../src/server/runtime/Factory.ts").ControlRuntimeFactory["create"]
+                import("../../../src/Factory.ts").ControlFactory["create"]
             >[0]) {
                 const instance = instances.registry.get("retry-local")!;
                 const close = instance.close.bind(instance);

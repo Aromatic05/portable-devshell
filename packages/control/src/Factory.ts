@@ -15,50 +15,50 @@ import {
     createToolTransport,
 } from "@portable-devshell/shared";
 import { ReverseConnections } from "@portable-devshell/core/instance/transport";
-import { createExtensionRuntime } from "../../extension/index.js";
-import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/index.js";
-import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/index.js";
+import { createExtensionRuntime } from "./extension/index.js";
+import { ExtensionArtifactCapabilityControl } from "./extension/api/cap/artifact/index.js";
+import { ExtensionAssetCapabilityControl } from "./extension/api/cap/asset/index.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
-} from "../../extension/api/cap/instance/index.js";
-import { ExtensionContextObserveCapabilityControl } from "../../extension/api/cap/context/index.js";
+} from "./extension/api/cap/instance/index.js";
+import { ExtensionContextObserveCapabilityControl } from "./extension/api/cap/context/index.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
-} from "../../extension/install/BuiltinSource.js";
-import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
-import { ExtensionConfigControl } from "../../extension/api/cap/config/index.js";
-import { McpRuntimeFactory } from "../mcp/Runtime.js";
-import { createArtifactRuntime } from "../../artifact/index.js";
-import { ControlServerRuntime } from "./Runtime.js";
-import { ControlState } from "../../State.js";
-import type { ControlConfig } from "../../config/index.js";
-import type { ControlInstances } from "../../instance/index.js";
-import { createToolCallRegistry } from "../../toolcall/index.js";
-import { createContextRuntime } from "../../context/index.js";
-import { McpControlModule } from "../mcp/Module.js";
-import { ControlWebRuntime } from "../web/Runtime.js";
-import { ConfigEditorCoordinator } from "../../config/editor/index.js";
-import { ConfigEngine } from "../../config/engine/index.js";
-import { HttpEndpointPreflight } from "../../config/engine/Http.js";
-import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
-import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
+} from "./extension/install/BuiltinSource.js";
+import type { ExtensionInstallLimits } from "./extension/install/Policy.js";
+import { ExtensionConfigControl } from "./extension/api/cap/config/index.js";
+import { McpRuntimeFactory } from "./server/mcp/Runtime.js";
+import { createArtifactRuntime } from "./artifact/index.js";
+import { ControlServer } from "./server/index.js";
+import { ControlState } from "./State.js";
+import type { ControlConfig } from "./config/index.js";
+import type { ControlInstances } from "./instance/index.js";
+import { createToolCallRegistry } from "./toolcall/index.js";
+import { createContextRuntime } from "./context/index.js";
+import { McpControlModule } from "./server/mcp/Module.js";
+import { ControlWebRuntime } from "./server/web/Runtime.js";
+import { ConfigEditorCoordinator } from "./config/editor/index.js";
+import { ConfigEngine } from "./config/engine/index.js";
+import { HttpEndpointPreflight } from "./config/engine/Http.js";
+import { InstanceEditorCoordinator } from "./instance/editor/index.js";
+import { InstanceCreateCoordinator } from "./instance/editor/create/index.js";
 import { createInstance } from "@portable-devshell/core";
-import { ReverseCredentials } from "../../instance/reverse/Credentials.js";
-import { ReverseCredentialStore } from "../../instance/reverse/credential/Store.js";
-import { ReverseIngress } from "../reverse/Ingress.js";
+import { ReverseCredentials } from "./instance/reverse/Credentials.js";
+import { ReverseCredentialStore } from "./instance/reverse/credential/Store.js";
+import { ReverseIngress } from "./server/reverse/Ingress.js";
 
-export interface ControlRuntimeFactoryOptions {
+export interface ControlFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     mcpFactory?: McpRuntimeFactory;
 }
 
-export class ControlRuntimeFactory {
+export class ControlFactory {
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #mcpFactory: McpRuntimeFactory;
 
-    constructor(options: ControlRuntimeFactoryOptions = {}) {
+    constructor(options: ControlFactoryOptions = {}) {
         this.#builtinExtensionSources = Object.freeze([
             ...(options.builtinExtensionSources ??
                 readBuiltinExtensionSources()),
@@ -73,7 +73,7 @@ export class ControlRuntimeFactory {
         homeDirectory?: string;
         instances: ControlInstances;
         socketPath: string;
-    }): Promise<{ state: ControlState; server: ControlServerRuntime }> {
+    }): Promise<{ state: ControlState; server: ControlServer }> {
         const controlPaths = new ControlPathHome(
             options.homeDirectory ?? homedir(),
         );
@@ -422,7 +422,7 @@ export class ControlRuntimeFactory {
                     await state.extensions.retireInstanceGeneration(instance.name);
                 },
             );
-            const server = new ControlServerRuntime({
+            const server = new ControlServer({
                 config: () => options.config.require(),
                 configChanges: options.config.changes,
                 configEditor: options.config.editor,

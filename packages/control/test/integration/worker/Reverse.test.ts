@@ -25,8 +25,8 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 
-import { ControlServer } from "../../../src/server/Server.ts";
-import { ControlRuntimeFactory } from "../../../src/server/runtime/Factory.ts";
+import { Control } from "../../../src/Control.ts";
+import { ControlFactory } from "../../../src/Factory.ts";
 import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../../src/instance/reverse/credential/Store.ts";
@@ -54,10 +54,10 @@ import {
 const workerBinary = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
 
-class CapturingRuntimeFactory extends ControlRuntimeFactory {
+class CapturingRuntimeFactory extends ControlFactory {
     registry?: InstanceRegistry;
 
-    override async create(options: Parameters<ControlRuntimeFactory["create"]>[0]) {
+    override async create(options: Parameters<ControlFactory["create"]>[0]) {
         this.registry = options.instances.registry;
         return await super.create(options);
     }
@@ -105,10 +105,10 @@ test(
             "reverse-real-worker",
         );
         const paths = new ControlPathHome(homeDirectory);
-        const runtimeFactory = new CapturingRuntimeFactory({ builtinExtensionSources: [] });
-        const server = new ControlServer({
+        const factory = new CapturingRuntimeFactory({ builtinExtensionSources: [] });
+        const server = new Control({
             homeDirectory,
-            runtimeFactory,
+            factory,
             xdgRuntimeDir,
         });
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
@@ -245,7 +245,7 @@ test(
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
         const workerInstance =
-            runtimeFactory.registry?.get("reverse-test")?.worker;
+            factory.registry?.get("reverse-test")?.worker;
         assert.ok(workerInstance);
         const httpBody = "reverse-http-over-devshell";
         const httpServer = createHttpServer((request, response) => {
@@ -665,9 +665,9 @@ test(
         const proxy = await startLoopbackHttpProxy();
         const publicBaseUrl = proxy.origin;
         const paths = new ControlPathHome(controlHome);
-        const server = new ControlServer({
+        const server = new Control({
             homeDirectory: controlHome,
-            runtimeFactory: new ControlRuntimeFactory({
+            factory: new ControlFactory({
                 builtinExtensionSources: [],
             }),
             xdgRuntimeDir: controlRuntime,

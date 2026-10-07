@@ -15,7 +15,7 @@ test("a stopping daemon preserves successor lifecycle state", async () => {
                 lifecycle.pid = "old";
             },
         } as never,
-        server: {
+        control: {
             async start() {},
             async stop() {},
         } as never,
@@ -46,7 +46,7 @@ test("a daemon tears down a started server when pid publication fails", async ()
                 throw publicationFailure;
             },
         } as never,
-        server: {
+        control: {
             async start() {},
             async stop() {
                 stopCalls += 1;
@@ -79,7 +79,7 @@ test("a failed daemon rollback preserves state and aggregates rollback failure",
                 throw publicationFailure;
             },
         } as never,
-        server: {
+        control: {
             async start() {},
             async stop() {
                 stopCalls += 1;
@@ -113,7 +113,7 @@ test("a failed daemon stop never logs that the server stopped", async () => {
             path: "/tmp/control.log",
         } as never,
         pidFile: { async write() {} } as never,
-        server: {
+        control: {
             async start() {},
             async stop() {
                 throw stopFailure;
@@ -150,7 +150,7 @@ test("a stop requested during startup runs after startup completes", async () =>
                 calls.push("pid");
             },
         } as never,
-        server: {
+        control: {
             async start() {
                 calls.push("start");
                 await startGate;

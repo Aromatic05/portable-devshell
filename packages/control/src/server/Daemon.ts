@@ -6,13 +6,13 @@ import {
     ControlSocketFile,
 } from "@portable-devshell/shared";
 
-import { ControlServer } from "./Server.js";
+import { Control } from "../Control.js";
 
 export interface ControlDaemonOptions {
     homeDirectory?: string;
     logger?: ControlLogger;
     pidFile?: ControlPidFile;
-    server?: ControlServer;
+    control?: Control;
     socketFile?: ControlSocketFile;
     xdgRuntimeDir?: string;
 }
@@ -20,7 +20,7 @@ export interface ControlDaemonOptions {
 export class ControlDaemon {
     readonly #logger: ControlLogger;
     readonly #pidFile: ControlPidFile;
-    readonly #server: ControlServer;
+    readonly #control: Control;
     readonly #socketFile: ControlSocketFile;
     #operationTail: Promise<void> = Promise.resolve();
     #started = false;
@@ -30,9 +30,9 @@ export class ControlDaemon {
             options.logger ?? new ControlLogger(options.homeDirectory);
         this.#pidFile =
             options.pidFile ?? new ControlPidFile(options.homeDirectory);
-        this.#server =
-            options.server ??
-            new ControlServer({
+        this.#control =
+            options.control ??
+            new Control({
                 homeDirectory: options.homeDirectory,
                 startupDiagnostic: writeStartupDiagnostic,
                 xdgRuntimeDir: options.xdgRuntimeDir,
@@ -50,7 +50,7 @@ export class ControlDaemon {
         writeStartupDiagnostic("control daemon start started");
         await this.#socketFile.ensureRuntimeDir();
         writeStartupDiagnostic("control daemon runtime directory ready");
-        await this.#server.start();
+        await this.#control.start();
         writeStartupDiagnostic("control server ready");
         this.#started = true;
         try {
@@ -59,7 +59,7 @@ export class ControlDaemon {
             writeStartupDiagnostic("control daemon start completed");
         } catch (error) {
             try {
-                await this.#server.stop();
+                await this.#control.stop();
                 this.#started = false;
             } catch (rollbackError) {
                 throw new AggregateError(
@@ -82,7 +82,7 @@ export class ControlDaemon {
             .info("control server stopping")
             .catch((error) => failures.push(error));
         try {
-            await this.#server.stop();
+            await this.#control.stop();
             this.#started = false;
         } catch (error) {
             failures.push(error);

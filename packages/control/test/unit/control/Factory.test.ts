@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveControlExtensionAssetLimits } from "../../../../src/server/runtime/Factory.ts";
+import { resolveControlExtensionAssetLimits } from "../../../src/Factory.ts";
 
 test("Control grants the reserved Agent Extension a bounded large-Provider asset budget only", () => {
     assert.equal(resolveControlExtensionAssetLimits("artifact"), undefined);
