@@ -3,11 +3,17 @@ import {
     type ControlHostDefinition,
     type ControlInstanceConfig,
     type ControlPortDefinition,
+    type WorkerArtifactApi,
 } from "@portable-devshell/shared";
 
 import { createAuditRuntime } from "../../audit/index.js";
 import type { InstanceEventPort } from "../Api.js";
-import type { WorkerInstance } from "../runtime/Api.js";
+import type {
+    WorkerEnvironment,
+    WorkerInstance,
+    WorkerProvision,
+    WorkerSupervision,
+} from "../runtime/Api.js";
 import { TransportConnection } from "../transport/endpoint/Connection.js";
 import { ReverseProvision } from "../runtime/provision/install/provider/Reverse.js";
 import { WorkerInstance as WorkerRuntime } from "../runtime/index.js";
@@ -65,7 +71,6 @@ export class Instance {
             toWorkerConfig(config, reverse, paths.homeDirectory),
             eventLog.port,
             {
-                acquireLease: () => instance.lifecycle.acquireLease(),
                 active: () => instance.lifecycle.active,
                 enabled: () => instance.config.enabled,
             },
@@ -101,8 +106,20 @@ export class Instance {
         return this.#config;
     }
 
-    get worker(): WorkerInstance {
-        return this.#worker;
+    get artifact(): WorkerArtifactApi {
+        return this.#worker.execution.artifact;
+    }
+
+    get environment(): WorkerEnvironment {
+        return this.#worker.execution.environment;
+    }
+
+    get provision(): WorkerProvision {
+        return this.#worker.provision;
+    }
+
+    get supervision(): WorkerSupervision {
+        return this.#worker.supervision;
     }
 
     get lifecycle(): InstanceLifecycle {
@@ -189,7 +206,6 @@ function createWorkerInstance(
     config: WorkerInstanceConfig,
     events: InstanceEventPort,
     admission: {
-        acquireLease(): { release(): void };
         active(): boolean;
         enabled(): boolean;
     },

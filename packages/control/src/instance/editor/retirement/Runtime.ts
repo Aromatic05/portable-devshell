@@ -9,7 +9,7 @@ export function assertInstanceDeletable(
     descriptor: Instance | undefined,
 ): boolean {
     if (descriptor === undefined) return false;
-    const snapshot = descriptor.worker.supervision.snapshot();
+    const snapshot = descriptor.supervision.snapshot();
     if (snapshot.daemonState === "stopped") return false;
     if (
         snapshot.daemonState === "failed" ||
@@ -36,11 +36,11 @@ export async function retireInstanceForDelete(
     if (descriptor === undefined) return;
     const failures: unknown[] = [];
     if (!skipRuntimeRetirement) {
-        await descriptor.worker.provision
+        await descriptor.provision
             .retireRuntime()
             .catch((error: unknown) => failures.push(error));
     }
-    await descriptor.worker.provision
+    await descriptor.provision
         .retireProviderResources()
         .catch((error: unknown) => failures.push(error));
     if (failures.length > 0) {

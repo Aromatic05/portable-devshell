@@ -45,7 +45,6 @@ import { createInstance } from "@portable-devshell/core";
 import { ReverseCredentials } from "../../instance/reverse/Credentials.js";
 import { ReverseCredentialStore } from "../../instance/reverse/credential/Store.js";
 import { ReverseIngress } from "../reverse/Ingress.js";
-import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 export interface ControlRuntimeFactoryOptions {
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
@@ -81,7 +80,6 @@ export class ControlRuntimeFactory {
         });
         try {
             await artifact.start();
-            const processSubscriptions = new ProcessSubscriptionManager();
             const internalEndpoint = new Endpoint({
                 connectChannel: (signal) =>
                     connectControlChannel(
@@ -146,9 +144,9 @@ export class ControlRuntimeFactory {
                 reconcileContextInstanceCleanup: async (instance, descriptor) => {
                     if (
                         descriptor !== undefined &&
-                        !descriptor.worker.supervision.snapshot().ready
+                        !descriptor.supervision.snapshot().ready
                     ) {
-                        await descriptor.worker.supervision.lifecycle.start();
+                        await descriptor.supervision.lifecycle.start();
                     }
                     await contexts.api.cleanup.reconcileInstance(
                         instance,
@@ -156,11 +154,11 @@ export class ControlRuntimeFactory {
                             ? undefined
                             : {
                                   releaseAlerts: async (workspace) =>
-                                      await descriptor.worker.execution.environment.releaseAlerts(
+                                      await descriptor.environment.releaseAlerts(
                                           workspace,
                                       ),
                                   releaseReference: async (reference) =>
-                                      await descriptor.worker.supervision.ownership.releaseReference(
+                                      await descriptor.supervision.ownership.releaseReference(
                                           reference,
                                       ),
                               },
@@ -220,47 +218,30 @@ export class ControlRuntimeFactory {
                             extensionId,
                         ),
                         project: async (input) => {
-                            const descriptor =
-                                options.state.instances.get(
+                            const prepared =
+                                await createEnvironmentTransport(
+                                    internalEndpoint,
                                     input.target.instance,
-                                );
-                            if (descriptor === undefined)
-                                throw new Error(
-                                    `Instance ${input.target.instance} is unavailable.`,
-                                );
-                            const lease = descriptor.lifecycle.acquireLease();
-                            try {
-                                const prepared =
-                                    await lease.instance.worker.execution.environment.prepareExtensionResource(
-                                        {
-                                            collection:
-                                                input.target.collection,
-                                            extensionId,
-                                        },
-                                    );
-                                const completed =
-                                    await artifact.transferHostPath(
-                                        input.sourcePath,
-                                        {
-                                            instance:
-                                                input.target.instance,
-                                            path: join(
-                                                prepared.directory,
-                                                input.target.key,
-                                            ),
-                                            workspace:
-                                                prepared.directory,
-                                        },
-                                        input.overwrite,
-                                        input.signal,
-                                    );
-                                return {
-                                    transferredBytes:
-                                        completed.transferredBytes,
-                                };
-                            } finally {
-                                lease.release();
-                            }
+                                ).prepareExtensionResource({
+                                    collection: input.target.collection,
+                                    extensionId,
+                                });
+                            const completed = await artifact.transferHostPath(
+                                input.sourcePath,
+                                {
+                                    instance: input.target.instance,
+                                    path: join(
+                                        prepared.directory,
+                                        input.target.key,
+                                    ),
+                                    workspace: prepared.directory,
+                                },
+                                input.overwrite,
+                                input.signal,
+                            );
+                            return {
+                                transferredBytes: completed.transferredBytes,
+                            };
                         },
                     }),
                 configFactory: ({
@@ -304,7 +285,6 @@ export class ControlRuntimeFactory {
                     observe: new ExtensionInstanceObserveCapabilityControl({
                         allowed: observeAllowed,
                         extensionId,
-                        instances: options.state.instances,
                         listConfigured: () =>
                             options.state
                                 .requireConfig()
@@ -316,9 +296,12 @@ export class ControlRuntimeFactory {
                                 })),
                         process: (name) =>
                             createProcessTransport(internalEndpoint, name),
-                        subscriptions: processSubscriptions,
+                        runtime: (name) =>
+                            createInstanceRuntimeTransport(internalEndpoint, name),
                     }),
                 }),
+                instanceRuntime: (name) =>
+                    createInstanceRuntimeTransport(internalEndpoint, name),
                 instances: options.state.instances,
                 readToolCalls: async (name, query) => {
                     const descriptor = options.state.instances.get(name);

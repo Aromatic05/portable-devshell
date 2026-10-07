@@ -429,7 +429,7 @@ export class InstanceCleanupDebt {
                 ?.retireMcpApp(record.instance.name)
                 .catch((error) => failures.push(error));
             try {
-                await descriptor.worker.supervision.lifecycle.stop();
+                await descriptor.supervision.lifecycle.stop();
                 workerRetirementSucceeded = true;
             } catch (error) {
                 failures.push(error);

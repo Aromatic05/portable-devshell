@@ -13,19 +13,15 @@ import type {
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
     createRemoteError,
-    controlErrorCodes,
     type InstanceCreateResult,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
     type InstanceLogEntry,
+    type InstanceRuntimeTransport,
     type JsonValue,
     type ProcessTransport,
-    runtimeErrorCodes,
     STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
-
-import type { InstanceRegistry } from "../../../../instance/Api.js";
-import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 export interface ExtensionInstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
@@ -49,28 +45,25 @@ export interface ExtensionConfiguredInstance {
 export interface ExtensionInstanceObserveCapabilityControlOptions {
     allowed: boolean;
     extensionId: string;
-    instances: InstanceRegistry;
     listConfigured(): readonly ExtensionConfiguredInstance[];
     process(name: string): ProcessTransport;
-    subscriptions: ProcessSubscriptionManager;
+    runtime(name: string): InstanceRuntimeTransport;
 }
 
 /** Read-only Instance observation backed by Control's authoritative registry. */
 export class ExtensionInstanceObserveCapabilityControl implements ExtensionInstanceObserveCapability {
     readonly #allowed: boolean;
     readonly #extensionId: string;
-    readonly #instances: InstanceRegistry;
     readonly #listConfigured: () => readonly ExtensionConfiguredInstance[];
     readonly #process: (name: string) => ProcessTransport;
-    readonly #subscriptions: ProcessSubscriptionManager;
+    readonly #runtime: (name: string) => InstanceRuntimeTransport;
 
     constructor(options: ExtensionInstanceObserveCapabilityControlOptions) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
-        this.#instances = options.instances;
         this.#listConfigured = options.listConfigured;
         this.#process = options.process;
-        this.#subscriptions = options.subscriptions;
+        this.#runtime = options.runtime;
     }
 
     async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
@@ -91,22 +84,18 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
     async list(): Promise<readonly ExtensionInstanceRecord[]> {
         this.#assertAllowed();
         return await Promise.all(this.#listConfigured().map(async (configured) => {
-            const descriptor = configured.enabled
-                ? this.#instances.get(configured.name)
+            const snapshot = configured.enabled
+                ? await this.#process(configured.name)
+                      .snapshot()
+                      .then((value) => toSnapshot(value.snapshot))
+                      .catch(() => undefined)
                 : undefined;
             return {
                 enabled: configured.enabled,
                 mcpEnabled: configured.mcpEnabled,
                 name: configured.name,
                 provider: configured.provider,
-                ...(descriptor === undefined
-                    ? {}
-                    : {
-                          snapshot: toSnapshot(
-                              (await this.#process(configured.name).snapshot())
-                                  .snapshot,
-                          ),
-                      }),
+                ...(snapshot === undefined ? {} : { snapshot }),
             };
         }));
     }
@@ -116,12 +105,11 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
         watch.signal.throwIfAborted();
         if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 0)
             throw new TypeError("Instance event watch fromSeq must be a non-negative integer.");
-        const descriptor = this.#require(name);
-        const source = { subscribe: (fromSeq: number) => descriptor.worker.supervision.state.subscribe(fromSeq) };
+        const runtime = this.#runtime(requireName(name));
         const types = watch.eventTypes === undefined ? undefined : new Set(watch.eventTypes);
         let fromSeq = watch.fromSeq;
         if (watch.onSeed !== undefined) {
-            const seed = source.subscribe(fromSeq);
+            const seed = await runtime.readEvents(fromSeq);
             if (seed.kind === "gap") {
                 throw createRemoteError({
                     code: STREAM_GAP_CODE,
@@ -142,16 +130,31 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
             fromSeq = seed.lastSeq + 1;
         }
         if (watch.signal.aborted) return;
-        await this.#subscriptions.watch(name, source, fromSeq, watch.signal, {
-            onEvent: async (event: Parameters<typeof toEvent>[0]) => {
-                if (types === undefined || types.has(event.type)) await watch.onEvent(toEvent(event));
-            },
-            onGap: async (gap: { lastSeq: number; nextSeq: number }) => await watch.onGap?.(gap),
-        });
-    }
-
-    #require(name: string) {
-        return requireInstance(this.#instances, name);
+        const stream = await runtime.subscribeEvents(fromSeq);
+        const abort = () => stream.close();
+        watch.signal.addEventListener("abort", abort, { once: true });
+        try {
+            if (watch.signal.aborted) return;
+            for (;;) {
+                const message = await stream.next();
+                if (message.kind === "closed") {
+                    if (message.error !== undefined) throw message.error;
+                    return;
+                }
+                if (message.kind === "gap") {
+                    await watch.onGap?.({
+                        lastSeq: message.gap.lastSeq,
+                        nextSeq: message.gap.nextSeq,
+                    });
+                    continue;
+                }
+                if (types === undefined || types.has(message.event.type))
+                    await watch.onEvent(toEvent(message.event));
+            }
+        } finally {
+            watch.signal.removeEventListener("abort", abort);
+            stream.close();
+        }
     }
 
     #assertAllowed(): void {
@@ -242,28 +245,20 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
 }
 
 export class ExtensionInstanceEventPublishCapabilityControl implements ExtensionInstanceEventPublishCapability {
-    constructor(private readonly options: { allowed: boolean; extensionId: string; instances: InstanceRegistry }) {}
+    constructor(private readonly options: {
+        allowed: boolean;
+        extensionId: string;
+        runtime(name: string): InstanceRuntimeTransport;
+    }) {}
 
     async appendEvent(name: string, type: string, data?: ExtensionJsonValue): Promise<void> {
         if (!this.options.allowed)
             throw new Error(`Extension ${this.options.extensionId} did not declare the instance.events.publish capability.`);
-        const lease = requireInstance(this.options.instances, name).lifecycle.acquireLease();
-        try {
-            await lease.instance.worker.supervision.state.appendEvent(requireEventType(type), data as JsonValue | undefined);
-        } finally { lease.release(); }
+        await this.options.runtime(requireName(name)).appendEvent(
+            requireEventType(type),
+            data as JsonValue | undefined,
+        );
     }
-}
-
-function requireInstance(instances: InstanceRegistry, name: string) {
-    const instance = requireName(name);
-    const descriptor = instances.get(instance);
-    if (descriptor !== undefined) return descriptor;
-    throw createRemoteError({
-        code: controlErrorCodes.instanceNotFound,
-        details: { instance },
-        message: `Instance ${instance} was not found or is disabled.`,
-        retryable: false,
-    });
 }
 
 function toCreateResult(

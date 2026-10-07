@@ -9,7 +9,6 @@ import type { WorkerInstanceSupervision } from "./Recovery.js";
 
 interface WorkerOwnershipOptions {
     admission: {
-        acquireLease(): { release(): void };
         active(): boolean;
         enabled(): boolean;
     };
@@ -44,53 +43,48 @@ export class WorkerOwnership {
             });
         }
 
-        const lease = this.options.admission.acquireLease();
-        try {
-            let snapshot = this.options.snapshot();
-            let started = false;
-            if (!snapshot.ready) {
-                if (this.options.managementMode === "selfManaged") {
-                    snapshot = await this.options.recovery.refreshStatus();
-                    if (!snapshot.ready) {
-                        throw createRemoteError({
-                            code: runtimeErrorCodes.reverseSelfManagedOffline,
-                            details: { instance: this.options.instanceName },
-                            message: `Instance ${this.options.instanceName} is self-managed and is not connected.`,
-                            retryable: true,
-                        });
-                    }
-                } else {
-                    snapshot = await this.options.lifecycle.start();
-                    started = true;
+        let snapshot = this.options.snapshot();
+        let started = false;
+        if (!snapshot.ready) {
+            if (this.options.managementMode === "selfManaged") {
+                snapshot = await this.options.recovery.refreshStatus();
+                if (!snapshot.ready) {
+                    throw createRemoteError({
+                        code: runtimeErrorCodes.reverseSelfManagedOffline,
+                        details: { instance: this.options.instanceName },
+                        message: `Instance ${this.options.instanceName} is self-managed and is not connected.`,
+                        retryable: true,
+                    });
                 }
+            } else {
+                snapshot = await this.options.lifecycle.start();
+                started = true;
             }
-
-            if (!this.options.admission.active()) {
-                if (
-                    started &&
-                    this.options.snapshot().daemonState !== "stopped"
-                ) {
-                    await this.options.lifecycle.stop();
-                }
-                throw createRemoteError({
-                    code: runtimeErrorCodes.instanceConflict,
-                    details: {
-                        instance: this.options.instanceName,
-                        operation: "connect",
-                    },
-                    message: `Instance ${this.options.instanceName} generation was retired while connecting.`,
-                    retryable: true,
-                });
-            }
-
-            if (this.options.managementMode !== "selfManaged") {
-                this.#references.add(reference);
-                if (started) this.#autoOwned = true;
-            }
-            return snapshot;
-        } finally {
-            lease.release();
         }
+
+        if (!this.options.admission.active()) {
+            if (
+                started &&
+                this.options.snapshot().daemonState !== "stopped"
+            ) {
+                await this.options.lifecycle.stop();
+            }
+            throw createRemoteError({
+                code: runtimeErrorCodes.instanceConflict,
+                details: {
+                    instance: this.options.instanceName,
+                    operation: "connect",
+                },
+                message: `Instance ${this.options.instanceName} generation was retired while connecting.`,
+                retryable: true,
+            });
+        }
+
+        if (this.options.managementMode !== "selfManaged") {
+            this.#references.add(reference);
+            if (started) this.#autoOwned = true;
+        }
+        return snapshot;
     }
 
     async releaseReference(reference: string): Promise<void> {

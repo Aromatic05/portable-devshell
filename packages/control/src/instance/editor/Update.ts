@@ -88,7 +88,7 @@ export class InstanceReconfigurationCoordinator {
 
     assertUpdateReady(plan: InstanceConfigUpdatePlan): void {
         if (!plan.rebuildRequired || plan.descriptor === undefined) return;
-        const snapshot = plan.descriptor.worker.supervision.snapshot();
+        const snapshot = plan.descriptor.supervision.snapshot();
         if (snapshot.daemonState === "stopped") return;
         throw createRemoteError({
             code: runtimeErrorCodes.instanceConflict,
@@ -528,10 +528,10 @@ export class InstanceReconfigurationCoordinator {
             descriptor !== undefined
         ) {
             let stopped =
-                descriptor.worker.supervision.managementMode === "selfManaged";
+                descriptor.supervision.managementMode === "selfManaged";
             if (!stopped) {
                 try {
-                    await descriptor.worker.supervision.lifecycle.stop();
+                    await descriptor.supervision.lifecycle.stop();
                     stopped = true;
                 } catch (error) {
                     failures.push(error);

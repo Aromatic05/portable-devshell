@@ -24,22 +24,6 @@ export function createInstanceConfigRouteModule(
     return routeModule(
         "instance",
         {
-            acquireInstanceReference: async (request) => {
-                const input = readInstanceReference(request.payload);
-                const instance = options.registry.get(input.instanceName);
-                if (instance === undefined)
-                    throw createRemoteError({
-                        code: controlErrorCodes.instanceNotFound,
-                        details: { instance: input.instanceName },
-                        message: `Instance ${input.instanceName} was not found.`,
-                        retryable: false,
-                    });
-                const snapshot =
-                    await instance.worker.supervision.ownership.acquireReference(
-                        input.reference,
-                    );
-                return snapshot as unknown as JsonValue;
-            },
             listInstances: () => readInstances(options) as never,
             snapshotInstances: () => {
                 // Stable read: the envelope's revision must label exactly the
@@ -63,15 +47,6 @@ export function createInstanceConfigRouteModule(
                 await editor().disableInstance(request.payload),
             deleteInstance: async (request) =>
                 await editor().deleteInstance(request.payload),
-            releaseInstanceReference: async (request) => {
-                const input = readInstanceReference(request.payload);
-                await options.registry
-                    .get(input.instanceName)
-                    ?.worker.supervision.ownership.releaseReference(
-                        input.reference,
-                    );
-                return {};
-            },
             updateInstance: async (request) =>
                 await editor().updateInstanceConfig(request.payload),
         },
@@ -140,32 +115,6 @@ export function createInstanceConfigRouteModule(
             },
         },
     );
-}
-
-function readInstanceReference(payload?: JsonValue): {
-    instanceName: string;
-    reference: string;
-} {
-    if (!isRecord(payload))
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "instance reference operation requires an object payload.",
-            retryable: false,
-        });
-    const instanceName = payload.instanceName;
-    const reference = payload.reference;
-    if (
-        typeof instanceName !== "string" ||
-        instanceName.trim().length === 0 ||
-        typeof reference !== "string" ||
-        reference.trim().length === 0
-    )
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
-            message: "instanceName and reference must be non-empty strings.",
-            retryable: false,
-        });
-    return { instanceName: instanceName.trim(), reference: reference.trim() };
 }
 
 function readInstances(

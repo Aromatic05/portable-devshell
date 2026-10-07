@@ -15,7 +15,7 @@ import type { ExtensionProcessCapability } from "@portable-devshell/extension/pr
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { InstanceRegistry } from "../../../instance/Api.js";
-import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
+import type { InstanceRuntimeTransport, ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
 
 import type { ExtensionConfigRuntime } from "./config/index.js";
 import { ExtensionAssetCapabilityControl } from "./asset/index.js";
@@ -68,6 +68,7 @@ export interface ExtensionCapabilityAssemblerOptions {
         manage: ExtensionInstanceManageCapability;
         observe: ExtensionInstanceObserveCapability;
     };
+    instanceRuntime(instance: string): InstanceRuntimeTransport;
     instances: InstanceRegistry;
     readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
     toolCallDecorator?: ExtensionToolCallDecorator;
@@ -168,7 +169,7 @@ export class ExtensionCapabilityAssembler {
                     "instance.events.publish",
                 ),
                 extensionId,
-                instances: this.#options.instances,
+                runtime: this.#options.instanceRuntime,
             });
         const toolCallHistory: ToolCallHistoryCapability =
             new ExtensionToolCallHistoryCapabilityControl({

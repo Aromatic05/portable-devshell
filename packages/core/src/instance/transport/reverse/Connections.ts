@@ -187,7 +187,7 @@ export class ReverseConnections {
     }
 
     #requireReverseConnection(instance: Instance) {
-        const connection = instance.worker.provision.reverseConnection;
+        const connection = instance.provision.reverseConnection;
         if (instance.config.provider !== "reverse" || connection === undefined) {
             throw createRemoteError({
                 code: runtimeErrorCodes.reverseInstanceNotReverse,

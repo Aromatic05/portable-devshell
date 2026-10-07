@@ -7,7 +7,6 @@ function createOwnership() {
     let active = true;
     let enabled = true;
     let ready = false;
-    let leases = 0;
     let starts = 0;
     let stops = 0;
     const lifecycle = {
@@ -24,17 +23,6 @@ function createOwnership() {
     };
     const ownership = new WorkerOwnership({
         admission: {
-            acquireLease: () => {
-                leases += 1;
-                let released = false;
-                return {
-                    release: () => {
-                        if (released) return;
-                        released = true;
-                        leases -= 1;
-                    },
-                };
-            },
             active: () => active,
             enabled: () => enabled,
         },
@@ -47,9 +35,6 @@ function createOwnership() {
     });
     return {
         ownership,
-        get leases() {
-            return leases;
-        },
         get starts() {
             return starts;
         },
@@ -73,7 +58,6 @@ test("worker ownership auto-stops after the final reference", async () => {
 
     assert.equal(current.starts, 1);
     assert.equal(current.ownership.owned, true);
-    assert.equal(current.leases, 0);
 
     await current.ownership.releaseReference("ctx:first");
     assert.equal(current.stops, 0);
@@ -107,7 +91,6 @@ test("worker ownership rejects a reference when the instance is disabled", async
             (error as { code?: string }).code === "instance.conflict",
     );
     assert.equal(current.starts, 0);
-    assert.equal(current.leases, 0);
 });
 
 test("worker ownership stops a late start when instance retirement begins", async () => {
@@ -121,7 +104,6 @@ test("worker ownership stops a late start when instance retirement begins", asyn
     });
     const ownership = new WorkerOwnership({
         admission: {
-            acquireLease: () => ({ release() {} }),
             active: () => active,
             enabled: () => true,
         },

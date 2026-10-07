@@ -127,7 +127,7 @@ class ArtifactRuntimeState implements ArtifactRuntime {
     }
 
     #resolveEndpoint(name: string, authorityInstance?: string) {
-        if (name !== "host") return this.#instances.get(name)?.worker.execution.artifact;
+        if (name !== "host") return this.#instances.get(name)?.artifact;
         if (authorityInstance === undefined || this.#bridge === undefined)
             return undefined;
         if (!this.#hostTransferAuthorities.has(authorityInstance))

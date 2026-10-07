@@ -27,7 +27,6 @@ import { WorkerInstanceState } from "./supervision/State.js";
 
 interface WorkerInstanceDependencies {
     admission: {
-        acquireLease(): { release(): void };
         active(): boolean;
         enabled(): boolean;
     };

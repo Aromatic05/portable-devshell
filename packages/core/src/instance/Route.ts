@@ -36,13 +36,13 @@ export function createInstanceHost(
 ): ControlHostDefinition {
     const { descriptor, state } = options;
     const events = {
-        cursor: () => descriptor.worker.supervision.snapshot().lastSeq,
+        cursor: () => descriptor.supervision.snapshot().lastSeq,
         subscribe: (fromSeq?: number) =>
-            descriptor.worker.supervision.state.subscribe(fromSeq),
+            descriptor.supervision.state.subscribe(fromSeq),
     };
     const name = descriptor.config.name;
     const ports = mergeControlPortsByName([
-        createInstanceRuntimeRouteModule(descriptor),
+        createInstanceRuntimeRouteModule(descriptor, state.subscriptions),
         createEnvironmentRouteModule(descriptor),
         createProcessRouteModule(descriptor, state, state.subscriptions),
         createApprovalRouteModule(
@@ -89,23 +89,64 @@ export function createInstanceHost(
 
 function createInstanceRuntimeRouteModule(
     instance: Instance,
+    subscriptions: ProcessSubscriptionManager,
 ): ControlPortDefinition {
-    return routeModule(INSTANCE_RUNTIME_PORT, {
-        acquireReference: async (request) =>
-            (await instance.worker.supervision.ownership.acquireReference(
-                readString(request.payload, "reference", "instance.acquireReference"),
-            )) as unknown as JsonValue,
-        releaseReference: async (request) => {
-            await instance.worker.supervision.ownership.releaseReference(
-                readString(request.payload, "reference", "instance.releaseReference"),
-            );
-            return {};
+    return routeModule(
+        INSTANCE_RUNTIME_PORT,
+        {
+            acquireReference: async (request) =>
+                (await instance.supervision.ownership.acquireReference(
+                    readString(
+                        request.payload,
+                        "reference",
+                        "instance.acquireReference",
+                    ),
+                )) as unknown as JsonValue,
+            appendEvent: async (request) => {
+                const payload = readRecord(
+                    request.payload,
+                    "instance.appendEvent",
+                );
+                await instance.supervision.state.appendEvent(
+                    readString(
+                        request.payload,
+                        "type",
+                        "instance.appendEvent",
+                    ),
+                    payload.data,
+                );
+                return {};
+            },
+            readEvents: (request) =>
+                instance.supervision.state.subscribe(
+                    readFromSeq(request.payload, "instance.readEvents"),
+                ) as unknown as JsonValue,
+            releaseReference: async (request) => {
+                await instance.supervision.ownership.releaseReference(
+                    readString(
+                        request.payload,
+                        "reference",
+                        "instance.releaseReference",
+                    ),
+                );
+                return {};
+            },
         },
-    });
+        {
+            subscribeEvents: async (stream, request, context) =>
+                await subscriptions.subscribe(
+                    stream,
+                    context,
+                    instance.config.name,
+                    instance.supervision.state,
+                    readFromSeq(request.payload, "instance.subscribeEvents"),
+                ),
+        },
+    );
 }
 
 function createEnvironmentRouteModule(instance: Instance): ControlPortDefinition {
-    const environment = instance.worker.execution.environment;
+    const environment = instance.environment;
     return routeModule(ENVIRONMENT_PORT, {
         prepareExtensionResource: async (request) =>
             (await environment.prepareExtensionResource({
@@ -207,7 +248,7 @@ export function createProcessRouteModule(
         "process",
         {
             snapshot: () => {
-                const snapshot = instance.worker.supervision.snapshot();
+                const snapshot = instance.supervision.snapshot();
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
@@ -216,7 +257,7 @@ export function createProcessRouteModule(
             },
             refresh: async () => {
                 const snapshot =
-                    await instance.worker.supervision.recovery.refreshStatus();
+                    await instance.supervision.recovery.refreshStatus();
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
@@ -229,8 +270,8 @@ export function createProcessRouteModule(
                 )) as unknown as JsonValue,
             stop: async () => {
                 const result =
-                    await instance.worker.supervision.lifecycle.stop();
-                instance.worker.supervision.ownership.clearOwned();
+                    await instance.supervision.lifecycle.stop();
+                instance.supervision.ownership.clearOwned();
                 return result as unknown as JsonValue;
             },
         },
@@ -257,10 +298,10 @@ export function createProcessRouteModule(
                 );
                 try {
                     const result =
-                        await instance.worker.supervision.lifecycle.startInteractive(
+                        await instance.supervision.lifecycle.startInteractive(
                             relay,
                         );
-                    instance.worker.supervision.ownership.markOwned();
+                    instance.supervision.ownership.markOwned();
                     await stream.close(result as unknown as JsonValue);
                 } finally {
                     offData();
@@ -274,7 +315,7 @@ export function createProcessRouteModule(
                     stream,
                     context,
                     instance.config.name,
-                    instance.worker.supervision.state,
+                    instance.supervision.state,
                     readProcessSubscriptionFromSeq(request.payload),
                     (event) =>
                         isProcessEventType(event.type)
@@ -286,7 +327,7 @@ export function createProcessRouteModule(
 }
 
 function workerInfo(instance: Instance) {
-    const handshake = instance.worker.supervision.handshake;
+    const handshake = instance.supervision.handshake;
     return handshake === undefined
         ? {}
         : {
@@ -300,17 +341,7 @@ function workerInfo(instance: Instance) {
 }
 
 export function readProcessSubscriptionFromSeq(payload?: JsonValue): number {
-    if (
-        !isRecord(payload) ||
-        typeof payload.fromSeq !== "number" ||
-        !Number.isSafeInteger(payload.fromSeq) ||
-        payload.fromSeq < 0
-    ) {
-        throw invalid(
-            "process.subscribe requires a non-negative integer fromSeq.",
-        );
-    }
-    return payload.fromSeq;
+    return readFromSeq(payload, "process.subscribe");
 }
 
 function isRecord(
@@ -327,6 +358,28 @@ function readString(
     if (!isRecord(payload) || typeof payload[field] !== "string")
         throw invalid(`${operation} requires string ${field}.`);
     return payload[field];
+}
+
+function readRecord(
+    payload: JsonValue | undefined,
+    operation: string,
+): Record<string, JsonValue> {
+    if (!isRecord(payload)) throw invalid(`${operation} requires an object.`);
+    return payload;
+}
+
+function readFromSeq(
+    payload: JsonValue | undefined,
+    operation: string,
+): number {
+    if (
+        !isRecord(payload) ||
+        typeof payload.fromSeq !== "number" ||
+        !Number.isSafeInteger(payload.fromSeq) ||
+        payload.fromSeq < 0
+    )
+        throw invalid(`${operation} requires a non-negative integer fromSeq.`);
+    return payload.fromSeq;
 }
 
 function invalid(message: string) {
