@@ -1,10 +1,5 @@
-import {
-    controlErrorCodes,
-    createRemoteError,
-    isMessageEventType,
-    type JsonValue,
-    type MessageEvent,
-} from "@portable-devshell/shared";
+import { ExtensionError } from "@portable-devshell/extension";
+import type { JsonValue, MessageEvent } from "@portable-devshell/shared";
 import {
     type ControlStreamBinding,
 } from "@portable-devshell/extension/control";
@@ -80,14 +75,18 @@ function readMessageSubscriptionFromSeq(payload?: JsonValue): number {
         !Number.isSafeInteger(payload.fromSeq) ||
         payload.fromSeq < 0
     ) {
-        throw createRemoteError({
-            code: controlErrorCodes.invalidTarget,
+        throw new ExtensionError({
+            code: "control.invalidTarget",
             message:
                 "message.subscribe requires a non-negative integer fromSeq.",
             retryable: false,
         });
     }
     return payload.fromSeq;
+}
+
+function isMessageEventType(type: string): boolean {
+    return type.startsWith("context.message.") || type === "message.changed";
 }
 
 function isRecord(
