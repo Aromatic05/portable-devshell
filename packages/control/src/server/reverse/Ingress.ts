@@ -88,7 +88,6 @@ export class ReverseIngress {
     }
 
     stop(): void {
-        this.#connections.stop();
         this.#webSocketServer.close();
     }
 

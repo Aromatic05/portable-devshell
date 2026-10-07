@@ -31,10 +31,11 @@ import type { ExtensionInstallLimits } from "../../extension/install/Policy.js";
 import { ExtensionConfigControl } from "../../extension/api/cap/config/index.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";
-import { ControlRuntime } from "./Runtime.js";
-import type { ControlState } from "../../State.js";
+import { ControlServerRuntime } from "./Runtime.js";
+import { ControlState } from "../../State.js";
 import type { ControlConfig } from "../../config/index.js";
 import type { ControlInstances } from "../../instance/index.js";
+import { createToolCallRegistry } from "../../toolcall/index.js";
 import { createContextRuntime } from "../../context/index.js";
 import { McpControlModule } from "../mcp/Module.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
@@ -72,11 +73,11 @@ export class ControlRuntimeFactory {
         homeDirectory?: string;
         instances: ControlInstances;
         socketPath: string;
-        state: ControlState;
-    }): Promise<ControlRuntime> {
+    }): Promise<{ state: ControlState; server: ControlServerRuntime }> {
         const controlPaths = new ControlPathHome(
             options.homeDirectory ?? homedir(),
         );
+        const toolRegistry = createToolCallRegistry();
         const artifact = createArtifactRuntime({
             config: () => options.config.require(),
             controlPaths,
@@ -117,7 +118,7 @@ export class ControlRuntimeFactory {
                 controlPaths,
                 factory: this.#mcpFactory,
                 instances: options.instances.registry,
-                toolRegistry: options.state.toolCalls,
+                toolRegistry,
             });
             const configEngine = new ConfigEngine({
                 configStore: options.config.store,
@@ -202,6 +203,7 @@ export class ControlRuntimeFactory {
                 registry: options.config.registry,
                 setConfig: (config) => options.config.set(config),
             });
+            options.config.composeRuntime(configEngine, configEditor);
             const extensions = createExtensionRuntime({
                 configRegistry: options.config.registry,
                 pathOptions: {
@@ -329,6 +331,7 @@ export class ControlRuntimeFactory {
             );
             const reverseHost = mcp.host?.server;
             const reversePublicBaseUrl = reverseConfig.mcp.publicBaseUrl;
+            let reverseConnections: ReverseConnections | undefined;
             let reverseCredentials: ReverseCredentials | undefined;
             let reverseIngress: ReverseIngress | undefined;
             if (reverseHost === undefined || reversePublicBaseUrl === undefined) {
@@ -341,9 +344,10 @@ export class ControlRuntimeFactory {
                     });
                 }
             } else {
-                const reverseConnections = new ReverseConnections({
+                const connections = new ReverseConnections({
                     instances: options.instances.registry,
                 });
+                reverseConnections = connections;
                 reverseCredentials = new ReverseCredentials({
                     credentialStore: new ReverseCredentialStore(
                         options.homeDirectory,
@@ -352,10 +356,10 @@ export class ControlRuntimeFactory {
                     publicBaseUrl: reversePublicBaseUrl,
                 });
                 reverseCredentials.setDisconnectHandler((instance) =>
-                    reverseConnections.disconnect(instance),
+                    connections.disconnect(instance),
                 );
                 reverseIngress = new ReverseIngress({
-                    connections: reverseConnections,
+                    connections,
                     credentials: reverseCredentials,
                     publicBaseUrl: reversePublicBaseUrl,
                 });
@@ -373,34 +377,58 @@ export class ControlRuntimeFactory {
                     await artifact.service.retireInstance(instance.name);
                 },
             );
-            return new ControlRuntime({
+            options.instances.composeRuntime({
+                create: instanceCreate,
+                editor: instanceEditor,
+                ...(reverseConnections === undefined || reverseCredentials === undefined
+                    ? {}
+                    : {
+                          reverse: {
+                              connections: reverseConnections,
+                              credentials: reverseCredentials,
+                          },
+                      }),
+            });
+            const state = new ControlState({
+                artifact,
+                builtinExtensionSources: this.#builtinExtensionSources,
+                config: () => options.config.require(),
                 contexts,
-                contextTransport,
+                extensions,
+                instanceChanges: options.instances.changes,
+                instances: options.instances.registry,
+                internalEndpoint,
+                toolRegistry,
+            });
+            instanceEditor.registerInstanceGenerationRetirement(
+                async (instance) => {
+                    await state.extensions.retireInstanceGeneration(instance.name);
+                },
+            );
+            const server = new ControlServerRuntime({
+                config: () => options.config.require(),
+                configChanges: options.config.changes,
+                configEditor: options.config.editor,
+                instanceCreate: options.instances.create,
+                instanceEditor: options.instances.editor,
+                instanceChanges: options.instances.changes,
+                instances: options.instances.registry,
                 internalControl: {
                     endpoint: internalEndpoint,
                     server: serverTransport,
                 },
-                artifact,
-                builtinExtensionSources: this.#builtinExtensionSources,
-                config: () => options.config.require(),
-                configChanges: options.config.changes,
-                configEditor,
-                extensions,
-                instanceCreate,
-                instanceEditor,
-                instanceChanges: options.instances.changes,
-                instances: options.instances.registry,
                 mcp,
-                toolCalls: options.state.toolCalls,
                 restart: options.restart,
                 reverse: {
-                    credentials: reverseCredentials,
+                    credentials: options.instances.reverseCredentials,
                     ingress: reverseIngress,
                 },
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
+                state,
                 web,
             });
+            return { server, state };
         } catch (error) {
             try {
                 await artifact.stop();

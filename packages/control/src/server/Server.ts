@@ -1,12 +1,13 @@
 import type { ControlConfig as ControlConfigDocument } from "@portable-devshell/shared";
-import type { ControlConfigStore } from "../config/store/index.js";
+import { ControlSocketFile } from "@portable-devshell/shared";
+
+import type { ControlState } from "../State.js";
 import { ControlConfig } from "../config/index.js";
+import type { ControlConfigStore } from "../config/store/index.js";
 import { ControlInstances } from "../instance/index.js";
-import { ControlState } from "../State.js";
 import type { McpRuntimeFactory } from "./mcp/Runtime.js";
 import { ControlRuntimeFactory } from "./runtime/Factory.js";
-import type { ControlRuntime } from "./runtime/Runtime.js";
-import { ControlSocketFile } from "@portable-devshell/shared";
+import type { ControlServerRuntime } from "./runtime/Runtime.js";
 
 export interface ControlServerOptions {
     configStore?: ControlConfigStore;
@@ -18,18 +19,21 @@ export interface ControlServerOptions {
 }
 
 export class ControlServer {
+    readonly #config: ControlConfig;
+    readonly #homeDirectory?: string;
+    readonly #instances: ControlInstances;
     readonly #runtimeFactory: ControlRuntimeFactory;
     readonly #socketFile: ControlSocketFile;
     readonly #startupDiagnostic: (message: string) => void;
-    readonly #config: ControlConfig;
-    readonly #instances = new ControlInstances();
-    readonly #state = new ControlState();
-    readonly #homeDirectory?: string;
     #operationTail: Promise<void> = Promise.resolve();
-    #runtime?: ControlRuntime;
+    #server?: ControlServerRuntime;
+    #state?: ControlState;
 
     constructor(options: ControlServerOptions = {}) {
         this.#config = new ControlConfig({ store: options.configStore });
+        this.#instances = new ControlInstances({
+            configChanges: this.#config.changes,
+        });
         this.#homeDirectory = options.homeDirectory;
         this.#runtimeFactory =
             options.runtimeFactory ??
@@ -65,12 +69,16 @@ export class ControlServer {
     }
 
     async #start(): Promise<void> {
-        if (this.#runtime !== undefined) return;
+        if (this.#server !== undefined || this.#state !== undefined) return;
         await this.#instances.close();
+        this.#instances.reset();
         this.#startupDiagnostic("control config load started");
         const config = await this.#config.load(this.#homeDirectory);
         this.#startupDiagnostic("control instances load started");
         await this.#instances.load(config);
+
+        let state: ControlState | undefined;
+        let server: ControlServerRuntime | undefined;
         try {
             this.#startupDiagnostic("control composition input load completed");
             this.#startupDiagnostic(
@@ -80,30 +88,45 @@ export class ControlServer {
             this.#startupDiagnostic(
                 "control runtime directory initialization completed",
             );
-            this.#startupDiagnostic("control runtime composition started");
-            const runtime = await this.#runtimeFactory.create({
+            this.#startupDiagnostic("control composition started");
+            const composition = await this.#runtimeFactory.create({
+                config: this.#config,
+                homeDirectory: this.#homeDirectory,
+                instances: this.#instances,
                 restart: async () => {
                     await this.restart();
                 },
                 shutdown: async () => {
                     await this.stop();
                 },
-                config: this.#config,
-                homeDirectory: this.#homeDirectory,
-                instances: this.#instances,
                 socketPath: this.#socketFile.path,
-                state: this.#state,
             });
-            this.#startupDiagnostic("control runtime composition completed");
-            this.#startupDiagnostic("control runtime start started");
-            await runtime.start();
-            this.#runtime = runtime;
-            this.#startupDiagnostic("control runtime start completed");
+            state = composition.state;
+            server = composition.server;
+            this.#startupDiagnostic("control composition completed");
+            await state.start();
+            await this.#instances.reconcile();
+            await server.start();
+            await state.reconcile();
+            this.#state = state;
+            this.#server = server;
+            this.#startupDiagnostic("control start completed");
         } catch (error) {
-            try {
-                await this.#instances.close();
-            } catch (cleanupError) {
-                throw new AggregateError([error, cleanupError], "Control startup failed and instance cleanup was incomplete.");
+            const cleanupFailures: unknown[] = [];
+            await server?.stop().catch((cleanupError) =>
+                cleanupFailures.push(cleanupError),
+            );
+            await state?.close().catch((cleanupError) =>
+                cleanupFailures.push(cleanupError),
+            );
+            await this.#instances.close().catch((cleanupError) =>
+                cleanupFailures.push(cleanupError),
+            );
+            if (cleanupFailures.length > 0) {
+                throw new AggregateError(
+                    [error, ...cleanupFailures],
+                    "Control startup failed and cleanup was incomplete.",
+                );
             }
             this.#instances.reset();
             this.#config.reset();
@@ -112,10 +135,18 @@ export class ControlServer {
     }
 
     async #stop(): Promise<void> {
-        const runtime = this.#runtime;
-        if (runtime !== undefined) await runtime.stop();
-        await this.#instances.close();
-        this.#runtime = undefined;
+        const failures: unknown[] = [];
+        await this.#server?.stop().catch((error) => failures.push(error));
+        await this.#state?.close().catch((error) => failures.push(error));
+        await this.#instances.close().catch((error) => failures.push(error));
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                "Control failed to stop cleanly.",
+            );
+        }
+        this.#server = undefined;
+        this.#state = undefined;
         this.#instances.reset();
         this.#config.reset();
     }
