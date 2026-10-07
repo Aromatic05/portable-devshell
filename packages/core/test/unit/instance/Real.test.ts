@@ -16,8 +16,11 @@ import { promisify } from "node:util";
 import {
     Endpoint,
     Rpc,
+    Stream,
+    WORKER_PROTOCOL_VERSION,
     asInstanceName,
     controlErrorCodes,
+    createToolCallRuntime,
     runtimeErrorCodes,
     StreamChannel,
     toolCallOutput,
@@ -29,9 +32,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { createToolCallRuntime } from "../../../src/toolcall/index.ts";
 import { WorkerInstance } from "../../../src/instance/runtime/index.ts";
-import { WORKER_PROTOCOL_VERSION } from "../../../src/instance/transport/packet/Client.ts";
 import {
     createTestWorkerInstance,
     createTestWorkerToolRuntime,
@@ -104,6 +105,7 @@ async function bridgeRsyncRemoteShell(
     socket: Socket,
     cwd: string,
 ): Promise<void> {
+    let protocol: Stream | undefined;
     let stream: MessageStream | undefined;
     try {
         const handshake = await readSocketLine(socket);
@@ -120,7 +122,13 @@ async function bridgeRsyncRemoteShell(
             throw new Error("invalid rsync remote shell handshake");
         }
         const [executable, ...args] = parsed.command as string[];
-        stream = await instance.execProcess({
+        protocol = new Stream(
+            await instance.supervision.endpoint.connect(
+                `${instance.supervision.snapshot().name}-worker`,
+                "process",
+            ),
+        );
+        stream = await protocol.open("exec", {
             executable: executable!,
             args,
             cwd,
@@ -162,6 +170,8 @@ async function bridgeRsyncRemoteShell(
             error instanceof Error ? error : new Error(String(error)),
         );
         throw error;
+    } finally {
+        protocol?.close();
     }
 }
 
@@ -187,20 +197,20 @@ test(
         });
 
         t.after(async () => {
-            await instance.stop();
-            await instance.close();
+            await instance.supervision.lifecycle.stop();
+            await instance.supervision.close();
             await rm(workspacePath, { force: true, recursive: true });
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
         });
 
-        const started = await instance.start();
+        const started = await instance.supervision.lifecycle.start();
 
         assert.equal(started.daemonState, "running");
         assert.equal(started.connectionState, "connected");
         assert.equal(started.ready, true);
-        assert.equal(instance.handshake?.instance, instanceName);
-        assert.equal(instance.handshake?.homeDirectory, homeDirectory);
+        assert.equal(instance.supervision.handshake?.instance, instanceName);
+        assert.equal(instance.supervision.handshake?.homeDirectory, homeDirectory);
         const bashRun = (await instance.readWorkerTools()).find(
             (tool) => tool.name === "bash_run",
         );
@@ -223,7 +233,7 @@ test(
         assert.notEqual(fileGlobSchema.properties?.type, undefined);
         assert.notEqual(fileGlobSchema.properties?.cursor, undefined);
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
@@ -253,7 +263,7 @@ test(
             status: "ready",
         });
 
-        const stopped = await instance.stop();
+        const stopped = await instance.supervision.lifecycle.stop();
         assert.equal(stopped.daemonState, "stopped");
         assert.equal(stopped.connectionState, "disconnected");
         assert.equal(stopped.ready, false);
@@ -290,20 +300,20 @@ test(
             workerBinaryPath: workerBinaryPath!,
         });
         t.after(async () => {
-            await instance.stop();
-            await instance.close();
+            await instance.supervision.lifecycle.stop();
+            await instance.supervision.close();
             await rm(workspacePath, { force: true, recursive: true });
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
         });
 
-        await instance.start();
-        const opened = await instance.artifact.openArtifactPayload({
+        await instance.supervision.lifecycle.start();
+        const opened = await instance.execution.artifact.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
             path: "./source.bin",
             workspace: workspacePath,
         });
-        const chunk = await instance.artifact.readArtifactPayload({
+        const chunk = await instance.execution.artifact.readArtifactPayload({
             maxBytes: source.byteLength,
             offsetBytes: 0,
             payloadId: opened.payloadId,
@@ -313,24 +323,24 @@ test(
         assert.equal(chunk.eof, true);
         assert.deepEqual(Buffer.from(chunk.bytes), source);
 
-        const receive = await instance.artifact.beginArtifactReceive({
+        const receive = await instance.execution.artifact.beginArtifactReceive({
             descriptor: opened.descriptor,
             overwrite: false,
             targetPath: "./copy.bin",
             workspace: workspacePath,
         });
-        const written = await instance.artifact.writeArtifactReceive({
+        const written = await instance.execution.artifact.writeArtifactReceive({
             bytes: chunk.bytes,
             offsetBytes: receive.nextOffsetBytes,
             receiveId: receive.receiveId,
         });
         assert.equal(written.receivedBytes, source.byteLength);
-        const finished = await instance.artifact.finishArtifactReceive(
+        const finished = await instance.execution.artifact.finishArtifactReceive(
             receive.receiveId,
         );
         assert.equal(finished.bytes, source.byteLength);
         assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
-        await instance.artifact.closeArtifactPayload(opened.payloadId);
+        await instance.execution.artifact.closeArtifactPayload(opened.payloadId);
     },
 );
 
@@ -373,16 +383,23 @@ test(
             workerBinaryPath: workerBinaryPath!,
         });
         t.after(async () => {
-            await instance.stop();
-            await instance.close();
+            await instance.supervision.lifecycle.stop();
+            await instance.supervision.close();
             server.close();
             await rm(workspacePath, { force: true, recursive: true });
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
         });
 
-        await instance.start();
-        const tcp = await instance.connectTcp({
+        await instance.supervision.lifecycle.start();
+        const network = new Stream(
+            await instance.supervision.endpoint.connect(
+                `${instance.supervision.snapshot().name}-worker`,
+                "network",
+            ),
+        );
+        t.after(() => network.close());
+        const tcp = await network.open("tcp", {
             host: "127.0.0.1",
             port: address.port,
         });
@@ -479,7 +496,14 @@ test(
         const socksAddress = socksServer.address();
         assert.ok(socksAddress !== null && typeof socksAddress !== "string");
 
-        const socks = await instance.connectTcp({
+        const socksNetwork = new Stream(
+            await instance.supervision.endpoint.connect(
+                `${instance.supervision.snapshot().name}-worker`,
+                "network",
+            ),
+        );
+        t.after(() => socksNetwork.close());
+        const socks = await socksNetwork.open("tcp", {
             host: "127.0.0.1",
             port: socksAddress.port,
         });
@@ -532,7 +556,14 @@ test(
         assert.match(proxiedResponse, /^HTTP\/1\.1 200 OK\r\n/u);
         assert.match(proxiedResponse, /\r\n\r\nhttp-over-devshell$/u);
 
-        const processStream = await instance.execProcess({
+        const processProtocol = new Stream(
+            await instance.supervision.endpoint.connect(
+                `${instance.supervision.snapshot().name}-worker`,
+                "process",
+            ),
+        );
+        t.after(() => processProtocol.close());
+        const processStream = await processProtocol.open("exec", {
             executable: process.execPath,
             args: [
                 "-e",
@@ -633,15 +664,15 @@ socket.on("error", (error) => {
 
         t.after(async () => {
             bridgeServer.close();
-            await instance.stop();
-            await instance.close();
+            await instance.supervision.lifecycle.stop();
+            await instance.supervision.close();
             await rm(sourcePath, { force: true, recursive: true });
             await rm(workspacePath, { force: true, recursive: true });
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
         });
 
-        await instance.start();
+        await instance.supervision.lifecycle.start();
         await Promise.all([
             execFileAsync(
                 "rsync",
@@ -705,9 +736,9 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     });
 
     try {
-        const starting = instance.start();
+        const starting = instance.supervision.lifecycle.start();
         await waitFor(() => commands.includes("start"));
-        const stopping = instance.stop();
+        const stopping = instance.supervision.lifecycle.stop();
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         releaseStart();
@@ -717,7 +748,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
         assert.equal(stopOverlappedStart, false);
     } finally {
         releaseStart();
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -848,7 +879,7 @@ test("control-owned tool operations are audited while the worker is stopped", as
             ],
         );
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         const eventTypesForCall = (callId: string | undefined) =>
             replay.events
@@ -880,7 +911,7 @@ test("control-owned tool operations are audited while the worker is stopped", as
         ingress.close();
         await toolRuntime.execution.close();
         await toolRuntime.audit.close();
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -899,7 +930,7 @@ test("WorkerInstance trusted internal tool invocation does not record ingress au
         worker: instance,
     });
     try {
-        await instance.start();
+        await instance.supervision.lifecycle.start();
         await toolRuntime.execution.refreshTools();
         const internal = toolRuntime.execution.invokeInternal(
             "bash_run",
@@ -918,8 +949,8 @@ test("WorkerInstance trusted internal tool invocation does not record ingress au
     } finally {
         await toolRuntime.execution.close();
         await toolRuntime.audit.close();
-        await instance.stop();
-        await instance.close();
+        await instance.supervision.lifecycle.stop();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -961,7 +992,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             },
         );
 
-        const started = await instance.start();
+        const started = await instance.supervision.lifecycle.start();
         assert.equal(started.ready, true);
         await toolRuntime.execution.refreshTools();
 
@@ -1062,7 +1093,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             stdout,
         });
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.slice(0, 7).map((event) => event.type),
@@ -1152,12 +1183,12 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             toolName: "bash_run",
         });
 
-        await instance.stop();
+        await instance.supervision.lifecycle.stop();
     } finally {
         ingress.close();
         await toolRuntime.execution.close();
         await toolRuntime.audit.close();
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1189,7 +1220,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     });
 
     try {
-        await assert.rejects(instance.start(), (error: unknown) => {
+        await assert.rejects(instance.supervision.lifecycle.start(), (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
                 runtimeErrorCodes.workerStartFailed,
@@ -1197,7 +1228,7 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
             return true;
         });
 
-        const snapshot = instance.snapshot();
+        const snapshot = instance.supervision.snapshot();
         assert.equal(snapshot.daemonState, "stopped");
         assert.equal(snapshot.connectionState, "disconnected");
         assert.equal(snapshot.ready, false);
@@ -1210,14 +1241,14 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
             "Worker start failed for instance task-6-start-failure.",
         );
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
             ["instance.statusChanged", "instance.statusChanged"],
         );
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1247,10 +1278,10 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
     });
 
     try {
-        await instance.start();
+        await instance.supervision.lifecycle.start();
         harness.setStatus("running");
 
-        await assert.rejects(instance.stop(), (error: unknown) => {
+        await assert.rejects(instance.supervision.lifecycle.stop(), (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
                 runtimeErrorCodes.workerStopFailed,
@@ -1258,7 +1289,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
             return true;
         });
 
-        const snapshot = instance.snapshot();
+        const snapshot = instance.supervision.snapshot();
         assert.equal(snapshot.daemonState, "running");
         assert.equal(snapshot.connectionState, "connected");
         assert.equal(snapshot.ready, true);
@@ -1271,7 +1302,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
             "Worker stop failed for instance task-6-stop-failure.",
         );
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1286,25 +1317,25 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
     });
 
     try {
-        const stopped = await instance.refreshStatus();
+        const stopped = await instance.supervision.recovery.refreshStatus();
         assert.equal(stopped.daemonState, "stopped");
         assert.equal(stopped.connectionState, "disconnected");
         assert.equal(harness.requestedMethods(), 0);
 
         harness.setStatus("running");
-        const running = await instance.refreshStatus();
+        const running = await instance.supervision.recovery.refreshStatus();
         assert.equal(running.daemonState, "running");
         assert.equal(running.connectionState, "connected");
         assert.equal(running.ready, true);
         assert.equal((await instance.readWorkerTools())[0]?.name, "bash_run");
 
         harness.setStatus("stale");
-        const stale = await instance.refreshStatus();
+        const stale = await instance.supervision.recovery.refreshStatus();
         assert.equal(stale.daemonState, "stale");
         assert.equal(stale.connectionState, "disconnected");
         assert.equal(stale.ready, false);
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
@@ -1320,7 +1351,7 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
             ],
         );
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1338,19 +1369,19 @@ test("WorkerInstance refreshStatus on a connected instance keeps ready without a
 
     try {
         harness.setStatus("running");
-        const connected = await instance.refreshStatus();
+        const connected = await instance.supervision.recovery.refreshStatus();
         assert.equal(connected.ready, true);
         assert.equal(connected.connectionState, "connected");
 
-        const before = instance.subscribe(1);
+        const before = instance.supervision.state.subscribe(1);
         assert.equal(before.kind, "events");
         const beforeSeq = before.lastSeq;
 
-        const refreshed = await instance.refreshStatus();
+        const refreshed = await instance.supervision.recovery.refreshStatus();
         assert.equal(refreshed.ready, true);
         assert.equal(refreshed.connectionState, "connected");
 
-        const after = instance.subscribe(beforeSeq + 1);
+        const after = instance.supervision.state.subscribe(beforeSeq + 1);
         assert.equal(after.kind, "events");
         const transientReadyChanged = after.events.find(
             (event) =>
@@ -1364,7 +1395,7 @@ test("WorkerInstance refreshStatus on a connected instance keeps ready without a
             "refreshStatus must not transiently flip ready to false",
         );
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1379,7 +1410,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     });
 
     try {
-        await instance.start();
+        await instance.supervision.lifecycle.start();
         assert.deepEqual(
             (await instance.readWorkerTools())[0]?.inputSchema,
             toolSchemaFor("command"),
@@ -1398,9 +1429,9 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
         harness.disconnect();
         await harness.waitForMethodCount("worker.handshake", 2);
         await waitFor(
-            () => instance.snapshot().connectionState === "connected",
+            () => instance.supervision.snapshot().connectionState === "connected",
         );
-        assert.equal(instance.snapshot().connectionState, "connected");
+        assert.equal(instance.supervision.snapshot().connectionState, "connected");
         const refreshedTools = await instance.readWorkerTools();
         await harness.waitForMethodCount("tools.list", 2);
         assert.deepEqual(
@@ -1408,7 +1439,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
             toolSchemaFor("cwd"),
         );
 
-        const replay = instance.subscribe(1);
+        const replay = instance.supervision.state.subscribe(1);
         assert.equal(replay.kind, "events");
         assert.deepEqual(
             replay.events.map((event) => event.type),
@@ -1429,7 +1460,7 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
             ],
         );
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
@@ -1446,18 +1477,18 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
     });
 
     try {
-        await instance.start();
+        await instance.supervision.lifecycle.start();
         harness.failNextRpcConnections();
         harness.disconnect();
 
         await harness.waitForMethodCount("worker.handshake", 2);
         await waitFor(
-            () => instance.snapshot().connectionState === "connected",
+            () => instance.supervision.snapshot().connectionState === "connected",
         );
-        assert.equal(instance.snapshot().connectionState, "connected");
+        assert.equal(instance.supervision.snapshot().connectionState, "connected");
         assert.equal((await instance.readWorkerTools()).length, 1);
     } finally {
-        await instance.close();
+        await instance.supervision.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });

@@ -6,22 +6,22 @@ import {
 } from "@portable-devshell/shared";
 import { join } from "node:path";
 
-import { createAuditRuntime, type AuditRuntime } from "../../src/audit/Public.ts";
-import {
-    createToolCallExecutionRuntime,
-    type ToolCallExecutionRuntime,
-} from "../../src/toolcall/Public.ts";
-import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
-import { WorkerCommandClient, type WorkerRuntime } from "../../src/instance/runtime/execution/Command.ts";
+import { createAuditRuntime } from "../../src/audit/index.ts";
+import type { AuditRuntime } from "../../src/audit/Api.ts";
+import type { WorkerToolDefinition } from "../../src/instance/Api.ts";
 import { WorkerBinary } from "../../src/instance/runtime/Binary.ts";
+import { WorkerCommandClient, type WorkerRuntime } from "../../src/instance/runtime/execution/Command.ts";
 import { LocalExecution } from "../../src/instance/runtime/execution/provider/Local.ts";
-import { LocalInstall } from "../../src/instance/runtime/provision/install/provider/Local.ts";
-import { resolveWorkerInstanceConfig } from "../../src/instance/runtime/provision/Config.ts";
 import { WorkerInstance } from "../../src/instance/runtime/index.ts";
+import { resolveWorkerInstanceConfig } from "../../src/instance/runtime/provision/Config.ts";
+import { LocalInstall } from "../../src/instance/runtime/provision/install/provider/Local.ts";
+import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
 import { InstanceStateMachine } from "../../src/instance/runtime/supervision/State.ts";
-import { WorkerProtocolClient } from "../../src/instance/transport/packet/Client.ts";
 import { TransportConnection } from "../../src/instance/transport/endpoint/Connection.ts";
 import { TransportFactory } from "../../src/instance/transport/endpoint/Factory.ts";
+import { WorkerProtocolClient } from "../../src/instance/transport/packet/Client.ts";
+import { createToolCallExecutionRuntime } from "../../src/toolcall/index.ts";
+import type { ToolCallExecutionRuntime } from "../../src/toolcall/Api.ts";
 import type { WorkerCommandResult } from "../../src/instance/runtime/execution/Command.ts";
 import type { WorkerCommandName } from "../../src/instance/runtime/Binary.ts";
 import type { WorkerCommandOptions, WorkerChannelOptions } from "../../src/instance/runtime/execution/Command.ts";
@@ -48,9 +48,13 @@ export interface TestWorkerToolRuntime {
     execution: ToolCallExecutionRuntime;
 }
 
+export interface TestWorkerInstance extends WorkerInstance {
+    readWorkerTools(): Promise<WorkerToolDefinition[]>;
+}
+
 export function createTestWorkerInstance(
     options: TestWorkerInstanceOptions,
-): WorkerInstance {
+): TestWorkerInstance {
     const runtime = createRuntime(options);
     const connection = new TransportConnection(() =>
         runtime.connectChannel({
@@ -72,21 +76,27 @@ export function createTestWorkerInstance(
         workerHost,
     );
     const events = new InstanceEventBuffer(options.name, 1024);
-    return new WorkerInstance({
+    const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
+    const worker = new WorkerInstance({
+        admission: { active: () => true, enabled: () => true },
         commandClient: new WorkerCommandClient(runtime, options.name, options.env),
         config,
         endpoint,
         events,
-        protocolClient: new WorkerProtocolClient(endpoint, workerHost),
+        onReadyChanged: async () => undefined,
+        protocolClient,
         stateMachine: new InstanceStateMachine(options.name),
         transportConnection: connection,
+    });
+    return Object.assign(worker, {
+        readWorkerTools: async () => (await protocolClient.listTools()).tools,
     });
 }
 
 export function createTestWorkerToolRuntime(options: {
     homeDirectory: string;
     instanceName: InstanceName;
-    worker: WorkerInstance;
+    worker: TestWorkerInstance;
 }): TestWorkerToolRuntime {
     const audit = createAuditRuntime({
         eventBufferSize: 1024,
@@ -97,18 +107,24 @@ export function createTestWorkerToolRuntime(options: {
         audit,
         execution: createToolCallExecutionRuntime({
             appendEvent: async (type, data?: JsonValue) =>
-                await options.worker.appendControlEvent(type, data),
+                await options.worker.supervision.state.appendEvent(type, data),
             assertReady: () => {
-                if (options.worker.snapshot().ready) return;
+                if (options.worker.supervision.snapshot().ready) return;
                 throw Object.assign(
                     new Error(`Instance ${options.instanceName} is not ready.`),
                     { code: runtimeErrorCodes.instanceNotReady },
                 );
             },
             audit: audit.api,
-            endpoint: options.worker.endpoint,
+            endpoint: options.worker.supervision.endpoint,
             instanceName: options.instanceName,
+            prepareWorkspace: (workspace) =>
+                options.worker.execution.environment.prepareWorkspace(workspace),
             readTools: async () => await options.worker.readWorkerTools(),
+            releaseWorkspace: async (workspace) =>
+                await options.worker.execution.environment.releaseAlerts(
+                    workspace,
+                ),
         }),
     };
 }
