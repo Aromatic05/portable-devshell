@@ -31,8 +31,17 @@ export class Control {
 
     constructor(options: ControlOptions = {}) {
         this.#config = new ControlConfig({ store: options.configStore });
-        this.#instances = new ControlInstances({
-            configChanges: this.#config.changes,
+        this.#instances = new ControlInstances();
+        this.#config.changes.onChange((change) => {
+            if (
+                change.paths.some(
+                    (path) =>
+                        path === "instances" ||
+                        path.startsWith("instances."),
+                )
+            ) {
+                this.#instances.changes.publish("config");
+            }
         });
         this.#homeDirectory = options.homeDirectory;
         this.#factory =

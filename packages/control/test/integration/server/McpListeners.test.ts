@@ -670,7 +670,17 @@ async function createOwners(
         }) as never,
     });
     await config.load(homeDirectory);
-    const instances = new ControlInstances({ configChanges: config.changes });
+    const instances = new ControlInstances();
+    config.changes.onChange((change) => {
+        if (
+            change.paths.some(
+                (path) =>
+                    path === "instances" || path.startsWith("instances."),
+            )
+        ) {
+            instances.changes.publish("config");
+        }
+    });
     await instances.load(config.require());
     const toolRegistry = createToolCallRegistry();
     return {
@@ -680,7 +690,6 @@ async function createOwners(
         toolRegistry,
         async close() {
             await instances.close();
-            instances.dispose();
         },
     };
 }

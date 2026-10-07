@@ -2,14 +2,9 @@ import { createInstance, type Instance } from "@portable-devshell/core";
 import type { ReverseConnections } from "@portable-devshell/core/instance/transport";
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import type { ConfigChangeHub } from "../config/change/Config.js";
 import { InstanceChangeHub } from "./Change.js";
 import type { InstanceEditorCoordinator } from "./editor/index.js";
 import { InstanceRegistry } from "./Registry.js";
-
-export interface ControlInstancesOptions {
-    configChanges?: ConfigChangeHub;
-}
 
 export interface ControlInstancesRuntime {
     editor: InstanceEditorCoordinator;
@@ -18,25 +13,9 @@ export interface ControlInstancesRuntime {
 
 export class ControlInstances {
     readonly changes = new InstanceChangeHub();
-    readonly #unsubscribeConfigChanges: () => void;
     #editor?: InstanceEditorCoordinator;
     #registry = new InstanceRegistry([]);
     #reverseConnections?: ReverseConnections;
-
-    constructor(options: ControlInstancesOptions = {}) {
-        this.#unsubscribeConfigChanges =
-            options.configChanges?.onChange((change) => {
-                if (
-                    change.paths.some(
-                        (path) =>
-                            path === "instances" ||
-                            path.startsWith("instances."),
-                    )
-                ) {
-                    this.changes.publish("config");
-                }
-            }) ?? (() => undefined);
-    }
 
     get registry(): InstanceRegistry {
         return this.#registry;
@@ -103,9 +82,5 @@ export class ControlInstances {
         this.#editor = undefined;
         this.#registry = new InstanceRegistry([]);
         this.#reverseConnections = undefined;
-    }
-
-    dispose(): void {
-        this.#unsubscribeConfigChanges();
     }
 }

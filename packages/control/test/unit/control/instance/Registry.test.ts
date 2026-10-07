@@ -6,7 +6,6 @@ import {
     normalizeConfigInstanceDraft,
 } from "@portable-devshell/shared";
 
-import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
 import { ControlInstances } from "../../../../src/instance/index.ts";
 
 test("ControlInstances loads only enabled instance generations without starting workers", async (t) => {
@@ -33,22 +32,6 @@ test("ControlInstances loads only enabled instance generations without starting 
     const active = instances.registry.get("demo-local");
     assert.ok(active);
     assert.equal(active.supervision.snapshot().ready, false);
-});
-
-test("ControlInstances projects instance config changes into its change source", () => {
-    const configChanges = new ConfigChangeHub();
-    const instances = new ControlInstances({ configChanges });
-    const kinds: string[] = [];
-    const unsubscribe = instances.changes.onChange((change) => {
-        kinds.push(change.kind);
-    });
-
-    configChanges.publish(["control.logLevel"]);
-    configChanges.publish(["instances.0.env"]);
-
-    assert.deepEqual(kinds, ["config"]);
-    unsubscribe();
-    instances.dispose();
 });
 
 test("ControlInstances closes only owned workers and preserves failed ownership for retry", async () => {
