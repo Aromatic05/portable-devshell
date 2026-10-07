@@ -121,6 +121,7 @@ export class ControlFactory {
                 instances: options.instances.registry,
                 toolRegistry,
             });
+            let server: ControlServer | undefined;
             const configEngine = new ConfigEngine({
                 configStore: options.config.store,
                 getConfig: () => options.config.require(),
@@ -134,7 +135,13 @@ export class ControlFactory {
                 registry: options.config.registry,
                 runtimeApply: {
                     apply: async (previous, next, changes) =>
-                        await mcp.applyRuntimeConfig(previous, next, changes),
+                        server === undefined
+                            ? false
+                            : await server.applyRuntimeConfig(
+                                  previous,
+                                  next,
+                                  changes,
+                              ),
                 },
                 runtimePreflight: new HttpEndpointPreflight(),
                 setConfig: (config) => options.config.set(config),
@@ -422,7 +429,7 @@ export class ControlFactory {
                     await state.extensions.retireInstanceGeneration(instance.name);
                 },
             );
-            const server = new ControlServer({
+            const composedServer = new ControlServer({
                 artifact: state.artifact,
                 config: () => options.config.require(),
                 configChanges: options.config.changes,
@@ -451,7 +458,8 @@ export class ControlFactory {
                 toolCalls: state.toolCalls,
                 web,
             });
-            return { server, state };
+            server = composedServer;
+            return { server: composedServer, state };
         } catch (error) {
             try {
                 if (composedState === undefined) await artifact.stop();

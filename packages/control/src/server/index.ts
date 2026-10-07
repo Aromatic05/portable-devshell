@@ -7,6 +7,7 @@ import type {
 
 import type { ArtifactRuntime } from "../artifact/Api.js";
 import type { ConfigChangeHub } from "../config/change/Config.js";
+import type { ConfigRuntimeChangeSet } from "../config/engine/Api.js";
 import type { ConfigEditorCoordinator } from "../config/editor/index.js";
 import type { ContextRuntime } from "../context/Api.js";
 import type { DebugRuntime } from "../debug/Api.js";
@@ -31,6 +32,7 @@ import { ControlWebRuntime } from "./web/Runtime.js";
 import { WebApplicationCatalog } from "./web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "./web/extension/page/Service.js";
 import { createContextRouteModule } from "../context/Public.js";
+import { ControlServerConfig } from "./Config.js";
 
 export interface ControlServerOptions {
     artifact: ArtifactRuntime;
@@ -62,6 +64,7 @@ export interface ControlServerOptions {
 }
 
 export class ControlServer {
+    readonly #config: ControlServerConfig;
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
@@ -133,59 +136,23 @@ export class ControlServer {
             onConnectionDetached: options.onConnectionDetached,
             routes: this.#routes,
         });
-
-        this.#mcp.setWebConfigApplier?.(
-            async (previous, next) =>
-                await this.#web.replace(previous, next, this.#transport),
-        );
-        this.#mcp.setMcpConfigApplier?.(async (previous, next) => {
-            const retired = await this.#mcp.replaceMcpHost(previous, next);
-            try {
-                const host = this.#mcp.host;
-                if (host !== undefined && this.#reverseIngress !== undefined) {
-                    if (next.mcp.publicBaseUrl !== undefined) {
-                        this.#reverseCredentials?.setPublicBaseUrl(
-                            next.mcp.publicBaseUrl,
-                        );
-                        this.#reverseIngress.setPublicBaseUrl(
-                            next.mcp.publicBaseUrl,
-                        );
-                    }
-                    this.#reverseIngress.install(host.server);
-                }
-                await retired?.stop();
-            } catch (error) {
-                const rollbackFailures: unknown[] = [];
-                await this.#mcp
-                    .restoreMcpHost(retired, previous)
-                    .catch((rollbackError) => {
-                        rollbackFailures.push(rollbackError);
-                    });
-                try {
-                    const host = this.#mcp.host;
-                    if (host !== undefined && this.#reverseIngress !== undefined) {
-                        if (previous.mcp.publicBaseUrl !== undefined) {
-                            this.#reverseCredentials?.setPublicBaseUrl(
-                                previous.mcp.publicBaseUrl,
-                            );
-                            this.#reverseIngress.setPublicBaseUrl(
-                                previous.mcp.publicBaseUrl,
-                            );
-                        }
-                        this.#reverseIngress.install(host.server);
-                    }
-                } catch (rollbackError) {
-                    rollbackFailures.push(rollbackError);
-                }
-                if (rollbackFailures.length > 0) {
-                    throw new AggregateError(
-                        [error, ...rollbackFailures],
-                        "MCP hot replacement failed and runtime rollback was incomplete.",
-                    );
-                }
-                throw error;
-            }
+        this.#config = new ControlServerConfig({
+            mcp: this.#mcp,
+            reverse: {
+                credentials: this.#reverseCredentials,
+                ingress: this.#reverseIngress,
+            },
+            transport: this.#transport,
+            web: this.#web,
         });
+    }
+
+    async applyRuntimeConfig(
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: ConfigRuntimeChangeSet,
+    ): Promise<boolean> {
+        return await this.#config.apply(previous, next, changes);
     }
 
     async prepare(): Promise<void> {

@@ -9,7 +9,6 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import type { ToolCallApi } from "@portable-devshell/shared";
 import {
@@ -46,14 +45,6 @@ export class McpControlModule {
     readonly #runtimeState: McpRuntimeState;
     readonly #toolRegistry: ToolCallRegistry;
     #toolCalls?: ToolCallApi;
-    #applyWebConfig?: (
-        previous: ControlConfig,
-        next: ControlConfig,
-    ) => Promise<void>;
-    #applyMcpConfig?: (
-        previous: ControlConfig,
-        next: ControlConfig,
-    ) => Promise<void>;
 
     constructor(options: McpControlModuleOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
@@ -119,18 +110,6 @@ export class McpControlModule {
 
     get publicBaseUrl(): string | undefined {
         return this.#publicBaseUrl;
-    }
-
-    setWebConfigApplier(
-        apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>,
-    ): void {
-        this.#applyWebConfig = apply;
-    }
-
-    setMcpConfigApplier(
-        apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>,
-    ): void {
-        this.#applyMcpConfig = apply;
     }
 
     async replaceMcpHost(
@@ -205,46 +184,6 @@ export class McpControlModule {
         }
     }
 
-    async applyRuntimeConfig(
-        previous: ControlConfig,
-        next: ControlConfig,
-        changes: ConfigRuntimeChangeSet,
-    ): Promise<boolean> {
-        if (changes.instanceAuth && !changes.mcp && !changes.web) return true;
-
-        if (
-            changes.web &&
-            !changes.mcp &&
-            previous.web.enabled &&
-            next.web.enabled &&
-            endpointIsIndependent(
-                previous.web,
-                previous.mcp,
-                previous.mcp.enabled,
-            ) &&
-            endpointIsIndependent(next.web, next.mcp, next.mcp.enabled) &&
-            this.#applyWebConfig !== undefined
-        ) {
-            await this.#applyWebConfig(previous, next);
-            return true;
-        }
-        if (
-            changes.mcp &&
-            !changes.web &&
-            endpointIsIndependent(
-                previous.mcp,
-                previous.web,
-                previous.web.enabled,
-            ) &&
-            endpointIsIndependent(next.mcp, next.web, next.web.enabled) &&
-            this.#applyMcpConfig !== undefined
-        ) {
-            await this.#applyMcpConfig(previous, next);
-            return true;
-        }
-        return false;
-    }
-
     get oauthApprovals(): McpOAuthApprovalService | undefined {
         return this.#host?.oauthApprovals;
     }
@@ -280,14 +219,6 @@ export class McpControlModule {
             throw new AggregateError(failures, "MCP module shutdown failed.");
         }
     }
-}
-
-function endpointIsIndependent(
-    endpoint: { listenHost: string; listenPort: number },
-    other: { listenHost: string; listenPort: number },
-    otherEnabled: boolean,
-): boolean {
-    return !otherEnabled || !sameEndpoint(endpoint, other);
 }
 
 function sameEndpoint(

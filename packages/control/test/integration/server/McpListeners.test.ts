@@ -14,7 +14,9 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpControlModule } from "../../../src/server/mcp/Module.ts";
+import { ControlServerConfig } from "../../../src/server/Config.ts";
 import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
+import type { ConfigRuntimeChangeSet } from "../../../src/config/engine/Api.ts";
 import { ConfigEngine } from "../../../src/config/engine/index.ts";
 import { ConfigEditorCoordinator } from "../../../src/config/editor/index.ts";
 import { InstanceEditorCoordinator } from "../../../src/instance/editor/index.ts";
@@ -175,8 +177,6 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
             provider: "local",
         }),
     ];
-    let webApplyCalls = 0;
-    let mcpApplyCalls = 0;
     const owners = await createOwners(config, homeDirectory, {
         async readOrCreate() {
             return config;
@@ -193,11 +193,11 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
-    runtime.setWebConfigApplier(async () => {
-        webApplyCalls += 1;
-    });
-    runtime.setMcpConfigApplier(async () => {
-        mcpApplyCalls += 1;
+    const serverConfig = new ControlServerConfig({
+        mcp: runtime,
+        reverse: {},
+        transport: {} as never,
+        web: {} as never,
     });
     t.after(async () => {
         await cleanupInOrder(
@@ -206,14 +206,16 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         );
     });
 
-    const { instanceEditor } = createEditors(owners, runtime);
+    const { instanceEditor } = createEditors(
+        owners,
+        runtime,
+        serverConfig.apply.bind(serverConfig),
+    );
     const result = (await instanceEditor.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "a".repeat(48) } },
     })) as { restartControlRequired: boolean };
 
-    assert.equal(webApplyCalls, 0);
-    assert.equal(mcpApplyCalls, 0);
     assert.equal(result.restartControlRequired, false);
 });
 
@@ -222,7 +224,6 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
     let config = createDefaultControlConfig();
     config.mcp.listenPort = 0;
     config.web.enabled = false;
-    let mcpApplyCalls = 0;
     const owners = await createOwners(config, homeDirectory, {
         async readOrCreate() {
             return config;
@@ -239,8 +240,11 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
-    runtime.setMcpConfigApplier(async () => {
-        mcpApplyCalls += 1;
+    const serverConfig = new ControlServerConfig({
+        mcp: runtime,
+        reverse: {},
+        transport: {} as never,
+        web: {} as never,
     });
     t.after(async () => {
         await cleanupInOrder(
@@ -249,13 +253,17 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         );
     });
 
-    const { configEditor } = createEditors(owners, runtime);
+    const { configEditor } = createEditors(
+        owners,
+        runtime,
+        serverConfig.apply.bind(serverConfig),
+    );
     const result = (await configEditor.updateMcpConfig({
         patch: { enabled: true },
     })) as { restartControlRequired: boolean };
 
-    assert.equal(mcpApplyCalls, 1);
     assert.equal(result.restartControlRequired, false);
+    assert.ok(runtime.host);
 });
 
 test("MCP migration starts a different listener before retiring the previous listener", async (t) => {
@@ -506,7 +514,6 @@ test("shared listener Web auth changes require an explicit control restart witho
         "runtime-listener-shared-apply",
     );
     let config = createConfig(0, 0);
-    let webHotApplyCalls = 0;
     const owners = await createOwners(config, homeDirectory, {
         async readOrCreate() {
             return config;
@@ -526,8 +533,11 @@ test("shared listener Web auth changes require an explicit control restart witho
         } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
-    runtime.setWebConfigApplier(async () => {
-        webHotApplyCalls += 1;
+    const serverConfig = new ControlServerConfig({
+        mcp: runtime,
+        reverse: {},
+        transport: {} as never,
+        web: {} as never,
     });
     t.after(async () => {
         await cleanupInOrder(
@@ -536,7 +546,11 @@ test("shared listener Web auth changes require an explicit control restart witho
         );
     });
 
-    const { configEditor } = createEditors(owners, runtime);
+    const { configEditor } = createEditors(
+        owners,
+        runtime,
+        serverConfig.apply.bind(serverConfig),
+    );
     const previousHost = runtime.host;
     const result = (await configEditor.updateWebConfig({
         patch: { auth: "token", token: "a".repeat(48) },
@@ -544,7 +558,6 @@ test("shared listener Web auth changes require an explicit control restart witho
         restartControlRequired: boolean;
     };
 
-    assert.equal(webHotApplyCalls, 0);
     assert.equal(result.restartControlRequired, true);
     assert.equal(runtime.host, previousHost);
     const view = configEditor.getConfigView() as {
@@ -594,7 +607,15 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
     };
 }
 
-function createEditors(owners: TestOwners, mcp: McpControlModule) {
+function createEditors(
+    owners: TestOwners,
+    mcp: McpControlModule,
+    applyRuntimeConfig: (
+        previous: ControlConfig,
+        next: ControlConfig,
+        changes: ConfigRuntimeChangeSet,
+    ) => Promise<boolean>,
+) {
     const options = {
         configStore: owners.config.store,
         getConfig: () => owners.config.require(),
@@ -604,7 +625,7 @@ function createEditors(owners: TestOwners, mcp: McpControlModule) {
         changeHub: owners.config.changes,
         mutationRunner: owners.config.mutations,
         registry: owners.config.registry,
-        runtimeApply: { apply: mcp.applyRuntimeConfig.bind(mcp) },
+        runtimeApply: { apply: applyRuntimeConfig },
         setConfig: (config: ControlConfig) => owners.config.set(config),
     };
     const engine = new ConfigEngine(options);
