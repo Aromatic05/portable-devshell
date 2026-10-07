@@ -29,6 +29,7 @@ export class WorkerInstanceLifecycle {
     readonly #connection: WorkerInstanceConnection;
     readonly #refreshStatus: WorkerInstanceLifecycleOptions["refreshStatus"];
     readonly #reverse?: ReverseExecution;
+    #operationTail: Promise<void> = Promise.resolve();
 
     constructor(options: WorkerInstanceLifecycleOptions) {
         this.#appendEvent = options.appendEvent;
@@ -41,13 +42,15 @@ export class WorkerInstanceLifecycle {
     }
 
     async start(): Promise<InstanceSnapshot> {
-        return await this.#start();
+        return await this.#runExclusive(async () => await this.#start());
     }
 
     async startInteractive(
         interactiveSession?: WorkerCommandInteractiveSession,
     ): Promise<InstanceSnapshot> {
-        return await this.#start(interactiveSession);
+        return await this.#runExclusive(
+            async () => await this.#start(interactiveSession),
+        );
     }
 
     async #start(
@@ -102,6 +105,10 @@ export class WorkerInstanceLifecycle {
     }
 
     async stop(): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(async () => await this.#stop());
+    }
+
+    async #stop(): Promise<InstanceSnapshot> {
         if (this.#reverse !== undefined) return this.#reverse.stop();
 
         await this.#applyStateUpdate({
@@ -149,6 +156,15 @@ export class WorkerInstanceLifecycle {
             lastErrorCode: undefined,
             lastErrorMessage: undefined,
         });
+    }
+
+    async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.#operationTail.then(operation, operation);
+        this.#operationTail = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return await run;
     }
 
     #requireCommandClient(): WorkerCommandClient {
