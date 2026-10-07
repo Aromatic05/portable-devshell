@@ -2,11 +2,15 @@ import type {
     ControlConfig,
     Endpoint,
     ServerTransport,
+    ToolCallApi,
 } from "@portable-devshell/shared";
 
-import type { ControlState } from "../State.js";
+import type { ArtifactRuntime } from "../artifact/Api.js";
 import type { ConfigChangeHub } from "../config/change/Config.js";
 import type { ConfigEditorCoordinator } from "../config/editor/index.js";
+import type { ContextRuntime } from "../context/Api.js";
+import type { DebugRuntime } from "../debug/Api.js";
+import type { ExtensionRuntime } from "../extension/Api.js";
 import { CliExtensionCommandService } from "../extension/api/point/cli/command/index.js";
 import { ControlExtensionRouteService } from "../extension/api/point/control/Dispatch.js";
 import { TuiExtensionPageService } from "../extension/api/point/tui/index.js";
@@ -29,9 +33,13 @@ import { WebExtensionPageService } from "./web/extension/page/Service.js";
 import { createContextRouteModule } from "../context/Public.js";
 
 export interface ControlServerOptions {
+    artifact: ArtifactRuntime;
     config?: () => ControlConfig;
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
+    contexts: ContextRuntime;
+    debug: DebugRuntime;
+    extensions: ExtensionRuntime;
     instanceCreate: InstanceCreateCoordinator;
     instanceEditor: InstanceEditorCoordinator;
     instanceChanges: InstanceChangeHub;
@@ -48,7 +56,7 @@ export interface ControlServerOptions {
     };
     shutdown: () => Promise<void>;
     socketPath: string;
-    state: ControlState;
+    toolCalls: ToolCallApi;
     web: ControlWebRuntime;
 }
 
@@ -64,18 +72,17 @@ export class ControlServer {
     readonly #web: ControlWebRuntime;
 
     constructor(options: ControlServerOptions) {
-        const state = options.state;
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#mcp = options.mcp;
-        this.#mcp.setToolCalls(state.toolCalls);
+        this.#mcp.setToolCalls(options.toolCalls);
         this.#reverseCredentials = options.reverse.credentials;
         this.#reverseIngress = options.reverse.ingress;
 
-        const extensionRoutes = new ControlExtensionRouteService(state.extensions);
+        const extensionRoutes = new ControlExtensionRouteService(options.extensions);
         this.#routes = new ControlRouteRegistry({
-            artifact: state.artifact.service,
-            cliCommands: new CliExtensionCommandService(state.extensions, {
+            artifact: options.artifact.service,
+            cliCommands: new CliExtensionCommandService(options.extensions, {
                 surface: "native",
             }),
             config: options.configEditor,
@@ -83,9 +90,9 @@ export class ControlServer {
             ...(options.config === undefined
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
-            controlPorts: [createContextRouteModule(state.contexts.api)],
-            debug: state.debug,
-            extension: state.extensions.control,
+            controlPorts: [createContextRouteModule(options.contexts.api)],
+            debug: options.debug,
+            extension: options.extensions.control,
             extensionRoutes,
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
@@ -104,9 +111,9 @@ export class ControlServer {
             restart: options.restart,
             reverse: this.#reverseCredentials,
             shutdown: options.shutdown,
-            tuiPages: new TuiExtensionPageService(state.extensions),
-            webApplications: new WebApplicationCatalog(state.extensions),
-            webPages: new WebExtensionPageService(state.extensions),
+            tuiPages: new TuiExtensionPageService(options.extensions),
+            webApplications: new WebApplicationCatalog(options.extensions),
+            webPages: new WebExtensionPageService(options.extensions),
         });
         options.instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {

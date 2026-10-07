@@ -423,9 +423,13 @@ export class ControlFactory {
                 },
             );
             const server = new ControlServer({
+                artifact: state.artifact,
                 config: () => options.config.require(),
                 configChanges: options.config.changes,
                 configEditor: options.config.editor,
+                contexts: state.contexts,
+                debug: state.debug,
+                extensions: state.extensions,
                 instanceCreate: options.instances.create,
                 instanceEditor: options.instances.editor,
                 instanceChanges: options.instances.changes,
@@ -442,7 +446,7 @@ export class ControlFactory {
                 },
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
-                state,
+                toolCalls: state.toolCalls,
                 web,
             });
             return { server, state };
