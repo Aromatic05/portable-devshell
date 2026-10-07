@@ -203,24 +203,6 @@ export class ControlServer {
         await this.#web.startHost();
     }
 
-    async start(): Promise<void> {
-        try {
-            await this.prepare();
-            await this.startTransport();
-            await this.startHosts();
-        } catch (error) {
-            try {
-                await this.stop();
-            } catch (cleanupError) {
-                throw new AggregateError(
-                    [error, cleanupError],
-                    "Control server startup failed and rollback was incomplete.",
-                );
-            }
-            throw error;
-        }
-    }
-
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         try {
