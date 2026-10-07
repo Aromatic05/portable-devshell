@@ -338,7 +338,7 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-        await this.#retirement.notification
+        await this.#retirement.hooks
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
 
@@ -415,13 +415,13 @@ export class InstanceCleanupDebt {
         if (!descriptor.lifecycle.retired) {
             await descriptor.retire().catch((error) => failures.push(error));
         }
-        await this.#retirement.notification
+        await this.#retirement.hooks
             .retireGenerationResources(record.instance)
             .catch((error) => failures.push(error));
         let workerRetirementSucceeded = false;
         if (record.operation === "disable") {
             failures.push(
-                ...(await this.#retirement.notification.retireDisable(
+                ...(await this.#retirement.hooks.retireDisable(
                     record.instance,
                 )),
             );
@@ -434,12 +434,9 @@ export class InstanceCleanupDebt {
             } catch (error) {
                 failures.push(error);
             }
-            await this.#retirement.notification
-                .notifyDisabled(record.instance)
-                .catch((error) => failures.push(error));
         } else {
             failures.push(
-                ...(await this.#retirement.notification.retireDelete(
+                ...(await this.#retirement.hooks.retireDelete(
                     record.instance,
                 )),
             );
@@ -452,9 +449,6 @@ export class InstanceCleanupDebt {
             } catch (error) {
                 failures.push(error);
             }
-            await this.#retirement.notification
-                .notifyDeleted(record.instance)
-                .catch((error) => failures.push(error));
         }
         let descriptorFinalized = false;
         if (workerRetirementSucceeded) {

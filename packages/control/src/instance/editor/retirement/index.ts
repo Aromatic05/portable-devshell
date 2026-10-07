@@ -1,7 +1,7 @@
 import type { InstanceRegistry } from "../../Registry.js";
 import { createRemoteError, controlErrorCodes, parseConfigInstanceTargetRequest, type ControlConfig, type JsonValue, } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
-import { InstanceRetirementNotification } from "./Notification.js";
+import { InstanceRetirementHooks } from "./Hooks.js";
 import { assertInstanceDeletable, retireInstanceForDelete } from "./Runtime.js";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
@@ -15,7 +15,7 @@ import {
 type InstanceDescriptor = Instance | undefined;
 
 export class InstanceRetirementCoordinator {
-    readonly notification = new InstanceRetirementNotification();
+    readonly hooks = new InstanceRetirementHooks();
     readonly #detachContextInstance?: (instance: string) => Promise<void>;
 
     readonly #reconcileContextInstanceCleanup: InstanceEditorCoordinatorOptions["reconcileContextInstanceCleanup"];
@@ -150,12 +150,12 @@ export class InstanceRetirementCoordinator {
         ) {
             const instanceDisabled = !next.enabled;
             if (!descriptor.lifecycle.active) {
-                await this.notification
+                await this.hooks
                     .retireGenerationResources(existing)
                     .catch((error) => failures.push(error));
                 if (instanceDisabled) {
                     failures.push(
-                        ...(await this.notification.retireDisable(existing)),
+                        ...(await this.hooks.retireDisable(existing)),
                     );
                 }
             }
@@ -164,11 +164,6 @@ export class InstanceRetirementCoordinator {
             if (workspaceDisabled || instanceDisabled) {
                 await this.#mcp
                     ?.retireMcpApp(existing.name)
-                    .catch((error) => failures.push(error));
-            }
-            if (instanceDisabled) {
-                await this.notification
-                    .notifyDisabled(existing)
                     .catch((error) => failures.push(error));
             }
         }
@@ -204,16 +199,16 @@ export class InstanceRetirementCoordinator {
             return failures;
         }
         if (descriptor !== undefined && !descriptor.lifecycle.active) {
-            await this.notification
+            await this.hooks
                 .retireGenerationResources(existing)
                 .catch((error) => failures.push(error));
-            failures.push(...(await this.notification.retireDelete(existing)));
+            failures.push(...(await this.hooks.retireDelete(existing)));
         }
         if (descriptor === undefined) {
-            await this.notification
+            await this.hooks
                 .retireGenerationResources(existing)
                 .catch((error) => failures.push(error));
-            failures.push(...(await this.notification.retireDelete(existing)));
+            failures.push(...(await this.hooks.retireDelete(existing)));
         }
         let workerRetirementSucceeded = cleanupDescriptor === undefined;
         if (cleanupDescriptor !== undefined) {
@@ -237,10 +232,6 @@ export class InstanceRetirementCoordinator {
                     .catch((error) => failures.push(error));
             }
         }
-
-        await this.notification
-            .notifyDeleted(existing)
-            .catch((error) => failures.push(error));
         return failures;
     }
 

@@ -1,13 +1,7 @@
 import type { ControlConfig } from "@portable-devshell/shared";
 
-export class InstanceRetirementNotification {
+export class InstanceRetirementHooks {
     readonly #instanceDisableRetirements = new Set<
-        (instance: ControlConfig["instances"][number]) => Promise<void>
-    >();
-    readonly #instanceDisabled = new Set<
-        (instance: ControlConfig["instances"][number]) => Promise<void>
-    >();
-    readonly #instanceDeleted = new Set<
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
     readonly #instanceDeleteRetirements = new Set<
@@ -36,24 +30,6 @@ export class InstanceRetirementNotification {
     ): () => void {
         this.#instanceGenerationRetirements.add(retire);
         return () => this.#instanceGenerationRetirements.delete(retire);
-    }
-
-    registerInstanceDisabled(
-        listener: (
-            instance: ControlConfig["instances"][number],
-        ) => Promise<void>,
-    ): () => void {
-        this.#instanceDisabled.add(listener);
-        return () => this.#instanceDisabled.delete(listener);
-    }
-
-    registerInstanceDeleted(
-        listener: (
-            instance: ControlConfig["instances"][number],
-        ) => Promise<void>,
-    ): () => void {
-        this.#instanceDeleted.add(listener);
-        return () => this.#instanceDeleted.delete(listener);
     }
 
     async retireGenerationResources(
@@ -88,33 +64,4 @@ export class InstanceRetirementNotification {
         return failures;
     }
 
-    async notifyDisabled(
-        instance: ControlConfig["instances"][number],
-    ): Promise<void> {
-        await this.#notify(this.#instanceDisabled, instance);
-    }
-
-    async notifyDeleted(
-        instance: ControlConfig["instances"][number],
-    ): Promise<void> {
-        await this.#notify(this.#instanceDeleted, instance);
-    }
-
-    async #notify(
-        listeners: ReadonlySet<
-            (instance: ControlConfig["instances"][number]) => Promise<void>
-        >,
-        instance: ControlConfig["instances"][number],
-    ): Promise<void> {
-        const failures: unknown[] = [];
-        for (const listener of [...listeners])
-            await listener(instance).catch((error) => failures.push(error));
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1) {
-            throw new AggregateError(
-                failures,
-                `Instance ${instance.name} lifecycle cleanup failed.`,
-            );
-        }
-    }
 }

@@ -917,7 +917,6 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
             const writes: ControlConfig[] = [];
             let stopCalls = 0;
             let startCalls = 0;
-            let committed = 0;
             const waiting = {
                 status: "waiting",
                 waitId: "wait-retirement-failure",
@@ -973,9 +972,6 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
                 instanceRegistry: registry,
             });
             registerLifecycle(instance, instanceDescriptor);
-            instance.registerInstanceDisabled(async () => {
-                committed += 1;
-            });
             const configEditor = makeConfigEditor(engine, instance);
 
             const warnings = await captureWarnings(
@@ -987,7 +983,6 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
             );
             assert.equal(stopCalls, 1);
             assert.equal(startCalls, 0);
-            assert.equal(committed, 1);
             assert.equal(writes.length, 1);
             assert.equal(config.instances[0]?.enabled, false);
             assert.equal(registry.get("demo-local"), undefined);
@@ -1091,120 +1086,6 @@ test("disable persistence failure performs no Worker or interaction cleanup", as
     assert.equal(startCalls, 0);
     assert.equal(config.instances[0]?.enabled, true);
     assert.equal(registry.get("demo-local")?.enabled, true);
-});
-
-test("disable committed listeners do not run when persistence fails", async () => {
-    let config = createConfig();
-    let committed = 0;
-    const registry = new InstanceRegistry([
-        descriptor({
-            snapshot: runningSnapshot,
-            async stop() {
-                return {
-                    ...runningSnapshot(),
-                    daemonState: "stopped",
-                    ready: false,
-                    status: "stopped",
-                };
-            },
-            async start() {
-                return runningSnapshot();
-            },
-        }),
-    ]);
-    const service = new InstanceEditorCoordinator({
-        engine: configEngine(
-            () => config,
-            (nextConfig) => {
-                config = nextConfig;
-            },
-            {
-                configStore: {
-                    async write() {
-                        throw new Error("config persistence failed");
-                    },
-                },
-            },
-        ),
-        instanceRegistry: registry,
-    });
-    service.registerInstanceDisabled(async () => {
-        committed += 1;
-    });
-
-    await assert.rejects(
-        service.disableInstance({ instanceName: "demo-local" }),
-        /config persistence failed/u,
-    );
-    assert.equal(committed, 0);
-    assert.equal(config.instances[0]?.enabled, true);
-    assert.equal(registry.get("demo-local")?.enabled, true);
-});
-
-test("disable committed listeners run after persisted descriptor state is visible", async () => {
-    let config = createConfig();
-    const observed: string[] = [];
-    const registry = new InstanceRegistry([
-        descriptor({
-            snapshot: runningSnapshot,
-            async stop() {
-                return {
-                    ...runningSnapshot(),
-                    daemonState: "stopped",
-                    ready: false,
-                    status: "stopped",
-                };
-            },
-        }),
-    ]);
-    const service = new InstanceEditorCoordinator({
-        engine: configEngine(() => config, (nextConfig) => {
-            config = nextConfig;
-        }),
-        instanceRegistry: registry,
-    });
-    service.changes.onChange(() => {
-        observed.push(`registry:${registry.get("demo-local")?.enabled}`);
-    });
-    service.registerInstanceDisabled(async () => {
-        observed.push(
-            `committed:${config.instances[0]?.enabled}:${registry.get("demo-local")?.enabled}`,
-        );
-    });
-
-    await service.disableInstance({ instanceName: "demo-local" });
-
-    assert.deepEqual(observed, [
-        "registry:undefined",
-        "committed:false:undefined",
-    ]);
-});
-
-test("disable committed-listener failure is cleanup degradation, not transaction failure", async () => {
-    let config = createConfig();
-    const registry = new InstanceRegistry([
-        descriptor({ snapshot: stoppedSnapshot }),
-    ]);
-    const service = createService(
-        () => config,
-        (next) => {
-            config = next;
-        },
-        registry,
-    );
-    service.registerInstanceDisabled(async () => {
-        throw new Error("comment retirement failed");
-    });
-
-    const warnings = await captureWarnings(
-        async () =>
-            await service.disableInstance({ instanceName: "demo-local" }),
-    );
-
-    assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(registry.get("demo-local"), undefined);
-    assert.equal(warnings.length, 1);
-    assert.match(String(warnings[0]), /cleanup was incomplete/u);
 });
 
 test("Control disable does not stop self-managed reverse workers but retires local pending interactions", async () => {
@@ -2332,33 +2213,6 @@ test("instance delete remains committed when live-state retirement fails", async
     assert.equal(warnings.length, 1);
 });
 
-test("instance delete committed-listener failure does not reverse the delete", async () => {
-    let config = createConfig();
-    const registry = new InstanceRegistry([
-        descriptor({ snapshot: stoppedSnapshot }),
-    ]);
-    const service = createService(
-        () => config,
-        (next) => {
-            config = next;
-        },
-        registry,
-    );
-    service.registerInstanceDeleted(async () => {
-        throw new Error("comment delete cleanup failed");
-    });
-
-    const warnings = await captureWarnings(
-        async () =>
-            await service.deleteInstance({ instanceName: "demo-local" }),
-    );
-
-    assert.equal(config.instances.length, 0);
-    assert.equal(registry.get("demo-local"), undefined);
-    assert.equal(warnings.length, 1);
-    assert.match(String(warnings[0]), /cleanup was incomplete/u);
-});
-
 test("instance delete persistence failure performs no destructive cleanup", async () => {
     let config = createConfig();
     const actions: string[] = [];
@@ -2428,10 +2282,6 @@ test("instance delete persistence failure performs no destructive cleanup", asyn
         },
         instanceRegistry: registry,
     });
-    service.registerInstanceDeleted(async () => {
-        actions.push("committed.delete");
-    });
-
     await assert.rejects(
         service.deleteInstance({ instanceName: "demo-local" }),
         /delete persistence failed/u,

@@ -68,31 +68,19 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
     registerInstanceDeleteRetirement(
         retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
     ): () => void {
-        return this.#retirement.notification.registerInstanceDeleteRetirement(retire);
+        return this.#retirement.hooks.registerInstanceDeleteRetirement(retire);
     }
 
     registerInstanceDisableRetirement(
         retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
     ): () => void {
-        return this.#retirement.notification.registerInstanceDisableRetirement(retire);
+        return this.#retirement.hooks.registerInstanceDisableRetirement(retire);
     }
 
     registerInstanceGenerationRetirement(
         retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
     ): () => void {
-        return this.#retirement.notification.registerInstanceGenerationRetirement(retire);
-    }
-
-    registerInstanceDisabled(
-        listener: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void {
-        return this.#retirement.notification.registerInstanceDisabled(listener);
-    }
-
-    registerInstanceDeleted(
-        listener: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void {
-        return this.#retirement.notification.registerInstanceDeleted(listener);
+        return this.#retirement.hooks.registerInstanceGenerationRetirement(retire);
     }
 
     async assertInstanceCleanupSettled(instance: string): Promise<void> {
