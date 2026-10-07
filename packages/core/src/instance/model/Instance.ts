@@ -210,7 +210,16 @@ export class Instance {
     async #close(): Promise<void> {
         const failures: unknown[] = [];
         await this.retire().catch((error) => failures.push(error));
-        await this.#worker.supervision.close().catch((error) => {
+        const supervision = this.#worker.supervision;
+        if (supervision.ownership.owned) {
+            try {
+                await supervision.lifecycle.stop();
+                supervision.ownership.clearOwned();
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        await supervision.close().catch((error) => {
             failures.push(error);
         });
         await this.#eventLog.flush().catch((error) => {

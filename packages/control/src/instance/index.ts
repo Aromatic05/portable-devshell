@@ -89,15 +89,6 @@ export class ControlInstances {
             failures.push(error);
         }
         for (const instance of this.#registry.list()) {
-            const supervision = instance.supervision;
-            if (supervision.ownership.owned) {
-                try {
-                    await supervision.lifecycle.stop();
-                    supervision.ownership.clearOwned();
-                } catch (error) {
-                    failures.push(error);
-                }
-            }
             await instance.close().catch((error) => failures.push(error));
         }
         if (failures.length > 0) {
