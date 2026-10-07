@@ -78,7 +78,6 @@ export function createServerRouteModule(
 export interface ControlRouteExtensionPort {
     modules(scope: "control" | "instance"): readonly ControlPortDefinition[];
     onChange(listener: () => void): () => void;
-    retireInstance(instance: string): Promise<void>;
 }
 
 export interface ControlRouteRegistryOptions {
@@ -112,7 +111,6 @@ export class ControlRouteRegistry {
     readonly #instanceChanges: InstanceChangeHub;
     readonly #options: ControlRouteRegistryOptions;
     readonly #unsubscribeExtensions: () => void;
-    readonly #unsubscribeConfigChanges: () => void;
     readonly #unsubscribeInstances: () => void;
     readonly #listeners = new Set<() => void>();
     #hosts: readonly ControlHostDefinition[];
@@ -127,19 +125,6 @@ export class ControlRouteRegistry {
         this.#unsubscribeExtensions =
             options.extensionRoutes?.onChange(() => this.#rebuild()) ??
             (() => undefined);
-        this.#unsubscribeConfigChanges = this.#configChanges.onChange(
-            (change) => {
-                if (
-                    change.paths.some(
-                        (path) =>
-                            path === "instances" ||
-                            path.startsWith("instances."),
-                    )
-                ) {
-                    this.#instanceChanges.publish("config");
-                }
-            },
-        );
         this.#unsubscribeInstances = this.#instanceChanges.onChange(() => {
             this.#rebuild();
         });
@@ -159,13 +144,8 @@ export class ControlRouteRegistry {
             instance.connectionClosed(connectionId);
     }
 
-    async retireInstance(instance: string): Promise<void> {
-        await this.#options.extensionRoutes?.retireInstance(instance);
-    }
-
     dispose(): void {
         this.#unsubscribeExtensions();
-        this.#unsubscribeConfigChanges();
         this.#unsubscribeInstances();
     }
 

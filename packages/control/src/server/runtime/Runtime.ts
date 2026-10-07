@@ -92,6 +92,7 @@ export class ControlRuntime {
     readonly #reverse: ConnectionModule;
     readonly #routes: ControlRouteRegistry;
     readonly #socketListener: ControlSocketListener;
+    readonly #unsubscribeConfigInstanceChanges: () => void;
     readonly #toolCallHookUnregister: Array<() => void>;
     readonly #toolCallRegistryUnbind: () => void;
     readonly #toolCalls: ToolCallApi;
@@ -172,6 +173,20 @@ export class ControlRuntime {
                 options.toolCalls,
             ),
         );
+        this.#unsubscribeConfigInstanceChanges = options.configChanges.onChange(
+            (change) => {
+                if (
+                    change.paths.some(
+                        (path) =>
+                            path === "instances" ||
+                            path.startsWith("instances."),
+                    )
+                ) {
+                    options.instanceChanges.publish("config");
+                }
+            },
+        );
+        const extensionRoutes = new ControlExtensionRouteService(this.#extensions);
         this.#routes = new ControlRouteRegistry({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, {
@@ -185,7 +200,7 @@ export class ControlRuntime {
             controlPorts: [createContextRouteModule(options.contexts.api)],
             debug: this.#debug,
             extension: this.#extensions.control,
-            extensionRoutes: new ControlExtensionRouteService(this.#extensions),
+            extensionRoutes,
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
             instanceChanges: options.instanceChanges,
@@ -214,7 +229,7 @@ export class ControlRuntime {
         );
         this.#instanceEditor.registerInstanceGenerationRetirement(
             async (instance) => {
-                await this.#routes.retireInstance(instance.name);
+                await extensionRoutes.retireInstance(instance.name);
             },
         );
         this.#socketListener = new ControlSocketListener({
@@ -335,6 +350,11 @@ export class ControlRuntime {
         );
         this.#toolCallRuntime.close();
         this.#contexts.close();
+        try {
+            this.#unsubscribeConfigInstanceChanges();
+        } catch (error) {
+            failures.push(error);
+        }
         try {
             this.#routes.dispose();
         } catch (error) {
