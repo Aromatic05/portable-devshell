@@ -359,7 +359,7 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         const failures: unknown[] = [];
         let restored: Instance | undefined;
-        if (descriptor === undefined || !descriptor.generation.active) {
+        if (descriptor === undefined || !descriptor.lifecycle.active) {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
@@ -399,7 +399,7 @@ export class InstanceReconfigurationCoordinator {
                 (error) => failures.push(error),
             );
         }
-        if (descriptor !== undefined && !descriptor.generation.active && descriptor !== restored) {
+        if (descriptor !== undefined && !descriptor.lifecycle.active && descriptor !== restored) {
             await closeDescriptorResourcesBestEffort(
                 descriptor,
                 this.#finalizeRuntimeInstance,

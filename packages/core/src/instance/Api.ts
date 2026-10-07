@@ -161,6 +161,6 @@ export interface WorkerCommandInteractiveSession {
 }
 
 export type { WorkerExecution, WorkerInstance } from "./runtime/Api.js";
-export type { InstanceLease } from "./model/Generation.js";
+export type { InstanceLease } from "./model/Lifecycle.js";
 export type { InstanceState } from "./model/State.js";
 export type { InstanceToolDefinitionRegistration } from "./model/Tools.js";

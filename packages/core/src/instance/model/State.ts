@@ -214,7 +214,7 @@ export class InstanceState {
     target(): ToolCallTarget {
         return {
             dispatch: async (request) => {
-                const lease = this.instance.generation.acquireLease();
+                const lease = this.instance.lifecycle.acquireLease();
                 try {
                     return await this.callTool(request);
                 } finally {

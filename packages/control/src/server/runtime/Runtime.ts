@@ -342,10 +342,11 @@ export class ControlRuntime {
 async function closeInstances(instances: InstanceRegistry): Promise<void> {
     const failures: unknown[] = [];
     for (const instance of instances.list()) {
-        for (const worker of instance.ownership.ownedWorkers()) {
+        const worker = instance.worker;
+        if (worker.supervision.ownership.owned) {
             try {
                 await worker.supervision.lifecycle.stop();
-                instance.ownership.clearOwnedWorker(worker);
+                worker.supervision.ownership.clearOwned();
             } catch (error) {
                 failures.push(error);
             }

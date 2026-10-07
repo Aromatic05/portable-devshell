@@ -412,7 +412,7 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-        if (!descriptor.generation.retired) {
+        if (!descriptor.lifecycle.retired) {
             await descriptor.retire().catch((error) => failures.push(error));
         }
         await this.#retirement.notification

@@ -185,8 +185,11 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                         message: `Instance ${instance} is unavailable.`,
                         retryable: false,
                     });
-                const { snapshot, worker } =
-                    await target.ownership.acquireReference(ctxId);
+                const snapshot =
+                    await target.worker.supervision.ownership.acquireReference(
+                        ctxId,
+                    );
+                const worker = target.worker;
                 const connection = snapshot as unknown as Record<
                     string,
                     JsonValue
@@ -333,7 +336,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             });
         }
         try {
-            return target.generation.acquireLease();
+            return target.lifecycle.acquireLease();
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

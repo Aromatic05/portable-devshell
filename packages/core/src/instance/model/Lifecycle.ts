@@ -5,7 +5,7 @@ export interface InstanceLease {
     release(): void;
 }
 
-export class InstanceGeneration {
+export class InstanceLifecycle {
     #admitted = 0;
     #phase: "active" | "retiring" | "retired" | "closed" = "active";
     readonly #waiters = new Set<() => void>();

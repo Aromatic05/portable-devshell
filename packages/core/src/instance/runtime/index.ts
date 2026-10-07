@@ -17,6 +17,7 @@ import { WorkerTerminal } from "./execution/capability/terminal/Terminal.js";
 import type { InstanceStateMachine } from "./supervision/State.js";
 import type { ResolvedWorkerInstanceConfig } from "./provision/Config.js";
 import { WorkerInstanceConnection } from "./supervision/Connection.js";
+import { WorkerOwnership } from "./supervision/Ownership.js";
 import { WorkerInstanceSupervision } from "./supervision/Recovery.js";
 import { WorkerInstanceLifecycle } from "./execution/Lifecycle.js";
 import { guardArtifact } from "./execution/capability/artifact/Guard.js";
@@ -25,6 +26,11 @@ import { WorkerInstanceRetirement } from "./provision/Retirement.js";
 import { WorkerInstanceState } from "./supervision/State.js";
 
 interface WorkerInstanceDependencies {
+    admission: {
+        acquireLease(): { release(): void };
+        active(): boolean;
+        enabled(): boolean;
+    };
     commandClient?: WorkerCommandClient;
     config: ResolvedWorkerInstanceConfig;
     events: InstanceEventPort;
@@ -108,6 +114,14 @@ export class WorkerInstance implements WorkerInstanceApi {
             refreshStatus: () => service.refreshStatus(),
             reverse,
         });
+        const ownership = new WorkerOwnership({
+            admission: dependencies.admission,
+            instanceName: config.name,
+            lifecycle,
+            managementMode: config.managementMode,
+            recovery: service,
+            snapshot: () => state.snapshot(connection.snapshotReverse()),
+        });
         const retirement = new WorkerInstanceRetirement({
             commandClient: dependencies.commandClient,
             config,
@@ -152,6 +166,7 @@ export class WorkerInstance implements WorkerInstanceApi {
             endpoint: components.endpoint,
             connection,
             lifecycle,
+            ownership,
             recovery: service,
             state,
             get handshake() {

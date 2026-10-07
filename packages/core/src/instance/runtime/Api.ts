@@ -12,6 +12,7 @@ import type { WorkerTerminal } from "./execution/capability/terminal/Terminal.js
 import type { WorkerTunnel } from "./execution/capability/tunnel/Tunnel.js";
 import type { WorkerInstanceLifecycle } from "./execution/Lifecycle.js";
 import type { WorkerInstanceConnection } from "./supervision/Connection.js";
+import type { WorkerOwnership } from "./supervision/Ownership.js";
 import type { WorkerInstanceSupervision } from "./supervision/Recovery.js";
 import type { WorkerInstanceState } from "./supervision/State.js";
 
@@ -51,6 +52,7 @@ export interface WorkerSupervision {
     readonly handshake: WorkerHandshakeResult | undefined;
     readonly connection: WorkerInstanceConnection;
     readonly lifecycle: WorkerInstanceLifecycle;
+    readonly ownership: WorkerOwnership;
     readonly recovery: WorkerInstanceSupervision;
     readonly state: WorkerInstanceState;
     snapshot(): InstanceSnapshot;

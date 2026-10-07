@@ -167,7 +167,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 target?.config.name === cleanup.instance
                     ? target
                     : this.#instances.get(cleanup.instance);
-            await instance?.ownership.releaseReference(ctxId);
+            await instance?.worker.supervision.ownership.releaseReference(ctxId);
             return true;
         }
 
@@ -209,7 +209,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             );
         let lease: { instance: Instance; release(): void };
         try {
-            lease = instance.generation.acquireLease();
+            lease = instance.lifecycle.acquireLease();
         } catch {
             throw new Error(
                 `Instance ${cleanup.instance} is unavailable for alert cleanup.`,

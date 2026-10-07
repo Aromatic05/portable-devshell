@@ -199,7 +199,7 @@ export class ControlRuntimeFactory {
                                 throw new Error(
                                     `Instance ${input.target.instance} is unavailable.`,
                                 );
-                            const lease = descriptor.generation.acquireLease();
+                            const lease = descriptor.lifecycle.acquireLease();
                             try {
                                 const prepared =
                                     await lease.instance.worker.execution.environment.prepareExtensionResource(

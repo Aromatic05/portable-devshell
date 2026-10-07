@@ -18,8 +18,7 @@ import { TransportFactory } from "../transport/endpoint/Factory.js";
 import { resolveWorkerInstanceConfig, type WorkerInstanceConfig } from "../runtime/provision/Config.js";
 import { WorkerRuntimeFactory, type WorkerRuntimeFactoryOptions } from "../runtime/provision/Factory.js";
 import { InstancePaths } from "./Paths.js";
-import { InstanceGeneration } from "./Generation.js";
-import { InstanceWorkerOwnership } from "./Ownership.js";
+import { InstanceLifecycle } from "./Lifecycle.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
 import {
     createInstanceEventLog,
@@ -38,8 +37,7 @@ export class Instance {
     readonly #paths: InstancePaths;
     readonly #worker: WorkerInstance;
     readonly #state: InstanceState;
-    readonly #generation: InstanceGeneration;
-    readonly #ownership: InstanceWorkerOwnership;
+    readonly #lifecycle: InstanceLifecycle;
     #closePromise?: Promise<void>;
     #config: InstanceConfig;
     #retirePromise?: Promise<void>;
@@ -66,6 +64,11 @@ export class Instance {
         const { protocolClient, worker } = createWorkerInstance(
             toWorkerConfig(config, reverse, paths.homeDirectory),
             eventLog.port,
+            {
+                acquireLease: () => instance.lifecycle.acquireLease(),
+                active: () => instance.lifecycle.active,
+                enabled: () => instance.config.enabled,
+            },
         );
         state = new InstanceState({
             audit,
@@ -91,12 +94,7 @@ export class Instance {
         this.#worker = fields.worker;
         this.#state = fields.state;
         this.#config = fields.config;
-        this.#generation = new InstanceGeneration(this);
-        this.#ownership = new InstanceWorkerOwnership(
-            this,
-            fields.worker,
-            this.#generation,
-        );
+        this.#lifecycle = new InstanceLifecycle(this);
     }
 
     get config(): InstanceConfig {
@@ -111,12 +109,8 @@ export class Instance {
         return this.#state;
     }
 
-    get generation(): InstanceGeneration {
-        return this.#generation;
-    }
-
-    get ownership(): InstanceWorkerOwnership {
-        return this.#ownership;
+    get lifecycle(): InstanceLifecycle {
+        return this.#lifecycle;
     }
 
     get paths(): InstancePaths {
@@ -138,7 +132,7 @@ export class Instance {
 
     retire(): Promise<void> {
         if (this.#retirePromise !== undefined) return this.#retirePromise;
-        this.#generation.beginRetirement();
+        this.#lifecycle.beginRetirement();
         const retirement = Promise.resolve().then(async () => await this.#retire());
         this.#retirePromise = retirement;
         void retirement.catch(() => {
@@ -162,10 +156,10 @@ export class Instance {
         await this.#state
             .prepareRetirement()
             .catch((error) => failures.push(error));
-        await this.#generation.drain();
+        await this.#lifecycle.drain();
         await this.#state.retire().catch((error) => failures.push(error));
         if (failures.length === 0) {
-            this.#generation.completeRetirement();
+            this.#lifecycle.completeRetirement();
             return;
         }
         if (failures.length === 1) throw failures[0];
@@ -185,7 +179,7 @@ export class Instance {
                 resourcesClosed = true;
             })
             .catch((error) => failures.push(error));
-        if (resourcesClosed) this.#generation.completeClose();
+        if (resourcesClosed) this.#lifecycle.completeClose();
         if (failures.length === 0) return;
         if (failures.length === 1) throw failures[0];
         throw new AggregateError(
@@ -198,6 +192,11 @@ export class Instance {
 function createWorkerInstance(
     config: WorkerInstanceConfig,
     events: InstanceEventPort,
+    admission: {
+        acquireLease(): { release(): void };
+        active(): boolean;
+        enabled(): boolean;
+    },
 ): { protocolClient: WorkerProtocolClient; worker: WorkerInstance } {
     const resolved = resolveWorkerInstanceConfig(config);
     const transportConnection = resolved.transportConnection;
@@ -209,6 +208,7 @@ function createWorkerInstance(
     );
     const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
     const worker = new WorkerRuntime({
+        admission,
         commandClient:
             resolved.runtime === undefined
                 ? undefined

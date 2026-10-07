@@ -213,7 +213,7 @@ export class ReverseConnections {
         }
         let lease: { instance: Instance; release(): void };
         try {
-            lease = instance.generation.acquireLease();
+            lease = instance.lifecycle.acquireLease();
         } catch {
             throw retiredGeneration(identity.descriptor.config.name);
         }
