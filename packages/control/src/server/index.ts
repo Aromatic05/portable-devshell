@@ -2,7 +2,6 @@ import type {
     ControlConfig,
     Endpoint,
     ServerTransport,
-    ToolCallApi,
 } from "@portable-devshell/shared";
 
 import type { ArtifactRuntime } from "../artifact/Api.js";
@@ -59,7 +58,6 @@ export interface ControlServerOptions {
     };
     shutdown: () => Promise<void>;
     socketPath: string;
-    toolCalls: ToolCallApi;
     web: ControlWebRuntime;
 }
 
@@ -80,7 +78,6 @@ export class ControlServer {
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#mcp = options.mcp;
-        this.#mcp.setToolCalls(options.toolCalls);
         this.#reverseCredentials = options.reverse.credentials;
         this.#reverseIngress = options.reverse.ingress;
 

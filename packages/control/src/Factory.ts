@@ -390,6 +390,7 @@ export class ControlFactory {
                 toolRegistry,
             });
             composedState = state;
+            mcp.setToolCalls(state.toolCalls);
             instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await state.extensions.retireInstanceGeneration(instance.name);
@@ -421,7 +422,6 @@ export class ControlFactory {
                 },
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
-                toolCalls: state.toolCalls,
                 web,
             });
             instanceEditor.registerInstanceGenerationRetirement(
