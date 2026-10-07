@@ -18,7 +18,10 @@ import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
 import { ConfigEngine } from "../../../src/config/engine/index.ts";
 import { ConfigEditorCoordinator } from "../../../src/config/editor/index.ts";
 import { InstanceEditorCoordinator } from "../../../src/instance/editor/index.ts";
-import { ControlRuntimeState } from "../../../src/server/runtime/State.ts";
+import { ControlConfig as ControlConfigOwner } from "../../../src/config/index.ts";
+import { ControlInstances } from "../../../src/instance/index.ts";
+import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
+import { createInstance } from "@portable-devshell/core";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { cleanupInOrder } from "../../../../../test/TestCleanup.ts";
 
@@ -174,23 +177,19 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     ];
     let webApplyCalls = 0;
     let mcpApplyCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-            async write(next: ControlConfig) {
-                config = next;
-            },
-        } as never,
-        homeDirectory,
+    const owners = await createOwners(config, homeDirectory, {
+        async readOrCreate() {
+            return config;
+        },
+        async write(next: ControlConfig) {
+            config = next;
+        },
     });
-    await state.load();
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
@@ -207,7 +206,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         );
     });
 
-    const { instanceEditor } = createEditors(state, runtime);
+    const { instanceEditor } = createEditors(owners, runtime);
     const result = (await instanceEditor.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { mcp: { auth: "token", token: "a".repeat(48) } },
@@ -224,23 +223,19 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
     config.mcp.listenPort = 0;
     config.web.enabled = false;
     let mcpApplyCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-            async write(next: ControlConfig) {
-                config = next;
-            },
-        } as never,
-        homeDirectory,
+    const owners = await createOwners(config, homeDirectory, {
+        async readOrCreate() {
+            return config;
+        },
+        async write(next: ControlConfig) {
+            config = next;
+        },
     });
-    await state.load();
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
@@ -254,7 +249,7 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         );
     });
 
-    const { configEditor } = createEditors(state, runtime);
+    const { configEditor } = createEditors(owners, runtime);
     const result = (await configEditor.updateMcpConfig({
         patch: { enabled: true },
     })) as { restartControlRequired: boolean };
@@ -290,20 +285,12 @@ test("MCP migration starts a different listener before retiring the previous lis
         },
     };
     let wireCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return previous;
-            },
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
+    const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -317,7 +304,7 @@ test("MCP migration starts a different listener before retiring the previous lis
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
 
-    state.setConfig(next);
+    owners.config.set(next);
     const retired = await runtime.replaceMcpHost(previous, next);
     assert.deepEqual(events, ["new.start"]);
     assert.equal(runtime.publicBaseUrl, "https://new.example");
@@ -355,20 +342,12 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
         },
     };
     let wireCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return previous;
-            },
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
+    const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -429,20 +408,12 @@ test("MCP restore attempts every host transition and reports rollback failures",
         },
     };
     let wireCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return previous;
-            },
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
+    const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -456,7 +427,7 @@ test("MCP restore attempts every host transition and reports rollback failures",
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
 
-    state.setConfig(next);
+    owners.config.set(next);
     const retired = await runtime.replaceMcpHost(previous, next);
     assert.equal(retired, oldHost);
     oldStartShouldFail = true;
@@ -490,20 +461,12 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     const config = await createIndependentConfig();
     config.web.listenHost = "127.0.0.1";
     config.web.listenPort = address.port;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-        } as never,
-        homeDirectory,
-    });
-    await state.load();
+    const owners = await createOwners(config, homeDirectory);
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
@@ -544,23 +507,19 @@ test("shared listener Web auth changes require an explicit control restart witho
     );
     let config = createConfig(0, 0);
     let webHotApplyCalls = 0;
-    const state = new ControlRuntimeState({
-        configStore: {
-            async readOrCreate() {
-                return config;
-            },
-            async write(next: ControlConfig) {
-                config = next;
-            },
-        } as never,
-        homeDirectory,
+    const owners = await createOwners(config, homeDirectory, {
+        async readOrCreate() {
+            return config;
+        },
+        async write(next: ControlConfig) {
+            config = next;
+        },
     });
-    await state.load();
     const runtime = new McpControlModule({
-        config: state.requireConfig(),
+        config: owners.config.require(),
         contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
-        instances: state.instances,
-        toolRegistry: state.toolCalls,
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
         artifact: {
             service: {},
             installHttpRoute() {},
@@ -577,7 +536,7 @@ test("shared listener Web auth changes require an explicit control restart witho
         );
     });
 
-    const { configEditor } = createEditors(state, runtime);
+    const { configEditor } = createEditors(owners, runtime);
     const previousHost = runtime.host;
     const result = (await configEditor.updateWebConfig({
         patch: { auth: "token", token: "a".repeat(48) },
@@ -606,11 +565,10 @@ function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControl
 }
 
 async function createRuntime(config: ControlConfig, homeDirectory: string) {
-    const state = new ControlRuntimeState({ homeDirectory });
-    state.setConfig(config);
+    const owners = await createOwners(config, homeDirectory);
     const endpoint = new Endpoint({ host: "listener-test" });
     const mcp = new McpControlModule({
-        config, contextTransport: createContextTransport(endpoint), instances: state.instances, toolRegistry: state.toolCalls,
+        config, contextTransport: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
@@ -630,39 +588,81 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
                 () => web.stopHost(),
                 () => mcp.stop(),
                 () => { endpoint.close(); },
-                () => state.instanceRuntimes.close(),
+                () => owners.close(),
             );
         },
     };
 }
 
-function createEditors(state: ControlRuntimeState, mcp: McpControlModule) {
+function createEditors(owners: TestOwners, mcp: McpControlModule) {
     const options = {
-        configStore: state.configStore,
-        getConfig: () => state.requireConfig(),
-        getRestartControlRequired: () => state.restartControlRequired,
-        markRestartControlRequired: () => state.markRestartControlRequired(),
-        homeDirectory: state.homeDirectory,
-        changeHub: state.configChanges,
-        mutationRunner: state.configMutations,
-        registry: state.configRegistry,
+        configStore: owners.config.store,
+        getConfig: () => owners.config.require(),
+        getRestartControlRequired: () => owners.config.restartRequired,
+        markRestartControlRequired: () => owners.config.markRestartRequired(),
+        homeDirectory: owners.homeDirectory,
+        changeHub: owners.config.changes,
+        mutationRunner: owners.config.mutations,
+        registry: owners.config.registry,
         runtimeApply: { apply: mcp.applyRuntimeConfig.bind(mcp) },
-        setConfig: (config: ControlConfig) => state.setConfig(config),
+        setConfig: (config: ControlConfig) => owners.config.set(config),
     };
     const engine = new ConfigEngine(options);
     const instanceEditor = new InstanceEditorCoordinator({
-        engine, instanceRegistry: state.instances, instanceChanges: state.instanceChanges,
-        createRuntimeInstance: config => state.instanceRuntimes.create(config),
-        retireRuntimeInstance: instance => state.instanceRuntimes.retire(instance),
-        finalizeRuntimeInstance: instance => state.instanceRuntimes.finalize(instance),
-        updateApprovalPolicy: async (name, policy) => {
-            const instance = state.instances.get(name);
-            assert.ok(instance);
-            state.instanceRuntimes.get(instance).approval.setPolicy(policy);
-        },
+        engine,
+        instanceRegistry: owners.instances.registry,
+        instanceChanges: owners.instances.changes,
+        createRuntimeInstance: (config) => createInstance(config),
+        finalizeRuntimeInstance: async (instance) => await instance.close(),
         mcp: mcp.instancePort,
     });
-    return { instanceEditor, configEditor: new ConfigEditorCoordinator({ ...options, engine, instances: instanceEditor }) };
+    const configEditor = new ConfigEditorCoordinator({
+        ...options,
+        engine,
+        instances: instanceEditor,
+    });
+    owners.config.composeRuntime(engine, configEditor);
+    return { instanceEditor, configEditor };
+}
+
+interface TestOwners {
+    config: ControlConfigOwner;
+    homeDirectory: string;
+    instances: ControlInstances;
+    toolRegistry: ReturnType<typeof createToolCallRegistry>;
+    close(): Promise<void>;
+}
+
+async function createOwners(
+    initialConfig: ControlConfig,
+    homeDirectory: string,
+    store?: {
+        readOrCreate(): Promise<ControlConfig>;
+        write?(next: ControlConfig): Promise<void>;
+    },
+): Promise<TestOwners> {
+    const config = new ControlConfigOwner({
+        store: (store ?? {
+            async readOrCreate() {
+                return initialConfig;
+            },
+            async write() {},
+        }) as never,
+    });
+    await config.load(homeDirectory);
+    const instances = new ControlInstances({ configChanges: config.changes });
+    await instances.load(config.require());
+    const toolRegistry = createToolCallRegistry();
+    return {
+        config,
+        homeDirectory,
+        instances,
+        toolRegistry,
+        async close() {
+            await instances.close();
+            instances.dispose();
+        },
+    };
 }
 
 async function availablePort(): Promise<number> {
