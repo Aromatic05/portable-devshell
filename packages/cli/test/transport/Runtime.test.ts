@@ -37,10 +37,11 @@ test(
         endpoint.connect = async () => connection;
         const adapter = createCliRuntimeAdapter(
             endpoint,
+            "alpha",
             {} as ProcessTransport,
         );
 
-        const started = adapter.start("alpha", {
+        const started = adapter.start({
             input,
             output: { write() {} },
         });

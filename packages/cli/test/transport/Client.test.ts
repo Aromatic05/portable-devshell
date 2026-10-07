@@ -34,9 +34,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                     };
                 },
             }),
-            new Rpc(endpoint.bind("config", "@control"), {
+            new Rpc(endpoint.bind("instance", "@control"), {
                 listInstances: () => {
-                    methods.push("config.listInstances");
+                    methods.push("instance.listInstances");
                     return [
                         {
                             mcpEnabled: true,
@@ -91,14 +91,14 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     });
     await negotiateCliControl(clients);
     const instances = await clients.instance.listInstances();
-    const logs = await clients.runtime.readLogs("demo-local", { limit: 1 });
+    const logs = await clients.runtime("demo-local").readLogs({ limit: 1 });
 
     assert.equal(instances[0]?.name, "demo-local");
     assert.equal(instances[0]?.snapshot.status, "stopped");
     assert.equal(logs[0]?.message, "ready\n");
     assert.deepEqual(methods, [
         "server.hello",
-        "config.listInstances",
+        "instance.listInstances",
         "process.readLogs",
     ]);
 });
