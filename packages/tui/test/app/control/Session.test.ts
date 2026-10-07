@@ -3,30 +3,41 @@ import { rm } from "node:fs/promises";
 import test from "node:test";
 import {
     asInstanceName,
+    isApprovalEventType,
+    isMessageEventType,
+    isProcessEventType,
+    isTaskEventType,
+    isToolCallEvent,
+    ProcessSubscriptionManager,
+    routeModule,
+    type ApprovalEvent,
     type ApprovalRequest,
-    type MessageEntry,
+    type ContextMessageRecord,
+    type ContextRecord,
+    type ControlHostDefinition,
+    type ControlPortDefinition,
+    type InstanceEventSource,
+    type InstanceEventStreamGap,
+    type InstanceEventStreamSlice,
+    type InstanceName,
     type InstanceSnapshot,
     type JsonValue,
-    type ContextRecord,
+    type MessageEntry,
+    type MessageEvent,
+    type MessageStream,
     type OAuthApprovalRequest,
+    type ProcessEvent,
+    type TaskEvent,
     type ToolCallQuery,
     type ToolCallRecord,
-    type ContextMessageRecord,
+    type ToolEvent,
 } from "@portable-devshell/shared";
 import {
     refreshTuiAudit,
     refreshTuiInstance,
 } from "../../../src/app/control/Refresh.ts";
-import type { WorkerInstance } from "@portable-devshell/core/instance";
-import { InstanceRegistry } from "@portable-devshell/core/instance";
-import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
+import { createServerRouteModule } from "../../../../control/src/server/Route.ts";
 import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
-import {
-    createTestApprovalApi,
-    createTestTaskApi,
-} from "../../../../control/test/support/DomainApis.ts";
-import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
-import { createTestInstance } from "../../../../control/test/support/ControlFixtures.ts";
 import {
     createTuiDomainSession,
     TuiControlSession,
@@ -569,7 +580,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await domains.server.connect();
 
         const runtime = domains.runtime("alpha");
-        await runtime.load("alpha");
+        await runtime.load();
         assert.equal(runtime.state.snapshot?.name, "alpha");
 
         const relayOutput: string[] = [];
@@ -583,7 +594,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.deepEqual(await runtime.stop(), started);
 
         const approval = domains.approval("alpha");
-        await approval.load("alpha");
+        await approval.load();
         assert.equal((await approval.get("approval-1")).status, "pending");
         await approval.decide("approval-1", "approve");
         assert.equal(worker.decisions[0]?.decision, "approve");
@@ -650,36 +661,53 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             decidedBy: string;
             decision: string;
         }> = [];
-        const instances = new InstanceRegistry([]);
-        const routes = new ControlRouteRegistry({
-            ...createTestRouteBindings(instances),
-            instances,
-            mcpStatus: () => ({
-                authMode: "oauth2",
-                oauthReady: true,
-                running: true,
-            }),
-            oauthApprovals: () =>
-                ({
-                    async decide(
-                        approvalId: string,
-                        decision: "approve" | "deny",
-                        decidedBy: string,
-                    ) {
-                        decisions.push({ approvalId, decidedBy, decision });
-                        return {
-                            ...pending,
-                            decidedBy: "tui",
-                            status:
-                                decision === "approve" ? "approved" : "denied",
-                        };
-                    },
-                    async list() {
-                        return [pending];
-                    },
-                }) as never,
-            shutdown() {},
-        });
+        const routes = {
+            hosts: (): readonly ControlHostDefinition[] => [
+                {
+                    host: "@control",
+                    ports: [
+                        createServerRouteModule({
+                            instanceCount: () => 0,
+                            ready: () => true,
+                            shutdown() {},
+                        }),
+                        routeModule("auth", {
+                            decideApproval: (request, context) => {
+                                const approvalId = readString(
+                                    request.payload,
+                                    "approvalId",
+                                );
+                                const decision = readString(
+                                    request.payload,
+                                    "decision",
+                                );
+                                decisions.push({
+                                    approvalId,
+                                    decidedBy: context.peer,
+                                    decision,
+                                });
+                                return toJson({
+                                    ...pending,
+                                    decidedBy: context.peer,
+                                    status:
+                                        decision === "approve"
+                                            ? "approved"
+                                            : "denied",
+                                });
+                            },
+                            listApprovals: () => toJson([pending]),
+                            status: () =>
+                                toJson({
+                                    authMode: "oauth2",
+                                    oauthReady: true,
+                                    running: true,
+                                }),
+                        }),
+                    ],
+                },
+            ],
+            onChange: () => () => undefined,
+        };
         const server = new ControlSocketServer({ routes, socketPath });
         const domains = createTuiDomainSession({ socketPath });
 
@@ -687,7 +715,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         t.after(async () => {
             domains.close();
             await server.stop();
-            routes.dispose();
             await rm(runtimeDir, { force: true, recursive: true });
         });
         await domains.server.connect();
@@ -745,348 +772,379 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         start(): Promise<void>;
         stop(): Promise<void>;
     } {
-        const instances = new InstanceRegistry([
-            createTestInstance(worker as unknown as WorkerInstance, {
-                name: "alpha",
-            }),
-        ]);
-        const task = createTestTaskApi({
-                    goal: {
-                        async continuation() {
-                            return {};
-                        },
-                        async list() {
-                            return [];
-                        },
-                        async manage() {
-                            return undefined;
-                        },
-                        async read() {
-                            return undefined;
-                        },
-                        async recordReentry() {},
-                        async stopAll() {
-                            return [];
-                        },
-                        async touch() {},
-                    },
-                    todo: {
-                        async cancelAll() {},
-                        async control() {
-                            return {
-                                items: [],
-                                revision: 0,
-                                summary: { completed: 0, total: 0 },
-                            };
-                        },
-                        async delete() {},
-                        async read() {
-                            options.onTodoRead?.();
-                            await options.todoReadGate;
-                            return {
-                                items: [],
-                                revision: 0,
-                                summary: { completed: 0, total: 0 },
-                            };
-                        },
-                        summaries() {
-                            return [];
-                        },
-                        async write() {
-                            return {
-                                items: [],
-                                revision: 0,
-                                summary: { completed: 0, total: 0 },
-                            };
-                        },
-                    },
-        });
-        const approval = createTestApprovalApi({
-            async decideApproval(approvalId, input) {
-                return await worker.decideApproval(approvalId, input);
-            },
-            async getApproval(approvalId) {
-                return await worker.getApproval(approvalId);
-            },
-            async listApprovals() {
-                return await worker.listApprovals();
-            },
-            async listPendingApprovals() {
-                return await worker.listPendingApprovals();
-            },
-        });
+        const subscriptions = new ProcessSubscriptionManager();
+        const events: InstanceEventSource = {
+            cursor: () => worker.snapshot().lastSeq,
+            subscribe: (fromSeq) => worker.subscribe(fromSeq),
+        };
+        const instanceName = asInstanceName("alpha");
         let server!: ControlSocketServer;
         let contextReads = 0;
         let oauthApprovalReads = 0;
         let restartCount = 0;
-        const toolCalls = {
-            async call(..._args: unknown[]) {
-                return (await worker.callTool()) as unknown as JsonValue;
+
+        const configView: JsonValue = {
+            instances: [
+                {
+                    enabled: true,
+                    mcp: { enabled: false, path: "/alpha/mcp" },
+                    name: "alpha",
+                    provider: "local",
+                },
+            ],
+            mcp: {
+                enabled: false,
+                listenHost: "127.0.0.1",
+                listenPort: 3210,
             },
+            version: getConfigVersion(),
         };
-        const contextChanges = {
-            revision: 0,
-            onChange: () => () => undefined,
-            readSince: () => ({
-                changes: [],
-                kind: "events" as const,
-                latestRevision: 0,
-                oldestAvailableRevision: 0,
-            }),
-        };
-        const contextAdmin =
-            options.contextRecords === undefined
-                ? undefined
-                : () =>
-                      ({
-                          registry: {
-                              changes: contextChanges,
-                              async snapshot() {
-                                  contextReads += 1;
-                                  return {
-                                      contexts: options.contextRecords!(),
-                                      revision: contextChanges.revision,
-                                  };
-                              },
-                              async list() {
-                                  contextReads += 1;
-                                  return options.contextRecords!();
-                              },
-                              async referenceInstance() {
-                                  return undefined;
-                              },
-                              async validateForInstance(
-                                  ctxId: string,
-                                  instance: string,
-                              ) {
-                                  const record = options
-                                      .contextRecords!()
-                                      .find(
-                                          (candidate) =>
-                                              candidate.ctxId === ctxId &&
-                                              candidate.environments.some(
-                                                  (environment) =>
-                                                      environment.instance ===
-                                                      instance,
-                                              ),
-                                      );
-                                  if (record === undefined)
-                                      throw new Error(
-                                          "Context is unavailable.",
-                                      );
-                                  return record;
-                              },
-                          },
-                          async disable(ctxId: string) {
-                              return options.contextRecords!().find(
-                                  (record) => record.ctxId === ctxId,
-                              )!;
-                          },
-                          async renew(ctxId: string) {
-                              return options.contextRecords!().find(
-                                  (record) => record.ctxId === ctxId,
-                              )!;
-                          },
-                      }) as never;
-        const overview = {
-            async read() {
-                const now = Date.now();
-                const activity = await worker.readToolCalls({
-                    includeInput: false,
-                    includeOutput: false,
-                    limit: 20,
-                    maxBytes: 128 * 1024,
-                });
-                const failure = await worker.readToolCallFailureSummary(
-                    now - 24 * 60 * 60 * 1000,
-                    now,
-                );
-                const snapshot = worker.snapshot();
-                return {
-                    activity: activity.map((record) => ({
-                        callId: record.callId,
-                        completedAt: record.completedAt,
-                        errorSummary: record.error,
-                        instance: record.instance,
-                        source: record.source,
-                        startedAt: record.startedAt,
-                        status: record.status,
-                        toolName: record.toolName,
-                    })),
-                    alerts:
-                        failure.latest === undefined
-                            ? []
-                            : [
-                                  {
-                                      detail: "A tool call failed.",
-                                      id: `activity.failed:${failure.latest.callId}`,
-                                      instance: asInstanceName("alpha"),
-                                      kind: "activity.failed" as const,
-                                      severity: "attention" as const,
-                                      title: "Tool call failed",
-                                  },
-                              ],
-                    controller: { pid: process.pid, uptimeSeconds: 0 },
-                    counts: {
-                        activeTodos: 0,
-                        failedCalls24h: failure.count,
-                        instancesAttention: 0,
-                        instancesCritical: 0,
-                        instancesReady: snapshot.ready ? 1 : 0,
-                        instancesTotal: 1,
-                        pendingApprovals: 0,
-                    },
-                    generatedAt: new Date(now).toISOString(),
-                    health: failure.count > 0 ? "attention" as const : "healthy" as const,
-                    instances: [
-                        {
-                            mcpEnabled: false,
-                            name: asInstanceName("alpha"),
-                            pendingApprovals: 0,
-                            provider: "local" as const,
-                            snapshot,
-                        },
-                    ],
-                    todos: [],
-                };
-            },
-        };
-        const routes = new ControlRouteRegistry({
-            ...createTestRouteBindings(instances, {
-                approval,
-                contextAdmin,
-                overview,
-                task,
-                toolCalls: toolCalls as never,
-            }),
-            extensionRoutes: {
-                modules(scope) {
-                    return scope === "control"
-                        ? [
-                              {
-                                  name: "message",
-                                  operations: [
-                                      {
-                                          name: "preferences",
-                                          handle: () => ({
-                                              hiddenContexts: {},
-                                              orderByWorkspace: {},
-                                              titles: {},
-                                              version: 1,
-                                              workspaceOrder: [],
-                                          }),
-                                      },
-                                      {
-                                          name: "updatePreferences",
-                                          handle: (request) =>
-                                              request.payload ?? {},
-                                      },
-                                  ],
-                              },
-                          ]
+
+        async function overview() {
+            const now = Date.now();
+            const activity = await worker.readToolCalls({
+                includeInput: false,
+                includeOutput: false,
+                limit: 20,
+                maxBytes: 128 * 1024,
+            });
+            const failure = await worker.readToolCallFailureSummary(
+                now - 24 * 60 * 60 * 1000,
+                now,
+            );
+            const snapshot = worker.snapshot();
+            return {
+                activity: activity.map((record) => ({
+                    callId: record.callId,
+                    completedAt: record.completedAt,
+                    errorSummary: record.error,
+                    instance: record.instance,
+                    source: record.source,
+                    startedAt: record.startedAt,
+                    status: record.status,
+                    toolName: record.toolName,
+                })),
+                alerts:
+                    failure.latest === undefined
+                        ? []
                         : [
                               {
-                                  name: "message",
-                                  operations: [
-                                      {
-                                          name: "listMessageEntries",
-                                          handle: async () =>
-                                              ({
-                                                  entries:
-                                                      options.messageHistoryEntries?.() ??
-                                                      [],
-                                                  lastSeq:
-                                                      worker.snapshot().lastSeq,
-                                              }) as unknown as JsonValue,
-                                      },
-                                      {
-                                          name: "listContextMessages",
-                                          handle: async () =>
-                                              worker.listContextMessages() as unknown as JsonValue,
-                                      },
-                                      {
-                                          name: "queueContextMessage",
-                                          handle: async (request) =>
-                                              worker.queueContextMessage(
-                                                  request.payload as {
-                                                      ctxId: string;
-                                                      text: string;
-                                                  },
-                                              ) as unknown as JsonValue,
-                                      },
-                                  ],
+                                  detail: "A tool call failed.",
+                                  id: `activity.failed:${failure.latest.callId}`,
+                                  instance: asInstanceName("alpha"),
+                                  kind: "activity.failed" as const,
+                                  severity: "attention" as const,
+                                  title: "Tool call failed",
                               },
-                          ];
+                          ],
+                controller: { pid: process.pid, uptimeSeconds: 0 },
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: failure.count,
+                    instancesAttention: 0,
+                    instancesCritical: 0,
+                    instancesReady: snapshot.ready ? 1 : 0,
+                    instancesTotal: 1,
+                    pendingApprovals: 0,
                 },
-                onChange() {
-                    return () => undefined;
-                },
-                async retireInstance() {},
-            },
-            artifact: {
-                listShares() {
-                    return [];
-                },
-                listTransfers() {
-                    return [];
-                },
-            } as never,
-            toolCalls: toolCalls as never,
-            config: {
-                getConfigView() {
-                    return {
-                        instances: [
-                            {
-                                enabled: true,
-                                mcp: { enabled: false, path: "/alpha/mcp" },
-                                name: "alpha",
-                                provider: "local",
-                            },
-                        ],
-                        mcp: {
-                            enabled: false,
-                            listenHost: "127.0.0.1",
-                            listenPort: 3210,
-                        },
-                        version: getConfigVersion(),
-                    };
-                },
-            } as never,
-            instances,
-            tuiPages: {
-                async invoke() {
-                    return { items: [], title: "" };
-                },
-                list() {
-                    return [];
-                },
-            } as never,
-            mcpStatus: () => ({
-                running: false,
-                reason: "MCP runtime is disabled.",
-            }),
-            oauthApprovals: () =>
-                ({
-                    async list() {
-                        oauthApprovalReads += 1;
-                        return [];
+                generatedAt: new Date(now).toISOString(),
+                health:
+                    failure.count > 0
+                        ? ("attention" as const)
+                        : ("healthy" as const),
+                instances: [
+                    {
+                        mcpEnabled: false,
+                        name: asInstanceName("alpha"),
+                        pendingApprovals: 0,
+                        provider: "local" as const,
+                        snapshot,
                     },
-                }) as never,
-            ...(options.restartable
-                ? {
-                      restart: async () => {
-                          restartCount += 1;
-                          await server.stop();
-                          server = new ControlSocketServer({
-                              routes,
-                              socketPath,
-                          });
-                          await server.start();
-                      },
-                  }
-                : {}),
-            shutdown() {},
-        });
+                ],
+                todos: [],
+            };
+        }
+
+        const controlPorts: ControlPortDefinition[] = [
+            createServerRouteModule({
+                instanceCount: () => 1,
+                ready: () => true,
+                ...(options.restartable
+                    ? {
+                          restart: async () => {
+                              restartCount += 1;
+                              await server.stop();
+                              server = new ControlSocketServer({
+                                  routes,
+                                  socketPath,
+                              });
+                              await server.start();
+                          },
+                      }
+                    : {}),
+                shutdown() {},
+            }),
+            routeModule(
+                "config",
+                {
+                    snapshot: () =>
+                        toJson({
+                            revision: getConfigVersion(),
+                            view: configView,
+                        }),
+                },
+                { subscribe: emptySubscription },
+            ),
+            routeModule(
+                "instance",
+                {
+                    snapshotInstances: () =>
+                        toJson({
+                            instances: [
+                                {
+                                    enabled: true,
+                                    homeDirectory:
+                                        worker.handshake?.homeDirectory,
+                                    mcpEnabled: false,
+                                    name: "alpha",
+                                    snapshot: worker.snapshot(),
+                                },
+                            ],
+                            revision: 1,
+                        }),
+                },
+                { subscribeInstances: emptySubscription },
+            ),
+            routeModule(
+                "context",
+                {
+                    snapshot: () => {
+                        contextReads += 1;
+                        return toJson({
+                            contexts: options.contextRecords?.() ?? [],
+                            revision: 0,
+                        });
+                    },
+                },
+                { subscribe: emptySubscription },
+            ),
+            routeModule("overview", {
+                get: async () => toJson(await overview()),
+            }),
+            routeModule("extension", {
+                tuiPage: () => ({}),
+                tuiPages: () => [],
+            }),
+            routeModule(
+                "artifact",
+                {
+                    snapshot: () =>
+                        toJson({
+                            lastSeq: worker.snapshot().lastSeq,
+                            shares: [],
+                            transfers: [],
+                        }),
+                },
+                { subscribe: emptySubscription },
+            ),
+            routeModule("auth", {
+                listApprovals: () => {
+                    oauthApprovalReads += 1;
+                    return toJson([]);
+                },
+                status: () => toJson({ running: false }),
+            }),
+            routeModule("message", {
+                preferences: () => toJson(emptyPreferences()),
+                updatePreferences: (request) =>
+                    toJson(request.payload ?? emptyPreferences()),
+            }),
+        ];
+
+        const instancePorts: ControlPortDefinition[] = [
+            routeModule(
+                "process",
+                {
+                    readLogs: async () => toJson(await worker.readLogs()),
+                    refresh: () =>
+                        toJson({
+                            lastSeq: worker.snapshot().lastSeq,
+                            snapshot: worker.snapshot(),
+                        }),
+                    snapshot: () =>
+                        toJson({
+                            lastSeq: worker.snapshot().lastSeq,
+                            snapshot: worker.snapshot(),
+                        }),
+                    stop: async () => toJson(await worker.stop()),
+                },
+                {
+                    start: async (stream) => {
+                        const snapshot = await worker.startInteractive({
+                            writeOutput: async (chunk) => {
+                                await stream.send({
+                                    name: "output",
+                                    payload: { chunk },
+                                });
+                            },
+                        });
+                        await stream.close(toJson(snapshot));
+                    },
+                    subscribe: async (stream, request, context) =>
+                        await subscriptions.subscribe(
+                            stream,
+                            context,
+                            "alpha",
+                            events,
+                            readFromSeq(request.payload),
+                            (event) =>
+                                isProcessEventType(event.type)
+                                    ? (event as ProcessEvent)
+                                    : undefined,
+                        ),
+                },
+            ),
+            routeModule(
+                "task",
+                {
+                    getGoals: () =>
+                        toJson({
+                            goals: [],
+                            lastSeq: worker.snapshot().lastSeq,
+                        }),
+                    getTodo: async () => {
+                        options.onTodoRead?.();
+                        await options.todoReadGate;
+                        return toJson({
+                            lastSeq: worker.snapshot().lastSeq,
+                            todo: {
+                                items: [],
+                                revision: 0,
+                                summary: { completed: 0, total: 0 },
+                            },
+                        });
+                    },
+                },
+                {
+                    subscribe: async (stream, request, context) =>
+                        await subscriptions.subscribe(
+                            stream,
+                            context,
+                            "alpha",
+                            events,
+                            readFromSeq(request.payload),
+                            (event) =>
+                                isTaskEventType(event.type)
+                                    ? (event as TaskEvent)
+                                    : undefined,
+                        ),
+                },
+            ),
+            routeModule(
+                "approval",
+                {
+                    decide: async (request) =>
+                        toJson(
+                            await worker.decideApproval(
+                                readString(request.payload, "approvalId"),
+                                {
+                                    decision: readString(
+                                        request.payload,
+                                        "decision",
+                                    ),
+                                },
+                            ),
+                        ),
+                    get: async (request) =>
+                        toJson(
+                            await worker.getApproval(
+                                readString(request.payload, "approvalId"),
+                            ),
+                        ),
+                    list: async () => toJson(await worker.listApprovals()),
+                    snapshot: async () =>
+                        toJson({
+                            approvals: await worker.listApprovals(),
+                            lastSeq: worker.snapshot().lastSeq,
+                        }),
+                },
+                {
+                    subscribe: async (stream, request, context) =>
+                        await subscriptions.subscribe(
+                            stream,
+                            context,
+                            "alpha",
+                            events,
+                            readFromSeq(request.payload),
+                            (event) =>
+                                isApprovalEventType(event.type)
+                                    ? (event as ApprovalEvent)
+                                    : undefined,
+                        ),
+                },
+            ),
+            routeModule(
+                "tool",
+                {
+                    call: async () => toJson(await worker.callTool()),
+                    listCalls: async () => toJson(await worker.readToolCalls()),
+                },
+                {
+                    subscribe: async (stream, request, context) =>
+                        await subscriptions.subscribe(
+                            stream,
+                            context,
+                            "alpha",
+                            events,
+                            readFromSeq(request.payload),
+                            (event) =>
+                                isToolCallEvent(event.type)
+                                    ? (event as ToolEvent)
+                                    : undefined,
+                        ),
+                },
+            ),
+            routeModule(
+                "message",
+                {
+                    listContextMessages: () =>
+                        toJson(worker.listContextMessages()),
+                    listMessageEntries: () =>
+                        toJson({
+                            entries: options.messageHistoryEntries?.() ?? [],
+                            lastSeq: worker.snapshot().lastSeq,
+                        }),
+                    queueContextMessage: (request) =>
+                        toJson(
+                            worker.queueContextMessage(
+                                readQueueInput(request.payload),
+                            ),
+                        ),
+                },
+                {
+                    subscribe: async (stream, request, context) =>
+                        await subscriptions.subscribe(
+                            stream,
+                            context,
+                            "alpha",
+                            events,
+                            readFromSeq(request.payload),
+                            (event) =>
+                                isMessageEventType(event.type)
+                                    ? (event as MessageEvent)
+                                    : undefined,
+                        ),
+                },
+            ),
+        ];
+
+        const routes = {
+            hosts: (): readonly ControlHostDefinition[] => [
+                { host: "@control", ports: controlPorts },
+                { host: instanceName, ports: instancePorts },
+            ],
+            onChange: () => () => undefined,
+        };
         server = new ControlSocketServer({ routes, socketPath });
         return {
             contextReads: () => contextReads,
@@ -1094,11 +1152,75 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             restartCount: () => restartCount,
             start: async () => await server.start(),
             async stop() {
+                subscriptions.close();
                 await server.stop();
-                routes.dispose();
             },
         };
     }
+
+    function toJson(value: unknown): JsonValue {
+        if (
+            value === null ||
+            typeof value === "boolean" ||
+            typeof value === "number" ||
+            typeof value === "string"
+        )
+            return value;
+        if (Array.isArray(value)) return value.map(toJson);
+        if (typeof value === "object") {
+            const record: Record<string, JsonValue> = {};
+            for (const [key, entry] of Object.entries(value)) {
+                if (entry !== undefined) record[key] = toJson(entry);
+            }
+            return record;
+        }
+        throw new Error(`Cannot serialize ${typeof value} to JSON.`);
+    }
+
+    async function emptySubscription(stream: MessageStream): Promise<void> {
+        await stream.send({ name: "seed", payload: { events: [] } });
+    }
+
+    function isRecord(
+        value: JsonValue | undefined,
+    ): value is Record<string, JsonValue> {
+        return (
+            typeof value === "object" && value !== null && !Array.isArray(value)
+        );
+    }
+
+    function readFromSeq(payload: JsonValue | undefined): number {
+        if (!isRecord(payload) || typeof payload.fromSeq !== "number")
+            throw new Error("A subscription requires a numeric fromSeq.");
+        return payload.fromSeq;
+    }
+
+    function readString(payload: JsonValue | undefined, field: string): string {
+        if (!isRecord(payload) || typeof payload[field] !== "string")
+            throw new Error(`Expected a string ${field}.`);
+        return payload[field];
+    }
+
+    function readQueueInput(payload: JsonValue | undefined): {
+        ctxId: string;
+        text: string;
+    } {
+        return {
+            ctxId: readString(payload, "ctxId"),
+            text: readString(payload, "text"),
+        };
+    }
+
+    function emptyPreferences(): JsonValue {
+        return {
+            hiddenContexts: {},
+            orderByWorkspace: {},
+            titles: {},
+            version: 1,
+            workspaceOrder: [],
+        };
+    }
+
 
     function contextRecord(
         status: ContextRecord["status"],
@@ -1117,11 +1239,11 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     }
 
     class FakeWorker {
-        readonly #name: string;
+        readonly #name: InstanceName;
         #events: Array<{
             at: string;
-            data?: unknown;
-            instanceName: string;
+            data?: JsonValue;
+            instanceName: InstanceName;
             seq: number;
             type: string;
         }> = [];
@@ -1149,7 +1271,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             name: string,
             private readonly initialSnapshot: Partial<InstanceSnapshot> = {},
         ) {
-            this.#name = name;
+            this.#name = asInstanceName(name);
             this.#logs = [
                 {
                     at: new Date(0).toISOString(),
@@ -1212,7 +1334,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             } as const;
         }
 
-        subscribe(fromSeq = 1) {
+        subscribe(
+            fromSeq = 1,
+        ): InstanceEventStreamGap | InstanceEventStreamSlice {
             this.subscribeFromSeqs.push(fromSeq);
 
             const nextSeq = this.#events[0]?.seq ?? this.#lastSeq + 1;
