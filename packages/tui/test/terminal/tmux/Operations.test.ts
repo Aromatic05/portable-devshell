@@ -27,9 +27,8 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
         const session = new TuiControlSession({ domains: domains.domains });
         const operations = new TuiRuntimeTmuxOperations({
             clients: {
-                tool: {
+                tool: (instance: string) => ({
                     async call(
-                        instance: string,
                         toolName: string,
                         input: JsonValue,
                         workspace: string,
@@ -43,7 +42,7 @@ import { TuiTestDomains } from "../../support/DomainHarness.ts";
                         calls.push(call);
                         return responder(call);
                     },
-                },
+                }),
             } as never,
             domains: domains.domains,
             operationTimeoutMs: 1000,
