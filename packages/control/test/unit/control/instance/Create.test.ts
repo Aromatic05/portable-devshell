@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry } from "@portable-devshell/core/instance";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
 import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
@@ -219,7 +219,6 @@ test("instance create restores configuration and registry when MCP registration 
             provider: "local",
         }),
     );
-    let retired = 0;
     let finalized = 0;
     const engine = createEngine(
         () => config,
@@ -235,9 +234,6 @@ test("instance create restores configuration and registry when MCP registration 
         ...testRuntimeHooks(),
         engine,
         createRuntimeInstance: () => descriptor,
-        retireRuntimeInstance: async () => {
-            retired += 1;
-        },
         finalizeRuntimeInstance: async () => {
             finalized += 1;
         },
@@ -263,7 +259,7 @@ test("instance create restores configuration and registry when MCP registration 
     assert.equal(writes.length, 2);
     assert.deepEqual(config.instances, []);
     assert.equal(registry.get("demo-local"), undefined);
-    assert.equal(retired, 1);
+    assert.equal(descriptor.lifecycle.retired, true);
     assert.equal(finalized, 1);
     assert.equal(configChanges.revision, 0);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistry } from "@portable-devshell/core/instance";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
 import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
@@ -15,7 +15,7 @@ import {
     testRuntimeHooks,
 } from "../../../support/InstanceRuntime.ts";
 
-test("failed retirement rollback installs a fresh active generation", async () => {
+test("failed generation retirement leaves committed rebuild debt until reconciliation", async () => {
     let config = configWithInstance();
     const original = createTestInstance(config.instances[0]!);
     const registry = new InstanceRegistry([original]);
@@ -34,27 +34,37 @@ test("failed retirement rollback installs a fresh active generation", async () =
                 generations.push(descriptor);
                 return descriptor;
             },
-            retireRuntimeInstance: async () => {
-                retirementCalls += 1;
-                throw new Error("approval retirement failed");
-            },
         },
     });
+    coordinator.registerInstanceGenerationRetirement(async () => {
+        retirementCalls += 1;
+        if (retirementCalls === 1)
+            throw new Error("generation retirement failed once");
+    });
 
-    await assert.rejects(
-        coordinator.updateInstanceConfig({
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(...args);
+    try {
+        await coordinator.updateInstanceConfig({
             instanceName: "demo-local",
             patch: { security: { mode: "workspace" } },
-        }),
-        /approval retirement failed/u,
-    );
+        });
+    } finally {
+        console.warn = originalWarn;
+    }
+
     assert.equal(retirementCalls, 1);
-    assert.equal(config.instances[0]?.security.mode, "disabled");
-    assert.equal(original.retired, true);
+    assert.equal(config.instances[0]?.security.mode, "workspace");
+    assert.equal(original.lifecycle.retired, true);
+    assert.equal(generations.length, 1);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(warnings.length, 1);
+    await coordinator.assertInstanceCleanupSettled("demo-local");
+    assert.equal(retirementCalls, 2);
     assert.equal(generations.length, 2);
     assert.equal(registry.get("demo-local"), generations[1]);
-    assert.notStrictEqual(registry.get("demo-local"), original);
-    assert.equal(registry.get("demo-local")?.retired, false);
+    assert.equal(registry.get("demo-local")?.lifecycle.active, true);
 });
 
 test("disable wait-cancel failure is cleanup debt after admission drains", async () => {
