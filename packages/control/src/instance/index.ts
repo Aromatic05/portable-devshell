@@ -4,32 +4,24 @@ import type { ControlConfig } from "@portable-devshell/shared";
 
 import type { ConfigChangeHub } from "../config/change/Config.js";
 import { InstanceChangeHub } from "./Change.js";
-import type { InstanceCreateCoordinator } from "./editor/create/index.js";
 import type { InstanceEditorCoordinator } from "./editor/index.js";
 import { InstanceRegistry } from "./Registry.js";
-import type { ReverseCredentials } from "./reverse/Credentials.js";
 
 export interface ControlInstancesOptions {
     configChanges?: ConfigChangeHub;
 }
 
 export interface ControlInstancesRuntime {
-    create: InstanceCreateCoordinator;
     editor: InstanceEditorCoordinator;
-    reverse?: {
-        connections: ReverseConnections;
-        credentials: ReverseCredentials;
-    };
+    reverseConnections?: ReverseConnections;
 }
 
 export class ControlInstances {
     readonly changes = new InstanceChangeHub();
     readonly #unsubscribeConfigChanges: () => void;
-    #create?: InstanceCreateCoordinator;
     #editor?: InstanceEditorCoordinator;
     #registry = new InstanceRegistry([]);
     #reverseConnections?: ReverseConnections;
-    #reverseCredentials?: ReverseCredentials;
 
     constructor(options: ControlInstancesOptions = {}) {
         this.#unsubscribeConfigChanges =
@@ -46,31 +38,13 @@ export class ControlInstances {
             }) ?? (() => undefined);
     }
 
-    get create(): InstanceCreateCoordinator {
-        if (this.#create === undefined)
-            throw new Error("Control instance create service is not composed.");
-        return this.#create;
-    }
-
-    get editor(): InstanceEditorCoordinator {
-        if (this.#editor === undefined)
-            throw new Error("Control instance editor is not composed.");
-        return this.#editor;
-    }
-
     get registry(): InstanceRegistry {
         return this.#registry;
     }
 
-    get reverseCredentials(): ReverseCredentials | undefined {
-        return this.#reverseCredentials;
-    }
-
-    composeRuntime(runtime: ControlInstancesRuntime): void {
-        this.#create = runtime.create;
+    attachRuntime(runtime: ControlInstancesRuntime): void {
         this.#editor = runtime.editor;
-        this.#reverseConnections = runtime.reverse?.connections;
-        this.#reverseCredentials = runtime.reverse?.credentials;
+        this.#reverseConnections = runtime.reverseConnections;
     }
 
     async reconcile(): Promise<void> {
@@ -135,11 +109,9 @@ export class ControlInstances {
     }
 
     reset(): void {
-        this.#create = undefined;
         this.#editor = undefined;
         this.#registry = new InstanceRegistry([]);
         this.#reverseConnections = undefined;
-        this.#reverseCredentials = undefined;
     }
 
     dispose(): void {

@@ -205,7 +205,6 @@ export class ControlFactory {
                 registry: options.config.registry,
                 setConfig: (config) => options.config.set(config),
             });
-            options.config.composeRuntime(configEngine, configEditor);
             const extensions = createExtensionRuntime({
                 configRegistry: options.config.registry,
                 pathOptions: {
@@ -379,18 +378,6 @@ export class ControlFactory {
                     await artifact.service.retireInstance(instance.name);
                 },
             );
-            options.instances.composeRuntime({
-                create: instanceCreate,
-                editor: instanceEditor,
-                ...(reverseConnections === undefined || reverseCredentials === undefined
-                    ? {}
-                    : {
-                          reverse: {
-                              connections: reverseConnections,
-                              credentials: reverseCredentials,
-                          },
-                      }),
-            });
             const state = new ControlState({
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
@@ -412,12 +399,12 @@ export class ControlFactory {
                 artifact: state.artifact,
                 config: () => options.config.require(),
                 configChanges: options.config.changes,
-                configEditor: options.config.editor,
+                configEditor,
                 contexts: state.contexts,
                 debug: state.debug,
                 extensions: state.extensions,
-                instanceCreate: options.instances.create,
-                instanceEditor: options.instances.editor,
+                instanceCreate,
+                instanceEditor,
                 instanceChanges: options.instances.changes,
                 instances: options.instances.registry,
                 onConnectionDetached: (connectionId) =>
@@ -429,7 +416,7 @@ export class ControlFactory {
                 mcp,
                 restart: options.restart,
                 reverse: {
-                    credentials: options.instances.reverseCredentials,
+                    credentials: reverseCredentials,
                     ingress: reverseIngress,
                 },
                 shutdown: options.shutdown,
@@ -442,6 +429,12 @@ export class ControlFactory {
                     await composedServer.retireInstanceGeneration(instance.name);
                 },
             );
+            options.instances.attachRuntime({
+                editor: instanceEditor,
+                ...(reverseConnections === undefined
+                    ? {}
+                    : { reverseConnections }),
+            });
             server = composedServer;
             return { server: composedServer, state };
         } catch (error) {

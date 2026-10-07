@@ -6,9 +6,7 @@ import {
 
 import { ConfigChangeHub } from "./change/Config.js";
 import { ConfigRegistry, createCoreConfigRegistry } from "./domain/Registry.js";
-import type { ConfigEditorCoordinator } from "./editor/index.js";
 import { ControlConfigMutationLock } from "./engine/Lock.js";
-import type { ConfigEngine } from "./engine/index.js";
 import { ControlConfigStore } from "./store/index.js";
 
 export interface ControlConfigOptions {
@@ -22,8 +20,6 @@ export class ControlConfig {
     readonly registry: ConfigRegistry;
     readonly store: ControlConfigStore;
     #document?: ControlConfigDocument;
-    #editor?: ConfigEditorCoordinator;
-    #engine?: ConfigEngine;
     #restartRequired = false;
 
     constructor(options: ControlConfigOptions = {}) {
@@ -33,18 +29,6 @@ export class ControlConfig {
 
     get document(): ControlConfigDocument | undefined {
         return this.#document;
-    }
-
-    get editor(): ConfigEditorCoordinator {
-        if (this.#editor === undefined)
-            throw new Error("Control config editor is not composed.");
-        return this.#editor;
-    }
-
-    get engine(): ConfigEngine {
-        if (this.#engine === undefined)
-            throw new Error("Control config engine is not composed.");
-        return this.#engine;
     }
 
     get restartRequired(): boolean {
@@ -71,19 +55,12 @@ export class ControlConfig {
         this.#document = document;
     }
 
-    composeRuntime(engine: ConfigEngine, editor: ConfigEditorCoordinator): void {
-        this.#engine = engine;
-        this.#editor = editor;
-    }
-
     markRestartRequired(): void {
         this.#restartRequired = true;
     }
 
     reset(): void {
         this.#document = undefined;
-        this.#editor = undefined;
-        this.#engine = undefined;
         this.#restartRequired = false;
     }
 }

@@ -642,7 +642,6 @@ function createEditors(
         engine,
         instances: instanceEditor,
     });
-    owners.config.composeRuntime(engine, configEditor);
     return { instanceEditor, configEditor };
 }
 
