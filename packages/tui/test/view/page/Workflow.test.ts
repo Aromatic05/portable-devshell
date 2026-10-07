@@ -1,400 +1,49 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
-import { PassThrough } from "node:stream";
-import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
-import { type TodoReadResult } from "@portable-devshell/shared";
-import { InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";
-import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
-import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
-import { createTestTaskApi } from "../../../../control/test/support/DomainApis.ts";
-import { createTestInstance } from "../../../../control/test/support/ControlFixtures.ts";
-import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
 import {
-    createTuiDomainSession,
+    type TodoReadResult,
+    type TodoTaskSummary,
+} from "@portable-devshell/shared";
+import {
+    buildFocusGraphForState,
     currentTuiRoute,
     selectBreadcrumbSegments,
     selectMainScreenModel,
+    TuiAppStore,
+    TuiCommandDispatcherFocus,
+    TuiCommandDispatcherNavigation,
+    TuiFocusManager,
 } from "../../../src/testing.ts";
-import { TuiRuntime } from "../../../src/app/Runtime.ts";
-import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
-import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { TuiTestDomains } from "../../support/DomainHarness.js";
 
+// View/page coverage for the Todo (workflow) page. The previous test drove a
+// real TuiRuntime across a control socket to prove the on-demand `todo.read`
+// round-trip. That transport behavior remains covered by the TUI control
+// session integration tests; these tests exercise the Todo view projection
+// plus the route/focus/expansion interaction surface directly.
 {
-    test("real TuiRuntime drives Todo overview to detail through the control socket", async (t) => {
-        const runtimeDir = await createTestTempDirectory("tui-todo-detail");
-        const socketPath = createTestIpcPath("tui-todo-detail", runtimeDir);
-        const server = createTodoServer(socketPath);
-        await server.start();
-        t.after(async () => {
-            await server.stop();
-            await rm(runtimeDir, { force: true, recursive: true });
-        });
+    const taskSummary: TodoTaskSummary = {
+        completed: 1,
+        currentItem: "Implement Todo",
+        revision: 2,
+        status: "in_progress",
+        taskId: "task-1",
+        title: "Todo support",
+        total: 3,
+        updatedAt: "2026-07-31T00:00:00.000Z",
+    };
 
-        const domains = createTuiDomainSession({ socketPath });
+    // Overview read: the control read model exposes task summaries before the
+    // full item list has been loaded for the active task.
+    const summariesOnlyTodo: TodoReadResult = {
+        items: [],
+        revision: 0,
+        summary: { completed: 0, total: 0 },
+        tasks: [taskSummary],
+    };
 
-        const terminal = createTerminal();
-        const runtime = new TuiRuntime(
-            { stdin: terminal.stdin, stdout: terminal.stdout },
-            { domains, inkDebug: true },
-        );
-        const running = runtime.run();
-        t.after(async () => {
-            await runtime.stop();
-        });
-
-        try {
-            await waitUntil(
-                () =>
-                    runtime.store.getState().connection.status === "connected",
-            );
-            await waitUntil(
-                () => runtime.reader.instances.instances.length === 1,
-            );
-
-            await runtime.handleInput("6", {});
-            await waitUntil(
-                () => runtime.store.getState().ui.selectedPage === "todo",
-            );
-            await runtime.handleInput("!", {});
-            await waitUntil(
-                () => runtime.store.getState().ui.selectedInstance === "alpha",
-            );
-            await waitUntil(() => server.todoReadTaskIds().length > 0);
-            await waitUntil(() =>
-                selectMainScreenModel(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ).boxes.some((box) => box.id === "todo-task:task-1"),
-            );
-            assert.equal(server.todoReadTaskIds().includes("task-1"), false);
-
-            const overviewBoxes = selectMainScreenModel(
-                runtime.store.getState(),
-                runtime.reader,
-            ).boxes;
-            assert.ok(
-                overviewBoxes.some((box) => box.id === "todo-task:task-1"),
-                "overview should render the root task box",
-            );
-            assert.equal(
-                overviewBoxes.some((box) => box.id.startsWith("todo-item:")),
-                false,
-                "overview uses summaries; full items are loaded after opening the task",
-            );
-            for (const box of overviewBoxes) {
-                assert.notEqual(
-                    box.primaryAction,
-                    undefined,
-                    `every overview box must expose a primary route: ${box.id}`,
-                );
-            }
-
-            await runtime.handleInput("", { tab: true });
-            await waitUntil(
-                () =>
-                    runtime.store.getState().interaction.focusScope ===
-                    "mainBoxes",
-            );
-
-            await runtime.handleInput(" ", {});
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.expandedBoxes[
-                        "todo:alpha:todo-task:task-1"
-                    ] === true,
-            );
-            assert.equal(
-                currentTuiRoute(runtime.store.getState()).view,
-                "overview",
-                "Space must only expand, not navigate",
-            );
-            await runtime.handleInput(" ", {});
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.expandedBoxes[
-                        "todo:alpha:todo-task:task-1"
-                    ] === false,
-            );
-            assert.equal(
-                currentTuiRoute(runtime.store.getState()).view,
-                "overview",
-                "Space must only collapse, not navigate",
-            );
-
-            await runtime.handleInput("", { return: true });
-            await waitUntil(() => {
-                const route = currentTuiRoute(runtime.store.getState());
-                return route.page === "todo" && route.view === "detail";
-            });
-            await waitUntil(() =>
-                selectMainScreenModel(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ).boxes.some((box) => box.id === "todo-item:inspect"),
-            );
-            assert.equal(server.todoReadTaskIds().includes("task-1"), true);
-
-            const detailBoxes = selectMainScreenModel(
-                runtime.store.getState(),
-                runtime.reader,
-            ).boxes;
-            assert.ok(
-                detailBoxes.some((box) => box.id === "todo-summary:task-1"),
-                "detail should render the task summary box",
-            );
-            assert.ok(
-                detailBoxes.some((box) => box.id === "todo-item:inspect"),
-                "detail should render sub-item inspect",
-            );
-            assert.ok(
-                detailBoxes.some((box) => box.id === "todo-item:implement"),
-                "detail should render sub-item implement",
-            );
-            assert.ok(
-                detailBoxes.some((box) => box.id === "todo-item:verify"),
-                "detail should render sub-item verify",
-            );
-
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.mainFocusId ===
-                    "todo-summary:task-1",
-            );
-            await runtime.handleInput(" ", {});
-            await waitUntil(() => {
-                const box = selectMainScreenModel(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ).boxes.find(
-                    (candidate) => candidate.id === "todo-summary:task-1",
-                );
-                return box?.expanded === true;
-            });
-            const summary = selectMainScreenModel(
-                runtime.store.getState(),
-                runtime.reader,
-            ).boxes.find((box) => box.id === "todo-summary:task-1");
-            assert.ok(
-                summary?.expandedLines.some((line) =>
-                    line.text.includes("1/3"),
-                ),
-                "detail summary should show progress",
-            );
-
-            await runtime.handleInput(" ", {});
-            await waitUntil(() => {
-                const box = selectMainScreenModel(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ).boxes.find(
-                    (candidate) => candidate.id === "todo-summary:task-1",
-                );
-                return box?.expanded === false;
-            });
-
-            await runtime.handleInput("", { downArrow: true });
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.mainFocusId ===
-                    "todo-item:inspect",
-            );
-            await runtime.handleInput("", { downArrow: true });
-            await waitUntil(
-                () =>
-                    runtime.store.getState().ui.mainFocusId ===
-                    "todo-item:implement",
-            );
-            await runtime.handleInput(" ", {});
-            await waitUntil(() => {
-                const box = selectMainScreenModel(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ).boxes.find(
-                    (candidate) => candidate.id === "todo-item:implement",
-                );
-                return box?.expanded === true;
-            });
-            const implement = selectMainScreenModel(
-                runtime.store.getState(),
-                runtime.reader,
-            ).boxes.find((box) => box.id === "todo-item:implement");
-            assert.ok(
-                implement?.expandedLines.some((line) =>
-                    line.text.includes("Adding dedicated TUI page"),
-                ),
-                "detail should render the sub-item description",
-            );
-            assert.ok(
-                implement?.expandedLines.some((line) =>
-                    line.text.includes("Level"),
-                ),
-                "detail should render the sub-item hierarchy level",
-            );
-            assert.deepEqual(
-                selectBreadcrumbSegments(
-                    runtime.store.getState(),
-                    runtime.reader,
-                ),
-                ["todo", "Todo support"],
-            );
-
-            await runtime.handleInput("", { escape: true });
-            await waitUntil(() => {
-                const route = currentTuiRoute(runtime.store.getState());
-                return route.page === "todo" && route.view === "overview";
-            });
-            assert.equal(
-                runtime.store.getState().ui.mainFocusId,
-                "todo-task:task-1",
-            );
-
-            terminal.write("\u0004");
-            await running;
-        } finally {
-            await runtime.stop();
-        }
-    });
-
-    function createTodoServer(socketPath: string): {
-        start(): Promise<void>;
-        stop(): Promise<void>;
-        todoReadTaskIds(): Array<string | undefined>;
-    } {
-        const worker = new FakeWorker("alpha");
-        const todoReadTaskIds: Array<string | undefined> = [];
-        const instances = new InstanceRegistry([
-            createTestInstance(worker as unknown as WorkerInstance, {
-                name: "alpha",
-            }),
-        ]);
-        const task = createTestTaskApi({
-                    goal: {
-                        async continuation() {
-                            return {};
-                        },
-                        async list() {
-                            return [];
-                        },
-                        async manage() {
-                            return undefined;
-                        },
-                        async read() {
-                            return undefined;
-                        },
-                        async recordReentry() {},
-                        async stopAll() {
-                            return [];
-                        },
-                        async touch() {},
-                    },
-                    todo: {
-                        async cancelAll() {},
-                        async control() {
-                            return todoFixture;
-                        },
-                        async delete() {},
-                        async read(input) {
-                            const taskId = input?.taskId;
-                            todoReadTaskIds.push(taskId);
-                            return taskId === todoFixture.taskId
-                                ? todoFixture
-                                : {
-                                      items: [],
-                                      revision: 0,
-                                      summary: { completed: 0, total: 0 },
-                                      tasks: todoFixture.tasks,
-                                  };
-                        },
-                        summaries() {
-                            return todoFixture.tasks ?? [];
-                        },
-                        async write() {
-                            return todoFixture;
-                        },
-                    },
-        });
-        const routes = new ControlRouteRegistry({
-            config: {
-                getConfigView() {
-                    return {
-                        instances: [
-                            {
-                                enabled: true,
-                                mcp: { enabled: false, path: "/alpha/mcp" },
-                                name: "alpha",
-                                provider: "local",
-                            },
-                        ],
-                        mcp: {
-                            enabled: false,
-                            listenHost: "127.0.0.1",
-                            listenPort: 3210,
-                        },
-                        version: 1,
-                    };
-                },
-            } as never,
-            extensionRoutes: {
-                modules(scope) {
-                    return scope === "control"
-                        ? [
-                              {
-                                  name: "message",
-                                  operations: [
-                                      {
-                                          name: "preferences",
-                                          handle: () => ({
-                                              hiddenContexts: {},
-                                              orderByWorkspace: {},
-                                              titles: {},
-                                              version: 1,
-                                              workspaceOrder: [],
-                                          }),
-                                      },
-                                      {
-                                          name: "updatePreferences",
-                                          handle: (request) =>
-                                              request.payload ?? {},
-                                      },
-                                  ],
-                              },
-                          ]
-                        : [];
-                },
-                onChange() {
-                    return () => undefined;
-                },
-                async retireInstance() {},
-            },
-            ...createTestRouteBindings(instances, { task }),
-            instances,
-            tuiPages: {
-                async invoke() {
-                    return { items: [], title: "" };
-                },
-                list() {
-                    return [];
-                },
-            } as never,
-            mcpStatus: () => ({
-                running: false,
-                reason: "MCP runtime is disabled.",
-            }),
-            shutdown() {},
-        });
-        const server = new ControlSocketServer({ routes, socketPath });
-        return {
-            start: async () => await server.start(),
-            async stop() {
-                await server.stop();
-                routes.dispose();
-            },
-            todoReadTaskIds: () => [...todoReadTaskIds],
-        };
-    }
-
-    const todoFixture: TodoReadResult = {
+    // Detail read: the active task together with its full item list.
+    const activeTodo: TodoReadResult = {
         items: [
             { content: "Inspect", id: "inspect", status: "completed" },
             {
@@ -408,108 +57,243 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         revision: 2,
         summary: { completed: 1, currentItemId: "implement", total: 3 },
         taskId: "task-1",
-        tasks: [
-            {
-                completed: 1,
-                revision: 2,
-                status: "in_progress",
-                taskId: "task-1",
-                title: "Todo support",
-                total: 3,
-                updatedAt: "2026-07-31T00:00:00.000Z",
-            },
-        ],
+        tasks: [taskSummary],
         title: "Todo support",
     };
 
-    class FakeWorker {
-        readonly #name: string;
+    function createWorkflow() {
+        const domains = new TuiTestDomains();
+        const store = new TuiAppStore();
+        domains.setInstances([
+            { enabled: true, mcpEnabled: false, name: "alpha" },
+        ]);
+        store.setSelectedInstance("alpha");
 
-        constructor(name: string) {
-            this.#name = name;
-        }
-
-        snapshot() {
-            return {
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 2,
-                name: this.#name,
-                ready: true,
-                status: "ready",
-            } as const;
-        }
-
-        subscribe() {
-            return { events: [], kind: "events" as const, lastSeq: 2 };
-        }
-    }
-
-    function createTerminal(): {
-        output: string;
-        rawModes: boolean[];
-        stdin: ReadStream;
-        stdout: WriteStream;
-        write(value: string): void;
-    } {
-        class Input extends PassThrough {
-            readonly isTTY = true;
-            readonly rawModes: boolean[] = [];
-
-            ref(): this {
-                return this;
-            }
-
-            setRawMode(enabled: boolean): this {
-                this.rawModes.push(enabled);
-                return this;
-            }
-
-            unref(): this {
-                return this;
-            }
-        }
-
-        class Output extends PassThrough {
-            readonly columns = 120;
-            readonly isTTY = true;
-            readonly rows = 40;
-        }
-
-        const input = new Input();
-        const output = new Output();
-        let captured = "";
-        output.on("data", (chunk) => {
-            captured += chunk.toString();
+        const projection = domains.projection;
+        const focus = new TuiCommandDispatcherFocus({
+            mainViewportRows: () => 12,
+            projection,
+            store,
+        });
+        const focusManager = new TuiFocusManager(store, {
+            boxIdForLine: (lineId) =>
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) =>
+                    box.expandedLines.some((line) => line.id === lineId),
+                )?.id,
+            currentPage: () => store.getState().ui.selectedPage,
+            expandedKeyFor: (boxId) =>
+                selectMainScreenModel(
+                    store.getState(),
+                    domains.reader,
+                ).boxes.find((box) => box.id === boxId)?.expandedKey,
+            graphFor: (page, mode) =>
+                buildFocusGraphForState(
+                    {
+                        ...store.getState(),
+                        interaction: {
+                            ...store.getState().interaction,
+                            focusScope: mode,
+                        },
+                        ui: { ...store.getState().ui, selectedPage: page },
+                    },
+                    domains.reader,
+                ),
+            mode: () => store.getState().interaction.focusScope,
+        });
+        const navigation = new TuiCommandDispatcherNavigation({
+            focus,
+            focusManager,
+            onPageReload: async () => undefined,
+            onRedraw: () => undefined,
+            projection,
+            store,
         });
 
-        return {
-            get output() {
-                return captured;
-            },
-            rawModes: input.rawModes,
-            stdin: input as unknown as ReadStream,
-            stdout: output as unknown as WriteStream,
-            write(value: string) {
-                input.write(value);
-            },
-        };
+        return { domains, navigation, store };
     }
 
-    async function waitUntil(
-        predicate: () => boolean,
-        timeoutMs = 10_000,
-    ): Promise<void> {
-        const deadline = Date.now() + timeoutMs;
-        while (!predicate()) {
-            if (Date.now() >= deadline) {
-                throw new Error("Timed out waiting for TUI state.");
-            }
-            await delay(5);
-        }
-    }
+    test("Todo overview projects task summaries as navigable boxes without preloading items", () => {
+        const { domains, store } = createWorkflow();
+        domains.setTodo("alpha", summariesOnlyTodo);
+        store.setSelectedPage("todo");
 
-    async function delay(milliseconds: number): Promise<void> {
-        await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-    }
+        const boxes = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes;
+        assert.deepEqual(
+            boxes.map((box) => box.id),
+            ["todo-task:task-1"],
+        );
+        assert.equal(
+            boxes.some((box) => box.id.startsWith("todo-item:")),
+            false,
+            "overview uses summaries; items arrive with the detail read",
+        );
+
+        const [task] = boxes;
+        assert.ok(task);
+        assert.deepEqual(task.primaryAction, {
+            kind: "navigate",
+            route: { page: "todo", todoId: "task-1", view: "detail" },
+        });
+        assert.equal(task.enterable, true);
+        assert.match(task.collapsedLines[0].text, /progress=1\/3/u);
+    });
+
+    test("Todo detail falls back to the summary until the full item read is loaded", () => {
+        const { domains, store } = createWorkflow();
+        domains.setTodo("alpha", summariesOnlyTodo);
+        store.setSelectedPage("todo");
+        store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
+
+        const boxes = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes;
+        assert.deepEqual(
+            boxes.map((box) => box.id),
+            ["todo-summary:task-1"],
+        );
+
+        const summary = boxes[0];
+        assert.ok(summary);
+        store.toggleExpanded(summary.expandedKey);
+        const expanded = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes.find((box) => box.id === "todo-summary:task-1");
+        assert.equal(expanded?.expanded, true);
+        assert.ok(
+            expanded?.expandedLines.some((line) =>
+                line.text.includes("Full item data is not present"),
+            ),
+        );
+    });
+
+    test("Todo detail projects the task summary, sub-items, progress, and breadcrumb", () => {
+        const { domains, store } = createWorkflow();
+        domains.setTodo("alpha", activeTodo);
+        store.setSelectedPage("todo");
+        store.pushRoute({ page: "todo", todoId: "task-1", view: "detail" });
+        store.setFocusScope("mainBoxes");
+        store.setMainFocusId("todo-summary:task-1");
+
+        const boxes = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes;
+        assert.deepEqual(
+            boxes.map((box) => box.id),
+            [
+                "todo-summary:task-1",
+                "todo-item:inspect",
+                "todo-item:implement",
+                "todo-item:verify",
+            ],
+        );
+        assert.deepEqual(
+            selectBreadcrumbSegments(store.getState(), domains.reader),
+            ["todo", "Todo support"],
+        );
+
+        const collapsedSummary = boxes.find(
+            (box) => box.id === "todo-summary:task-1",
+        );
+        assert.ok(collapsedSummary);
+        store.toggleExpanded(collapsedSummary.expandedKey);
+        const summary = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes.find((box) => box.id === "todo-summary:task-1");
+        assert.equal(summary?.expanded, true);
+        assert.ok(
+            summary?.expandedLines.some((line) => line.text.includes("1/3")),
+            "detail summary should show progress",
+        );
+        assert.ok(
+            summary?.expandedLines.some(
+                (line) =>
+                    line.text.includes("Level") &&
+                    line.text.includes("0 · root"),
+            ),
+        );
+
+        const collapsedImplement = boxes.find(
+            (box) => box.id === "todo-item:implement",
+        );
+        assert.ok(collapsedImplement);
+        store.toggleExpanded(collapsedImplement.expandedKey);
+        const implement = selectMainScreenModel(
+            store.getState(),
+            domains.reader,
+        ).boxes.find((box) => box.id === "todo-item:implement");
+        assert.equal(implement?.expanded, true);
+        assert.ok(
+            implement?.expandedLines.some((line) =>
+                line.text.includes("Adding dedicated TUI page"),
+            ),
+            "detail should render the sub-item description",
+        );
+        assert.ok(
+            implement?.expandedLines.some(
+                (line) =>
+                    line.text.includes("Level") &&
+                    line.text.includes("1 · subtask"),
+            ),
+            "detail should render the sub-item hierarchy level",
+        );
+    });
+
+    test("Todo overview routes to detail and back while Space only toggles expansion", async () => {
+        const { domains, navigation, store } = createWorkflow();
+        domains.setTodo("alpha", activeTodo);
+        store.setSelectedPage("todo");
+
+        await navigation.dispatch({ direction: "next", type: "focus.move" });
+        assert.equal(store.getState().interaction.focusScope, "mainBoxes");
+        assert.equal(store.getState().ui.mainFocusId, "todo-task:task-1");
+
+        await navigation.dispatch({ type: "screen.toggle" });
+        assert.equal(
+            store.getState().ui.expandedBoxes["todo:alpha:todo-task:task-1"],
+            true,
+        );
+        assert.deepEqual(currentTuiRoute(store.getState()), {
+            page: "todo",
+            view: "overview",
+        });
+        await navigation.dispatch({ type: "screen.toggle" });
+        assert.equal(
+            store.getState().ui.expandedBoxes["todo:alpha:todo-task:task-1"],
+            false,
+        );
+        assert.deepEqual(currentTuiRoute(store.getState()), {
+            page: "todo",
+            view: "overview",
+        });
+
+        assert.equal(navigation.openFocusedRoute(), true);
+        assert.deepEqual(currentTuiRoute(store.getState()), {
+            page: "todo",
+            todoId: "task-1",
+            view: "detail",
+        });
+        assert.equal(store.getState().ui.mainFocusId, "todo-summary:task-1");
+
+        await navigation.dispatch({ direction: "down", type: "focus.move" });
+        assert.equal(store.getState().ui.mainFocusId, "todo-item:inspect");
+        await navigation.dispatch({ direction: "down", type: "focus.move" });
+        assert.equal(store.getState().ui.mainFocusId, "todo-item:implement");
+
+        assert.equal(navigation.cancelPassiveScope(), true);
+        assert.deepEqual(currentTuiRoute(store.getState()), {
+            page: "todo",
+            view: "overview",
+        });
+        assert.equal(store.getState().ui.mainFocusId, "todo-task:task-1");
+    });
 }
