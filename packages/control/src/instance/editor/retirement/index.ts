@@ -31,7 +31,6 @@ export class InstanceRetirementCoordinator {
 
     readonly #instanceRegistry: InstanceRegistry;
     readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
-    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(options: InstanceEditorCoordinatorOptions) {
@@ -43,7 +42,6 @@ export class InstanceRetirementCoordinator {
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
         this.#createRuntimeInstance = options.createRuntimeInstance;
-        this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
@@ -113,9 +111,7 @@ export class InstanceRetirementCoordinator {
         if (descriptor !== undefined) {
             cleanup.retainDescriptor(instanceName, descriptor);
             await this.#instanceRegistry
-                .remove(instanceName, descriptor, async (retiring) => {
-                    await this.#retireRuntimeInstance(retiring);
-                })
+                .remove(instanceName, descriptor)
                 .catch((error) => cleanupFailures.push(error));
             this.#instanceChanges.publish("registry");
         }
@@ -156,7 +152,7 @@ export class InstanceRetirementCoordinator {
             existing.enabled
         ) {
             const instanceDisabled = !next.enabled;
-            if (descriptor.lifecycle.retired) {
+            if (!descriptor.generation.active) {
                 await this.notification
                     .retireGenerationResources(existing)
                     .catch((error) => failures.push(error));
@@ -213,7 +209,7 @@ export class InstanceRetirementCoordinator {
             failures.push(error);
             return failures;
         }
-        if (descriptor?.lifecycle.retired) {
+        if (descriptor !== undefined && !descriptor.generation.active) {
             await this.notification
                 .retireGenerationResources(existing)
                 .catch((error) => failures.push(error));

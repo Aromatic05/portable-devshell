@@ -402,7 +402,7 @@ class ContextToolRuntime {
             });
         }
         try {
-            return target.lifecycle.acquireLease();
+            return target.generation.acquireLease();
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

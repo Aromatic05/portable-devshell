@@ -36,7 +36,6 @@ export class InstanceReconfigurationCoordinator {
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #cleanup: InstanceCleanupDebt;
-    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(
@@ -51,7 +50,6 @@ export class InstanceReconfigurationCoordinator {
         this.#mcp = options.mcp;
         this.#retirement = retirement;
         this.#cleanup = cleanup;
-        this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
@@ -361,13 +359,11 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         const failures: unknown[] = [];
         let restored: Instance | undefined;
-        if (descriptor === undefined || descriptor.lifecycle.retired) {
+        if (descriptor === undefined || !descriptor.generation.active) {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
-                    .remove(existing.name, current, async (retiring) =>
-                        await this.#retireRuntimeInstance(retiring),
-                    )
+                    .remove(existing.name, current)
                     .catch((error) => failures.push(error));
             if (existing.enabled) {
                 try {
@@ -381,12 +377,7 @@ export class InstanceReconfigurationCoordinator {
             try {
                 const current = this.#instanceRegistry.get(existing.name);
                 if (current !== undefined && current !== descriptor) {
-                    await this.#instanceRegistry.remove(
-                        existing.name,
-                        current,
-                        async (retiring) =>
-                            await this.#retireRuntimeInstance(retiring),
-                    );
+                    await this.#instanceRegistry.remove(existing.name, current);
                 }
                 descriptor.update(existing);
                 if (this.#instanceRegistry.get(existing.name) !== descriptor)
@@ -408,7 +399,7 @@ export class InstanceReconfigurationCoordinator {
                 (error) => failures.push(error),
             );
         }
-        if (descriptor?.lifecycle.retired && descriptor !== restored) {
+        if (descriptor !== undefined && !descriptor.generation.active && descriptor !== restored) {
             await closeDescriptorResourcesBestEffort(
                 descriptor,
                 this.#finalizeRuntimeInstance,
@@ -441,12 +432,7 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         if (!instance.enabled) {
             if (descriptor !== undefined) {
-                await this.#instanceRegistry.remove(
-                    instance.name,
-                    descriptor,
-                    async (retiring) =>
-                        await this.#retireRuntimeInstance(retiring),
-                );
+                await this.#instanceRegistry.remove(instance.name, descriptor);
                 this.#instanceChanges.publish("registry");
             }
             return;
@@ -463,12 +449,7 @@ export class InstanceReconfigurationCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            await this.#instanceRegistry.remove(
-                instance.name,
-                descriptor,
-                async (retiring) =>
-                    await this.#retireRuntimeInstance(retiring),
-            );
+            await this.#instanceRegistry.remove(instance.name, descriptor);
             this.#instanceChanges.publish("registry");
             return;
         }
@@ -595,9 +576,7 @@ export class InstanceReconfigurationCoordinator {
                     preparedDescriptor
                 ) {
                     await this.#instanceRegistry
-                        .remove(existing.name, preparedDescriptor, async (retiring) =>
-                            await this.#retireRuntimeInstance(retiring),
-                        )
+                        .remove(existing.name, preparedDescriptor)
                         .catch((cleanupError) =>
                             failures.push(cleanupError),
                         );

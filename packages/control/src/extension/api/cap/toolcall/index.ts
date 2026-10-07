@@ -26,7 +26,7 @@ export class ExtensionToolCallHistoryCapabilityControl implements ToolCallHistor
         this.#assertAllowed();
         const descriptor = this.options.instances.get(instance);
         if (descriptor === undefined) throw new Error(`Instance ${instance} is unavailable.`);
-        const lease = descriptor.lifecycle.acquireLease();
+        const lease = descriptor.generation.acquireLease();
         try {
             const boundedQuery = query === undefined ? undefined : {
                 ...query,

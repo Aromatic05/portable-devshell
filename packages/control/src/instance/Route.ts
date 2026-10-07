@@ -34,7 +34,7 @@ export function createInstanceConfigRouteModule(
                         message: `Instance ${input.instanceName} was not found.`,
                         retryable: false,
                     });
-                const lease = await instance.lifecycle.acquireReference(input.reference);
+                const lease = await instance.ownership.acquireReference(input.reference);
                 return lease.snapshot as unknown as JsonValue;
             },
             listInstances: () => readInstances(options) as never,
@@ -64,7 +64,7 @@ export function createInstanceConfigRouteModule(
                 const input = readInstanceReference(request.payload);
                 await options.registry
                     .get(input.instanceName)
-                    ?.lifecycle.releaseReference(input.reference);
+                    ?.ownership.releaseReference(input.reference);
                 return {};
             },
             updateInstance: async (request) =>

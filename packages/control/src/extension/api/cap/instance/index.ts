@@ -74,21 +74,21 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
 
     async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
+        const lease = this.#require(name).generation.acquireLease();
         try { return toSnapshot(lease.instance.worker.supervision.snapshot()); }
         finally { lease.release(); }
     }
 
     async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
+        const lease = this.#require(name).generation.acquireLease();
         try { return toSnapshot(await lease.instance.worker.supervision.recovery.refreshStatus()); }
         finally { lease.release(); }
     }
 
     async readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
+        const lease = this.#require(name).generation.acquireLease();
         try { return (await this.#readLogs(name, query)).map(toLogEntry); }
         finally { lease.release(); }
     }
@@ -223,10 +223,10 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
                 retryable: false,
             });
         }
-        const lease = descriptor.lifecycle.acquireLease();
+        const lease = descriptor.generation.acquireLease();
         try {
             const snapshot = await lease.instance.worker.supervision.lifecycle.start();
-            lease.instance.lifecycle.markOwned();
+            lease.instance.ownership.markOwned();
             return toSnapshot(snapshot);
         }
         finally { lease.release(); }
@@ -234,10 +234,10 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
 
     async stop(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
+        const lease = this.#require(name).generation.acquireLease();
         try {
             const snapshot = await lease.instance.worker.supervision.lifecycle.stop();
-            lease.instance.lifecycle.clearOwned();
+            lease.instance.ownership.clearOwned();
             return toSnapshot(snapshot);
         }
         finally { lease.release(); }
@@ -271,7 +271,7 @@ export class ExtensionInstanceEventPublishCapabilityControl implements Extension
     async appendEvent(name: string, type: string, data?: ExtensionJsonValue): Promise<void> {
         if (!this.options.allowed)
             throw new Error(`Extension ${this.options.extensionId} did not declare the instance.events.publish capability.`);
-        const lease = requireInstance(this.options.instances, name).lifecycle.acquireLease();
+        const lease = requireInstance(this.options.instances, name).generation.acquireLease();
         try {
             await lease.instance.worker.supervision.state.appendEvent(requireEventType(type), data as JsonValue | undefined);
         } finally { lease.release(); }

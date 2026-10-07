@@ -36,9 +36,6 @@ export interface InstanceCreateCoordinatorOptions {
     instanceChanges: InstanceChangeHub;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
-    retireRuntimeInstance(
-        descriptor: Instance,
-    ): Promise<void>;
     mcp?: InstanceMcpRuntimePort;
     mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
@@ -59,7 +56,6 @@ export class InstanceCreateCoordinator {
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
     readonly #publishConfigChange: InstanceCreateCoordinatorOptions["publishConfigChange"];
-    readonly #retireRuntimeInstance: InstanceCreateCoordinatorOptions["retireRuntimeInstance"];
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #sshHosts: () => readonly string[];
     readonly #validator: ControlConfigValidator;
@@ -79,7 +75,6 @@ export class InstanceCreateCoordinator {
             options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
         this.#publishConfigChange = options.publishConfigChange;
-        this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#setConfig = options.setConfig;
         this.#sshHosts = options.sshHosts ?? discoverSshConfigHosts;
         this.#validator = options.validator ?? new ControlConfigValidator();
@@ -175,18 +170,11 @@ export class InstanceCreateCoordinator {
             if (descriptor !== undefined) {
                 if (current === descriptor) {
                     await this.#instanceRegistry
-                        .remove(
-                            normalized.name,
-                            descriptor,
-                            async (retiring) =>
-                                await this.#retireRuntimeInstance(retiring),
-                        )
+                        .remove(normalized.name, descriptor)
                         .catch((cleanupError) => failures.push(cleanupError));
                 } else {
                     await descriptor
-                        .lifecycle.retire(async () =>
-                            await this.#retireRuntimeInstance(descriptor),
-                        )
+                        .retire()
                         .catch((cleanupError) => failures.push(cleanupError));
                 }
                 await closeDescriptorResourcesBestEffort(

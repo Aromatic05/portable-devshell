@@ -97,7 +97,7 @@ export class ContextService {
             if (instance === undefined) continue;
             let lease: { instance: Instance; release(): void };
             try {
-                lease = instance.lifecycle.acquireLease();
+                lease = instance.generation.acquireLease();
             } catch {
                 continue;
             }

@@ -191,7 +191,6 @@ export class InstanceCleanupDebt {
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
     readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
-    readonly #retireRuntimeInstance: InstanceEditorCoordinatorOptions["retireRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
 
     constructor(
@@ -209,7 +208,6 @@ export class InstanceCleanupDebt {
         this.#retirement = retirement;
         this.#syncMcpEndpoint = syncMcpEndpoint;
         this.#createRuntimeInstance = options.createRuntimeInstance;
-        this.#retireRuntimeInstance = options.retireRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
@@ -333,12 +331,7 @@ export class InstanceCleanupDebt {
         let candidate = this.#instanceRegistry.get(record.instance.name);
         if (candidate !== undefined) {
             try {
-                await this.#instanceRegistry.remove(
-                    record.instance.name,
-                    candidate,
-                    async (retiring) =>
-                        await this.#retireRuntimeInstance(retiring),
-                );
+                await this.#instanceRegistry.remove(record.instance.name, candidate);
                 this.#instanceChanges.publish("registry");
             } catch (error) {
                 failures.push(error);
@@ -419,12 +412,8 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
-        if (!descriptor.lifecycle.retired) {
-            await descriptor
-                .lifecycle.retire(async () => {
-                    await this.#retireRuntimeInstance(descriptor);
-                })
-                .catch((error) => failures.push(error));
+        if (!descriptor.generation.retired) {
+            await descriptor.retire().catch((error) => failures.push(error));
         }
         await this.#retirement.notification
             .retireGenerationResources(record.instance)

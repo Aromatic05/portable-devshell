@@ -186,7 +186,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                         retryable: false,
                     });
                 const { snapshot, worker } =
-            await target.lifecycle.acquireReference(ctxId);
+                    await target.ownership.acquireReference(ctxId);
                 const connection = snapshot as unknown as Record<
                     string,
                     JsonValue
@@ -333,7 +333,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             });
         }
         try {
-            return target.lifecycle.acquireLease();
+            return target.generation.acquireLease();
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

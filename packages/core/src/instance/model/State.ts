@@ -124,7 +124,7 @@ export class InstanceState {
     readonly #worker: WorkerInstance;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
-    #retired = false;
+    #retiring = false;
 
     constructor(dependencies: InstanceStateDependencies) {
         const { audit, config, instanceName, paths, protocolClient, worker } =
@@ -214,7 +214,7 @@ export class InstanceState {
     target(): ToolCallTarget {
         return {
             dispatch: async (request) => {
-                const lease = this.instance.lifecycle.acquireLease();
+                const lease = this.instance.generation.acquireLease();
                 try {
                     return await this.callTool(request);
                 } finally {
@@ -225,12 +225,12 @@ export class InstanceState {
     }
 
     async refreshTools(): Promise<void> {
-        if (this.#retired)
+        if (this.#retiring)
             throw new Error(
-                `Instance ${this.instance.config.name} state is retired.`,
+                `Instance ${this.instance.config.name} domains are retiring.`,
             );
         const definitions = await this.tools.refreshTools();
-        if (this.#retired) return;
+        if (this.#retiring) return;
         this.#workerToolRegistration.replace(definitions);
         this.task.resume();
     }
@@ -276,14 +276,14 @@ export class InstanceState {
     }
 
     async handleReadyChanged(): Promise<void> {
-        if (this.#retired) return;
+        if (this.#retiring) return;
         if (this.#worker.supervision.snapshot().ready)
             await this.refreshTools();
         else this.#workerToolRegistration.replace([]);
     }
 
     async #retire(): Promise<void> {
-        this.#retired = true;
+        this.#retiring = true;
         const failures: unknown[] = [];
         const close = async (operation: () => unknown | Promise<unknown>) => {
             try {
@@ -313,11 +313,6 @@ export class InstanceState {
 
     async #close(): Promise<void> {
         const failures: unknown[] = [];
-        await this.instance.lifecycle
-            .retire(async () => await this.prepareRetirement())
-            .catch((error) => {
-                failures.push(error);
-            });
         await this.retire().catch((error) => {
             failures.push(error);
         });

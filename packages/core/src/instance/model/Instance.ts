@@ -18,7 +18,8 @@ import { TransportFactory } from "../transport/endpoint/Factory.js";
 import { resolveWorkerInstanceConfig, type WorkerInstanceConfig } from "../runtime/provision/Config.js";
 import { WorkerRuntimeFactory, type WorkerRuntimeFactoryOptions } from "../runtime/provision/Factory.js";
 import { InstancePaths } from "./Paths.js";
-import { InstanceLifecycle } from "./Lifecycle.js";
+import { InstanceGeneration } from "./Generation.js";
+import { InstanceWorkerOwnership } from "./Ownership.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
 import {
     createInstanceEventLog,
@@ -37,8 +38,11 @@ export class Instance {
     readonly #paths: InstancePaths;
     readonly #worker: WorkerInstance;
     readonly #state: InstanceState;
-    readonly #lifecycle: InstanceLifecycle;
+    readonly #generation: InstanceGeneration;
+    readonly #ownership: InstanceWorkerOwnership;
+    #closePromise?: Promise<void>;
     #config: InstanceConfig;
+    #retirePromise?: Promise<void>;
 
     static create(config: ControlInstanceConfig): Instance {
         const instanceName = asInstanceName(config.name);
@@ -87,7 +91,12 @@ export class Instance {
         this.#worker = fields.worker;
         this.#state = fields.state;
         this.#config = fields.config;
-        this.#lifecycle = new InstanceLifecycle(this, fields.worker);
+        this.#generation = new InstanceGeneration(this);
+        this.#ownership = new InstanceWorkerOwnership(
+            this,
+            fields.worker,
+            this.#generation,
+        );
     }
 
     get config(): InstanceConfig {
@@ -102,8 +111,12 @@ export class Instance {
         return this.#state;
     }
 
-    get lifecycle(): InstanceLifecycle {
-        return this.#lifecycle;
+    get generation(): InstanceGeneration {
+        return this.#generation;
+    }
+
+    get ownership(): InstanceWorkerOwnership {
+        return this.#ownership;
     }
 
     get paths(): InstancePaths {
@@ -123,12 +136,62 @@ export class Instance {
         this.#state.subscriptions.unsubscribeConnection(connectionId);
     }
 
-    async prepareRetirement(): Promise<void> {
-        await this.#state.prepareRetirement();
+    retire(): Promise<void> {
+        if (this.#retirePromise !== undefined) return this.#retirePromise;
+        this.#generation.beginRetirement();
+        const retirement = Promise.resolve().then(async () => await this.#retire());
+        this.#retirePromise = retirement;
+        void retirement.catch(() => {
+            if (this.#retirePromise === retirement) this.#retirePromise = undefined;
+        });
+        return retirement;
     }
 
-    async close(): Promise<void> {
-        await this.#state.close();
+    close(): Promise<void> {
+        if (this.#closePromise !== undefined) return this.#closePromise;
+        const closing = Promise.resolve().then(async () => await this.#close());
+        this.#closePromise = closing;
+        void closing.catch(() => {
+            if (this.#closePromise === closing) this.#closePromise = undefined;
+        });
+        return closing;
+    }
+
+    async #retire(): Promise<void> {
+        const failures: unknown[] = [];
+        await this.#state
+            .prepareRetirement()
+            .catch((error) => failures.push(error));
+        await this.#generation.drain();
+        await this.#state.retire().catch((error) => failures.push(error));
+        if (failures.length === 0) {
+            this.#generation.completeRetirement();
+            return;
+        }
+        if (failures.length === 1) throw failures[0];
+        throw new AggregateError(
+            failures,
+            `Instance ${this.config.name} retirement was incomplete.`,
+        );
+    }
+
+    async #close(): Promise<void> {
+        const failures: unknown[] = [];
+        await this.retire().catch((error) => failures.push(error));
+        let resourcesClosed = false;
+        await this.#state
+            .close()
+            .then(() => {
+                resourcesClosed = true;
+            })
+            .catch((error) => failures.push(error));
+        if (resourcesClosed) this.#generation.completeClose();
+        if (failures.length === 0) return;
+        if (failures.length === 1) throw failures[0];
+        throw new AggregateError(
+            failures,
+            `Instance ${this.config.name} failed to close.`,
+        );
     }
 }
 

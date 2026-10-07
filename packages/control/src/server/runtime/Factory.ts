@@ -119,7 +119,6 @@ export class ControlRuntimeFactory {
             });
             const instanceEditor = new InstanceEditorCoordinator({
                 createRuntimeInstance: (config) => createInstance(config),
-                retireRuntimeInstance: (descriptor) => descriptor.prepareRetirement(),
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
@@ -145,7 +144,6 @@ export class ControlRuntimeFactory {
             const instanceCreate = new InstanceCreateCoordinator({
                 publishConfigChange: (paths) => options.state.configChanges.publish(paths),
                 createRuntimeInstance: (config) => createInstance(config),
-                retireRuntimeInstance: (descriptor) => descriptor.prepareRetirement(),
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 assertCleanupSettled: async (instance) =>
                     await instanceEditor.assertInstanceCleanupSettled(instance),
@@ -201,7 +199,7 @@ export class ControlRuntimeFactory {
                                 throw new Error(
                                     `Instance ${input.target.instance} is unavailable.`,
                                 );
-                            const lease = descriptor.lifecycle.acquireLease();
+                            const lease = descriptor.generation.acquireLease();
                             try {
                                 const prepared =
                                     await lease.instance.worker.execution.environment.prepareExtensionResource(

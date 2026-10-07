@@ -20,6 +20,5 @@ export interface InstanceEditorCoordinatorOptions {
         instance: string,
         descriptor?: Instance,
     ) => Promise<void>;
-    retireRuntimeInstance(descriptor: Instance): Promise<void>;
     finalizeRuntimeInstance(descriptor: Instance): Promise<void>;
 }

@@ -25,16 +25,13 @@ export class InstanceRegistry {
     async remove(
         name: string,
         expected?: Instance,
-        beforeDrain?: (instance: Instance) => Promise<void>,
     ): Promise<Instance | undefined> {
         const instance = this.#instances.get(name);
         if (instance === undefined) return undefined;
         if (expected !== undefined && instance !== expected) {
             throw new Error(`Cannot remove stale instance generation ${name}.`);
         }
-        const retiring = instance.lifecycle.retire(async () => {
-            await beforeDrain?.(instance);
-        });
+        const retiring = instance.retire();
         this.#instances.delete(name);
         await retiring;
         return instance;

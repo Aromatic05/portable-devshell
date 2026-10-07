@@ -91,7 +91,7 @@ function fenceGeneration(
         operations: port.operations.map((operation) => ({
             ...operation,
             handle: async (request, context) => {
-                const generation = descriptor.lifecycle.acquireLease();
+                const generation = descriptor.generation.acquireLease();
                 try {
                     return await operation.handle(request, context);
                 } finally {
@@ -105,7 +105,7 @@ function fenceGeneration(
                   streams: port.streams.map((operation) => ({
                       ...operation,
                       handle: async (stream, request, context) => {
-                          const generation = descriptor.lifecycle.acquireLease();
+                          const generation = descriptor.generation.acquireLease();
                           try {
                               return await operation.handle(
                                   stream,
@@ -150,7 +150,7 @@ export function createProcessRouteModule(
             stop: async () => {
                 const result =
                     await instance.worker.supervision.lifecycle.stop();
-                instance.lifecycle.clearOwned();
+                instance.ownership.clearOwned();
                 return result as unknown as JsonValue;
             },
         },
@@ -180,7 +180,7 @@ export function createProcessRouteModule(
                         await instance.worker.supervision.lifecycle.startInteractive(
                             relay,
                         );
-                    instance.lifecycle.markOwned();
+                    instance.ownership.markOwned();
                     await stream.close(result as unknown as JsonValue);
                 } finally {
                     offData();
