@@ -107,9 +107,12 @@ export class ControlState {
         ];
     }
 
-    async start(): Promise<void> {
+    async initialize(): Promise<void> {
         await this.artifact.start();
         await this.contexts.initialize();
+    }
+
+    async start(): Promise<void> {
         await this.extensions.start();
         for (const source of this.#builtinExtensionSources) {
             await this.extensions.installBuiltin(source.id, source.path);

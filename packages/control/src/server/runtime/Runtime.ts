@@ -179,16 +179,28 @@ export class ControlServerRuntime {
         });
     }
 
+    async prepare(): Promise<void> {
+        await this.#web.prepare();
+    }
+
+    async startTransport(): Promise<void> {
+        await this.#transport.start();
+        await this.#internalControlServer.hello();
+    }
+
+    async startHosts(): Promise<void> {
+        await this.#mcp.start();
+        if (this.#reverseIngress !== undefined && this.#mcp.host !== undefined) {
+            this.#reverseIngress.install(this.#mcp.host.server);
+        }
+        await this.#web.startHost();
+    }
+
     async start(): Promise<void> {
         try {
-            await this.#web.prepare();
-            await this.#transport.start();
-            await this.#internalControlServer.hello();
-            await this.#mcp.start();
-            if (this.#reverseIngress !== undefined && this.#mcp.host !== undefined) {
-                this.#reverseIngress.install(this.#mcp.host.server);
-            }
-            await this.#web.startHost();
+            await this.prepare();
+            await this.startTransport();
+            await this.startHosts();
         } catch (error) {
             try {
                 await this.stop();

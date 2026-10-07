@@ -104,9 +104,12 @@ export class ControlServer {
             state = composition.state;
             server = composition.server;
             this.#startupDiagnostic("control composition completed");
+            await state.initialize();
+            await server.prepare();
+            await server.startTransport();
             await state.start();
             await this.#instances.reconcile();
-            await server.start();
+            await server.startHosts();
             await state.reconcile();
             this.#state = state;
             this.#server = server;
