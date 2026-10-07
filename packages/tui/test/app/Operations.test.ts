@@ -126,14 +126,13 @@ import {
                     calls.push("server.restart");
                 },
             },
-            task: {
-                async deleteTodo(instance: string, taskId: string) {
+            task: (instance: string) => ({
+                async deleteTodo(taskId: string) {
                     calls.push(`todo.delete:${instance}:${taskId}`);
                 },
-            },
-            tool: {
+            }),
+            tool: (instance: string) => ({
                 async call(
-                    instance: string,
                     toolName: string,
                     input: JsonValue,
                     workspace: string,
@@ -143,7 +142,7 @@ import {
                     );
                     return {};
                 },
-            },
+            }),
         } as unknown as TuiRuntimeOperationClients;
         const runtime = {
             async refresh(instance: string) {
@@ -283,8 +282,8 @@ import {
                     refreshed.push("toolCalls");
                 },
             },
-            todo: () => ({
-                async load(instance: string) {
+            todo: (instance: string) => ({
+                async load() {
                     refreshed.push(`todo:${instance}`);
                 },
             }),
