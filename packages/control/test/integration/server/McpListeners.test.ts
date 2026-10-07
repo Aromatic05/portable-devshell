@@ -638,7 +638,6 @@ function createEditors(
         mcp: mcp.instancePort,
     });
     const configEditor = new ConfigEditorCoordinator({
-        ...options,
         engine,
         instances: instanceEditor,
     });

@@ -66,6 +66,10 @@ export class ConfigEngine {
         return this.#getConfig();
     }
 
+    get restartControlRequired(): boolean {
+        return this.#getRestartControlRequired();
+    }
+
     get domains(): readonly ConfigDomainDefinition[] {
         return this.#registry.list();
     }

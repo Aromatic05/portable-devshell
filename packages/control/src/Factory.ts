@@ -172,18 +172,7 @@ export class ControlFactory {
             });
             const configEditor = new ConfigEditorCoordinator({
                 engine: configEngine,
-                configStore: options.config.store,
-                getConfig: () => options.config.require(),
-                getRestartControlRequired: () =>
-                    options.config.restartRequired,
-                homeDirectory: options.homeDirectory,
                 instances: instanceEditor,
-                markRestartControlRequired: () =>
-                    options.config.markRestartRequired(),
-                changeHub: options.config.changes,
-                mutationRunner: options.config.mutations,
-                registry: options.config.registry,
-                setConfig: (config) => options.config.set(config),
             });
             const extensions = createExtensionRuntime({
                 configRegistry: options.config.registry,

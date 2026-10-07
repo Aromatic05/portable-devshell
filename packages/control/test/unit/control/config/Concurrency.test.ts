@@ -44,14 +44,7 @@ test("instance creation and endpoint updates share one configuration mutation bo
         runtimePreflight: { async assertAvailable() {} },
         setConfig,
     });
-    const editor = new ConfigEditorCoordinator({
-        configStore,
-        engine,
-        getConfig,
-        mutationRunner: mutations,
-        runtimePreflight: { async assertAvailable() {} },
-        setConfig,
-    });
+    const editor = new ConfigEditorCoordinator({ engine });
     const creator = new InstanceCreateCoordinator({
         ...testRuntimeHooks(),
         engine,

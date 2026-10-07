@@ -35,6 +35,7 @@ import {
     createTestTaskApi,
 } from "../../../../src/testing.ts";
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
 import { ControlConfigStore } from "../../../../src/config/store/index.ts";
 import { createDebugRuntime } from "../../../../src/debug/index.ts";
@@ -349,7 +350,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
     await configStore.write(config, homeDirectory);
 
     const registry = new InstanceRegistryFactory().build(config);
-    const editor = new ConfigEditorCoordinator({
+    const engine = new ConfigEngine({
         configStore,
         getConfig: () => config,
         homeDirectory,
@@ -358,6 +359,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
             config = next;
         },
     });
+    const editor = new ConfigEditorCoordinator({ engine });
     const routes = new ControlRouteRegistry({
         config: editor,
         instanceDomains: createTestInstanceDomainRuntime(),

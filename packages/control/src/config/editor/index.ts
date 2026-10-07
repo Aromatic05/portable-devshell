@@ -1,6 +1,5 @@
 import type { JsonValue } from "@portable-devshell/shared";
-import { ConfigEngine } from "../engine/index.js";
-import type { ConfigEngineOptions } from "../engine/Api.js";
+import type { ConfigEngine } from "../engine/index.js";
 import { ConfigDraftValidator } from "./Draft.js";
 import { ConfigGlobalPatch } from "./GlobalPatch.js";
 import {
@@ -8,8 +7,8 @@ import {
     type ConfigBatchInstancePort,
 } from "./Batch.js";
 
-export interface ConfigEditorCoordinatorOptions extends ConfigEngineOptions {
-    engine?: ConfigEngine;
+export interface ConfigEditorCoordinatorOptions {
+    engine: ConfigEngine;
     instances?: ConfigBatchInstancePort;
 }
 
@@ -20,10 +19,10 @@ export class ConfigEditorCoordinator {
     readonly #batch: ConfigBatchEditor;
 
     constructor(options: ConfigEditorCoordinatorOptions) {
-        this.#engine = options.engine ?? new ConfigEngine(options);
+        this.#engine = options.engine;
         this.#global = new ConfigGlobalPatch(this.#engine);
         this.#batch = new ConfigBatchEditor(this.#engine, options.instances);
-        this.#drafts = new ConfigDraftValidator(this.#engine, options.getRestartControlRequired ?? (() => false));
+        this.#drafts = new ConfigDraftValidator(this.#engine);
     }
 
     getConfigView(): JsonValue {

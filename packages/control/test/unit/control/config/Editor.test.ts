@@ -83,7 +83,7 @@ test("config editor returns each patch apply summary to the initiating request",
             config = nextConfig;
         },
     });
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: registry,
@@ -206,10 +206,13 @@ test("config batch update persists instance, MCP, and Web changes as one transac
             },
         },
     );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
+    const service = makeConfigEditor(
+        engine,
+        new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }));
+        }),
+    );
 
     const result = (await service.updateConfig({
         instance: {
@@ -274,10 +277,13 @@ test("config batch preflight failure leaves every requested scope unchanged", as
             },
         },
     );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
+    const service = makeConfigEditor(
+        engine,
+        new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }));
+        }),
+    );
 
     try {
         await assert.rejects(
@@ -330,7 +336,7 @@ test("config view and validation mask all tokens while updates preserve masked s
     const engine = configEngine(() => config, (nextConfig) => {
         config = nextConfig;
     });
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: registry,
@@ -424,7 +430,7 @@ test("listener preflight rejects an occupied Web bind without persisting configu
                 },
             },
         );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
 
     try {
         await assert.rejects(
@@ -466,7 +472,7 @@ test("listener preflight does not treat a disabled MCP endpoint as active", asyn
             },
             { configStore: { async write() {} } },
         );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
 
     try {
         await assert.rejects(
@@ -506,7 +512,7 @@ test("endpoint runtime failure restores the prior persisted configuration", asyn
                 },
             },
         );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
 
     await assert.rejects(
         service.updateWebConfig({
@@ -542,7 +548,7 @@ test("namespace auth updates apply runtime protection before exposing OAuth", as
             },
         },
     );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; });
+    const service = makeConfigEditor(engine);
     const instances = new InstanceEditorCoordinator({
         engine,
         instanceRegistry: new InstanceRegistryFactory().build(config),
@@ -970,14 +976,7 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
             instance.registerInstanceDisabled(async () => {
                 committed += 1;
             });
-            const configEditor = makeConfigEditor(
-                engine,
-                () => config,
-                (nextConfig) => {
-                    config = nextConfig;
-                },
-                instance,
-            );
+            const configEditor = makeConfigEditor(engine, instance);
 
             const warnings = await captureWarnings(
                 async () =>
@@ -1317,10 +1316,13 @@ test("batch instance failure restores a hot-applied endpoint before configuratio
             runtimePreflight: { async assertAvailable() {} },
         },
     );
-    const service = makeConfigEditor(engine, () => config, (next) => { config = next; }, new InstanceEditorCoordinator({
+    const service = makeConfigEditor(
+        engine,
+        new InstanceEditorCoordinator({
             engine,
             instanceRegistry: registry,
-        }));
+        }),
+    );
 
     await assert.rejects(
         service.updateConfig({
@@ -2851,9 +2853,7 @@ test("config editor applies Core path updates transactionally and restores on ru
                 runtimePreflight: { async assertAvailable() {} },
             },
         );
-    const service = makeConfigEditor(engine, () => config, (nextConfig) => {
-        config = nextConfig;
-    });
+    const service = makeConfigEditor(engine);
 
     await service.updateCorePaths({
         "mcp.publicBaseUrl": "https://public.example.test/mcp",
@@ -2918,9 +2918,7 @@ test("MCP OAuth2 approval changes also invalidate an active Web OAuth2 runtime",
                 runtimePreflight: { async assertAvailable() {} },
             },
         );
-    const service = makeConfigEditor(engine, () => config, (nextConfig) => {
-        config = nextConfig;
-    });
+    const service = makeConfigEditor(engine);
 
     await service.updateMcpConfig({
         patch: {
@@ -2970,21 +2968,9 @@ function configEngine(
 
 function makeConfigEditor(
     engine: ConfigEngine,
-    getConfig: () => ControlConfig,
-    setConfig: (config: ControlConfig) => void,
     instances?: InstanceEditorCoordinator,
 ): ConfigEditorCoordinator {
-    return new ConfigEditorCoordinator({
-        engine,
-        configStore: {
-            async write(nextConfig: ControlConfig) {
-                setConfig(nextConfig);
-            },
-        },
-        getConfig,
-        setConfig,
-        instances,
-    });
+    return new ConfigEditorCoordinator({ engine, instances });
 }
 
 function requireCleanupDescriptor(

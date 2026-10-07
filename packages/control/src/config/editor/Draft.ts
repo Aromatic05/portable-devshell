@@ -9,10 +9,7 @@ import {
 import type { ConfigEngine } from "../engine/index.js";
 
 export class ConfigDraftValidator {
-    constructor(
-        private readonly engine: ConfigEngine,
-        private readonly getRestartControlRequired: () => boolean,
-    ) {}
+    constructor(private readonly engine: ConfigEngine) {}
 
     validate(params: JsonValue | undefined): JsonValue {
         const draft = this.engine.readInput(() =>
@@ -23,7 +20,7 @@ export class ConfigDraftValidator {
         );
         return toConfigView(
             this.engine.validateConfig(config),
-            this.getRestartControlRequired(),
+            this.engine.restartControlRequired,
         ) as unknown as JsonValue;
     }
 
