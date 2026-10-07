@@ -4,11 +4,11 @@ import test from "node:test";
 import type {
     ApprovalEvent,
     ControlPortContext,
+    InstanceEventSource,
     InstanceEventRecord,
 } from "@portable-devshell/shared";
 
-import { createApprovalRouteModule } from "../../../src/approval/transport/index.ts";
-import type { InstanceEventSource } from "@portable-devshell/core/instance";
+import { createApprovalRouteModule } from "../../../src/approval/Route.ts";
 
 function eventSource(lastSeq = 7): InstanceEventSource {
     return {

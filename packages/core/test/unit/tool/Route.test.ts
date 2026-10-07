@@ -3,14 +3,13 @@ import test from "node:test";
 
 import { attachToolCallErrorPayload } from "@portable-devshell/shared";
 import {
+    createToolIngressRouteModule,
+    createToolRouteModule,
     createRemoteError,
     type JsonValue,
     type ToolCallContext,
     type ControlPortContext,
 } from "@portable-devshell/shared";
-
-import { createToolIngressRouteModule } from "../../../src/toolcall/execution/transport/Route.ts";
-import { createToolRouteModule } from "../../../src/toolcall/execution/transport/ToolRoute.ts";
 
 function routeContext(connectionId: string): ControlPortContext {
     return {
@@ -202,7 +201,7 @@ test("control tool route does not expose approval operations", () => {
     const module = createToolRouteModule({ worker: {} as never });
     assert.deepEqual(
         module.operations.map((operation) => operation.name),
-        ["openSession", "closeSession", "listCalls"],
+        ["openSession", "closeSession", "listCalls", "failureSummary"],
     );
     assert.equal(module.streams, undefined);
 });

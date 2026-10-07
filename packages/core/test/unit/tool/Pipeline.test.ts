@@ -4,22 +4,25 @@ import test from "node:test";
 import {
     asInstanceName,
     createRemoteError,
+    createToolCallRuntime,
     runtimeErrorCodes,
     type JsonValue,
+    type ToolCallHookValue,
+    type ToolCallReviewInput,
+    type ToolCallReviewResult,
+    type ToolCallRewriteInput,
+    type ToolCallTargetResolver,
 } from "@portable-devshell/shared";
 
 import { createToolCallScope } from "../../../src/toolcall/execution/Context.ts";
-import {
-    ToolCallPipeline,
-} from "../../../src/toolcall/execution/Pipeline.ts";
-import type { ToolCallTargetResolver, ToolCallHookValue } from "../../../src/toolcall/Api.ts";
-import { ToolCallHookRegistry } from "../../../src/toolcall/registration/index.ts";
 import { ToolCallExecutionTarget } from "../../../src/toolcall/execution/ExecutionTarget.ts";
-import { ToolCallHookSequence } from "../../../src/toolcall/execution/hook/Sequence.ts";
-import type {
-    ToolCallReview,
-} from "../../../src/toolcall/execution/hook/Review.ts";
-import type { ToolCallRewrite } from "../../../src/toolcall/execution/hook/Rewrite.ts";
+
+type ToolCallReview = (
+    input: ToolCallReviewInput,
+) => ToolCallReviewResult | Promise<ToolCallReviewResult>;
+type ToolCallRewrite = (
+    input: ToolCallRewriteInput,
+) => ToolCallHookValue | Promise<ToolCallHookValue>;
 
 const context = {
     ctxId: "ctx-1",
@@ -34,7 +37,7 @@ interface Harness {
         input: unknown;
         toolName: string;
     }>;
-    pipeline: ToolCallPipeline;
+    runtime: ReturnType<typeof createToolCallRuntime>;
     target: ToolCallExecutionTarget;
     released: string[];
     scheduled: Array<{
@@ -139,19 +142,27 @@ function createHarness(
         },
     } as never);
     const released: string[] = [];
-    const pipeline = new ToolCallPipeline({
-        hooks: () => ({
-            release() {
-                released.push("release");
-            },
-            sequence: new ToolCallHookSequence({
-                reviews: options.reviews,
-                rewrites: options.rewrites,
-            }),
-        }),
+    const runtime = createToolCallRuntime({
         resolveTarget: options.resolveTarget ?? (() => target),
     });
-    return { audit, invoked, pipeline, target, scheduled, released };
+    options.reviews?.forEach((review, index) => {
+        runtime.hooks.registerReview({
+            hook: "test-review",
+            id: String(index).padStart(3, "0"),
+            review: (input) => review(input),
+        });
+    });
+    runtime.hooks.registerContributor(() => ({
+        rewrites: (options.rewrites ?? []).map((rewrite, index) => ({
+            hook: "test-rewrite",
+            id: String(index).padStart(3, "0"),
+            rewrite: (input) => rewrite(input),
+        })),
+        release() {
+            released.push("release");
+        },
+    }));
+    return { audit, invoked, runtime, target, scheduled, released };
 }
 
 test("ToolCallPipeline rejects during review before rewrite and target resolution", async () => {
@@ -176,7 +187,7 @@ test("ToolCallPipeline rejects during review before rewrite and target resolutio
     });
 
     await assert.rejects(
-        harness.pipeline.call(
+        harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             { command: "echo ok" },
@@ -225,7 +236,7 @@ test("unknown original instance rewrites to a valid target resolved exactly once
                     : input.value,
         ],
     });
-    const result = await source.pipeline.call(
+    const result = await source.runtime.api.call(
         "unknown-instance",
         "bash_run",
         { command: "echo original" },
@@ -253,40 +264,27 @@ test("registered execute handles the rewritten tool through the target lifecycle
         assertReady() {
             assert.fail("registered execute must not require worker readiness");
         },
-    });
-    const hooks = new ToolCallHookRegistry();
-    const executed: Array<{ input: JsonValue; toolName: string }> = [];
-    hooks.registerContributor(() => ({
         rewrites: [
-            {
-                hook: "500-route",
-                id: "rewrite",
-                rewrite: async (input) =>
-                    input.direction === "inbound"
-                        ? {
-                              ...input.value,
-                              payload: { value: 2 },
-                              toolName: "virtual_execute",
-                          }
-                        : input.value,
-            },
+            async (input) =>
+                input.direction === "inbound"
+                    ? {
+                          ...input.value,
+                          payload: { value: 2 },
+                          toolName: "virtual_execute",
+                      }
+                    : input.value,
         ],
-        release() {},
-    }));
-    hooks.registerExecute(
+    });
+    const executed: Array<{ input: JsonValue; toolName: string }> = [];
+    target.runtime.hooks.registerExecute(
         "virtual_execute",
         async (_callId, input, value) => {
             executed.push({ input, toolName: value.toolName });
             return { handled: true };
         },
     );
-    const pipeline = new ToolCallPipeline({
-        hooks: hooks.provider(),
-        resolveExecute: (toolName) => hooks.lookupExecute(toolName),
-        resolveTarget: () => target.target,
-    });
 
-    const result = await pipeline.call(
+    const result = await target.runtime.api.call(
         "instance-a",
         "bash_run",
         { command: "echo original" },
@@ -353,7 +351,7 @@ test("outbound progress and result run rewrite then review in forward order", as
     });
     const progress: JsonValue[] = [];
 
-    const result = await harness.pipeline.call(
+    const result = await harness.runtime.api.call(
         asInstanceName("instance-a"),
         "bash_run",
         { command: "echo ok" },
@@ -405,7 +403,7 @@ test("outbound error rewrite may replace error identity", async () => {
     });
 
     await assert.rejects(
-        harness.pipeline.call(
+        harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             {},
@@ -452,7 +450,7 @@ test("outbound result rewritten as error throws the rewritten body", async () =>
         ],
     });
     await assert.rejects(
-        harness.pipeline.call(
+        harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             {},
@@ -492,7 +490,7 @@ test("outbound error rewritten as result returns the rewritten payload", async (
         },
     });
     assert.deepEqual(
-        await harness.pipeline.call(
+        await harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             {},
@@ -527,7 +525,7 @@ test("inbound rewrite to progress emits progress and returns it as terminal resu
     });
     const progress: JsonValue[] = [];
     assert.deepEqual(
-        await harness.pipeline.call(
+        await harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             {},
@@ -580,7 +578,7 @@ test("outbound progress rewritten to result becomes the terminal override", asyn
     });
     const progress: JsonValue[] = [];
     assert.deepEqual(
-        await harness.pipeline.call(
+        await harness.runtime.api.call(
             asInstanceName("instance-a"),
             "bash_run",
             {},
@@ -620,7 +618,7 @@ test("invocationInput prepares the final rewritten call before reservation, read
             return { ok: true };
         },
     });
-    await harness.pipeline.call(
+    await harness.runtime.api.call(
         "unknown",
         "original",
         {},

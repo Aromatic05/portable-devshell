@@ -11,17 +11,20 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    createToolCallProvenanceRuntime,
+    createToolRouteModule,
+    type ToolCallRecord,
+} from "@portable-devshell/shared";
 
-import { ToolCallProvenanceStore } from "../../../src/toolcall/execution/record/Provenance.ts";
-import { createToolRouteModule } from "../../../src/toolcall/execution/transport/ToolRoute.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("tool call provenance persists in Control and decorates matching Worker audit records", async () => {
     const root = await createTestTempDirectory("tool-call-provenance");
     const filePath = join(root, "tool-call-provenance.jsonl");
     try {
-        const store = new ToolCallProvenanceStore(filePath);
+        const store = createToolCallProvenanceRuntime(filePath);
         await store.record({
             callId: "call-1",
             explanation:
@@ -59,7 +62,7 @@ test("tool call provenance persists in Control and decorates matching Worker aud
             workerRecord,
         ]);
 
-        const reloaded = new ToolCallProvenanceStore(filePath);
+        const reloaded = createToolCallProvenanceRuntime(filePath);
         assert.deepEqual(await reloaded.decorate("alpha", [workerRecord]), [
             {
                 ...workerRecord,
@@ -79,7 +82,7 @@ test("tool call provenance recovers a truncated hot JSONL tail after a crash", a
     );
     const filePath = join(root, "tool-call-provenance.jsonl");
     try {
-        const store = new ToolCallProvenanceStore(filePath);
+        const store = createToolCallProvenanceRuntime(filePath);
         await store.record({
             callId: "call-1",
             instance: "alpha",
@@ -87,7 +90,7 @@ test("tool call provenance recovers a truncated hot JSONL tail after a crash", a
         });
         await appendFile(filePath, '{"version":1,"callId":"partial', "utf8");
 
-        const recovered = new ToolCallProvenanceStore(filePath);
+        const recovered = createToolCallProvenanceRuntime(filePath);
         await recovered.record({
             callId: "call-2",
             instance: "alpha",
@@ -130,7 +133,7 @@ test("tool call provenance record does not initialize cold archives", async () =
             "not-zstd",
             "utf8",
         );
-        const store = new ToolCallProvenanceStore(filePath);
+        const store = createToolCallProvenanceRuntime(filePath);
 
         await assert.doesNotReject(
             store.record({
@@ -150,7 +153,7 @@ test("tool call provenance record does not initialize cold archives", async () =
 test("tool.listCalls merges Control provenance without changing Worker records", async () => {
     const root = await createTestTempDirectory("tool-call-provenance-route");
     try {
-        const store = new ToolCallProvenanceStore(
+        const store = createToolCallProvenanceRuntime(
             join(root, "tool-call-provenance.jsonl"),
         );
         await store.record({
@@ -204,7 +207,7 @@ test("tool call provenance rotates hot JSONL into compressed cold archives and r
     const filePath = join(root, "tool-call-provenance.jsonl");
     const now = Date.parse("2026-09-04T12:00:00.000Z");
     try {
-        const store = new ToolCallProvenanceStore(filePath, {
+        const store = createToolCallProvenanceRuntime(filePath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1,
             now: () => now,
@@ -229,7 +232,7 @@ test("tool call provenance rotates hot JSONL into compressed cold archives and r
                 purpose: "Keep cold provenance",
             },
         ]);
-        const reloaded = new ToolCallProvenanceStore(filePath, {
+        const reloaded = createToolCallProvenanceRuntime(filePath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1,
             now: () => now,
@@ -254,13 +257,13 @@ test("tool call provenance retention removes expired hot and cold records", asyn
     const hotPath = join(root, "hot.jsonl");
     let now = Date.parse("2026-09-01T00:00:00.000Z");
     try {
-        const cold = new ToolCallProvenanceStore(coldPath, {
+        const cold = createToolCallProvenanceRuntime(coldPath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1,
             now: () => now,
             retentionDays: 7,
         });
-        const hot = new ToolCallProvenanceStore(hotPath, {
+        const hot = createToolCallProvenanceRuntime(hotPath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1024 * 1024,
             now: () => now,
@@ -285,13 +288,13 @@ test("tool call provenance retention removes expired hot and cold records", asyn
             toolCall("hot-old"),
         ]);
 
-        const coldReloaded = new ToolCallProvenanceStore(coldPath, {
+        const coldReloaded = createToolCallProvenanceRuntime(coldPath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1,
             now: () => now,
             retentionDays: 7,
         });
-        const hotReloaded = new ToolCallProvenanceStore(hotPath, {
+        const hotReloaded = createToolCallProvenanceRuntime(hotPath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1024 * 1024,
             now: () => now,
@@ -322,7 +325,7 @@ test("tool call provenance cold budget evicts oldest archives", async () => {
     const filePath = join(root, "tool-call-provenance.jsonl");
     let now = Date.parse("2026-09-04T00:00:00.000Z");
     try {
-        const seed = new ToolCallProvenanceStore(filePath, {
+        const seed = createToolCallProvenanceRuntime(filePath, {
             coldMaxBytes: 1024 * 1024,
             hotMaxBytes: 1,
             now: () => now,
@@ -347,7 +350,7 @@ test("tool call provenance cold budget evicts oldest archives", async () => {
         const newestBytes = (await stat(join(archiveDirectory, names[1]!)))
             .size;
 
-        const bounded = new ToolCallProvenanceStore(filePath, {
+        const bounded = createToolCallProvenanceRuntime(filePath, {
             coldMaxBytes: newestBytes,
             hotMaxBytes: 1,
             now: () => now,

@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, runtimeErrorCodes } from "@portable-devshell/shared";
-import { ToolCallHookRegistry } from "../../../src/toolcall/registration/index.ts";
-import type { ToolCallReviewInput } from "../../../src/toolcall/execution/hook/Review.ts";
-
+import {
+    asInstanceName,
+    runtimeErrorCodes,
+    type ApprovalRequest,
+    type ToolCallHookRuntime,
+    type ToolCallHooks,
+    type ToolCallReviewHook,
+    type ToolCallReviewInput,
+} from "@portable-devshell/shared";
 import type {
     ApprovalEvaluation,
+    ApprovalEvaluationApi,
     ApprovalResolution,
 } from "../../../src/approval/Api.ts";
-import {
-    ApprovalError,
-    ApprovalService,
-} from "../../../src/approval/execution/Service.ts";
 import { registerApprovalToolCallReview } from "../../../src/approval/execution/ToolCallReview.ts";
 
 const input: ToolCallReviewInput = {
@@ -34,65 +36,53 @@ const input: ToolCallReviewInput = {
 };
 
 function fixture() {
-    const service = new ApprovalService({
-        instanceName: asInstanceName("dev"),
-        store: {
-            append: async () => {
-                assert.fail("review must only evaluate and wait");
-            },
-            delete: async () => {
-                assert.fail("review must not prune approvals");
-            },
-            get: async () => {
-                assert.fail("review must not re-read approvals");
-            },
-            list: async () => {
-                assert.fail("review must not query approvals");
-            },
+    let registeredReview: ToolCallReviewHook | undefined;
+    const hooks: ToolCallHooks = {
+        registerContributor() {
+            throw new Error("approval review must register only a review hook");
         },
-        events: {
-            append: async () => {
-                assert.fail("review must not append events");
-            },
+        registerExecute() {
+            throw new Error("approval review must register only a review hook");
         },
-    });
-    const hooks = new ToolCallHookRegistry();
-    registerApprovalToolCallReview(hooks, (instance) =>
-        instance === "dev" ? service : undefined,
-    );
-    return { hooks, service };
-}
-
-async function acquire(
-    hooks: ToolCallHookRegistry,
-    reviewInput: ToolCallReviewInput,
-    signal: AbortSignal,
-    recording: "caller" | "host",
-) {
-    return await hooks.provider()(reviewInput.value.context, signal, recording);
+        registerReview(review) {
+            registeredReview = review;
+            return () => {
+                if (registeredReview === review) registeredReview = undefined;
+            };
+        },
+    };
+    const approval: ApprovalEvaluationApi = {
+        async evaluate(): Promise<ApprovalEvaluation> {
+            assert.fail("review fixture must mock approval evaluation");
+        },
+    };
+    registerApprovalToolCallReview(hooks, approval);
+    return {
+        approval,
+        review: () => {
+            assert.ok(registeredReview);
+            return registeredReview;
+        },
+    };
 }
 
 async function runReview(
-    hooks: ToolCallHookRegistry,
+    review: ToolCallReviewHook,
     reviewInput: ToolCallReviewInput,
-    signal: AbortSignal,
-    recording: "caller" | "host",
+    signal: AbortSignal = new AbortController().signal,
+    recording: "caller" | "host" = "host",
 ) {
-    const lease = await acquire(hooks, reviewInput, signal, recording);
-    try {
-        return await lease.sequence.review(reviewInput);
-    } finally {
-        lease.release();
-    }
+    const runtime: ToolCallHookRuntime = { recording, signal };
+    return await review.review(reviewInput, runtime);
 }
 
 test("review maps explicit ToolCall fields, forwards signal and holds until resolution", async (t) => {
-    const { hooks, service } = fixture();
+    const { approval, review } = fixture();
     let resolve!: (resolution: ApprovalResolution) => void;
     const outcome = new Promise<ApprovalResolution>((done) => {
         resolve = done;
     });
-    const request = {
+    const request: ApprovalRequest = {
         approvalId: "approval-1",
         callId: "call-1",
         createdAt: "created",
@@ -100,13 +90,13 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
         inputSummary: "{}",
         instance: asInstanceName("dev"),
         reason: "required",
-        riskLevel: "medium" as const,
-        source: "mcp" as const,
-        status: "pending" as const,
+        riskLevel: "medium",
+        source: "mcp",
+        status: "pending",
         toolName: "shell",
     };
     const evaluate = t.mock.method(
-        service,
+        approval,
         "evaluate",
         async (): Promise<ApprovalEvaluation> => ({
             decision: "ask",
@@ -116,12 +106,14 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
     );
     const controller = new AbortController();
     const addListener = t.mock.method(controller.signal, "addEventListener");
-    const cancel = t.mock.method(service, "cancel", async () => {
-        assert.fail("review must not cancel directly");
-    });
-    const lease = await acquire(hooks, input, controller.signal, "caller");
+    const registered = review();
     let settled = false;
-    const pending = lease.sequence.review(input).then((result) => {
+    const pending = runReview(
+        registered,
+        input,
+        controller.signal,
+        "caller",
+    ).then((result) => {
         settled = true;
         return result;
     });
@@ -142,7 +134,6 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
     ]);
     controller.abort("cancelled");
     assert.equal(addListener.mock.callCount(), 0);
-    assert.equal(cancel.mock.callCount(), 0);
     resolve({
         status: "approved",
         decision: {
@@ -153,7 +144,6 @@ test("review maps explicit ToolCall fields, forwards signal and holds until reso
         },
     });
     assert.deepEqual(await pending, { decision: "continue" });
-    lease.release();
 });
 
 for (const [direction, kind] of [
@@ -166,20 +156,18 @@ for (const [direction, kind] of [
     ["outbound", "progress"],
 ] as const) {
     test(`review skips ${direction} ${kind}`, async (t) => {
-        const { hooks, service } = fixture();
-        const evaluate = t.mock.method(service, "evaluate", async () => {
-            assert.fail("non-inbound calls must not request approval");
+        const { approval, review } = fixture();
+        const evaluate = t.mock.method(approval, "evaluate", async () => {
+            assert.fail("only inbound calls require approval");
         });
         assert.deepEqual(
             await runReview(
-                hooks,
+                review(),
                 {
                     ...input,
                     direction,
                     value: { ...input.value, kind },
                 },
-                new AbortController().signal,
-                "host",
             ),
             { decision: "continue" },
         );
@@ -189,19 +177,13 @@ for (const [direction, kind] of [
 
 for (const decision of ["allow", "deny"] as const) {
     test(`review maps policy ${decision}`, async (t) => {
-        const { hooks, service } = fixture();
-        const error = new ApprovalError(
-            runtimeErrorCodes.approvalDenied,
-            "policy denied",
-        );
-        t.mock.method(service, "evaluate", async () => ({ decision, error }));
-        assert.deepEqual(
-            await runReview(
-                hooks,
-                input,
-                new AbortController().signal,
-                "host",
-            ),
+        const { approval, review } = fixture();
+        const error = {
+            code: runtimeErrorCodes.approvalDenied,
+            message: "policy denied",
+        };
+        t.mock.method(approval, "evaluate", async () => ({ decision, error }));
+        assert.deepEqual(await runReview(review(), input),
             decision === "allow"
                 ? { decision: "continue" }
                 : {
@@ -214,14 +196,14 @@ for (const decision of ["allow", "deny"] as const) {
 }
 
 for (const status of ["denied", "cancelled", "expired"] as const) {
-    test(`review maps ${status} resolution without reading persistence`, async (t) => {
-        const { hooks, service } = fixture();
+    test(`review maps ${status} resolution`, async (t) => {
+        const { approval, review } = fixture();
         const code = {
             denied: runtimeErrorCodes.approvalDenied,
             cancelled: runtimeErrorCodes.toolCallCancelled,
             expired: runtimeErrorCodes.approvalExpired,
         }[status];
-        const error = new ApprovalError(code, `approval ${status}`);
+        const error = { code, message: `approval ${status}` };
         const decision = {
             approvalId: "approval-1",
             decidedAt: "decided",
@@ -232,38 +214,27 @@ for (const status of ["denied", "cancelled", "expired"] as const) {
             status === "denied"
                 ? { status, decision, error }
                 : { status, error };
-        t.mock.method(service, "evaluate", async () => ({
+        t.mock.method(approval, "evaluate", async () => ({
             decision: "ask",
             awaitDecision: Promise.resolve(resolution),
         }));
-        assert.deepEqual(
-            await runReview(
-                hooks,
-                input,
-                new AbortController().signal,
-                "host",
-            ),
-            {
-                decision: "reject",
-                error: { code },
-                reason: error.message,
-            },
-        );
+        assert.deepEqual(await runReview(review(), input), {
+            decision: "reject",
+            error: { code },
+            reason: error.message,
+        });
     });
 }
 
 test("review preserves the typed evaluation error code and message", async (t) => {
-    const { hooks, service } = fixture();
-    t.mock.method(service, "evaluate", async () => ({
+    const { approval, review } = fixture();
+    t.mock.method(approval, "evaluate", async () => ({
         decision: "deny",
         error: { code: "approval.policy.denied", message: "Denied by policy." },
     }));
-    assert.deepEqual(
-        await runReview(hooks, input, new AbortController().signal, "host"),
-        {
-            decision: "reject",
-            error: { code: "approval.policy.denied" },
-            reason: "Denied by policy.",
-        },
-    );
+    assert.deepEqual(await runReview(review(), input), {
+        decision: "reject",
+        error: { code: "approval.policy.denied" },
+        reason: "Denied by policy.",
+    });
 });
