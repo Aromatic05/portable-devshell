@@ -5,7 +5,7 @@ import {
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
-import { migrateInstanceConfigV2OrV3 } from "../../../migration/Config.js";
+import { migrateInstanceConfigV2OrV3 } from "../Migration.js";
 
 import type { ConfigTomlDocument } from "../TomlCodec.js";
 

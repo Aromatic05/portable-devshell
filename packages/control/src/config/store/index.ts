@@ -28,7 +28,7 @@ import {
     type ConfigGlobalMigrationState,
     inspectGlobalConfigMigration,
     normalizeMigratedInstanceConfig,
-} from "../../migration/Config.js";
+} from "./Migration.js";
 
 import { ControlConfigValidator } from "../engine/Validator.js";
 import {

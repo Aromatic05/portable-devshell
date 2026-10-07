@@ -5,7 +5,7 @@ import {
     type ControlGlobalConfig,
 } from "@portable-devshell/shared";
 
-import { migrateGlobalConfigV1 } from "../../../migration/Config.js";
+import { migrateGlobalConfigV1 } from "../Migration.js";
 
 import {
     ConfigRegistry,
