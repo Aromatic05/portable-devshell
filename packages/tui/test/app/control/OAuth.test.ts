@@ -5,11 +5,16 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
-import { InstanceRegistry } from "@portable-devshell/core/instance";
-import { ControlRouteRegistry } from "../../../../control/src/server/Route.ts";
 import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
-import { createTestRouteBindings } from "../../../../control/test/support/RouteBindings.ts";
+import { createServerRouteModule } from "../../../../control/src/server/Route.ts";
+import { createAuthRouteModule } from "../../../../control/src/server/auth/Route.ts";
 import { type McpOAuthApprovalService } from "@portable-devshell/mcp";
+import {
+    routeModule,
+    type ControlHostDefinition,
+    type JsonValue,
+    type MessageStream,
+} from "@portable-devshell/shared";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import {
@@ -44,7 +49,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                         provider: "oauth2",
                     },
                     name: "demo",
-                    worker: createMcpWorker(),
                 },
             ],
             listenHost: "127.0.0.1",
@@ -55,53 +59,113 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await host.start();
         const listenPort = requireTcpPort(host.server.address);
         proxy.setTarget(`http://127.0.0.1:${listenPort}`);
-        const instances = new InstanceRegistry([]);
-        const routes = new ControlRouteRegistry({
-            config: {
-                getConfigView() {
-                    return {
-                        instances: [
-                            {
-                                enabled: true,
-                                mcp: {
-                                    auth: "oauth2",
-                                    enabled: true,
-                                    path: "/demo/mcp",
-                                },
-                                name: "demo",
-                                provider: "local",
+        const configView: JsonValue = {
+            instances: [
+                {
+                    enabled: true,
+                    extensions: { model: ["instance"] },
+                    mcp: {
+                        auth: {
+                            mode: "oauth2",
+                            oauth2: {
+                                requiredScopes: ["mcp"],
+                                resourceName: "demo",
                             },
-                        ],
-                        mcp: {
-                            auth: {
-                                mode: "oauth2",
-                                oauth2: {
-                                    requiredScopes: ["mcp"],
-                                    resourceName: "demo",
-                                },
-                            },
-                            enabled: true,
-                            listenHost: "127.0.0.1",
-                            listenPort,
-                            publicBaseUrl: origin,
                         },
-                    };
+                        contextMode: "explicit",
+                        enabled: true,
+                        path: "/demo/mcp",
+                    },
+                    name: "demo",
+                    provider: "local",
+                    security: { mode: "disabled" },
+                    workspace: { enabled: true },
                 },
-            } as never,
-            ...createTestRouteBindings(instances),
-            instances,
-            tuiPages: {
-                async invoke() {
-                    return { items: [], title: "" };
+            ],
+            mcp: {
+                auth: {
+                    mode: "oauth2",
+                    oauth2: {
+                        requiredScopes: ["mcp"],
+                        resourceName: "demo",
+                    },
                 },
-                list() {
-                    return [];
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort,
+                oauth2: { approval: "tui" },
+                publicBaseUrl: origin,
+            },
+        };
+        const routes = {
+            hosts: (): readonly ControlHostDefinition[] => [
+                {
+                    host: "@control",
+                    ports: [
+                        createServerRouteModule({
+                            instanceCount: () => 0,
+                            ready: () => true,
+                            shutdown() {},
+                        }),
+                        createAuthRouteModule({
+                            approvals: () => host.oauthApprovals,
+                            status: () => {
+                                const status = host.status();
+                                return {
+                                    authMode: status.authMode,
+                                    oauthReady: status.oauthReady,
+                                    running: status.running,
+                                    ...(status.publicBaseUrl === undefined
+                                        ? {}
+                                        : {
+                                              publicBaseUrl:
+                                                  status.publicBaseUrl,
+                                          }),
+                                };
+                            },
+                        }),
+                        routeModule(
+                            "config",
+                            {
+                                snapshot: () => ({
+                                    revision: 1,
+                                    view: configView,
+                                }),
+                            },
+                            { subscribe: emptySubscription },
+                        ),
+                        routeModule(
+                            "instance",
+                            {
+                                snapshotInstances: () => ({
+                                    instances: [
+                                        {
+                                            enabled: true,
+                                            homeDirectory: "/workspace/demo",
+                                            mcpEnabled: true,
+                                            name: "demo",
+                                        },
+                                    ],
+                                    revision: 1,
+                                }),
+                            },
+                            { subscribeInstances: emptySubscription },
+                        ),
+                        routeModule(
+                            "context",
+                            {
+                                snapshot: () => ({
+                                    contexts: [],
+                                    revision: 1,
+                                }),
+                            },
+                            { subscribe: emptySubscription },
+                        ),
+                    ],
                 },
-            } as never,
-            mcpStatus: () => host.status(),
-            oauthApprovals: () => host.oauthApprovals,
-            shutdown() {},
-        });
+            ],
+            onChange: () => () => undefined,
+        };
         const control = new ControlSocketServer({ routes, socketPath });
         const terminal = createTerminal();
         const runtime = new TuiRuntime(
@@ -115,7 +179,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await control.start();
         t.after(async () => {
             await control.stop();
-            routes.dispose();
             await host.stop();
             await proxy.close();
             await rm(directory, { force: true, recursive: true });
@@ -413,21 +476,8 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         };
     }
 
-    function createMcpWorker() {
-        return {
-            async appendMcpSessionClosed() {},
-            async appendMcpSessionOpened() {},
-            async appendMcpToolCalled() {},
-            async callTool() {
-                return { exitCode: 0, stderr: "", stdout: "ok\n" };
-            },
-            listTools() {
-                return [];
-            },
-            snapshot() {
-                return { ready: true };
-            },
-        } as never;
+    async function emptySubscription(stream: MessageStream): Promise<void> {
+        await stream.send({ name: "seed", payload: { events: [] } });
     }
 
     function mergeCookieHeader(existing: string, response: Response): string {
