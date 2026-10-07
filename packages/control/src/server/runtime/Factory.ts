@@ -313,11 +313,21 @@ export class ControlRuntimeFactory {
                 oauthDirectory: join(controlPaths.oauthDir, "web"),
             });
             const reverse = new ConnectionModule({
-                mcp: {
-                    host: mcp.host,
-                    instanceEditor,
-                },
-                state: options.state,
+                hasReverseInstance: options.state
+                    .requireConfig()
+                    .instances.some((instance) => instance.provider === "reverse"),
+                homeDirectory: options.state.homeDirectory,
+                host: mcp.host?.server,
+                instances: options.state.instances,
+                publicBaseUrl: options.state.requireConfig().mcp.publicBaseUrl,
+            });
+            instanceEditor.registerInstanceDeleteRetirement(async (instance) => {
+                if (instance.provider !== "reverse") return;
+                await reverse.service?.retireInstance(instance.name);
+            });
+            instanceEditor.registerInstanceDisableRetirement(async (instance) => {
+                if (instance.provider !== "reverse") return;
+                await reverse.service?.retireInstance(instance.name);
             });
             instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {

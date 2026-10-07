@@ -10,15 +10,8 @@ export class ConnectionModule {
     readonly #gateway?: ReverseIngress;
 
     constructor(options: ConnectionModuleOptions) {
-        const config = options.state.requireConfig();
-        const hasReverseInstance = config.instances.some(
-            (instance) => instance.provider === "reverse",
-        );
-        if (
-            options.mcp.host === undefined ||
-            config.mcp.publicBaseUrl === undefined
-        ) {
-            if (!hasReverseInstance) return;
+        if (options.host === undefined || options.publicBaseUrl === undefined) {
+            if (!options.hasReverseInstance) return;
             throw createRemoteError({
                 code: controlErrorCodes.configValidationFailed,
                 message:
@@ -27,33 +20,21 @@ export class ConnectionModule {
             });
         }
         const credentialStore = new ReverseCredentialStore(
-            options.state.homeDirectory,
+            options.homeDirectory,
         );
         this.service = new ReverseCredentials({
             credentialStore,
-            instanceRegistry: options.state.instances,
-            publicBaseUrl: config.mcp.publicBaseUrl,
+            instanceRegistry: options.instances,
+            publicBaseUrl: options.publicBaseUrl,
         });
         this.#gateway = new ReverseIngress({
             credentialStore,
-            instanceRegistry: options.state.instances,
-            publicBaseUrl: config.mcp.publicBaseUrl,
+            instanceRegistry: options.instances,
+            publicBaseUrl: options.publicBaseUrl,
         });
-        this.install(options.mcp.host.server);
+        this.install(options.host);
         this.service.setDisconnectHandler((instance) =>
             this.#gateway?.disconnect(instance),
-        );
-        options.mcp.instanceEditor.registerInstanceDeleteRetirement(
-            async (instance) => {
-                if (instance.provider !== "reverse") return;
-                await this.service?.retireInstance(instance.name);
-            },
-        );
-        options.mcp.instanceEditor.registerInstanceDisableRetirement(
-            async (instance) => {
-                if (instance.provider !== "reverse") return;
-                await this.service?.retireInstance(instance.name);
-            },
         );
     }
 

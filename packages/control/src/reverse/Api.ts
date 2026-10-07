@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { ControlConfig, InstanceName } from "@portable-devshell/shared";
+import type { InstanceName } from "@portable-devshell/shared";
 
 import type { Instance } from "@portable-devshell/core";
 
@@ -26,15 +26,6 @@ export interface StoredReverseDeviceCode {
     instance: InstanceName;
 }
 
-interface ConnectionLifecyclePort {
-    registerInstanceDeleteRetirement(
-        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void;
-    registerInstanceDisableRetirement(
-        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
-    ): () => void;
-}
-
 export interface ReverseHttpHost {
     registerRawRoute(
         method: "delete" | "get" | "head" | "options" | "post",
@@ -54,20 +45,10 @@ export interface ReverseHttpHost {
     ): () => void;
 }
 
-interface ConnectionMcpPort {
-    readonly instanceEditor: ConnectionLifecyclePort;
-    readonly host?: {
-        readonly server: ReverseHttpHost;
-    };
-}
-
-interface ConnectionStatePort {
-    readonly homeDirectory?: string;
-    readonly instances: ReverseInstanceLookup;
-    requireConfig(): ControlConfig;
-}
-
 export interface ConnectionModuleOptions {
-    mcp: ConnectionMcpPort;
-    state: ConnectionStatePort;
+    readonly hasReverseInstance: boolean;
+    readonly homeDirectory?: string;
+    readonly host?: ReverseHttpHost;
+    readonly instances: ReverseInstanceLookup;
+    readonly publicBaseUrl?: string;
 }
