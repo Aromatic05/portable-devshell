@@ -4,6 +4,10 @@ import test from "node:test";
 import { asInstanceName } from "@portable-devshell/shared";
 import { TodoToolDefinitions } from "../../../src/task/todo/tool/Definition.ts";
 import { readTodoToolInput } from "../../../src/task/todo/tool/Input.ts";
+import type {
+    ToolCallExecutor,
+    ToolCallHooks,
+} from "../../../src/toolcall/Api.ts";
 
 test("task todo read selector accepts taskId and rejects title selectors", () => {
     assert.deepEqual(readTodoToolInput({ taskId: "task-1" }), { taskId: "task-1" });
@@ -57,38 +61,27 @@ test("task domain keeps todo as the operation namespace", () => {
     assert.equal(catalog.isTodoTool("task_read"), false);
 });
 
-import type { ToolCallRegistration } from "../../../src/toolcall/registration/Api.ts";
 import type { TaskApi } from "../../../src/task/Api.ts";
 import { installTodoTools } from "../../../src/task/todo/tool/Runtime.ts";
 
-test("Todo tools register for all instances and execute against the selected TaskApi", async () => {
+test("Todo tools execute against the provided TaskApi", async () => {
     const instanceName = asInstanceName("local");
-    const executes = new Map<
-        string,
-        Parameters<ToolCallRegistration["registerExecute"]>[1]
-    >();
-    const toolNames = new Map<
-        string,
-        Parameters<ToolCallRegistration["registerToolName"]>[1]
-    >();
-    const hooks = {
-        registerContributor: () => () => undefined,
+    const executes = new Map<string, ToolCallExecutor>();
+    const hooks: ToolCallHooks = {
+        registerContributor() {
+            return () => undefined;
+        },
         registerExecute: (
             name: string,
-            execute: Parameters<ToolCallRegistration["registerExecute"]>[1],
+            execute: ToolCallExecutor,
         ) => {
             executes.set(name, execute);
             return () => executes.delete(name);
         },
-        registerReview: () => () => undefined,
-        registerToolName: (
-            name: string,
-            handle: Parameters<ToolCallRegistration["registerToolName"]>[1],
-        ) => {
-            toolNames.set(name, handle);
-            return () => toolNames.delete(name);
+        registerReview() {
+            return () => undefined;
         },
-    } as ToolCallRegistration;
+    };
     let writtenCtxId: string | undefined;
     const task = {
         todo: {
@@ -120,19 +113,8 @@ test("Todo tools register for all instances and execute against the selected Tas
         },
     } as unknown as TaskApi;
 
-    const uninstall = installTodoTools(
-        hooks,
-        (instance) => (instance === "local" ? task : undefined),
-    );
+    const uninstall = installTodoTools(hooks, task);
     try {
-        assert.equal(
-            (await toolNames.get("todo_read")?.())?.name,
-            "todo_read",
-        );
-        assert.equal(
-            (await toolNames.get("todo_write")?.())?.name,
-            "todo_write",
-        );
         const read = executes.get("todo_read");
         const write = executes.get("todo_write");
         assert.ok(read);
@@ -169,5 +151,6 @@ test("Todo tools register for all instances and execute against the selected Tas
     } finally {
         uninstall();
     }
-    assert.equal(toolNames.get("todo_read"), undefined);
+    assert.equal(executes.get("todo_read"), undefined);
+    assert.equal(executes.get("todo_write"), undefined);
 });

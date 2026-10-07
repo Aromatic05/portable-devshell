@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerTerminalAttachResult, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification } from "@portable-devshell/core/instance";
-
 import {
     WorkerTerminalBackend,
-    type WorkerTerminalPort,
 } from "../../../src/terminal/Backend.ts";
+import type {
+    WorkerTerminalAttachResult,
+    WorkerTerminalDescriptor,
+    WorkerTerminalIdentity,
+    WorkerTerminalNotification,
+    WorkerTerminalOpenInput,
+    WorkerTerminalPort,
+} from "../../../src/terminal/Api.ts";
 
 class FakeWorkerTerminal implements WorkerTerminalPort {
     readonly attaches: Array<{
@@ -41,11 +46,11 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 
-    async openTerminal(): Promise<WorkerTerminalDescriptor> {
+    async open(_input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor> {
         return this.descriptor();
     }
 
-    async attachTerminal(input: {
+    async attach(input: {
         fromSeq: number;
         generation: number;
         terminalId: string;
@@ -74,13 +79,13 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 
-    async writeTerminal(input: WorkerTerminalIdentity & { data: string }) {
+    async write(input: WorkerTerminalIdentity & { data: string }) {
         this.writes.push(input);
         await this.writeGate;
         return { ...input, accepted: true };
     }
 
-    async resizeTerminal(
+    async resize(
         input: WorkerTerminalIdentity & { cols: number; rows: number },
     ) {
         this.resizes.push(input);
@@ -89,7 +94,7 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         return { ...input, accepted: true, version: this.version };
     }
 
-    async killTerminal(
+    async kill(
         input: WorkerTerminalIdentity,
     ): Promise<WorkerTerminalDescriptor> {
         this.kills.push(input);
@@ -100,11 +105,11 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 
-    async listTerminals(): Promise<WorkerTerminalDescriptor[]> {
+    async list(): Promise<WorkerTerminalDescriptor[]> {
         return [this.descriptor()];
     }
 
-    onTerminalNotification(
+    onNotification(
         listener: (notification: WorkerTerminalNotification) => void,
     ): () => void {
         this.notification = listener;
@@ -113,14 +118,14 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 
-    onTransportConnected(listener: () => void): () => void {
+    onConnected(listener: () => void): () => void {
         this.connected = listener;
         return () => {
             this.connected = undefined;
         };
     }
 
-    onTransportDisconnected(listener: (error: Error) => void): () => void {
+    onDisconnected(listener: (error: Error) => void): () => void {
         this.disconnected = listener;
         return () => {
             this.disconnected = undefined;

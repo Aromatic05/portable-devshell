@@ -9,12 +9,12 @@ import {
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import type { WaitApi } from "../../../src/task/Api.ts";
+import type { ToolCallHooks } from "../../../src/toolcall/Api.ts";
 import {
     WAIT_SYNC_MS,
     WaitService,
 } from "../../../src/task/wait/index.ts";
 import { installWaitToolCallRewrite } from "../../../src/task/wait/Runtime.ts";
-import { ToolCallHookRegistry } from "../../../src/toolcall/registration/index.ts";
 
 test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async () => {
     const detached: WaitDetachInput[] = [];
@@ -35,21 +35,41 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             return [];
         },
     } satisfies WaitApi;
-    const hooks = new ToolCallHookRegistry();
-    const uninstall = installWaitToolCallRewrite(hooks, () => wait);
+    const contributors: Array<
+        Parameters<ToolCallHooks["registerContributor"]>[0]
+    > = [];
+    const hooks: ToolCallHooks = {
+        registerContributor(contributor) {
+            contributors.push(contributor);
+            return () => {
+                const index = contributors.indexOf(contributor);
+                if (index >= 0) contributors.splice(index, 1);
+            };
+        },
+        registerExecute() {
+            return () => undefined;
+        },
+        registerReview() {
+            return () => undefined;
+        },
+    };
+    const uninstall = installWaitToolCallRewrite(hooks, wait);
     const context = {
         ctxId: "ctx-1",
         instance: instanceName,
         source: "mcp" as const,
         workspace: "/repo",
     };
-    const lease = await hooks.provider()(
-        context,
-        new AbortController().signal,
-        "host",
-    );
+    const signal = new AbortController().signal;
+    const contribution = await contributors[0]!(context, {
+        recording: "host",
+        signal,
+    });
+    assert.ok(contribution.rewrites);
+    const rewrite = contribution.rewrites[0]!.rewrite;
+    const runtime = { recording: "host" as const, signal };
     try {
-        const run = await lease.sequence.rewrite({
+        const run = await rewrite({
             callId: "call-run",
             direction: "inbound",
             value: {
@@ -58,10 +78,10 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 payload: { timeMs: 250_000, wait: "block" },
                 toolName: "tmux_run",
             },
-        });
+        }, runtime);
         assert.equal((run.payload as Record<string, JsonValue>).timeMs, WAIT_SYNC_MS);
 
-        await lease.sequence.rewrite({
+        await rewrite({
             callId: "call-run",
             direction: "outbound",
             value: {
@@ -73,7 +93,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 },
                 toolName: "tmux_run",
             },
-        });
+        }, runtime);
         assert.deepEqual(detached, [
             {
                 callId: "call-run",
@@ -86,7 +106,7 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             },
         ]);
 
-        await lease.sequence.rewrite({
+        await rewrite({
             callId: "call-cancel",
             direction: "outbound",
             value: {
@@ -102,10 +122,10 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 },
                 toolName: "tmux_run",
             },
-        });
+        }, runtime);
         assert.equal(detached[1]?.targetId, "task-2");
 
-        const read = await lease.sequence.rewrite({
+        const read = await rewrite({
             callId: "call-read",
             direction: "inbound",
             value: {
@@ -114,10 +134,10 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 payload: { task: "task-3", timeMs: 300_000 },
                 toolName: "tmux_read",
             },
-        });
+        }, runtime);
         assert.equal((read.payload as Record<string, JsonValue>).timeMs, WAIT_SYNC_MS);
     } finally {
-        lease.release();
+        contribution.release();
         uninstall();
     }
 });
