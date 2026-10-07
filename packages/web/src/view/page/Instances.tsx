@@ -60,14 +60,6 @@ export function Instances({
     const interactive = server.status === "online" && !disabled;
     const selfManaged =
         entry?.snapshot.reverse?.managementMode === "selfManaged";
-    const lifecycleAction =
-        entry === undefined
-            ? undefined
-            : selfManaged
-              ? undefined
-              : entry.snapshot.status === "stopped"
-                ? "Start"
-                : "Stop";
     const enabled =
         entry === undefined
             ? undefined
@@ -173,7 +165,6 @@ export function Instances({
                             entry={entry}
                             interactive={interactive}
                             key={entry.name}
-                            lifecycleAction={lifecycleAction}
                             navigate={navigate}
                             onArtifactConfirm={(next) => {
                                 setArtifactFailure(undefined);
@@ -306,7 +297,6 @@ function InstanceDetail({
     enabled,
     entry,
     interactive,
-    lifecycleAction,
     navigate,
     onArtifactConfirm,
     onArtifactFailure,
@@ -322,7 +312,6 @@ function InstanceDetail({
     enabled: boolean | undefined;
     entry: InstanceListEntry;
     interactive: boolean;
-    lifecycleAction: "Start" | "Stop" | undefined;
     navigate(route: WebRoute): void;
     onArtifactConfirm(
         next: { kind: "share"; id: string } | { kind: "transfer"; id: string },
@@ -342,6 +331,11 @@ function InstanceDetail({
     const [lifecycleFailure, setLifecycleFailure] = useState<string>();
     const state = store.state;
     const snapshot = runtime.snapshot ?? entry.snapshot;
+    const lifecycleAction = selfManaged
+        ? undefined
+        : snapshot.status === "stopped"
+          ? "Start"
+          : "Stop";
 
     useEffect(() => {
         const generation = ++refreshGeneration.current;
@@ -561,7 +555,7 @@ function InstanceDetail({
                             </button>
                         )}
                         {selfManaged ||
-                        entry.snapshot.status === "stopped" ? null : (
+                        snapshot.status === "stopped" ? null : (
                             <button
                                 disabled={
                                     !interactive ||

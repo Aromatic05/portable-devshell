@@ -193,6 +193,26 @@ it("keeps confirmation for stopping a running local instance", () => {
     expect(stop).toHaveBeenCalledWith("local-one");
 });
 
+it("derives Stop from the live runtime snapshot when the catalog snapshot is inactive", () => {
+    const { domains, store } = setup({
+        config: localConfig(),
+        instances: [localInstance("stopped")],
+    });
+    domains.setRuntime("local-one", {
+        snapshot: localInstance("ready").snapshot,
+    });
+    renderInstances(domains, store, "local-one");
+
+    const stop = vi.spyOn(store, "stop");
+    const button = screen.getByRole("button", { name: "Stop" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stop" }));
+    expect(stop).toHaveBeenCalledWith("local-one");
+});
+
 it("offers restart, disable, delete, and refresh actions for a managed instance", async () => {
     const { domains, store } = setup({
         config: localConfig(),
@@ -207,9 +227,7 @@ it("offers restart, disable, delete, and refresh actions for a managed instance"
     const refresh = screen.getByRole("button", { name: "Refresh" });
     await waitFor(() => expect(refresh).toBeEnabled());
     fireEvent.click(refresh);
-    await waitFor(() =>
-        expect(refreshInstance).toHaveBeenCalledWith("local-one"),
-    );
+    await waitFor(() => expect(refreshInstance).toHaveBeenCalledOnce());
 
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     let dialog = screen.getByRole("dialog", { name: "Confirm restart" });
