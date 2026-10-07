@@ -8,18 +8,17 @@ import {
     type JsonValue,
     type ReverseEnrollmentRequest,
     type ReverseUpstreamBatch,
+    ReverseSseChannel,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
+import {
+    ReverseConnections,
+    type ReverseConnectionIdentity,
+} from "@portable-devshell/core/instance/transport";
 import { WebSocketServer } from "ws";
 
-import { ReverseConnections } from "./Connections.js";
-import type {
-    ReverseConnectionIdentity,
-    ReverseHttpHost,
-    ReverseInstanceLookup,
-} from "./Api.js";
-import { ReverseSseChannel } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "./credential/Store.js";
+import type { ReverseCredentials } from "../../instance/reverse/Credentials.js";
+import type { ReverseHttpHost } from "./Api.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";
@@ -27,14 +26,20 @@ const SSE_SUFFIX = "/reverse/v1/events";
 const UPSTREAM_SUFFIX = "/reverse/v1/frames";
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
+interface ReverseAuthentication {
+    readonly identity: ReverseConnectionIdentity;
+    readonly token: string;
+}
+
 export interface ReverseIngressOptions {
-    credentialStore: ReverseCredentialStore;
-    instanceRegistry: ReverseInstanceLookup;
+    connections: ReverseConnections;
+    credentials: ReverseCredentials;
     publicBaseUrl: string;
 }
 
 export class ReverseIngress {
     readonly #connections: ReverseConnections;
+    readonly #credentials: ReverseCredentials;
     #publicBaseUrl: string;
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
@@ -42,8 +47,9 @@ export class ReverseIngress {
     });
 
     constructor(options: ReverseIngressOptions) {
+        this.#connections = options.connections;
+        this.#credentials = options.credentials;
         this.#publicBaseUrl = options.publicBaseUrl;
-        this.#connections = new ReverseConnections(options);
     }
 
     setPublicBaseUrl(publicBaseUrl: string): void {
@@ -81,10 +87,6 @@ export class ReverseIngress {
         );
     }
 
-    disconnect(instance: string): void {
-        this.#connections.disconnect(instance);
-    }
-
     stop(): void {
         this.#connections.stop();
         this.#webSocketServer.close();
@@ -96,7 +98,13 @@ export class ReverseIngress {
     ): Promise<void> {
         try {
             const body = asEnrollmentRequest(await readJsonBody(request));
-            sendJson(response, 200, await this.#connections.enroll(body));
+            const credential = await this.#credentials.consumeDeviceCode(
+                body.deviceCode,
+            );
+            sendJson(response, 200, {
+                controllerUrl: this.#publicBaseUrl,
+                ...credential,
+            });
         } catch (error) {
             sendGatewayError(response, error);
         }
@@ -108,7 +116,7 @@ export class ReverseIngress {
         head: Buffer,
     ): Promise<void> {
         try {
-            const identity = await this.#authenticateRequest(request);
+            const authentication = await this.#authenticateRequest(request);
             if (
                 !hasWebSocketProtocol(request, "devshell-worker-transport.v1")
             ) {
@@ -126,8 +134,17 @@ export class ReverseIngress {
                 head,
                 (webSocket) => {
                     const channel = new WebServerChannel(webSocket as never);
-                    void this.#connections
-                        .activate(identity, "wss", channel)
+                    void this.#credentials
+                        .runAuthenticated(
+                            authentication.identity.descriptor.config.name,
+                            authentication.token,
+                            async () =>
+                                await this.#connections.activate(
+                                    authentication.identity,
+                                    "wss",
+                                    channel,
+                                ),
+                        )
                         .catch(() => channel.close());
                 },
             );
@@ -141,7 +158,7 @@ export class ReverseIngress {
         response: ServerResponse,
     ): Promise<void> {
         try {
-            const identity = await this.#authenticateRequest(request);
+            const authentication = await this.#authenticateRequest(request);
             response.writeHead(200, {
                 "Cache-Control": "no-cache, no-transform",
                 Connection: "keep-alive",
@@ -153,7 +170,16 @@ export class ReverseIngress {
                 response,
                 readLastEventId(request),
             );
-            await this.#connections.activate(identity, "sse", channel);
+            await this.#credentials.runAuthenticated(
+                authentication.identity.descriptor.config.name,
+                authentication.token,
+                async () =>
+                    await this.#connections.activate(
+                        authentication.identity,
+                        "sse",
+                        channel,
+                    ),
+            );
         } catch (error) {
             if (!response.headersSent) {
                 sendGatewayError(response, error);
@@ -172,12 +198,15 @@ export class ReverseIngress {
         response: ServerResponse,
     ): Promise<void> {
         try {
-            const identity = await this.#authenticateRequest(request);
+            const authentication = await this.#authenticateRequest(request);
             const batch = asUpstreamBatch(await readJsonBody(request));
             sendJson(
                 response,
                 200,
-                this.#connections.acceptUpstream(identity, batch),
+                this.#connections.acceptUpstream(
+                    authentication.identity,
+                    batch,
+                ),
             );
         } catch (error) {
             sendGatewayError(response, error);
@@ -186,20 +215,19 @@ export class ReverseIngress {
 
     async #authenticateRequest(
         request: IncomingMessage,
-    ): Promise<ReverseConnectionIdentity> {
+    ): Promise<ReverseAuthentication> {
         const instance = readRequiredHeader(request, "x-devshell-instance");
         const generation = parseGeneration(
             readRequiredHeader(request, "x-devshell-generation"),
         );
         const token = readBearerToken(request.headers.authorization);
-        return await this.#connections.authenticate(
-            instance,
-            generation,
+        const descriptor = await this.#credentials.authenticate(instance, token);
+        return {
+            identity: { descriptor, generation },
             token,
-        );
+        };
     }
 }
-
 function asEnrollmentRequest(value: JsonValue): ReverseEnrollmentRequest {
     if (!isRecord(value)) {
         throw new Error("Enrollment body must be an object.");

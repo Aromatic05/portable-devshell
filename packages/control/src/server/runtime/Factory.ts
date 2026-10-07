@@ -5,13 +5,16 @@ import {
     ControlPathHome,
     Endpoint,
     connectControlChannel,
+    controlErrorCodes,
     createContextTransport,
     createEnvironmentTransport,
     createInstanceRuntimeTransport,
     createProcessTransport,
+    createRemoteError,
     createServerTransport,
     createToolTransport,
 } from "@portable-devshell/shared";
+import { ReverseConnections } from "@portable-devshell/core/instance/transport";
 import { createExtensionRuntime } from "../../extension/index.js";
 import { ExtensionArtifactCapabilityControl } from "../../extension/api/cap/artifact/index.js";
 import { ExtensionAssetCapabilityControl } from "../../extension/api/cap/asset/index.js";
@@ -39,7 +42,9 @@ import { HttpEndpointPreflight } from "../../config/engine/Http.js";
 import { InstanceEditorCoordinator } from "../../instance/editor/index.js";
 import { InstanceCreateCoordinator } from "../../instance/editor/create/index.js";
 import { createInstance } from "@portable-devshell/core";
-import { ConnectionModule } from "../../reverse/index.js";
+import { ReverseCredentials } from "../../instance/reverse/Credentials.js";
+import { ReverseCredentialStore } from "../../instance/reverse/credential/Store.js";
+import { ReverseIngress } from "../reverse/Ingress.js";
 import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 export interface ControlRuntimeFactoryOptions {
@@ -331,22 +336,51 @@ export class ControlRuntimeFactory {
                 mcp,
                 oauthDirectory: join(controlPaths.oauthDir, "web"),
             });
-            const reverse = new ConnectionModule({
-                hasReverseInstance: options.state
-                    .requireConfig()
-                    .instances.some((instance) => instance.provider === "reverse"),
-                homeDirectory: options.state.homeDirectory,
-                host: mcp.host?.server,
-                instances: options.state.instances,
-                publicBaseUrl: options.state.requireConfig().mcp.publicBaseUrl,
-            });
+            const reverseConfig = options.state.requireConfig();
+            const hasReverseInstance = reverseConfig.instances.some(
+                (instance) => instance.provider === "reverse",
+            );
+            const reverseHost = mcp.host?.server;
+            const reversePublicBaseUrl = reverseConfig.mcp.publicBaseUrl;
+            let reverseCredentials: ReverseCredentials | undefined;
+            let reverseIngress: ReverseIngress | undefined;
+            if (reverseHost === undefined || reversePublicBaseUrl === undefined) {
+                if (hasReverseInstance) {
+                    throw createRemoteError({
+                        code: controlErrorCodes.configValidationFailed,
+                        message:
+                            "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",
+                        retryable: false,
+                    });
+                }
+            } else {
+                const reverseConnections = new ReverseConnections({
+                    instances: options.state.instances,
+                });
+                reverseCredentials = new ReverseCredentials({
+                    credentialStore: new ReverseCredentialStore(
+                        options.state.homeDirectory,
+                    ),
+                    instanceRegistry: options.state.instances,
+                    publicBaseUrl: reversePublicBaseUrl,
+                });
+                reverseCredentials.setDisconnectHandler((instance) =>
+                    reverseConnections.disconnect(instance),
+                );
+                reverseIngress = new ReverseIngress({
+                    connections: reverseConnections,
+                    credentials: reverseCredentials,
+                    publicBaseUrl: reversePublicBaseUrl,
+                });
+                reverseIngress.install(reverseHost);
+            }
             instanceEditor.registerInstanceDeleteRetirement(async (instance) => {
                 if (instance.provider !== "reverse") return;
-                await reverse.service?.retireInstance(instance.name);
+                await reverseCredentials?.retireInstance(instance.name);
             });
             instanceEditor.registerInstanceDisableRetirement(async (instance) => {
                 if (instance.provider !== "reverse") return;
-                await reverse.service?.retireInstance(instance.name);
+                await reverseCredentials?.retireInstance(instance.name);
             });
             instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
@@ -373,7 +407,10 @@ export class ControlRuntimeFactory {
                 mcp,
                 toolCalls: options.state.toolCalls,
                 restart: options.restart,
-                reverse,
+                reverse: {
+                    credentials: reverseCredentials,
+                    ingress: reverseIngress,
+                },
                 shutdown: options.shutdown,
                 socketPath: options.socketPath,
                 web,

@@ -21,6 +21,9 @@
                 "./packages/shared/dist/execution/toolcall/Type.d.ts"
             ],
             "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
+            "@portable-devshell/core/instance/transport": [
+                "./packages/core/dist/instance/transport/Public.d.ts"
+            ],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"
             ],

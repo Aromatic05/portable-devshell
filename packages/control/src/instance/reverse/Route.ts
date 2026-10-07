@@ -7,7 +7,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 
-import type { ReverseCredentials } from "./credential/Credentials.js";
+import type { ReverseCredentials } from "./Credentials.js";
 
 export function createConnectionRouteModule(
     service?: ReverseCredentials,

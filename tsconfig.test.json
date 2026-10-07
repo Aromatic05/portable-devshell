@@ -79,6 +79,9 @@
             "@portable-devshell/core/instance": [
                 "./packages/core/src/instance/Public.ts"
             ],
+            "@portable-devshell/core/instance/transport": [
+                "./packages/core/src/instance/transport/Public.ts"
+            ],
             "@portable-devshell/agent-extension": [
                 "./extensions/agent/src/index.ts"
             ],

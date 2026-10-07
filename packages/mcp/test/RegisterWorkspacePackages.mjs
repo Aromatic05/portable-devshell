@@ -95,6 +95,10 @@ const workspacePackages = new Map([
         new URL("../../core/src/instance/Public.ts", import.meta.url).href,
     ],
     [
+        "@portable-devshell/core/instance/transport",
+        new URL("../../core/src/instance/transport/Public.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/extension",
         new URL("../../extension/src/index.ts", import.meta.url).href,
     ],

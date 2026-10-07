@@ -24,7 +24,8 @@ import { createDebugRuntime } from "../../debug/index.js";
 import type { DebugRuntime } from "../../debug/Api.js";
 import { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
 import { TuiExtensionPageService } from "../../extension/api/point/tui/index.js";
-import type { ConnectionModule } from "../../reverse/index.js";
+import type { ReverseCredentials } from "../../instance/reverse/Credentials.js";
+import type { ReverseIngress } from "../reverse/Ingress.js";
 import { ControlExtensionRouteService } from "../../extension/api/point/control/Dispatch.js";
 import { WebApplicationCatalog } from "../web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../web/extension/page/Service.js";
@@ -70,7 +71,10 @@ export interface ControlRuntimeOptions {
     mcp: McpControlModule;
     toolCalls: ToolCallRegistry;
     restart: () => Promise<void>;
-    reverse: ConnectionModule;
+    reverse: {
+        credentials?: ReverseCredentials;
+        ingress?: ReverseIngress;
+    };
     shutdown: () => Promise<void>;
     socketPath: string;
     web: ControlWebRuntime;
@@ -89,7 +93,8 @@ export class ControlRuntime {
     readonly #internalControlServer: ServerTransport;
     readonly #instanceEditor: InstanceEditorCoordinator;
     readonly #mcp: McpControlModule;
-    readonly #reverse: ConnectionModule;
+    readonly #reverseCredentials?: ReverseCredentials;
+    readonly #reverseIngress?: ReverseIngress;
     readonly #routes: ControlRouteRegistry;
     readonly #socketListener: ControlSocketListener;
     readonly #unsubscribeConfigInstanceChanges: () => void;
@@ -132,7 +137,8 @@ export class ControlRuntime {
         this.#toolCallHookUnregister.push(
             extensionMcpTools.install(options.toolCalls),
         );
-        this.#reverse = options.reverse;
+        this.#reverseCredentials = options.reverse.credentials;
+        this.#reverseIngress = options.reverse.ingress;
         this.#debug = createDebugRuntime();
         const modelCliCommands = new CliExtensionCommandService(
             this.#extensions,
@@ -216,7 +222,7 @@ export class ControlRuntime {
                 oauthApprovals: () => options.mcp.oauthApprovals,
             }),
             restart: options.restart,
-            reverse: options.reverse.service,
+            reverse: this.#reverseCredentials,
             shutdown: options.shutdown,
             tuiPages: new TuiExtensionPageService(this.#extensions),
             webApplications: new WebApplicationCatalog(this.#extensions),
@@ -251,8 +257,17 @@ export class ControlRuntime {
             const retired = await this.#mcp.replaceMcpHost(_previous, next);
             try {
                 const host = this.#mcp.host;
-                if (host !== undefined)
-                    this.#reverse.install(host.server, next.mcp.publicBaseUrl);
+                if (host !== undefined && this.#reverseIngress !== undefined) {
+                    if (next.mcp.publicBaseUrl !== undefined) {
+                        this.#reverseCredentials?.setPublicBaseUrl(
+                            next.mcp.publicBaseUrl,
+                        );
+                        this.#reverseIngress.setPublicBaseUrl(
+                            next.mcp.publicBaseUrl,
+                        );
+                    }
+                    this.#reverseIngress.install(host.server);
+                }
                 await retired?.stop();
             } catch (error) {
                 const rollbackFailures: unknown[] = [];
@@ -263,11 +278,17 @@ export class ControlRuntime {
                     });
                 try {
                     const host = this.#mcp.host;
-                    if (host !== undefined)
-                        this.#reverse.install(
-                            host.server,
-                            _previous.mcp.publicBaseUrl,
-                        );
+                    if (host !== undefined && this.#reverseIngress !== undefined) {
+                        if (_previous.mcp.publicBaseUrl !== undefined) {
+                            this.#reverseCredentials?.setPublicBaseUrl(
+                                _previous.mcp.publicBaseUrl,
+                            );
+                            this.#reverseIngress.setPublicBaseUrl(
+                                _previous.mcp.publicBaseUrl,
+                            );
+                        }
+                        this.#reverseIngress.install(host.server);
+                    }
                 } catch (rollbackError) {
                     rollbackFailures.push(rollbackError);
                 }
@@ -340,7 +361,7 @@ export class ControlRuntime {
         await this.#debug.close().catch((error) => failures.push(error));
         this.#web.stop();
         try {
-            this.#reverse.stop();
+            this.#reverseIngress?.stop();
         } catch (error) {
             failures.push(error);
         }
@@ -375,11 +396,11 @@ export class ControlRuntime {
 async function closeInstances(instances: InstanceRegistry): Promise<void> {
     const failures: unknown[] = [];
     for (const instance of instances.list()) {
-        const worker = instance.worker;
-        if (worker.supervision.ownership.owned) {
+        const supervision = instance.supervision;
+        if (supervision.ownership.owned) {
             try {
-                await worker.supervision.lifecycle.stop();
-                worker.supervision.ownership.clearOwned();
+                await supervision.lifecycle.stop();
+                supervision.ownership.clearOwned();
             } catch (error) {
                 failures.push(error);
             }

@@ -7,6 +7,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
+        },
+        "./instance/transport": {
+            "types": "./dist/instance/transport/Public.d.ts",
+            "default": "./dist/instance/transport/Public.js"
         }
     },
     "files": [

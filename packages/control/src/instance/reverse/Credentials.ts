@@ -5,9 +5,12 @@ import {
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
 
-import type { ReverseInstanceLookup } from "../Api.js";
 import type { Instance } from "@portable-devshell/core";
-import { ReverseCredentialStore } from "./Store.js";
+import type {
+    ReverseEnrollmentCredential,
+    ReverseInstanceLookup,
+} from "./Api.js";
+import { ReverseCredentialStore } from "./credential/Store.js";
 
 export class ReverseCredentials {
     readonly #credentialStore: ReverseCredentialStore;
@@ -40,6 +43,37 @@ export class ReverseCredentials {
             controllerUrl: this.#publicBaseUrl,
             ...result,
         };
+    }
+
+    async consumeDeviceCode(
+        deviceCode: string,
+    ): Promise<ReverseEnrollmentCredential> {
+        const credential = await this.#credentialStore.consumeDeviceCode(deviceCode);
+        this.#requireReverseInstance(credential.instance);
+        this.#disconnect?.(credential.instance);
+        return credential;
+    }
+
+    async authenticate(instance: string, deviceToken: string): Promise<Instance> {
+        const descriptor = this.#requireReverseInstance(instance);
+        if (!(await this.#credentialStore.authenticate(instance, deviceToken))) {
+            throw invalidDeviceToken(instance);
+        }
+        return descriptor;
+    }
+
+    async runAuthenticated(
+        instance: string,
+        deviceToken: string,
+        operation: () => Promise<void>,
+    ): Promise<void> {
+        this.#requireReverseInstance(instance);
+        const authenticated = await this.#credentialStore.withAuthenticatedToken(
+            instance,
+            deviceToken,
+            operation,
+        );
+        if (!authenticated) throw invalidDeviceToken(instance);
     }
 
     async rotateDeviceToken(
@@ -88,4 +122,13 @@ export class ReverseCredentials {
         }
         return descriptor;
     }
+}
+
+function invalidDeviceToken(instance: string): Error {
+    return createRemoteError({
+        code: runtimeErrorCodes.reverseDeviceTokenInvalid,
+        details: { instance },
+        message: "Device token is invalid or revoked.",
+        retryable: false,
+    });
 }
