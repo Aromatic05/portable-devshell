@@ -222,7 +222,7 @@ describe("web domain transport", () => {
         serverChannel.connect(clientChannel);
         const server = new Endpoint({ host: "control" });
         const accepting = server.accept(serverChannel);
-        const service = new Rpc(server.bind("service", "@control"), {
+        const service = new Rpc(server.bind("server", "@control"), {
             hello: () => ({
                 capabilities: ["request", "stream", "streamResume"],
                 protocolVersion: CONTROL_PROTOCOL_VERSION,
