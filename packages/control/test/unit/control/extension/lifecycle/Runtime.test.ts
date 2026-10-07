@@ -4,12 +4,27 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createExtensionRuntime } from "../../../../../src/extension/index.ts";
+import type { InstanceRuntimeTransport } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+
+function unusedInstanceRuntime(): InstanceRuntimeTransport {
+    const unused = (): never => {
+        throw new Error("Instance runtime is not configured for this fixture.");
+    };
+    return {
+        acquireReference: async () => unused(),
+        appendEvent: async () => unused(),
+        readEvents: async () => unused(),
+        releaseReference: async () => unused(),
+        subscribeEvents: async () => unused(),
+    };
+}
 
 test("Extension runtime owns paths, registry, points, and loader lifecycle", async (t) => {
     const root = await createTestTempDirectory("extension-runtime");
     const runtime = createExtensionRuntime({
         instances: { list: () => [] } as never,
+        instanceRuntime: unusedInstanceRuntime,
         pathOptions: {
             dataHome: join(root, "data"),
             homeDirectory: join(root, "home"),

@@ -9,8 +9,11 @@ import type {
     ToolCallRewriteContext,
     ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
-import { asInstanceName } from "@portable-devshell/shared";
-import { ToolCallHookRegistry } from "../../../../../../../../core/src/toolcall/registration/index.ts";
+import {
+    asInstanceName,
+    createToolCallRuntime,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import { ToolCallExtensionBinding } from "../../../../../../../src/extension/api/point/toolcall/index.ts";
 import {
@@ -75,7 +78,13 @@ function host(options: {
 
 test("ToolCall review pipeline orders builtin reviews with extension reviews", async () => {
     const calls: string[] = [];
-    const registry = new ToolCallHookRegistry();
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                return request.value.payload;
+            },
+        }),
+    });
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -98,8 +107,8 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
             ],
         }) as never,
     );
-    binding.install(registry);
-    registry.registerReview({
+    binding.install(runtime.hooks);
+    runtime.hooks.registerReview({
         hook: "510-builtin",
         id: "middle",
         review: async () => {
@@ -107,27 +116,27 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
             return { decision: "continue" };
         },
     });
-    const lease = await registry.provider()(
-        context,
-        new AbortController().signal,
-        "host",
-    );
 
     assert.deepEqual(
-        await lease.sequence.review({
-            callId: "call-1",
-            direction: "inbound",
-            value,
-        }),
-        { decision: "continue" },
+        await runtime.api.call(
+            "instance-a",
+            value.toolName,
+            value.payload,
+            value.context,
+        ),
+        { command: "echo ok" },
     );
     assert.deepEqual(calls, ["early", "builtin", "late"]);
-    lease.release();
+    runtime.close();
 });
 
 test("builtin review rejection short-circuits later reviews", async () => {
     const calls: string[] = [];
-    const registry = new ToolCallHookRegistry();
+    const runtime = createToolCallRuntime({
+        resolveTarget() {
+            assert.fail("rejected calls must not resolve a target");
+        },
+    });
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -150,8 +159,8 @@ test("builtin review rejection short-circuits later reviews", async () => {
             ],
         }) as never,
     );
-    binding.install(registry);
-    registry.registerReview({
+    binding.install(runtime.hooks);
+    runtime.hooks.registerReview({
         hook: "510-builtin",
         id: "middle",
         review: async () => {
@@ -159,22 +168,21 @@ test("builtin review rejection short-circuits later reviews", async () => {
             return { decision: "reject", reason: "denied" };
         },
     });
-    const lease = await registry.provider()(
-        context,
-        new AbortController().signal,
-        "host",
-    );
 
-    assert.deepEqual(
-        await lease.sequence.review({
-            callId: "call-1",
-            direction: "inbound",
-            value,
-        }),
-        { decision: "reject", reason: "denied" },
+    await assert.rejects(
+        runtime.api.call(
+            "instance-a",
+            value.toolName,
+            value.payload,
+            value.context,
+        ),
+        {
+            code: runtimeErrorCodes.toolCallRejected,
+            details: { reason: "denied", toolName: "bash_run" },
+        },
     );
     assert.deepEqual(calls, ["early", "builtin"]);
-    lease.release();
+    runtime.close();
 });
 
 test("review and rewrite ordering are independent", async () => {
@@ -195,7 +203,13 @@ test("review and rewrite ordering are independent", async () => {
                 },
             };
         };
-    const registry = new ToolCallHookRegistry();
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                return request.value.payload;
+            },
+        }),
+    });
     const binding = new ToolCallExtensionBinding(
         host({
             reviews: [
@@ -230,33 +244,31 @@ test("review and rewrite ordering are independent", async () => {
             ],
         }) as never,
     );
-    binding.install(registry);
-    const lease = await registry.provider()(
-        context,
-        new AbortController().signal,
-        "host",
-    );
+    binding.install(runtime.hooks);
 
-    await lease.sequence.review({
-        callId: "call-1",
-        direction: "inbound",
-        value,
-    });
-    const rewritten = await lease.sequence.rewrite({
-        callId: "call-1",
-        direction: "inbound",
-        value: { ...value, payload: { trace: [] } },
-    });
+    const rewritten = await runtime.api.call(
+        "instance-a",
+        value.toolName,
+        { trace: [] },
+        value.context,
+    );
 
     assert.deepEqual(reviewCalls, ["500", "900"]);
     assert.deepEqual(rewriteCalls, ["500", "900"]);
-    assert.deepEqual(rewritten.payload, { trace: ["500", "900"] });
-    lease.release();
+    assert.deepEqual(rewritten, { trace: ["500", "900"] });
+    runtime.close();
 });
 
 test("ToolCall binding holds exact registration leases for the call", async () => {
     const releases: string[] = [];
-    const registry = new ToolCallHookRegistry();
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch() {
+                assert.deepEqual(releases, []);
+                return value.payload;
+            },
+        }),
+    });
     const binding = new ToolCallExtensionBinding(
         host({
             releases,
@@ -276,16 +288,16 @@ test("ToolCall binding holds exact registration leases for the call", async () =
             ],
         }) as never,
     );
-    binding.install(registry);
+    binding.install(runtime.hooks);
 
-    const lease = await registry.provider()(
-        context,
-        new AbortController().signal,
-        "host",
+    await runtime.api.call(
+        "instance-a",
+        value.toolName,
+        value.payload,
+        value.context,
     );
-    assert.deepEqual(releases, []);
-    lease.release();
     assert.deepEqual(releases, ["rewrite", "review"]);
+    runtime.close();
 });
 
 test("ToolCall sandbox codecs expose only callId direction value and context signal", async () => {

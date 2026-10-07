@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ControlStreamBinding, ControlStreamMessage } from "@portable-devshell/extension/control";
-import type { ControlPortContext, MessageStream } from "@portable-devshell/shared";
+import type {
+    ControlPortContext,
+    InstanceEventSource,
+    InstanceRuntimeTransport,
+    MessageStream,
+} from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
-import type { ProcessSubscriptionManager } from "../../../../../core/src/instance/runtime/supervision/Subscription.ts";
-import type { InstanceEventSource } from "@portable-devshell/core/instance";
 import type { ExtensionPointSandboxBridge } from "../../../../src/extension/registration/PointRegistry.ts";
 import { controlStreamsExtensionPointDefinition, controlStreamsSandboxCodec } from "../../../../src/extension/api/point/control/Stream.ts";
 import { ControlExtensionRouteService } from "../../../../src/extension/api/point/control/Dispatch.ts";
@@ -61,15 +64,29 @@ test("seeded instance observation resumes after the seed and preserves initial g
             return { kind: "events" as const, events: [event(1, "context.message.queued")], lastSeq: 3 };
         },
     };
+    const runtime: InstanceRuntimeTransport = {
+        acquireReference: async () => ({}),
+        appendEvent: async () => {},
+        readEvents: async (fromSeq) => source.subscribe(fromSeq),
+        releaseReference: async () => {},
+        async subscribeEvents(fromSeq) {
+            nextFromSeq = fromSeq;
+            let served = false;
+            return {
+                close() {},
+                async next() {
+                    if (served) return { kind: "closed" as const };
+                    served = true;
+                    return { event: event(4, "context.message.delivered"), kind: "event" as const };
+                },
+            };
+        },
+    };
     const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true, extensionId: "comment",
-        instances: { get: () => ({ worker: source }) } as never,
         listConfigured: () => [],
-        readLogs: async () => [],
-        subscriptions: { async watch(...[_name, _source, fromSeq, _signal, handlers]: Parameters<ProcessSubscriptionManager["watch"]>) {
-            nextFromSeq = fromSeq;
-            await handlers.onEvent(event(4, "context.message.delivered"));
-        } } as never,
+        process: () => { throw new Error("unexpected process access"); },
+        runtime: () => runtime,
     });
     const messages: ControlStreamMessage[] = [];
     await createMessageSubscriptionBinding(capability)({ send: async (message) => { messages.push(message); }, close: async () => {} },

@@ -16,7 +16,7 @@ import {
     EXTENSION_API_VERSION,
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
-import { controlErrorCodes } from "@portable-devshell/shared";
+import { controlErrorCodes, type InstanceRuntimeTransport } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/artifact/Archive.ts";
@@ -27,6 +27,19 @@ import { ExtensionLoader } from "../../../../../src/extension/discovery/Loader.t
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../../../src/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+
+function unusedInstanceRuntime(): InstanceRuntimeTransport {
+    const unused = (): never => {
+        throw new Error("Instance runtime is not configured for this fixture.");
+    };
+    return {
+        acquireReference: async () => unused(),
+        appendEvent: async () => unused(),
+        readEvents: async () => unused(),
+        releaseReference: async () => unused(),
+        subscribeEvents: async () => unused(),
+    };
+}
 
 interface Harness {
     cleanup(): Promise<void>;
@@ -58,6 +71,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
         loader: new ExtensionLoader({
             readToolCalls: async () => [],
             instances: { list: () => [] } as never,
+            instanceRuntime: unusedInstanceRuntime,
             paths,
             points: createControlExtensionPointRegistry(),
         }),
@@ -329,6 +343,7 @@ test("reinstalling the selected builtin generation preserves lazy startup until 
         loader: new ExtensionLoader({
             readToolCalls: async () => [],
             instances: { list: () => [] } as never,
+            instanceRuntime: unusedInstanceRuntime,
             paths: h.paths,
             points: createControlExtensionPointRegistry(),
         }),
@@ -363,6 +378,7 @@ test("reinstalling a disabled builtin keeps it disabled across Control restart",
         loader: new ExtensionLoader({
             readToolCalls: async () => [],
             instances: { list: () => [] } as never,
+            instanceRuntime: unusedInstanceRuntime,
             paths: h.paths,
             points: createControlExtensionPointRegistry(),
         }),

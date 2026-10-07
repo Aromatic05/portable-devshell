@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { asInstanceName, normalizeConfigInstanceDraft } from "@portable-devshell/shared";
+
 import { ExtensionToolCallHistoryCapabilityControl } from "../../../../../../../src/extension/api/cap/toolcall/index.ts";
-import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
-import { asInstanceName } from "@portable-devshell/shared";
+import { InstanceRegistry } from "../../../../../../../src/instance/Registry.ts";
+import { createTestInstance } from "../../../../../../support/InstanceRuntime.ts";
 
 test("ToolCall history capability is read-only, typed, bounded, and provenance-decorated", async () => {
     const queries: unknown[] = [];
     const instances = new InstanceRegistry([
-        new Instance({
-            enabled: true,
-            mcpEnabled: false,
-            mcpPath: "",
-            modelExtensions: [],
-            name: "demo-local",
-            provider: "local",
-            worker: {} as never,
-        }),
+        createTestInstance(
+            normalizeConfigInstanceDraft({
+                enabled: true,
+                name: "demo-local",
+                provider: "local",
+            }),
+        ),
     ]);
     const capability = new ExtensionToolCallHistoryCapabilityControl({
         allowed: true,

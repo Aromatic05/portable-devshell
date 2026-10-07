@@ -142,7 +142,6 @@ test("Extension Web proxy authenticates one generic namespace, strips credential
         basePath: "/web/extensions",
         extensions: extensions as never,
         loginPath: "/web/",
-        paths: {} as never,
     }).install(http, sessions);
 
     try {
@@ -321,6 +320,9 @@ test("Extension static Web contribution serves only files contained by the immut
                 },
             };
         },
+        generationDirectory(id: string, generation: string) {
+            return paths.generationDirectory(id, generation);
+        },
     };
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
     const sessions = new ControlWebSessionService({
@@ -332,7 +334,6 @@ test("Extension static Web contribution serves only files contained by the immut
         basePath: "/web/extensions",
         extensions: extensions as never,
         loginPath: "/web/",
-        paths,
     }).install(http, sessions);
     try {
         await http.start();
@@ -446,7 +447,6 @@ test("Extension Web gateway owns 404/502/503 semantics without leaking host or u
         basePath: "/web/extensions",
         extensions: extensions as never,
         loginPath: "/web/",
-        paths: {} as never,
     }).install(http, sessions);
 
     try {

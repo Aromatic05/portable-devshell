@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     presentToolCallResult,
     type ToolCallHooks,
-} from "@portable-devshell/core/toolcall";
+} from "@portable-devshell/shared";
 import type { InstanceName } from "@portable-devshell/shared";
 
 import { McpExtensionService } from "../../../../src/extension/api/point/mcp/index.ts";
