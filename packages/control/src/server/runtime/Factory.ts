@@ -148,27 +148,42 @@ export class ControlRuntimeFactory {
                     await contextTransport.detachInstance(instance);
                 },
                 reconcileContextInstanceCleanup: async (instance, descriptor) => {
+                    let startedForCleanup = false;
                     if (
                         descriptor !== undefined &&
                         !descriptor.supervision.snapshot().ready
                     ) {
-                        await descriptor.supervision.lifecycle.start();
+                        try {
+                            await descriptor.supervision.lifecycle.start();
+                            startedForCleanup = true;
+                        } catch (error) {
+                            await descriptor.supervision.lifecycle
+                                .stop()
+                                .catch(() => undefined);
+                            throw error;
+                        }
                     }
-                    await contexts.api.cleanup.reconcileInstance(
-                        instance,
-                        descriptor === undefined
-                            ? undefined
-                            : {
-                                  releaseAlerts: async (workspace) =>
-                                      await descriptor.environment.releaseAlerts(
-                                          workspace,
-                                      ),
-                                  releaseReference: async (reference) =>
-                                      await descriptor.supervision.ownership.releaseReference(
-                                          reference,
-                                      ),
-                              },
-                    );
+                    try {
+                        await contexts.api.cleanup.reconcileInstance(
+                            instance,
+                            descriptor === undefined
+                                ? undefined
+                                : {
+                                      releaseAlerts: async (workspace) =>
+                                          await descriptor.environment.releaseAlerts(
+                                              workspace,
+                                          ),
+                                      releaseReference: async (reference) =>
+                                          await descriptor.supervision.ownership.releaseReference(
+                                              reference,
+                                          ),
+                                  },
+                        );
+                    } finally {
+                        if (startedForCleanup && descriptor !== undefined) {
+                            await descriptor.supervision.lifecycle.stop();
+                        }
+                    }
                 },
                 instanceRegistry: options.instances.registry,
                 instanceChanges: options.instances.changes,
