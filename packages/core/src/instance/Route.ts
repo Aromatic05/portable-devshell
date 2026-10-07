@@ -29,12 +29,13 @@ export interface InstanceRouteOptions {
     descriptor: Instance;
     extensionPorts?: readonly ControlPortDefinition[];
     state: InstanceState;
+    subscriptions: ProcessSubscriptionManager;
 }
 
 export function createInstanceHost(
     options: InstanceRouteOptions,
 ): ControlHostDefinition {
-    const { descriptor, state } = options;
+    const { descriptor, state, subscriptions } = options;
     const events = {
         cursor: () => descriptor.supervision.snapshot().lastSeq,
         subscribe: (fromSeq?: number) =>
@@ -42,12 +43,12 @@ export function createInstanceHost(
     };
     const name = descriptor.config.name;
     const ports = mergeControlPortsByName([
-        createInstanceRuntimeRouteModule(descriptor, state.subscriptions),
+        createInstanceRuntimeRouteModule(descriptor, subscriptions),
         createEnvironmentRouteModule(descriptor),
-        createProcessRouteModule(descriptor, state, state.subscriptions),
+        createProcessRouteModule(descriptor, state, subscriptions),
         createApprovalRouteModule(
             { approval: state.approval.api, events, name },
-            state.subscriptions,
+            subscriptions,
         ),
         createTerminalRouteModule({
             backend: state.terminal.api,
@@ -57,7 +58,7 @@ export function createInstanceHost(
         createGoalTaskRouteModule({ events, goal: state.task.api.goal }),
         createTodoTaskRouteModule(
             { events, name, todo: state.task.api.todo },
-            state.subscriptions,
+            subscriptions,
         ),
         createToolRouteModule(
             {
@@ -77,7 +78,7 @@ export function createInstanceHost(
             },
             undefined,
             state.toolCalls.api,
-            state.subscriptions,
+            subscriptions,
         ),
         ...(options.extensionPorts ?? []),
     ]);

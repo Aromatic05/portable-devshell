@@ -1,5 +1,6 @@
 import {
     asInstanceName,
+    ProcessSubscriptionManager,
     type ControlHostDefinition,
     type ControlInstanceConfig,
     type ControlPortDefinition,
@@ -26,21 +27,23 @@ import { WorkerRuntimeFactory, type WorkerRuntimeFactoryOptions } from "../runti
 import { InstancePaths } from "./Paths.js";
 import { InstanceLifecycle } from "./Lifecycle.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
-import {
-    createInstanceEventLog,
-    InstanceState,
-} from "./State.js";
+import { createInstanceEventLog, type InstanceEventLog } from "./EventLog.js";
+import { InstanceState } from "./State.js";
 import { createInstanceHost } from "../Route.js";
 
 export interface InstanceFields {
     config: InstanceConfig;
+    eventLog: InstanceEventLog;
     paths: InstancePaths;
     state: InstanceState;
+    subscriptions: ProcessSubscriptionManager;
     worker: WorkerInstance;
 }
 
 export class Instance {
+    readonly #eventLog: InstanceEventLog;
     readonly #paths: InstancePaths;
+    readonly #subscriptions: ProcessSubscriptionManager;
     readonly #worker: WorkerInstance;
     readonly #state: InstanceState;
     readonly #lifecycle: InstanceLifecycle;
@@ -67,6 +70,7 @@ export class Instance {
                 await state.handleReadyChanged();
             },
         );
+        const subscriptions = new ProcessSubscriptionManager();
         const { protocolClient, worker } = createWorkerInstance(
             toWorkerConfig(config, reverse, paths.homeDirectory),
             eventLog.port,
@@ -78,7 +82,6 @@ export class Instance {
         state = new InstanceState({
             audit,
             config,
-            eventLog,
             instanceName,
             paths,
             protocolClient,
@@ -87,15 +90,19 @@ export class Instance {
         });
         instance = new Instance({
             config: toInstanceConfig(config),
+            eventLog,
             paths,
             state,
+            subscriptions,
             worker,
         });
         return instance;
     }
 
     constructor(fields: InstanceFields) {
+        this.#eventLog = fields.eventLog;
         this.#paths = fields.paths;
+        this.#subscriptions = fields.subscriptions;
         this.#worker = fields.worker;
         this.#state = fields.state;
         this.#config = fields.config;
@@ -136,11 +143,12 @@ export class Instance {
             descriptor: this,
             extensionPorts,
             state: this.#state,
+            subscriptions: this.#subscriptions,
         });
     }
 
     connectionClosed(connectionId: string): void {
-        this.#state.subscriptions.unsubscribeConnection(connectionId);
+        this.#subscriptions.unsubscribeConnection(connectionId);
     }
 
     retire(): Promise<void> {
@@ -170,6 +178,11 @@ export class Instance {
             .prepareRetirement()
             .catch((error) => failures.push(error));
         await this.#lifecycle.drain();
+        try {
+            this.#subscriptions.close();
+        } catch (error) {
+            failures.push(error);
+        }
         await this.#state.retire().catch((error) => failures.push(error));
         if (failures.length === 0) {
             this.#lifecycle.completeRetirement();
@@ -185,6 +198,12 @@ export class Instance {
     async #close(): Promise<void> {
         const failures: unknown[] = [];
         await this.retire().catch((error) => failures.push(error));
+        await this.#worker.supervision.close().catch((error) => {
+            failures.push(error);
+        });
+        await this.#eventLog.flush().catch((error) => {
+            failures.push(error);
+        });
         let resourcesClosed = false;
         await this.#state
             .close()

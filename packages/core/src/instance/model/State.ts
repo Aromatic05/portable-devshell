@@ -1,10 +1,8 @@
 import {
     createRemoteError,
     runtimeErrorCodes,
-    STREAM_GAP_CODE,
     type ApprovalRequest,
     type ControlInstanceConfig,
-    type InstanceEventRecord,
     type InstanceName,
     type JsonValue,
     createToolCallRuntime,
@@ -28,12 +26,8 @@ import type {
     ToolCallTarget,
 } from "../../toolcall/Api.js";
 import { createToolCallExecutionRuntime } from "../../toolcall/index.js";
-import type {
-    InstanceEventPort,
-    WorkerWorkspacePrepareResult,
-} from "../Api.js";
+import type { WorkerWorkspacePrepareResult } from "../Api.js";
 import type { WorkerInstance } from "../runtime/Api.js";
-import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { WorkerProtocolClient } from "../transport/packet/Client.js";
 import type { Instance } from "./Instance.js";
 import type { InstancePaths } from "./Paths.js";
@@ -42,62 +36,9 @@ import {
     type InstanceToolDefinitionRegistration,
 } from "./Tools.js";
 
-export interface InstanceEventLog {
-    readonly port: InstanceEventPort;
-    flush(): Promise<void>;
-}
-
-export function createInstanceEventLog(
-    audit: AuditRuntime,
-    instanceName: InstanceName,
-    onReadyChanged: () => Promise<void>,
-): InstanceEventLog {
-    let appendTail = Promise.resolve();
-    const readEvents = (fromSeq = 1) => {
-        const lastSeq = audit.api.events.readHighWater();
-        const records = audit.api.events.readFrom(fromSeq);
-        const nextSeq = audit.api.events.readFrom(1, 1)[0]?.seq ?? lastSeq + 1;
-        return fromSeq < nextSeq
-            ? {
-                  code: STREAM_GAP_CODE as typeof STREAM_GAP_CODE,
-                  fromSeq,
-                  kind: "gap" as const,
-                  lastSeq,
-                  nextSeq,
-              }
-            : { events: records, kind: "events" as const, lastSeq };
-    };
-    return {
-        flush: () => appendTail,
-        port: {
-            append: (input) => {
-                const operation = appendTail.then(async () => {
-                    const record: InstanceEventRecord = {
-                        ...input,
-                        instanceName,
-                        seq: audit.api.events.readHighWater() + 1,
-                    };
-                    await audit.api.events.append(record);
-                    if (record.type === "instance.readyChanged")
-                        await onReadyChanged();
-                    return record;
-                });
-                appendTail = operation.then(
-                    () => undefined,
-                    () => undefined,
-                );
-                return operation;
-            },
-            cursor: () => audit.api.events.readHighWater(),
-            readFrom: readEvents,
-        },
-    };
-}
-
 interface InstanceStateDependencies {
     audit: AuditRuntime;
     config: ControlInstanceConfig;
-    eventLog: InstanceEventLog;
     instanceName: InstanceName;
     paths: InstancePaths;
     protocolClient: WorkerProtocolClient;
@@ -112,8 +53,6 @@ export class InstanceState {
     readonly terminal: TerminalRuntime;
     readonly tools: ToolCallExecutionRuntime;
     readonly toolCalls: ToolCallRuntime;
-    readonly subscriptions = new ProcessSubscriptionManager();
-    readonly #eventLog: InstanceEventLog;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #resolveInstance: () => Instance;
     readonly #toolDefinitions = new InstanceToolCatalog();
@@ -130,7 +69,6 @@ export class InstanceState {
         const { audit, config, instanceName, paths, protocolClient, worker } =
             dependencies;
         this.audit = audit;
-        this.#eventLog = dependencies.eventLog;
         this.#protocolClient = protocolClient;
         this.#resolveInstance = dependencies.resolveInstance;
         this.#worker = worker;
@@ -299,7 +237,6 @@ export class InstanceState {
         await close(() => this.toolCalls.close());
         await close(() => this.tools.close());
         await close(() => this.terminal.sessions.close());
-        await close(() => this.subscriptions.close());
         for (const connectionId of this.#toolSessions.keys())
             await close(async () => await this.releaseToolSession(connectionId));
         await close(() => this.#workerToolRegistration.dispose());
@@ -314,12 +251,6 @@ export class InstanceState {
     async #close(): Promise<void> {
         const failures: unknown[] = [];
         await this.retire().catch((error) => {
-            failures.push(error);
-        });
-        await this.#worker.supervision.close().catch((error) => {
-            failures.push(error);
-        });
-        await this.#eventLog.flush().catch((error) => {
             failures.push(error);
         });
         await this.audit.close().catch((error) => {
