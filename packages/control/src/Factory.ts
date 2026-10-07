@@ -155,42 +155,21 @@ export class ControlFactory {
                     await contextTransport.detachInstance(instance);
                 },
                 reconcileContextInstanceCleanup: async (instance, descriptor) => {
-                    let startedForCleanup = false;
-                    if (
-                        descriptor !== undefined &&
-                        !descriptor.supervision.snapshot().ready
-                    ) {
-                        try {
-                            await descriptor.supervision.lifecycle.start();
-                            startedForCleanup = true;
-                        } catch (error) {
-                            await descriptor.supervision.lifecycle
-                                .stop()
-                                .catch(() => undefined);
-                            throw error;
-                        }
-                    }
-                    try {
-                        await contexts.api.cleanup.reconcileInstance(
-                            instance,
-                            descriptor === undefined
-                                ? undefined
-                                : {
-                                      releaseAlerts: async (workspace) =>
-                                          await descriptor.environment.releaseAlerts(
-                                              workspace,
-                                          ),
-                                      releaseReference: async (reference) =>
-                                          await descriptor.supervision.ownership.releaseReference(
-                                              reference,
-                                          ),
-                                  },
-                        );
-                    } finally {
-                        if (startedForCleanup && descriptor !== undefined) {
-                            await descriptor.supervision.lifecycle.stop();
-                        }
-                    }
+                    await contexts.api.cleanup.reconcileInstance(
+                        instance,
+                        descriptor === undefined
+                            ? undefined
+                            : {
+                                  releaseAlerts: async (workspace) =>
+                                      await descriptor.environment.releaseAlerts(
+                                          workspace,
+                                      ),
+                                  releaseReference: async (reference) =>
+                                      await descriptor.supervision.ownership.releaseReference(
+                                          reference,
+                                      ),
+                              },
+                    );
                 },
                 instanceRegistry: options.instances.registry,
                 instanceChanges: options.instances.changes,

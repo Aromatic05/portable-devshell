@@ -201,10 +201,7 @@ export class InstanceRetirementCoordinator {
             return failures;
         }
         try {
-            await this.#reconcileContextInstanceCleanup?.(
-                existing.name,
-                cleanupDescriptor,
-            );
+            await this.#reconcileContextCleanup(existing.name, cleanupDescriptor);
         } catch (error) {
             failures.push(error);
             return failures;
@@ -255,6 +252,36 @@ export class InstanceRetirementCoordinator {
         descriptor: InstanceDescriptor,
     ): Promise<void> {
         await this.#detachContextInstance?.(instance);
-        await this.#reconcileContextInstanceCleanup?.(instance, descriptor);
+        await this.#reconcileContextCleanup(instance, descriptor);
+    }
+
+    async #reconcileContextCleanup(
+        instance: string,
+        descriptor: InstanceDescriptor,
+    ): Promise<void> {
+        if (this.#reconcileContextInstanceCleanup === undefined) return;
+
+        let startedForCleanup = false;
+        if (
+            descriptor !== undefined &&
+            !descriptor.supervision.snapshot().ready
+        ) {
+            try {
+                await descriptor.supervision.lifecycle.start();
+                startedForCleanup = true;
+            } catch (error) {
+                await descriptor.supervision.lifecycle
+                    .stop()
+                    .catch(() => undefined);
+                throw error;
+            }
+        }
+        try {
+            await this.#reconcileContextInstanceCleanup(instance, descriptor);
+        } finally {
+            if (startedForCleanup && descriptor !== undefined) {
+                await descriptor.supervision.lifecycle.stop();
+            }
+        }
     }
 }
