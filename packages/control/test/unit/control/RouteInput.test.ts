@@ -26,7 +26,7 @@ import {
     readToolCall,
     readToolCallQuery,
     limitToolCallResponse,
-} from "../../../../core/src/toolcall/execution/transport/Input.ts";
+} from "../../../../shared/src/execution/toolcall/RouteInput.ts";
 
 test("artifact route inputs preserve the two supported source forms", () => {
     assert.deepEqual(

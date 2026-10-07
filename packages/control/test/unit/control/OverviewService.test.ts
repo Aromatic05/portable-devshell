@@ -2,14 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    Endpoint,
+    Rpc,
     asInstanceName,
-    type ActiveTodoSummary,
+    normalizeConfigInstanceDraft,
+    type ControlInstanceConfig,
+    type InstanceProcessEnvelope,
+    type InstanceSnapshot,
+    type InstanceWorkerInfo,
     type OAuthApprovalRequest,
     type ToolCallRecord,
+    type TodoTaskSummary,
 } from "@portable-devshell/shared";
-import { Instance, type Instance } from "@portable-devshell/core/instance";
-import type { OperationalOverviewInstanceData } from "../../../src/overview/collector/Instance.ts";
+import { Instance } from "@portable-devshell/core";
 import { OperationalOverviewInstanceCollector } from "../../../src/overview/collector/Instance.ts";
+import { createTestInstance } from "../../support/InstanceRuntime.ts";
 
 import { createOperationalOverviewRuntime } from "../../../src/overview/index.ts";
 
@@ -28,51 +35,98 @@ const healthySystemCollector = {
     },
 };
 
-function instance(name: string, worker: object, options: {
-    mcpEnabled?: boolean;
-    provider?: Instance["provider"];
-} = {}): Instance {
-    return new Instance({
-        enabled: true,
-        mcpEnabled: options.mcpEnabled ?? false,
-        mcpPath: "",
-        modelExtensions: [],
-        name,
-        provider: options.provider ?? "local",
-        worker: worker as never,
+function instance(
+    name: string,
+    options: {
+        mcpEnabled?: boolean;
+        provider?: ControlInstanceConfig["provider"];
+    } = {},
+): Instance {
+    return createTestInstance(
+        normalizeConfigInstanceDraft({
+            enabled: true,
+            mcp: { enabled: options.mcpEnabled ?? false },
+            name,
+            provider: options.provider ?? "local",
+        }),
+    );
+}
+
+interface OverviewEndpointInstance {
+    approvals?: () => unknown[];
+    calls?: (query: unknown) => ToolCallRecord[];
+    failures?: (
+        sinceMs: number,
+        untilMs: number,
+    ) => { count: number; latest?: ToolCallRecord };
+    snapshot: () => InstanceProcessEnvelope;
+    todo?: () => unknown;
+}
+
+function processEnvelope(
+    snapshot: InstanceSnapshot,
+    worker?: InstanceWorkerInfo,
+): InstanceProcessEnvelope {
+    return {
+        lastSeq: snapshot.lastSeq,
+        snapshot,
+        ...(worker === undefined ? {} : { worker }),
+    };
+}
+
+function todoEnvelope(tasks: readonly TodoTaskSummary[] = []): unknown {
+    return {
+        lastSeq: 0,
+        todo: {
+            items: [],
+            revision: 0,
+            summary: { completed: 0, total: 0 },
+            tasks,
+        },
+    };
+}
+
+function overviewEndpoint(
+    instances: Record<string, OverviewEndpointInstance>,
+): Endpoint {
+    const endpoint = new Endpoint({ host: "control" });
+    endpoint.connect = async (host, port) =>
+        endpoint.bind(`client-${host}-${port}`).connect(host, port);
+    for (const [name, data] of Object.entries(instances)) {
+        const host = asInstanceName(name);
+        new Rpc(endpoint.bind("process", host), {
+            snapshot: () => data.snapshot(),
+        });
+        new Rpc(endpoint.bind("approval", host), {
+            list: () => data.approvals?.() ?? [],
+        });
+        new Rpc(endpoint.bind("task", host), {
+            getTodo: () => data.todo?.() ?? todoEnvelope(),
+        });
+        new Rpc(endpoint.bind("tool", host), {
+            listCalls: (payload) => data.calls?.(payload) ?? [],
+            failureSummary: (payload) => {
+                const window = payload as { sinceMs: number; untilMs: number };
+                return (
+                    data.failures?.(window.sinceMs, window.untilMs) ?? {
+                        count: 0,
+                    }
+                );
+            },
+        });
+    }
+    return endpoint;
+}
+
+function collector(endpoint: Endpoint): OperationalOverviewInstanceCollector {
+    return new OperationalOverviewInstanceCollector({
+        activityLimit: 20,
+        endpoint,
     });
 }
 
-function instanceData(options: {
-    pendingApprovals?: unknown[];
-    todos?: ActiveTodoSummary[];
-    calls?: ToolCallRecord[];
-    failureSummary?: { count: number; latest?: ToolCallRecord };
-    readApprovals?: () => Promise<never[]>;
-    readTodos?: () => ActiveTodoSummary[];
-    readCalls?: (query: unknown) => Promise<ToolCallRecord[]>;
-    readFailures?: (sinceMs: number, untilMs: number) => Promise<{ count: number; latest?: ToolCallRecord }>;
-} = {}): OperationalOverviewInstanceData {
-    return {
-        approval: {
-            listPendingApprovals: options.readApprovals ?? (async () => options.pendingApprovals ?? []),
-        },
-        task: {
-            todo: { summaries: options.readTodos ?? (() => options.todos ?? []) },
-        },
-        tools: {
-            readToolCalls: options.readCalls ?? (async () => options.calls ?? []),
-            readToolCallFailureSummary: options.readFailures ?? (async () => options.failureSummary ?? { count: 0 }),
-        },
-    } as OperationalOverviewInstanceData;
-}
-
-function collector(data: (descriptor: Instance) => OperationalOverviewInstanceData) {
-    return new OperationalOverviewInstanceCollector({ activityLimit: 20, instanceData: data });
-}
-
 test("operational overview prioritizes failures, approvals, activity, and todos without raw payloads", async () => {
-    const blockedTodo: ActiveTodoSummary = {
+    const blockedTodo: TodoTaskSummary = {
         completed: 1,
         currentItem: "Waiting for worker package",
         revision: 4,
@@ -80,6 +134,7 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         taskId: "task-1",
         title: "Upgrade worker",
         total: 3,
+        updatedAt: "2026-07-30T23:00:00.000Z",
     };
     const failedCall: ToolCallRecord = {
         callId: "call-1",
@@ -94,63 +149,57 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
         status: "failed",
         toolName: "bash_run",
     };
-    const ready = instance("ready-one", {
-            handshake: {
-                capabilities: { cancel: true, streaming: true, tools: true },
-                instance: "ready-one",
-                platform: {
-                    arch: "x64",
-                    distribution: { id: "arch", name: "Arch Linux" },
-                    os: "linux",
-                    packageManager: "pacman",
-                    shell: {
-                        executable: "/bin/bash",
-                        kind: "bash",
-                        version: "5.3",
+    const ready = instance("ready-one", { mcpEnabled: true, provider: "local" });
+    const failed = instance("failed-one", { provider: "reverse" });
+    const endpoint = overviewEndpoint({
+        "ready-one": {
+            approvals: () => [{ id: "approval-1" }],
+            calls: () => [failedCall],
+            failures: () => ({ count: 1, latest: failedCall }),
+            snapshot: () =>
+                processEnvelope(
+                    {
+                        connectionState: "connected",
+                        daemonState: "running",
+                        lastSeq: 7,
+                        name: asInstanceName("ready-one"),
+                        ready: true,
+                        status: "ready",
                     },
-                },
-                protocolVersion: 2,
-                skillsDirectory: "/workspace/.agents/skills",
-                workerVersion: "0.4.10",
-                homeDirectory: "/workspace",
-            },
-            snapshot: () => ({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 7,
-                name: asInstanceName("ready-one"),
-                ready: true,
-                status: "ready",
-            }),
+                    {
+                        capabilities: { cancel: true, streaming: true, tools: true },
+                        platform: {
+                            arch: "x64",
+                            distribution: { id: "arch", name: "Arch Linux" },
+                            os: "linux",
+                            packageManager: "pacman",
+                            shell: {
+                                executable: "/bin/bash",
+                                kind: "bash",
+                                version: "5.3",
+                            },
+                        },
+                        protocolVersion: "2",
+                        version: "0.4.10",
+                    },
+                ),
+            todo: () => todoEnvelope([blockedTodo]),
         },
-        { mcpEnabled: true, provider: "local" },
-    );
-    const failed = instance(
-        "failed-one",
-        {
-            snapshot: () => ({
-                connectionState: "failed",
-                daemonState: "failed",
-                lastErrorMessage: "reverse worker disconnected",
-                lastSeq: 2,
-                name: asInstanceName("failed-one"),
-                ready: false,
-                status: "failed",
-            }),
+        "failed-one": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "failed",
+                    daemonState: "failed",
+                    lastErrorMessage: "reverse worker disconnected",
+                    lastSeq: 2,
+                    name: asInstanceName("failed-one"),
+                    ready: false,
+                    status: "failed",
+                }),
         },
-        { provider: "reverse" },
-    );
-    const data = new Map<string, OperationalOverviewInstanceData>([
-        ["ready-one", instanceData({
-            pendingApprovals: [{ id: "approval-1" }],
-            todos: [blockedTodo],
-            calls: [failedCall],
-            failureSummary: { count: 1, latest: failedCall },
-        })],
-        ["failed-one", instanceData()],
-    ]);
+    });
     const overview = await createOperationalOverviewRuntime({
-        instanceCollector: collector((descriptor) => data.get(descriptor.name)!),
+        instanceCollector: collector(endpoint),
         instances: { list: () => [ready, failed] },
         now: () => now,
         oauthApprovals: () => ({
@@ -236,43 +285,43 @@ test("operational overview prioritizes failures, approvals, activity, and todos 
                     version: "5.3",
                 },
             },
-            protocolVersion: 2,
+            protocolVersion: "2",
             version: "0.4.10",
         },
     );
 });
 
 test("operational overview treats a deliberately stopped instance as neutral while keeping transitional non-ready instances actionable", async () => {
-    const stopped = instance(
-        "stopped-one",
-        {
-            snapshot: () => ({
-                connectionState: "disconnected",
-                daemonState: "stopped",
-                lastSeq: 1,
-                name: asInstanceName("stopped-one"),
-                ready: false,
-                status: "stopped",
-            }),
+    const stopped = instance("stopped-one");
+    const starting = instance("starting-one");
+    const endpoint = overviewEndpoint({
+        "stopped-one": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "disconnected",
+                    daemonState: "stopped",
+                    lastSeq: 1,
+                    name: asInstanceName("stopped-one"),
+                    ready: false,
+                    status: "stopped",
+                }),
         },
-    );
-    const starting = instance(
-        "starting-one",
-        {
-            snapshot: () => ({
-                connectionState: "connecting",
-                daemonState: "starting",
-                lastSeq: 2,
-                name: asInstanceName("starting-one"),
-                ready: false,
-                status: "starting",
-            }),
+        "starting-one": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "connecting",
+                    daemonState: "starting",
+                    lastSeq: 2,
+                    name: asInstanceName("starting-one"),
+                    ready: false,
+                    status: "running",
+                }),
         },
-    );
+    });
 
     const overview = await createOperationalOverviewRuntime({
         instances: { list: () => [stopped, starting] },
-        instanceCollector: collector(() => instanceData()),
+        instanceCollector: collector(endpoint),
         now: () => now,
         systemCollector: healthySystemCollector,
     }).read();
@@ -337,36 +386,32 @@ test("operational overview counts the full 24 hour failure window while bounding
     };
     let activityQuery: unknown;
     let failureWindow: [number, number] | undefined;
-    const descriptor = instance(
-        "busy-one",
-        {
-            snapshot: () => ({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("busy-one"),
-                ready: true,
-                status: "ready",
-            }),
-        },
-    );
-    const data = instanceData({
-            readFailures: async (
-                sinceMs: number,
-                untilMs: number,
-            ) => {
+    const descriptor = instance("busy-one");
+    const endpoint = overviewEndpoint({
+        "busy-one": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("busy-one"),
+                    ready: true,
+                    status: "ready",
+                }),
+            failures: (sinceMs, untilMs) => {
                 failureWindow = [sinceMs, untilMs];
                 return { count: 1, latest: olderFailure };
             },
-            readCalls: async (query: unknown) => {
+            calls: (query) => {
                 activityQuery = query;
                 return [olderFailure, futureFailure, ...completedCalls];
             },
+        },
     });
 
     const overview = await createOperationalOverviewRuntime({
         instances: { list: () => [descriptor] },
-        instanceCollector: collector(() => data),
+        instanceCollector: collector(endpoint),
         now: () => now,
         systemCollector: healthySystemCollector,
     }).read();
@@ -393,7 +438,7 @@ test("operational overview counts the full 24 hour failure window while bounding
 });
 
 test("operational overview coalesces concurrent reads without caching later refreshes", async () => {
-    const descriptor = instance("coalesced-one", {});
+    const descriptor = instance("coalesced-one");
     let collectCount = 0;
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {
@@ -445,7 +490,7 @@ test("operational overview coalesces concurrent reads without caching later refr
 test("controller resource alerts participate in overall health", async () => {
     const service = createOperationalOverviewRuntime({
         instances: { list: () => [] },
-        instanceCollector: collector(() => instanceData()),
+        instanceCollector: collector(overviewEndpoint({})),
         now: () => now,
         systemCollector: {
             async collect() {
@@ -482,32 +527,32 @@ test("controller resource alerts participate in overall health", async () => {
 });
 
 test("operational overview isolates snapshot and todo collection failures per instance", async () => {
-    const snapshotBroken = instance(
-        "snapshot-broken",
-        {
+    const snapshotBroken = instance("snapshot-broken");
+    const todoBroken = instance("todo-broken");
+    const endpoint = overviewEndpoint({
+        "snapshot-broken": {
             snapshot: () => {
                 throw new Error("snapshot unavailable");
             },
         },
-    );
-    const todoBroken = instance(
-        "todo-broken",
-        {
-            snapshot: () => ({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("todo-broken"),
-                ready: true,
-                status: "ready",
-            }),
+        "todo-broken": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("todo-broken"),
+                    ready: true,
+                    status: "ready",
+                }),
+            todo: () => {
+                throw new Error("todo store unavailable");
+            },
         },
-    );
+    });
 
     const overview = await createOperationalOverviewRuntime({
-        instanceCollector: collector((descriptor) => descriptor.name === "todo-broken"
-            ? instanceData({ readTodos: () => { throw new Error("todo store unavailable"); } })
-            : instanceData()),
+        instanceCollector: collector(endpoint),
         instances: { list: () => [snapshotBroken, todoBroken] },
         now: () => now,
         systemCollector: healthySystemCollector,
@@ -538,28 +583,28 @@ test("operational overview isolates snapshot and todo collection failures per in
 });
 
 test("operational overview remains available when one collection source fails", async () => {
-    const descriptor = instance(
-        "local-one",
-        {
-            snapshot: () => ({
-                connectionState: "connected",
-                daemonState: "running",
-                lastSeq: 1,
-                name: asInstanceName("local-one"),
-                ready: true,
-                status: "ready",
-            }),
-        },
-    );
-    const overview = await createOperationalOverviewRuntime({
-        instanceCollector: collector(() => instanceData({
-            readApprovals: async () => {
+    const descriptor = instance("local-one");
+    const endpoint = overviewEndpoint({
+        "local-one": {
+            snapshot: () =>
+                processEnvelope({
+                    connectionState: "connected",
+                    daemonState: "running",
+                    lastSeq: 1,
+                    name: asInstanceName("local-one"),
+                    ready: true,
+                    status: "ready",
+                }),
+            approvals: () => {
                 throw new Error("approval store unavailable");
             },
-            readCalls: async () => {
+            calls: () => {
                 throw new Error("audit store unavailable");
             },
-        })),
+        },
+    });
+    const overview = await createOperationalOverviewRuntime({
+        instanceCollector: collector(endpoint),
         instances: { list: () => [descriptor] },
         now: () => now,
         systemCollector: healthySystemCollector,
