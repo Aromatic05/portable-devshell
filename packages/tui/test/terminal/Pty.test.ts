@@ -100,7 +100,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const attachCalls: unknown[] = [];
         let openCalls = 0;
         const client: TuiControlTerminalClient = {
-            async attach(_instance, input) {
+            async attach(input) {
                 attachCalls.push(input);
                 return attachAttachment(stream, {
                     ...opened,
@@ -116,7 +116,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         };
         const factory = new TuiControlTerminalPtyFactory({
-            client,
+            client: () => client,
             workspaceForInstance: () => "/home/alpha",
         });
         const pty = factory.create("alpha")("ignored", [], {
@@ -195,7 +195,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         assert.equal(stream.closed, true);
 
         const resumedStream = new FakeAttachment();
-        client.attach = async (_instance, input) => {
+        client.attach = async (input) => {
             attachCalls.push(input);
             return attachAttachment(resumedStream, {
                 ...opened,
@@ -264,7 +264,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         };
         const pty = new TuiControlTerminalPtyFactory({
-            client,
+            client: () => client,
             operationAckTimeoutMs: 20,
             workspaceForInstance: () => "/home/alpha",
         }).create("alpha")("ignored", [], {
@@ -314,7 +314,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         };
         const factory = new TuiControlTerminalPtyFactory({
-            client,
+            client: () => client,
             workspaceForInstance: () => "/home/alpha",
         });
         const pty = factory.create("alpha")("ignored", [], {
@@ -369,13 +369,13 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         });
         const killInputs: unknown[] = [];
         const client: TuiControlTerminalClient = {
-            async attach(_instance, input) {
+            async attach(input) {
                 return attachAttachment(currentStream, {
                     ...currentOpen,
                     latestSeq: input.fromSeq,
                 });
             },
-            async kill(_instance, identity) {
+            async kill(identity) {
                 killInputs.push(identity);
                 return await killResult;
             },
@@ -384,7 +384,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             },
         };
         const factory = new TuiControlTerminalPtyFactory({
-            client,
+            client: () => client,
             workspaceForInstance: () => "/home/alpha",
         });
         factory.create("alpha")("ignored", [], {
