@@ -8,6 +8,8 @@ import {
 import {
     type ContextTransport,
     type ControlConfig,
+    createEnvironmentTransport,
+    createProcessTransport,
     type Endpoint,
     type ServerTransport,
 } from "@portable-devshell/shared";
@@ -147,8 +149,19 @@ export class ControlRuntime {
         };
         this.#toolCallHookUnregister.push(
             installContextTools(options.contexts.api, options.toolCalls, {
-                instances: options.instances,
+                environment: (name) =>
+                    createEnvironmentTransport(
+                        options.internalControl.endpoint,
+                        name,
+                    ),
+                leaseInstance: (name) => {
+                    const descriptor = options.instances.get(name);
+                    if (descriptor === undefined) throw new Error(name);
+                    return descriptor.lifecycle.acquireLease();
+                },
                 modelCommands,
+                process: (name) =>
+                    createProcessTransport(options.internalControl.endpoint, name),
             }),
         );
         this.#toolCallHookUnregister.push(

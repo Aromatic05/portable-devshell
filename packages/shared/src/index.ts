@@ -34,8 +34,11 @@ export { artifactErrorCodes, type ArtifactEventType, type ArtifactImageContent, 
 export type { WorkerArtifactApi } from "./execution/artifact/Api.js";
 export { type ArtifactTransport, createArtifactTransport } from "./execution/artifact/Transport.js";
 export { ArtifactViewModel } from "./execution/artifact/ViewModel.js";
+export { type WorkerAlertAdvice, type WorkerAlertsReadResult, type WorkerExtensionResourcePrepareInput, type WorkerExtensionResourcePrepareResult, type WorkerWorkspacePrepareResult } from "./execution/environment/Model.js";
+export { createEnvironmentTransport, ENVIRONMENT_PORT, type EnvironmentTransport } from "./execution/environment/Transport.js";
+export { createInstanceRuntimeTransport, INSTANCE_RUNTIME_PORT, type InstanceRuntimeTransport } from "./execution/instance/Transport.js";
 export { type InstanceLogEntry, isProcessEventType, type ProcessEvent } from "./execution/process/Event.js";
-export { type ConnectionState, type DaemonState, type EffectiveSecurityMode, type InstanceListEntry, type InstanceSnapshot, type ProcessStatus, type ReverseEnrollmentState, type ReverseInstanceStatus, type ReverseTransport } from "./execution/process/Model.js";
+export { type ConnectionState, type DaemonState, type EffectiveSecurityMode, type InstanceListEntry, type InstanceProcessEnvelope, type InstanceSnapshot, type InstanceWorkerInfo, type ProcessStatus, type ReverseEnrollmentState, type ReverseInstanceStatus, type ReverseTransport } from "./execution/process/Model.js";
 export { readInstanceSnapshot } from "./execution/process/Snapshot.js";
 export { createProcessTransport, PROCESS_PORT, type ProcessStartOptions, type ProcessTransport } from "./execution/process/Transport.js";
 export { ProcessViewModel } from "./execution/process/ViewModel.js";

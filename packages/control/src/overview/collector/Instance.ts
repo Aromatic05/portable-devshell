@@ -117,7 +117,6 @@ export class OperationalOverviewInstanceCollector {
         alerts.push(...createTodoAlerts(name, todos));
         const recent = createRecentFailureAlert(name, failure);
         if (recent.alert !== undefined) alerts.push(recent.alert);
-        const handshake = descriptor.worker.supervision.handshake;
         return {
             activity: selectOperationalActivity(records, this.options.activityLimit),
             alerts,
@@ -129,16 +128,9 @@ export class OperationalOverviewInstanceCollector {
                 pendingApprovals: pending.length,
                 provider: descriptor.config.provider,
                 snapshot,
-                ...(handshake === undefined
+                ...(snapshotEnvelope.worker === undefined
                     ? {}
-                    : {
-                          worker: {
-                              capabilities: handshake.capabilities,
-                              platform: handshake.platform,
-                              protocolVersion: handshake.protocolVersion,
-                              version: handshake.workerVersion,
-                          },
-                      }),
+                    : { worker: snapshotEnvelope.worker }),
             },
         };
     }

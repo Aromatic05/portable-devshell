@@ -1,6 +1,4 @@
-import type { InstanceRegistry } from "../instance/Api.js";
-import type { ContextBinding, ContextEnvironment, ContextEnvironmentBinding, ContextEnvironmentCleanup, ContextExternalBinding, ContextInstanceReference, ContextMaskedInstance, ContextQuery, ContextRecord, ContextResolveInput, ContextSnapshot, ContextValidationBinding, JsonValue, } from "@portable-devshell/shared";
-import type { Instance } from "@portable-devshell/core";
+import type { ContextBinding, ContextEnvironment, ContextEnvironmentBinding, ContextEnvironmentCleanup, ContextExternalBinding, ContextInstanceReference, ContextMaskedInstance, ContextQuery, ContextRecord, ContextResolveInput, ContextSnapshot, ContextValidationBinding, EnvironmentTransport, InstanceRuntimeTransport, JsonValue, ProcessTransport, } from "@portable-devshell/shared";
 
 export interface ContextCleanupLedgerPort {
     listCleanupPending(): Promise<ContextRecord[]>;
@@ -86,7 +84,15 @@ export interface ContextRegistryPort extends
 
 export interface ContextCleanupPort {
     reconcile(ctxId?: string): Promise<void>;
-    reconcileInstance(instance: string, target?: Instance): Promise<void>;
+    reconcileInstance(
+        instance: string,
+        target?: ContextInstanceCleanupPort,
+    ): Promise<void>;
+}
+
+export interface ContextInstanceCleanupPort {
+    releaseAlerts(workspace: string): Promise<void>;
+    releaseReference(reference: string): Promise<void>;
 }
 
 export interface PreparedEnvironmentFacts {
@@ -174,7 +180,10 @@ export interface ContextApi {
 
 export interface ContextRuntimeOptions {
     contextFile: string;
-    instances: InstanceRegistry;
+    environment(instance: string): EnvironmentTransport;
+    leaseInstance(instance: string): { release(): void };
+    process(instance: string): ProcessTransport;
+    runtime(instance: string): InstanceRuntimeTransport;
 }
 
 export interface ContextRuntime {

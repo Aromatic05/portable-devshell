@@ -24,20 +24,15 @@ export class ExtensionToolCallHistoryCapabilityControl implements ToolCallHistor
 
     async read(instance: string, query?: ToolCallHistoryQuery): Promise<readonly ToolCallHistoryRecord[]> {
         this.#assertAllowed();
-        const descriptor = this.options.instances.get(instance);
-        if (descriptor === undefined) throw new Error(`Instance ${instance} is unavailable.`);
-        const lease = descriptor.lifecycle.acquireLease();
-        try {
-            const boundedQuery = query === undefined ? undefined : {
-                ...query,
-                ...(query.limit === undefined ? {} : { limit: Math.max(1, Math.min(query.limit, 1_000)) }),
-                ...(query.maxBytes === undefined ? {} : { maxBytes: Math.max(1, Math.min(query.maxBytes, 8 * 1024 * 1024)) }),
-            };
-            const records = await this.options.readToolCalls(instance, boundedQuery as ToolCallQuery | undefined);
-            return this.options.toolCallDecorator === undefined
-                ? records
-                : await this.options.toolCallDecorator.decorate(instance, records);
-        } finally { lease.release(); }
+        const boundedQuery = query === undefined ? undefined : {
+            ...query,
+            ...(query.limit === undefined ? {} : { limit: Math.max(1, Math.min(query.limit, 1_000)) }),
+            ...(query.maxBytes === undefined ? {} : { maxBytes: Math.max(1, Math.min(query.maxBytes, 8 * 1024 * 1024)) }),
+        };
+        const records = await this.options.readToolCalls(instance, boundedQuery as ToolCallQuery | undefined);
+        return this.options.toolCallDecorator === undefined
+            ? records
+            : await this.options.toolCallDecorator.decorate(instance, records);
     }
 
     #assertAllowed(): void {

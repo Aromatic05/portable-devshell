@@ -1,8 +1,6 @@
-import type { Instance } from "@portable-devshell/core";
-import type { InstanceRegistry } from "../../instance/Api.js";
 import type { ToolCallRegistration } from "@portable-devshell/shared";
 import {
-    contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, type JsonValue, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";
+    contextErrorCodes, controlErrorCodes, createRemoteError, runtimeErrorCodes, type EnvironmentTransport, type JsonValue, type ProcessTransport, type ContextRecord, type ToolCallContext, type ToolCallExternalBinding, } from "@portable-devshell/shared";
 import type { ContextApi } from "../Api.js";
 import {
     contextToolDefinitions,
@@ -18,8 +16,10 @@ export function installContextTools(
     contexts: ContextApi,
     hooks: ToolCallRegistration,
     options: {
-        instances: InstanceRegistry;
+        environment(instance: string): EnvironmentTransport;
+        leaseInstance(instance: string): { release(): void };
         modelCommands?(instance: string): readonly string[];
+        process(instance: string): ProcessTransport;
     },
 ): () => void {
     const runtime = new ContextToolRuntime(contexts, options);
@@ -45,19 +45,25 @@ export function installContextTools(
 
 class ContextToolRuntime {
     readonly #contexts: ContextApi;
-    readonly #instances: InstanceRegistry;
+    readonly #environment: (instance: string) => EnvironmentTransport;
+    readonly #leaseInstance: (instance: string) => { release(): void };
     readonly #modelCommands: (instance: string) => readonly string[];
+    readonly #process: (instance: string) => ProcessTransport;
 
     constructor(
         contexts: ContextApi,
         options: {
-            instances: InstanceRegistry;
+            environment(instance: string): EnvironmentTransport;
+            leaseInstance(instance: string): { release(): void };
             modelCommands?(instance: string): readonly string[];
+            process(instance: string): ProcessTransport;
         },
     ) {
         this.#contexts = contexts;
-        this.#instances = options.instances;
+        this.#environment = options.environment;
+        this.#leaseInstance = options.leaseInstance;
         this.#modelCommands = options.modelCommands ?? (() => []);
+        this.#process = options.process;
     }
 
     async environmentInfo(
@@ -98,9 +104,9 @@ class ContextToolRuntime {
 
             const generation = this.#requireGeneration(context.instance);
             try {
-                const worker = generation.instance.worker;
-                const handshake = worker.supervision.handshake;
-                if (handshake === undefined)
+                const process = await this.#process(context.instance).snapshot();
+                const worker = process.worker;
+                if (worker === undefined)
                     throw createRemoteError({
                         code: runtimeErrorCodes.workerHandshakeFailed,
                         details: { instance: context.instance },
@@ -110,6 +116,7 @@ class ContextToolRuntime {
 
                 let skillsDirectory = "";
                 let alerts: Array<{ code: string; text: string }> = [];
+                const environment = this.#environment(context.instance);
                 const prepared = await this.#contexts.environment.prepareLocal(
                     record.ctxId,
                     context.instance,
@@ -125,13 +132,13 @@ class ContextToolRuntime {
                               }),
                         beforeCommit: async (facts) => {
                             skillsDirectory = (
-                                await worker.execution.environment.prepareExtensionResource({
+                                await environment.prepareExtensionResource({
                                     collection: "managed",
                                     extensionId: "skill",
                                 })
                             ).directory;
                             alertCleanupWorkspace = facts.workspace;
-                            alerts = (await worker.execution.environment.readAlerts(facts.workspace))
+                            alerts = (await environment.readAlerts(facts.workspace))
                                 .advice;
                         },
                         signal,
@@ -158,22 +165,22 @@ class ContextToolRuntime {
                     expiresAt: record.expiresAt,
                     instance: context.instance,
                     platform: {
-                        arch: handshake.platform.arch,
-                        ...(handshake.platform.distribution === undefined
+                        arch: worker.platform.arch,
+                        ...(worker.platform.distribution === undefined
                             ? {}
                             : {
-                                  distribution: handshake.platform.distribution,
+                                  distribution: worker.platform.distribution,
                               }),
-                        os: handshake.platform.os,
-                        ...(handshake.platform.packageManager === undefined
+                        os: worker.platform.os,
+                        ...(worker.platform.packageManager === undefined
                             ? {}
                             : {
                                   packageManager:
-                                      handshake.platform.packageManager,
+                                      worker.platform.packageManager,
                               }),
-                        ...(handshake.platform.shell === undefined
+                        ...(worker.platform.shell === undefined
                             ? {}
-                            : { shell: handshake.platform.shell.kind }),
+                            : { shell: worker.platform.shell.kind }),
                     },
                     ...(prepared.projectMemoryPresent !== false
                         ? {
@@ -391,18 +398,9 @@ class ContextToolRuntime {
         return context.principal ?? "local";
     }
 
-    #requireGeneration(instance: string): { instance: Instance; release(): void } {
-        const target = this.#instances.get(instance);
-        if (target === undefined) {
-            throw createRemoteError({
-                code: runtimeErrorCodes.instanceNotReady,
-                details: { instance },
-                message: `Instance ${instance} is unavailable.`,
-                retryable: false,
-            });
-        }
+    #requireGeneration(instance: string): { release(): void } {
         try {
-            return target.lifecycle.acquireLease();
+            return this.#leaseInstance(instance);
         } catch {
             throw createRemoteError({
                 code: runtimeErrorCodes.instanceNotReady,

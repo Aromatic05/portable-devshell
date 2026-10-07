@@ -6,6 +6,8 @@ import {
     Endpoint,
     connectControlChannel,
     createContextTransport,
+    createEnvironmentTransport,
+    createInstanceRuntimeTransport,
     createProcessTransport,
     createServerTransport,
     createToolTransport,
@@ -88,7 +90,18 @@ export class ControlRuntimeFactory {
             });
             const contexts = createContextRuntime({
                 contextFile: controlPaths.contextsFile,
-                instances: options.state.instances,
+                environment: (name) =>
+                    createEnvironmentTransport(internalEndpoint, name),
+                leaseInstance: (name) => {
+                    const descriptor = options.state.instances.get(name);
+                    if (descriptor === undefined)
+                        throw new Error(`Instance ${name} is unavailable.`);
+                    return descriptor.lifecycle.acquireLease();
+                },
+                process: (name) =>
+                    createProcessTransport(internalEndpoint, name),
+                runtime: (name) =>
+                    createInstanceRuntimeTransport(internalEndpoint, name),
             });
             const mcp = new McpControlModule({
                 artifact,
@@ -134,7 +147,18 @@ export class ControlRuntimeFactory {
                     }
                     await contexts.api.cleanup.reconcileInstance(
                         instance,
-                        descriptor,
+                        descriptor === undefined
+                            ? undefined
+                            : {
+                                  releaseAlerts: async (workspace) =>
+                                      await descriptor.worker.execution.environment.releaseAlerts(
+                                          workspace,
+                                      ),
+                                  releaseReference: async (reference) =>
+                                      await descriptor.worker.supervision.ownership.releaseReference(
+                                          reference,
+                                      ),
+                              },
                     );
                 },
                 instanceRegistry: options.state.instances,
@@ -269,7 +293,8 @@ export class ControlRuntimeFactory {
                         create: instanceCreate,
                         editor: instanceEditor,
                         extensionId,
-                        instances: options.state.instances,
+                        process: (name) =>
+                            createProcessTransport(internalEndpoint, name),
                     }),
                     observe: new ExtensionInstanceObserveCapabilityControl({
                         allowed: observeAllowed,
@@ -284,15 +309,9 @@ export class ControlRuntimeFactory {
                                     name: instance.name,
                                     provider: instance.provider,
                                 })),
+                        process: (name) =>
+                            createProcessTransport(internalEndpoint, name),
                         subscriptions: processSubscriptions,
-                        readLogs: async (name, query) => {
-                            const descriptor = options.state.instances.get(name);
-                            if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
-                            return await createProcessTransport(
-                                internalEndpoint,
-                                name,
-                            ).readLogs(query);
-                        },
                     }),
                 }),
                 instances: options.state.instances,

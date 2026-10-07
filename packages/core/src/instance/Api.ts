@@ -90,31 +90,13 @@ export interface WorkerToolsListResult {
     tools: WorkerToolDefinition[];
 }
 
-export interface WorkerWorkspacePrepareResult {
-    projectMemoryAgentFile: string;
-    projectMemoryDirectory: string;
-    projectMemoryPresent?: boolean;
-    temporaryDirectory: string;
-    workspace: string;
-}
-
-export interface WorkerExtensionResourcePrepareInput {
-    collection: string;
-    extensionId: string;
-}
-
-export interface WorkerExtensionResourcePrepareResult {
-    directory: string;
-}
-
-export interface WorkerAlertAdvice {
-    code: string;
-    text: string;
-}
-
-export interface WorkerAlertsReadResult {
-    advice: WorkerAlertAdvice[];
-}
+export type {
+    WorkerAlertAdvice,
+    WorkerAlertsReadResult,
+    WorkerExtensionResourcePrepareInput,
+    WorkerExtensionResourcePrepareResult,
+    WorkerWorkspacePrepareResult,
+} from "@portable-devshell/shared";
 
 export interface WorkerCommandSessionOpen {
     argv: readonly string[];

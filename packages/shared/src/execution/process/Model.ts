@@ -42,9 +42,35 @@ export interface InstanceSnapshot {
     status: ProcessStatus;
 }
 
+export interface InstanceWorkerInfo {
+    capabilities: {
+        cancel: boolean;
+        streaming: boolean;
+        tools: boolean;
+    };
+    platform: {
+        arch: string;
+        distribution?: {
+            id: string;
+            name: string;
+            version?: string;
+        };
+        os: string;
+        packageManager?: string;
+        shell?: {
+            executable: string;
+            kind: string;
+            version: string;
+        };
+    };
+    protocolVersion: string;
+    version: string;
+}
+
 export interface InstanceProcessEnvelope {
     lastSeq: number;
     snapshot: InstanceSnapshot;
+    worker?: InstanceWorkerInfo;
 }
 
 export interface InstanceListEntry {

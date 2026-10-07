@@ -1,23 +1,24 @@
-import type { InstanceRegistry } from "../../instance/Api.js";
-import type { ContextEnvironmentCleanup, ContextRecord, } from "@portable-devshell/shared";
+import type { ContextEnvironmentCleanup, ContextRecord, EnvironmentTransport, InstanceRuntimeTransport, } from "@portable-devshell/shared";
 
 import type {
-    ContextCleanupLedgerPort, ContextLifecycleCleanupPort, ContextRecordPort, } from "../Api.js";
-import type { Instance } from "@portable-devshell/core";
+    ContextCleanupLedgerPort, ContextInstanceCleanupPort, ContextLifecycleCleanupPort, ContextRecordPort, } from "../Api.js";
 
 export class ContextCleanupService implements ContextLifecycleCleanupPort {
     readonly #registry: ContextCleanupLedgerPort &
         Pick<ContextRecordPort, "list">;
-    readonly #instances: InstanceRegistry;
+    readonly #environment: (instance: string) => EnvironmentTransport;
+    readonly #runtime: (instance: string) => InstanceRuntimeTransport;
     readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: {
         contextRegistry: ContextCleanupLedgerPort &
             Pick<ContextRecordPort, "list">;
-        instances: InstanceRegistry;
+        environment(instance: string): EnvironmentTransport;
+        runtime(instance: string): InstanceRuntimeTransport;
     }) {
         this.#registry = options.contextRegistry;
-        this.#instances = options.instances;
+        this.#environment = options.environment;
+        this.#runtime = options.runtime;
     }
 
     async reconcile(ctxId?: string): Promise<void> {
@@ -28,7 +29,10 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         await this.#reconcile(ctxId);
     }
 
-    async reconcileInstance(instance: string, target?: Instance): Promise<void> {
+    async reconcileInstance(
+        instance: string,
+        target?: ContextInstanceCleanupPort,
+    ): Promise<void> {
         await this.#reconcile(undefined, instance, false, target);
     }
 
@@ -102,7 +106,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         ctxId?: string,
         instance?: string,
         serialized = false,
-        target?: Instance,
+        target?: ContextInstanceCleanupPort,
     ): Promise<void> {
         const pending = await this.#registry.listEnvironmentCleanup(ctxId);
         const scoped =
@@ -145,7 +149,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
     async #cleanup(
         ctxId: string,
         cleanup: ContextEnvironmentCleanup,
-        target?: Instance,
+        target?: ContextInstanceCleanupPort,
     ): Promise<boolean> {
         const contexts = await this.#registry.list();
         const now = Date.now();
@@ -163,11 +167,8 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                     ),
             );
             if (stillOwned) return true;
-            const instance =
-                target?.config.name === cleanup.instance
-                    ? target
-                    : this.#instances.get(cleanup.instance);
-            await instance?.worker.supervision.ownership.releaseReference(ctxId);
+            if (target !== undefined) await target.releaseReference(ctxId);
+            else await this.#runtime(cleanup.instance).releaseReference(ctxId);
             return true;
         }
 
@@ -196,30 +197,8 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         if (cleanup.workspace === undefined)
             throw new Error("Alert cleanup requires a workspace.");
 
-        const explicit = target?.config.name === cleanup.instance ? target : undefined;
-        if (explicit !== undefined) {
-            await explicit.worker.execution.environment.releaseAlerts(cleanup.workspace);
-            return true;
-        }
-
-        const instance = this.#instances.get(cleanup.instance);
-        if (instance === undefined)
-            throw new Error(
-                `Instance ${cleanup.instance} is unavailable for alert cleanup.`,
-            );
-        let lease: { instance: Instance; release(): void };
-        try {
-            lease = instance.lifecycle.acquireLease();
-        } catch {
-            throw new Error(
-                `Instance ${cleanup.instance} is unavailable for alert cleanup.`,
-            );
-        }
-        try {
-            await lease.instance.worker.execution.environment.releaseAlerts(cleanup.workspace);
-        } finally {
-            lease.release();
-        }
+        if (target !== undefined) await target.releaseAlerts(cleanup.workspace);
+        else await this.#environment(cleanup.instance).releaseAlerts(cleanup.workspace);
         return true;
     }
 

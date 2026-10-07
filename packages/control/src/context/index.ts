@@ -16,17 +16,22 @@ export function createContextRuntime(
     const registry = new ContextRegistry({ filePath: options.contextFile });
     const cleanup = new ContextCleanupService({
         contextRegistry: registry,
-        instances: options.instances,
+        environment: options.environment,
+        runtime: options.runtime,
     });
     const environment = new ContextEnvironmentService({
         contextRegistry: registry,
         cleanup,
-        instances: options.instances,
+        environment: options.environment,
+        leaseInstance: options.leaseInstance,
+        runtime: options.runtime,
     });
     const service = new ContextService({
         cleanup,
         environment,
-        instances: options.instances,
+        environmentTransport: options.environment,
+        leaseInstance: options.leaseInstance,
+        process: options.process,
         registry,
     });
     return {

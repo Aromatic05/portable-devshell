@@ -1,25 +1,29 @@
-import type { Instance } from "@portable-devshell/core";
-import type { InstanceRegistry } from "../../instance/Api.js";
 import type { ContextLifecycleCleanupPort, ContextRecordSourcePort, } from "../Api.js";
-import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord } from "@portable-devshell/shared";
+import { contextErrorCodes, createRemoteError, type ContextResolveInput, type ContextRecord, type EnvironmentTransport, type ProcessTransport } from "@portable-devshell/shared";
 import type { ContextEnvironmentPort } from "../Api.js";
 
 export class ContextService {
     readonly registry: ContextRecordSourcePort;
     readonly environment: ContextEnvironmentPort;
     readonly cleanup: ContextLifecycleCleanupPort;
-    readonly #instances: InstanceRegistry;
+    readonly #environment: (instance: string) => EnvironmentTransport;
+    readonly #leaseInstance: (instance: string) => { release(): void };
+    readonly #process: (instance: string) => ProcessTransport;
 
     constructor(options: {
         registry: ContextRecordSourcePort;
         environment: ContextEnvironmentPort;
         cleanup: ContextLifecycleCleanupPort;
-        instances: InstanceRegistry;
+        environmentTransport(instance: string): EnvironmentTransport;
+        leaseInstance(instance: string): { release(): void };
+        process(instance: string): ProcessTransport;
     }) {
         this.registry = options.registry;
         this.environment = options.environment;
         this.cleanup = options.cleanup;
-        this.#instances = options.instances;
+        this.#environment = options.environmentTransport;
+        this.#leaseInstance = options.leaseInstance;
+        this.#process = options.process;
     }
 
     async initialize(): Promise<void> {
@@ -93,18 +97,20 @@ export class ContextService {
         const record = await this.registry.renew(ctxId);
         for (const environment of record.environments) {
             if (environment.workspace === undefined) continue;
-            const instance = this.#instances.get(environment.instance);
-            if (instance === undefined) continue;
-            let lease: { instance: Instance; release(): void };
+            let lease: { release(): void };
             try {
-                lease = instance.lifecycle.acquireLease();
+                lease = this.#leaseInstance(environment.instance);
             } catch {
                 continue;
             }
             try {
-                const worker = lease.instance.worker;
-                if (worker.supervision.snapshot().ready === true)
-                    await worker.execution.environment.touchAlerts(environment.workspace);
+                if (
+                    (await this.#process(environment.instance).snapshot()).snapshot
+                        .ready === true
+                )
+                    await this.#environment(environment.instance).touchAlerts(
+                        environment.workspace,
+                    );
             } finally {
                 lease.release();
             }

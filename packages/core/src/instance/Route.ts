@@ -4,6 +4,8 @@ import {
     createRemoteError,
     controlErrorCodes,
     createToolRouteModule,
+    ENVIRONMENT_PORT,
+    INSTANCE_RUNTIME_PORT,
     isProcessEventType,
     runtimeErrorCodes,
     type ProcessEvent,
@@ -21,17 +23,18 @@ import { createTerminalRouteModule } from "../terminal/Route.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { Instance } from "./model/Instance.js";
+import type { InstanceState } from "./model/State.js";
 
 export interface InstanceRouteOptions {
     descriptor: Instance;
     extensionPorts?: readonly ControlPortDefinition[];
+    state: InstanceState;
 }
 
 export function createInstanceHost(
     options: InstanceRouteOptions,
 ): ControlHostDefinition {
-    const { descriptor } = options;
-    const { state } = descriptor;
+    const { descriptor, state } = options;
     const events = {
         cursor: () => descriptor.worker.supervision.snapshot().lastSeq,
         subscribe: (fromSeq?: number) =>
@@ -39,7 +42,9 @@ export function createInstanceHost(
     };
     const name = descriptor.config.name;
     const ports = mergeControlPortsByName([
-        createProcessRouteModule(descriptor, state.subscriptions),
+        createInstanceRuntimeRouteModule(descriptor),
+        createEnvironmentRouteModule(descriptor),
+        createProcessRouteModule(descriptor, state, state.subscriptions),
         createApprovalRouteModule(
             { approval: state.approval.api, events, name },
             state.subscriptions,
@@ -80,6 +85,78 @@ export function createInstanceHost(
         host: asInstanceName(name),
         ports: fenceGeneration(ports, descriptor),
     };
+}
+
+function createInstanceRuntimeRouteModule(
+    instance: Instance,
+): ControlPortDefinition {
+    return routeModule(INSTANCE_RUNTIME_PORT, {
+        acquireReference: async (request) =>
+            (await instance.worker.supervision.ownership.acquireReference(
+                readString(request.payload, "reference", "instance.acquireReference"),
+            )) as unknown as JsonValue,
+        releaseReference: async (request) => {
+            await instance.worker.supervision.ownership.releaseReference(
+                readString(request.payload, "reference", "instance.releaseReference"),
+            );
+            return {};
+        },
+    });
+}
+
+function createEnvironmentRouteModule(instance: Instance): ControlPortDefinition {
+    const environment = instance.worker.execution.environment;
+    return routeModule(ENVIRONMENT_PORT, {
+        prepareExtensionResource: async (request) =>
+            (await environment.prepareExtensionResource({
+                collection: readString(
+                    request.payload,
+                    "collection",
+                    "environment.prepareExtensionResource",
+                ),
+                extensionId: readString(
+                    request.payload,
+                    "extensionId",
+                    "environment.prepareExtensionResource",
+                ),
+            })) as unknown as JsonValue,
+        prepareWorkspace: async (request) =>
+            (await environment.prepareWorkspace(
+                readString(
+                    request.payload,
+                    "workspace",
+                    "environment.prepareWorkspace",
+                ),
+            )) as unknown as JsonValue,
+        readAlerts: async (request) =>
+            (await environment.readAlerts(
+                readString(request.payload, "workspace", "environment.readAlerts"),
+            )) as unknown as JsonValue,
+        releaseAlerts: async (request) => {
+            await environment.releaseAlerts(
+                readString(
+                    request.payload,
+                    "workspace",
+                    "environment.releaseAlerts",
+                ),
+            );
+            return {};
+        },
+        touchAlerts: async (request) =>
+            (await environment.touchAlerts(
+                readString(request.payload, "workspace", "environment.touchAlerts"),
+            )) as unknown as JsonValue,
+        touchTemporaryDirectory: async (request) => {
+            await environment.touchTemporaryDirectory(
+                readString(
+                    request.payload,
+                    "path",
+                    "environment.touchTemporaryDirectory",
+                ),
+            );
+            return {};
+        },
+    });
 }
 
 function fenceGeneration(
@@ -123,6 +200,7 @@ function fenceGeneration(
 
 export function createProcessRouteModule(
     instance: Instance,
+    state: InstanceState,
     subscriptions: ProcessSubscriptionManager,
 ): ControlPortDefinition {
     return routeModule(
@@ -133,6 +211,7 @@ export function createProcessRouteModule(
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
+                    ...workerInfo(instance),
                 } as unknown as JsonValue;
             },
             refresh: async () => {
@@ -141,10 +220,11 @@ export function createProcessRouteModule(
                 return {
                     lastSeq: snapshot.lastSeq,
                     snapshot,
+                    ...workerInfo(instance),
                 } as unknown as JsonValue;
             },
             readLogs: async (request) =>
-                (await instance.state.tools.readLogs(
+                (await state.tools.readLogs(
                     request.payload as never,
                 )) as unknown as JsonValue,
             stop: async () => {
@@ -205,6 +285,20 @@ export function createProcessRouteModule(
     );
 }
 
+function workerInfo(instance: Instance) {
+    const handshake = instance.worker.supervision.handshake;
+    return handshake === undefined
+        ? {}
+        : {
+              worker: {
+                  capabilities: handshake.capabilities,
+                  platform: handshake.platform,
+                  protocolVersion: handshake.protocolVersion,
+                  version: handshake.workerVersion,
+              },
+          };
+}
+
 export function readProcessSubscriptionFromSeq(payload?: JsonValue): number {
     if (
         !isRecord(payload) ||
@@ -223,6 +317,16 @@ function isRecord(
     value: JsonValue | undefined,
 ): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(
+    payload: JsonValue | undefined,
+    field: string,
+    operation: string,
+): string {
+    if (!isRecord(payload) || typeof payload[field] !== "string")
+        throw invalid(`${operation} requires string ${field}.`);
+    return payload[field];
 }
 
 function invalid(message: string) {

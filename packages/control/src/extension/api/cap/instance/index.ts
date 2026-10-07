@@ -19,6 +19,7 @@ import {
     type InstanceCreateSummary,
     type InstanceLogEntry,
     type JsonValue,
+    type ProcessTransport,
     runtimeErrorCodes,
     STREAM_GAP_CODE,
 } from "@portable-devshell/shared";
@@ -50,7 +51,7 @@ export interface ExtensionInstanceObserveCapabilityControlOptions {
     extensionId: string;
     instances: InstanceRegistry;
     listConfigured(): readonly ExtensionConfiguredInstance[];
-    readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly InstanceLogEntry[]>;
+    process(name: string): ProcessTransport;
     subscriptions: ProcessSubscriptionManager;
 }
 
@@ -60,42 +61,36 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
     readonly #listConfigured: () => readonly ExtensionConfiguredInstance[];
+    readonly #process: (name: string) => ProcessTransport;
     readonly #subscriptions: ProcessSubscriptionManager;
-    readonly #readLogs: ExtensionInstanceObserveCapabilityControlOptions["readLogs"];
 
     constructor(options: ExtensionInstanceObserveCapabilityControlOptions) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
         this.#listConfigured = options.listConfigured;
+        this.#process = options.process;
         this.#subscriptions = options.subscriptions;
-        this.#readLogs = options.readLogs;
     }
 
     async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
-        try { return toSnapshot(lease.instance.worker.supervision.snapshot()); }
-        finally { lease.release(); }
+        return toSnapshot((await this.#process(name).snapshot()).snapshot);
     }
 
     async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
-        try { return toSnapshot(await lease.instance.worker.supervision.recovery.refreshStatus()); }
-        finally { lease.release(); }
+        return toSnapshot((await this.#process(name).refresh()).snapshot);
     }
 
     async readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
-        try { return (await this.#readLogs(name, query)).map(toLogEntry); }
-        finally { lease.release(); }
+        return (await this.#process(name).readLogs(query)).map(toLogEntry);
     }
 
     async list(): Promise<readonly ExtensionInstanceRecord[]> {
         this.#assertAllowed();
-        return this.#listConfigured().map((configured) => {
+        return await Promise.all(this.#listConfigured().map(async (configured) => {
             const descriptor = configured.enabled
                 ? this.#instances.get(configured.name)
                 : undefined;
@@ -106,9 +101,14 @@ export class ExtensionInstanceObserveCapabilityControl implements ExtensionInsta
                 provider: configured.provider,
                 ...(descriptor === undefined
                     ? {}
-                    : { snapshot: toSnapshot(descriptor.worker.supervision.snapshot()) }),
+                    : {
+                          snapshot: toSnapshot(
+                              (await this.#process(configured.name).snapshot())
+                                  .snapshot,
+                          ),
+                      }),
             };
-        });
+        }));
     }
 
     async watchEvents(name: string, watch: ExtensionInstanceEventWatch): Promise<void> {
@@ -167,7 +167,7 @@ export interface ExtensionInstanceManageCapabilityControlOptions {
     create: ExtensionInstanceCreatePort;
     editor: ExtensionInstanceEditorPort;
     extensionId: string;
-    instances: InstanceRegistry;
+    process(name: string): ProcessTransport;
 }
 
 /** Instance lifecycle/configuration authority, intentionally separate from observation. */
@@ -176,14 +176,14 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
     readonly #create: ExtensionInstanceCreatePort;
     readonly #editor: ExtensionInstanceEditorPort;
     readonly #extensionId: string;
-    readonly #instances: InstanceRegistry;
+    readonly #process: (name: string) => ProcessTransport;
 
     constructor(options: ExtensionInstanceManageCapabilityControlOptions) {
         this.#allowed = options.allowed;
         this.#create = options.create;
         this.#editor = options.editor;
         this.#extensionId = options.extensionId;
-        this.#instances = options.instances;
+        this.#process = options.process;
     }
 
     async createSchema(): Promise<ExtensionJsonValue> {
@@ -214,33 +214,13 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
 
     async start(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const descriptor = this.#require(name);
-        if (!descriptor.config.enabled) {
-            throw createRemoteError({
-                code: runtimeErrorCodes.instanceConflict,
-                details: { instance: name, operation: "start" },
-                message: `Instance ${name} is disabled.`,
-                retryable: false,
-            });
-        }
-        const lease = descriptor.lifecycle.acquireLease();
-        try {
-            const snapshot = await lease.instance.worker.supervision.lifecycle.start();
-            lease.instance.worker.supervision.ownership.markOwned();
-            return toSnapshot(snapshot);
-        }
-        finally { lease.release(); }
+        const started = await this.#process(name).start();
+        return toSnapshot(await started.snapshot);
     }
 
     async stop(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
-        const lease = this.#require(name).lifecycle.acquireLease();
-        try {
-            const snapshot = await lease.instance.worker.supervision.lifecycle.stop();
-            lease.instance.worker.supervision.ownership.clearOwned();
-            return toSnapshot(snapshot);
-        }
-        finally { lease.release(); }
+        return toSnapshot(await this.#process(name).stop());
     }
 
     async disable(name: string): Promise<void> {
@@ -251,10 +231,6 @@ export class ExtensionInstanceManageCapabilityControl implements ExtensionInstan
     async delete(name: string): Promise<void> {
         this.#assertAllowed();
         await this.#editor.deleteInstance({ instanceName: requireName(name) });
-    }
-
-    #require(name: string) {
-        return requireInstance(this.#instances, name);
     }
 
     #assertAllowed(): void {

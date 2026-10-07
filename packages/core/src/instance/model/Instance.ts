@@ -105,16 +105,8 @@ export class Instance {
         return this.#worker;
     }
 
-    get state(): InstanceState {
-        return this.#state;
-    }
-
     get lifecycle(): InstanceLifecycle {
         return this.#lifecycle;
-    }
-
-    get paths(): InstancePaths {
-        return this.#paths;
     }
 
     update(instance: ControlInstanceConfig): void {
@@ -123,7 +115,11 @@ export class Instance {
     }
 
     host(extensionPorts: readonly ControlPortDefinition[] = []): ControlHostDefinition {
-        return createInstanceHost({ descriptor: this, extensionPorts });
+        return createInstanceHost({
+            descriptor: this,
+            extensionPorts,
+            state: this.#state,
+        });
     }
 
     connectionClosed(connectionId: string): void {
