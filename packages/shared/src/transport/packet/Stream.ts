@@ -1,5 +1,5 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
-import type { Address } from "../endpoint/Address.js";
+import { createTransportId, type Address } from "../endpoint/Address.js";
 import type { Message } from "./Packet.js";
 
 export interface StreamError {
@@ -61,7 +61,7 @@ export class Stream {
         if (!(this.#target instanceof Connection))
             throw new Error("Stream open requires a Connection.");
         const connection = this.#target;
-        const id = crypto.randomUUID();
+        const id = createTransportId();
         const stream = this.#create(
             id,
             connection.remote,

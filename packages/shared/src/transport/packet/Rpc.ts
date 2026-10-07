@@ -1,5 +1,5 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
-import type { Address } from "../endpoint/Address.js";
+import { createTransportId, type Address } from "../endpoint/Address.js";
 import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../Error.js";
 import type { Message } from "./Packet.js";
 
@@ -87,7 +87,7 @@ export class Rpc {
             throw new Error("RPC request requires a Connection.");
         const connection = this.#target;
         signal?.throwIfAborted();
-        const id = crypto.randomUUID();
+        const id = createTransportId();
         const response = new Promise<Message | undefined>((resolve, reject) =>
             this.#pending.set(id, { peer: connection.remote, reject, resolve }),
         );

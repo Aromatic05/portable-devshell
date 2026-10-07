@@ -10,6 +10,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 import { FRAME_MAX_DATA_SIZE } from "@portable-devshell/shared/transport/frame";
+import { createTransportId } from "../../../src/transport/endpoint/Address.ts";
 
 class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -389,6 +390,48 @@ test("Rpc handler does not reply after its peer disconnects", async () => {
     endpoint.close();
 });
 
+
+test("createTransportId falls back to getRandomValues when randomUUID is unavailable", () => {
+    const arrays: ArrayBufferView[] = [];
+    const source = {
+        getRandomValues<T extends ArrayBufferView>(array: T): T {
+            arrays.push(array);
+            const bytes = array as unknown as Uint8Array;
+            for (let index = 0; index < bytes.length; index += 1)
+                bytes[index] = index;
+            return array;
+        },
+    };
+
+    const id = createTransportId(source);
+
+    assert.equal(arrays.length, 1);
+    assert.ok(arrays[0] instanceof Uint8Array);
+    assert.equal((arrays[0] as Uint8Array).length, 16);
+    assert.equal(id, "00010203-0405-4607-8809-0a0b0c0d0e0f");
+    assert.equal(id[14], "4");
+    assert.match(id[19]!, /[89ab]/u);
+});
+
+test("createTransportId prefers randomUUID when it is available", () => {
+    let fallbacks = 0;
+    const id = createTransportId({
+        randomUUID: () => "random-uuid",
+        getRandomValues<T extends ArrayBufferView>(array: T): T {
+            fallbacks += 1;
+            return array;
+        },
+    });
+
+    assert.equal(id, "random-uuid");
+    assert.equal(fallbacks, 0);
+});
+
+test("createTransportId fails closed without a secure random source", () => {
+    const error = /cryptographically secure random source/u;
+    assert.throws(() => createTransportId(null), error);
+    assert.throws(() => createTransportId({}), error);
+});
 
 async function echo(stream: MessageStream): Promise<void> {
     const data = await stream.read();
