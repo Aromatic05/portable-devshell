@@ -458,6 +458,11 @@ export class ControlFactory {
                 toolCalls: state.toolCalls,
                 web,
             });
+            instanceEditor.registerInstanceGenerationRetirement(
+                async (instance) => {
+                    await composedServer.retireInstanceGeneration(instance.name);
+                },
+            );
             server = composedServer;
             return { server: composedServer, state };
         } catch (error) {

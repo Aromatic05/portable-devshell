@@ -65,6 +65,7 @@ export interface ControlServerOptions {
 
 export class ControlServer {
     readonly #config: ControlServerConfig;
+    readonly #extensionRoutes: ControlExtensionRouteService;
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
@@ -83,7 +84,7 @@ export class ControlServer {
         this.#reverseCredentials = options.reverse.credentials;
         this.#reverseIngress = options.reverse.ingress;
 
-        const extensionRoutes = new ControlExtensionRouteService(options.extensions);
+        this.#extensionRoutes = new ControlExtensionRouteService(options.extensions);
         this.#routes = new ControlRouteRegistry({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(options.extensions, {
@@ -97,7 +98,7 @@ export class ControlServer {
             controlPorts: [createContextRouteModule(options.contexts.api)],
             debug: options.debug,
             extension: options.extensions.control,
-            extensionRoutes,
+            extensionRoutes: this.#extensionRoutes,
             instanceCreate: options.instanceCreate,
             instanceEditor: options.instanceEditor,
             instanceChanges: options.instanceChanges,
@@ -119,12 +120,6 @@ export class ControlServer {
             webApplications: new WebApplicationCatalog(options.extensions),
             webPages: new WebExtensionPageService(options.extensions),
         });
-        options.instanceEditor.registerInstanceGenerationRetirement(
-            async (instance) => {
-                await extensionRoutes.retireInstance(instance.name);
-            },
-        );
-
         this.#socketListener = new ControlSocketListener({
             socketPath: options.socketPath,
         });
@@ -153,6 +148,10 @@ export class ControlServer {
         changes: ConfigRuntimeChangeSet,
     ): Promise<boolean> {
         return await this.#config.apply(previous, next, changes);
+    }
+
+    async retireInstanceGeneration(instance: string): Promise<void> {
+        await this.#extensionRoutes.retireInstance(instance);
     }
 
     async prepare(): Promise<void> {
