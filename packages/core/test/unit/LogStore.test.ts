@@ -14,7 +14,7 @@ import { AuditDatabase, AUDIT_DATABASE_SCHEMA_VERSION } from "../../src/audit/da
 import { AuditEventStore } from "../../src/audit/event/index.ts";
 import type { InstanceLogEntry } from "../../src/audit/Api.ts";
 import { LogStoreInstance } from "../../src/audit/log/index.ts";
-import { InstancePaths } from "../../src/instance/Paths.ts";
+import { InstancePaths } from "../../src/instance/model/Paths.ts";
 import { InstanceEventBuffer } from "../../src/instance/runtime/supervision/Event.ts";
 import { ToolCallHistory } from "../../src/toolcall/execution/record/History.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";

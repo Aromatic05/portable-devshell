@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { WORKER_PROTOCOL_VERSION, WorkerProtocolClient } from "../../../../src/instance/transport/packet/Client.ts";
+import { WorkerProtocolClient } from "../../../../src/instance/transport/packet/Client.ts";
 import {
     Endpoint,
     Rpc,
     StreamChannel,
+    WORKER_PROTOCOL_VERSION,
     type Channel,
 } from "@portable-devshell/shared";
 

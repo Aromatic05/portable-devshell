@@ -6,7 +6,7 @@ import test, { type TestContext } from "node:test";
 import { Endpoint, Rpc, Stream, StreamChannel, asInstanceName, runtimeErrorCodes, type JsonValue } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { createAuditRuntime } from "../../../src/audit/index.ts";
-import { createWorkerArtifact } from "../../../src/instance/transport/packet/Artifact.ts";
+import { createWorkerArtifact } from "../../../src/instance/runtime/execution/capability/artifact/Artifact.ts";
 import { WorkerProtocolClient } from "../../../src/instance/transport/packet/Client.ts";
 import { TransportConnection } from "../../../src/instance/transport/endpoint/Connection.ts";
 import { resolveWorkerInstanceConfig } from "../../../src/instance/runtime/provision/Config.ts";
@@ -83,12 +83,14 @@ test("worker rejects artifact calls before opening a port when it is not ready",
     const endpoint = new Endpoint({ host: "control", connectChannel: async () => { connections += 1; throw new Error("must not connect"); } });
     const transportConnection = new TransportConnection(async () => { throw new Error("must not connect"); });
     const worker = new WorkerInstance({
+        admission: { active: () => true, enabled: () => true },
         config: resolveWorkerInstanceConfig({ managementMode: "selfManaged", name, transportConnection }),
         endpoint, events: new InstanceEventBuffer(name, 16), protocolClient: new WorkerProtocolClient(endpoint, "alpha-worker"),
+        onReadyChanged: async () => {},
         stateMachine: new InstanceStateMachine(name), transportConnection,
     });
-    t.after(() => worker.close());
-    await assert.rejects(worker.artifact.openArtifactPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }), { code: runtimeErrorCodes.instanceNotReady });
+    t.after(() => worker.supervision.close());
+    await assert.rejects(worker.execution.artifact.openArtifactPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }), { code: runtimeErrorCodes.instanceNotReady });
     assert.equal(connections, 0);
 });
 

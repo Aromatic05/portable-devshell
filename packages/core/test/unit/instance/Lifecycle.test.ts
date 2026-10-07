@@ -3,10 +3,34 @@ import test from "node:test";
 
 import { runtimeErrorCodes } from "@portable-devshell/shared";
 
-import { Instance } from "../../../src/instance/Instance.ts";
+import { Instance } from "../../../src/instance/model/Instance.ts";
 import { ReverseExecution } from "../../../src/instance/runtime/execution/provider/Reverse.ts";
 
-test("self-managed worker execution rejects Control start and stop", async () => {
+function createInstance(
+    name: string,
+    state: {
+        prepareRetirement?: () => Promise<void>;
+        retire?: () => Promise<void>;
+    } = {},
+): Instance {
+    return new Instance({
+        config: { name } as never,
+        eventLog: { async flush() {} } as never,
+        state: {
+            async close() {},
+            async prepareRetirement() {
+                await state.prepareRetirement?.();
+            },
+            async retire() {
+                await state.retire?.();
+            },
+        } as never,
+        subscriptions: { close() {} } as never,
+        worker: {} as never,
+    });
+}
+
+test("self-managed worker execution rejects controller start and stop", () => {
     const execution = new ReverseExecution({
         applyStateUpdate: async () => ({}) as never,
         connection: {} as never,
@@ -28,55 +52,51 @@ test("self-managed worker execution rejects Control start and stop", async () =>
     }
 });
 
-test("instance retirement fences synchronously and invokes beforeDrain once", async () => {
-    const instance = new Instance({
-        enabled: true,
-        mcpEnabled: false,
-        mcpPath: "/reverse-mac/mcp",
-        modelExtensions: [],
-        name: "reverse-mac",
-        provider: "local",
-        worker: {} as never,
+test("instance retirement blocks new leases and drains existing work", async () => {
+    const events: string[] = [];
+    const instance = createInstance("reverse-mac", {
+        prepareRetirement: async () => {
+            events.push("prepare");
+        },
+        retire: async () => {
+            events.push("retire");
+        },
     });
-    let callbacks = 0;
-    let reentrantRetirement: Promise<void> | undefined;
-    const retirement = instance.retire(async () => {
-        callbacks += 1;
-        reentrantRetirement = instance.retire(async () => {
-            callbacks += 1;
-        });
-    });
+    const lease = instance.lifecycle.acquireLease();
+    const retirement = instance.retire();
 
-    assert.equal(instance.retired, true);
+    assert.equal(instance.lifecycle.active, false);
+    assert.equal(instance.lifecycle.phase, "retiring");
+    assert.strictEqual(instance.retire(), retirement);
+    assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
+
+    await Promise.resolve();
+    assert.deepEqual(events, ["prepare"]);
+    lease.release();
     await retirement;
 
-    assert.equal(callbacks, 1);
-    assert.strictEqual(reentrantRetirement, retirement);
+    assert.deepEqual(events, ["prepare", "retire"]);
+    assert.equal(instance.lifecycle.retired, true);
+    assert.equal(instance.lifecycle.phase, "retired");
 });
 
-test("failed instance retirement can be retried without reopening admission", async () => {
-    const instance = new Instance({
-        enabled: true,
-        mcpEnabled: false,
-        mcpPath: "/retry/mcp",
-        modelExtensions: [],
-        name: "retry",
-        provider: "local",
-        worker: {} as never,
-    });
+test("failed instance retirement can retry without reopening admission", async () => {
     const failure = new Error("approval retirement failed once");
-    let calls = 0;
-    const failOnce = async () => {
-        calls += 1;
-        if (calls === 1) throw failure;
-    };
+    let prepareCalls = 0;
+    const instance = createInstance("retry", {
+        prepareRetirement: async () => {
+            prepareCalls += 1;
+            if (prepareCalls === 1) throw failure;
+        },
+    });
 
-    await assert.rejects(instance.retire(failOnce), failure);
-    assert.equal(instance.retired, true);
-    assert.throws(() => instance.acquireLease(), /retired/u);
+    await assert.rejects(instance.retire(), failure);
+    assert.equal(instance.lifecycle.phase, "retiring");
+    assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
 
-    const retry = instance.retire(failOnce);
+    const retry = instance.retire();
     await retry;
-    assert.strictEqual(instance.retire(failOnce), retry);
-    assert.equal(calls, 2);
+    assert.strictEqual(instance.retire(), retry);
+    assert.equal(instance.lifecycle.phase, "retired");
+    assert.equal(prepareCalls, 2);
 });

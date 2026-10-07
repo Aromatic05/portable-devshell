@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { InstanceEventBuffer } from "../../../../src/instance/runtime/supervision/Event.ts";
 import { InstanceStateMachine } from "../../../../src/instance/runtime/supervision/State.ts";
 import { WorkerInstance } from "../../../../src/instance/runtime/index.ts";
-import { WORKER_PROTOCOL_VERSION } from "../../../../src/instance/transport/packet/Client.ts";
+import { WorkerProtocolClient } from "../../../../src/instance/transport/packet/Client.ts";
 import { resolveWorkerInstanceConfig } from "../../../../src/instance/runtime/provision/Config.ts";
 import { TransportConnection } from "../../../../src/instance/transport/endpoint/Connection.ts";
 import {
     Endpoint,
+    Rpc,
+    StreamChannel,
+    WORKER_PROTOCOL_VERSION,
     asInstanceName,
     createRemoteError,
+    type Channel,
 } from "@portable-devshell/shared";
 
 test("WorkerInstance wraps start stop and status command failures with diagnostic details", async () => {
@@ -31,7 +36,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
         }),
     });
 
-    await assert.rejects(startFailure.start(), (error: unknown) => {
+    await assert.rejects(startFailure.supervision.lifecycle.start(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal(
             (error as { code?: string }).code,
@@ -74,7 +79,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
         }),
     });
 
-    await assert.rejects(stopFailure.stop(), (error: unknown) => {
+    await assert.rejects(stopFailure.supervision.lifecycle.stop(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal(
             (error as { code?: string }).code,
@@ -112,7 +117,7 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
         }),
     });
 
-    await assert.rejects(statusFailure.refreshStatus(), (error: unknown) => {
+    await assert.rejects(statusFailure.supervision.recovery.refreshStatus(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
         assert.equal(
             (error as { code?: string }).code,
@@ -134,9 +139,16 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
     });
 });
 
-test("WorkerInstance preserves protocol tool-list failures", async () => {
-    const instance = createInstance({
-        listTools: async () => {
+test("WorkerProtocolClient preserves tool-list failures", async () => {
+    const pair = channelPair();
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => pair.client,
+    });
+    const server = new Endpoint({ host: "worker" });
+    const accepting = server.accept(pair.server);
+    const tool = new Rpc(server.bind("tool"), {
+        "tools.list": () => {
             throw createRemoteError({
                 code: "core.toolSchemaUnavailable",
                 details: { toolName: "bash_run" },
@@ -145,24 +157,53 @@ test("WorkerInstance preserves protocol tool-list failures", async () => {
             });
         },
     });
+    await client.connect("worker", "tool");
+    await accepting;
 
-    await assert.rejects(instance.readWorkerTools(), (error: unknown) => {
-        assert.ok(typeof error === "object" && error !== null);
-        assert.equal(
-            (error as { code?: string }).code,
-            "core.toolSchemaUnavailable",
-        );
-        assert.equal(
-            (error as { message?: string }).message,
-            "catalog-error-fixture",
-        );
-        return true;
-    });
+    try {
+        const worker = new WorkerProtocolClient(client, "worker");
+        await assert.rejects(worker.listTools(), (error: unknown) => {
+            assert.ok(typeof error === "object" && error !== null);
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.toolSchemaUnavailable",
+            );
+            assert.equal(
+                (error as { message?: string }).message,
+                "catalog-error-fixture",
+            );
+            return true;
+        });
+    } finally {
+        tool.close();
+        client.close();
+        server.close();
+    }
 });
+
+function channelPair(): { client: Channel; server: Channel } {
+    const leftToRight = new PassThrough();
+    const rightToLeft = new PassThrough();
+    let closed = false;
+    let left: StreamChannel;
+    let right: StreamChannel;
+    const close = (error?: Error) => {
+        if (closed) return;
+        closed = true;
+        left.close(error);
+        right.close(error);
+    };
+    left = new StreamChannel(rightToLeft, leftToRight, {
+        closeTransport: close,
+    });
+    right = new StreamChannel(leftToRight, rightToLeft, {
+        closeTransport: close,
+    });
+    return { client: left, server: right };
+}
 
 function createInstance(
     commands: Partial<{
-        listTools: () => Promise<{ tools: [] }>;
         start: () => Promise<{
             details?: Record<string, unknown>;
             exitCode: number | null;
@@ -189,6 +230,7 @@ function createInstance(
         throw new Error("not used by command failure tests");
     });
     return new WorkerInstance({
+        admission: { active: () => true, enabled: () => true },
         commandClient: {
             start:
                 commands.start ??
@@ -219,10 +261,10 @@ function createInstance(
                 protocolVersion: WORKER_PROTOCOL_VERSION,
                 workerVersion: "0.0.0",
             }),
-            listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true }),
         } as never,
         endpoint,
+        onReadyChanged: async () => {},
         stateMachine: new InstanceStateMachine(instanceName),
         transportConnection,
     });

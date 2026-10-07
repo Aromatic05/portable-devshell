@@ -20,8 +20,8 @@ import { ContainerInstall, type ContainerInstallOptions } from "../../../src/ins
 import { WorkerInstallerRemote } from "../../../src/instance/runtime/provision/install/Remote.ts";
 import { WorkerBinary } from "../../../src/instance/runtime/Binary.ts";
 import { TransportConnection } from "../../../src/instance/transport/endpoint/Connection.ts";
-import { WorkerTunnel } from "../../../src/instance/transport/packet/Tunnel.ts";
-import { WorkerArtifact } from "../../../src/instance/transport/packet/Artifact.ts";
+import { createWorkerArtifact } from "../../../src/instance/runtime/execution/capability/artifact/Artifact.ts";
+import { WorkerTunnel } from "../../../src/instance/runtime/execution/capability/tunnel/Tunnel.ts";
 import { probeLocalWorkerTarget } from "../../../src/instance/runtime/provision/Target.ts";
 import {
     Endpoint,
@@ -149,7 +149,7 @@ test(
             endpoint,
             `${instanceName}-worker`,
         );
-        const artifact = new WorkerArtifact(endpoint, `${instanceName}-worker`);
+        const artifact = createWorkerArtifact(endpoint, `${instanceName}-worker`);
         t.after(async () => {
             endpoint.close();
             connection.close();
@@ -184,31 +184,31 @@ test(
             join(homeDirectory, "artifact-source.bin"),
             artifactBytes,
         );
-        const payload = await artifact.openPayload({
+        const payload = await artifact.openArtifactPayload({
             expiresAtMs: Date.now() + 60_000,
             path: "./artifact-source.bin",
             workspace: homeDirectory,
         });
-        const chunk = await artifact.readPayload({
+        const chunk = await artifact.readArtifactPayload({
             maxBytes: artifactBytes.byteLength,
             offsetBytes: 0,
             payloadId: payload.payloadId,
         });
         assert.deepEqual(Buffer.from(chunk.bytes), artifactBytes);
         assert.equal(chunk.eof, true);
-        const receive = await artifact.beginReceive({
+        const receive = await artifact.beginArtifactReceive({
             descriptor: payload.descriptor,
             overwrite: false,
             targetPath: "./artifact-copy.bin",
             workspace: homeDirectory,
         });
-        const written = await artifact.writeReceive({
+        const written = await artifact.writeArtifactReceive({
             bytes: chunk.bytes,
             offsetBytes: receive.nextOffsetBytes,
             receiveId: receive.receiveId,
         });
         assert.equal(written.nextOffsetBytes, artifactBytes.byteLength);
-        const finished = await artifact.finishReceive(
+        const finished = await artifact.finishArtifactReceive(
             receive.receiveId,
         );
         assert.equal(finished.bytes, artifactBytes.byteLength);
@@ -216,7 +216,7 @@ test(
             await readFile(join(homeDirectory, "artifact-copy.bin")),
             artifactBytes,
         );
-        await artifact.closePayload(payload.payloadId);
+        await artifact.closeArtifactPayload(payload.payloadId);
 
         const stalled = await services.execProcess({
             executable: process.execPath,

@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkerInstance } from "../../../src/instance/runtime/index.ts";
 import type {
     ControlPortContext,
     ControlStreamMessage,
+    InstanceEventRecord,
     JsonValue,
     MessageStream,
 } from "@portable-devshell/shared";
-
-import { ProcessSubscriptionManager } from "../../../src/instance/runtime/supervision/Subscription.ts";
+import { ProcessSubscriptionManager } from "@portable-devshell/shared";
 
 test("ProcessSubscriptionManager returns snapshot lastSeq and pushes sequenced events", async () => {
     const manager = new ProcessSubscriptionManager(5);
@@ -22,7 +21,7 @@ test("ProcessSubscriptionManager returns snapshot lastSeq and pushes sequenced e
         harness.stream,
         harness.context,
         "alpha",
-        worker as unknown as WorkerInstance,
+        worker,
         1,
     );
 
@@ -56,7 +55,7 @@ test("ProcessSubscriptionManager transports multi-segment event types through va
         harness.stream,
         harness.context,
         "alpha",
-        worker as unknown as WorkerInstance,
+        worker,
         1,
     );
     worker.emit("context.message.delivered", {
@@ -120,7 +119,7 @@ test("ProcessSubscriptionManager emits a non-terminal runtime stream.gap", async
         harness.stream,
         harness.context,
         "alpha",
-        worker as unknown as WorkerInstance,
+        worker,
         1,
     );
     worker.emit("toolCall.completed", { toolName: "bash_run" });
@@ -206,14 +205,14 @@ test("ProcessSubscriptionManager isolates a throwing subscription poll", async (
             bad.stream,
             bad.context,
             "bad",
-            throwingWorker as WorkerInstance,
+            throwingWorker,
             1,
         );
         await manager.subscribe(
             healthy.stream,
             healthy.context,
             "healthy",
-            healthyWorker as unknown as WorkerInstance,
+            healthyWorker,
             1,
         );
         failPoll = true;
@@ -241,7 +240,7 @@ test("ProcessSubscriptionManager shares the same polling owner with callback wat
 
     const watch = manager.watch(
         "alpha",
-        worker as unknown as WorkerInstance,
+        worker,
         2,
         controller.signal,
         {
@@ -301,13 +300,7 @@ function createStreamContext(
 
 class FakeWorker {
     readonly #name: string;
-    #events: Array<{
-        at: string;
-        data?: unknown;
-        instanceName: string;
-        seq: number;
-        type: string;
-    }> = [];
+    #events: InstanceEventRecord[] = [];
     #lastSeq = 0;
     #snapshot = {
         connectionState: "disconnected",
@@ -363,7 +356,7 @@ class FakeWorker {
         };
     }
 
-    emit(type: string, data?: unknown) {
+    emit(type: string, data?: JsonValue) {
         const event = {
             at: new Date().toISOString(),
             data,
