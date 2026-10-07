@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
 import test from "node:test";
 
-import { ReverseSseChannel } from "../../../../core/src/instance/transport/endpoint/channel/reverse/SseChannel.ts";
+import { ReverseSseChannel } from "@portable-devshell/shared";
 
 class FakeServerResponse extends EventEmitter {
     writableEnded = false;

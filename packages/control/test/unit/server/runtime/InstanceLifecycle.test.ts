@@ -1,110 +1,235 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
-import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
-import { createInstanceRuntimeRegistry } from "@portable-devshell/core";
-import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
+
+import { createInstance, type Instance } from "@portable-devshell/core";
+import {
+    normalizeConfigInstanceDraft,
+    runtimeErrorCodes,
+    type ControlHostDefinition,
+    type ControlPortContext,
+    type ControlPortDefinition,
+} from "@portable-devshell/shared";
+
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
-test("finalize retries a failed worker close without reopening the retired generation", async (t) => {
+test("close retries a failed worker close without reopening the retired generation", async (t) => {
     const root = await createTestTempDirectory("instance-finalize-retry");
-    const registry = createInstanceRuntimeRegistry({ homeDirectory: root, toolCalls: createToolCallRegistry() });
+    const restoreHome = redirectHome(root);
+    const instance = createInstance(
+        normalizeConfigInstanceDraft({ name: "retry-local", provider: "local" }),
+    );
     t.after(async () => {
-        await registry.close();
+        await instance.close().catch(() => undefined);
+        restoreHome();
         await rm(root, { force: true, recursive: true });
     });
-    const instance = registry.create(normalizeConfigInstanceDraft({ name: "retry-local", provider: "local" }));
-    const runtime = registry.get(instance);
-    const originalClose = instance.worker.close.bind(instance.worker);
+    const originalClose = instance.supervision.close.bind(instance.supervision);
     const failure = new Error("temporary close failure");
-    instance.worker.close = async () => { throw failure; };
-    await assert.rejects(registry.finalize(instance), AggregateError);
-    assert.equal(instance.retired, true);
-    assert.throws(() => instance.acquireLease(), /retired/u);
-    assert.equal(registry.get(instance), runtime);
+    instance.supervision.close = async () => {
+        throw failure;
+    };
 
-    instance.worker.close = originalClose;
-    await registry.finalize(instance);
-    assert.throws(() => registry.get(instance), /unavailable/u);
+    await assert.rejects(instance.close(), /temporary close failure/u);
+    assert.equal(instance.lifecycle.retired, true);
+    assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
+
+    instance.supervision.close = originalClose;
+    await instance.close();
+    assert.equal(instance.lifecycle.closed, true);
+    assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
 });
 
 test("shutdown waits for admitted work and closes every instance audit", { timeout: 5000 }, async (t) => {
     const root = await createTestTempDirectory("instance-shutdown-drain");
-    const registry = createInstanceRuntimeRegistry({ homeDirectory: root, toolCalls: createToolCallRegistry() });
-    let releaseLease = () => {};
+    const restoreHome = redirectHome(root);
+    const first = createInstance(
+        normalizeConfigInstanceDraft({ name: "first-local", provider: "local" }),
+    );
+    const second = createInstance(
+        normalizeConfigInstanceDraft({ name: "second-local", provider: "local" }),
+    );
     t.after(async () => {
-        releaseLease();
-        await registry.close();
+        await Promise.all([
+            first.close().catch(() => undefined),
+            second.close().catch(() => undefined),
+        ]);
+        restoreHome();
         await rm(root, { force: true, recursive: true });
     });
-    const first = registry.create(normalizeConfigInstanceDraft({ name: "first-local", provider: "local" }));
-    const second = registry.create(normalizeConfigInstanceDraft({ name: "second-local", provider: "local" }));
-    const firstRuntime = registry.get(first);
-    const secondRuntime = registry.get(second);
-    await first.worker.appendControlEvent("test.shutdown", { value: 1 });
-    assert.equal(firstRuntime.audit.api.events.readHighWater(), 1);
-    const lease = first.acquireLease();
-    releaseLease = () => lease.release();
+
+    await first.supervision.state.appendEvent("test.shutdown", { value: 1 });
+    assert.equal(first.supervision.state.snapshot().lastSeq, 1);
+    const lease = first.lifecycle.acquireLease();
     let closed = false;
-    const closing = registry.close().then(() => { closed = true; });
-    await firstRuntime.prepareRetirement();
-    assert.equal(first.retired, true);
+    const closing = Promise.all([first.close(), second.close()]).then(() => {
+        closed = true;
+    });
+    await waitForPhase(first, "retiring");
     assert.equal(closed, false);
-    assert.throws(() => first.acquireLease(), /retired/u);
+    assert.throws(() => first.lifecycle.acquireLease(), /retired/u);
     lease.release();
     await closing;
-    assert.equal(second.retired, true);
-    assert.throws(() => firstRuntime.audit.api.events.readHighWater(), /closed/iu);
-    assert.throws(() => secondRuntime.audit.api.events.readHighWater(), /closed/iu);
+    assert.equal(first.lifecycle.closed, true);
+    assert.equal(second.lifecycle.closed, true);
+    await assert.rejects(
+        first.supervision.state.appendEvent("late", { value: 2 }),
+        /clos/iu,
+    );
+    await assert.rejects(
+        second.supervision.state.appendEvent("late", { value: 2 }),
+        /clos/iu,
+    );
 });
 
 test("retirement cancels a pending approval before waiting for its admitted call", { timeout: 5000 }, async (t) => {
     const root = await createTestTempDirectory("instance-approval-drain");
-    const registry = createInstanceRuntimeRegistry({ homeDirectory: root, toolCalls: createToolCallRegistry() });
-    const instance = registry.create(normalizeConfigInstanceDraft({
-        name: "approval-local", provider: "local", approvalPolicy: { mode: "ask" },
-    }));
-    const lease = instance.acquireLease();
+    const restoreHome = redirectHome(root);
+    const instance = createInstance(
+        normalizeConfigInstanceDraft({
+            approvalPolicy: { mode: "ask" },
+            name: "approval-local",
+            provider: "local",
+        }),
+    );
     t.after(async () => {
-        lease.release();
-        await registry.close();
+        await instance.close().catch(() => undefined);
+        restoreHome();
         await rm(root, { force: true, recursive: true });
     });
-    const runtime = registry.get(instance);
-    const evaluation = await runtime.approval.api.evaluate({
-        callId: "pending-call", source: "mcp", inputSummary: "{}", toolName: "shell_run",
+    const host = instance.host();
+    const list = routeOperation(routePort(host, "approval"), "list");
+    const call = routeOperation(routePort(host, "tool"), "call");
+
+    const pendingCall = call.handle(
+        {
+            id: "call-1",
+            name: "call",
+            payload: {
+                input: {},
+                toolName: "shell_run",
+                workspace: "/workspace",
+            },
+        },
+        createContext(instance.config.name),
+    );
+    const pending = await waitFor(async () => {
+        const value = await list.handle(
+            { id: "list-1", name: "list", payload: { pendingOnly: true } },
+            createContext(instance.config.name),
+        );
+        return Array.isArray(value) && value.length === 1 ? value : undefined;
     });
-    assert.equal(evaluation.decision, "ask");
-    assert.ok("awaitDecision" in evaluation);
-    const completedCall = evaluation.awaitDecision.then(resolution => {
-        assert.equal(resolution.status, "cancelled");
-        lease.release();
-    });
-    await registry.close();
-    await completedCall;
-    assert.equal(instance.retired, true);
-    assert.throws(() => runtime.audit.api.events.readHighWater(), /closed/iu);
+    assert.equal((pending[0] as { status?: string }).status, "pending");
+
+    await instance.close();
+    const result = (await pendingCall) as { error?: { code?: string } };
+    assert.equal(result.error?.code, runtimeErrorCodes.toolCallRejected);
+    assert.equal(instance.lifecycle.closed, true);
 });
 
 test("instance generations resume the persisted event cursor after finalization", async (t) => {
     const root = await createTestTempDirectory("instance-event-generation");
-    const registry = createInstanceRuntimeRegistry({ homeDirectory: root, toolCalls: createToolCallRegistry() });
+    const restoreHome = redirectHome(root);
+    const config = normalizeConfigInstanceDraft({
+        name: "event-local",
+        provider: "local",
+    });
+    const original = createInstance(config);
+    await original.supervision.state.appendEvent("test.first", { value: 1 });
+    await original.close();
+    const replacement = createInstance(config);
     t.after(async () => {
-        await registry.close();
+        await replacement.close().catch(() => undefined);
+        restoreHome();
         await rm(root, { force: true, recursive: true });
     });
-    const config = normalizeConfigInstanceDraft({ name: "event-local", provider: "local" });
-    const original = registry.create(config);
-    await original.worker.appendControlEvent("test.first", { value: 1 });
-    await registry.finalize(original);
-    const replacement = registry.create(config);
-    assert.equal(replacement.worker.snapshot().lastSeq, 1);
-    await replacement.worker.appendControlEvent("test.second", { value: 2 });
-    const slice = replacement.worker.subscribe(1);
+
+    assert.equal(replacement.supervision.snapshot().lastSeq, 1);
+    await replacement.supervision.state.appendEvent("test.second", { value: 2 });
+    const slice = replacement.supervision.state.subscribe(1);
     assert.equal(slice.kind, "events");
     assert.ok("events" in slice);
-    assert.deepEqual(slice.events.map(event => ({ seq: event.seq, type: event.type, data: event.data })), [
-        { seq: 1, type: "test.first", data: { value: 1 } },
-        { seq: 2, type: "test.second", data: { value: 2 } },
-    ]);
+    assert.deepEqual(
+        slice.events.map((event) => ({
+            data: event.data,
+            seq: event.seq,
+            type: event.type,
+        })),
+        [
+            { data: { value: 1 }, seq: 1, type: "test.first" },
+            { data: { value: 2 }, seq: 2, type: "test.second" },
+        ],
+    );
 });
+
+function redirectHome(root: string): () => void {
+    const previous = {
+        HOME: process.env.HOME,
+        USERPROFILE: process.env.USERPROFILE,
+    };
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    return () => {
+        if (previous.HOME === undefined) delete process.env.HOME;
+        else process.env.HOME = previous.HOME;
+        if (previous.USERPROFILE === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = previous.USERPROFILE;
+    };
+}
+
+function createContext(host: string): ControlPortContext {
+    return {
+        afterReply() {},
+        connectionId: "connection-1",
+        host,
+        peer: "cli",
+        requestId: "request-1",
+        signal: new AbortController().signal,
+    };
+}
+
+function routePort(
+    host: ControlHostDefinition,
+    name: string,
+): ControlPortDefinition {
+    const port = host.ports.find((entry) => entry.name === name);
+    if (port === undefined) throw new Error(`Route port ${name} is missing.`);
+    return port;
+}
+
+function routeOperation(
+    port: ControlPortDefinition,
+    name: string,
+): ControlPortDefinition["operations"][number] {
+    const operation = port.operations.find((entry) => entry.name === name);
+    if (operation === undefined)
+        throw new Error(`Route operation ${name} is missing.`);
+    return operation;
+}
+
+async function waitForPhase(
+    instance: Instance,
+    phase: Instance["lifecycle"]["phase"],
+): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (instance.lifecycle.phase === phase) return;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error(
+        `Instance ${instance.config.name} did not reach ${phase}.`,
+    );
+}
+
+async function waitFor<T>(
+    factory: () => Promise<T | undefined>,
+    timeoutMs = 2000,
+): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const value = await factory();
+        if (value !== undefined) return value;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for condition.");
+}

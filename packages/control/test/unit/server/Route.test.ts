@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ControlPortContext } from "@portable-devshell/shared";
+import {
+    createToolIngressHost,
+    type ControlPortContext,
+    type ToolCallIngressPort,
+} from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../../../src/artifact/Service.ts";
-import { InstanceRegistry } from "@portable-devshell/core/instance";
-import type { ToolCallIngressPort } from "@portable-devshell/core/toolcall";
+import { InstanceRegistry } from "../../../src/instance/Registry.ts";
+import type { OperationalOverviewApi } from "../../../src/overview/Api.ts";
 import { ControlRouteRegistry } from "../../../src/server/Route.ts";
-import { createTestRouteBindings } from "../../support/RouteBindings.ts";
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
@@ -31,8 +34,8 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
     const instances = new InstanceRegistry([]);
     const routes = new ControlRouteRegistry({
         artifact: artifactService,
-        ...createTestRouteBindings(instances),
         instances,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const control = routes.hosts().find((host) => host.host === "@control")!;
@@ -90,7 +93,6 @@ function createContext(host: string): ControlPortContext {
 
 test("native control tool.call admits a nonexistent original instance to host ingress", async () => {
     const calls: string[] = [];
-    const instances = new InstanceRegistry([]);
     const toolCalls: ToolCallIngressPort = {
         async call(instance, toolName, input, context) {
             calls.push(instance);
@@ -100,13 +102,7 @@ test("native control tool.call admits a nonexistent original instance to host in
             return { content: "read" };
         },
     };
-    const routes = new ControlRouteRegistry({
-        ...createTestRouteBindings(instances, { toolCalls }),
-        instances,
-        shutdown() {},
-        toolCalls,
-    });
-    const dynamic = routes.hosts().find((host) => host.host === "*")!;
+    const dynamic = createToolIngressHost(toolCalls);
     const tool = dynamic.ports.filter((port) => port.name === "tool");
     assert.equal(tool.length, 1);
     assert.deepEqual(
@@ -133,5 +129,12 @@ test("native control tool.call admits a nonexistent original instance to host in
         { content: "read" },
     );
     assert.deepEqual(calls, ["nonexistent"]);
-    routes.dispose();
 });
+
+function createTestOverview(): OperationalOverviewApi {
+    return {
+        async read() {
+            throw new Error("Operational overview is unused by route fixtures.");
+        },
+    };
+}
