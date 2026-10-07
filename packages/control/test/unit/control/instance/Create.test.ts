@@ -5,6 +5,7 @@ import { InstanceRegistry } from "@portable-devshell/core/instance";
 import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { ConfigChangeHub } from "../../../../src/config/change/Config.ts";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
@@ -122,20 +123,19 @@ test("disabled instance creation publishes the committed instance config", async
             instanceChanges.publish("config");
         }
     });
-    const service = new InstanceCreateCoordinator({
-        ...testRuntimeHooks(),
-        configStore: {
-            async write(nextConfig) {
-                config = nextConfig;
-            },
-        },
-        getConfig: () => config,
-        instanceChanges,
-        instanceRegistry: new InstanceRegistry([]),
-        publishConfigChange: (paths) => configChanges.publish(paths),
-        setConfig: (nextConfig) => {
+    const engine = createEngine(
+        () => config,
+        (nextConfig) => {
             config = nextConfig;
         },
+        async () => {},
+        configChanges,
+    );
+    const service = new InstanceCreateCoordinator({
+        ...testRuntimeHooks(),
+        engine,
+        instanceChanges,
+        instanceRegistry: new InstanceRegistry([]),
     });
 
     const result = await service.createInstance({
@@ -157,46 +157,42 @@ test("disabled instance creation publishes the committed instance config", async
 
 function createService(platform?: NodeJS.Platform) {
     let config = createDefaultControlConfig();
+    const engine = createEngine(
+        () => config,
+        (nextConfig) => {
+            config = nextConfig;
+        },
+    );
 
     return new InstanceCreateCoordinator({
         ...testRuntimeHooks(),
-        configStore: {
-            async write(nextConfig) {
-                config = nextConfig;
-            },
-        },
-        getConfig: () => config,
+        engine,
         instanceChanges: new InstanceChangeHub(),
         instanceRegistry: new InstanceRegistry([]),
-        publishConfigChange() {},
         platform,
-        setConfig: (nextConfig) => {
-            config = nextConfig;
-        },
     });
 }
 
 test("instance create prepares the runtime descriptor before persisting configuration", async () => {
     let config = createDefaultControlConfig();
     let writes = 0;
+    const engine = createEngine(
+        () => config,
+        (nextConfig) => {
+            config = nextConfig;
+        },
+        async () => {
+            writes += 1;
+        },
+    );
     const service = new InstanceCreateCoordinator({
         ...testRuntimeHooks(),
-        configStore: {
-            async write(nextConfig) {
-                writes += 1;
-                config = nextConfig;
-            },
-        },
-        getConfig: () => config,
+        engine,
         createRuntimeInstance() {
             throw new Error("runtime descriptor failed");
         },
         instanceChanges: new InstanceChangeHub(),
         instanceRegistry: new InstanceRegistry([]),
-        publishConfigChange() {},
-        setConfig: (nextConfig) => {
-            config = nextConfig;
-        },
     });
 
     await assert.rejects(
@@ -215,7 +211,7 @@ test("instance create restores configuration and registry when MCP registration 
     config.mcp.enabled = true;
     const writes: ControlConfig[] = [];
     const registry = new InstanceRegistry([]);
-    const published: string[][] = [];
+    const configChanges = new ConfigChangeHub();
     const descriptor = createTestInstance(
         normalizeConfigInstanceDraft({
             mcp: { enabled: true },
@@ -225,15 +221,19 @@ test("instance create restores configuration and registry when MCP registration 
     );
     let retired = 0;
     let finalized = 0;
+    const engine = createEngine(
+        () => config,
+        (nextConfig) => {
+            config = nextConfig;
+        },
+        async (nextConfig) => {
+            writes.push(structuredClone(nextConfig));
+        },
+        configChanges,
+    );
     const service = new InstanceCreateCoordinator({
         ...testRuntimeHooks(),
-        configStore: {
-            async write(nextConfig) {
-                writes.push(structuredClone(nextConfig));
-                config = nextConfig;
-            },
-        },
-        getConfig: () => config,
+        engine,
         createRuntimeInstance: () => descriptor,
         retireRuntimeInstance: async () => {
             retired += 1;
@@ -250,12 +250,6 @@ test("instance create restores configuration and registry when MCP registration 
             async retireMcpApp() {},
             unregisterInstance() {},
         },
-        publishConfigChange(paths) {
-            published.push([...paths]);
-        },
-        setConfig: (nextConfig) => {
-            config = nextConfig;
-        },
     });
 
     await assert.rejects(
@@ -271,7 +265,7 @@ test("instance create restores configuration and registry when MCP registration 
     assert.equal(registry.get("demo-local"), undefined);
     assert.equal(retired, 1);
     assert.equal(finalized, 1);
-    assert.deepEqual(published, []);
+    assert.equal(configChanges.revision, 0);
 });
 
 test("instance create defaults to SSH after a local instance already exists", () => {
@@ -285,16 +279,17 @@ test("instance create defaults to SSH after a local instance already exists", ()
             }),
         ],
     };
-    const service = new InstanceCreateCoordinator({
-        ...testRuntimeHooks(),
-        configStore: { async write() {} },
-        getConfig: () => config,
-        instanceChanges: new InstanceChangeHub(),
-        instanceRegistry: new InstanceRegistry([]),
-        publishConfigChange() {},
-        setConfig: (nextConfig) => {
+    const engine = createEngine(
+        () => config,
+        (nextConfig) => {
             config = nextConfig;
         },
+    );
+    const service = new InstanceCreateCoordinator({
+        ...testRuntimeHooks(),
+        engine,
+        instanceChanges: new InstanceChangeHub(),
+        instanceRegistry: new InstanceRegistry([]),
         sshHosts: () => ["aromatic-server", "build-server"],
     });
 
@@ -302,3 +297,17 @@ test("instance create defaults to SSH after a local instance already exists", ()
     assert.equal(schema.defaultProvider, "ssh");
     assert.deepEqual(schema.sshHosts, ["aromatic-server", "build-server"]);
 });
+
+function createEngine(
+    getConfig: () => ControlConfig,
+    setConfig: (config: ControlConfig) => void,
+    write: (config: ControlConfig) => Promise<void> = async () => {},
+    changeHub?: ConfigChangeHub,
+): ConfigEngine {
+    return new ConfigEngine({
+        ...(changeHub === undefined ? {} : { changeHub }),
+        configStore: { write },
+        getConfig,
+        setConfig,
+    });
+}

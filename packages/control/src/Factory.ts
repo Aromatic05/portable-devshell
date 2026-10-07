@@ -161,19 +161,14 @@ export class ControlFactory {
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({
-                publishConfigChange: (paths) => options.config.changes.publish(paths),
                 createRuntimeInstance: (config) => createInstance(config),
+                engine: configEngine,
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 assertCleanupSettled: async (instance) =>
                     await instanceEditor.assertInstanceCleanupSettled(instance),
-                configStore: options.config.store,
-                getConfig: () => options.config.require(),
-                homeDirectory: options.homeDirectory,
                 instanceChanges: options.instances.changes,
                 instanceRegistry: options.instances.registry,
                 mcp: mcp.instancePort,
-                mutationRunner: options.config.mutations,
-                setConfig: (config) => options.config.set(config),
             });
             const configEditor = new ConfigEditorCoordinator({
                 engine: configEngine,

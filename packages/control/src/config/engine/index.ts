@@ -162,13 +162,20 @@ export class ConfigEngine {
             hotApplied,
         );
         if (result.restartControlRequired) this.#markRestartControlRequired();
+        this.publishCommittedChange(previous, next);
+        return result as unknown as JsonValue;
+    }
+
+    publishCommittedChange(
+        previous: ControlConfig,
+        next: ControlConfig,
+    ): void {
         this.#changeHub?.publish([
             ...diffConfigPaths(previous.control, next.control, "control"),
             ...diffConfigPaths(previous.instances, next.instances, "instances"),
             ...diffConfigPaths(previous.mcp, next.mcp, "mcp"),
             ...diffConfigPaths(previous.web, next.web, "web"),
         ]);
-        return result as unknown as JsonValue;
     }
 
     readInput<T>(read: () => T): T {

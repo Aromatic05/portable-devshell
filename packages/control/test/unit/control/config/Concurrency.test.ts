@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { ControlConfig } from "@portable-devshell/shared";
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { ControlConfigMutationLock } from "../../../../src/config/engine/Lock.ts";
 import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
@@ -32,25 +33,30 @@ test("instance creation and endpoint updates share one configuration mutation bo
             config = next;
         },
     };
-    const common = {
-        ...testRuntimeHooks(),
-        configStore,
-        getConfig: () => config,
-        homeDirectory: undefined,
-        instanceChanges: new InstanceChangeHub(),
-        instanceRegistry: registry,
-        mutationRunner: mutations,
-        publishConfigChange: () => undefined,
-        setConfig: (next: ControlConfig) => {
-            config = next;
-        },
+    const getConfig = () => config;
+    const setConfig = (next: ControlConfig) => {
+        config = next;
     };
-    const editor = new ConfigEditorCoordinator({
-        ...common,
+    const engine = new ConfigEngine({
+        configStore,
+        getConfig,
+        mutationRunner: mutations,
         runtimePreflight: { async assertAvailable() {} },
+        setConfig,
+    });
+    const editor = new ConfigEditorCoordinator({
+        configStore,
+        engine,
+        getConfig,
+        mutationRunner: mutations,
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig,
     });
     const creator = new InstanceCreateCoordinator({
-        ...common,
+        ...testRuntimeHooks(),
+        engine,
+        instanceChanges: new InstanceChangeHub(),
+        instanceRegistry: registry,
     });
 
     const endpointUpdate = editor.updateWebConfig({

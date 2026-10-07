@@ -10,78 +10,51 @@ import {
 } from "./Config.js";
 import type { InstanceMcpRuntimePort } from "../../Mcp.js";
 import { InstanceChangeHub } from "../../Change.js";
-import { ControlConfigValidator } from "../../../config/engine/Validator.js";
-import { diffConfigPaths } from "../../../config/Path.js";
+import type { ConfigEngine } from "../../../config/engine/index.js";
 import { closeDescriptorResourcesBestEffort } from "../retirement/State.js";
-import {
-    ControlConfigMutationLock,
-    type ControlConfigMutationRunner,
-} from "../../../config/engine/Lock.js";
-interface ControlConfigWriter {
-    write(config: ControlConfig, homeDirectory?: string): Promise<void>;
-}
 
 export interface InstanceCreateCoordinatorOptions {
     assertCleanupSettled?: (instance: string) => Promise<void>;
-    configStore: ControlConfigWriter;
     createRuntimeInstance(
         config: ControlConfig["instances"][number],
     ): Instance;
+    engine: ConfigEngine;
     finalizeRuntimeInstance(
         descriptor: Instance,
     ): Promise<void>;
-    publishConfigChange(paths: readonly string[]): void;
-    getConfig: () => ControlConfig;
-    homeDirectory?: string;
     instanceChanges: InstanceChangeHub;
     instanceRegistry: InstanceRegistry;
     platform?: NodeJS.Platform;
     mcp?: InstanceMcpRuntimePort;
-    mutationRunner?: ControlConfigMutationRunner;
-    setConfig: (config: ControlConfig) => void;
     sshHosts?: () => readonly string[];
-    validator?: ControlConfigValidator;
 }
 
 export class InstanceCreateCoordinator {
     readonly #assertCleanupSettled: (instance: string) => Promise<void>;
-    readonly #configStore: ControlConfigWriter;
     readonly #createRuntimeInstance: InstanceCreateCoordinatorOptions["createRuntimeInstance"];
+    readonly #engine: ConfigEngine;
     readonly #finalizeRuntimeInstance: InstanceCreateCoordinatorOptions["finalizeRuntimeInstance"];
-    readonly #getConfig: () => ControlConfig;
-    readonly #homeDirectory?: string;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #mcp?: InstanceMcpRuntimePort;
-    readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
-    readonly #publishConfigChange: InstanceCreateCoordinatorOptions["publishConfigChange"];
-    readonly #setConfig: (config: ControlConfig) => void;
     readonly #sshHosts: () => readonly string[];
-    readonly #validator: ControlConfigValidator;
 
     constructor(options: InstanceCreateCoordinatorOptions) {
         this.#assertCleanupSettled =
             options.assertCleanupSettled ?? (async () => {});
-        this.#configStore = options.configStore;
         this.#createRuntimeInstance = options.createRuntimeInstance;
+        this.#engine = options.engine;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
-        this.#getConfig = options.getConfig;
-        this.#homeDirectory = options.homeDirectory;
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
         this.#mcp = options.mcp;
-        this.#mutationRunner =
-            options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
-        this.#publishConfigChange = options.publishConfigChange;
-        this.#setConfig = options.setConfig;
         this.#sshHosts = options.sshHosts ?? discoverSshConfigHosts;
-        this.#validator = options.validator ?? new ControlConfigValidator();
     }
 
     getSchema(): InstanceCreateSchema {
-        const hasLocal = this.#getConfig().instances.some(
+        const hasLocal = this.#engine.current.instances.some(
             (instance) => instance.provider === "local",
         );
         return resolveInstanceCreateSchema({
@@ -107,7 +80,7 @@ export class InstanceCreateCoordinator {
             params,
             this.#platform,
         );
-        return await this.#mutationRunner.runExclusive(
+        return await this.#engine.runExclusive(
             async () => await this.#createNormalized(normalized),
         );
     }
@@ -115,7 +88,7 @@ export class InstanceCreateCoordinator {
         normalized: ControlInstanceConfig,
     ): Promise<InstanceCreateResult> {
         await this.#assertCleanupSettled(normalized.name);
-        const previousConfig = this.#getConfig();
+        const previousConfig = this.#engine.current;
         const nextConfig = this.#validateMergedConfig(normalized);
         const descriptor = normalized.enabled
             ? this.#createRuntimeInstance(normalized)
@@ -123,14 +96,11 @@ export class InstanceCreateCoordinator {
         let persisted = false;
 
         try {
-            await this.#configStore.write(nextConfig, this.#homeDirectory);
-            this.#setConfig(nextConfig);
+            await this.#engine.persist(nextConfig);
             persisted = true;
 
             if (!normalized.enabled || descriptor === undefined) {
-                this.#publishConfigChange(
-                    diffConfigPaths(previousConfig.instances, nextConfig.instances, "instances"),
-                );
+                this.#engine.publishCommittedChange(previousConfig, nextConfig);
                 return {
                     enabled: false,
                     mcpPath: normalized.mcp.enabled
@@ -148,9 +118,7 @@ export class InstanceCreateCoordinator {
                     normalized.mcp.auth,
                 );
             }
-            this.#publishConfigChange(
-                diffConfigPaths(previousConfig.instances, nextConfig.instances, "instances"),
-            );
+            this.#engine.publishCommittedChange(previousConfig, nextConfig);
 
             return {
                 enabled: true,
@@ -187,15 +155,9 @@ export class InstanceCreateCoordinator {
                     .catch((cleanupError) => failures.push(cleanupError));
             }
             if (persisted) {
-                try {
-                    await this.#configStore.write(
-                        previousConfig,
-                        this.#homeDirectory,
-                    );
-                    this.#setConfig(previousConfig);
-                } catch (rollbackError) {
-                    failures.push(rollbackError);
-                }
+                await this.#engine
+                    .persist(previousConfig)
+                    .catch((rollbackError) => failures.push(rollbackError));
             }
             if (current === descriptor && descriptor !== undefined) {
                 this.#instanceChanges.publish("registry");
@@ -209,7 +171,7 @@ export class InstanceCreateCoordinator {
     }
 
     #validateMergedConfig(instance: ControlInstanceConfig): ControlConfig {
-        const currentConfig = this.#getConfig();
+        const currentConfig = this.#engine.current;
         if (
             currentConfig.instances.some(
                 (entry) => entry.name === instance.name,
@@ -224,7 +186,7 @@ export class InstanceCreateCoordinator {
         }
 
         try {
-            return this.#validator.validate({
+            return this.#engine.validateConfig({
                 ...currentConfig,
                 instances: [...currentConfig.instances, instance],
             });
