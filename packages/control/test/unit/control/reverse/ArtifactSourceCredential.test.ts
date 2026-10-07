@@ -14,7 +14,7 @@ import {
     sourceTypeFromPayload,
     validateTransferStart,
 } from "../../../../src/artifact/Source.ts";
-import { ReverseCredentials } from "@portable-devshell/core/instance";
+import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
 
 test("artifact source helpers preserve handle and path variants", () => {
     assert.deepEqual(
@@ -163,7 +163,7 @@ test("reverse credential service validates instance existence and provider befor
         instanceRegistry: {
             get(instance: string) {
                 if (instance === "local-one") {
-                    return { provider: "local" };
+                    return { config: { provider: "local" } };
                 }
                 return undefined;
             },
@@ -207,7 +207,7 @@ test("reverse credentials coordinate enrollment, rotation, revocation, and disco
         instanceRegistry: {
             get(instance: string) {
                 return instance === "reverse-one"
-                    ? { provider: "reverse" }
+                    ? { config: { provider: "reverse" } }
                     : undefined;
             },
         } as never,

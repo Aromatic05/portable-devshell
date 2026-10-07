@@ -29,7 +29,7 @@ import { ControlServer } from "../../../src/server/Server.ts";
 import { ControlRuntimeFactory } from "../../../src/server/runtime/Factory.ts";
 import type { InstanceRegistry } from "@portable-devshell/core/instance";
 import { ControlPathHome } from "@portable-devshell/shared";
-import { ReverseCredentialStore } from "@portable-devshell/core/instance";
+import { ReverseCredentialStore } from "../../../src/instance/reverse/credential/Store.ts";
 import {
     encodeGlobalConfig,
     encodeInstanceConfig,

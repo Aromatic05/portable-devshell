@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { ReverseCredentialStore } from "@portable-devshell/core/instance";
+import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const execFileAsync = promisify(execFile);

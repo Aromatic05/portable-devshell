@@ -1,20 +1,12 @@
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
 import test from "node:test";
 
-import {
-    createDefaultControlConfig,
-    normalizeConfigInstanceDraft,
-    type ControlConfig,
-} from "@portable-devshell/shared";
-import type { HttpHost } from "@portable-devshell/mcp";
-import {
-    createReverseRuntime,
-    type ReverseRuntimeOptions,
-} from "@portable-devshell/core/instance";
-import { buildTestInstanceRegistry } from "../../../support/InstanceRuntime.ts";
-import type { ControlRuntimeState } from "../../../../src/server/runtime/State.ts";
+import { ReverseConnections } from "@portable-devshell/core/instance/transport";
+
+import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
+import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";
+import { ReverseIngress } from "../../../../src/server/reverse/Ingress.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 class RecordingHttpHost {
@@ -32,105 +24,71 @@ class RecordingHttpHost {
     }
 }
 
-test("reverse runtime is ready before the first reverse instance is created", async (t) => {
-    const homeDirectory = await createTestTempDirectory(
-        "reverse-runtime-empty",
-    );
+test("reverse ingress can install before the first reverse instance exists", async (t) => {
+    const homeDirectory = await createTestTempDirectory("reverse-runtime-empty");
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
-    const config = createDefaultControlConfig();
-    config.mcp.enabled = true;
-    config.mcp.publicBaseUrl = "https://controller.example.test";
-    const instances = buildTestInstanceRegistry(config);
+    const instances = { get: () => undefined };
+    const connections = new ReverseConnections({ instances });
+    const credentials = new ReverseCredentials({
+        credentialStore: new ReverseCredentialStore(homeDirectory),
+        instanceRegistry: instances,
+        publicBaseUrl: "https://controller.example.test",
+    });
+    const ingress = new ReverseIngress({
+        connections,
+        credentials,
+        publicBaseUrl: "https://controller.example.test",
+    });
     const host = new RecordingHttpHost();
-    const state = {
-        homeDirectory,
-        instances,
-        requireConfig: () => config,
-    } as unknown as ControlRuntimeState;
-    let deleteRetirement:
-        | ((instance: ControlConfig["instances"][number]) => Promise<void>)
-        | undefined;
-    let disableRetirement:
-        | ((instance: ControlConfig["instances"][number]) => Promise<void>)
-        | undefined;
-    const mcp = {
-        instanceEditor: {
-            registerInstanceDisableRetirement(
-                retire: (
-                    instance: ControlConfig["instances"][number],
-                ) => Promise<void>,
-            ) {
-                disableRetirement = retire;
-            },
-            registerInstanceDeleteRetirement(
-                retire: (
-                    instance: ControlConfig["instances"][number],
-                ) => Promise<void>,
-            ) {
-                deleteRetirement = retire;
-            },
-        },
-        host: { server: host as unknown as HttpHost },
-    } as unknown as ReverseRuntimeOptions["mcp"];
 
-    const reverse = createReverseRuntime({ mcp, state });
+    ingress.install(host as never);
 
-    assert.notEqual(reverse.service, undefined);
-    assert.notEqual(disableRetirement, undefined);
-    assert.notEqual(deleteRetirement, undefined);
     assert.equal(host.rawPaths.includes("/reverse/v1/enroll"), true);
     assert.equal(host.upgradePaths.includes("/reverse/v1/connect"), true);
+    ingress.stop();
 });
 
-test("reverse runtime adopts a changed MCP public URL on the replacement host", async (t) => {
+test("reverse ingress and credentials adopt a replacement public URL", async (t) => {
     const homeDirectory = await createTestTempDirectory("reverse-runtime");
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
-    const config = reverseConfig("https://controller.example.test/old");
-    const instances = buildTestInstanceRegistry(config);
-    const firstHost = new RecordingHttpHost();
-    const state = {
-        homeDirectory,
-        instances,
-        requireConfig: () => config,
-    } as unknown as ControlRuntimeState;
-    const mcp = {
-        instanceEditor: {
-            registerInstanceDeleteRetirement() {},
-            registerInstanceDisableRetirement() {},
+    const descriptor: any = {
+        config: { name: "reverse-worker", provider: "reverse" },
+    };
+    const instances = {
+        get(name: string) {
+            return name === descriptor.config.name ? descriptor : undefined;
         },
-        host: { server: firstHost as unknown as HttpHost },
-    } as unknown as ReverseRuntimeOptions["mcp"];
-    const reverse = createReverseRuntime({ mcp, state });
-
+    };
+    const connections = new ReverseConnections({ instances });
+    const credentials = new ReverseCredentials({
+        credentialStore: new ReverseCredentialStore(homeDirectory),
+        instanceRegistry: instances,
+        publicBaseUrl: "https://controller.example.test/old",
+    });
+    const ingress = new ReverseIngress({
+        connections,
+        credentials,
+        publicBaseUrl: "https://controller.example.test/old",
+    });
+    const firstHost = new RecordingHttpHost();
+    ingress.install(firstHost as never);
     assert.equal(firstHost.rawPaths.includes("/old/reverse/v1/enroll"), true);
+
+    credentials.setPublicBaseUrl("https://controller.example.test/new");
+    ingress.setPublicBaseUrl("https://controller.example.test/new");
     const nextHost = new RecordingHttpHost();
-    reverse.install(
-        nextHost as unknown as HttpHost,
-        "https://controller.example.test/new",
-    );
+    ingress.install(nextHost as never);
 
     assert.equal(nextHost.rawPaths.includes("/new/reverse/v1/enroll"), true);
     assert.equal(
         nextHost.upgradePaths.includes("/new/reverse/v1/connect"),
         true,
     );
-    const code = await reverse.service!.createDeviceCode("reverse-worker");
+    const code = await credentials.createDeviceCode("reverse-worker");
     assert.equal(code.controllerUrl, "https://controller.example.test/new");
+    ingress.stop();
 });
-
-function reverseConfig(publicBaseUrl: string): ControlConfig {
-    const config = createDefaultControlConfig();
-    config.mcp.enabled = true;
-    config.mcp.publicBaseUrl = publicBaseUrl;
-    config.instances = [
-        normalizeConfigInstanceDraft({
-            name: "reverse-worker",
-            provider: "reverse",
-        }),
-    ];
-    return config;
-}
