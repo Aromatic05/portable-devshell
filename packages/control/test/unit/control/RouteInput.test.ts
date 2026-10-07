@@ -17,7 +17,7 @@ import {
 import {
     readMcpApprovalDecision,
     readMcpApprovalId,
-} from "../../../src/auth/Input.ts";
+} from "../../../src/server/auth/Input.ts";
 import {
     readProcessSubscriptionFromSeq,
 } from "../../../../core/src/instance/Route.ts";

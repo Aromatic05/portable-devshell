@@ -32,7 +32,7 @@ import {
     createInstanceConfigRouteModule,
 } from "../instance/Public.js";
 import { InstanceChangeHub } from "../instance/Change.js";
-import { createAuthRouteModule } from "../auth/Route.js";
+import { createAuthRouteModule } from "./auth/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Public.js";
 import type { OperationalOverviewApi } from "../overview/Api.js";
 import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
