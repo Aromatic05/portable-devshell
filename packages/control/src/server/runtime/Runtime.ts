@@ -369,9 +369,6 @@ export class ControlRuntime {
             failures.push(error);
         }
         await this.#artifact.stop().catch((error) => failures.push(error));
-        await closeInstances(this.#instances).catch((error) =>
-            failures.push(error),
-        );
         this.#toolCallRuntime.close();
         this.#contexts.close();
         try {
@@ -394,25 +391,4 @@ export class ControlRuntime {
             );
         }
     }
-}
-
-async function closeInstances(instances: InstanceRegistry): Promise<void> {
-    const failures: unknown[] = [];
-    for (const instance of instances.list()) {
-        const supervision = instance.supervision;
-        if (supervision.ownership.owned) {
-            try {
-                await supervision.lifecycle.stop();
-                supervision.ownership.clearOwned();
-            } catch (error) {
-                failures.push(error);
-            }
-        }
-        await instance.close().catch((error) => failures.push(error));
-    }
-    if (failures.length > 0)
-        throw new AggregateError(
-            failures,
-            `Failed to close ${failures.length} instance resource(s).`,
-        );
 }

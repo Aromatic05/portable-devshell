@@ -32,7 +32,9 @@ import { ExtensionConfigControl } from "../../extension/api/cap/config/index.js"
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { createArtifactRuntime } from "../../artifact/index.js";
 import { ControlRuntime } from "./Runtime.js";
-import type { ControlRuntimeState } from "./State.js";
+import type { ControlState } from "../../State.js";
+import type { ControlConfig } from "../../config/index.js";
+import type { ControlInstances } from "../../instance/index.js";
 import { createContextRuntime } from "../../context/index.js";
 import { McpControlModule } from "../mcp/Module.js";
 import { ControlWebRuntime } from "../web/Runtime.js";
@@ -66,17 +68,20 @@ export class ControlRuntimeFactory {
     async create(options: {
         restart: () => Promise<void>;
         shutdown: () => Promise<void>;
+        config: ControlConfig;
+        homeDirectory?: string;
+        instances: ControlInstances;
         socketPath: string;
-        state: ControlRuntimeState;
+        state: ControlState;
     }): Promise<ControlRuntime> {
         const controlPaths = new ControlPathHome(
-            options.state.homeDirectory ?? homedir(),
+            options.homeDirectory ?? homedir(),
         );
         const artifact = createArtifactRuntime({
-            config: () => options.state.requireConfig(),
+            config: () => options.config.require(),
             controlPaths,
-            homeDirectory: options.state.homeDirectory,
-            instances: options.state.instances,
+            homeDirectory: options.homeDirectory,
+            instances: options.instances.registry,
         });
         try {
             const internalEndpoint = new Endpoint({
@@ -95,7 +100,7 @@ export class ControlRuntimeFactory {
                 environment: (name) =>
                     createEnvironmentTransport(internalEndpoint, name),
                 leaseInstance: (name) => {
-                    const descriptor = options.state.instances.get(name);
+                    const descriptor = options.instances.registry.get(name);
                     if (descriptor === undefined)
                         throw new Error(`Instance ${name} is unavailable.`);
                     return descriptor.lifecycle.acquireLease();
@@ -107,30 +112,30 @@ export class ControlRuntimeFactory {
             });
             const mcp = new McpControlModule({
                 artifact,
-                config: options.state.requireConfig(),
+                config: options.config.require(),
                 contextTransport,
                 controlPaths,
                 factory: this.#mcpFactory,
-                instances: options.state.instances,
+                instances: options.instances.registry,
                 toolRegistry: options.state.toolCalls,
             });
             const configEngine = new ConfigEngine({
-                configStore: options.state.configStore,
-                getConfig: () => options.state.requireConfig(),
+                configStore: options.config.store,
+                getConfig: () => options.config.require(),
                 getRestartControlRequired: () =>
-                    options.state.restartControlRequired,
-                homeDirectory: options.state.homeDirectory,
+                    options.config.restartRequired,
+                homeDirectory: options.homeDirectory,
                 markRestartControlRequired: () =>
-                    options.state.markRestartControlRequired(),
-                changeHub: options.state.configChanges,
-                mutationRunner: options.state.configMutations,
-                registry: options.state.configRegistry,
+                    options.config.markRestartRequired(),
+                changeHub: options.config.changes,
+                mutationRunner: options.config.mutations,
+                registry: options.config.registry,
                 runtimeApply: {
                     apply: async (previous, next, changes) =>
                         await mcp.applyRuntimeConfig(previous, next, changes),
                 },
                 runtimePreflight: new HttpEndpointPreflight(),
-                setConfig: (config) => options.state.setConfig(config),
+                setConfig: (config) => options.config.set(config),
             });
             const instanceEditor = new InstanceEditorCoordinator({
                 createRuntimeInstance: (config) => createInstance(config),
@@ -163,44 +168,44 @@ export class ControlRuntimeFactory {
                               },
                     );
                 },
-                instanceRegistry: options.state.instances,
-                instanceChanges: options.state.instanceChanges,
+                instanceRegistry: options.instances.registry,
+                instanceChanges: options.instances.changes,
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({
-                publishConfigChange: (paths) => options.state.configChanges.publish(paths),
+                publishConfigChange: (paths) => options.config.changes.publish(paths),
                 createRuntimeInstance: (config) => createInstance(config),
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 assertCleanupSettled: async (instance) =>
                     await instanceEditor.assertInstanceCleanupSettled(instance),
-                configStore: options.state.configStore,
-                getConfig: () => options.state.requireConfig(),
-                homeDirectory: options.state.homeDirectory,
-                instanceChanges: options.state.instanceChanges,
-                instanceRegistry: options.state.instances,
+                configStore: options.config.store,
+                getConfig: () => options.config.require(),
+                homeDirectory: options.homeDirectory,
+                instanceChanges: options.instances.changes,
+                instanceRegistry: options.instances.registry,
                 mcp: mcp.instancePort,
-                mutationRunner: options.state.configMutations,
-                setConfig: (config) => options.state.setConfig(config),
+                mutationRunner: options.config.mutations,
+                setConfig: (config) => options.config.set(config),
             });
             const configEditor = new ConfigEditorCoordinator({
                 engine: configEngine,
-                configStore: options.state.configStore,
-                getConfig: () => options.state.requireConfig(),
+                configStore: options.config.store,
+                getConfig: () => options.config.require(),
                 getRestartControlRequired: () =>
-                    options.state.restartControlRequired,
-                homeDirectory: options.state.homeDirectory,
+                    options.config.restartRequired,
+                homeDirectory: options.homeDirectory,
                 instances: instanceEditor,
                 markRestartControlRequired: () =>
-                    options.state.markRestartControlRequired(),
-                changeHub: options.state.configChanges,
-                mutationRunner: options.state.configMutations,
-                registry: options.state.configRegistry,
-                setConfig: (config) => options.state.setConfig(config),
+                    options.config.markRestartRequired(),
+                changeHub: options.config.changes,
+                mutationRunner: options.config.mutations,
+                registry: options.config.registry,
+                setConfig: (config) => options.config.set(config),
             });
             const extensions = createExtensionRuntime({
-                configRegistry: options.state.configRegistry,
+                configRegistry: options.config.registry,
                 pathOptions: {
-                    homeDirectory: options.state.homeDirectory,
+                    homeDirectory: options.homeDirectory,
                 },
                 artifactFactory: ({ allowed, extensionId }) =>
                     new ExtensionArtifactCapabilityControl({
@@ -250,13 +255,13 @@ export class ControlRuntimeFactory {
                     stateDirectory,
                 }) =>
                     new ExtensionConfigControl({
-                        changeHub: options.state.configChanges,
+                        changeHub: options.config.changes,
                         declaration,
                         extensionId,
                         generation,
-                        mutationRunner: options.state.configMutations,
-                        readCoreConfig: () => options.state.requireConfig(),
-                        registry: options.state.configRegistry,
+                        mutationRunner: options.config.mutations,
+                        readCoreConfig: () => options.config.require(),
+                        registry: options.config.registry,
                         stateDirectory,
                         updateCoreConfig: async (patch) =>
                             await configEditor.updateCorePaths(patch),
@@ -285,8 +290,8 @@ export class ControlRuntimeFactory {
                         allowed: observeAllowed,
                         extensionId,
                         listConfigured: () =>
-                            options.state
-                                .requireConfig()
+                            options.config
+                                .require()
                                 .instances.map((instance) => ({
                                     enabled: instance.enabled,
                                     mcpEnabled: instance.mcp.enabled,
@@ -301,9 +306,9 @@ export class ControlRuntimeFactory {
                 }),
                 instanceRuntime: (name) =>
                     createInstanceRuntimeTransport(internalEndpoint, name),
-                instances: options.state.instances,
+                instances: options.instances.registry,
                 readToolCalls: async (name, query) => {
-                    const descriptor = options.state.instances.get(name);
+                    const descriptor = options.instances.registry.get(name);
                     if (descriptor === undefined) throw new Error(`Instance ${name} is unavailable.`);
                     return await createToolTransport(
                         internalEndpoint,
@@ -313,12 +318,12 @@ export class ControlRuntimeFactory {
                 toolCallDecorator: mcp.toolProvenance,
             });
             const web = new ControlWebRuntime({
-                config: options.state.requireConfig(),
+                config: options.config.require(),
                 extensions,
                 mcp,
                 oauthDirectory: join(controlPaths.oauthDir, "web"),
             });
-            const reverseConfig = options.state.requireConfig();
+            const reverseConfig = options.config.require();
             const hasReverseInstance = reverseConfig.instances.some(
                 (instance) => instance.provider === "reverse",
             );
@@ -337,13 +342,13 @@ export class ControlRuntimeFactory {
                 }
             } else {
                 const reverseConnections = new ReverseConnections({
-                    instances: options.state.instances,
+                    instances: options.instances.registry,
                 });
                 reverseCredentials = new ReverseCredentials({
                     credentialStore: new ReverseCredentialStore(
-                        options.state.homeDirectory,
+                        options.homeDirectory,
                     ),
-                    instanceRegistry: options.state.instances,
+                    instanceRegistry: options.instances.registry,
                     publicBaseUrl: reversePublicBaseUrl,
                 });
                 reverseCredentials.setDisconnectHandler((instance) =>
@@ -377,14 +382,14 @@ export class ControlRuntimeFactory {
                 },
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
-                config: () => options.state.requireConfig(),
-                configChanges: options.state.configChanges,
+                config: () => options.config.require(),
+                configChanges: options.config.changes,
                 configEditor,
                 extensions,
                 instanceCreate,
                 instanceEditor,
-                instanceChanges: options.state.instanceChanges,
-                instances: options.state.instances,
+                instanceChanges: options.instances.changes,
+                instances: options.instances.registry,
                 mcp,
                 toolCalls: options.state.toolCalls,
                 restart: options.restart,
