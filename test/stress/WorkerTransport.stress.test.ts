@@ -7,7 +7,7 @@ import test from "node:test";
 import { WorkerBinary } from "../../packages/core/src/instance/runtime/Binary.ts";
 import { LocalExecution } from "../../packages/core/src/instance/runtime/execution/provider/Local.ts";
 import { TransportConnection } from "../../packages/core/src/instance/transport/endpoint/Connection.ts";
-import { WorkerTunnel } from "../../packages/core/src/instance/transport/packet/Tunnel.ts";
+import { WorkerTunnel } from "../../packages/core/src/instance/runtime/execution/capability/tunnel/Tunnel.ts";
 import { createTestWorkerInstance } from "../../packages/core/test/support/WorkerInstance.ts";
 import { Endpoint, asInstanceName, type MessageStream } from "@portable-devshell/shared";
 
@@ -137,20 +137,20 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
         workerBinaryPath,
     });
     t.after(async () => {
-        await instance.stop().catch(() => undefined);
-        await instance.close().catch(() => undefined);
+        await instance.supervision.lifecycle.stop().catch(() => undefined);
+        await instance.supervision.close().catch(() => undefined);
         await rm(workspace, { force: true, recursive: true });
         await rm(homeDirectory, { force: true, recursive: true });
         await rm(runtimeDirectory, { force: true, recursive: true });
     });
 
-    await instance.start();
-    const opened = await instance.artifact.openArtifactPayload({
+    await instance.supervision.lifecycle.start();
+    const opened = await instance.execution.artifact.openArtifactPayload({
         expiresAtMs: Date.now() + 120_000,
         path: "./source.bin",
         workspace,
     });
-    const receive = await instance.artifact.beginArtifactReceive({
+    const receive = await instance.execution.artifact.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
         targetPath: "./copy.bin",
@@ -159,7 +159,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     const sourceHash = createHash("sha256");
     let offsetBytes = 0;
     while (offsetBytes < source.byteLength) {
-        const chunk = await instance.artifact.readArtifactPayload({
+        const chunk = await instance.execution.artifact.readArtifactPayload({
             maxBytes: 1024 * 1024,
             offsetBytes,
             payloadId: opened.payloadId,
@@ -167,7 +167,7 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
         assert.ok(chunk.bytes.byteLength > 0);
         assert.ok(chunk.bytes.byteLength <= 1024 * 1024);
         sourceHash.update(chunk.bytes);
-        const written = await instance.artifact.writeArtifactReceive({
+        const written = await instance.execution.artifact.writeArtifactReceive({
             bytes: chunk.bytes,
             offsetBytes,
             receiveId: receive.receiveId,
@@ -176,9 +176,9 @@ test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", 
     }
     assert.equal(offsetBytes, source.byteLength);
     assert.equal(sourceHash.digest("hex"), digest(source));
-    const finished = await instance.artifact.finishArtifactReceive(receive.receiveId);
+    const finished = await instance.execution.artifact.finishArtifactReceive(receive.receiveId);
     assert.equal(finished.bytes, source.byteLength);
     assert.equal(digest(await readFile(`${workspace}/copy.bin`)), digest(source));
-    await instance.artifact.closeArtifactPayload(opened.payloadId);
-    assert.equal(instance.snapshot().ready, true);
+    await instance.execution.artifact.closeArtifactPayload(opened.payloadId);
+    assert.equal(instance.supervision.snapshot().ready, true);
 });
