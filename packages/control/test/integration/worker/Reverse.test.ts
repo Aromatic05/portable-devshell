@@ -58,7 +58,7 @@ class CapturingRuntimeFactory extends ControlRuntimeFactory {
     registry?: InstanceRegistry;
 
     override async create(options: Parameters<ControlRuntimeFactory["create"]>[0]) {
-        this.registry = options.state.instances;
+        this.registry = options.instances.registry;
         return await super.create(options);
     }
 }
