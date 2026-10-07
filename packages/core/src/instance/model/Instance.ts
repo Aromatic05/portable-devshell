@@ -33,10 +33,9 @@ import { createInstanceEventLog, type InstanceEventLog } from "./EventLog.js";
 import { InstanceState } from "./State.js";
 import { createInstanceHost } from "../Route.js";
 
-export interface InstanceFields {
+interface InstanceFields {
     config: InstanceConfig;
     eventLog: InstanceEventLog;
-    paths: InstancePaths;
     state: InstanceState;
     subscriptions: ProcessSubscriptionManager;
     worker: WorkerInstance;
@@ -44,7 +43,6 @@ export interface InstanceFields {
 
 export class Instance {
     readonly #eventLog: InstanceEventLog;
-    readonly #paths: InstancePaths;
     readonly #subscriptions: ProcessSubscriptionManager;
     readonly #worker: WorkerInstance;
     readonly #state: InstanceState;
@@ -107,7 +105,6 @@ export class Instance {
         instance = new Instance({
             config: toInstanceConfig(config),
             eventLog,
-            paths,
             state,
             subscriptions,
             worker,
@@ -117,7 +114,6 @@ export class Instance {
 
     constructor(fields: InstanceFields) {
         this.#eventLog = fields.eventLog;
-        this.#paths = fields.paths;
         this.#subscriptions = fields.subscriptions;
         this.#worker = fields.worker;
         this.#state = fields.state;
