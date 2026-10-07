@@ -332,9 +332,9 @@ describe("WebStore", () => {
         expect(loadToolCalls).toHaveBeenCalledWith("demo");
         expect(messageRefresh).toHaveBeenCalledWith("demo");
         expect(messagesRefresh).toHaveBeenCalledWith("demo");
-        expect(runtimeLoad).toHaveBeenCalledWith("demo");
+        expect(runtimeLoad).toHaveBeenCalledOnce();
         expect(readLogs).toHaveBeenCalledOnce();
-        expect(approvalLoad).toHaveBeenCalledWith("demo");
+        expect(approvalLoad).toHaveBeenCalledOnce();
     });
 
     it("attempts every Context in a batch disable and reports the failure", async () => {
@@ -379,7 +379,7 @@ describe("WebStore", () => {
     it("does not let an old mutation clear a new connection operation", async () => {
         const domains = new WebTestDomains();
         const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => undefined);
+        runtime.load = vi.fn(async () => undefined);
         const oldStop = deferred<InstanceSnapshot>();
         const newStop = deferred<InstanceSnapshot>();
         runtime.stop = vi
@@ -407,7 +407,7 @@ describe("WebStore", () => {
     it("does not send duplicate start or stop mutations while an operation is pending", async () => {
         const domains = new WebTestDomains();
         const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => undefined);
+        runtime.load = vi.fn(async () => undefined);
         const finish = deferred<InstanceSnapshot>();
         const stop = vi.fn(() => finish.promise);
         runtime.stop = stop;
@@ -427,7 +427,7 @@ describe("WebStore", () => {
         const domains = new WebTestDomains();
         domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
         const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => undefined);
+        runtime.load = vi.fn(async () => undefined);
         const stopped: InstanceSnapshot = {
             ...snapshot,
             connectionState: "disconnected",
@@ -582,7 +582,7 @@ describe("WebStore operation and transport boundaries", () => {
     it("completes a successful lifecycle operation without waiting for auxiliary reads", async () => {
         const domains = new WebTestDomains();
         const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => undefined);
+        runtime.load = vi.fn(async () => undefined);
         const running: InstanceSnapshot = {
             ...snapshot,
             lastSeq: 10,
@@ -605,7 +605,7 @@ describe("WebStore operation and transport boundaries", () => {
         vi.useFakeTimers();
         const domains = new WebTestDomains();
         const runtime = domains.domains.runtime("demo");
-        runtime.load = vi.fn(async (_instance: string) => undefined);
+        runtime.load = vi.fn(async () => undefined);
         let operationSignal: AbortSignal | undefined;
         runtime.start = vi.fn(async (options?: ProcessStartOptions) => {
             operationSignal = options?.signal;
