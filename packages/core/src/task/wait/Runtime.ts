@@ -1,9 +1,9 @@
 import type {
     JsonValue,
     ToolCallHookValue,
+    ToolCallHooks,
     WaitDetachInput,
 } from "@portable-devshell/shared";
-import type { ToolCallHooks } from "../../toolcall/Api.js";
 import type { WaitApi } from "../Api.js";
 import { WAIT_SYNC_MS } from "./index.js";
 

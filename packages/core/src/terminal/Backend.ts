@@ -1,11 +1,9 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerExecution } from "../instance/Api.js";
 import type {
+    WorkerTerminalPort,
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
-} from "../instance/Api.js";
-import type {
     TerminalBackend,
     TerminalBackendOpenInput,
     TerminalBackendOpenResult,
@@ -13,8 +11,6 @@ import type {
     TerminalProcess,
     TerminalProcessExit,
 } from "./Api.js";
-
-export type WorkerTerminalPort = WorkerExecution["terminal"];
 
 export class WorkerTerminalBackend implements TerminalBackend {
     constructor(private readonly options: { worker: WorkerTerminalPort }) {}

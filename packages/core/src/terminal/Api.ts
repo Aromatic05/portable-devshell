@@ -3,6 +3,86 @@ import type {
     TerminalSessionDescriptor,
 } from "@portable-devshell/shared";
 
+export interface WorkerTerminalDescriptor {
+    cols: number;
+    createdAtMs: number;
+    generation: number;
+    latestSeq: number;
+    rows: number;
+    state: "running" | "exited";
+    terminalId: string;
+    version: number;
+}
+
+export interface WorkerTerminalOpenInput {
+    cols: number;
+    command?: string;
+    cwd?: string;
+    rows: number;
+    workspace: string;
+}
+
+export interface WorkerTerminalIdentity {
+    clientSeq: number;
+    generation: number;
+    terminalId: string;
+    version: number;
+}
+
+export interface WorkerTerminalOutputFrame {
+    dataBase64: string;
+    seq: number;
+}
+
+export interface WorkerTerminalAttachResult {
+    exit?: { exitCode: number; signal: number };
+    replay: WorkerTerminalOutputFrame[];
+    session: WorkerTerminalDescriptor;
+}
+
+export type WorkerTerminalNotification =
+    | {
+          method: "terminal.output";
+          params: {
+              dataBase64: string;
+              generation: number;
+              seq: number;
+              terminalId: string;
+          };
+      }
+    | {
+          method: "terminal.exit";
+          params: {
+              exitCode: number;
+              generation: number;
+              signal: number;
+              terminalId: string;
+              version: number;
+          };
+      };
+
+export interface WorkerTerminalPort {
+    open(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor>;
+    attach(input: {
+        fromSeq: number;
+        generation: number;
+        terminalId: string;
+    }): Promise<WorkerTerminalAttachResult>;
+    write(
+        input: WorkerTerminalIdentity & { data: string },
+    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
+    resize(
+        input: WorkerTerminalIdentity & { cols: number; rows: number },
+    ): Promise<WorkerTerminalIdentity & { accepted: boolean }>;
+    kill(input: WorkerTerminalIdentity): Promise<WorkerTerminalDescriptor>;
+    list(): Promise<WorkerTerminalDescriptor[]>;
+    onNotification(
+        listener: (notification: WorkerTerminalNotification) => void,
+    ): () => void;
+    onConnected(listener: () => void): () => void;
+    onDisconnected(listener: (error: Error) => void): () => void;
+}
+
 export interface TerminalProcessExit {
     exitCode: number;
     signal: number;

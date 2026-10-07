@@ -1,7 +1,10 @@
-import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice, InstanceEventSource, InstanceEventPort } from "../../Api.js";
+import type { InstanceEventInput, InstanceEventPort } from "../../Api.js";
 import {
     STREAM_GAP_CODE,
     type InstanceEventRecord,
+    type InstanceEventSource,
+    type InstanceEventStreamGap,
+    type InstanceEventStreamSlice,
     type InstanceName,
     type InstanceSnapshot,
     type JsonValue,

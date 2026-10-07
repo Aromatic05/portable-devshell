@@ -35,6 +35,24 @@ export interface InstanceEventRecord<Type extends string = string> {
     type: Type;
 }
 
+export interface InstanceEventStreamGap extends StreamGap {
+    code: typeof STREAM_GAP_CODE;
+    kind: "gap";
+}
+
+export interface InstanceEventStreamSlice {
+    events: InstanceEventRecord[];
+    kind: "events";
+    lastSeq: number;
+}
+
+export interface InstanceEventSource {
+    cursor(): number;
+    subscribe(
+        fromSeq?: number,
+    ): InstanceEventStreamGap | InstanceEventStreamSlice;
+}
+
 export type StreamMessage<Event> =
     | { kind: "event"; event: Event }
     | { details?: JsonValue; gap: StreamGap; kind: "gap" }

@@ -1,7 +1,9 @@
-import type { InstanceEventInput, InstanceEventPort, InstanceEventStreamGap, InstanceEventStreamSlice } from "../../Api.js";
+import type { InstanceEventInput, InstanceEventPort } from "../../Api.js";
 import type {
     ConnectionState,
     DaemonState,
+    InstanceEventStreamGap,
+    InstanceEventStreamSlice,
     InstanceName,
     InstanceSnapshot as SharedInstanceSnapshot,
     JsonValue,

@@ -8,6 +8,7 @@ import type {
     ApprovalDecisionBy,
     ControlPortContext,
     ControlPortDefinition,
+    InstanceEventSource,
     InstanceEventRecord,
     JsonValue,
     MessageStream,
@@ -16,7 +17,6 @@ import { isApprovalEventType } from "@portable-devshell/shared";
 
 import { routeModule } from "@portable-devshell/shared";
 import type { ApprovalApi } from "./Api.js";
-import type { InstanceEventSource } from "../instance/Api.js";
 
 import {
     readApprovalDecision,

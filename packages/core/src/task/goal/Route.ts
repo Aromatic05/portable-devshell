@@ -1,11 +1,11 @@
 import type {
+    InstanceEventSource,
     JsonValue,
     ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "@portable-devshell/shared";
 import type { GoalApi } from "../Api.js";
-import type { InstanceEventSource } from "../../instance/Api.js";
 
 interface GoalTaskRouteInstancePort {
     events: Pick<InstanceEventSource, "cursor">;

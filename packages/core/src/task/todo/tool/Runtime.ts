@@ -1,8 +1,8 @@
-import type { ToolCallHooks } from "../../../toolcall/Api.js";
 import {
     contextErrorCodes,
     createRemoteError,
     type JsonValue,
+    type ToolCallHooks,
     type TodoWriteInput,
 } from "@portable-devshell/shared";
 

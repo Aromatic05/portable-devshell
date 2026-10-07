@@ -6,6 +6,7 @@ import {
 import type {
     ControlPortContext,
     ControlPortDefinition,
+    InstanceEventSource,
     InstanceEventRecord,
     JsonValue,
     MessageStream,
@@ -14,7 +15,6 @@ import type {
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
 import type { TodoApi } from "../Api.js";
-import type { InstanceEventSource } from "../../instance/Api.js";
 
 interface TodoTaskRouteSubscriptionPort {
     subscribe(

@@ -3,7 +3,7 @@ export { ControlLifecycleManager, ControlLogger, ControlPidFile } from "./client
 export { ControlPathHome, ControlPathRuntime, ControlSocketFile, isWindowsNamedPipePath, removeControlIpcEndpoint } from "./client/Path.js";
 export { withRequestTimeout } from "./client/Request.js";
 export { ServerSession } from "./client/Session.js";
-export { type InstanceEventRecord, type InstanceEventStreamPort, STREAM_GAP_CODE, type StreamMessage } from "./client/Stream.js";
+export { type InstanceEventRecord, type InstanceEventSource, type InstanceEventStreamGap, type InstanceEventStreamPort, type InstanceEventStreamSlice, STREAM_GAP_CODE, type StreamMessage } from "./client/Stream.js";
 export { type AuthStatus, generateOAuth2ApprovalToken, type OAuthApprovalDecision, type OAuthApprovalKind, type OAuthApprovalRequest } from "./control/auth/Model.js";
 export { type AuthTransport, createAuthTransport } from "./control/auth/Transport.js";
 export { AuthViewModel } from "./control/auth/ViewModel.js";

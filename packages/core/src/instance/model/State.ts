@@ -168,7 +168,7 @@ export class InstanceState {
                 this.tools.invokeInternal(toolName, input, context, signal),
             paths,
         });
-        this.terminal = createTerminalRuntime(worker);
+        this.terminal = createTerminalRuntime(worker.execution.terminal);
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
             todoToolDefinitions(),

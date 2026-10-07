@@ -1,4 +1,11 @@
-import type { WorkerTerminalDescriptor, WorkerTerminalOpenInput, WorkerTerminalIdentity, WorkerTerminalAttachResult, WorkerTerminalNotification } from "../../../../Api.js";
+import type {
+    WorkerTerminalAttachResult,
+    WorkerTerminalDescriptor,
+    WorkerTerminalIdentity,
+    WorkerTerminalNotification,
+    WorkerTerminalOpenInput,
+    WorkerTerminalPort,
+} from "../../../../../terminal/Api.js";
 import {
     Endpoint,
     Event,
@@ -19,7 +26,7 @@ import {
 
 
 
-export class WorkerTerminal {
+export class WorkerTerminal implements WorkerTerminalPort {
     readonly #endpoint: Endpoint;
     readonly #port: PortClient;
     readonly #events: Event;
