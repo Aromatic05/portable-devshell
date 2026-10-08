@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
-import { createToolCallRuntime } from "@portable-devshell/shared";
+import { createToolCallRuntime, type JsonValue } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { GoalService } from "../../../../core/src/task/goal/index.ts";
 import { TodoService } from "../../../../core/src/task/todo/index.ts";
@@ -19,7 +19,7 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
     const native = createToolCallRuntime({ resolveTarget: () => ({
         async dispatch(request) {
             assert.ok(request.execute);
-            return await request.execute(request.callId, request.value.payload, request.value);
+            return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
         },
     }) });
     const goal = new GoalService({

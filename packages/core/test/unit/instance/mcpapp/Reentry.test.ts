@@ -22,7 +22,7 @@ test("MCPApp Reentry uses Context-owned Goal continuation and fences duplicate d
     const runtime = createToolCallRuntime({
         resolveTarget: () => ({ async dispatch(request) {
             assert.ok(request.execute);
-            return await request.execute(request.callId, request.value.payload, request.value);
+            return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
         } }),
     });
     const stop = installMcpAppReentry(runtime.hooks, {
@@ -63,29 +63,30 @@ test("MCPApp Task recovery requires a resumed Todo in the same Context", async (
     const created = await todo.write({ revision: 0, title: "Resume task", todos: [
         { id: "work", content: "Work item", status: "in_progress" },
     ] }, "ctx-owner");
-    assert.ok(created.taskId);
+    const taskId = created.taskId;
+    assert.ok(taskId);
     const runtime = createToolCallRuntime({ resolveTarget: () => ({
         async dispatch(request) {
             assert.ok(request.execute);
-            return await request.execute(request.callId, request.value.payload, request.value);
+            return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
         },
     }) });
     const stop = installMcpAppReentry(runtime.hooks, { todo } as never);
     const call = (ctxId: string, action: string) => runtime.api.call("local", "mcpapp_reentry", {
-        action, claimId: "task-claim-123", intent: "task-resume", sourceId: created.taskId,
+        action, claimId: "task-claim-123", intent: "task-resume", sourceId: taskId,
         ...(action === "report" ? { outcome: "accepted" } : {}),
     }, { ctxId, workspace: "/repo", source: "mcp" });
     try {
-        await todo.control(created.taskId, "pause", "ctx-owner", created.revision);
+        await todo.control(taskId, "pause", "ctx-owner", created.revision);
         assert.deepEqual(await call("ctx-owner", "claim"), { claimed: false });
-        const paused = (await todo.read()).tasks?.find((item) => item.taskId === created.taskId);
-        await todo.control(created.taskId, "resume", "ctx-owner", paused?.revision);
+        const paused = (await todo.read()).tasks?.find((item) => item.taskId === taskId);
+        await todo.control(taskId, "resume", "ctx-owner", paused?.revision);
         assert.deepEqual(await call("ctx-other", "claim"), { claimed: false });
         assert.deepEqual(await call("ctx-owner", "claim"), { claimed: true });
         assert.deepEqual(await call("ctx-owner", "validate"), { valid: true });
         assert.deepEqual(await call("ctx-owner", "attempt"), { attempted: true });
         assert.deepEqual(await call("ctx-owner", "report"), { reported: true });
-        await todo.control(created.taskId, "cancel", "ctx-owner");
+        await todo.control(taskId, "cancel", "ctx-owner");
         assert.deepEqual(await call("ctx-owner", "validate"), { valid: false });
     } finally {
         stop();

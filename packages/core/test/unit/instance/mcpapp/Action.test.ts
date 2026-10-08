@@ -11,7 +11,8 @@ test("native MCP App action passes Hook review, executes only for matching Conte
             async dispatch(request) {
                 recorded.push("target");
                 assert.ok(request.execute, "Instance must own Execute");
-                return await request.execute(request.callId, request.value.payload, request.value);
+                // Native MCPApp actions return raw JSON, never a presentation.
+                return await request.execute(request.callId, request.value.payload, request.value) as JsonValue;
             },
         }),
     });
