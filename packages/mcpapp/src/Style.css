@@ -22,4 +22,11 @@ h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.025em; }
 p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacity: .7; }
 .workspace-context { max-width: 260px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: 11px; opacity: .55; }
 .workspace-foot { border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); padding-top: 10px; font-size: 10px; opacity: .5; }
+.workspace-items { width: 100%; display: grid; gap: 8px; margin-top: 12px; text-align: left; }
+.workspace-items > p { text-align: center; margin: 0 auto; }
+.workspace-item { border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 10px; padding: 10px 12px; }
+.workspace-item-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; }
+.workspace-item-head span { font-size: 10px; opacity: .65; white-space: nowrap; }
+.workspace-item p { max-width: none; margin-top: 5px; font-size: 11px; overflow-wrap: anywhere; }
+.workspace-item[data-kind="decision"] { border-color: color-mix(in srgb, #c89136 45%, transparent); }
 @media (min-width: 600px) { .workspace { min-height: 280px; padding: 20px 24px; } }
