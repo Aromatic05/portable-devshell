@@ -1,6 +1,6 @@
 import { asInstanceName } from "@portable-devshell/shared";
 import type { ContextRecord, ContextTransport, ToolCallApi } from "@portable-devshell/shared";
-import { contextToolDefinitions } from "@portable-devshell/core/context";
+import { contextToolDefinitions } from "../../../../../control/src/context/tool/Definition.ts";
 import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -26,7 +26,7 @@ import {
     mcpAppStableResourceUri,
 } from "@portable-devshell/mcp/testing";
 import {
-    TestMcpEndpointWorker as McpEndpointWorker,
+    createTestMcpEndpoint,
 } from "../../../ContextRuntime.ts";
 import { TestToolSource } from "../../../support/ToolSource.ts";
 
@@ -97,10 +97,9 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
         context: harness.context,
         tools: harness.tools,
         toolSource: harness.toolRegistry,
-        worker: harness.worker,
     };
 
-    const noauth = new McpEndpointWorker(base)
+    const noauth = createTestMcpEndpoint(base)
         .listTools()
         .find((tool) => tool.name === "bash_run");
     assert.deepEqual(noauth?.securitySchemes, [{ type: "noauth" }]);
@@ -109,7 +108,7 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
         [{ type: "noauth" }],
     );
 
-    const oauth = new McpEndpointWorker({
+    const oauth = createTestMcpEndpoint({
         ...base,
         auth: {
             enabled: true,
@@ -131,7 +130,7 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
         oauthSchemes,
     );
 
-    const token = new McpEndpointWorker({
+    const token = createTestMcpEndpoint({
         ...base,
         auth: {
             enabled: true,
@@ -162,10 +161,9 @@ test("tmux_run does not render a Workspace App", () => {
             },
         ],
     });
-    const tool = new McpEndpointWorker({
+    const tool = createTestMcpEndpoint({
         instanceName: "demo",
         context: harness.context,
-        worker: harness.worker,
         tools: harness.tools,
         toolSource: harness.toolRegistry,
     })
@@ -208,13 +206,12 @@ test("MCP endpoint serves App resources and environment presentation from a gene
     ]);
     const harness = createWorkerHarness();
     const binding = new McpEndpointBinding(
-        new McpEndpointWorker({
+        createTestMcpEndpoint({
             extensions,
             instanceName: "demo",
             context: harness.context,
-            worker: harness.worker,
             tools: harness.tools,
-        toolSource: harness.toolRegistry,
+            toolSource: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -642,12 +639,11 @@ test("tools/call forwards stale worker arguments even when the advertised schema
         ],
     });
     const binding = new McpEndpointBinding(
-        new McpEndpointWorker({
+        createTestMcpEndpoint({
             instanceName: "demo",
             context: harness.context,
-            worker: harness.worker,
             tools: harness.tools,
-        toolSource: harness.toolRegistry,
+            toolSource: harness.toolRegistry,
         }),
     );
     const server = await createBindingServer(binding);
@@ -794,7 +790,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         instance: string;
         purpose?: string;
     }> = [];
-    const endpoint = new McpEndpointWorker({
+    const endpoint = createTestMcpEndpoint({
         instanceName: "demo",
         toolProvenance: {
             async record(record) {
@@ -804,7 +800,6 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         context: harness.context,
         tools: harness.tools,
         toolSource: harness.toolRegistry,
-        worker: harness.worker,
     });
     const bashTool = endpoint
         .listTools()
@@ -1130,14 +1125,13 @@ function createBinding(
               ])
             : undefined;
     return new McpEndpointBinding(
-        new McpEndpointWorker({
+        createTestMcpEndpoint({
             contextMode: options?.contextMode,
             ...(extensions === undefined ? {} : { extensions }),
             context: harness.context,
             instanceName: "demo",
             tools: harness.tools,
-        toolSource: harness.toolRegistry,
-            worker: harness.worker,
+            toolSource: harness.toolRegistry,
         }),
         options?.serverVersion,
     );

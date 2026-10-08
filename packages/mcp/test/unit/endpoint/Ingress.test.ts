@@ -8,10 +8,10 @@ import {
     type JsonValue,
     type ToolCallHookValue,
     type ToolCallPresentation,
+    type ToolCallIngressPort,
     type ToolDefinition,
 } from "@portable-devshell/shared";
-import { McpEndpointWorker } from "../../../src/endpoint/Endpoint.ts";
-import type { ToolCallIngressPort } from "../../../src/endpoint/call/Port.ts";
+import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
 import { McpNativeToolResult } from "../../../src/endpoint/call/Boundary.ts";
 import { readMcpRoutedInput } from "../../../src/endpoint/tool/Input.ts";
 import { TestToolSource } from "../../support/ToolSource.ts";
@@ -45,12 +45,11 @@ test("bootstrap tools enter the shared Control ingress with the current instance
     };
     const toolSource = new TestToolSource();
     toolSource.register("*", [bootstrapTool]);
-    const endpoint = new McpEndpointWorker({
+    const endpoint = new McpEndpoint({
         context: { async resolve() { throw new Error("bootstrap must not resolve a Context"); } } as never,
         instanceName: "alpha",
         toolSource,
         tools,
-        worker: workerPort(),
     });
 
     assert.deepEqual(
@@ -77,7 +76,6 @@ test("workspace calls pass through Control callbacks and preserve worker present
     const registry = new TestToolSource();
     registry.register("alpha", [workerTool]);
     const contextLookups: unknown[] = [];
-    const workerEvents: unknown[] = [];
     const provenance: unknown[] = [];
     const ingress: unknown[] = [];
     const presentation: ToolCallPresentation = {
@@ -107,7 +105,7 @@ test("workspace calls pass through Control callbacks and preserve worker present
             return result;
         },
     };
-    const endpoint = new McpEndpointWorker({
+    const endpoint = new McpEndpoint({
         context: {
             async resolve(request: Parameters<ContextTransport["resolve"]>[0]) {
                 contextLookups.push(request);
@@ -118,12 +116,6 @@ test("workspace calls pass through Control callbacks and preserve worker present
         toolProvenance: { async record(record) { provenance.push(record); } },
         toolSource: registry,
         tools,
-        worker: {
-            ...workerPort(),
-            async appendMcpToolCalled(toolName, context) {
-                workerEvents.push({ context, toolName });
-            },
-        },
     });
 
     const result = await endpoint.callTool("bash_run", {
@@ -137,16 +129,6 @@ test("workspace calls pass through Control callbacks and preserve worker present
     const ingressCall = ingress[0] as unknown[];
     assert.deepEqual(ingressCall[2], { command: "pwd" });
     assert.equal(contextLookups.length, 2);
-    assert.deepEqual(workerEvents, [{
-        context: {
-            ctxId: "ctx-alpha",
-            instance: "alpha",
-            requestId: "request-1",
-            source: "mcp",
-            workspace: "/work/alpha",
-        },
-        toolName: "bash_run",
-    }]);
     assert.deepEqual(provenance, [{
         callId: "call-1",
         explanation: "Check the active workspace.",
@@ -177,13 +159,3 @@ const bootstrapTool: ToolDefinition = {
     outputSchema: { type: "object" },
     requiredCapabilities: [],
 };
-
-function workerPort() {
-    return {
-        snapshot: () => ({ ready: true }),
-        async appendMcpSessionClosed() {},
-        async appendMcpSessionOpened() {},
-        async appendMcpToolCalled() {},
-        async readAlerts() { return { advice: [] }; },
-    };
-}

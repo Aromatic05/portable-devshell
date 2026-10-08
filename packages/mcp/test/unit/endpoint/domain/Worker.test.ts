@@ -1,6 +1,5 @@
 import { asInstanceName } from "@portable-devshell/shared";
-import { ToolCallPipeline } from "../../../../../core/src/toolcall/execution/Pipeline.ts";
-import { ToolCallHookSequence } from "../../../../../core/src/toolcall/execution/hook/Sequence.ts";
+import { createToolCallRuntime } from "@portable-devshell/shared";
 import type { ToolCallHookValue } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -13,12 +12,12 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 import type { McpToolProvenanceRecorder } from "../../../../src/endpoint/tool/Provenance.ts";
-import { contextToolDefinitions } from "@portable-devshell/core/context";
+import { contextToolDefinitions } from "../../../../../control/src/context/tool/Definition.ts";
 import { todoToolDefinitions } from "../../../../../core/src/task/todo/tool/Definition.ts";
 import {
     createTestMcpRuntimeState,
 } from "../../../ContextRuntime.ts";
-import { McpEndpointWorker } from "../../../../src/endpoint/Endpoint.ts";
+import { McpEndpoint } from "../../../../src/endpoint/Endpoint.ts";
 import { TestToolSource } from "../../../support/ToolSource.ts";
 import {
     withMcpContextId,
@@ -525,34 +524,7 @@ async function rewrittenEndpoint(
     const values: ToolCallHookValue[] = [];
     const callIds: string[] = [];
     const reviews: string[] = [];
-    const pipeline = new ToolCallPipeline({
-        hooks: () => ({
-            release() {},
-            sequence: new ToolCallHookSequence({
-                reviews: [({ value }) => {
-                    reviews.push(value.context.instance);
-                    return reject
-                        ? { decision: "reject", reason: "blocked" }
-                        : { decision: "continue" };
-                }],
-                rewrites: [({ value }) => ({
-                    ...value,
-                    toolName,
-                    payload: {
-                        command: "rewritten",
-                        task: "final-task",
-                        wait: "block",
-                        timeMs: 180000,
-                    },
-                    context: {
-                        ...value.context,
-                        instance: asInstanceName(instance),
-                        ctxId: final.ctxId,
-                        workspace: "/final",
-                    },
-                })],
-            }),
-        }),
+    const pipeline = createToolCallRuntime({
         resolveTarget(target) {
             assert.equal(target, instance);
             return {
@@ -586,6 +558,41 @@ async function rewrittenEndpoint(
             };
         },
     });
+    pipeline.hooks.registerContributor(() => ({
+        reviews: [{
+            hook: "test.review",
+            id: "mcp-endpoint-review",
+            review({ value }) {
+                reviews.push(value.context.instance);
+                return reject
+                    ? { decision: "reject", reason: "blocked" }
+                    : { decision: "continue" };
+            },
+        }],
+        rewrites: [{
+            hook: "test.rewrite",
+            id: "mcp-endpoint-rewrite",
+            rewrite({ value }) {
+                return {
+                    ...value,
+                    toolName,
+                    payload: {
+                        command: "rewritten",
+                        task: "final-task",
+                        wait: "block",
+                        timeMs: 180000,
+                    },
+                    context: {
+                        ...value.context,
+                        instance: asInstanceName(instance),
+                        ctxId: final.ctxId,
+                        workspace: "/final",
+                    },
+                };
+            },
+        }],
+        release() {},
+    }));
     const definitions = [
         bashTool,
         fileReadTool,
@@ -594,9 +601,7 @@ async function rewrittenEndpoint(
         { ...bashTool, group: "ext", name: "ext_original" },
         { ...bashTool, group: "ext", name: "ext_final" },
     ];
-    const endpointTools: ToolCallApi = {
-        call: (...args) => pipeline.call(...args),
-    };
+    const endpointTools: ToolCallApi = pipeline.api;
     const endpoint = createManagedEndpoint(
         createWorker({
             tools: [
@@ -775,7 +780,7 @@ function createManagedEndpoint(
         toolProvenance?: McpToolProvenanceRecorder;
         toolDefinitions?: readonly ToolDefinition[];
     } = {},
-): McpEndpointWorker {
+): McpEndpoint {
     const state = options.contextState ?? contextState;
     const toolSource = new TestToolSource();
     const workerTools = worker.listTools();
@@ -787,14 +792,13 @@ function createManagedEndpoint(
             ({ name }) => !workerToolNames.has(name),
         ),
     ]);
-    return new McpEndpointWorker({
+    return new McpEndpoint({
         context: state.contextTransport,
         contextMode: options.contextMode,
         instanceName: "main-pc",
         toolProvenance: options.toolProvenance,
         toolSource,
         tools,
-        worker,
     });
 }
 

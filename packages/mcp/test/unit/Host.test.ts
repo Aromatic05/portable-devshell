@@ -6,7 +6,11 @@ import {
     McpHostRouteRegistry,
     HttpHost,
 } from "@portable-devshell/mcp/testing";
-import { createTestMcpRuntimeState, TestMcpEndpointWorker as McpEndpointWorker, TestMcpHost as McpHost } from "../ContextRuntime.ts";
+import {
+    createTestMcpEndpoint,
+    createTestMcpRuntimeState,
+    TestMcpHost as McpHost,
+} from "../ContextRuntime.ts";
 import { rm, writeFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
@@ -68,39 +72,7 @@ test("McpRuntimeState owns state across replaceable listener hosts", () => {
     test("route registry resolves per-instance binding", () => {
         const registry = new McpHostRouteRegistry();
         const binding = new McpEndpointBinding(
-            new McpEndpointWorker({
-                instanceName: "demo",
-                worker: {
-                    async appendMcpSessionClosed(_sessionId: string) {},
-                    async appendMcpSessionOpened(_sessionId: string) {},
-                    async appendMcpToolCalled(
-                        _toolName: string,
-                        _context: { ctxId?: string; requestId?: string },
-                    ) {},
-                    snapshot() {
-                        return { ready: true };
-                    },
-                    listTools() {
-                        return [
-                            {
-                                requiredCapabilities: ["execute"],
-                                group: "bash",
-                                name: "bash_run",
-                                description: "Run shell",
-                                inputSchema: { type: "object" },
-                                outputSchema: { type: "object" },
-                            },
-                        ];
-                    },
-                    async callTool(
-                        _toolName: string,
-                        _input: unknown,
-                        _context: { source: "mcp" },
-                    ) {
-                        return { exitCode: 0, stderr: "", stdout: "" };
-                    },
-                } as never,
-            }),
+            createTestMcpEndpoint({ instanceName: "demo" }),
         );
 
         registry.register({
