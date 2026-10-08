@@ -269,3 +269,43 @@ test("server Goal recovery intent delivers model context and one Host message af
     await act(async () => { host.clients[0]?.ontoolinput?.({ arguments: { ctxId: "ctx-other" } }); });
     expect(host.sent).toHaveLength(1);
 });
+
+test("server Task resume directive delivers exactly one Host message", async () => {
+    const state = {
+        ctxId: "ctx-task", instance: "demo", cursor: 18, agentBusy: false,
+        presentation: { work: [{ id: "todo-one", title: "Continue Todo" }], background: [] },
+        reentry: { pending: true, directives: [{
+            kind: "reentry", id: "task-receipt", intent: "task-resume", sourceId: "todo-one",
+        }] },
+    };
+    host.recovery = (request) => {
+        if (request.action === "claim") return { claimed: true, delivery: {
+            message: "Resume authorized Todo", modelContext: { structuredContent: { todo: "todo-one" } },
+        } };
+        if (request.action === "validate") return { valid: true };
+        if (request.action === "attempt") return { attempted: true };
+        return {};
+    };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot"))
+            return Promise.resolve(new Response(JSON.stringify(state), { status: 200 }));
+        if (String(input).includes("/watch")) return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+        throw new Error("Unexpected request");
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: { "portable-devshell/mcpapp": {
+        ctxId: "ctx-task", token: "private-task-lease", liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
+    } } }); });
+    await vi.waitFor(() => expect(host.actions.map((value) => value.arguments.action))
+        .toEqual(["claim", "validate", "attempt", "report"]));
+    expect(host.actions.every((value) => value.arguments.intent === "task-resume" &&
+        value.arguments.sourceId === "todo-one" && value.arguments.directiveId === "task-receipt")).toBe(true);
+    expect(host.sent).toEqual([{ role: "user", content: [{ type: "text", text: "Resume authorized Todo" }] }]);
+    expect(host.modelContexts).toHaveLength(1);
+    expect(container.textContent).not.toContain("private-task-lease");
+});
