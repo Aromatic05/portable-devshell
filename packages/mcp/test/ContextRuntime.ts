@@ -11,6 +11,7 @@ import { createContextRuntime } from "../../control/src/context/index.ts";
 import { installContextTools } from "../../control/src/context/tool/Runtime.ts";
 import type {
     ContextTransport,
+    Endpoint,
     EnvironmentTransport,
     InstanceRuntimeTransport,
     ProcessTransport,
@@ -62,6 +63,7 @@ export interface TestMcpRuntimeState {
 
 export interface TestMcpRuntimeOptions {
     contextFile?: string;
+    endpoint?: Endpoint;
     tools?: ToolCallApi;
     resolveTarget?: ToolCallTargetResolver;
     configureToolCalls?: (
@@ -202,6 +204,7 @@ export function createTestMcpRuntimeState(
     options.configureToolCalls?.(toolCallRuntime);
     const state = new McpRuntimeState({
         context,
+        ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
         tools: options.tools ?? toolCallRuntime.api,
         storageDir: options.storageDir,
         mcpAppLeaseFile: options.mcpAppLeaseFile,

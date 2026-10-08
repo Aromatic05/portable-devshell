@@ -1,0 +1,212 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { Endpoint, type ContextRecord } from "@portable-devshell/shared";
+import { createTestMcpRuntimeState, TestMcpHost } from "../ContextRuntime.ts";
+import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
+import { HttpHost } from "../../src/host/Http.ts";
+import { McpAppLeaseStore } from "../../src/mcpapp/app/Lease.ts";
+import { McpAppPresenceStore } from "../../src/mcpapp/app/Presence.ts";
+import { installMcpAppLive } from "../../src/mcpapp/app/Live.ts";
+import type { McpAppSnapshot } from "../../src/mcpapp/model/Contract.ts";
+
+test("MCP App Live requires a valid Instance+Context Lease, validates Context and supports CORS watch", async () => {
+    const host = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    const leases = new McpAppLeaseStore();
+    const presence = new McpAppPresenceStore();
+    const snapshot: McpAppSnapshot = {
+        ctxId: "ctx-a", instance: "demo", cursor: 4, agentBusy: false,
+        presentation: { work: [], background: [] },
+        modelContext: { content: [], structuredContent: { portableDevshellMcpApp: null } },
+        reentry: { pending: false },
+    };
+    let contextActive = true;
+    let unavailable = false;
+    let requestedCursor = -1;
+    const stop = installMcpAppLive({
+        host, instance: "demo", leases, presence,
+        contexts: {
+            async validateForInstance(ctxId, instance) {
+                assert.equal(instance, "demo");
+                assert.equal(ctxId, "ctx-a");
+                return {
+                    ctxId, environments: [{ instance, workspace: "/workspace" }],
+                    principal: "test", status: contextActive ? "active" : "disabled",
+                } as ContextRecord;
+            },
+        },
+        view: {
+            async snapshot(instance, ctxId, workspace) {
+                if (unavailable) throw new Error("private backend file /secret/path");
+                assert.equal(instance, "demo");
+                assert.equal(ctxId, "ctx-a");
+                assert.equal(workspace, "/workspace");
+                return snapshot;
+            },
+            async watch(_instance, _ctxId, _workspace, cursor) {
+                requestedCursor = cursor;
+                return { changed: true, cursor: snapshot.cursor, snapshot };
+            },
+        },
+    });
+    await host.start();
+    try {
+        const address = host.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const base = `http://127.0.0.1:${address.port}/api/live/demo/workspace`;
+        const url = `${base}/snapshot?ctxId=ctx-a`;
+        assert.equal((await fetch(url)).status, 401);
+        const token = await leases.issue("demo", "ctx-a");
+        const headers = { Authorization: `Bearer ${token}` };
+        assert.equal((await fetch(`${base}/snapshot?ctxId=ctx-b`, { headers })).status, 401);
+        const preflight = await fetch(url, {
+            method: "OPTIONS",
+            headers: { origin: "https://chatgpt.example", "access-control-request-method": "GET", "access-control-request-headers": "authorization" },
+        });
+        assert.equal(preflight.status, 204);
+        assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+        const valid = await fetch(url, { headers });
+        assert.equal(valid.status, 200);
+        assert.equal(valid.headers.get("cache-control"), "no-store");
+        assert.deepEqual(await valid.json(), snapshot);
+        assert.equal(presence.has("demo", "ctx-a"), true);
+
+        const watched = await fetch(`${base}/watch?ctxId=ctx-a&cursor=3`, { headers });
+        assert.equal(watched.status, 200);
+        assert.deepEqual(await watched.json(), { changed: true, cursor: 4, snapshot });
+        assert.equal(requestedCursor, 3);
+        assert.equal((await fetch(`${base}/watch?ctxId=ctx-a&cursor=invalid`, { headers })).status, 400);
+
+        unavailable = true;
+        const unavailableResponse = await fetch(url, { headers });
+        assert.equal(unavailableResponse.status, 503);
+        assert.equal((await unavailableResponse.text()).includes("/secret/path"), false);
+        unavailable = false;
+
+        contextActive = false;
+        assert.equal((await fetch(url, { headers })).status, 403);
+        contextActive = true;
+        await leases.revokeInstance("demo");
+        assert.equal((await fetch(url, { headers })).status, 401);
+
+        stop();
+        assert.equal((await fetch(url, { headers })).status, 404);
+    } finally {
+        stop();
+        await host.stop();
+    }
+});
+
+test("successful MCP environ_info returns an Instance-bound private Lease, without exposing the token to the model", async () => {
+    let ctxId = "";
+    const runtime = createTestMcpRuntimeState({
+        endpoint: new Endpoint({ host: "mcpapp-bootstrap-test" }),
+        tools: {
+            async call(instance, toolName) {
+                assert.equal(instance, "demo");
+                assert.equal(toolName, "environ_info");
+                return { ctxId, instance, status: "active" };
+            },
+        },
+    });
+    const host = new TestMcpHost({
+        instances: [{ name: "demo" }],
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+        publicBaseUrl: "https://devshell.example.com",
+    }, runtime);
+    await host.start();
+    try {
+        const record = await runtime.contexts.registry.create({
+            principal: "local",
+            environments: [{ instance: "demo", workspace: "/workspace" }],
+        });
+        ctxId = record.ctxId;
+        const address = host.server.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
+        const call = async () => {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
+                body: JSON.stringify({
+                    id: "test-bootstrap", jsonrpc: "2.0", method: "tools/call",
+                    params: { name: "environ_info", arguments: {} },
+                }),
+            });
+            assert.equal(response.status, 200);
+            return parseMcpHttpResponse<{
+                error?: { message?: string };
+                result?: { _meta?: Record<string, unknown>; structuredContent?: Record<string, unknown> };
+            }>(await response.text());
+        };
+        const response = await call();
+        assert.equal(response.error, undefined);
+        const meta = response.result?._meta?.["portable-devshell/mcpapp"] as Record<string, string> | undefined;
+        assert.equal(meta?.ctxId, ctxId);
+        assert.ok(typeof meta?.token === "string" && meta.token.length >= 16);
+        assert.equal(meta?.liveBaseUrl, "https://devshell.example.com/api/live/demo/workspace");
+        assert.deepEqual(response.result?.structuredContent, { ctxId, instance: "demo", status: "active" });
+        assert.equal(JSON.stringify(response.result?.structuredContent).includes(meta!.token), false);
+        assert.equal(await runtime.state.mcpAppLeases.verify("demo", ctxId, meta!.token), true);
+        assert.equal(runtime.state.mcpAppPresence.has("demo", ctxId), true);
+
+        const unauthorized = await runtime.contexts.registry.create({
+            principal: "different-user", environments: [{ instance: "demo", workspace: "/private" }],
+        });
+        ctxId = unauthorized.ctxId;
+        const rejected = await call();
+        assert.ok(rejected.error);
+        assert.equal(runtime.state.mcpAppPresence.has("demo", ctxId), false);
+        assert.equal(await runtime.state.mcpAppLeases.verify("demo", ctxId, meta!.token), false);
+    } finally {
+        await host.stop();
+    }
+});
+
+test("MCP App Watch denies data after Lease revocation and ends on Instance retirement", async () => {
+    const host = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
+    const leases = new McpAppLeaseStore();
+    const presence = new McpAppPresenceStore();
+    let complete!: () => void;
+    let entered!: () => void;
+    let started = new Promise<void>((resolve) => { entered = resolve; });
+    const stop = installMcpAppLive({
+        host, instance: "demo", leases, presence,
+        contexts: { async validateForInstance(ctxId, instance) {
+            return { ctxId, status: "active", principal: "local",
+                environments: [{ instance, workspace: "/workspace" }] } as ContextRecord;
+        } },
+        view: {
+            async snapshot() { throw new Error("Unexpected snapshot"); },
+            async watch(_instance, _ctxId, _workspace, cursor, signal) {
+                entered();
+                return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
+                    complete = () => resolve({ changed: true, cursor: cursor + 1 });
+                    signal?.addEventListener("abort", () => resolve({ changed: false, cursor }), { once: true });
+                });
+            },
+        },
+    });
+    await host.start();
+    try {
+        const address = host.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const url = `http://127.0.0.1:${address.port}/api/live/demo/workspace/watch?ctxId=ctx-a&cursor=1`;
+        const token = await leases.issue("demo", "ctx-a");
+        const first = fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        await started;
+        await leases.revokeInstance("demo");
+        complete();
+        assert.equal((await first).status, 401);
+
+        const nextToken = await leases.issue("demo", "ctx-a");
+        started = new Promise<void>((resolve) => { entered = resolve; });
+        const second = fetch(url, { headers: { Authorization: `Bearer ${nextToken}` } });
+        await started;
+        stop();
+        assert.equal((await second).status, 410);
+    } finally {
+        stop();
+        await host.stop();
+    }
+});
