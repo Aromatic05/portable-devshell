@@ -32,6 +32,8 @@ test("Goal task getGoal only returns the requested Context when Workspaces overl
     assert.equal((result as { goal?: { objective: string } }).goal?.objective, "Authorized goal");
     assert.equal(JSON.stringify(result).includes("Other Context secret"), false);
     assert.equal((result as { lastSeq: number }).lastSeq, 14);
+    const missing = await read.handle({ id: "read-missing", name: "getGoal", payload: { ctxId: "ctx-empty" } }, {} as never);
+    assert.deepEqual(missing, { goal: null, lastSeq: 14 });
     await assert.rejects(() => Promise.resolve(read.handle({ id: "bad", name: "getGoal", payload: {} }, {} as never)), /Context ID/u);
 });
 
