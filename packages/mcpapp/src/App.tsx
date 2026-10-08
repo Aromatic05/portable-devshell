@@ -172,7 +172,7 @@ export function AppView() {
     useEffect(() => {
         if (status !== "connected" || !snapshot || !session) return;
         const directive = snapshot.reentry?.directives?.find((item) =>
-            item.intent === "goal-resume" || item.intent === "goal-retry");
+            item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
         const schedule = snapshot.reentry?.schedule;
         const recovery = directive ?? (schedule ? {
             kind: "reentry" as const, intent: "automatic" as const,
@@ -186,6 +186,7 @@ export function AppView() {
         deliveredRecovery.current.add(key);
         const claimId = `mcpapp-${crypto.randomUUID()}`;
         const base = { ctxId: session.ctxId, claimId,
+            intent: recovery.intent, sourceId: recovery.sourceId,
             ...(recovery.id === undefined ? {} : { directiveId: recovery.id }) };
         const current = () => sessionRef.current?.ctxId === session.ctxId && hostRef.current === app;
         const invoke = async (payload: Record<string, unknown>) => {
