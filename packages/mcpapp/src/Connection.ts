@@ -23,6 +23,11 @@ export interface McpAppSnapshot {
     cursor: number;
     agentBusy: boolean;
     presentation: { primary?: McpAppItem; work: McpAppItem[]; background: McpAppItem[] };
+    reentry?: {
+        pending?: boolean;
+        schedule?: { readyAt: string; intent: "automatic"; sourceId?: string };
+        directives?: Array<{ kind: "reentry"; id?: string; intent: "goal-resume" | "goal-retry" | "automatic" | "task-resume"; sourceId?: string }>;
+    };
 }
 
 export async function readMcpAppSnapshot(session: McpAppSession, signal: AbortSignal): Promise<McpAppSnapshot> {

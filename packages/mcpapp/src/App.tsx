@@ -25,6 +25,7 @@ export function AppView() {
     const [pendingAction, setPendingAction] = useState<string>();
     const [busyAction, setBusyAction] = useState<string>();
     const hostRef = useRef<ConnectedApp>();
+    const deliveredRecovery = useRef(new Set<string>());
 
     useEffect(() => {
         let active = true;
@@ -165,6 +166,75 @@ export function AppView() {
         })();
         return () => { current = false; controller.abort(); };
     }, [session, status]);
+
+    // The server chooses recovery eligibility and persists the claim. React
+    // only hands that intent to the MCP Host; it does not run a local scheduler.
+    useEffect(() => {
+        if (status !== "connected" || !snapshot || !session) return;
+        const directive = snapshot.reentry?.directives?.find((item) =>
+            item.intent === "goal-resume" || item.intent === "goal-retry");
+        const schedule = snapshot.reentry?.schedule;
+        const recovery = directive ?? (schedule ? {
+            kind: "reentry" as const, intent: "automatic" as const,
+            sourceId: schedule.sourceId,
+        } : undefined);
+        if (!recovery?.sourceId) return;
+        const key = `${session.ctxId}:${recovery.id ?? `automatic:${recovery.sourceId}:${schedule?.readyAt ?? ""}`}`;
+        if (deliveredRecovery.current.has(key)) return;
+        const app = hostRef.current;
+        if (!app) return;
+        deliveredRecovery.current.add(key);
+        const claimId = `mcpapp-${crypto.randomUUID()}`;
+        const base = { ctxId: session.ctxId, claimId,
+            ...(recovery.id === undefined ? {} : { directiveId: recovery.id }) };
+        const current = () => sessionRef.current?.ctxId === session.ctxId && hostRef.current === app;
+        const invoke = async (payload: Record<string, unknown>) => {
+            const result = await app.callServerTool({ name: "mcpapp_reentry", arguments: { ...base, ...payload } });
+            if (result.isError) throw new Error("Workspace recovery was rejected.");
+            return (result.structuredContent ?? {}) as Record<string, unknown>;
+        };
+        void (async () => {
+            let claimed = false;
+            let attempted = false;
+            let outcome: "accepted" | "rejected" | "uncertain" = "uncertain";
+            try {
+                const claim = await invoke({ action: "claim", intent: recovery.intent, sourceId: recovery.sourceId });
+                if (claim.claimed !== true) return;
+                claimed = true;
+                if (!current()) return;
+                const validated = await invoke({ action: "validate" });
+                if (validated.valid !== true || !current()) return;
+                const delivery = claim.delivery as { message?: string; modelContext?: unknown } | undefined;
+                if (typeof delivery?.message !== "string" || !delivery.modelContext ||
+                    typeof delivery.modelContext !== "object")
+                    throw new Error("Workspace recovery delivery is unavailable.");
+                await app.updateModelContext(delivery.modelContext as Parameters<ConnectedApp["updateModelContext"]>[0]);
+                if (!current()) return;
+                const attempt = await invoke({ action: "attempt" });
+                if (attempt.attempted !== true || !current()) return;
+                attempted = true;
+                const sent = await app.sendMessage({
+                    role: "user", content: [{ type: "text", text: delivery.message }],
+                });
+                outcome = sent?.isError ? "rejected" : "accepted";
+            } catch (error) {
+                if (current()) setActionError(error instanceof Error ? error.message : "Workspace recovery failed.");
+            } finally {
+                if (claimed) {
+                    try {
+                        if (attempted) await invoke({ action: "report", outcome });
+                        else await invoke({ action: "release" });
+                    } catch {
+                        // An uncertain send cannot be replayed blindly.
+                    }
+                }
+                if (current()) {
+                    try { setSnapshot(await readMcpAppSnapshot(session, new AbortController().signal)); }
+                    catch { /* Watch reconnects from authoritative state. */ }
+                }
+            }
+        })();
+    }, [snapshot, session, status]);
 
     const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => {
         const app = hostRef.current;
