@@ -4,8 +4,8 @@ import { ToolCallRegistryState } from "./Registry.js";
 export { installInstanceToolDefinitions } from "./Registry.js";
 export type {
     InstallInstanceToolDefinitionsOptions,
-    InstanceToolCatalogSource,
 } from "./Registry.js";
+export type { InstanceToolCatalogSource } from "./Api.js";
 
 export function createToolCallRegistry(): ToolCallRegistry {
     return new ToolCallRegistryState();

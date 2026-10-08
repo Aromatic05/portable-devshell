@@ -14,8 +14,20 @@ export interface ToolCallDefinitionRegistration {
     dispose(): void;
 }
 
+export interface InstanceToolCatalogSource {
+    readonly config: { readonly mcpEnabled: boolean; readonly name: string };
+    readonly toolCallHooks: ToolCallHooks;
+    readonly toolDefinitions: {
+        register(definitions: readonly ToolDefinition[]): ToolCallDefinitionRegistration;
+        list(): readonly ToolDefinition[];
+    };
+}
+
 export interface ToolCallRegistry extends ToolCallRegistration {
-    bind(hooks: ToolCallHooks): () => void;
+    bind(options: {
+        changes: { onChange(listener: () => void): () => void };
+        instances: { list(): readonly InstanceToolCatalogSource[] };
+    }): () => void;
     register(
         scope: string,
         definitions: readonly ToolDefinition[],

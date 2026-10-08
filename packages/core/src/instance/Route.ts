@@ -70,7 +70,6 @@ export function createInstanceHost(
                     readToolCalls: (query) => state.tools.readToolCalls(query),
                     readToolCallFailureSummary: (sinceMs, untilMs) =>
                         state.tools.readToolCallFailureSummary(sinceMs, untilMs),
-                    dispatchToolCall: (request) => state.callTool(request),
                     releaseToolSession: (connectionId) =>
                         state.tools.releaseSession(connectionId),
                     subscribe: events.subscribe,

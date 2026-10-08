@@ -8,6 +8,7 @@ import {
     type ToolNameHandle,
 } from "@portable-devshell/shared";
 import type {
+    InstanceToolCatalogSource,
     ToolCallDefinitionEntry,
     ToolCallDefinitionRegistration,
     ToolCallRegistry,
@@ -21,32 +22,79 @@ interface StoredRegistration {
     readonly scope: string;
 }
 
-export class ToolCallRegistryState implements ToolCallRegistry {
-    #hooks?: ToolCallHooks;
-    readonly #registrations = new Map<symbol, StoredRegistration>();
+interface HookRegistration {
+    install(hooks: ToolCallHooks): () => void;
+    releases: Map<InstanceToolCatalogSource, () => void>;
+}
 
-    bind(hooks: ToolCallHooks): () => void {
-        if (this.#hooks !== undefined)
-            throw new Error("Control ToolCall registry is already bound.");
-        this.#hooks = hooks;
+interface ExecuteRegistration {
+    execute: ToolCallExecutor;
+    releases: Map<InstanceToolCatalogSource, () => void>;
+}
+
+interface InstanceBinding {
+    instance: InstanceToolCatalogSource;
+    definitions: ToolCallDefinitionRegistration;
+    current: readonly ToolDefinition[];
+}
+
+export class ToolCallRegistryState implements ToolCallRegistry {
+    readonly #registrations = new Map<symbol, StoredRegistration>();
+    readonly #hooks = new Set<HookRegistration>();
+    readonly #executes = new Map<string, ExecuteRegistration>();
+    readonly #bindings = new Map<string, InstanceBinding>();
+    #bound = false;
+
+    bind(options: {
+        changes: { onChange(listener: () => void): () => void };
+        instances: { list(): readonly InstanceToolCatalogSource[] };
+    }): () => void {
+        if (this.#bound) throw new Error("ToolCall registry is already bound.");
+        this.#bound = true;
+        let stop: () => void;
+        try {
+            this.#sync(options.instances.list());
+            stop = options.changes.onChange(() => this.#sync(options.instances.list()));
+        } catch (error) {
+            this.#detachAll();
+            this.#bound = false;
+            throw error;
+        }
         let released = false;
         return () => {
             if (released) return;
             released = true;
-            if (this.#hooks === hooks) this.#hooks = undefined;
+            stop();
+            this.#detachAll();
+            this.#bound = false;
         };
     }
 
     registerContributor(contributor: ToolCallHookContributor): () => void {
-        return this.#requireHooks().registerContributor(contributor);
+        return this.#registerHook((hooks) => hooks.registerContributor(contributor));
     }
 
     registerExecute(toolName: string, execute: ToolCallExecutor): () => void {
-        return this.#requireHooks().registerExecute(toolName, execute);
+        if (this.#executes.has(toolName))
+            throw new Error(`ToolCall execute already registered: ${toolName}`);
+        const entry: ExecuteRegistration = { execute, releases: new Map() };
+        this.#executes.set(toolName, entry);
+        try {
+            this.#syncExecutes();
+        } catch (error) {
+            this.#executes.delete(toolName);
+            this.#syncExecutes();
+            throw error;
+        }
+        return () => {
+            this.#executes.delete(toolName);
+            for (const release of entry.releases.values()) release();
+            entry.releases.clear();
+        };
     }
 
     registerReview(review: ToolCallReviewHook): () => void {
-        return this.#requireHooks().registerReview(review);
+        return this.#registerHook((hooks) => hooks.registerReview(review));
     }
 
     registerToolName(toolName: string, handle: ToolNameHandle): () => void {
@@ -72,12 +120,20 @@ export class ToolCallRegistryState implements ToolCallRegistry {
         };
         this.#assertNoConflicts(registration);
         this.#registrations.set(id, registration);
+        try {
+            this.#refreshDefinitions();
+        } catch (error) {
+            this.#registrations.delete(id);
+            this.#refreshDefinitions();
+            throw error;
+        }
         let disposed = false;
         return {
             dispose: () => {
                 if (disposed) return;
                 disposed = true;
                 this.#registrations.delete(id);
+                this.#refreshDefinitions();
             },
             replace: (next) => {
                 if (disposed)
@@ -88,7 +144,15 @@ export class ToolCallRegistryState implements ToolCallRegistry {
                     scope,
                 };
                 this.#assertNoConflicts(replacement, id);
+                const previous = registration.definitions;
                 registration.definitions = replacement.definitions;
+                try {
+                    this.#refreshDefinitions();
+                } catch (error) {
+                    registration.definitions = previous;
+                    this.#refreshDefinitions();
+                    throw error;
+                }
             },
         };
     }
@@ -115,6 +179,14 @@ export class ToolCallRegistryState implements ToolCallRegistry {
                 });
             }
         }
+        const source = this.#bindings.get(instance)?.instance;
+        if (source?.config.mcpEnabled) {
+            const registered = new Set(entries.map((entry) => entry.definition.name));
+            for (const definition of source.toolDefinitions.list()) {
+                if (registered.has(definition.name)) continue;
+                entries.push({ definition: structuredClone(definition), scope: instance });
+            }
+        }
         return entries;
     }
 
@@ -127,9 +199,121 @@ export class ToolCallRegistryState implements ToolCallRegistry {
         );
     }
 
-    #requireHooks(): ToolCallHooks {
-        if (this.#hooks !== undefined) return this.#hooks;
-        throw new Error("Control ToolCall registry is not bound.");
+    #registerHook(install: HookRegistration["install"]): () => void {
+        const entry: HookRegistration = { install, releases: new Map() };
+        try {
+            for (const binding of this.#bindings.values())
+                entry.releases.set(binding.instance, install(binding.instance.toolCallHooks));
+        } catch (error) {
+            for (const release of entry.releases.values()) release();
+            throw error;
+        }
+        this.#hooks.add(entry);
+        let disposed = false;
+        return () => {
+            if (disposed) return;
+            disposed = true;
+            this.#hooks.delete(entry);
+            for (const release of entry.releases.values()) release();
+            entry.releases.clear();
+        };
+    }
+
+    #definitions(instance: string): readonly ToolDefinition[] {
+        const definitions: ToolDefinition[] = [];
+        for (const registration of this.#registrations.values()) {
+            if (registration.scope !== allToolCallInstances && registration.scope !== instance)
+                continue;
+            definitions.push(...registration.definitions.values());
+        }
+        return definitions;
+    }
+
+    #refreshDefinitions(): void {
+        const updated: InstanceBinding[] = [];
+        try {
+            for (const [name, binding] of this.#bindings) {
+                binding.definitions.replace(this.#definitions(name));
+                updated.push(binding);
+            }
+            this.#syncExecutes();
+        } catch (error) {
+            for (const binding of updated.reverse())
+                binding.definitions.replace(binding.current);
+            this.#syncExecutes();
+            throw error;
+        }
+        for (const [name, binding] of this.#bindings)
+            binding.current = this.#definitions(name);
+    }
+
+    #syncExecutes(): void {
+        for (const [name, binding] of this.#bindings) {
+            const visible = new Set(this.#definitions(name).map((definition) => definition.name));
+            for (const [toolName, entry] of this.#executes) {
+                const installed = entry.releases.get(binding.instance);
+                if (!visible.has(toolName)) {
+                    installed?.();
+                    entry.releases.delete(binding.instance);
+                } else if (installed === undefined) {
+                    entry.releases.set(
+                        binding.instance,
+                        binding.instance.toolCallHooks.registerExecute(toolName, entry.execute),
+                    );
+                }
+            }
+        }
+    }
+
+    #sync(instances: readonly InstanceToolCatalogSource[]): void {
+        const active = new Map(instances.map((instance) => [instance.config.name, instance]));
+        for (const [name, binding] of this.#bindings) {
+            if (active.get(name) === binding.instance) continue;
+            this.#detach(name, binding);
+        }
+        for (const [name, instance] of active) {
+            if (this.#bindings.has(name)) continue;
+            const current = this.#definitions(name);
+            const definitions = instance.toolDefinitions.register(current);
+            try {
+                for (const hook of this.#hooks)
+                    hook.releases.set(instance, hook.install(instance.toolCallHooks));
+                for (const [toolName, entry] of this.#executes) {
+                    if (!current.some((definition) => definition.name === toolName)) continue;
+                    entry.releases.set(instance, instance.toolCallHooks.registerExecute(toolName, entry.execute));
+                }
+            } catch (error) {
+                for (const hook of this.#hooks) {
+                    hook.releases.get(instance)?.();
+                    hook.releases.delete(instance);
+                }
+                for (const entry of this.#executes.values()) {
+                    entry.releases.get(instance)?.();
+                    entry.releases.delete(instance);
+                }
+                definitions.dispose();
+                throw error;
+            }
+            this.#bindings.set(name, { instance, definitions, current });
+        }
+    }
+
+    #detach(name: string, binding: InstanceBinding): void {
+        for (const hook of this.#hooks) {
+            hook.releases.get(binding.instance)?.();
+            hook.releases.delete(binding.instance);
+        }
+        for (const entry of this.#executes.values()) {
+            entry.releases.get(binding.instance)?.();
+            entry.releases.delete(binding.instance);
+        }
+        binding.definitions.dispose();
+        this.#bindings.delete(name);
+    }
+
+    #detachAll(): void {
+        for (const [name, binding] of this.#bindings)
+            this.#detach(name, binding);
     }
 
     #assertNoConflicts(
@@ -193,70 +377,15 @@ function scopesOverlap(left: string, right: string): boolean {
     );
 }
 
-export interface InstanceToolCatalogSource {
-    readonly config: { readonly mcpEnabled: boolean; readonly name: string };
-    readonly toolDefinitions: {
-        list(): readonly ToolDefinition[];
-        onChange(listener: () => void): () => void;
-    };
-}
-
 export interface InstallInstanceToolDefinitionsOptions {
     changes: { onChange(listener: () => void): () => void };
     hooks: ToolCallRegistry;
     instances: { list(): readonly InstanceToolCatalogSource[] };
 }
 
-/**
- * Projects every MCP-enabled instance's per-instance tool catalog into the
- * Control registry, scoped by instance name. The catalog is the single source
- * of truth for Worker-refreshed definitions, so registering it here keeps the
- * MCP catalog consistent without copying Worker schemas.
- */
+/** Install Control registrations into every live Instance and project its catalog to MCP. */
 export function installInstanceToolDefinitions(
     options: InstallInstanceToolDefinitionsOptions,
 ): () => void {
-    const { changes, hooks, instances } = options;
-    const registrations = new Map<
-        string,
-        {
-            readonly instance: InstanceToolCatalogSource;
-            readonly registration: ToolCallDefinitionRegistration;
-            readonly unsubscribe: () => void;
-        }
-    >();
-    const sync = () => {
-        const active = new Map<string, InstanceToolCatalogSource>();
-        for (const instance of instances.list()) {
-            if (instance.config.mcpEnabled)
-                active.set(instance.config.name, instance);
-        }
-        for (const [name, entry] of registrations) {
-            if (active.get(name) === entry.instance) continue;
-            entry.unsubscribe();
-            entry.registration.dispose();
-            registrations.delete(name);
-        }
-        for (const [name, instance] of active) {
-            if (registrations.has(name)) continue;
-            const registration = hooks.register(
-                name,
-                instance.toolDefinitions.list(),
-            );
-            const unsubscribe = instance.toolDefinitions.onChange(() => {
-                registration.replace(instance.toolDefinitions.list());
-            });
-            registrations.set(name, { instance, registration, unsubscribe });
-        }
-    };
-    sync();
-    const stopSync = changes.onChange(sync);
-    return () => {
-        stopSync();
-        for (const entry of registrations.values()) {
-            entry.unsubscribe();
-            entry.registration.dispose();
-        }
-        registrations.clear();
-    };
+    return options.hooks.bind({ changes: options.changes, instances: options.instances });
 }

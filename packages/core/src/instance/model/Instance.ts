@@ -6,6 +6,8 @@ import {
     type ControlHostDefinition,
     type ControlInstanceConfig,
     type ControlPortDefinition,
+    type ToolCallHooks,
+    type ToolCallApi,
     type WorkerArtifactApi,
 } from "@portable-devshell/shared";
 
@@ -144,6 +146,14 @@ export class Instance {
 
     get toolDefinitions(): InstanceToolCatalog {
         return this.#state.toolDefinitions;
+    }
+
+    get toolCallHooks(): ToolCallHooks {
+        return this.#state.toolCalls.hooks;
+    }
+
+    get toolCallIngress(): ToolCallApi {
+        return this.#state.toolCalls.api;
     }
 
     get lifecycle(): InstanceLifecycle {
