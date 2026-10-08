@@ -9,6 +9,7 @@ import type { ArtifactRuntime } from "./artifact/Api.js";
 import { installArtifactTools } from "./artifact/tool/index.js";
 import type { ContextRuntime } from "./context/Api.js";
 import { installContextTools } from "./context/Public.js";
+import { ModelCommandBroker } from "./context/command/index.js";
 import { createDebugRuntime } from "./debug/index.js";
 import type { DebugRuntime } from "./debug/Api.js";
 import type { ExtensionRuntime } from "./extension/Api.js";
@@ -41,6 +42,7 @@ export class ControlState {
     readonly extensions: ExtensionRuntime;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #toolCallHookUnregister: Array<() => void>;
+    readonly #modelCommands: ModelCommandBroker;
     #closed = false;
 
     constructor(options: ControlStateOptions) {
@@ -68,6 +70,14 @@ export class ControlState {
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
         };
+
+        this.#modelCommands = new ModelCommandBroker({
+            changes: options.instanceChanges,
+            commands: modelCliCommands,
+            contexts: options.contexts.api,
+            endpoint: options.internalEndpoint,
+            instances: options.instances,
+        });
 
         this.#toolCallHookUnregister = [
             extensionToolCalls.install(options.toolRegistry),
@@ -117,6 +127,7 @@ export class ControlState {
     async close(): Promise<void> {
         if (this.#closed) return;
         const failures: unknown[] = [];
+        this.#modelCommands.close();
         for (const unregister of this.#toolCallHookUnregister.splice(0).reverse()) {
             try {
                 unregister();
