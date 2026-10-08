@@ -6,6 +6,7 @@ import {
 export async function runTestspaceModelDevshellSmoke({
     endpoint,
     instance,
+    remoteEndpoint,
     remoteInstance,
     remoteWorkspace,
     workspace,
@@ -14,6 +15,7 @@ export async function runTestspaceModelDevshellSmoke({
         name: "portable-devshell-testspace-model-devshell-smoke",
         version: "0.0.0",
     });
+    let remoteClient;
     try {
         await client.connect(
             new StreamableHTTPClientTransport(new URL(endpoint)),
@@ -115,7 +117,15 @@ export async function runTestspaceModelDevshellSmoke({
             );
         }
 
-        const remotePwd = await runBash(client, ctxId, "pwd", remoteInstance);
+        // Instance routing is endpoint-scoped unless the host exposes the
+        // instance-management capability. The attached Context is authorized
+        // at the separate reverse MCP endpoint without an instance override.
+        remoteClient = new Client({
+            name: "portable-devshell-testspace-remote-model-smoke",
+            version: "0.0.0",
+        });
+        await remoteClient.connect(new StreamableHTTPClientTransport(new URL(remoteEndpoint)));
+        const remotePwd = await runBash(remoteClient, ctxId, "pwd");
         assertExit(remotePwd, 0, "remote bash after environ_remote attach");
         if (String(remotePwd.stdout ?? "").trim() !== remoteWorkspace) {
             throw new Error(
@@ -155,11 +165,10 @@ export async function runTestspaceModelDevshellSmoke({
 
         await assertToolErrorCall(
             async () =>
-                await client.callTool({
+                await remoteClient.callTool({
                     arguments: {
                         command: "pwd",
                         ctxId,
-                        instance: remoteInstance,
                         timeoutMs: 30_000,
                     },
                     name: "bash_run",
@@ -208,16 +217,16 @@ export async function runTestspaceModelDevshellSmoke({
             toolCount: names.size,
         };
     } finally {
+        await remoteClient?.close().catch(() => undefined);
         await client.close().catch(() => undefined);
     }
 }
 
-async function runBash(client, ctxId, command, instance) {
+async function runBash(client, ctxId, command) {
     const result = await client.callTool({
         arguments: {
             command,
             ctxId,
-            ...(instance === undefined ? {} : { instance }),
             timeoutMs: 30_000,
         },
         name: "bash_run",
