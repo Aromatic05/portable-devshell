@@ -11,6 +11,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 import type { WaitApi } from "../../../src/task/Api.ts";
 import type { ToolCallHooks } from "../../../src/toolcall/Api.ts";
 import {
+    WAIT_HANDOFF_MS,
     WAIT_SYNC_MS,
     WaitService,
 } from "../../../src/task/wait/index.ts";
@@ -79,9 +80,9 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 toolName: "tmux_run",
             },
         }, runtime);
-        assert.equal((run.payload as Record<string, JsonValue>).timeMs, WAIT_SYNC_MS);
+        assert.equal((run.payload as Record<string, JsonValue>).timeMs, WAIT_HANDOFF_MS);
 
-        await rewrite({
+        const handedOff = await rewrite({
             callId: "call-run",
             direction: "outbound",
             value: {
@@ -89,11 +90,16 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
                 kind: "result",
                 payload: {
                     task: { id: "task-1", status: "running" },
+                    timeout: 220_000,
                     timedOut: true,
+                    warnings: [{ code: "tmux.blockTimeout", message: "internal timeout" }],
                 },
                 toolName: "tmux_run",
             },
         }, runtime);
+        assert.equal((handedOff.payload as Record<string, JsonValue>).detached, true);
+        assert.equal((handedOff.payload as Record<string, JsonValue>).timedOut, undefined);
+        assert.deepEqual((handedOff.payload as Record<string, JsonValue>).warnings, []);
         assert.deepEqual(detached, [
             {
                 callId: "call-run",
@@ -124,6 +130,19 @@ test("Wait rewrite clamps tmux block/read and detaches timed-out tasks", async (
             },
         }, runtime);
         assert.equal(detached[1]?.targetId, "task-2");
+
+        const shortDeadline = await rewrite({
+            callId: "call-short",
+            direction: "outbound",
+            value: {
+                context,
+                kind: "result",
+                payload: { task: { id: "task-short", status: "running" }, timeout: 300, timedOut: true },
+                toolName: "tmux_run",
+            },
+        }, runtime);
+        assert.equal((shortDeadline.payload as Record<string, JsonValue>).timedOut, true);
+        assert.equal((shortDeadline.payload as Record<string, JsonValue>).detached, undefined);
 
         const read = await rewrite({
             callId: "call-read",

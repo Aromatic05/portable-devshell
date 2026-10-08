@@ -12,6 +12,7 @@ import {
 } from "@portable-devshell/shared";
 
 export const WAIT_SYNC_MS = 120_000;
+export const WAIT_HANDOFF_MS = 180_000;
 const WAIT_TERMINAL_RETENTION = 128;
 
 export interface WaitInvokePort {
