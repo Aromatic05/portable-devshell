@@ -238,3 +238,23 @@ test("review preserves the typed evaluation error code and message", async (t) =
         reason: "Denied by policy.",
     });
 });
+
+test("MCP App approval resolution does not approve itself, but rejects other Contexts", async () => {
+    const { approval, review } = fixture();
+    let evaluated = 0;
+    Object.assign(approval, {
+        async getApproval(id: string) {
+            return { approvalId: id, status: "pending", ctxId: "ctx-1", workspace: "/workspace" };
+        },
+        async evaluate() { evaluated++; return { decision: "ask" }; },
+    });
+    const app = {
+        ...input,
+        value: { ...input.value, toolName: "mcpapp_action", payload: { itemId: "approval-1", actionId: "approve" } },
+    };
+    assert.deepEqual(await runReview(review(), app), { decision: "continue" });
+    assert.equal(evaluated, 0);
+    const wrongContext = { ...app, value: { ...app.value, context: { ...app.value.context, ctxId: "ctx-other" } } };
+    assert.equal((await runReview(review(), wrongContext)).decision, "reject");
+    assert.equal(evaluated, 0);
+});

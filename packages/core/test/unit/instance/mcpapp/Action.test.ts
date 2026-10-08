@@ -59,7 +59,10 @@ test("native MCP App action passes Hook review, executes only for matching Conte
     });
     const stop = installMcpAppAction(runtime.hooks, domain as never);
     const call = async (input: JsonValue, ctxId = "ctx-a", source: "mcp" | "cli" = "mcp") =>
-        await runtime.api.call("local", "mcpapp_action", input, { ctxId, workspace: "/repo", source });
+        await runtime.api.call("local", "mcpapp_action", {
+            ...(input as Record<string, JsonValue>),
+            requestId: "test-request-uuid-12345678",
+        }, { ctxId, workspace: "/repo", source });
     try {
         assert.deepEqual(await call({ itemId: "task-a", actionId: "task-pause", expectedRevision: 3 }),
             { status: "applied", itemId: "task-a", actionId: "task-pause" });
