@@ -52,12 +52,18 @@ export async function deliverMcpAppReentry(
             const reserved = await ports.actions.beginDelivery(directiveId);
             if (reserved === undefined) return { claimed: false };
         }
-    } else if (receipt !== undefined &&
-        !["attempting", "attempted", "reporting"].includes(receipt.status)) {
-        return { valid: false, attempted: false };
+    } else if (receipt !== undefined) {
+        if (action === "validate" && receipt.status !== "attempting")
+            return { valid: false };
+        if (action === "attempt" && receipt.status === "attempted")
+            return { attempted: false, duplicate: true };
+        if (action === "attempt" && receipt.status !== "attempting")
+            return { attempted: false };
+        if (action === "report" && receipt.status !== "attempted")
+            return { reported: false };
+        if (action === "release" && receipt.status !== "attempting")
+            return { released: false };
     }
-    if (action === "attempt" && receipt?.status === "attempted")
-        return { attempted: false, duplicate: true };
 
     let result: McpEndpointResult;
     try {
@@ -79,19 +85,34 @@ export async function deliverMcpAppReentry(
                 await ports.actions.restoreDelivery(directiveId);
             return result;
         }
-        const snapshot = await ports.view.snapshot(ports.instance, ctxId, environment.workspace);
-        const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
-        return {
-            ...value,
-            delivery: {
-                message: intent === "automatic"
-                    ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
-                    : intent === "task-resume"
-                        ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
-                        : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
-                modelContext: snapshot.modelContext as unknown as JsonValue,
-            },
-        };
+        try {
+            const snapshot = await ports.view.snapshot(ports.instance, ctxId, environment.workspace);
+            const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
+            return {
+                ...value,
+                delivery: {
+                    message: intent === "automatic"
+                        ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
+                        : intent === "task-resume"
+                            ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
+                            : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
+                    modelContext: snapshot.modelContext as unknown as JsonValue,
+                },
+            };
+        } catch (error) {
+            // The Host never received a claim response. Release the Instance
+            // claim through ToolCall before making its receipt available again.
+            try {
+                const released = await ports.dispatch.callTool("mcpapp_reentry", {
+                    ...input, action: "release",
+                }, request, signal);
+                if (released instanceof McpNativeToolResult && released.isError)
+                    throw new Error("Instance recovery release was rejected.");
+                if (typeof directiveId === "string")
+                    await ports.actions.restoreDelivery(directiveId);
+            } catch { /* Fail closed when release status is uncertain. */ }
+            throw error;
+        }
     }
 
     if (typeof directiveId === "string") {
