@@ -12,39 +12,25 @@ async function smokeTerminal(target, runtimeDirectory) {
     const { instance, workspace } = target;
     return await withTestspaceControlConnection(
         runtimeDirectory,
-        async (_shared, connection) => {
-            const opened = await connection.request(
-                instance,
-                "terminal",
-                "open",
-                {
-                    cols: 80,
-                    rows: 24,
-                    workspace,
-                },
-            );
+        async (shared, endpoint) => {
+            const terminal = shared.createTerminalTransport(endpoint, instance);
+            const opened = await terminal.open({ cols: 80, rows: 24, workspace });
             let version = opened.version;
             let lastSeq = 0;
             let clientSeq = 0;
-            const attached = await connection.openStream(
-                instance,
-                "terminal",
-                "attach",
-                {
-                    fromSeq: 0,
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                },
-            );
+            const attached = await terminal.attach({
+                fromSeq: 0,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            });
             const readyMarker = `${instance}-terminal-ready`;
-            await attached.stream.send("input", {
+            await attached.sendInput(terminalPrintCommand(readyMarker), {
                 clientSeq: ++clientSeq,
-                data: terminalPrintCommand(readyMarker),
                 generation: opened.generation,
                 terminalId: opened.terminalId,
                 version,
             });
-            const ready = await waitForTerminal(attached.stream, {
+            const ready = await waitForTerminal(attached, {
                 generation: opened.generation,
                 label: `${instance}:initial-output`,
                 marker: readyMarker,
@@ -53,34 +39,31 @@ async function smokeTerminal(target, runtimeDirectory) {
             });
             lastSeq = Math.max(lastSeq, ready.lastSeq);
 
-            await attached.stream.send("resize", {
+            await attached.sendResize(100, 40, {
                 clientSeq: ++clientSeq,
-                cols: 100,
                 generation: opened.generation,
-                rows: 40,
                 terminalId: opened.terminalId,
                 version,
             });
-            const resized = await waitForTerminal(attached.stream, {
+            const resized = await waitForTerminal(attached, {
                 generation: opened.generation,
                 label: `${instance}:resize`,
                 predicate: (event) =>
-                    event.name === "terminal.resized" &&
-                    event.payload?.clientSeq === clientSeq,
+                    event.kind === "resized" &&
+                    event.clientSeq === clientSeq,
                 terminalId: opened.terminalId,
                 version: () => version,
             });
-            version = resized.event.payload.version;
+            version = resized.event.identity.version;
             lastSeq = Math.max(lastSeq, resized.lastSeq);
 
-            await attached.stream.send("input", {
+            await attached.sendInput(terminalSizeProbeCommand(), {
                 clientSeq: ++clientSeq,
-                data: terminalSizeProbeCommand(),
                 generation: opened.generation,
                 terminalId: opened.terminalId,
                 version,
             });
-            const sized = await waitForTerminal(attached.stream, {
+            const sized = await waitForTerminal(attached, {
                 generation: opened.generation,
                 label: `${instance}:size-probe`,
                 marker: terminalExpectedSize(40, 100),
@@ -88,27 +71,21 @@ async function smokeTerminal(target, runtimeDirectory) {
                 version: () => version,
             });
             lastSeq = Math.max(lastSeq, sized.lastSeq);
-            attached.stream.close();
+            attached.close();
 
-            const resumed = await connection.openStream(
-                instance,
-                "terminal",
-                "attach",
-                {
-                    fromSeq: lastSeq,
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                },
-            );
+            const resumed = await terminal.attach({
+                fromSeq: lastSeq,
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+            });
             const resumedMarker = `${instance}-terminal-resumed`;
-            await resumed.stream.send("input", {
+            await resumed.sendInput(terminalPrintCommand(resumedMarker), {
                 clientSeq: ++clientSeq,
-                data: terminalPrintCommand(resumedMarker),
                 generation: opened.generation,
                 terminalId: opened.terminalId,
                 version,
             });
-            const resumedResult = await waitForTerminal(resumed.stream, {
+            const resumedResult = await waitForTerminal(resumed, {
                 generation: opened.generation,
                 label: `${instance}:resume`,
                 marker: resumedMarker,
@@ -116,18 +93,13 @@ async function smokeTerminal(target, runtimeDirectory) {
                 version: () => version,
             });
             lastSeq = Math.max(lastSeq, resumedResult.lastSeq);
-            resumed.stream.close();
+            resumed.close();
 
-            const killed = await connection.request(
-                instance,
-                "terminal",
-                "kill",
-                {
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                    version,
-                },
-            );
+            const killed = await terminal.kill({
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version,
+            });
             if (killed.state !== "killed" && killed.state !== "exited") {
                 throw new Error(
                     `terminal kill failed for ${instance}: ${JSON.stringify(killed)}`,
@@ -154,7 +126,7 @@ async function waitForTerminal(stream, options) {
         let event;
         try {
             event = await Promise.race([
-                stream.nextEvent(),
+                stream.next(),
                 new Promise((_, reject) =>
                     setTimeout(
                         () => reject(new Error("terminal event timeout")),
@@ -165,29 +137,25 @@ async function waitForTerminal(stream, options) {
         } catch (error) {
             throw new Error(
                 `${options.label} failed: ${error instanceof Error ? error.message : String(error)}; ` +
-                    `lastEvent=${lastEvent?.name ?? "none"}; output=${JSON.stringify(output)}`,
+                    `lastEvent=${lastEvent?.kind ?? "none"}; output=${JSON.stringify(output)}`,
             );
         }
         lastEvent = event;
-        if (
-            event.name === "stream.cancelled" ||
-            event.name === "stream.completed"
-        ) {
+        if (event.kind === "closed" || event.kind === "exit") {
             throw new Error(
-                `${options.label} ended unexpectedly: ${event.name}; ` +
+                `${options.label} ended unexpectedly: ${event.kind}; ` +
                     `error=${JSON.stringify(event.error)}; output=${JSON.stringify(output)}`,
             );
         }
-        if (event.name === "terminal.output") {
-            const seq = event.payload?.seq ?? 0;
-            output += event.payload?.data ?? "";
+        if (event.kind === "output") {
+            const seq = event.frame.seq;
+            output += event.frame.data;
             lastSeq = Math.max(lastSeq, seq);
-            await stream.send("ack", {
+            await stream.ack({
                 generation: options.generation,
                 terminalId: options.terminalId,
-                throughSeq: seq,
                 version: options.version(),
-            });
+            }, seq);
         }
         const matched =
             options.predicate?.(event, output) ??
@@ -195,7 +163,7 @@ async function waitForTerminal(stream, options) {
         if (matched) return { event, lastSeq, output };
     }
     throw new Error(
-        `${options.label} failed; terminal=${options.terminalId}; last event=${lastEvent?.name ?? "none"}; output=${JSON.stringify(output)}`,
+        `${options.label} failed; terminal=${options.terminalId}; last event=${lastEvent?.kind ?? "none"}; output=${JSON.stringify(output)}`,
     );
 }
 
