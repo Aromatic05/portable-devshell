@@ -27,7 +27,9 @@ export function createTestInstance(
         return {
             connectionState: ready ? "connected" : "disconnected",
             daemonState: ready ? "running" : "stopped",
+            effectiveSecurityMode: config.security.mode,
             lastSeq: 0,
+            name: config.name,
             ready,
             status: ready ? "running" : "stopped",
         };

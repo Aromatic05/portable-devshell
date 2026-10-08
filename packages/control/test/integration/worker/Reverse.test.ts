@@ -244,9 +244,9 @@ test(
         assert.equal(result.exitCode, 0);
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
-        const workerInstance =
-            factory.registry?.get("reverse-test")?.worker;
+        const workerInstance = factory.registry?.get("reverse-test");
         assert.ok(workerInstance);
+        const workerHost = `${workerInstance.config.name}-worker`;
         const httpBody = "reverse-http-over-devshell";
         const httpServer = createHttpServer((request, response) => {
             assert.equal(request.url, "/reverse-probe");
@@ -263,7 +263,14 @@ test(
         const httpAddress = httpServer.address();
         assert.ok(httpAddress !== null && typeof httpAddress !== "string");
 
-        const tcp = await workerInstance.connectTcp({
+        const networkProtocol = new Stream(
+            await workerInstance.supervision.endpoint.connect(
+                workerHost,
+                "network",
+            ),
+        );
+        t.after(() => networkProtocol.close());
+        const tcp = await networkProtocol.open("tcp", {
             host: "127.0.0.1",
             port: httpAddress.port,
         });
@@ -277,7 +284,14 @@ test(
         assert.match(httpResponse, /^HTTP\/1\.1 200 OK\r\n/u);
         assert.match(httpResponse, /\r\n\r\nreverse-http-over-devshell$/u);
 
-        const processStream = await workerInstance.execProcess({
+        const processProtocol = new Stream(
+            await workerInstance.supervision.endpoint.connect(
+                workerHost,
+                "process",
+            ),
+        );
+        t.after(() => processProtocol.close());
+        const processStream = await processProtocol.open("exec", {
             executable: process.execPath,
             args: [
                 "-e",
