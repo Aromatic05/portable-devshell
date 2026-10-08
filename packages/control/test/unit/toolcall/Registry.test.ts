@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createToolCallRuntime, type JsonValue, type ToolDefinition } from "@portable-devshell/shared";
+import type { Instance } from "@portable-devshell/core";
+import { InstanceRegistry } from "../../../src/instance/Registry.ts";
+import { InstanceChangeHub } from "../../../src/instance/Change.ts";
 import {
     createToolCallRegistry,
     installInstanceToolDefinitions,
@@ -72,7 +75,7 @@ test("instance catalog bridge projects catalogs and follows refresh", () => {
     const stop = installInstanceToolDefinitions({
         changes,
         hooks: registry,
-        instances: { list: () => [source.instance] },
+        instances: existingInstances(() => [source.instance]),
     });
 
     assert.deepEqual(names(registry, "local"), ["environ_info"]);
@@ -98,7 +101,7 @@ test("instance catalog bridge retires removed and replaced instances", () => {
     installInstanceToolDefinitions({
         changes,
         hooks: registry,
-        instances: { list: () => sources.map((entry) => entry.instance) },
+        instances: existingInstances(() => sources.map((entry) => entry.instance)),
     });
     const firstWorker = first.toolDefinitions.register([bashRun]);
     assert.deepEqual(names(registry, "local"), ["bash_run"]);
@@ -127,11 +130,74 @@ test("instance catalog bridge ignores instances without MCP", () => {
     installInstanceToolDefinitions({
         changes: changeHub(),
         hooks: registry,
-        instances: { list: () => [source.instance] },
+        instances: existingInstances(() => [source.instance]),
     });
 
     source.toolDefinitions.register([bashRun]);
     assert.deepEqual(names(registry, "local"), []);
+});
+
+test("instance add fails before commit when ToolCall injection conflicts", () => {
+    const registry = createToolCallRegistry();
+    const instances = new InstanceRegistry([]);
+    const changes = new InstanceChangeHub();
+    const definitions = registry.registerAll([environInfo]);
+    const stop = installInstanceToolDefinitions({
+        changes,
+        hooks: registry,
+        instances,
+    });
+    const conflict = catalogSource("collision");
+    conflict.toolDefinitions.register([environInfo]);
+    try {
+        assert.throws(
+            () => instances.add(conflict.instance as unknown as Instance),
+            /more than once/iu,
+        );
+        assert.equal(instances.get("collision"), undefined);
+        assert.deepEqual(conflict.toolDefinitions.list().map((tool) => tool.name), ["environ_info"]);
+    } finally {
+        stop();
+        definitions.dispose();
+        conflict.runtime.close();
+    }
+});
+
+test("instance add rolls back installed tools and hooks when a later initializer fails", async () => {
+    const registry = createToolCallRegistry();
+    const instances = new InstanceRegistry([]);
+    const source = catalogSource("rejected");
+    const definitions = registry.registerAll([environInfo]);
+    const unregisterExecute = registry.registerExecute("environ_info", async () => "ok");
+    let reviews = 0;
+    const unregisterReview = registry.registerReview({
+        hook: "400-precommit-review",
+        id: "precommit-review",
+        review: () => {
+            reviews += 1;
+            return { decision: "continue" };
+        },
+    });
+    const stop = installInstanceToolDefinitions({
+        changes: new InstanceChangeHub(),
+        hooks: registry,
+        instances,
+    });
+    const stopFailing = instances.onAdding(() => { throw new Error("initializer failed"); });
+    try {
+        assert.throws(() => instances.add(source.instance as unknown as Instance), /initializer failed/u);
+        assert.equal(instances.get("rejected"), undefined);
+        assert.deepEqual(source.toolDefinitions.list(), []);
+        await assert.rejects(source.runtime.api.call("rejected", "environ_info", {}, { source: "mcp" }), /no execute/iu);
+        assert.equal(reviews, 0);
+    } finally {
+        stopFailing();
+        stop();
+        unregisterReview();
+        unregisterExecute();
+        definitions.dispose();
+        source.runtime.close();
+    }
 });
 
 test("instance catalog bridge follows MCP enablement and preserves conflicts", () => {
@@ -142,7 +208,7 @@ test("instance catalog bridge follows MCP enablement and preserves conflicts", (
     installInstanceToolDefinitions({
         changes,
         hooks: registry,
-        instances: { list: () => [source.instance] },
+        instances: existingInstances(() => [source.instance]),
     });
 
     source.toolDefinitions.register([bashRun]);
@@ -183,7 +249,7 @@ test("control hooks and executes move with an instance generation", async () => 
     const stop = installInstanceToolDefinitions({
         changes,
         hooks: registry,
-        instances: { list: () => [current] },
+        instances: existingInstances(() => [current]),
     });
     const context = { source: "mcp" } as const;
     try {
@@ -235,7 +301,7 @@ test("global and instance-scoped tools both execute with receiving instance hook
     const stop = installInstanceToolDefinitions({
         changes,
         hooks: registry,
-        instances: { list: () => [local.instance, remote.instance] },
+        instances: existingInstances(() => [local.instance, remote.instance]),
     });
     const context = { requestId: "scope-call", source: "mcp" } as const;
     try {
@@ -271,6 +337,10 @@ function names(
     instance: string,
 ): string[] {
     return registry.list(instance).map((entry) => entry.definition.name);
+}
+
+function existingInstances<T>(list: () => readonly T[]) {
+    return { list, onAdding: () => () => undefined };
 }
 
 function catalogSource(name: string, options: { mcpEnabled?: boolean } = {}) {

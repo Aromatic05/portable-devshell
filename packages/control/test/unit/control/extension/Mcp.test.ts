@@ -101,6 +101,7 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
     const unbind = registry.bind({
         changes: { onChange: () => () => undefined },
         instances: {
+            onAdding: () => () => undefined,
             list: () => [{
                 config: { mcpEnabled: true, name: "remote-server" },
                 toolCallHooks: hooks,
