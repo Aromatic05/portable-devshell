@@ -39,3 +39,33 @@ export function mcpAppActionDefinition(): ToolDefinition {
         },
     };
 }
+
+export function mcpAppReentryDefinition(): ToolDefinition {
+    return {
+        name: "mcpapp_reentry",
+        group: "mcpapp",
+        requiredCapabilities: [],
+        description: "Advance an Instance-owned Goal continuation for an authorized MCP App Host delivery.",
+        _meta: {
+            ui: { visibility: ["app"] },
+            devshell: { mcp: { title: "Workspace recovery", annotations: {
+                destructiveHint: false, idempotentHint: false,
+                openWorldHint: false, readOnlyHint: false,
+            } } },
+        },
+        inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["action", "claimId"],
+            properties: {
+                action: { type: "string", enum: ["claim", "validate", "attempt", "report", "release"] },
+                claimId: { type: "string", minLength: 1, maxLength: 128 },
+                sourceId: { type: "string", minLength: 1, maxLength: 256 },
+                directiveId: { type: "string", minLength: 1, maxLength: 128 },
+                intent: { type: "string", enum: ["automatic", "goal-resume", "goal-retry"] },
+                outcome: { type: "string", enum: ["accepted", "rejected", "uncertain"] },
+            },
+        },
+        outputSchema: { type: "object" },
+    };
+}
