@@ -15,7 +15,7 @@ import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type { McpEndpointCallContext } from "./call/Port.js";
-import type { McpEndpointResult } from "./call/Boundary.js";
+import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
 
 export type { McpEndpointCallContext } from "./call/Port.js";
 
@@ -25,6 +25,11 @@ export interface McpEndpointOptions {
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     instanceName: string;
+    mcpAppBootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
+        ctxId: string;
+        token: string;
+        liveBaseUrl?: string;
+    } | undefined>;
     toolProvenance?: McpToolProvenanceRecorder;
     toolSource: McpToolSource;
     tools: ToolCallApi;
@@ -35,12 +40,14 @@ export class McpEndpoint {
     readonly #dispatch: McpEndpointDispatch;
     readonly #extensions: McpExtensionRegistry;
     readonly #instanceName: string;
+    readonly #mcpAppBootstrap?: McpEndpointOptions["mcpAppBootstrap"];
 
     constructor(options: McpEndpointOptions) {
         const contextSelector = createMcpContextSelector(
             options.contextMode ?? "explicit",
         );
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
+        this.#mcpAppBootstrap = options.mcpAppBootstrap;
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
             bootstrapPresentationResourceUri:
@@ -90,12 +97,29 @@ export class McpEndpoint {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
-        return await this.#dispatch.callTool(
+        const result = await this.#dispatch.callTool(
             toolName,
             input,
             requestContext,
             signal,
         );
+        if (toolName !== "environ_info" || this.#mcpAppBootstrap === undefined ||
+            (result instanceof McpNativeToolResult && result.isError)) return result;
+        const structured = result instanceof McpNativeToolResult
+            ? result.structuredContent : result;
+        const capability = await this.#mcpAppBootstrap(structured, requestContext);
+        if (capability === undefined) return result;
+        return new McpNativeToolResult({
+            ...(result instanceof McpNativeToolResult ? {
+                content: result.content,
+                isError: result.isError,
+            } : { content: [] }),
+            _meta: {
+                ...(result instanceof McpNativeToolResult ? result._meta : {}),
+                "portable-devshell/mcpapp": capability,
+            },
+            structuredContent: structured,
+        });
     }
 
     catalogSnapshot() {

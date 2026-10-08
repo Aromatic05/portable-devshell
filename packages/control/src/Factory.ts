@@ -117,6 +117,7 @@ export class ControlFactory {
                 config: options.config.require(),
                 contextTransport,
                 controlPaths,
+                endpoint: internalEndpoint,
                 factory: this.#mcpFactory,
                 instances: options.instances.registry,
                 toolRegistry,

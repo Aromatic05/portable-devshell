@@ -290,6 +290,9 @@ export class HttpHost {
             index: "index.html",
             redirect: true,
             setHeaders: (response, filePath) => {
+                // Only MCP App hashed JS/CSS is public across sandbox origins.
+                if (path === "/mcpapp/assets")
+                    response.setHeader("Access-Control-Allow-Origin", "*");
                 response.setHeader(
                     "Content-Security-Policy",
                     [

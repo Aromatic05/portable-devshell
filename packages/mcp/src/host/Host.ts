@@ -1,6 +1,7 @@
 import type {
     ContextTransport,
     ControlMcpContextMode,
+    Endpoint,
     ToolCallApi,
 } from "@portable-devshell/shared";
 import type {
@@ -12,14 +13,17 @@ import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpoint } from "../endpoint/Endpoint.js";
+import { createMcpContextSelector } from "../context/Selector.js";
 import { createMcpAppMcpExtension } from "../endpoint/extension/McpApp.js";
 import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import type { McpToolSource } from "../endpoint/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
+import { installMcpAppLive } from "../mcpapp/app/Live.js";
 import { mcpAppAssetDirectory } from "../mcpapp/app/App.js";
 import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
 import { McpAppActionStore } from "../mcpapp/ActionStore.js";
+import { createMcpAppViewModel } from "../mcpapp/ViewModel.js";
 import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
@@ -49,17 +53,21 @@ export class McpRuntimeState {
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly mcpAppLeases: McpAppLeaseStore;
+    readonly mcpAppView?: ReturnType<typeof createMcpAppViewModel>;
     readonly workspaceActions: McpAppActionStore;
     readonly mcpAppPresence = new McpAppPresenceStore();
     #initializePromise?: Promise<void>;
 
     constructor(config: {
         context: ContextTransport;
+        endpoint?: Endpoint;
         tools: ToolCallApi;
         storageDir?: string;
         mcpAppLeaseFile?: string;
     }) {
         this.context = config.context;
+        this.mcpAppView = config.endpoint === undefined
+            ? undefined : createMcpAppViewModel(config.endpoint);
         this.tools = config.tools;
         this.mcpAppLeases = new McpAppLeaseStore({
             filePath: config.mcpAppLeaseFile,
@@ -182,6 +190,8 @@ export class McpHost {
         await this.#runtimeState.initialize();
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
+            if (!this.#liveRouteCleanups.has(binding.binding.instanceName))
+                this.#attachLive(binding.binding.instanceName);
             this.#httpServer.registerBinding(
                 binding.path,
                 binding.binding,
@@ -193,13 +203,30 @@ export class McpHost {
     }
 
     async stop(): Promise<void> {
+        for (const cleanup of this.#liveRouteCleanups.values()) cleanup();
+        this.#liveRouteCleanups.clear();
         await this.#httpServer.stop();
         this.#started = false;
+    }
+
+    #attachLive(instance: string): void {
+        const view = this.#runtimeState.mcpAppView;
+        if (view !== undefined) {
+            this.#liveRouteCleanups.set(instance, installMcpAppLive({
+                contexts: this.#contexts,
+                host: this.#httpServer,
+                instance,
+                leases: this.#mcpAppLeases,
+                presence: this.#mcpAppPresence,
+                view,
+            }));
+        }
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
         this.#liveRouteCleanups.get(instance.name)?.();
         this.#liveRouteCleanups.delete(instance.name);
+        this.#attachLive(instance.name);
         const binding = new McpEndpointBinding(
             new McpEndpoint({
                 auth: instance.auth,
@@ -209,6 +236,32 @@ export class McpHost {
                     createMcpAppMcpExtension(this.#config.publicBaseUrl),
                 ]),
                 instanceName: instance.name,
+                mcpAppBootstrap: async (result, request) => {
+                    const structured = typeof result === "object" && result !== null && !Array.isArray(result)
+                        ? result : {};
+                    const ctxId = typeof structured.ctxId === "string" ? structured.ctxId : undefined;
+                    const selector = createMcpContextSelector(instance.contextMode ?? "explicit");
+                    const externalBindings = selector.bindings(request);
+                    if (ctxId === undefined && externalBindings.length === 0) return undefined;
+                    const record = await this.#contexts.resolve({
+                        ...(ctxId === undefined ? { externalBindings } : { ctxId }),
+                        instance: instance.name,
+                        principal: request.principal,
+                        touch: false,
+                    });
+                    if (record.status !== "active" || !record.environments.some((item) => item.instance === instance.name))
+                        return undefined;
+                    const token = await this.#mcpAppLeases.issue(instance.name, record.ctxId);
+                    this.#mcpAppPresence.open(instance.name, record.ctxId);
+                    const base = this.#config.publicBaseUrl;
+                    const liveBaseUrl = base === undefined ? undefined
+                        : `${base.replace(/\/+$/u, "")}/api/live/${encodeURIComponent(instance.name)}/workspace`;
+                    return {
+                        ctxId: record.ctxId,
+                        token,
+                        ...(liveBaseUrl === undefined ? {} : { liveBaseUrl }),
+                    };
+                },
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,
                 tools: this.#runtimeState.tools,

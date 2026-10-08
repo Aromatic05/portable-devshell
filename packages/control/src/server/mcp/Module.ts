@@ -6,6 +6,7 @@ import {
 import type {
     ContextTransport,
     ControlConfig,
+    Endpoint,
     JsonValue,
 } from "@portable-devshell/shared";
 
@@ -25,6 +26,7 @@ export interface McpControlModuleOptions {
     artifact: ArtifactRuntime;
     config: ControlConfig;
     contextTransport: ContextTransport;
+    endpoint?: Endpoint;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     instances: InstanceRegistry;
@@ -53,6 +55,7 @@ export class McpControlModule {
         this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpRuntimeState({
             context: options.contextTransport,
+            ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
             tools: { call: (instance, ...args) => {
                 const target = options.instances.get(instance);
                 if (target === undefined)
