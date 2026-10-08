@@ -1,0 +1,25 @@
+:root {
+    font-family: var(--font-sans, ui-sans-serif, system-ui, -apple-system, sans-serif);
+    color: var(--color-text-primary, #172031);
+    background: var(--color-background-primary, #f8fafc);
+    font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+.workspace { display: flex; flex-direction: column; min-height: 240px; padding: 16px; gap: 16px; }
+.workspace-head, .workspace-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-head { padding-bottom: 12px; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.workspace-name { font-size: 13px; font-weight: 750; letter-spacing: -.015em; }
+.workspace-name span { font-weight: 450; opacity: .68; }
+.workspace-status { display: flex; align-items: center; gap: 7px; font-size: 11px; opacity: .8; white-space: nowrap; }
+.workspace-indicator { width: 7px; height: 7px; border-radius: 50%; background: #b68a3b; }
+.workspace[data-status="connected"] .workspace-indicator { background: #16875d; }
+.workspace[data-status="disconnected"] .workspace-indicator { background: #b55e54; }
+.workspace-content { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px 8px; }
+.workspace-emblem { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 12px; margin-bottom: 14px; font-size: 21px; opacity: .65; }
+h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.025em; }
+p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacity: .7; }
+.workspace-context { max-width: 260px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: 11px; opacity: .55; }
+.workspace-foot { border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); padding-top: 10px; font-size: 10px; opacity: .5; }
+@media (min-width: 600px) { .workspace { min-height: 280px; padding: 20px 24px; } }
