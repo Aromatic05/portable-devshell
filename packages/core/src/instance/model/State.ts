@@ -20,6 +20,8 @@ import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import { installTodoTools } from "../../task/todo/tool/Runtime.js";
 import { todoToolDefinitions } from "../../task/todo/tool/Definition.js";
+import { mcpAppActionDefinition } from "../mcpapp/Definition.js";
+import { installMcpAppAction } from "../mcpapp/index.js";
 import { installWaitToolCallRewrite } from "../../task/wait/Runtime.js";
 import type { TerminalRuntime } from "../../terminal/Api.js";
 import { createTerminalRuntime } from "../../terminal/index.js";
@@ -102,7 +104,7 @@ export class InstanceState {
         this.terminal = createTerminalRuntime(dependencies.terminal);
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
-            todoToolDefinitions(),
+            [...todoToolDefinitions(), mcpAppActionDefinition()],
         );
         this.toolCalls = createToolCallRuntime({
             resolveTarget: (target) => {
@@ -123,6 +125,10 @@ export class InstanceState {
                 this.approval.api,
             ),
             installTodoTools(this.toolCalls.hooks, this.task.api),
+            installMcpAppAction(this.toolCalls.hooks, {
+                approval: this.approval.api,
+                task: this.task.api,
+            }),
             installWaitToolCallRewrite(
                 this.toolCalls.hooks,
                 this.task.api.wait,
