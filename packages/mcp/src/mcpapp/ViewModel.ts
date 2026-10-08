@@ -45,7 +45,13 @@ export function projectMcpAppSnapshot(input: {
                     current: goal.steps.filter((step) => step.status === "completed").length,
                     total: goal.steps.length,
                 },
-                actions: [],
+                actions: [
+                    goal.status === "active"
+                        ? { id: "goal-pause", label: "Pause", expectedRevision: goal.revision }
+                        : { id: "goal-resume", label: "Resume", expectedRevision: goal.revision },
+                    { id: "goal-stop", label: "Stop", tone: "danger" as const,
+                        confirmation: { message: "Stop this Goal?" }, expectedRevision: goal.revision },
+                ],
             })),
         ...tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled")
             .map((task) => ({
@@ -59,7 +65,13 @@ export function projectMcpAppSnapshot(input: {
                 ...(task.currentItem ? { current: task.currentItem } : {}),
                 ...(task.checkpoint?.summary ? { note: task.checkpoint.summary } : {}),
                 progress: { current: task.completed, total: task.total },
-                actions: [],
+                actions: [
+                    task.pausedAt
+                        ? { id: "task-resume", label: "Resume", expectedRevision: task.revision }
+                        : { id: "task-pause", label: "Pause", expectedRevision: task.revision },
+                    { id: "task-cancel", label: "Cancel", tone: "danger" as const,
+                        confirmation: { message: "Cancel this Task?" }, expectedRevision: task.revision },
+                ],
             })),
     ];
     const snapshot: McpAppSnapshot = {
@@ -77,7 +89,11 @@ export function projectMcpAppSnapshot(input: {
                     title: "Approval required",
                     summary: approvals[0].toolName,
                     detail: approvals[0].inputSummary,
-                    actions: [],
+                    actions: [
+                        { id: "approve", label: "Approve", tone: "primary" as const },
+                        { id: "deny", label: "Deny", tone: "danger" as const,
+                            confirmation: { message: "Deny this approval request?" } },
+                    ],
                 },
             }),
             work,

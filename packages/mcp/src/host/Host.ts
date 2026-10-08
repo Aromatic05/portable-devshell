@@ -236,6 +236,7 @@ export class McpHost {
                     createMcpAppMcpExtension(this.#config.publicBaseUrl),
                 ]),
                 instanceName: instance.name,
+                mcpAppActions: this.#workspaceActions,
                 mcpAppBootstrap: async (result, request) => {
                     const structured = typeof result === "object" && result !== null && !Array.isArray(result)
                         ? result : {};

@@ -55,6 +55,7 @@ export interface McpAppBackgroundItem {
 export interface McpAppAction {
     id: string;
     label: string;
+    expectedRevision?: number;
     tone?: "default" | "primary" | "danger";
     confirmation?: { message: string };
     input?: McpAppActionInput;
@@ -73,6 +74,8 @@ export type McpAppActionInput =
 export interface McpAppActionRequest {
     itemId: string;
     actionId: string;
+    expectedRevision?: number;
+    requestId?: string;
     input?: string;
 }
 
