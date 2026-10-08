@@ -16,7 +16,7 @@ export function mcpAppActionDefinition(): ToolDefinition {
         inputSchema: {
             type: "object",
             additionalProperties: false,
-            required: ["itemId", "actionId"],
+            required: ["itemId", "actionId", "requestId"],
             properties: {
                 itemId: { type: "string", minLength: 1, maxLength: 256 },
                 actionId: { type: "string", enum: [
@@ -24,6 +24,7 @@ export function mcpAppActionDefinition(): ToolDefinition {
                     "goal-pause", "goal-resume", "goal-retry", "goal-stop",
                 ] },
                 expectedRevision: { type: "integer", minimum: 0 },
+                requestId: { type: "string", minLength: 16, maxLength: 128 },
             },
         },
         outputSchema: {
@@ -31,7 +32,7 @@ export function mcpAppActionDefinition(): ToolDefinition {
             additionalProperties: false,
             required: ["status", "itemId", "actionId"],
             properties: {
-                status: { const: "applied", type: "string" },
+                status: { enum: ["applied", "stale"], type: "string" },
                 itemId: { type: "string" },
                 actionId: { type: "string" },
             },

@@ -1,9 +1,9 @@
 import type { JsonValue, ToolCallHooks } from "@portable-devshell/shared";
-import type { ApprovalEvaluationApi, ApprovalEvaluationError } from "../Api.js";
+import type { ApprovalApi, ApprovalEvaluationApi, ApprovalEvaluationError } from "../Api.js";
 
 export function registerApprovalToolCallReview(
     hooks: ToolCallHooks,
-    approval: ApprovalEvaluationApi,
+    approval: ApprovalEvaluationApi & Partial<Pick<ApprovalApi, "getApproval">>,
 ): () => void {
     return hooks.registerReview({
         hook: "510-approval",
@@ -14,6 +14,23 @@ export function registerApprovalToolCallReview(
         }
 
         const { source, requestId, ctxId, workspace } = input.value.context;
+        // Resolving an existing approval must not request approval for its own
+        // decision. Only a validated MCP Context may resolve its pending item;
+        // every other action continues through the configured approval policy.
+        if (input.value.toolName === "mcpapp_action" && source === "mcp" &&
+            typeof input.value.payload === "object" && input.value.payload !== null &&
+            !Array.isArray(input.value.payload) &&
+            (input.value.payload.actionId === "approve" || input.value.payload.actionId === "deny")) {
+            const itemId = input.value.payload.itemId;
+            if (typeof itemId !== "string" || !ctxId || approval.getApproval === undefined)
+                return { decision: "reject", reason: "A validated approval Context is required." };
+            try {
+                const pending = await approval.getApproval(itemId);
+                if (pending.status === "pending" && pending.ctxId === ctxId && pending.workspace === workspace)
+                    return { decision: "continue" };
+            } catch { /* The approval is missing or unavailable to this Context. */ }
+            return { decision: "reject", reason: "This approval is no longer pending for the Context." };
+        }
         const evaluation = await approval.evaluate(
             {
                 callId: input.callId,

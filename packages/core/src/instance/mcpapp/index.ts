@@ -63,8 +63,9 @@ export function installMcpAppAction(
 function readAction(value: JsonValue): { itemId: string; actionId: string; expectedRevision?: number } {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         throw denied("MCP App action input is invalid.");
-    const { itemId, actionId, expectedRevision } = value;
+    const { itemId, actionId, expectedRevision, requestId } = value;
     if (typeof itemId !== "string" || itemId.length === 0 || itemId.length > 256 ||
+        typeof requestId !== "string" || requestId.length < 16 || requestId.length > 128 ||
         typeof actionId !== "string" || ![
             "approve", "deny", "task-pause", "task-resume", "task-cancel",
             "goal-pause", "goal-resume", "goal-retry", "goal-stop",
