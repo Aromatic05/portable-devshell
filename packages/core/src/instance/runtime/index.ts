@@ -154,7 +154,7 @@ export class WorkerInstance implements WorkerInstanceApi {
             tunnel,
         };
         const managementMode = config.managementMode;
-        this.execution = { artifact, environment, terminal, tunnel };
+        this.execution = { artifact, commandSessions, environment, terminal, tunnel };
         this.provision = {
             reverseConnection:
                 managementMode === "selfManaged"

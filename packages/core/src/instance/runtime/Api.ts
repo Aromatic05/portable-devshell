@@ -10,6 +10,7 @@ import type {
 } from "../Api.js";
 import type { WorkerTerminal } from "./execution/capability/terminal/Terminal.js";
 import type { WorkerTunnel } from "./execution/capability/tunnel/Tunnel.js";
+import type { WorkerCommandSessionBridge } from "./execution/Session.js";
 import type { WorkerInstanceLifecycle } from "./execution/Lifecycle.js";
 import type { WorkerInstanceConnection } from "./supervision/Connection.js";
 import type { WorkerOwnership } from "./supervision/Ownership.js";
@@ -24,6 +25,7 @@ export interface WorkerInstance {
 
 export interface WorkerExecution {
     readonly artifact: WorkerArtifactApi;
+    readonly commandSessions: WorkerCommandSessionBridge;
     readonly environment: WorkerEnvironment;
     readonly terminal: WorkerTerminal;
     readonly tunnel: WorkerTunnel;

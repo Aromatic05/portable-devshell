@@ -136,6 +136,11 @@ export class Instance {
         return this.#worker.execution.environment;
     }
 
+    /** Worker-owned model command session transport; no Control ToolCall runtime. */
+    get commandSessions() {
+        return this.#worker.execution.commandSessions;
+    }
+
     get provision(): WorkerProvision {
         return this.#worker.provision;
     }
