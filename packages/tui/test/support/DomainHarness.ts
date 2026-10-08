@@ -798,9 +798,8 @@ export class TuiDomainHarness {
                 throw new Error("Task subscription is not supported.");
             },
         };
-        const toolTransport = {
+        const toolTransport = (instance: string) => ({
             call: async (
-                instance: string,
                 toolName: string,
                 input: JsonValue,
                 _workspace: string,
@@ -810,16 +809,15 @@ export class TuiDomainHarness {
                     {}) as JsonValue;
             },
             callStreaming: async (
-                instance: string,
                 toolName: string,
                 input: JsonValue,
             ) =>
                 (self.#options.toolCall?.(instance, toolName, input) ??
                     {}) as JsonValue,
             closeSession: async () => ({}) as Record<string, never>,
-            listCalls: async () => [...self.#toolCallRecords],
+            listCalls: async () => self.#toolCallRecords.filter((call) => call.instance === instance),
             openSession: async () => ({}) as any,
-        };
+        });
         const terminalTransport = {} as any;
 
         this.domains = {
