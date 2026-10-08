@@ -44,7 +44,12 @@ test("MCP App ViewModel isolates Context approvals, tasks, waits, and Context-ow
     assert.equal(snapshot.presentation.primary?.id, "allowed");
     assert.deepEqual(snapshot.presentation.work.map((entry) => entry.id), ["allowed-goal", "allowed-task"]);
     assert.deepEqual(snapshot.presentation.background.map((entry) => entry.id), ["allowed-wait"]);
-    assert.equal(snapshot.presentation.work.every((entry) => entry.actions.length === 0), true);
+    assert.deepEqual(snapshot.presentation.primary?.actions.map((action) => action.id), ["approve", "deny"]);
+    assert.deepEqual(snapshot.presentation.work[0]?.actions.map((action) => action.id), ["goal-pause", "goal-stop"]);
+    assert.deepEqual(snapshot.presentation.work[1]?.actions.map((action) => action.id), ["task-pause", "task-cancel"]);
+    assert.equal(snapshot.presentation.work[0]?.actions[0]?.expectedRevision, 1);
+    assert.equal(snapshot.presentation.work[1]?.actions[0]?.expectedRevision, 1);
+    assert.equal(snapshot.presentation.background.every((entry) => entry.actions.length === 0), true);
     assert.equal(JSON.stringify(snapshot).includes("secret"), false);
     assert.equal(JSON.stringify(snapshot).includes("private-worker-output"), false);
     assert.equal(snapshot.reentry.pending, false);
