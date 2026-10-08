@@ -37,7 +37,8 @@ export async function deliverMcpAppReentry(
     const receipt = typeof directiveId === "string"
         ? await ports.actions.get(directiveId) : undefined;
     if (directiveId !== undefined && (receipt?.ctxId !== ctxId || receipt.instance !== ports.instance ||
-        receipt.effect?.id !== directiveId || receipt.effect.kind !== "reentry"))
+        receipt.effect?.id !== directiveId || receipt.effect.kind !== "reentry" ||
+        receipt.effect.intent !== intent || receipt.effect.sourceId !== sourceId))
         throw new Error("Recovery directive is not owned by the current Context.");
     if (action === "claim") {
         if (intent === "automatic") {
@@ -46,7 +47,7 @@ export async function deliverMcpAppReentry(
         } else {
             if (typeof directiveId !== "string" || receipt?.status !== "applied" ||
                 receipt.effect?.intent !== intent || receipt.effect.sourceId !== sourceId ||
-                (intent !== "goal-resume" && intent !== "goal-retry"))
+                (intent !== "goal-resume" && intent !== "goal-retry" && intent !== "task-resume"))
                 return { claimed: false };
             const reserved = await ports.actions.beginDelivery(directiveId);
             if (reserved === undefined) return { claimed: false };
@@ -55,6 +56,8 @@ export async function deliverMcpAppReentry(
         !["attempting", "attempted", "reporting"].includes(receipt.status)) {
         return { valid: false, attempted: false };
     }
+    if (action === "attempt" && receipt?.status === "attempted")
+        return { attempted: false, duplicate: true };
 
     let result: McpEndpointResult;
     try {
@@ -77,13 +80,15 @@ export async function deliverMcpAppReentry(
             return result;
         }
         const snapshot = await ports.view.snapshot(ports.instance, ctxId, environment.workspace);
-        const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current Goal";
+        const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
         return {
             ...value,
             delivery: {
                 message: intent === "automatic"
                     ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
-                    : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
+                    : intent === "task-resume"
+                        ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
+                        : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
                 modelContext: snapshot.modelContext as unknown as JsonValue,
             },
         };

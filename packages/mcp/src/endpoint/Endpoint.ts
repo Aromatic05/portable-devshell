@@ -199,7 +199,7 @@ export class McpEndpoint {
                 const result = await this.#dispatch.callTool("mcpapp_action", input, requestContext, signal);
                 if (result instanceof McpNativeToolResult && result.isError)
                     throw new Error("MCP App action failed.");
-                await store.apply(key, actionId === "goal-resume" || actionId === "goal-retry"
+                await store.apply(key, actionId === "goal-resume" || actionId === "goal-retry" || actionId === "task-resume"
                     ? { kind: "reentry", intent: actionId, sourceId: itemId, id: key }
                     : undefined);
                 return result;
