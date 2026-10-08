@@ -1,4 +1,9 @@
-import type { ToolCallHookValue } from "@portable-devshell/shared";
+import { createToolCallRuntime } from "@portable-devshell/shared";
+import type {
+    ToolCallHookValue,
+    ToolCallReviewHook,
+    ToolCallRewriteHook,
+} from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
@@ -38,7 +43,6 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import { ToolCallHookSequence } from "../../../core/src/toolcall/execution/hook/Sequence.ts";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -196,7 +200,8 @@ test(
             },
             preferencesFile: join(contextRoot, "message-preferences.json"),
         });
-        let sequence = new ToolCallHookSequence({});
+        let reviewHooks: ToolCallReviewHook[] = [];
+        let rewriteHooks: ToolCallRewriteHook[] = [];
         const commentGate = createCommentToolCallGate(comment.comment);
         const commentTodoAccess = createCommentTodoAccess(comment.comment);
         const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
@@ -215,53 +220,59 @@ test(
                 { enabled: false, provider: "none" },
                 (_instance, runtime) => {
                     runtime.hooks.registerContributor(() => ({
-                        reviews: [{
-                            hook: "comment.review",
-                            id: "comment-gate",
-                            review: async (input) =>
-                                await sequence.review(input as never),
-                        }],
-                        rewrites: [{
-                            hook: "comment.rewrite",
-                            id: "comment-rewrite",
-                            rewrite: async (input) =>
-                                await sequence.rewrite(input as never),
-                        }],
+                        reviews: reviewHooks,
+                        rewrites: rewriteHooks,
                         release() {},
                     }));
                 },
             );
-        sequence = new ToolCallHookSequence({
-            reviews: [
-                async (input) =>
-                    await commentGate(
-                        input as never,
-                        unsupportedInvocation as never,
-                    ),
-            ],
-            rewrites: [
-                async (input) =>
+        reviewHooks = [{
+            hook: "comment.review",
+            id: "comment-gate",
+            review: async (input) =>
+                await commentGate(
+                    input as never,
+                    unsupportedInvocation as never,
+                ),
+        }];
+        rewriteHooks = [
+            {
+                hook: "comment.rewrite",
+                id: "01-todo-access",
+                rewrite: async (input) =>
                     (await commentTodoAccess(
                         input as never,
                         unsupportedInvocation as never,
                     )) as unknown as ToolCallHookValue,
-                async (input) =>
+            },
+            {
+                hook: "comment.rewrite",
+                id: "02-todo-invalid",
+                rewrite: async (input) =>
                     (await commentTodoInvalid(
                         input as never,
                         unsupportedInvocation as never,
                     )) as unknown as ToolCallHookValue,
-                async (input) =>
+            },
+            {
+                hook: "comment.rewrite",
+                id: "03-advice",
+                rewrite: async (input) =>
                     (await commentAdvice(
                         input as never,
                         unsupportedInvocation as never,
                     )) as unknown as ToolCallHookValue,
-                async (input) =>
+            },
+            {
+                hook: "comment.rewrite",
+                id: "04-delivery",
+                rewrite: async (input) =>
                     (await commentDelivery(
                         input as never,
                         unsupportedInvocation as never,
                     )) as unknown as ToolCallHookValue,
-            ],
-        });
+            },
+        ];
         cleanupDirs.push(contextRoot);
 
         try {
@@ -1223,7 +1234,7 @@ async function startFrozenWorkerHost(
     auth: McpAuthConfig,
     configureToolCalls?: (
         instance: ReturnType<typeof createTestInstance>,
-        runtime: ReturnType<typeof import("@portable-devshell/core/toolcall").createToolCallRuntime>,
+        runtime: ReturnType<typeof createToolCallRuntime>,
     ) => void,
 ) {
     const homeDirectory = await createTestTempDirectory(
