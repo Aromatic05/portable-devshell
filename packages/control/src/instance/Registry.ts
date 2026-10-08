@@ -2,6 +2,7 @@ import type { Instance } from "@portable-devshell/core";
 
 export class InstanceRegistry {
     readonly #instances = new Map<string, Instance>();
+    readonly #adding = new Set<(instance: Instance) => () => void>();
 
     constructor(instances: readonly Instance[]) {
         for (const instance of instances) {
@@ -13,11 +14,32 @@ export class InstanceRegistry {
         return this.#instances.get(name);
     }
 
+    /** Install contributions before an instance becomes visible to consumers. */
+    onAdding(install: (instance: Instance) => () => void): () => void {
+        this.#adding.add(install);
+        return () => this.#adding.delete(install);
+    }
+
     add(instance: Instance): void {
         if (this.#instances.has(instance.config.name)) {
             throw new Error(
                 `Cannot add active instance generation ${instance.config.name}; remove the current generation first.`,
             );
+        }
+        const releases: Array<() => void> = [];
+        try {
+            for (const install of this.#adding) releases.push(install(instance));
+        } catch (error) {
+            const failures: unknown[] = [error];
+            for (const release of releases.reverse()) {
+                try {
+                    release();
+                } catch (rollbackError) {
+                    failures.push(rollbackError);
+                }
+            }
+            if (failures.length === 1) throw error;
+            throw new AggregateError(failures, `Instance ${instance.config.name} registration rollback failed.`);
         }
         this.#instances.set(instance.config.name, instance);
     }

@@ -26,7 +26,10 @@ export interface InstanceToolCatalogSource {
 export interface ToolCallRegistry extends ToolCallRegistration {
     bind(options: {
         changes: { onChange(listener: () => void): () => void };
-        instances: { list(): readonly InstanceToolCatalogSource[] };
+        instances: {
+            list(): readonly InstanceToolCatalogSource[];
+            onAdding(install: (instance: InstanceToolCatalogSource) => () => void): () => void;
+        };
     }): () => void;
     register(
         scope: string,
