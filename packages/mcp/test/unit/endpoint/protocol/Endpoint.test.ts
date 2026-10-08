@@ -398,16 +398,19 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
                 ...mcpAppResourceMeta.ui,
                 csp: {
                     connectDomains: ["https://devshell.example.com"],
-                    resourceDomains: [],
+                    resourceDomains: ["https://devshell.example.com"],
                 },
                 domain: "https://devshell.example.com",
             },
             "openai/widgetCSP": {
                 connect_domains: ["https://devshell.example.com"],
-                resource_domains: [],
+                resource_domains: ["https://devshell.example.com"],
             },
             "openai/widgetDomain": "https://devshell.example.com",
         });
+        const html = read.body.result?.contents?.[0]?.text ?? "";
+        assert.ok(html.includes("https://devshell.example.com/prefix/mcpapp/assets/"));
+        assert.equal(html.includes("<script>"), false);
     } finally {
         await server.close();
     }

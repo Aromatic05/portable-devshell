@@ -102,14 +102,32 @@ test("production MCP host advertises and reads its MCP App resource", async () =
             });
             assert.equal(response.status, 200);
             return parseMcpHttpResponse<{
-                result?: { resources?: Array<{ uri: string; mimeType: string }>; contents?: Array<{ uri: string; mimeType: string; text: string }> };
+                result?: {
+                    resources?: Array<{ uri: string; mimeType: string }>;
+                    contents?: Array<{ uri: string; mimeType: string; text: string }>;
+                    tools?: Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
+                };
             }>(await response.text());
         };
         const listed = await request("resources/list");
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         const read = await request("resources/read", { uri: mcpAppResourceUri });
         assert.equal(read.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
-        assert.match(read.result?.contents?.[0]?.text ?? "", /<html\b/u);
+        const html = read.result?.contents?.[0]?.text ?? "";
+        assert.match(html, /<html\b/u);
+        assert.equal(html.includes("<script>"), false);
+        const assets = Array.from(html.matchAll(/(?:src|href)="([^"]+)"/gu), (match) => match[1]!)
+            .filter((path) => path.startsWith("/mcpapp/assets/"));
+        assert.ok(assets.some((path) => path.endsWith(".js")));
+        assert.ok(assets.some((path) => path.endsWith(".css")));
+        for (const path of assets) {
+            const asset = await fetch(`http://127.0.0.1:${port}${path}`);
+            assert.equal(asset.status, 200);
+            assert.ok((await asset.text()).length > 100);
+        }
+        const tools = await request("tools/list");
+        const bootstrap = tools.result?.tools?.find((tool) => tool.name === "environ_info");
+        assert.equal(bootstrap?._meta?.ui?.resourceUri, mcpAppResourceUri);
     } finally {
         await host.stop();
     }
