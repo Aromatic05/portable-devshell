@@ -696,7 +696,7 @@ function registerCommentRoutes(
         context.register(
             controlRoutes,
             route.id,
-            createCommentRouteBinding(source, comment, route),
+            createCommentRouteBinding(source, comment, context.capabilities.instanceObserve!, route),
         );
     }
 }
@@ -704,6 +704,7 @@ function registerCommentRoutes(
 function createCommentRouteBinding(
     source: BuiltinCommentInstanceSource,
     comment: CommentExtension,
+    observe: Pick<ExtensionInstanceObserveCapability, "snapshot">,
     route: {
         readonly module: string;
         readonly operation: string;
@@ -734,7 +735,15 @@ function createCommentRouteBinding(
                 retryable: false,
             });
         }
-        return (await operation.handle(
+        // Capture the Instance event cursor before the database read. Events
+        // committed during the read will be replayed by subscribers from
+        // lastSeq + 1, so ViewModels cannot miss delivered Comments.
+        const listOperation = route.operation === "listContextMessages" ||
+            route.operation === "listMessageEntries";
+        const lastSeq = listOperation
+            ? (await observe.snapshot(invocation.destination)).lastSeq
+            : undefined;
+        const result = (await operation.handle(
             {
                 id: invocation.requestId,
                 name: route.operation,
@@ -745,6 +754,17 @@ function createCommentRouteBinding(
             },
             undefined as never,
         )) as unknown as ExtensionJsonValue | undefined;
+        if (lastSeq === undefined) return result;
+        if (!Array.isArray(result)) {
+            throw new ExtensionError({
+                code: "control.invalidTarget",
+                message: `Comment ${route.operation} returned a non-list result.`,
+                retryable: false,
+            });
+        }
+        return route.operation === "listContextMessages"
+            ? { lastSeq, messages: result }
+            : { entries: result, lastSeq };
     };
 }
 
