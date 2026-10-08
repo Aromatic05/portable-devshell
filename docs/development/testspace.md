@@ -55,7 +55,7 @@ Testspace instance 故意启用较宽的开发策略：
 
 ```text
 MCP auth          none
-contextMode       openai-session
+contextMode       explicit
 approval          allow
 security.mode     workspace
 extensions.model  artifact,instance,mcp,secret,skill
@@ -63,6 +63,7 @@ MCP tools         fixed runtime catalog
 ```
 
 这是隔离测试环境，不是生产配置模板。
+Testspace 的模拟 MCP Client 没有 OpenAI 会话外部绑定，因此明确采用 `explicit` Context；正式 Instance 的默认 `openai-session` 规则不受影响。
 
 ## 隔离目录
 
