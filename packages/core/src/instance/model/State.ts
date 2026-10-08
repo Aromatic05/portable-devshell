@@ -130,7 +130,7 @@ export class InstanceState {
                 approval: this.approval.api,
                 task: this.task.api,
             }),
-            installMcpAppReentry(this.toolCalls.hooks, this.task.api.goal),
+            installMcpAppReentry(this.toolCalls.hooks, this.task.api),
             installWaitToolCallRewrite(
                 this.toolCalls.hooks,
                 this.task.api.wait,
