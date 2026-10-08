@@ -1,5 +1,6 @@
 export {
-    mcpAppHtml,
+    mcpAppHtmlForPublicBaseUrl,
+    mcpAppAssetDirectory,
     mcpAppResourceMeta,
     mcpAppResourceMetaForPublicBaseUrl,
     mcpAppResourceUri,

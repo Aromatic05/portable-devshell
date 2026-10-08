@@ -17,6 +17,7 @@ import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import type { McpToolSource } from "../endpoint/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
+import { mcpAppAssetDirectory } from "../mcpapp/app/App.js";
 import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
 import { McpAppActionStore } from "../mcpapp/ActionStore.js";
 import { HttpHost } from "./Http.js";
@@ -162,6 +163,7 @@ export class McpHost {
             oauth: this.#oauth,
             publicBaseUrl: config.publicBaseUrl,
         });
+        this.#httpServer.registerStaticDirectory("/mcpapp/assets", mcpAppAssetDirectory);
 
         for (const instance of config.instances) {
             this.registerInstance(instance);

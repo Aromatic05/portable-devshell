@@ -2,7 +2,7 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 
 import type { McpExtension } from "./Contract.js";
 import {
-    mcpAppHtml,
+    mcpAppHtmlForPublicBaseUrl,
     mcpAppLegacyResourceUris,
     mcpAppResourceMetaForPublicBaseUrl,
     mcpAppResourceUri,
@@ -30,7 +30,7 @@ export function createMcpAppMcpExtension(
                 name: "portable-devshell MCP App",
                 read: () => ({
                     _meta: resourceMeta,
-                    text: mcpAppHtml,
+                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl),
                 }),
                 uri: mcpAppResourceUri,
             }),
