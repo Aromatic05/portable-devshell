@@ -16,12 +16,11 @@ export interface ConfigBatchInstancePlan {
     readonly authChanged: boolean;
     readonly instance: ControlConfig["instances"][number];
     readonly target: string;
+    apply(): Promise<void>;
     assertReady(): void;
-    commit(
-        previous: ControlConfig,
-        next: ControlConfig,
-        runtimeChanges: ConfigRuntimeChangeSet,
-    ): Promise<boolean>;
+    cleanup(): Promise<void>;
+    prepare(): void;
+    rollback(): Promise<void>;
 }
 
 export interface ConfigBatchInstancePort {
@@ -119,11 +118,38 @@ export class ConfigBatchEditor {
         }
         const validated = this.#engine.validateConfig(next);
         if (preflight) await this.#engine.preflight(previous, validated);
-        const hotApplied = await plan.commit(
-            previous,
-            validated,
-            runtimeChanges,
-        );
+        plan.prepare();
+        let hotApplied = false;
+        try {
+            await this.#engine.persist(validated);
+            hotApplied = await this.#engine.applyRuntimeOrRestore(
+                previous,
+                validated,
+                runtimeChanges,
+            );
+            await plan.apply();
+        } catch (error) {
+            const failures: unknown[] = [error];
+            if (hotApplied) {
+                await this.#engine
+                    .rollbackRuntime(validated, previous, runtimeChanges)
+                    .catch((rollbackError) => failures.push(rollbackError));
+            }
+            if (this.#engine.current !== previous) {
+                await this.#engine
+                    .persist(previous)
+                    .catch((rollbackError) => failures.push(rollbackError));
+            }
+            await plan
+                .rollback()
+                .catch((rollbackError) => failures.push(rollbackError));
+            if (failures.length === 1) throw error;
+            throw new AggregateError(
+                failures,
+                "Configuration batch update failed and rollback was incomplete.",
+            );
+        }
+        await plan.cleanup();
         return this.#engine.finalizeApplyResult(previous, validated, changes, hotApplied);
     }
 

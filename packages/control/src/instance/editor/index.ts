@@ -8,8 +8,10 @@ import type {
     ConfigBatchInstancePlan,
     ConfigBatchInstancePort,
 } from "../../config/editor/Batch.js";
-import type { ConfigRuntimeChangeSet } from "../../config/engine/Api.js";
-import { InstanceReconfigurationCoordinator } from "./Update.js";
+import {
+    InstanceReconfigurationCoordinator,
+    type PreparedInstanceDescriptor,
+} from "./Update.js";
 import { InstanceCleanupDebt } from "./retirement/Debt.js";
 import { InstanceRetirementCoordinator } from "./retirement/index.js";
 import type { InstanceEditorCoordinatorOptions } from "./Options.js";
@@ -42,28 +44,21 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
         currentConfig: ControlConfig,
     ): Promise<ConfigBatchInstancePlan> {
         const plan = await this.#updates.createUpdatePlan(request, currentConfig);
+        let prepared: PreparedInstanceDescriptor | undefined;
         return {
             authChanged: plan.authChanged,
             instance: plan.instance,
             target: plan.target,
+            apply: async () =>
+                await this.#updates.applyPreparedInstance(plan, prepared),
             assertReady: () => this.#updates.assertUpdateReady(plan),
-            commit: async (
-                previous: ControlConfig,
-                next: ControlConfig,
-                runtimeChanges: ConfigRuntimeChangeSet,
-            ) => {
-                const prepared = this.#updates.prepareUpdate(plan);
-                await this.#updates.persistPreparedConfig(next, plan, prepared);
-                const hotApplied = await this.#updates.applyPreparedUpdate(
-                    plan,
-                    previous,
-                    next,
-                    prepared,
-                    runtimeChanges,
-                );
-                await this.#updates.cleanupPreparedUpdate(plan, prepared);
-                return hotApplied;
+            cleanup: async () =>
+                await this.#updates.cleanupPreparedUpdate(plan, prepared),
+            prepare: () => {
+                prepared = this.#updates.prepareUpdate(plan);
             },
+            rollback: async () =>
+                await this.#updates.rollbackPreparedInstance(plan, prepared),
         };
     }
 

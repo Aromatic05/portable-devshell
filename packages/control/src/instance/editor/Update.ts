@@ -112,6 +112,42 @@ export class InstanceReconfigurationCoordinator {
         );
     }
 
+    async applyPreparedInstance(
+        plan: InstanceConfigUpdatePlan,
+        preparedDescriptor: PreparedInstanceDescriptor | undefined,
+    ): Promise<void> {
+        await this.#applyInstanceConfig(
+            plan.existing,
+            plan.instance,
+            plan.descriptor,
+            plan.rebuildRequired,
+            preparedDescriptor,
+        );
+        await this.syncMcpEndpoint(plan.instance.name);
+    }
+
+    async rollbackPreparedInstance(
+        plan: InstanceConfigUpdatePlan,
+        preparedDescriptor: PreparedInstanceDescriptor | undefined,
+    ): Promise<void> {
+        const failures: unknown[] = [];
+        await this.#restoreInstanceRuntime(
+            plan.existing,
+            plan.descriptor,
+            preparedDescriptor,
+        ).catch((error) => failures.push(error));
+        await this.syncMcpEndpoint(plan.existing.name).catch((error) =>
+            failures.push(error),
+        );
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) {
+            throw new AggregateError(
+                failures,
+                `Failed to restore instance ${plan.existing.name}.`,
+            );
+        }
+    }
+
     async persistPreparedConfig(
         nextConfig: ControlConfig,
         plan: InstanceConfigUpdatePlan | undefined,
