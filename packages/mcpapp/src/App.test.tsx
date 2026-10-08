@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
 const host = vi.hoisted(() => ({
+    actions: [] as Array<{ name: string; arguments: Record<string, unknown> }>,
     clients: [] as Array<{
         ontoolinput?: (input: { arguments?: Record<string, unknown> }) => void;
         ontoolresult?: (result: unknown) => void;
@@ -19,6 +20,10 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         async connect() {}
         getHostContext() { return { displayMode: "inline" }; }
         setupSizeChangedNotifications() { return () => undefined; }
+        async callServerTool(params: { name: string; arguments: Record<string, unknown> }) {
+            host.actions.push(params);
+            return { isError: false, content: [], structuredContent: { status: "applied" } };
+        }
         async close() {}
     },
     applyDocumentTheme: vi.fn(),
@@ -40,6 +45,7 @@ afterEach(async () => {
     root = undefined;
     container = undefined;
     host.clients.length = 0;
+    host.actions.length = 0;
     globalThis.fetch = originalFetch;
 });
 
@@ -147,4 +153,59 @@ test("revoked MCP App Lease removes stale UI and private persisted credentials",
     } finally {
         Object.assign(window, { openai: previousOpenai });
     }
+});
+
+test("MCPApp user controls use callServerTool with Context, revision and confirmation", async () => {
+    const snapshot = {
+        ctxId: "ctx-human", instance: "demo", cursor: 9, agentBusy: true,
+        presentation: {
+            primary: { id: "approval-one", title: "Approval required", actions: [
+                { id: "approve", label: "Approve" }, { id: "deny", label: "Deny", confirmation: { message: "Deny?" } },
+            ] },
+            work: [{ id: "goal-one", title: "Deploy securely", actions: [
+                { id: "goal-pause", label: "Pause", expectedRevision: 7 },
+            ] }], background: [],
+        },
+    };
+    let reads = 0;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) {
+            reads++;
+            return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+        }
+        if (String(input).includes("/watch")) return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+        throw new Error("Unexpected request");
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => {
+        host.clients[0]?.ontoolresult?.({ _meta: { "portable-devshell/mcpapp": {
+            ctxId: "ctx-human", token: "valid-test-bearer-token", liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
+        } } });
+    });
+    await vi.waitFor(() => expect(container!.textContent).toContain("Deploy securely"));
+    const button = (name: string) => Array.from(container!.querySelectorAll("button"))
+        .find((entry) => entry.textContent === name)!;
+    await act(async () => { button("Pause").click(); });
+    await vi.waitFor(() => expect(host.actions).toHaveLength(1));
+    expect(host.actions[0]).toEqual({ name: "mcpapp_action", arguments: {
+        ctxId: "ctx-human", itemId: "goal-one", actionId: "goal-pause", expectedRevision: 7,
+        requestId: expect.any(String),
+    } });
+    expect(reads).toBeGreaterThan(1);
+    await act(async () => { button("Deny").click(); });
+    expect(host.actions).toHaveLength(1);
+    await act(async () => { button("Back").click(); });
+    expect(host.actions).toHaveLength(1);
+    await act(async () => { button("Deny").click(); });
+    await act(async () => { button("Confirm Deny").click(); });
+    await vi.waitFor(() => expect(host.actions).toHaveLength(2));
+    expect(host.actions[1]?.arguments).toEqual({
+        ctxId: "ctx-human", itemId: "approval-one", actionId: "deny", requestId: expect.any(String),
+    });
+    expect(host.actions[0]?.arguments.requestId).not.toBe(host.actions[1]?.arguments.requestId);
 });
