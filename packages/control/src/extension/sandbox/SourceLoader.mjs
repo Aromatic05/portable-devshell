@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { registerHooks, stripTypeScriptTypes } from "node:module";
+import { registerHooks } from "node:module";
+import ts from "typescript";
 
 const workspacePackages = new Map([
     [
@@ -97,11 +98,17 @@ registerHooks({
         return {
             format: "module",
             shortCircuit: true,
-            source: stripTypeScriptTypes(source, {
-                mode: "transform",
-                sourceMap: false,
-                sourceUrl: url,
-            }),
+            // This loader runs only for source-mode sandbox Workers. Node 26
+            // dropped the native 'transform' mode, while 'strip' cannot lower
+            // TS enums and parameter properties used by shared source modules.
+            source: ts.transpileModule(source, {
+                fileName: new URL(url).pathname,
+                compilerOptions: {
+                    module: ts.ModuleKind.ESNext,
+                    target: ts.ScriptTarget.ES2022,
+                    verbatimModuleSyntax: true,
+                },
+            }).outputText,
         };
     },
 });
