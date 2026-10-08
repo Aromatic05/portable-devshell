@@ -82,7 +82,10 @@ export function installMcpAppLive(options: {
     };
     const safe = async (request: IncomingMessage, response: ServerResponse, watch: boolean) => {
         try { await read(request, response, watch); }
-        catch {
+        catch (error) {
+            // Never return internal RPC failures or bearer tokens to callers,
+            // but retain the reason in the server log for integration triage.
+            console.warn(`MCP App ${watch ? "watch" : "snapshot"} failed for ${options.instance}:`, error);
             if (response.destroyed || response.writableEnded) return;
             if (response.headersSent) response.end();
             else reply(response, 503, { error: "Workspace temporarily unavailable" });
