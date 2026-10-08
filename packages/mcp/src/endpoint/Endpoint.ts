@@ -11,6 +11,8 @@ import type { McpAuthConfig } from "../auth/Config.js";
 import { createMcpContextSelector } from "../context/Selector.js";
 import { readMcpContextInput } from "../context/Selector.js";
 import type { McpAppActionStore } from "../mcpapp/ActionStore.js";
+import { deliverMcpAppReentry } from "../mcpapp/Reentry.js";
+import type { createMcpAppViewModel } from "../mcpapp/ViewModel.js";
 import type { McpAppActionOperation } from "../mcpapp/model/Contract.js";
 import type { McpTool } from "./tool/Schema.js";
 import type { McpToolSource } from "./tool/Source.js";
@@ -35,6 +37,7 @@ export interface McpEndpointOptions {
         liveBaseUrl?: string;
     } | undefined>;
     mcpAppActions?: McpAppActionStore;
+    mcpAppView?: ReturnType<typeof createMcpAppViewModel>;
     toolProvenance?: McpToolProvenanceRecorder;
     toolSource: McpToolSource;
     tools: ToolCallApi;
@@ -47,6 +50,7 @@ export class McpEndpoint {
     readonly #instanceName: string;
     readonly #mcpAppBootstrap?: McpEndpointOptions["mcpAppBootstrap"];
     readonly #mcpAppActions?: McpAppActionStore;
+    readonly #mcpAppView?: ReturnType<typeof createMcpAppViewModel>;
     readonly #mcpAppInflight = new Map<string, Promise<McpEndpointResult>>();
     readonly #context: Pick<ContextTransport, "resolve">;
 
@@ -57,6 +61,7 @@ export class McpEndpoint {
         this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#mcpAppBootstrap = options.mcpAppBootstrap;
         this.#mcpAppActions = options.mcpAppActions;
+        this.#mcpAppView = options.mcpAppView;
         this.#context = options.context;
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
@@ -109,6 +114,15 @@ export class McpEndpoint {
     ): Promise<McpEndpointResult> {
         if (toolName === "mcpapp_action" && this.#mcpAppActions)
             return await this.#callAction(input, requestContext, signal);
+        if (toolName === "mcpapp_reentry") {
+            if (!this.#mcpAppActions || !this.#mcpAppView)
+                throw new Error("MCP App recovery is unavailable.");
+            return await deliverMcpAppReentry({
+                actions: this.#mcpAppActions, context: this.#context,
+                dispatch: this.#dispatch, instance: this.#instanceName,
+                view: this.#mcpAppView,
+            }, input, requestContext, signal);
+        }
         const result = await this.#dispatch.callTool(
             toolName,
             input,
@@ -162,7 +176,6 @@ export class McpEndpoint {
             ? `approval-${actionId}` : actionId as McpAppActionOperation;
         const execute = (async (): Promise<McpEndpointResult> => {
             const store = this.#mcpAppActions!;
-            const stored = await store.get(key);
             const resolved = {
                 actionId: key,
                 itemId,
@@ -171,7 +184,9 @@ export class McpEndpoint {
                 targetId: itemId,
                 ...(expectedRevision === undefined ? {} : { revision: Number(expectedRevision) }),
             };
-            if (stored !== undefined) {
+            const prepared = await store.prepareOnce(ctxId, this.#instanceName, resolved);
+            if (!prepared.created) {
+                const stored = prepared.receipt;
                 if (stored.ctxId !== ctxId || stored.instance !== this.#instanceName ||
                     JSON.stringify(stored.resolved) !== JSON.stringify(resolved))
                     throw new Error("MCP App action receipt conflicts with another request.");
@@ -180,12 +195,13 @@ export class McpEndpoint {
                 // The Instance state is authoritative; never blindly replay it.
                 return { status: "stale", itemId, actionId };
             }
-            await store.prepare(ctxId, this.#instanceName, resolved);
             try {
                 const result = await this.#dispatch.callTool("mcpapp_action", input, requestContext, signal);
                 if (result instanceof McpNativeToolResult && result.isError)
                     throw new Error("MCP App action failed.");
-                await store.apply(key);
+                await store.apply(key, actionId === "goal-resume" || actionId === "goal-retry"
+                    ? { kind: "reentry", intent: actionId, sourceId: itemId, id: key }
+                    : undefined);
                 return result;
             } catch (error) {
                 await store.conflict(key).catch(() => undefined);

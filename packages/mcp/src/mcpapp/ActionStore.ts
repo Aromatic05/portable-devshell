@@ -74,6 +74,20 @@ export class McpAppActionStore {
         }))!;
     }
 
+    /** Reserve a receipt once across all endpoints sharing this store. */
+    async prepareOnce(ctxId: string, instance: string, resolved: McpAppResolvedAction): Promise<{ receipt: McpAppActionReceipt; created: boolean }> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const previous = this.#receipts.get(resolved.actionId);
+            if (previous !== undefined) return { receipt: structuredClone(previous), created: false };
+            const receipt = this.#record({ actionId: resolved.actionId, ctxId, instance, resolved, status: "prepared" });
+            this.#receipts.set(resolved.actionId, receipt);
+            try { await this.#persist(); }
+            catch (error) { this.#receipts.delete(resolved.actionId); throw error; }
+            return { receipt: structuredClone(receipt), created: true };
+        });
+    }
+
     async apply(actionId: string, effect?: McpAppActionEffect): Promise<McpAppActionReceipt> {
         return (await this.#change(actionId, (current) => {
             if (current === undefined) throw new Error("McpApp action receipt is missing.");

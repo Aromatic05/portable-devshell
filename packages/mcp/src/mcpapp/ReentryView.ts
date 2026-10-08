@@ -39,12 +39,8 @@ export function projectMcpAppReentry(
     const leaseIsFuture =
         Number.isFinite(executionLeaseUntil) &&
         executionLeaseUntil > Date.now();
-    const continuationDueAt = goal?.continuationDueAt;
-    const hasDueTrigger =
-        goal?.continuationDue === true ||
-        (typeof continuationDueAt === "string" &&
-            Number.isFinite(Date.parse(continuationDueAt)) &&
-            Date.parse(continuationDueAt) > Date.now());
+    // A future dueAt is not permission to resume. The Instance computes due.
+    const hasDueTrigger = goal?.continuationDue === true;
     const goalEligible =
         goal !== undefined &&
         goal.status === "active" &&
@@ -79,7 +75,7 @@ export function projectMcpAppReentry(
         !(agentBusy && !leaseIsFuture);
     const schedule = canSchedule ? source : undefined;
     return {
-        pending: state.pending === true,
+        pending: state.pending === true || (directives?.length ?? 0) > 0,
         ...(typeof state.executionActive === "boolean"
             ? { executionActive: state.executionActive }
             : {}),

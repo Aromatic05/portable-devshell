@@ -66,8 +66,6 @@ export class McpRuntimeState {
         mcpAppLeaseFile?: string;
     }) {
         this.context = config.context;
-        this.mcpAppView = config.endpoint === undefined
-            ? undefined : createMcpAppViewModel(config.endpoint);
         this.tools = config.tools;
         this.mcpAppLeases = new McpAppLeaseStore({
             filePath: config.mcpAppLeaseFile,
@@ -77,6 +75,8 @@ export class McpRuntimeState {
                 ? undefined
                 : `${config.mcpAppLeaseFile}.actions`,
         });
+        this.mcpAppView = config.endpoint === undefined
+            ? undefined : createMcpAppViewModel(config.endpoint, this.workspaceActions);
         this.oauthApprovals =
             config.storageDir === undefined
                 ? undefined
@@ -237,6 +237,7 @@ export class McpHost {
                 ]),
                 instanceName: instance.name,
                 mcpAppActions: this.#workspaceActions,
+                mcpAppView: this.#runtimeState.mcpAppView,
                 mcpAppBootstrap: async (result, request) => {
                     const structured = typeof result === "object" && result !== null && !Array.isArray(result)
                         ? result : {};

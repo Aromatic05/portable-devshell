@@ -9,7 +9,9 @@ import {
     type WaitRecord,
 } from "@portable-devshell/shared";
 import { mcpAppModelContext } from "./ModelContext.js";
-import type { McpAppSnapshot, McpAppWorkItem } from "./model/Contract.js";
+import { projectMcpAppReentry } from "./ReentryView.js";
+import type { McpAppActionStore } from "./ActionStore.js";
+import type { McpAppReentryDirective, McpAppSnapshot, McpAppWorkItem } from "./model/Contract.js";
 
 /** Present authoritative Instance snapshots without retaining another domain state. */
 export function projectMcpAppSnapshot(input: {
@@ -18,6 +20,7 @@ export function projectMcpAppSnapshot(input: {
     goal: { goal: GoalSnapshot | null; lastSeq: number };
     instance: string;
     todo: { todo: TodoReadResult; lastSeq: number };
+    directives?: McpAppReentryDirective[];
     waits?: { waits: WaitRecord[]; lastSeq: number };
     workspace?: string;
 }): McpAppSnapshot {
@@ -110,7 +113,9 @@ export function projectMcpAppSnapshot(input: {
             content: [],
             structuredContent: { portableDevshellMcpApp: null },
         },
-        reentry: { pending: false },
+        // A running Goal does not prove an active ToolCall. Goal continuationDue
+        // already accounts for recent agent activity and persisted claims.
+        reentry: projectMcpAppReentry({ mode: "automatic" }, goals[0], false, input.directives),
     };
     snapshot.modelContext = mcpAppModelContext(snapshot, {
         ...(goals[0] === undefined ? {} : { goal: goals[0] }),
@@ -124,15 +129,16 @@ export function projectMcpAppSnapshot(input: {
 }
 
 /** Reads existing Instance authorities; holds no independent workspace state. */
-export function createMcpAppViewModel(endpoint: Endpoint) {
+export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppActionStore) {
     const snapshot = async (instance: string, ctxId: string, workspace?: string) => {
         const task = createTaskTransport(endpoint, instance);
         const approval = createApprovalTransport(endpoint, instance);
-        const [goal, todo, approvals, waits] = await Promise.all([
+        const [goal, todo, approvals, waits, directives] = await Promise.all([
             task.getGoal(ctxId), task.getTodo(), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
+            actions?.pendingDirectives(ctxId, instance) ?? Promise.resolve([]),
         ]);
         return projectMcpAppSnapshot({
-            approvals, ctxId, goal, instance, todo, waits,
+            approvals, ctxId, goal, instance, todo, waits, directives,
             ...(workspace === undefined ? {} : { workspace }),
         });
     };
@@ -154,8 +160,16 @@ export function createMcpAppViewModel(endpoint: Endpoint) {
         });
         try {
             const result = await Promise.race([stream.next(), interrupted]);
-            if (result === "timeout" || result === "aborted")
-                return { changed: false, cursor };
+            if (result === "aborted") return { changed: false, cursor };
+            if (result === "timeout") {
+                // Time alone can make an Instance Goal due, without an event.
+                // React receives the server's decision, not a local timer.
+                const due = await snapshot(instance, ctxId, workspace);
+                if (due.reentry.schedule === undefined && !due.reentry.pending)
+                    return { changed: false, cursor };
+                due.cursor = Math.max(due.cursor, cursor);
+                return { changed: true, cursor: due.cursor, snapshot: due };
+            }
             if (result.kind === "closed")
                 throw result.error ?? new Error("Instance Event stream closed unexpectedly.");
             const next = await snapshot(instance, ctxId, workspace);
