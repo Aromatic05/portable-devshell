@@ -105,7 +105,8 @@ export async function runTestspaceCommentSmoke({
                 return [
                     "TUI Message ViewModel did not observe the delivered Comment",
                     `messages=${JSON.stringify(domains.messages.state.instances[instance]?.messages ?? [])}`,
-                    `failures=${JSON.stringify(domains.messages.state.failures)}`,
+                    `subscription=${JSON.stringify(domains.messages.state.instances[instance]?.status)}`,
+                    `failures=${JSON.stringify(Object.entries(domains.messages.state.failures).map(([key, error]) => ({ key, message: error.message, stack: error.stack })))}`,
                 ].join("\n");
             },
         );
