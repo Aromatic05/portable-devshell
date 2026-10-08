@@ -89,6 +89,7 @@ test("testspace instance fixtures use v4 model ACL without retired MCP policy", 
         buildTestspaceReverseInstanceConfig(),
     ]) {
         assert.match(config, /^version = 4$/mu);
+        assert.match(config, /^contextMode = "explicit"$/mu);
         assert.match(config, /^\[extensions\]$/mu);
         assert.match(
             config,
