@@ -5,7 +5,35 @@ import test from "node:test";
 
 import { GoalState } from "../../../src/task/goal/storage/State.ts";
 import { GoalService } from "../../../src/task/goal/index.ts";
+import { createGoalTaskRouteModule } from "../../../src/task/goal/Route.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+
+test("Goal task getGoal only returns the requested Context when Workspaces overlap", async () => {
+    const directory = await createTestTempDirectory("goal-context-route");
+    const service = new GoalService({
+        appendEvent: async () => undefined,
+        filePath: join(directory, "goal.json"),
+        instanceName: "alpha",
+    });
+    await service.manage("ctx-a", {
+        action: "start", objective: "Authorized goal", workspace: "/shared",
+        steps: [{ id: "a", text: "Work A" }],
+    });
+    await service.manage("ctx-b", {
+        action: "start", objective: "Other Context secret", workspace: "/shared",
+        steps: [{ id: "b", text: "Work B" }],
+    });
+    const route = createGoalTaskRouteModule({
+        events: { cursor: () => 14 },
+        goal: { list: () => service.list(), read: (ctxId) => service.read(ctxId) },
+    });
+    const read = route.operations.find((operation) => operation.name === "getGoal")!;
+    const result = await read.handle({ id: "read-a", name: "getGoal", payload: { ctxId: "ctx-a" } }, {} as never);
+    assert.equal((result as { goal?: { objective: string } }).goal?.objective, "Authorized goal");
+    assert.equal(JSON.stringify(result).includes("Other Context secret"), false);
+    assert.equal((result as { lastSeq: number }).lastSeq, 14);
+    await assert.rejects(() => Promise.resolve(read.handle({ id: "bad", name: "getGoal", payload: {} }, {} as never)), /Context ID/u);
+});
 
 test("GoalService stopAll terminalizes every live Goal while preserving completed history", async () => {
     const root = await createTestTempDirectory("goal-stop-all");

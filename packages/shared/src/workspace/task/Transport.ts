@@ -6,6 +6,7 @@ import type { Endpoint } from "../../transport/endpoint/Endpoint.js";
 import { createPortClient } from "../../transport/endpoint/PortClient.js";
 import { asInstanceName } from "../../types/Instance.js";
 import type {
+    GoalSnapshot,
     GoalSnapshotEnvelope,
     TaskEvent,
     TodoReadEnvelope,
@@ -15,6 +16,7 @@ import type {
 
 export interface TaskTransport {
     deleteTodo(taskId: string): Promise<Record<string, never>>;
+    getGoal(ctxId: string): Promise<{ goal: GoalSnapshot | null; lastSeq: number }>;
     getGoals(): Promise<GoalSnapshotEnvelope>;
     getTodo(input?: TodoReadInput): Promise<TodoReadEnvelope>;
     getWaits(ctxId: string): Promise<{ waits: WaitRecord[]; lastSeq: number }>;
@@ -32,6 +34,7 @@ export function createTaskTransport(
             port.request<Record<string, never>>("deleteTodo", {
                 taskId,
             }),
+        getGoal: (ctxId) => port.request<{ goal: GoalSnapshot | null; lastSeq: number }>("getGoal", { ctxId }),
         getGoals: () => port.request<GoalSnapshotEnvelope>("getGoals"),
         getTodo: (input) => port.request<TodoReadEnvelope>("getTodo", input),
         getWaits: (ctxId) => port.request<{ waits: WaitRecord[]; lastSeq: number }>("getWaits", { ctxId }),
