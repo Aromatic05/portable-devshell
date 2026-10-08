@@ -19,9 +19,10 @@ export const SAFE_ACTIONS = [
     "tmux_run",
 ];
 const TODO_TITLE = "testspace connector activity";
+const TODO_ACTIVITY_INTERVAL_MS = 35_000;
 const MAX_LOG_BYTES = 8 * 1024 * 1024;
 
-export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
+export function createSafeAction(name, { ctxId, iteration, revision = 0, taskId }) {
     switch (name) {
         case "bash_run":
             return {
@@ -47,13 +48,14 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
                 name,
             };
         case "todo_read":
-            return { arguments: { ctxId, title: TODO_TITLE }, name };
+            return { arguments: { ctxId }, name };
         case "todo_write": {
             const phase = iteration % 4;
             return {
                 arguments: {
                     ctxId,
                     revision,
+                    ...(taskId === undefined ? {} : { taskId }),
                     title: TODO_TITLE,
                     todos: [
                         {
@@ -98,6 +100,8 @@ export async function runConnectorLoop(options) {
     let client;
     let ctxId;
     let toolNames = new Set();
+    let todo = { revision: 0 };
+    let nextTodoAt = 0;
     let health = {
         endpoint: options.endpoint,
         instance: options.instance,
@@ -169,24 +173,38 @@ export async function runConnectorLoop(options) {
                         model: "testspace-gpt-simulator",
                     });
                     if (toolNames.has("todo_write")) {
-                        const revision = await readTodoRevision(client, ctxId);
-                        const initialTodo = createSafeAction("todo_write", {
-                            ctxId,
-                            iteration: 1,
-                            revision,
-                        });
-                        const result = await client.callTool(initialTodo);
-                        await log(options.logFile, {
-                            at: new Date().toISOString(),
-                            event: "testspace.todo.seeded",
-                            structuredContent: result.structuredContent,
-                        });
+                        todo = await readTodoState(client, ctxId);
+                        if (todo.taskId === undefined) {
+                            const initialTodo = createSafeAction("todo_write", {
+                                ctxId,
+                                iteration: 1,
+                                revision: 0,
+                            });
+                            const result = await client.callTool(initialTodo);
+                            if (result.isError === true)
+                                throw new Error(`Testspace initial Todo failed: ${JSON.stringify(result)}`);
+                            todo = {
+                                taskId: result.structuredContent?.taskId,
+                                revision: result.structuredContent?.revision,
+                            };
+                            if (typeof todo.taskId !== "string" || !Number.isSafeInteger(todo.revision))
+                                throw new Error("Testspace initial Todo returned no task identity or revision.");
+                            await log(options.logFile, {
+                                at: new Date().toISOString(),
+                                event: "testspace.todo.seeded",
+                                structuredContent: result.structuredContent,
+                            });
+                        }
+                        // Preserve Comment's two-access burst limit. Future
+                        // Todo activity uses a paced, cached task identity.
+                        nextTodoAt = Date.now() + TODO_ACTIVITY_INTERVAL_MS;
                     }
                 }
 
                 iteration += 1;
                 const available = SAFE_ACTIONS.filter((name) =>
-                    toolNames.has(name),
+                    toolNames.has(name) &&
+                    (!name.startsWith("todo_") || Date.now() >= nextTodoAt),
                 );
                 if (available.length === 0)
                     throw new Error(
@@ -194,14 +212,10 @@ export async function runConnectorLoop(options) {
                     );
                 const selected =
                     available[Math.floor(random() * available.length)];
-                const revision =
-                    selected === "todo_write"
-                        ? await readTodoRevision(client, ctxId)
-                        : 0;
                 const call = createSafeAction(selected, {
                     ctxId,
                     iteration,
-                    revision,
+                    ...todo,
                 });
                 const toolCallId = `testspace-${process.pid}-${iteration}`;
 
@@ -218,6 +232,17 @@ export async function runConnectorLoop(options) {
                 });
 
                 const result = await client.callTool(call);
+                if (selected.startsWith("todo_")) {
+                    nextTodoAt = Date.now() + TODO_ACTIVITY_INTERVAL_MS;
+                    if (result.isError !== true) {
+                        todo = selected === "todo_read"
+                            ? todoFromRead(result.structuredContent, ctxId)
+                            : {
+                                taskId: result.structuredContent?.taskId,
+                                revision: result.structuredContent?.revision,
+                            };
+                    }
+                }
                 const activityAt = new Date().toISOString();
                 await log(options.logFile, {
                     at: activityAt,
@@ -253,6 +278,8 @@ export async function runConnectorLoop(options) {
                 client = undefined;
                 ctxId = undefined;
                 toolNames = new Set();
+                todo = { revision: 0 };
+                nextTodoAt = 0;
             }
 
             if (
@@ -304,13 +331,24 @@ async function connect(endpoint, workspace) {
     };
 }
 
-async function readTodoRevision(client, ctxId) {
+async function readTodoState(client, ctxId) {
     const result = await client.callTool({
-        arguments: { ctxId, title: TODO_TITLE },
+        arguments: { ctxId },
         name: "todo_read",
     });
-    const revision = result.structuredContent?.revision;
-    return Number.isInteger(revision) && revision >= 0 ? revision : 0;
+    if (result.isError === true)
+        throw new Error(`Testspace Todo read failed: ${JSON.stringify(result)}`);
+    return todoFromRead(result.structuredContent, ctxId);
+}
+
+function todoFromRead(content, ctxId) {
+    const tasks = content?.tasks;
+    const task = Array.isArray(tasks)
+        ? tasks.find((item) => item.title === TODO_TITLE && item.ctxId === ctxId)
+        : undefined;
+    return task === undefined
+        ? { revision: 0 }
+        : { taskId: task.taskId, revision: task.revision };
 }
 
 async function log(path, record) {
