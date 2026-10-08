@@ -3,7 +3,6 @@ import {
     createProcessTransport,
     type ControlConfig,
     type Endpoint,
-    type ToolCallApi,
 } from "@portable-devshell/shared";
 
 import type { ArtifactRuntime } from "./artifact/Api.js";
@@ -40,7 +39,6 @@ export class ControlState {
     readonly contexts: ContextRuntime;
     readonly debug: DebugRuntime;
     readonly extensions: ExtensionRuntime;
-    readonly toolCalls: ToolCallApi;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #toolCallHookUnregister: Array<() => void>;
     #closed = false;
@@ -53,15 +51,6 @@ export class ControlState {
         this.#builtinExtensionSources = Object.freeze([
             ...(options.builtinExtensionSources ?? []),
         ]);
-
-        this.toolCalls = {
-            call: async (instance, ...args) => {
-                const target = options.instances.get(instance);
-                if (target === undefined)
-                    throw new Error(`Instance ${instance} is unavailable.`);
-                return await target.toolCallIngress.call(instance, ...args);
-            },
-        };
 
         const extensionToolCalls = new ToolCallExtensionBinding(
             this.extensions,

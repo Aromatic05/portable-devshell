@@ -10,7 +10,6 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
-import type { ToolCallApi } from "@portable-devshell/shared";
 import {
     createToolCallProvenanceRuntime,
     type ToolCallProvenanceApi,
@@ -44,7 +43,6 @@ export class McpControlModule {
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
     readonly #toolRegistry: ToolCallRegistry;
-    #toolCalls?: ToolCallApi;
 
     constructor(options: McpControlModuleOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
@@ -55,10 +53,11 @@ export class McpControlModule {
         this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpRuntimeState({
             context: options.contextTransport,
-            tools: { call: (...args) => {
-                if (this.#toolCalls === undefined)
-                    throw new Error("Control tool calls are not initialized.");
-                return this.#toolCalls.call(...args);
+            tools: { call: (instance, ...args) => {
+                const target = options.instances.get(instance);
+                if (target === undefined)
+                    throw new Error(`Instance ${instance} is unavailable.`);
+                return target.toolCallIngress.call(instance, ...args);
             } },
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
@@ -98,10 +97,6 @@ export class McpControlModule {
 
     get host(): McpHost | undefined {
         return this.#host;
-    }
-
-    setToolCalls(tools: ToolCallApi): void {
-        this.#toolCalls = tools;
     }
 
     get oauthApproval(): ControlConfig["mcp"]["oauth2"] {
