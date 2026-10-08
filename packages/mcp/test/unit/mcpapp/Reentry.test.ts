@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createToolCallRuntime } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { GoalService } from "../../../../core/src/task/goal/index.ts";
+import { TodoService } from "../../../../core/src/task/todo/index.ts";
 import { mcpAppReentryDefinition } from "../../../../core/src/instance/mcpapp/Definition.ts";
 import { installMcpAppReentry } from "../../../../core/src/instance/mcpapp/Reentry.ts";
 import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
@@ -25,7 +26,11 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
         appendEvent: async () => undefined,
         filePath: join(directory, "goals.json"), instanceName: "local",
     });
-    const unregister = installMcpAppReentry(native.hooks, goal);
+    const todo = new TodoService({
+        appendEvent: async () => undefined,
+        filePath: join(directory, "todo.json"), instanceName: "local",
+    });
+    const unregister = installMcpAppReentry(native.hooks, { goal, todo } as never);
     try {
         const ctx = await contexts.registry.create({
             principal: "local", environments: [{ instance: "local", workspace: "/repo" }],
@@ -59,7 +64,10 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
             instanceName: "local", toolSource: source, tools: native.api,
             mcpAppActions: receipts, mcpAppView: view as never,
         });
-        const base = { ctxId: ctx.ctxId, claimId: "claim-user-resume-1", directiveId: "authorized-resume-receipt" };
+        const base = {
+            ctxId: ctx.ctxId, claimId: "claim-user-resume-1", directiveId: "authorized-resume-receipt",
+            intent: "goal-resume", sourceId: started.goalId,
+        };
         const call = (data: Record<string, unknown>, principal = "local") =>
             endpoint.callTool("mcpapp_reentry", { ...base, ...data }, { principal });
         await assert.rejects(call({ action: "claim", intent: "goal-resume", sourceId: started.goalId }, "not-owner"));
@@ -79,6 +87,35 @@ test("MCPApp Reentry binds durable Goal recovery through Instance ToolCall and s
         assert.equal((await receipts.get(base.directiveId))?.status, "settled");
         assert.deepEqual(await receipts.pendingDirectives(ctx.ctxId, "local"), []);
         assert.equal((await goal.read(ctx.ctxId))?.continuationCount, 1);
+
+        const createdTask = await todo.write({ revision: 0, title: "Resume background work", todos: [
+            { id: "item", content: "Continue", status: "in_progress" },
+        ] }, ctx.ctxId);
+        assert.ok(createdTask.taskId);
+        await todo.control(createdTask.taskId, "pause", ctx.ctxId, createdTask.revision);
+        await todo.control(createdTask.taskId, "resume", ctx.ctxId);
+        await receipts.prepare(ctx.ctxId, "local", {
+            actionId: "authorized-task-receipt", itemId: createdTask.taskId,
+            instance: "local", operation: "task-resume", targetId: createdTask.taskId,
+        });
+        await receipts.apply("authorized-task-receipt", {
+            kind: "reentry", id: "authorized-task-receipt", intent: "task-resume", sourceId: createdTask.taskId,
+        });
+        const taskBase = {
+            ctxId: ctx.ctxId, claimId: "claim-task-resume-1", directiveId: "authorized-task-receipt",
+            intent: "task-resume", sourceId: createdTask.taskId,
+        };
+        const taskCall = (data: Record<string, unknown>) =>
+            endpoint.callTool("mcpapp_reentry", { ...taskBase, ...data }, { principal: "local" });
+        const taskClaim = await taskCall({ action: "claim" }) as { claimed: boolean; delivery: { message: string } };
+        assert.equal(taskClaim.claimed, true);
+        assert.match(taskClaim.delivery.message, /workspace Task/u);
+        assert.equal((await taskCall({ action: "validate" }) as { valid: boolean }).valid, true);
+        assert.equal((await taskCall({ action: "attempt" }) as { attempted: boolean }).attempted, true);
+        assert.deepEqual(await taskCall({ action: "attempt" }), { attempted: false, duplicate: true });
+        await taskCall({ action: "report", outcome: "accepted" });
+        assert.equal((await receipts.get("authorized-task-receipt"))?.status, "settled");
+        assert.deepEqual(await receipts.pendingDirectives(ctx.ctxId, "local"), []);
     } finally {
         unregister();
         native.close();
