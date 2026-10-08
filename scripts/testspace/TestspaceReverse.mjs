@@ -124,11 +124,8 @@ function defaultRunWorker({ args, environment, workerPath }) {
 async function defaultCreateDeviceCode({ instanceName, runtimeDirectory }) {
     return await withTestspaceControlConnection(
         runtimeDirectory,
-        async (shared, connection) => {
-            const reverse = shared.controlClientModule(connection, "reverse");
-            return await reverse.request("createCode", {
-                instance: instanceName,
-            });
+        async (shared, endpoint) => {
+            return await shared.createConnectionTransport(endpoint).createCode(instanceName);
         },
     );
 }
@@ -136,12 +133,8 @@ async function defaultCreateDeviceCode({ instanceName, runtimeDirectory }) {
 async function defaultReadSnapshot({ instanceName, runtimeDirectory }) {
     return await withTestspaceControlConnection(
         runtimeDirectory,
-        async (_shared, connection) => {
-            const response = await connection.request(
-                instanceName,
-                "runtime",
-                "snapshot",
-            );
+        async (shared, endpoint) => {
+            const response = await shared.createProcessTransport(endpoint, instanceName).snapshot();
             return response.snapshot;
         },
     );
@@ -177,27 +170,15 @@ export async function withTestspaceControlConnection(
     operation,
 ) {
     const shared = await import("../../packages/shared/dist/index.js");
-    const connection = new shared.ClientConnection({
-        connectChannel: (signal) =>
-            shared.SocketChannel.connect(
-                shared.resolveControlSocketPath(runtimeDirectory),
-                { signal },
-            ),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => shared.createError(error),
-        mode: "persistent",
-        peer: "cli",
+    const endpoint = new shared.Endpoint({
+        connectChannel: (signal) => shared.connectControlChannel({
+            xdgRuntimeDir: runtimeDirectory,
+        }, signal),
     });
     try {
-        const protocolVersion = shared.CONTROL_PROTOCOL_VERSION;
-        await connection.request("@control", "service", "hello", {
-            clientKind: "cli",
-            maxProtocolVersion: protocolVersion,
-            minProtocolVersion: protocolVersion,
-        });
-        return await operation(shared, connection);
+        await shared.createServerTransport(endpoint, { clientKind: "cli" }).hello();
+        return await operation(shared, endpoint);
     } finally {
-        connection.close();
+        endpoint.close();
     }
 }

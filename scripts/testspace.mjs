@@ -477,17 +477,13 @@ async function status() {
     });
     const instances = await withTestspaceControlConnection(
         runtimeDirectory,
-        async (_shared, connection) => {
+        async (shared, endpoint) => {
             const result = {};
             for (const instance of [
                 TESTSPACE_INSTANCE,
                 TESTSPACE_REVERSE_INSTANCE,
             ]) {
-                const snapshot = await connection.request(
-                    instance,
-                    "runtime",
-                    "snapshot",
-                );
+                const snapshot = await shared.createProcessTransport(endpoint, instance).snapshot();
                 result[instance] = snapshot.snapshot;
             }
             return result;
@@ -795,12 +791,8 @@ function connectorTargets(state) {
 async function readTestspaceInstanceSnapshot(runtimeDirectory, instance) {
     return await withTestspaceControlConnection(
         runtimeDirectory,
-        async (_shared, connection) => {
-            const response = await connection.request(
-                instance,
-                "runtime",
-                "snapshot",
-            );
+        async (shared, endpoint) => {
+            const response = await shared.createProcessTransport(endpoint, instance).snapshot();
             return response.snapshot;
         },
     );
