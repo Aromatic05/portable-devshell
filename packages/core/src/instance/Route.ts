@@ -57,7 +57,7 @@ export function createInstanceHost(
         }),
         createGoalTaskRouteModule({ events, goal: state.task.api.goal }),
         createTodoTaskRouteModule(
-            { events, name, todo: state.task.api.todo },
+            { events, name, todo: state.task.api.todo, wait: state.task.api.wait },
             subscriptions,
         ),
         createToolRouteModule(

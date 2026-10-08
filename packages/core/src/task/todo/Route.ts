@@ -14,7 +14,7 @@ import type {
     TodoReadInput,
 } from "@portable-devshell/shared";
 import { isTaskEventType } from "@portable-devshell/shared";
-import type { TodoApi } from "../Api.js";
+import type { TodoApi, WaitApi } from "../Api.js";
 
 interface TodoTaskRouteSubscriptionPort {
     subscribe(
@@ -31,6 +31,7 @@ interface TodoTaskRouteInstancePort {
     events: InstanceEventSource;
     name: string;
     todo: Pick<TodoApi, "delete" | "read">;
+    wait: Pick<WaitApi, "list">;
 }
 
 
@@ -53,6 +54,20 @@ export function createTodoTaskRouteModule(
                         readTodoInput(request.payload),
                     ),
                 }) as unknown as JsonValue,
+            getWaits: async (request) => {
+                const payload = request.payload;
+                if (!isRecord(payload) || typeof payload.ctxId !== "string" || payload.ctxId.trim().length === 0)
+                    throw createRemoteError({
+                        code: controlErrorCodes.invalidTarget,
+                        message: "task.getWaits requires a Context ID.",
+                        retryable: false,
+                    });
+                const lastSeq = instance.events.cursor();
+                return {
+                    lastSeq,
+                    waits: await instance.wait.list(payload.ctxId.trim()),
+                } as unknown as JsonValue;
+            },
             deleteTodo: async (request) => {
                 await instance.todo.delete(readTodoTaskId(request.payload));
                 return {};

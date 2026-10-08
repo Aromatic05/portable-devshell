@@ -10,12 +10,14 @@ import type {
     TaskEvent,
     TodoReadEnvelope,
     TodoReadInput,
+    WaitRecord,
 } from "./Model.js";
 
 export interface TaskTransport {
     deleteTodo(taskId: string): Promise<Record<string, never>>;
     getGoals(): Promise<GoalSnapshotEnvelope>;
     getTodo(input?: TodoReadInput): Promise<TodoReadEnvelope>;
+    getWaits(ctxId: string): Promise<{ waits: WaitRecord[]; lastSeq: number }>;
     subscribe(fromSeq: number): Promise<InstanceEventStreamPort<TaskEvent>>;
 }
 
@@ -32,6 +34,7 @@ export function createTaskTransport(
             }),
         getGoals: () => port.request<GoalSnapshotEnvelope>("getGoals"),
         getTodo: (input) => port.request<TodoReadEnvelope>("getTodo", input),
+        getWaits: (ctxId) => port.request<{ waits: WaitRecord[]; lastSeq: number }>("getWaits", { ctxId }),
         subscribe: async (fromSeq) =>
             new InstanceEventStream<TaskEvent>(
                 instanceName,
