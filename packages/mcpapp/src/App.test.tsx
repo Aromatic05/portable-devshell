@@ -4,6 +4,9 @@ import { afterEach, expect, test, vi } from "vitest";
 
 const host = vi.hoisted(() => ({
     actions: [] as Array<{ name: string; arguments: Record<string, unknown> }>,
+    recovery: undefined as undefined | ((request: Record<string, unknown>) => Record<string, unknown>),
+    sent: [] as unknown[],
+    modelContexts: [] as unknown[],
     clients: [] as Array<{
         ontoolinput?: (input: { arguments?: Record<string, unknown> }) => void;
         ontoolresult?: (result: unknown) => void;
@@ -22,8 +25,12 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         setupSizeChangedNotifications() { return () => undefined; }
         async callServerTool(params: { name: string; arguments: Record<string, unknown> }) {
             host.actions.push(params);
+            if (params.name === "mcpapp_reentry" && host.recovery)
+                return { isError: false, content: [], structuredContent: host.recovery(params.arguments) };
             return { isError: false, content: [], structuredContent: { status: "applied" } };
         }
+        async updateModelContext(value: unknown) { host.modelContexts.push(value); return {}; }
+        async sendMessage(value: unknown) { host.sent.push(value); return { isError: false }; }
         async close() {}
     },
     applyDocumentTheme: vi.fn(),
@@ -46,6 +53,9 @@ afterEach(async () => {
     container = undefined;
     host.clients.length = 0;
     host.actions.length = 0;
+    host.recovery = undefined;
+    host.sent.length = 0;
+    host.modelContexts.length = 0;
     globalThis.fetch = originalFetch;
 });
 
@@ -208,4 +218,54 @@ test("MCPApp user controls use callServerTool with Context, revision and confirm
         ctxId: "ctx-human", itemId: "approval-one", actionId: "deny", requestId: expect.any(String),
     });
     expect(host.actions[0]?.arguments.requestId).not.toBe(host.actions[1]?.arguments.requestId);
+});
+
+test("server Goal recovery intent delivers model context and one Host message after claim", async () => {
+    const state = {
+        ctxId: "ctx-recovery", instance: "demo", cursor: 16, agentBusy: false,
+        presentation: { work: [{ id: "goal-recovered", title: "Continue a Goal" }], background: [] },
+        reentry: { pending: true, directives: [{
+            kind: "reentry", id: "receipt-goal-resume", intent: "goal-resume", sourceId: "goal-recovered",
+        }] },
+    };
+    host.recovery = (request) => {
+        if (request.action === "claim") return { claimed: true, delivery: {
+            message: "Resume Context-owned Goal", modelContext: {
+                structuredContent: { portableDevshellMcpApp: { ctxId: "ctx-recovery" } },
+            },
+        } };
+        if (request.action === "validate") return { valid: true };
+        if (request.action === "attempt") return { attempted: true };
+        return {};
+    };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify(state), { status: 200 }));
+        if (String(input).includes("/watch")) return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+        throw new Error("Unexpected request");
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({
+        _meta: { "portable-devshell/mcpapp": {
+            ctxId: "ctx-recovery", token: "authorized-private-token", liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
+        } },
+    }); });
+    await vi.waitFor(() => expect(host.sent).toHaveLength(1));
+    expect(host.modelContexts).toHaveLength(1);
+    expect(JSON.stringify(host.modelContexts[0])).toContain("ctx-recovery");
+    expect(host.sent[0]).toEqual({
+        role: "user", content: [{ type: "text", text: "Resume Context-owned Goal" }],
+    });
+    await vi.waitFor(() => expect(host.actions.filter((value) => value.name === "mcpapp_reentry").map((value) => value.arguments.action))
+        .toEqual(["claim", "validate", "attempt", "report"]));
+    expect(host.actions[0]?.arguments).toEqual(expect.objectContaining({
+        ctxId: "ctx-recovery", directiveId: "receipt-goal-resume", sourceId: "goal-recovered", intent: "goal-resume",
+    }));
+    expect(host.actions[3]?.arguments.outcome).toBe("accepted");
+    await act(async () => { host.clients[0]?.ontoolinput?.({ arguments: { ctxId: "ctx-other" } }); });
+    expect(host.sent).toHaveLength(1);
 });
