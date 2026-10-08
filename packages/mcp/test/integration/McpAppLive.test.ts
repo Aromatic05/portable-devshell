@@ -163,6 +163,55 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
     }
 });
 
+test("MCP App bootstrap resolves OpenAI-session Context without making its ID model-visible", async () => {
+    const runtime = createTestMcpRuntimeState({
+        endpoint: new Endpoint({ host: "mcpapp-openai-session-test" }),
+        tools: { async call(instance, toolName) {
+            assert.equal(instance, "demo");
+            assert.equal(toolName, "environ_info");
+            return { instance, status: "active", workspace: "/shared" };
+        } },
+    });
+    const host = new TestMcpHost({
+        instances: [{ name: "demo", contextMode: "openai-session" }],
+        listenHost: "127.0.0.1", listenPort: 0,
+        publicBaseUrl: "https://devshell.example.com",
+    }, runtime);
+    await host.start();
+    try {
+        const context = await runtime.contexts.registry.create({
+            principal: "local", environments: [{ instance: "demo", workspace: "/shared" }],
+        });
+        await runtime.contexts.registry.attachEnvironment(context.ctxId,
+            { instance: "demo", workspace: "/shared" },
+            { principal: "local", bindings: [{ kind: "openai/session", value: "chat-session-mcpapp" }] },
+        );
+        const address = host.server.address;
+        assert.ok(typeof address === "object" && address !== null);
+        const response = await fetch(`http://127.0.0.1:${address.port}/demo/mcp`, {
+            method: "POST",
+            headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
+            body: JSON.stringify({
+                id: "test-openai-session", jsonrpc: "2.0", method: "tools/call",
+                params: { name: "environ_info", arguments: {}, _meta: { "openai/session": "chat-session-mcpapp" } },
+            }),
+        });
+        assert.equal(response.status, 200);
+        const payload = parseMcpHttpResponse<{
+            error?: { message?: string };
+            result?: { _meta?: Record<string, unknown>; structuredContent?: Record<string, unknown> };
+        }>(await response.text());
+        assert.equal(payload.error, undefined);
+        const capability = payload.result?._meta?.["portable-devshell/mcpapp"] as Record<string, string> | undefined;
+        assert.equal(capability?.ctxId, context.ctxId);
+        assert.equal(await runtime.state.mcpAppLeases.verify("demo", context.ctxId, capability!.token), true);
+        assert.equal(payload.result?.structuredContent?.ctxId, undefined);
+        assert.equal(JSON.stringify(payload.result?.structuredContent).includes(capability!.token), false);
+    } finally {
+        await host.stop();
+    }
+});
+
 test("MCP App Watch denies data after Lease revocation and ends on Instance retirement", async () => {
     const host = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
     const leases = new McpAppLeaseStore();
