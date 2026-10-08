@@ -64,6 +64,16 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
         // Different request identity is a new deliberate user action.
         await call(first, "task-a", "local", "second-action-request-5678");
         assert.equal(mutations, 2);
+
+        // A second endpoint has its own in-flight map; the shared store must
+        // reserve the request atomically before either can execute it.
+        const concurrent = await Promise.all([
+            call(first, "task-a", "local", "third-action-request-9012"),
+            call(endpoint(store), "task-a", "local", "third-action-request-9012"),
+        ]);
+        assert.equal(mutations, 3);
+        assert.equal(concurrent.some((value) => (value as { status: string }).status === "applied"), true);
+        assert.equal(concurrent.every((value) => ["applied", "stale"].includes((value as { status: string }).status)), true);
     } finally {
         await contexts.close();
     }
