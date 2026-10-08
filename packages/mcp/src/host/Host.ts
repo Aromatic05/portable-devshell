@@ -12,6 +12,8 @@ import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpoint } from "../endpoint/Endpoint.js";
+import { createMcpAppMcpExtension } from "../endpoint/extension/McpApp.js";
+import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
 import type { McpToolSource } from "../endpoint/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
@@ -201,6 +203,9 @@ export class McpHost {
                 auth: instance.auth,
                 context: this.#contexts,
                 contextMode: instance.contextMode ?? "explicit",
+                extensions: new McpExtensionRegistry([
+                    createMcpAppMcpExtension(this.#config.publicBaseUrl),
+                ]),
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,

@@ -18,6 +18,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 import { TestMcpHost as McpHost } from "../ContextRuntime.ts";
+import { mcpAppResourceUri } from "@portable-devshell/mcp/testing";
 import type {
     McpAuthConfig,
     McpHostInstanceConfig,
@@ -79,6 +80,36 @@ test("initialize succeeds over HTTP", async () => {
         assert.equal(response.status, 200);
         assert.equal(typeof payload.result?.protocolVersion, "string");
         assert.equal(response.headers.get("mcp-session-id"), null);
+    } finally {
+        await host.stop();
+    }
+});
+
+test("production MCP host advertises and reads its MCP App resource", async () => {
+    const host = createHost();
+    await host.start();
+    try {
+        const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
+        const request = async (method: string, params: JsonValue = {}) => {
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    accept: "application/json, text/event-stream",
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+            });
+            assert.equal(response.status, 200);
+            return parseMcpHttpResponse<{
+                result?: { resources?: Array<{ uri: string; mimeType: string }>; contents?: Array<{ uri: string; mimeType: string; text: string }> };
+            }>(await response.text());
+        };
+        const listed = await request("resources/list");
+        assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
+        const read = await request("resources/read", { uri: mcpAppResourceUri });
+        assert.equal(read.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
+        assert.match(read.result?.contents?.[0]?.text ?? "", /<html\b/u);
     } finally {
         await host.stop();
     }
