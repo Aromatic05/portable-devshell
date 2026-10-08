@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     presentToolCallResult,
     type ToolCallHooks,
+    type ToolDefinition,
 } from "@portable-devshell/shared";
 import type { InstanceName } from "@portable-devshell/shared";
 
@@ -96,11 +97,31 @@ test("MCP Extension tools publish definitions and execute through ToolCall hooks
     } as ToolCallHooks;
 
     const registry = createToolCallRegistry();
-    const unbind = registry.bind(hooks);
+    let injected: readonly ToolDefinition[] = [];
+    const unbind = registry.bind({
+        changes: { onChange: () => () => undefined },
+        instances: {
+            list: () => [{
+                config: { mcpEnabled: true, name: "remote-server" },
+                toolCallHooks: hooks,
+                toolDefinitions: {
+                    register: (initial: readonly ToolDefinition[]) => {
+                        injected = initial;
+                        return {
+                            replace: (next: readonly ToolDefinition[]) => { injected = next; },
+                            dispose: () => { injected = []; },
+                        };
+                    },
+                    list: () => injected,
+                },
+            }],
+        },
+    });
     const uninstall = service.install(registry);
     try {
         const tool = registry.get("remote-server", "todo_report")?.definition;
         assert.equal(tool?.name, "todo_report");
+        assert.equal(injected.some((entry) => entry.name === "todo_report"), true);
         assert.equal(tool?.description, "Send progress.");
         assert.deepEqual(tool?._meta, {
             devshell: {

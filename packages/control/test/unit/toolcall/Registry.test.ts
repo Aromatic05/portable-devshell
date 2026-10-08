@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ToolDefinition } from "@portable-devshell/shared";
+import { createToolCallRuntime, type JsonValue, type ToolDefinition } from "@portable-devshell/shared";
 import {
     createToolCallRegistry,
     installInstanceToolDefinitions,
@@ -163,6 +163,109 @@ test("instance catalog bridge follows MCP enablement and preserves conflicts", (
     assert.deepEqual(names(registry, "local"), ["environ_info", "bash_run"]);
 });
 
+test("control hooks and executes move with an instance generation", async () => {
+    const registry = createToolCallRegistry();
+    const first = catalogSource("local");
+    const second = catalogSource("local");
+    const changes = changeHub();
+    let current = first.instance;
+    let reviewed = 0;
+    const releaseReview = registry.registerReview({
+        hook: "400-generation-review",
+        id: "generation-review",
+        review: () => {
+            reviewed += 1;
+            return { decision: "continue" };
+        },
+    });
+    const definitions = registry.registerAll([environInfo]);
+    const releaseExecute = registry.registerExecute("environ_info", async () => "ok");
+    const stop = installInstanceToolDefinitions({
+        changes,
+        hooks: registry,
+        instances: { list: () => [current] },
+    });
+    const context = { source: "mcp" } as const;
+    try {
+        assert.equal(await first.runtime.api.call("local", "environ_info", {}, context), "ok");
+        current = second.instance;
+        changes.publish();
+        await assert.rejects(first.runtime.api.call("local", "environ_info", {}, context), /no execute/iu);
+        assert.equal(await second.runtime.api.call("local", "environ_info", {}, context), "ok");
+        assert.equal(reviewed, 2);
+        stop();
+        await assert.rejects(second.runtime.api.call("local", "environ_info", {}, context), /no execute/iu);
+        assert.equal(reviewed, 2);
+    } finally {
+        stop();
+        releaseExecute();
+        definitions.dispose();
+        releaseReview();
+        first.runtime.close();
+        second.runtime.close();
+    }
+});
+
+test("global and instance-scoped tools both execute with receiving instance hooks", async () => {
+    const registry = createToolCallRegistry();
+    const local = catalogSource("local");
+    const remote = catalogSource("remote");
+    const changes = changeHub();
+    const traces: string[] = [];
+    const disposeReview = registry.registerReview({
+        hook: "400-global-review",
+        id: "global-review",
+        review: ({ direction, value }) => {
+            traces.push(`${value.context.instance}:${direction}:global`);
+            return { decision: "continue" };
+        },
+    });
+    const disposeLocalReview = local.runtime.hooks.registerReview({
+        hook: "450-local-review",
+        id: "local-review",
+        review: ({ direction }) => {
+            traces.push(`local:${direction}:local`);
+            return { decision: "continue" };
+        },
+    });
+    const global = registry.registerAll([environInfo]);
+    const scoped = registry.register("local", [bashRun]);
+    const disposeGlobalExecute = registry.registerExecute("environ_info", async () => "global");
+    const disposeScopedExecute = registry.registerExecute("bash_run", async () => "scoped");
+    const stop = installInstanceToolDefinitions({
+        changes,
+        hooks: registry,
+        instances: { list: () => [local.instance, remote.instance] },
+    });
+    const context = { requestId: "scope-call", source: "mcp" } as const;
+    try {
+        assert.deepEqual(local.toolDefinitions.list().map((tool) => tool.name), ["environ_info", "bash_run"]);
+        assert.deepEqual(remote.toolDefinitions.list().map((tool) => tool.name), ["environ_info"]);
+        assert.equal(await local.runtime.api.call("local", "environ_info", {}, context), "global");
+        assert.equal(await local.runtime.api.call("local", "bash_run", {}, context), "scoped");
+        assert.equal(await remote.runtime.api.call("remote", "environ_info", {}, context), "global");
+        await assert.rejects(remote.runtime.api.call("remote", "bash_run", {}, context), /no execute/iu);
+        assert.deepEqual(traces, [
+            "local:inbound:global", "local:inbound:local",
+            "local:inbound:global", "local:inbound:local",
+            "remote:inbound:global", "remote:inbound:global",
+        ]);
+        scoped.replace([fileRead]);
+        assert.deepEqual(local.toolDefinitions.list().map((tool) => tool.name), ["environ_info", "file_read"]);
+        await assert.rejects(local.runtime.api.call("local", "bash_run", {}, context), /no execute/iu);
+    } finally {
+        stop();
+        disposeScopedExecute();
+        disposeGlobalExecute();
+        scoped.dispose();
+        global.dispose();
+        disposeLocalReview();
+        disposeReview();
+        local.runtime.close();
+        remote.runtime.close();
+    }
+});
+
 function names(
     registry: ReturnType<typeof createToolCallRegistry>,
     instance: string,
@@ -173,13 +276,23 @@ function names(
 function catalogSource(name: string, options: { mcpEnabled?: boolean } = {}) {
     let mcpEnabled = options.mcpEnabled ?? true;
     const toolDefinitions = new TestToolCatalog();
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            dispatch: async (request) => {
+                if (request.execute === undefined) throw new Error("no execute registered");
+                return (await request.execute(request.callId, request.value.payload, request.value)) as JsonValue;
+            },
+        }),
+    });
     return {
         instance: {
             get config() {
                 return { mcpEnabled, name };
             },
+            toolCallHooks: runtime.hooks,
             toolDefinitions,
         },
+        runtime,
         setMcpEnabled(next: boolean) {
             mcpEnabled = next;
         },
