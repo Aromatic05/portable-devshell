@@ -15,17 +15,17 @@ import type { McpAppSnapshot, McpAppWorkItem } from "./model/Contract.js";
 export function projectMcpAppSnapshot(input: {
     approvals: { approvals: ApprovalRequest[]; lastSeq: number };
     ctxId: string;
-    goals: { goals: GoalSnapshot[]; lastSeq: number };
+    goal: { goal: GoalSnapshot | null; lastSeq: number };
     instance: string;
     todo: { todo: TodoReadResult; lastSeq: number };
     waits?: { waits: WaitRecord[]; lastSeq: number };
     workspace?: string;
 }): McpAppSnapshot {
-    // A goal is workspace-owned, while approvals and Todo tasks carry Context IDs.
-    // Never infer permission to read another Context's records from the Instance name.
-    const goals = input.workspace === undefined
-        ? []
-        : input.goals.goals.filter((goal) => goal.workspace === input.workspace);
+    // The caller must use task.getGoal(ctxId), not the Instance-wide getGoals().
+    // Several independent Contexts may use the same Workspace.
+    const goals = input.goal.goal === null ||
+        (input.workspace !== undefined && input.goal.goal.workspace !== input.workspace)
+        ? [] : [input.goal.goal];
     const approvals = input.approvals.approvals.filter((entry) =>
         entry.ctxId === input.ctxId && entry.status === "pending",
     );
@@ -67,7 +67,7 @@ export function projectMcpAppSnapshot(input: {
         instance: input.instance,
         // Each authority captured a cursor before its read. Starting at their
         // minimum means changes racing with any read cannot be missed.
-        cursor: Math.min(input.approvals.lastSeq, input.goals.lastSeq, input.todo.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
+        cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.todo.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
         agentBusy: work.some((item) => item.state === "running"),
         presentation: {
             ...(approvals[0] === undefined ? {} : {
@@ -112,11 +112,11 @@ export function createMcpAppViewModel(endpoint: Endpoint) {
     const snapshot = async (instance: string, ctxId: string, workspace?: string) => {
         const task = createTaskTransport(endpoint, instance);
         const approval = createApprovalTransport(endpoint, instance);
-        const [goals, todo, approvals, waits] = await Promise.all([
-            task.getGoals(), task.getTodo(), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
+        const [goal, todo, approvals, waits] = await Promise.all([
+            task.getGoal(ctxId), task.getTodo(), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
         ]);
         return projectMcpAppSnapshot({
-            approvals, ctxId, goals, instance, todo, waits,
+            approvals, ctxId, goal, instance, todo, waits,
             ...(workspace === undefined ? {} : { workspace }),
         });
     };
