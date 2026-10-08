@@ -1,7 +1,7 @@
 import type {
     ToolCallHooks,
     ToolCallRegistration,
-} from "@portable-devshell/core/toolcall";
+} from "@portable-devshell/shared";
 import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
 import type {
     McpToolSource,

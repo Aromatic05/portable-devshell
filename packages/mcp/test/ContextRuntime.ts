@@ -6,18 +6,20 @@ import { join } from "node:path";
 import type {
     ContextApi,
     ContextRuntime,
-} from "@portable-devshell/core/context";
-import { createContextRuntime } from "@portable-devshell/core/context";
-import {
-    InstanceRegistry,
-    type WorkerInstance,
-} from "@portable-devshell/core/instance";
-import type { ToolCallApi } from "@portable-devshell/core/toolcall";
-import { createToolCallRuntime } from "@portable-devshell/core/toolcall";
-import { installContextTools } from "@portable-devshell/core/context";
+} from "../../control/src/context/Api.ts";
+import { createContextRuntime } from "../../control/src/context/index.ts";
+import { installContextTools } from "../../control/src/context/tool/Runtime.ts";
 import type {
     ContextTransport,
+    EnvironmentTransport,
+    InstanceRuntimeTransport,
+    ProcessTransport,
+    ToolCallApi,
+    ToolCallTargetResolver,
+    ToolDefinition,
+    ToolCallTarget,
 } from "@portable-devshell/shared";
+import { createToolCallRuntime } from "@portable-devshell/shared";
 import type { ContextChangeEvent } from "@portable-devshell/shared";
 import type { EventStreamPort } from "../../shared/src/client/Stream.ts";
 
@@ -25,19 +27,20 @@ import {
     McpEndpointDispatch,
     type McpEndpointDispatchOptions,
 } from "../src/endpoint/dispatch/Dispatch.ts";
+import {
+    McpEndpoint,
+    type McpEndpointOptions,
+} from "../src/endpoint/Endpoint.ts";
 import { McpHost, McpRuntimeState } from "../src/host/Host.ts";
 import type {
     McpHostConfig,
     McpHostInstanceConfig,
 } from "../src/host/Host.ts";
-import type { McpEndpointWorkerOptions } from "../src/endpoint/Endpoint.ts";
-import { McpEndpointWorker } from "../src/endpoint/Endpoint.ts";
-import type { ToolCallTargetResolver } from "@portable-devshell/core/toolcall";
 import {
     createTestWorkerToolRuntime,
     createTestWorkerInstance,
     type TestWorkerInstanceFields,
-} from "../../core/test/support/WorkerInstance.ts";
+} from "./support/WorkerInstance.ts";
 import {
     TestToolSource,
     type TestToolRegistration,
@@ -59,7 +62,6 @@ export interface TestMcpRuntimeState {
 
 export interface TestMcpRuntimeOptions {
     contextFile?: string;
-    instances?: InstanceRegistry;
     tools?: ToolCallApi;
     resolveTarget?: ToolCallTargetResolver;
     configureToolCalls?: (
@@ -69,7 +71,7 @@ export interface TestMcpRuntimeOptions {
 }
 
 export function createTestContextRuntime(
-    options: Pick<TestMcpRuntimeOptions, "contextFile" | "instances"> = {},
+    options: Pick<TestMcpRuntimeOptions, "contextFile"> = {},
 ): TestContextRuntime {
     const contextFile = options.contextFile ?? join(
         tmpdir(),
@@ -78,7 +80,10 @@ export function createTestContextRuntime(
     const removeContextFile = options.contextFile === undefined;
     const runtime = createContextRuntime({
         contextFile,
-        instances: options.instances ?? emptyInstances(),
+        environment: () => testEnvironment,
+        leaseInstance: () => ({ release() {} }),
+        process: () => testProcess,
+        runtime: () => testInstanceRuntime,
     });
     const closeRuntime = runtime.close.bind(runtime);
     return Object.assign(runtime, {
@@ -98,7 +103,7 @@ export function createTestContextRuntime(
 }
 
 export function createTestContextEnvironment(
-    options: Pick<TestMcpRuntimeOptions, "contextFile" | "instances"> = {},
+    options: Pick<TestMcpRuntimeOptions, "contextFile"> = {},
 ) {
     return createTestContextRuntime(options).environment;
 }
@@ -124,6 +129,7 @@ export function createTestToolCallApi(
 export function createTestInstance(options: TestWorkerInstanceFields) {
     const worker = createTestWorkerInstance(options);
     const mcpWorker = Object.assign(worker, {
+        listTools: () => runtime.execution.listTools(),
         appendMcpSessionClosed: async (sessionId: string) => {
             await worker.appendControlEvent("mcp.sessionClosed", { sessionId });
         },
@@ -174,7 +180,6 @@ export function createTestMcpRuntimeState(
 ): TestMcpRuntimeState {
     const contexts = createTestContextRuntime({
         contextFile: options.contextFile,
-        instances: options.instances,
     });
     const context = createContextTransport(contexts);
     const toolCallRuntime = createToolCallRuntime({
@@ -188,7 +193,11 @@ export function createTestMcpRuntimeState(
     const closeContextTools = installContextTools(
         contexts,
         toolSource.registration(toolCallRuntime.hooks),
-        { instances: options.instances ?? emptyInstances() },
+        {
+            environment: () => testEnvironment,
+            leaseInstance: () => ({ release() {} }),
+            process: () => testProcess,
+        },
     );
     options.configureToolCalls?.(toolCallRuntime);
     const state = new McpRuntimeState({
@@ -209,12 +218,20 @@ export function createTestMcpRuntimeState(
 }
 
 export interface TestMcpHostConfig
-    extends Omit<McpHostConfig, "toolSource"> {
+    extends Omit<McpHostConfig, "toolSource" | "instances"> {
+    instances: readonly TestMcpHostInstanceConfig[];
     contextFile?: string;
     tools?: ToolCallApi;
     resolveTarget?: ToolCallTargetResolver;
     configureToolCalls?: TestMcpRuntimeOptions["configureToolCalls"];
     toolSource?: TestToolSource;
+}
+
+export interface TestMcpHostInstanceConfig extends McpHostInstanceConfig {
+    worker?: {
+        listTools?: () => readonly ToolDefinition[];
+        target?: () => ToolCallTarget;
+    };
 }
 
 export class TestMcpHost extends McpHost {
@@ -224,6 +241,7 @@ export class TestMcpHost extends McpHost {
         string,
         TestToolRegistration
     >();
+    readonly #listWorkerTools = new Map<string, () => readonly ToolDefinition[]>();
 
     constructor(config: TestMcpHostConfig, runtime?: TestMcpRuntimeState) {
         const {
@@ -236,11 +254,17 @@ export class TestMcpHost extends McpHost {
         } = config;
         const toolSource =
             configuredToolSource ?? runtime?.toolSource ?? new TestToolSource();
+        const targetResolver = resolveTarget ?? ((instance: string) => {
+            const target = config.instances
+                .find((entry) => entry.name === instance)
+                ?.worker?.target?.();
+            if (target !== undefined) return target;
+            throw new Error(`Test MCP target is not configured for ${instance}.`);
+        });
         const testRuntime = runtime ?? createTestMcpRuntimeState({
             contextFile,
-            instances: instancesForHost(hostConfig.instances),
             tools,
-            resolveTarget,
+            resolveTarget: targetResolver,
             configureToolCalls,
             toolSource,
             storageDir: hostConfig.storageDir,
@@ -250,26 +274,37 @@ export class TestMcpHost extends McpHost {
             string,
             TestToolRegistration,
         ][] = [];
+        const workerToolListings: [
+            string,
+            () => readonly ToolDefinition[],
+        ][] = [];
         for (const instance of config.instances) {
-            const listTools = (
-                instance.worker as McpHostInstanceConfig["worker"] & {
-                    listTools?: () => readonly import("@portable-devshell/shared").ToolDefinition[];
-                }
-            ).listTools;
-            if (listTools !== undefined)
+            const listTools = instance.worker?.listTools;
+            if (listTools !== undefined) {
                 toolRegistrations.push(
                     [instance.name, toolSource.register(instance.name, listTools())],
                 );
+                workerToolListings.push([instance.name, listTools]);
+            }
         }
-        super({ ...hostConfig, toolSource }, testRuntime.state);
+        super({
+            ...hostConfig,
+            instances: config.instances.map(({ worker: _worker, ...instance }) => instance),
+            toolSource,
+        }, testRuntime.state);
         for (const [name, registration] of toolRegistrations)
             this.#toolRegistrations.set(name, registration);
+        for (const [name, listTools] of workerToolListings)
+            this.#listWorkerTools.set(name, listTools);
         this.contexts = testRuntime.contexts;
         this.#testRuntime = testRuntime;
     }
 
     override async start(): Promise<void> {
         await this.contexts.initialize();
+        for (const [instance, listTools] of this.#listWorkerTools) {
+            this.#toolRegistrations.get(instance)?.replace(listTools());
+        }
         await super.start();
         await this.contexts.reconcile();
     }
@@ -297,43 +332,20 @@ export class TestMcpHost extends McpHost {
     }
 }
 
-export class TestMcpEndpointWorker extends McpEndpointWorker {
-    constructor(
-        options: Omit<
-            McpEndpointWorkerOptions,
-            "context" | "tools" | "toolSource"
-        > & {
-            context?: McpEndpointWorkerOptions["context"];
-            toolSource?: McpEndpointWorkerOptions["toolSource"];
-            tools?: McpEndpointWorkerOptions["tools"];
+export function createTestMcpEndpoint(
+    options: Omit<McpEndpointOptions, "context" | "tools" | "toolSource"> &
+        Partial<Pick<McpEndpointOptions, "context" | "tools" | "toolSource">>,
+): McpEndpoint {
+    return new McpEndpoint({
+        ...options,
+        context: options.context ?? {
+            async resolve() {
+                throw new Error("Test MCP Context is not configured.");
+            },
         },
-    ) {
-        const contexts = createTestContextRuntime();
-        const contextTransport = createContextTransport(contexts);
-        super({
-            ...options,
-            context: options.context ?? contextTransport,
-            toolSource: options.toolSource ?? new TestToolSource(),
-            tools: options.tools ?? createTestToolCallApi(),
-        });
-    }
-}
-
-function instancesForHost(instances: readonly McpHostInstanceConfig[]): InstanceRegistry {
-    return new InstanceRegistry(instances.map((config) => new Instance({
-        enabled: true,
-        mcpContextMode: config.contextMode,
-        mcpEnabled: true,
-        mcpPath: config.path ?? `/${config.name}/mcp`,
-        modelExtensions: [],
-        name: config.name,
-        provider: "local",
-        worker: config.worker as unknown as WorkerInstance,
-    })));
-}
-
-function emptyInstances(): InstanceRegistry {
-    return new InstanceRegistry([]);
+        toolSource: options.toolSource ?? new TestToolSource(),
+        tools: options.tools ?? createTestToolCallApi(),
+    });
 }
 
 function createContextTransport(contexts: TestContextRuntime): ContextTransport {
@@ -426,3 +438,76 @@ function createContextChangeStream(
         },
     };
 }
+
+const testEnvironment: EnvironmentTransport = {
+    async prepareExtensionResource() {
+        throw new Error("Test MCP extension resources are not configured.");
+    },
+    async prepareWorkspace(workspace) {
+        return {
+            projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+            projectMemoryDirectory: workspace,
+            projectMemoryPresent: false,
+            temporaryDirectory: `${workspace}/tmp`,
+            workspace,
+        };
+    },
+    async readAlerts() {
+        return { advice: [] };
+    },
+    async releaseAlerts() {},
+    async touchAlerts() {
+        return { advice: [] };
+    },
+    async touchTemporaryDirectory() {},
+};
+
+const testInstanceRuntime: InstanceRuntimeTransport = {
+    async acquireReference() {
+        return {};
+    },
+    async appendEvent() {},
+    async readEvents() {
+        return { events: [], gap: false, latestSeq: 0 };
+    },
+    async releaseReference() {},
+    async subscribeEvents() {
+        throw new Error("Test MCP instance events are not configured.");
+    },
+};
+
+const testProcess: ProcessTransport = {
+    async readLogs() {
+        return [];
+    },
+    async refresh() {
+        return { snapshot: { ready: true } } as never;
+    },
+    async snapshot() {
+        return {
+            lastSeq: 0,
+            snapshot: { ready: true },
+            worker: {
+                capabilities: { cancel: true, streaming: true, tools: true },
+                platform: {
+                    arch: "x86_64",
+                    distribution: { id: "test", name: "Test" },
+                    os: process.platform,
+                    packageManager: "test",
+                    shell: { executable: "/bin/sh", kind: "sh", version: "test" },
+                },
+                protocolVersion: "1",
+                version: "test",
+            },
+        } as never;
+    },
+    async start() {
+        throw new Error("Test MCP processes are not configured.");
+    },
+    async stop() {
+        return { ready: false } as never;
+    },
+    async subscribe() {
+        throw new Error("Test MCP process events are not configured.");
+    },
+};
