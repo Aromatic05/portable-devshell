@@ -4,7 +4,7 @@ import {
     StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import {
-    createTuiClients,
+    createTuiDomainSession,
     TuiControlSession,
     TuiRuntimeOperations,
 } from "../../packages/tui/dist/testing.js";
@@ -15,16 +15,22 @@ export async function runTestspaceCommentSmoke({
     runtimeDirectory,
     workspace,
 }) {
-    const clients = createTuiClients({ xdgRuntimeDir: runtimeDirectory });
-    const session = new TuiControlSession({
-        clients,
-        overviewRefreshIntervalMs: 0,
-        readTimeoutMs: 10_000,
-    });
+    const domains = createTuiDomainSession({ xdgRuntimeDir: runtimeDirectory });
+    const session = new TuiControlSession({ domains });
+    const clients = {
+        artifact: domains.artifactTransport,
+        config: domains.configTransport,
+        instance: domains.instanceTransport,
+        reverse: domains.reverse,
+        server: domains.serverTransport,
+        task: (target) => domains.taskTransport(target),
+        tool: (target) => domains.toolTransport(target),
+    };
     const operations = new TuiRuntimeOperations({
         clients,
+        domains,
         operationTimeoutMs: 10_000,
-        session,
+        reconnect: () => session.reconnect(),
         store: session.store,
     });
     const mcp = new Client({
@@ -39,6 +45,7 @@ export async function runTestspaceCommentSmoke({
         );
         session.store.setSelectedInstance(instance);
         session.store.setSelectedPage("audit");
+        await domains.messages.load([instance]);
 
         await mcp.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
         const environment = await mcp.callTool({
@@ -54,9 +61,7 @@ export async function runTestspaceCommentSmoke({
         await operations.queueContextMessage(instance, ctxId, marker);
         await waitFor(
             () =>
-                session.store
-                    .getState()
-                    .readModel.instanceState[instance]?.contextMessages?.some(
+                domains.messages.state.instances[instance]?.messages.some(
                         (message) =>
                             message.ctxId === ctxId &&
                             message.text === marker &&
@@ -64,14 +69,12 @@ export async function runTestspaceCommentSmoke({
                     ) === true,
             "TUI operation did not publish the queued Comment",
         );
-        const queued = session.store
-            .getState()
-            .readModel.instanceState[instance]?.contextMessages?.find(
+        const queued = domains.messages.state.instances[instance]?.messages.find(
                 (message) => message.ctxId === ctxId && message.text === marker,
             );
         if (queued === undefined) {
             throw new Error(
-                "queued Comment disappeared from the TUI read model",
+                "queued Comment disappeared from the TUI Message ViewModel",
             );
         }
 
@@ -92,27 +95,21 @@ export async function runTestspaceCommentSmoke({
 
         await waitFor(
             () =>
-                session.store
-                    .getState()
-                    .readModel.instanceState[instance]?.contextMessages?.some(
+                domains.messages.state.instances[instance]?.messages.some(
                         (message) =>
                             message.id === queued.id &&
                             message.status === "delivered" &&
                             typeof message.callId === "string",
                     ) === true,
             () => {
-                const state = session.store.getState();
                 return [
-                    "TUI Comment state did not automatically become delivered",
-                    `messages=${JSON.stringify(state.readModel.instanceState[instance]?.contextMessages ?? [])}`,
-                    `events=${JSON.stringify(state.rawEvents.slice(-20).map((event) => ({ event: event.event, payload: event.payload, seq: event.seq })))}`,
-                    `panelErrors=${JSON.stringify(state.panelErrors)}`,
+                    "TUI Message ViewModel did not observe the delivered Comment",
+                    `messages=${JSON.stringify(domains.messages.state.instances[instance]?.messages ?? [])}`,
+                    `failures=${JSON.stringify(domains.messages.state.failures)}`,
                 ].join("\n");
             },
         );
-        const delivered = session.store
-            .getState()
-            .readModel.instanceState[instance]?.contextMessages?.find(
+        const delivered = domains.messages.state.instances[instance]?.messages.find(
                 (message) => message.id === queued.id,
             );
         return {
