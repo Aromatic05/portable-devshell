@@ -31,7 +31,7 @@ export function createGoalTaskRouteModule(
                 });
             const lastSeq = instance.events.cursor();
             return {
-                goal: await instance.goal.read(payload.ctxId),
+                goal: (await instance.goal.read(payload.ctxId)) ?? null,
                 lastSeq,
             } as unknown as JsonValue;
         },
