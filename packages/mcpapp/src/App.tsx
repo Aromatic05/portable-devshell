@@ -21,6 +21,10 @@ export function AppView() {
     const sessionRef = useRef(session);
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
     const [liveError, setLiveError] = useState<string>();
+    const [actionError, setActionError] = useState<string>();
+    const [pendingAction, setPendingAction] = useState<string>();
+    const [busyAction, setBusyAction] = useState<string>();
+    const hostRef = useRef<ConnectedApp>();
 
     useEffect(() => {
         let active = true;
@@ -35,6 +39,7 @@ export function AppView() {
                 reconnectTimer = undefined;
                 const previous = currentApp;
                 currentApp = undefined;
+                if (hostRef.current === previous) hostRef.current = undefined;
                 stopSize?.();
                 stopSize = undefined;
                 void previous?.close().catch(() => undefined);
@@ -50,6 +55,7 @@ export function AppView() {
                 { autoResize: true },
             ) as ConnectedApp;
             currentApp = app;
+            hostRef.current = app;
             app.onhostcontextchanged = (context) => {
                 if (!active || currentApp !== app) return;
                 if (context.theme === "light" || context.theme === "dark")
@@ -106,6 +112,7 @@ export function AppView() {
             active = false;
             if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
             stopSize?.();
+            hostRef.current = undefined;
             void currentApp?.close();
         };
     }, []);
@@ -159,6 +166,46 @@ export function AppView() {
         return () => { current = false; controller.abort(); };
     }, [session, status]);
 
+    const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => {
+        const app = hostRef.current;
+        const current = sessionRef.current;
+        if (!app || !current || busyAction) return;
+        const key = `${item.id}:${action.id}`;
+        if (action.confirmation && pendingAction !== key) {
+            setPendingAction(key);
+            return;
+        }
+        setPendingAction(undefined);
+        setActionError(undefined);
+        setBusyAction(key);
+        try {
+            const result = await app.callServerTool({
+                name: "mcpapp_action",
+                arguments: {
+                    ctxId: current.ctxId,
+                    itemId: item.id,
+                    actionId: action.id,
+                    requestId: crypto.randomUUID(),
+                    ...(action.expectedRevision === undefined ? {} : { expectedRevision: action.expectedRevision }),
+                },
+            });
+            if (result.isError) throw new Error("Workspace action was rejected.");
+            const value = result.structuredContent as { status?: string } | undefined;
+            if (sessionRef.current?.ctxId !== current.ctxId) return;
+            const updated = await readMcpAppSnapshot(current, new AbortController().signal);
+            if (sessionRef.current?.ctxId === current.ctxId) {
+                setSnapshot(updated);
+                if (value?.status === "stale")
+                    setActionError("The previous action may have changed state; review the latest status before retrying.");
+            }
+        } catch (error) {
+            if (sessionRef.current?.ctxId === current.ctxId)
+                setActionError(error instanceof Error ? error.message : "Workspace action failed.");
+        } finally {
+            setBusyAction(undefined);
+        }
+    };
+
     return (
         <main className="workspace" data-status={status}>
             <header className="workspace-head">
@@ -174,8 +221,9 @@ export function AppView() {
                     <h1>{snapshot.agentBusy ? "Workspace active" : "Workspace ready"}</h1>
                     <p>{snapshot.instance} · {snapshot.ctxId}</p>
                     <div className="workspace-items">
-                        {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision" />}
-                        {snapshot.presentation.work.map((item) => <WorkspaceItem key={item.id} item={item} kind="work" />)}
+                        {actionError && <p role="alert">{actionError}</p>}
+                        {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
+                        {snapshot.presentation.work.map((item) => <WorkspaceItem key={item.id} item={item} kind="work" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />)}
                         {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
                         {!snapshot.presentation.primary && snapshot.presentation.work.length === 0 && snapshot.presentation.background.length === 0 &&
                             <p>Nothing needs attention right now.</p>}
@@ -194,7 +242,14 @@ export function AppView() {
     );
 }
 
-function WorkspaceItem({ item, kind }: { item: McpAppItem; kind: string }) {
+function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel }: {
+    item: McpAppItem;
+    kind: string;
+    onAction?: (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => void;
+    pendingAction?: string;
+    busyAction?: string;
+    cancel?: () => void;
+}) {
     return <section className="workspace-item" data-kind={kind}>
         <div className="workspace-item-head"><strong>{item.title}</strong>{item.badge && <span>{item.badge}</span>}</div>
         {item.summary && <p>{item.summary}</p>}
@@ -202,5 +257,16 @@ function WorkspaceItem({ item, kind }: { item: McpAppItem; kind: string }) {
         {item.current && <p>{item.current}</p>}
         {item.note && <p>{item.note}</p>}
         {item.progress && <p>{item.progress.current} / {item.progress.total}</p>}
+        {item.actions && item.actions.length > 0 && onAction && <div className="workspace-actions">
+            {item.actions.map((action) => {
+                const key = `${item.id}:${action.id}`;
+                return <span key={key}>
+                    <button type="button" disabled={busyAction !== undefined} onClick={() => onAction(item, action)}>
+                        {pendingAction === key ? `Confirm ${action.label}` : busyAction === key ? "Applying…" : action.label}
+                    </button>
+                    {pendingAction === key && <button type="button" onClick={cancel}>Back</button>}
+                </span>;
+            })}
+        </div>}
     </section>;
 }

@@ -29,4 +29,8 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 .workspace-item-head span { font-size: 10px; opacity: .65; white-space: nowrap; }
 .workspace-item p { max-width: none; margin-top: 5px; font-size: 11px; overflow-wrap: anywhere; }
 .workspace-item[data-kind="decision"] { border-color: color-mix(in srgb, #c89136 45%, transparent); }
+.workspace-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.workspace-actions > span { display: inline-flex; gap: 5px; }
+.workspace-actions button { background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; font: inherit; font-size: 11px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 7px; padding: 5px 9px; cursor: pointer; }
+.workspace-actions button:disabled { opacity: .4; cursor: default; }
 @media (min-width: 600px) { .workspace { min-height: 280px; padding: 20px 24px; } }

@@ -9,6 +9,13 @@ export interface McpAppItem {
     current?: string;
     note?: string;
     progress?: { current: number; total: number };
+    actions?: Array<{
+        id: string;
+        label: string;
+        expectedRevision?: number;
+        tone?: "default" | "primary" | "danger";
+        confirmation?: { message: string };
+    }>;
 }
 export interface McpAppSnapshot {
     ctxId: string;
