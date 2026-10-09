@@ -39,7 +39,7 @@ test("Control HTTP owns one shared listener for MCP Protocol, MCP App and Web ro
         http,
     );
     const web = http.acquire({ listenHost: "127.0.0.1", listenPort: 0 });
-    const removeWeb = web.registerRawRoute("get", "/web/status", (_req, res) => res.end("web-ok"));
+    const removeWeb = web.registerRawRoute("get", "/web/status", (_req, res) => { res.end("web-ok"); });
     try {
         await runtime.contexts.initialize();
         await mcp.start();
@@ -119,6 +119,66 @@ test("MCP OAuth metadata and unauthorized requests work through Control's native
         assert.notEqual(discovery.status, 404);
     } finally {
         await host.dispose();
+        await runtime.state.close();
+        await runtime.contexts.close();
+        await http.close();
+        await rm(storage, { recursive: true, force: true });
+    }
+});
+
+test("overlapping OAuth MCP Host generations keep active routes and revoke retired metadata", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const storage = await mkdtemp(join(tmpdir(), "mcp-oauth-host-generations-"));
+    const http = new ControlHttpServer();
+    const runtime = createTestMcpRuntimeState({ storageDir: storage });
+    const web = http.acquire({ listenHost: "127.0.0.1", listenPort: 0 });
+    const makeHost = (prefix: string) => new McpHost({
+        instances: [{
+            name: "demo",
+            auth: { enabled: true, provider: "oauth2", oauth2: { requiredScopes: [], resourceName: "demo" } },
+        }],
+        listenHost: "127.0.0.1",
+        listenPort: 0,
+        publicBaseUrl: `http://127.0.0.1${prefix}`,
+        storageDir: storage,
+        toolSource: runtime.toolSource,
+    }, runtime.state, http);
+    const oldest = makeHost("/old");
+    const sameUrl = makeHost("/old");
+    const moved = makeHost("/new");
+    try {
+        await runtime.contexts.initialize();
+        web.registerRawRoute("get", "/health", (_req, response) => { response.end("ok"); });
+        await web.start();
+        const origin = `http://127.0.0.1:${port(web.address)}`;
+        const metadata = async (prefix: string) => await fetch(
+            `${origin}/.well-known/oauth-protected-resource${prefix}/demo/mcp`,
+            { signal: AbortSignal.timeout(5_000) },
+        );
+
+        await oldest.start();
+        await sameUrl.start();
+        assert.equal((await metadata("/old")).status, 200);
+        await oldest.stop();
+        assert.equal((await metadata("/old")).status, 200);
+
+        await moved.start();
+        assert.equal((await metadata("/new")).status, 200);
+        await sameUrl.stop();
+        assert.equal((await metadata("/old")).status, 404);
+        assert.equal((await metadata("/new")).status, 200);
+        assert.equal(await (await fetch(`${origin}/health`)).text(), "ok");
+
+        await moved.stop();
+        assert.equal((await metadata("/new")).status, 404);
+        assert.equal(await (await fetch(`${origin}/health`)).text(), "ok");
+    } finally {
+        await oldest.dispose();
+        await sameUrl.dispose();
+        await moved.dispose();
+        await web.dispose();
         await runtime.state.close();
         await runtime.contexts.close();
         await http.close();
