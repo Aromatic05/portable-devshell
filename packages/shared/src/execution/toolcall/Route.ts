@@ -91,7 +91,7 @@ export function createToolIngressRouteModule(
                         input,
                         {
                             requestId: context.requestId,
-                            ctxId: context.connectionId,
+                            ctxId: context.sourceHost,
                             source: context.peer,
                             workspace,
                         },
@@ -127,7 +127,7 @@ export function createToolIngressRouteModule(
                             ...(operationId === undefined
                                 ? {}
                                 : { operationId }),
-                            ctxId: context.connectionId,
+                            ctxId: context.sourceHost,
                             source: context.peer,
                             workspace,
                         },

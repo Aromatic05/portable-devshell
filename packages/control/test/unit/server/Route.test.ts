@@ -84,6 +84,7 @@ function createContext(host: string): ControlPortContext {
     return {
         afterReply() {},
         connectionId: "connection-1",
+        sourceHost: "connection-1",
         host,
         peer: "cli",
         requestId: "request-1",

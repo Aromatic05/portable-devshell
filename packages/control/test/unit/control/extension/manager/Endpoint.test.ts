@@ -163,6 +163,7 @@ function context(
 ): ControlPortContext {
     return {
         connectionId: "conn-1",
+        sourceHost: "conn-1",
         host: "@control",
         peer,
         requestId: "req-1",

@@ -23,6 +23,7 @@ export interface ControlPortContext {
     readonly connectionId: string;
     readonly host: string;
     readonly peer: ControlClientKind;
+    readonly sourceHost: string;
     readonly protocolVersion?: string;
     readonly requestId: string;
     readonly signal: AbortSignal;

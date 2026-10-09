@@ -32,6 +32,7 @@ test("message.queueContextMessage persists independently of Context lifecycle au
     const routeContext = {
         afterReply() {},
         connectionId: "conn",
+        sourceHost: "conn",
         host: "alpha",
         peer: "cli",
         requestId: "req",

@@ -19,6 +19,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 const routeContext = {
     afterReply() {},
     connectionId: "conn-comment",
+    sourceHost: "conn-comment",
     host: "alpha",
     peer: "cli",
     requestId: "request-comment",

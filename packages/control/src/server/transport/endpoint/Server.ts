@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
     Endpoint,
     Rpc,
@@ -38,6 +40,7 @@ export interface ControlTransportServerOptions {
 
 interface Session {
     readonly admission: ControlTransportAdmission;
+    readonly connectionId: string;
     peer?: ControlClientKind;
     pending?: {
         peer: ControlClientKind;
@@ -68,7 +71,7 @@ interface ActiveConnection {
 export class ControlTransportServer {
     readonly #endpoint = new Endpoint({ host: "server" });
     readonly #ports = new Map<string, BoundPort>();
-    readonly #sessions = new Map<string, Session>();
+    readonly #sessions = new Map<Channel, Map<string, Session>>();
     readonly #connections = new Set<ActiveConnection>();
     readonly #onConnectionDetached: (connectionId: string) => void;
     readonly #routes: ControlTransportRouteProvider;
@@ -251,23 +254,36 @@ export class ControlTransportServer {
             return;
         }
         const active: ActiveConnection = { channel };
+        const sessions = new Map<string, Session>();
+        this.#sessions.set(channel, sessions);
         this.#connections.add(active);
+        const detached = (host: string) => {
+            const session = sessions.get(host);
+            if (session === undefined) return;
+            sessions.delete(host);
+            this.#onConnectionDetached(session.connectionId);
+        };
+        channel.onClose(() => {
+            for (const host of sessions.keys()) detached(host);
+            this.#sessions.delete(channel);
+            this.#connections.delete(active);
+        });
         try {
             active.detach = await this.#endpoint.accept(channel, {
-                attached: (host) => this.#sessions.set(host, { admission }),
-                detached: (host) => {
-                    this.#sessions.delete(host);
-                    this.#onConnectionDetached(host);
+                attached: (host) => {
+                    sessions.set(host, {
+                        admission,
+                        connectionId: randomUUID(),
+                    });
                 },
+                detached,
             });
         } catch (error) {
-            this.#connections.delete(active);
             channel.close(
                 error instanceof Error ? error : new Error(String(error)),
             );
             return;
         }
-        channel.onClose(() => this.#connections.delete(active));
     }
 
     #syncPorts(): void {
@@ -341,7 +357,7 @@ export class ControlTransportServer {
             };
             for (const name of operations.keys()) register(name);
             const offOpen = stream.onOpen(
-                async (messageStream, name, payload, peer, local) => {
+                async (messageStream, name, payload, peer, local, incoming) => {
                     const handle = streamHandlers.get(name);
                     if (handle === undefined) {
                         await messageStream.cancel({
@@ -356,6 +372,7 @@ export class ControlTransportServer {
                     const context = this.#streamContext(
                         local.host,
                         peer.host,
+                        incoming,
                         messageStream,
                         controller.signal,
                     );
@@ -420,7 +437,7 @@ export class ControlTransportServer {
         payload: JsonValue | undefined,
         rpc: RpcContext,
     ): PreparedContext {
-        const session = this.#sessions.get(rpc.peer.host)!;
+        const session = this.#session(rpc.incoming, rpc.peer.host);
         if (host === "@control" && port === "server" && operation === "hello") {
             if (session.peer !== undefined)
                 throw createRemoteError({
@@ -456,12 +473,13 @@ export class ControlTransportServer {
             return {
                 context: {
                     afterReply: rpc.afterReply,
-                    connectionId: rpc.peer.host,
+                    connectionId: session.connectionId,
                     host,
                     peer: pending.peer,
                     protocolVersion: pending.protocolVersion,
                     requestId: rpc.requestId,
                     signal: rpc.signal,
+                    sourceHost: rpc.peer.host,
                     subject: session.admission.subject,
                 },
                 finish: (ok) => {
@@ -485,7 +503,7 @@ export class ControlTransportServer {
         return {
             context: {
                 afterReply: rpc.afterReply,
-                connectionId: rpc.peer.host,
+                connectionId: session.connectionId,
                 host,
                 peer: session.peer,
                 ...(session.protocolVersion === undefined
@@ -493,6 +511,7 @@ export class ControlTransportServer {
                     : { protocolVersion: session.protocolVersion }),
                 requestId: rpc.requestId,
                 signal: rpc.signal,
+                sourceHost: rpc.peer.host,
                 subject: session.admission.subject,
             },
             finish() {},
@@ -502,10 +521,11 @@ export class ControlTransportServer {
     #streamContext(
         host: string,
         peerHost: string,
+        incoming: Channel | undefined,
         stream: MessageStream,
         signal: AbortSignal,
     ): ControlPortContext {
-        const session = this.#sessions.get(peerHost)!;
+        const session = this.#session(incoming, peerHost);
         if (session.peer === undefined)
             throw createRemoteError({
                 code: controlErrorCodes.clientIdentityRequired,
@@ -515,7 +535,7 @@ export class ControlTransportServer {
             });
         return {
             afterReply: (action) => queueMicrotask(() => void action()),
-            connectionId: peerHost,
+            connectionId: session.connectionId,
             host,
             peer: session.peer,
             ...(session.protocolVersion === undefined
@@ -523,7 +543,22 @@ export class ControlTransportServer {
                 : { protocolVersion: session.protocolVersion }),
             requestId: stream.id,
             signal,
+            sourceHost: peerHost,
             subject: session.admission.subject,
         };
+    }
+
+    #session(incoming: Channel | undefined, host: string): Session {
+        const session =
+            incoming === undefined
+                ? undefined
+                : this.#sessions.get(incoming)?.get(host);
+        if (session === undefined)
+            throw createRemoteError({
+                code: controlErrorCodes.clientIdentityRequired,
+                message: "Control connection session is unavailable.",
+                retryable: false,
+            });
+        return session;
     }
 }

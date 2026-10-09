@@ -4,11 +4,13 @@ import type {
 } from "../../envelope/Codec.js";
 import type { Packet } from "../../packet/Packet.js";
 import type { Address, Host, PortName } from "../Address.js";
+import type { Channel } from "../channel/Channel.js";
 
 export type PacketListener = (
     packet: Packet,
     source: Address,
     destination: Address,
+    incoming?: Channel,
 ) => Promise<void> | void;
 
 export class Connection {
@@ -128,9 +130,10 @@ export class Port {
         packet: Packet,
         source: Address,
         destination: Address = this.local,
+        incoming?: Channel,
     ): Promise<void> {
         for (const listener of this.#listeners)
-            await listener(packet, source, destination);
+            await listener(packet, source, destination, incoming);
     }
 }
 
@@ -187,6 +190,7 @@ export class Route {
 
     attach(
         codec: EnvelopeCodec,
+        channel: Channel,
         lifecycle?: { attached(host: Host): void; detached(host: Host): void },
     ): () => void {
         const hosts = new Set<Host>();
@@ -205,7 +209,7 @@ export class Route {
             }
             this.#peers.set(envelope.source.host, codec);
             this.#refreshReachability();
-            void this.#dispatch(envelope, codec).catch((error) =>
+            void this.#dispatch(envelope, codec, channel).catch((error) =>
                 codec.close(normalizeError(error)),
             );
         });
@@ -217,11 +221,11 @@ export class Route {
         };
     }
 
-    gateway(codec: EnvelopeCodec): () => void {
+    gateway(codec: EnvelopeCodec, channel: Channel): () => void {
         this.#gateway = codec;
         this.#refreshReachability();
         const offEnvelope = codec.onEnvelope((envelope) =>
-            void this.#dispatch(envelope, codec).catch((error) =>
+            void this.#dispatch(envelope, codec, channel).catch((error) =>
                 codec.close(normalizeError(error)),
             ),
         );
@@ -245,7 +249,11 @@ export class Route {
         return this.#dispatch({ source, dest, packet });
     }
 
-    async #dispatch(envelope: Envelope, incoming?: EnvelopeCodec): Promise<void> {
+    async #dispatch(
+        envelope: Envelope,
+        incoming?: EnvelopeCodec,
+        channel?: Channel,
+    ): Promise<void> {
         if (envelope.dest.host === "*") {
             const deliveries: Array<Promise<void> | void> = [];
             for (const [host, ports] of this.#ports) {
@@ -254,10 +262,12 @@ export class Route {
                 const port = ports.get(envelope.dest.port);
                 if (port !== undefined)
                     deliveries.push(
-                        port.receive(envelope.packet, envelope.source, {
-                            host,
-                            port: envelope.dest.port,
-                        }),
+                        port.receive(
+                            envelope.packet,
+                            envelope.source,
+                            { host, port: envelope.dest.port },
+                            channel,
+                        ),
                     );
             }
             for (const [host, peer] of this.#peers) {
@@ -274,7 +284,12 @@ export class Route {
             .get(envelope.dest.host)
             ?.get(envelope.dest.port);
         if (exact !== undefined) {
-            await exact.receive(envelope.packet, envelope.source, envelope.dest);
+            await exact.receive(
+                envelope.packet,
+                envelope.source,
+                envelope.dest,
+                channel,
+            );
             return;
         }
         const peer = this.#peers.get(envelope.dest.host);
@@ -292,6 +307,7 @@ export class Route {
                 envelope.packet,
                 envelope.source,
                 envelope.dest,
+                channel,
             );
             return;
         }

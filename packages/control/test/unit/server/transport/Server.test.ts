@@ -13,6 +13,7 @@ import {
     createToolRouteModule,
     controlErrorCodes,
     type Channel,
+    type ControlPortContext,
     type JsonValue,
     type ControlHostDefinition,
     type MessageStream,
@@ -314,6 +315,103 @@ test("ControlTransportServer serves the same routes through multiple channel pro
         webConnection.request("@control", "server", "ping"),
         /closed/iu,
     );
+});
+
+test("ControlTransportServer keeps sessions independent when Channels reuse a Host", async (t) => {
+    const local = new MemoryControlTransportListener({
+        allowedPeers: ["tui"],
+        subject: { id: "local", kind: "local-owner" },
+    });
+    const web = new MemoryControlTransportListener({
+        allowedPeers: ["web"],
+        subject: { id: "web", kind: "web-session" },
+    });
+    const closed: string[] = [];
+    const server = new ControlTransportServer({
+        listeners: [local, web],
+        onConnectionDetached: (connectionId) => closed.push(connectionId),
+        routes: createRouteProvider(createSessionRouteHosts),
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const first = createClient(local, "tui", "shared-host");
+    const second = createClient(web, "web", "shared-host");
+    t.after(() => first.close());
+    t.after(() => second.close());
+
+    await negotiate(first, "tui");
+    await negotiate(second, "web");
+    const firstIdentity = await first.request<SessionIdentity>("@control", "session", "identify");
+    const secondIdentity = await second.request<SessionIdentity>("@control", "session", "identify");
+    assert.equal(firstIdentity.sourceHost, "shared-host");
+    assert.equal(secondIdentity.sourceHost, "shared-host");
+    assert.notEqual(firstIdentity.connectionId, secondIdentity.connectionId);
+    assert.equal(firstIdentity.peer, "tui");
+    assert.equal(secondIdentity.peer, "web");
+    assert.equal(firstIdentity.subject, "local");
+    assert.equal(secondIdentity.subject, "web");
+
+    const firstStream = await first.open("@control", "session", "identify");
+    assert.deepEqual(await firstStream.readMessage(), {
+        type: "close",
+        message: firstIdentity,
+    });
+    const secondStream = await second.open("@control", "session", "identify");
+    assert.deepEqual(await secondStream.readMessage(), {
+        type: "close",
+        message: secondIdentity,
+    });
+
+    first.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(closed, [firstIdentity.connectionId]);
+    assert.deepEqual(
+        await second.request("@control", "session", "identify"),
+        secondIdentity,
+    );
+    second.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(closed, [firstIdentity.connectionId, secondIdentity.connectionId]);
+});
+
+test("ControlTransportServer keeps separate Host sessions on the same Channel", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const closed: string[] = [];
+    const server = new ControlTransportServer({
+        listeners: [provider],
+        onConnectionDetached: (connectionId) => closed.push(connectionId),
+        routes: createRouteProvider(createSessionRouteHosts),
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const client = createClient(provider, "tui", "host-one");
+    t.after(() => client.close());
+    await negotiate(client, "tui");
+    const first = await client.request<SessionIdentity>("@control", "session", "identify");
+    const secondRpc = new Rpc(
+        client.endpoint.bind("server", "host-two").connect("@control", "server"),
+    );
+    t.after(() => secondRpc.close());
+    await secondRpc.request("hello", {
+        clientKind: "tui",
+        protocolRange: CONTROL_PROTOCOL_RANGE,
+    });
+    const secondPort = client.endpoint.bind("session", "host-two");
+    const secondConnection = new Rpc(secondPort.connect("@control", "session"));
+    t.after(() => secondConnection.close());
+    const second = await secondConnection.request<SessionIdentity>("identify");
+    assert.equal(first.sourceHost, "host-one");
+    assert.equal(second.sourceHost, "host-two");
+    assert.notEqual(first.connectionId, second.connectionId);
+    const secondStream = new Stream(secondPort.connect("@control", "session"));
+    t.after(() => secondStream.close());
+    assert.deepEqual(await (await secondStream.open("identify")).readMessage(), {
+        type: "close",
+        message: second,
+    });
+    client.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(new Set(closed), new Set([first.connectionId, second.connectionId]));
 });
 
 test("ControlTransportServer rejects a self-asserted peer outside transport admission", async (t) => {
@@ -810,8 +908,10 @@ interface TestClient {
 function createClient(
     provider: MemoryControlTransportListener,
     _peer: "tui" | "web",
+    host?: string,
 ): TestClient {
     const endpoint = new Endpoint({
+        ...(host === undefined ? {} : { host }),
         connectChannel: async () => provider.connect(),
     });
     const rpcs = new Map<string, Rpc>();
@@ -899,6 +999,34 @@ function createRouteHosts(): readonly ControlHostDefinition[] {
             ],
         },
     ];
+}
+
+interface SessionIdentity {
+    readonly connectionId: string;
+    readonly peer: string;
+    readonly sourceHost: string;
+    readonly subject: string | null;
+}
+
+function createSessionRouteHosts(): readonly ControlHostDefinition[] {
+    const identify = (context: ControlPortContext) => ({
+        connectionId: context.connectionId,
+        peer: context.peer,
+        sourceHost: context.sourceHost,
+        subject: context.subject?.id ?? null,
+    });
+    return [...createRouteHosts(), {
+        host: "@control",
+        ports: [{
+            name: "session",
+            operations: [{ name: "identify", handle: (_request, context) => identify(context) }],
+            streams: [{
+                name: "identify",
+                handle: async (stream, _request, context) =>
+                    await stream.close(identify(context)),
+            }],
+        }],
+    }];
 }
 
 async function negotiate(

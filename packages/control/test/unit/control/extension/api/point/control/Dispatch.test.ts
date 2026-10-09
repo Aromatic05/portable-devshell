@@ -10,6 +10,7 @@ import { ControlExtensionRouteService } from "../../../../../../../src/extension
 function context(): ControlPortContext {
     return {
         connectionId: "conn-1",
+        sourceHost: "conn-1",
         host: asInstanceName("demo"),
         peer: "web",
         protocolVersion: "1.0.0",

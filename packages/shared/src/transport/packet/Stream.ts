@@ -1,5 +1,6 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
 import { createTransportId, type Address } from "../endpoint/Address.js";
+import type { Channel } from "../endpoint/channel/Channel.js";
 import type { Message } from "./Packet.js";
 
 export interface StreamError {
@@ -33,6 +34,7 @@ export class Stream {
             message: Message | undefined,
             peer: Address,
             local: Address,
+            incoming?: Channel,
         ) => Promise<void> | void
     >();
     readonly #unsubscribe: () => void;
@@ -51,8 +53,8 @@ export class Stream {
                 offClose();
             };
         } else {
-            this.#unsubscribe = target.onPacket((packet, peer, local) =>
-                this.#accept(packet, peer, local),
+            this.#unsubscribe = target.onPacket((packet, peer, local, incoming) =>
+                this.#accept(packet, peer, local, incoming),
             );
         }
     }
@@ -85,6 +87,7 @@ export class Stream {
             message: Message | undefined,
             peer: Address,
             local: Address,
+            incoming?: Channel,
         ) => Promise<void> | void,
     ): () => void {
         this.#openListeners.add(listener);
@@ -107,7 +110,12 @@ export class Stream {
         this.#streams.clear();
     }
 
-    async #accept(value: unknown, peer: Address, local: Address): Promise<void> {
+    async #accept(
+        value: unknown,
+        peer: Address,
+        local: Address,
+        incoming?: Channel,
+    ): Promise<void> {
         const packet = parse(value);
         if (packet === undefined) return;
         const key = streamKey(local, peer, packet.id);
@@ -118,7 +126,7 @@ export class Stream {
                     : this.#target.connect(peer.host, peer.port, local);
             const stream = this.#create(packet.id, peer, local, connection);
             for (const listener of this.#openListeners)
-                await listener(stream, packet.name, packet.message, peer, local);
+                await listener(stream, packet.name, packet.message, peer, local, incoming);
             return;
         }
         const stream = this.#streams.get(key);

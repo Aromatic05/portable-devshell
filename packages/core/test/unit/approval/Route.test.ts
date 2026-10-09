@@ -20,6 +20,7 @@ function eventSource(lastSeq = 7): InstanceEventSource {
 function context(): ControlPortContext {
     return {
         connectionId: "conn-1",
+        sourceHost: "conn-1",
         host: "demo",
         peer: "tui",
         requestId: "req-1",

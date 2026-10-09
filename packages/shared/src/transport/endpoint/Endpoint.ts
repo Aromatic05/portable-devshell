@@ -70,7 +70,7 @@ export class Endpoint {
         const codec = new EnvelopeCodec(
             new FrameStreamChannel(await request.accept()),
         );
-        return this.#link(frame, codec, this.#route.attach(codec, lifecycle));
+        return this.#link(frame, codec, this.#route.attach(codec, channel, lifecycle));
     }
 
     onTransportClose(listener: (error?: Error) => void): () => void {
@@ -106,13 +106,14 @@ export class Endpoint {
         const connectChannel = this.#connectChannel;
         if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         const connecting = (async () => {
-            const frame = new FrameProtocol(await connectChannel(signal), {
+            const channel = await connectChannel(signal);
+            const frame = new FrameProtocol(channel, {
                 role: "opener",
             });
             const codec = new EnvelopeCodec(
                 new FrameStreamChannel(await frame.open(ENVELOPE_SERVICE)),
             );
-            const detach = this.#route.gateway(codec);
+            const detach = this.#route.gateway(codec, channel);
             const link: Link = { codec, detach, frame };
             this.#links.add(link);
             this.#gateway = link;

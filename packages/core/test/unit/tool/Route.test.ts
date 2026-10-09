@@ -15,6 +15,7 @@ function routeContext(connectionId: string): ControlPortContext {
     return {
         afterReply() {},
         connectionId,
+        sourceHost: connectionId,
         host: "demo",
         peer: "tui",
         requestId: "req-1",
@@ -153,7 +154,10 @@ test("control tool stream forwards progress before completing the unchanged fina
     );
     if (operation === undefined)
         throw new Error("tool.callStream stream is missing");
-    const streamContext = routeContext("pi-stream");
+    const streamContext = {
+        ...routeContext("pi-stream"),
+        sourceHost: "logical-context",
+    };
     const stream = {
         async close(payload?: JsonValue) {
             completed = payload;
@@ -194,6 +198,7 @@ test("control tool stream forwards progress before completing the unchanged fina
     });
     assert.equal(workerContext?.operationId, "pi-call-1");
     assert.equal(workerContext?.requestId, "req-1");
+    assert.equal(workerContext?.ctxId, "logical-context");
     assert.equal(workerRecording, "caller");
 });
 

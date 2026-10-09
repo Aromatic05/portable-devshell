@@ -293,6 +293,7 @@ function createStreamContext(
         context: {
             afterReply() {},
             connectionId,
+            sourceHost: connectionId,
             host: "alpha",
             peer: "cli",
             requestId,

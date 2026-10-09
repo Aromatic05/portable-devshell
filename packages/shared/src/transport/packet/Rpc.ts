@@ -1,5 +1,6 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
 import { createTransportId, type Address } from "../endpoint/Address.js";
+import type { Channel } from "../endpoint/channel/Channel.js";
 import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../Error.js";
 import type { Message } from "./Packet.js";
 
@@ -11,6 +12,7 @@ export interface RpcError {
 }
 
 export interface RpcContext {
+    readonly incoming?: Channel;
     readonly local: Address;
     readonly peer: Address;
     readonly requestId: string;
@@ -63,8 +65,8 @@ export class Rpc {
                 offClose();
             };
         } else {
-            this.#unsubscribe = target.onPacket((packet, peer, local) =>
-                this.#accept(packet, peer, local),
+            this.#unsubscribe = target.onPacket((packet, peer, local, incoming) =>
+                this.#accept(packet, peer, local, incoming),
             );
         }
         for (const [method, handler] of Object.entries(handlers))
@@ -151,11 +153,16 @@ export class Rpc {
         this.#pending.clear();
     }
 
-    async #accept(value: unknown, peer: Address, local: Address): Promise<void> {
+    async #accept(
+        value: unknown,
+        peer: Address,
+        local: Address,
+        incoming?: Channel,
+    ): Promise<void> {
         const packet = parse(value);
         if (packet === undefined) return;
         if (packet.type === "request") {
-            await this.#request(packet, peer, local);
+            await this.#request(packet, peer, local, incoming);
             return;
         }
         if (packet.type === "cancel") {
@@ -178,6 +185,7 @@ export class Rpc {
         packet: Extract<RpcPacket, { type: "request" }>,
         peer: Address,
         local: Address,
+        incoming?: Channel,
     ): Promise<void> {
         const connection =
             this.#target instanceof Connection
@@ -207,6 +215,7 @@ export class Rpc {
             try {
                 message = await handler(packet.message, {
                     afterReply: (action) => afterReply.push(action),
+                    ...(incoming === undefined ? {} : { incoming }),
                     local,
                     peer,
                     requestId: packet.id,

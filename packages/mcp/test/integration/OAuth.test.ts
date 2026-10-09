@@ -61,6 +61,7 @@ const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
 const commentRouteContext: ControlPortContext = {
     afterReply() {},
     connectionId: "mcp-comment-test",
+    sourceHost: "mcp-comment-test",
     host: asInstanceName("real-comment"),
     peer: "cli",
     requestId: "mcp-comment-test",
