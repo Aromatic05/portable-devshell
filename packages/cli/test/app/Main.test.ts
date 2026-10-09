@@ -205,6 +205,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                 async listInstances() {
                     return [
                         {
+                            enabled: true,
                             mcpEnabled: true,
                             name: "running-local",
                             snapshot: {
@@ -217,6 +218,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                             },
                         },
                         {
+                            enabled: true,
                             mcpEnabled: true,
                             name: "stopped-local",
                             snapshot: {
@@ -229,6 +231,13 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                             },
                         },
                     ];
+                },
+                async getSnapshot(instance: string) {
+                    return { snapshot: {
+                        name: instance,
+                        daemonState: instance === "running-local" ? "running" : "stopped",
+                        ready: instance === "running-local",
+                    } };
                 },
                 async startInstance(instance: string) {
                     clientCalls.push(`start:${instance}`);
