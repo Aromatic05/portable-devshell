@@ -9,10 +9,10 @@ import type {
     CliModelCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 
-import type { ContextApi } from "../Api.js";
-import type { CliExtensionCommandService } from "../../extension/api/point/cli/command/index.js";
-import type { InstanceRegistry } from "../../instance/Registry.js";
-import type { InstanceChangeHub } from "../../instance/Change.js";
+import type { ContextApi } from "../../../../../context/Api.js";
+import type { CliExtensionCommandService } from "./index.js";
+import type { InstanceRegistry } from "../../../../../instance/Registry.js";
+import type { InstanceChangeHub } from "../../../../../instance/Change.js";
 
 /** Connect Worker-owned command sessions to authorized model CLI extensions. */
 export class ModelCommandBroker {
