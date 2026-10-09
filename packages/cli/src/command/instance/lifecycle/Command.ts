@@ -14,7 +14,17 @@ export async function executeInstanceLifecycle(
     switch (command.kind) {
         case "instance.list": {
             const instances = await context.clients.instance.listInstances();
-            context.writeRecords(instances, renderInstanceList(instances));
+            // The Control list is configuration only: its snapshots are
+            // inactive placeholders. Get live state from each Instance.
+            const live = await Promise.all(instances.map(async (instance) =>
+                instance.enabled
+                    ? {
+                        ...instance,
+                        snapshot: (await context.clients.runtime(instance.name).snapshot()).snapshot,
+                    }
+                    : instance,
+            ));
+            context.writeRecords(live, renderInstanceList(live));
             return true;
         }
         case "instance.delete":
