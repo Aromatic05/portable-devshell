@@ -124,7 +124,7 @@ test("config editor returns each patch apply summary to the initiating request",
     assert.equal(writes.length, 1);
     assert.equal(config.instances[0]?.security.mode, "workspace");
     assert.equal(
-        registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode,
+        registry.get("demo-local")?.supervision.snapshot().effectiveSecurityMode,
         "workspace",
     );
 
@@ -243,7 +243,7 @@ test("config batch update persists instance, MCP, and Web changes as one transac
     assert.equal(config.web.listenPort, 17892);
     assert.deepEqual(config.web.auth, { mode: "token", token: "a".repeat(48) });
     assert.equal(
-        registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode,
+        registry.get("demo-local")?.supervision.snapshot().effectiveSecurityMode,
         "workspace",
     );
     assert.deepEqual(result.appliedChanges, [
@@ -309,7 +309,7 @@ test("config batch preflight failure leaves every requested scope unchanged", as
         assert.equal(config.instances[0]?.approvalPolicy, undefined);
         assert.equal(config.web.enabled, false);
         assert.equal(
-            registry.get("demo-local")?.worker.snapshot().effectiveSecurityMode,
+            registry.get("demo-local")?.supervision.snapshot().effectiveSecurityMode,
             "disabled",
         );
     } finally {
@@ -617,7 +617,7 @@ test("config editor reconfigures and disables a running instance without replaci
     });
     const enabledChanges: boolean[] = [];
     service.changes.onChange(() => {
-        enabledChanges.push(registry.get("demo-local")?.enabled === true);
+        enabledChanges.push(registry.get("demo-local")?.config.enabled === true);
     });
     await service.disableInstance({ instanceName: "demo-local" });
 
@@ -647,7 +647,7 @@ test("config editor reconfigures and disables a running instance without replaci
     assert.deepEqual(enabledChanges, [false]);
 
     await service.enableInstance({ instanceName: "demo-local" });
-    assert.equal(registry.get("demo-local")?.enabled, true);
+    assert.equal(registry.get("demo-local")?.config.enabled, true);
     assert.deepEqual(enabledChanges, [false, true]);
 });
 
@@ -1086,7 +1086,7 @@ test("disable persistence failure performs no Worker or interaction cleanup", as
     assert.equal(stopCalls, 0);
     assert.equal(startCalls, 0);
     assert.equal(config.instances[0]?.enabled, true);
-    assert.equal(registry.get("demo-local")?.enabled, true);
+    assert.equal(registry.get("demo-local")?.config.enabled, true);
 });
 
 test("Control disable does not stop self-managed reverse workers but retires local pending interactions", async () => {
@@ -1752,6 +1752,7 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
     assert.deepEqual(events, [
         "worker.start",
         "alerts.release:/historical",
+        "worker.stop",
         "worker.retire",
         "provider.retire",
         "worker.close",
@@ -2608,7 +2609,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
     assert.deepEqual(retiredMcpApps, []);
     assert.equal(registered[0]?.instance, "demo-local");
     assert.deepEqual(registered[0]?.auth, { mode: "none" });
-    assert.deepEqual(registry.get("demo-local")?.modelExtensions, [
+    assert.deepEqual(registry.get("demo-local")?.config.modelExtensions, [
         "instance",
         "artifact",
     ]);
@@ -2618,7 +2619,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         patch: { mcp: { contextMode: "openai-session" } },
     });
     assert.equal(registered[1]?.workspaceEnabled, true);
-    assert.equal(registry.get("demo-local")?.mcpContextMode, "openai-session");
+    assert.equal(registry.get("demo-local")?.config.mcpContextMode, "openai-session");
 
     await service.updateInstanceConfig({
         instanceName: "demo-local",
