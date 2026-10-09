@@ -5,7 +5,6 @@ import { dirname } from "node:path";
 import {
     createRemoteError, normalizeConfigInstanceDraft, parseConfigInstanceDraft, toConfigInstanceDraft, type ControlConfig, runtimeErrorCodes, } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
-import { retireInstanceForDelete } from "./Runtime.js";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";
@@ -438,7 +437,7 @@ export class InstanceCleanupDebt {
                 ?.retireMcpApp(record.instance.name)
                 .catch((error) => failures.push(error));
             try {
-                await descriptor.supervision.lifecycle.stop();
+                await descriptor.stopWorkerForDisable();
                 workerRetirementSucceeded = true;
             } catch (error) {
                 failures.push(error);
@@ -450,10 +449,7 @@ export class InstanceCleanupDebt {
                 )),
             );
             try {
-                await retireInstanceForDelete(
-                    descriptor,
-                    record.skipRuntimeRetirement,
-                );
+                await descriptor.retireWorkerResources(record.skipRuntimeRetirement);
                 workerRetirementSucceeded = true;
             } catch (error) {
                 failures.push(error);

@@ -563,15 +563,12 @@ export class InstanceReconfigurationCoordinator {
             !next.enabled &&
             descriptor !== undefined
         ) {
-            let stopped =
-                descriptor.supervision.managementMode === "selfManaged";
-            if (!stopped) {
-                try {
-                    await descriptor.supervision.lifecycle.stop();
-                    stopped = true;
-                } catch (error) {
-                    failures.push(error);
-                }
+            let stopped = false;
+            try {
+                await descriptor.stopWorkerForDisable();
+                stopped = true;
+            } catch (error) {
+                failures.push(error);
             }
             if (stopped) {
                 await closeDescriptorResourcesBestEffort(

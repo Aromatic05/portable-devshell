@@ -2,7 +2,7 @@ import type { InstanceRegistry } from "../../Registry.js";
 import { createRemoteError, controlErrorCodes, parseConfigInstanceTargetRequest, type ControlConfig, type JsonValue, } from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 import { InstanceRetirementHooks } from "./Hooks.js";
-import { assertInstanceDeletable, retireInstanceForDelete } from "./Runtime.js";
+import { assertInstanceDeletable } from "./Runtime.js";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
 import { InstanceChangeHub } from "../../Change.js";
@@ -213,10 +213,7 @@ export class InstanceRetirementCoordinator {
         let workerRetirementSucceeded = cleanupDescriptor === undefined;
         if (cleanupDescriptor !== undefined) {
             try {
-                await retireInstanceForDelete(
-                    cleanupDescriptor,
-                    skipRuntimeRetirement,
-                );
+                await cleanupDescriptor.retireWorkerResources(skipRuntimeRetirement);
                 workerRetirementSucceeded = true;
             } catch (error) {
                 failures.push(error);
@@ -247,43 +244,14 @@ export class InstanceRetirementCoordinator {
         instance: string,
         descriptor: InstanceDescriptor,
     ): Promise<void> {
-        if (this.#reconcileContextInstanceCleanup === undefined) return;
-
-        let startedForCleanup = false;
-        if (
-            descriptor !== undefined &&
-            !descriptor.supervision.snapshot().ready
-        ) {
-            try {
-                await descriptor.supervision.lifecycle.start();
-                startedForCleanup = true;
-            } catch (error) {
-                await descriptor.supervision.lifecycle
-                    .stop()
-                    .catch(() => undefined);
-                throw error;
-            }
+        const reconcile = this.#reconcileContextInstanceCleanup;
+        if (reconcile === undefined) return;
+        if (descriptor === undefined) {
+            await reconcile(instance);
+            return;
         }
-        try {
-            await this.#reconcileContextInstanceCleanup(
-                instance,
-                descriptor === undefined
-                    ? undefined
-                    : {
-                          releaseAlerts: async (workspace) =>
-                              await descriptor.environment.releaseAlerts(
-                                  workspace,
-                              ),
-                          releaseReference: async (reference) =>
-                              await descriptor.supervision.ownership.releaseReference(
-                                  reference,
-                              ),
-                      },
-            );
-        } finally {
-            if (startedForCleanup && descriptor !== undefined) {
-                await descriptor.supervision.lifecycle.stop();
-            }
-        }
+        await descriptor.withWorkerForCleanup(async (worker) => {
+            await reconcile(instance, worker);
+        });
     }
 }

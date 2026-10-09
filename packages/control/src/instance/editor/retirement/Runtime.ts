@@ -28,25 +28,3 @@ export function assertInstanceDeletable(
         retryable: false,
     });
 }
-
-export async function retireInstanceForDelete(
-    descriptor: Instance | undefined,
-    skipRuntimeRetirement = false,
-): Promise<void> {
-    if (descriptor === undefined) return;
-    const failures: unknown[] = [];
-    if (!skipRuntimeRetirement) {
-        await descriptor.provision
-            .retireRuntime()
-            .catch((error: unknown) => failures.push(error));
-    }
-    await descriptor.provision
-        .retireProviderResources()
-        .catch((error: unknown) => failures.push(error));
-    if (failures.length > 0) {
-        throw new AggregateError(
-            failures,
-            `Instance ${descriptor.config.name} delete cleanup was incomplete.`,
-        );
-    }
-}
