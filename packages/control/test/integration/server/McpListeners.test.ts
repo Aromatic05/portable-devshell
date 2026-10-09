@@ -187,7 +187,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     });
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -234,7 +234,7 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
     });
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -296,7 +296,7 @@ test("MCP migration starts a different listener before retiring the previous lis
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -353,7 +353,7 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -419,7 +419,7 @@ test("MCP restore attempts every host transition and reports rollback failures",
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -472,7 +472,7 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     const owners = await createOwners(config, homeDirectory);
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
@@ -524,7 +524,7 @@ test("shared listener Web auth changes require an explicit control restart witho
     });
     const runtime = new McpControlModule({
         config: owners.config.require(),
-        contextTransport: createContextTransport(new Endpoint({ host: "listener-test" })),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
         artifact: {
@@ -581,7 +581,7 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
     const owners = await createOwners(config, homeDirectory);
     const endpoint = new Endpoint({ host: "listener-test" });
     const mcp = new McpControlModule({
-        config, contextTransport: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
+        config, context: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });

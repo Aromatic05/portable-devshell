@@ -49,7 +49,7 @@ export interface McpHostConfig {
 
 export class McpRuntimeState {
     readonly tools: ToolCallApi;
-    readonly context: ContextTransport;
+    readonly context: Pick<ContextTransport, "resolve" | "validateForInstance">;
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
     readonly mcpAppLeases: McpAppLeaseStore;
@@ -59,7 +59,7 @@ export class McpRuntimeState {
     #initializePromise?: Promise<void>;
 
     constructor(config: {
-        context: ContextTransport;
+        context: Pick<ContextTransport, "resolve" | "validateForInstance">;
         endpoint?: Endpoint;
         tools: ToolCallApi;
         storageDir?: string;
@@ -134,7 +134,7 @@ export class McpRuntimeState {
 
 export class McpHost {
     readonly #config: McpHostConfig;
-    readonly #contexts: ContextTransport;
+    readonly #contexts: Pick<ContextTransport, "resolve" | "validateForInstance">;
     readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #registry = new McpHostRouteRegistry();

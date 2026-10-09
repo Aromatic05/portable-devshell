@@ -25,7 +25,7 @@ import type { ToolCallRegistry } from "../../toolcall/Api.js";
 export interface McpControlModuleOptions {
     artifact: ArtifactRuntime;
     config: ControlConfig;
-    contextTransport: ContextTransport;
+    context: Pick<ContextTransport, "resolve" | "validateForInstance">;
     endpoint?: Endpoint;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
@@ -54,7 +54,7 @@ export class McpControlModule {
         this.#controlPaths = options.controlPaths;
         this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpRuntimeState({
-            context: options.contextTransport,
+            context: options.context,
             ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
             tools: { call: (instance, ...args) => {
                 const target = options.instances.get(instance);

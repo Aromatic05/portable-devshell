@@ -6,7 +6,6 @@ import {
     Endpoint,
     connectControlChannel,
     controlErrorCodes,
-    createContextTransport,
     createEnvironmentTransport,
     createInstanceRuntimeTransport,
     createProcessTransport,
@@ -93,7 +92,6 @@ export class ControlFactory {
                         signal,
                     ),
             });
-            const contextTransport = createContextTransport(internalEndpoint);
             const serverTransport = createServerTransport(internalEndpoint, {
                 clientKind: "cli",
             });
@@ -115,7 +113,11 @@ export class ControlFactory {
             const mcp = new McpControlModule({
                 artifact,
                 config: options.config.require(),
-                contextTransport,
+                context: {
+                    resolve: (input) => contexts.api.resolve(input),
+                    validateForInstance: (ctxId, instance) =>
+                        contexts.api.registry.validateForInstance(ctxId, instance),
+                },
                 controlPaths,
                 endpoint: internalEndpoint,
                 factory: this.#mcpFactory,
@@ -153,7 +155,7 @@ export class ControlFactory {
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
                 detachContextInstance: async (instance) => {
-                    await contextTransport.detachInstance(instance);
+                    await contexts.api.detachInstance(instance);
                 },
                 reconcileContextInstanceCleanup: async (instance, target) =>
                     await contexts.api.cleanup.reconcileInstance(instance, target),
@@ -244,7 +246,7 @@ export class ControlFactory {
                         allowed,
                         extensionId,
                         listContexts: async (query) =>
-                            await contextTransport.list(query),
+                            await contexts.api.registry.list(query),
                     }),
                 instanceFactory: ({
                     extensionId,
