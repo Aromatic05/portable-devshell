@@ -12,6 +12,7 @@ const USER_TESTSPACE_COMMANDS = new Set([
     "update-smoke",
     "web",
     "web-smoke",
+    "workflow-smoke",
 ]);
 
 export function resolveTestspaceCommand(value) {
