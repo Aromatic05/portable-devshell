@@ -9,6 +9,8 @@ export class McpAppRoute {
     readonly #host: HttpHost;
     readonly #runtime: McpAppRuntime;
     readonly #contexts: Pick<ContextTransport, 'validateForInstance'>;
+    readonly #unregisterAssets: () => void;
+    #closed = false;
     readonly #live = new Map<string, ReturnType<typeof installMcpAppLive>>();
 
     constructor(host: HttpHost, runtime: McpAppRuntime,
@@ -16,10 +18,11 @@ export class McpAppRoute {
         this.#host = host;
         this.#runtime = runtime;
         this.#contexts = contexts;
-        this.#host.registerStaticDirectory('/mcpapp/assets', mcpAppAssetDirectory);
+        this.#unregisterAssets = this.#host.registerStaticDirectory('/mcpapp/assets', mcpAppAssetDirectory);
     }
 
     register(instance: string): void {
+        if (this.#closed) throw new Error('MCP App Route is closed.');
         if (this.#live.has(instance)) return;
         if (this.#runtime.view === undefined) return;
         this.#live.set(instance, installMcpAppLive({
@@ -39,6 +42,13 @@ export class McpAppRoute {
 
     stop(): void {
         for (const instance of this.#live.keys()) this.unregister(instance);
+    }
+
+    close(): void {
+        if (this.#closed) return;
+        this.#closed = true;
+        this.stop();
+        this.#unregisterAssets();
     }
 
     revokeContext(ctxId: string): void {

@@ -1,6 +1,7 @@
 import type { ContextTransport, Endpoint, ToolCallApi } from '@portable-devshell/shared';
 import type { McpOAuth2Config, McpOAuthApprovalConfig } from './oauth/Config.js';
 import { McpOAuthRuntime } from './oauth/index.js';
+import { McpProtocolRuntime } from './protocol/index.js';
 import type { McpOAuthProtectedResource } from './oauth/Route.js';
 import { McpAppRuntime } from './mcpapp/index.js';
 
@@ -9,6 +10,7 @@ export class McpRuntimeState {
     readonly context: Pick<ContextTransport, 'resolve' | 'validateForInstance'>;
     readonly tools: ToolCallApi;
     readonly oauth: McpOAuthRuntime;
+    readonly protocol?: McpProtocolRuntime;
     readonly app: McpAppRuntime;
 
     constructor(config: {
@@ -17,10 +19,12 @@ export class McpRuntimeState {
         tools: ToolCallApi;
         storageDir?: string;
         mcpAppLeaseFile?: string;
+        toolProvenanceFile?: string;
     }) {
         this.context = config.context;
         this.tools = config.tools;
         this.oauth = new McpOAuthRuntime(config.storageDir);
+        this.protocol = config.toolProvenanceFile === undefined ? undefined : new McpProtocolRuntime(config.toolProvenanceFile);
         this.app = new McpAppRuntime({
             ...(config.endpoint === undefined ? {} : { endpoint: config.endpoint }),
             ...(config.mcpAppLeaseFile === undefined ? {} : { filePath: config.mcpAppLeaseFile }),
@@ -28,7 +32,11 @@ export class McpRuntimeState {
     }
 
     initialize(): Promise<void> { return this.app.initialize(); }
-    close(): void { this.app.close(); this.oauth.close(); }
+    async close(): Promise<void> {
+        this.app.close();
+        this.oauth.close();
+        await this.protocol?.close();
+    }
     get oauthApprovals() { return this.oauth.approvals; }
     get mcpAppLeases() { return this.app.leases; }
     get workspaceActions() { return this.app.actions; }

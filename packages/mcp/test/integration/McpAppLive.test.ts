@@ -308,3 +308,41 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
         await host.stop();
     }
 });
+
+test('MCP App Domain owns HTTP asset and Live Route lifetime across listener reattachment', async () => {
+    const { McpAppRuntime } = await import('../../src/mcpapp/index.ts');
+    const { mcpAppAssetDirectory } = await import('../../src/mcpapp/app/Resource.ts');
+    const { readdir } = await import('node:fs/promises');
+    const files = await readdir(mcpAppAssetDirectory);
+    const asset = files.find((name) => name.endsWith('.js'));
+    assert.ok(asset);
+    const host = new HttpHost({ listenHost: '127.0.0.1', listenPort: 0 });
+    const runtime = new McpAppRuntime({ endpoint: new Endpoint({ host: 'app-lifecycle-test' }) });
+    const contexts = { async validateForInstance(ctxId: string, instance: string) {
+        return { ctxId, instance, status: 'active', principal: 'local',
+            environments: [{ instance, workspace: '/workspace' }] } as ContextRecord;
+    } };
+    const first = runtime.attachHost(host, contexts);
+    assert.equal(runtime.attachHost(host, contexts), first);
+    first.register('demo');
+    assert.equal(first.has('demo'), true);
+    await host.start();
+    try {
+        const address = host.address;
+        assert.ok(typeof address === 'object' && address !== null);
+        const url = `http://127.0.0.1:${address.port}/mcpapp/assets/${asset}`;
+        assert.equal((await fetch(url)).status, 200);
+        runtime.detachHost(host);
+        assert.equal((await fetch(url)).status, 404);
+        const second = runtime.attachHost(host, contexts);
+        assert.notEqual(second, first);
+        second.register('demo');
+        assert.equal(second.has('demo'), true);
+        assert.equal((await fetch(url)).status, 200);
+        runtime.close();
+        assert.equal((await fetch(url)).status, 404);
+    } finally {
+        runtime.close();
+        await host.stop();
+    }
+});

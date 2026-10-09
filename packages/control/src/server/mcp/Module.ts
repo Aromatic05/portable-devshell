@@ -17,7 +17,6 @@ import type {
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
 import type { ContextChangeSource } from "../../context/Api.js";
 import {
-    createToolCallProvenanceRuntime,
     type ToolCallProvenanceApi,
 } from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../../instance/Api.js";
@@ -76,13 +75,14 @@ export class McpControlModule {
             } },
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
+            toolProvenanceFile: options.controlPaths.toolProvenanceFile,
         });
         this.#contextRecords = options.contextRecords;
         this.#contextChanges = options.contextChanges;
         this.#subscribeContexts();
-        this.toolProvenance = createToolCallProvenanceRuntime(
-            options.controlPaths.toolProvenanceFile,
-        );
+        if (this.#runtimeState.protocol === undefined)
+            throw new Error('MCP protocol provenance runtime is unavailable.');
+        this.toolProvenance = this.#runtimeState.protocol.provenance;
         const config = options.config;
         this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
@@ -249,8 +249,10 @@ export class McpControlModule {
     // Physical HTTP listening is controlled by ControlServer through this module.
     async #startHost(host: Pick<McpHost, "start" | "stop">): Promise<void> {
         if (!(host instanceof McpHost)) { await host.start(); return; }
-        await host.prepare();
-        try { await host.server.start(); }
+        try {
+            await host.prepare();
+            await host.server.start();
+        }
         catch (error) { host.retire(); throw error; }
     }
 
@@ -267,11 +269,7 @@ export class McpControlModule {
         const failures: unknown[] = this.#contextCleanupFailures.splice(0);
         if (this.#host !== undefined)
             await this.stopHost(this.#host).catch((error) => failures.push(error));
-        await this.toolProvenance
-            .flush()
-            .catch((error) => failures.push(error));
-        try { this.#runtimeState.close(); }
-        catch (error) { failures.push(error); }
+        await this.#runtimeState.close().catch((error) => failures.push(error));
         if (failures.length > 0) {
             throw new AggregateError(failures, "MCP module shutdown failed.");
         }

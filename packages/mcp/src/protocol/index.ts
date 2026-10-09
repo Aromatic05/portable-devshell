@@ -1,4 +1,4 @@
-import type { ContextTransport, ControlMcpContextMode } from "@portable-devshell/shared";
+import { createToolCallProvenanceRuntime, type ToolCallProvenanceApi, type ContextTransport, type ControlMcpContextMode } from "@portable-devshell/shared";
 import type { McpAuthConfig, McpOAuthApprovalConfig } from "../oauth/Config.js";
 import { McpOAuthProtectedResource } from "../oauth/Route.js";
 import type { McpOAuthApprovalService } from "../oauth/interaction/Approval.js";
@@ -8,11 +8,18 @@ import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
 import { McpExtensionRegistry } from "../protocol/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
 import type { McpToolSource } from "../protocol/tool/Source.js";
-import { McpRuntimeState } from "../Runtime.js";
+import type { McpRuntimeState } from "../Runtime.js";
 import { HttpHost } from "../host/Http.js";
 import { McpProtocolRoute } from "./Route.js";
 import { McpAppRoute } from "../mcpapp/Route.js";
 import { McpAppCall } from "../mcpapp/Call.js";
+
+/** Protocol-scoped provenance survives HTTP listener replacement. */
+export class McpProtocolRuntime {
+    readonly provenance: ToolCallProvenanceApi;
+    constructor(filePath: string) { this.provenance = createToolCallProvenanceRuntime(filePath); }
+    async close(): Promise<void> { await this.provenance.flush(); }
+}
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
@@ -40,7 +47,7 @@ export class McpHost {
     readonly #httpServer: HttpHost;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #protocol: McpProtocolRoute;
-    readonly #appRoute: McpAppRoute;
+    #appRoute?: McpAppRoute;
     readonly #runtimeState: McpRuntimeState;
     #started = false;
 
@@ -68,7 +75,6 @@ export class McpHost {
             publicBaseUrl: config.publicBaseUrl,
         });
         this.#protocol = new McpProtocolRoute(this.#httpServer);
-        this.#appRoute = new McpAppRoute(this.#httpServer, state.app, this.#contexts);
 
         for (const instance of config.instances) {
             this.registerInstance(instance);
@@ -82,15 +88,23 @@ export class McpHost {
             throw new Error('mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth');
         await this.#runtimeState.initialize();
         await this.#oauth?.warmup();
-        this.#protocol.start();
-        for (const entry of this.#protocol.list()) this.#appRoute.register(entry.binding.instanceName);
-        this.#started = true;
+        try {
+            this.#protocol.start();
+            const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts);
+            for (const entry of this.#protocol.list()) route.register(entry.binding.instanceName);
+            this.#appRoute = route;
+            this.#started = true;
+        } catch (error) {
+            this.retire();
+            throw error;
+        }
     }
 
     /** Unmounts routes; the transport owner closes the underlying listener. */
     retire(): void {
         this.#protocol.stop();
-        this.#appRoute.stop();
+        this.#runtimeState.app.detachHost(this.#httpServer);
+        this.#appRoute = undefined;
         this.#started = false;
     }
 
@@ -107,7 +121,6 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
-        this.#appRoute.register(instance.name);
         const binding = new McpEndpointBinding(
             new McpEndpoint({
                 auth: instance.auth,
@@ -145,20 +158,21 @@ export class McpHost {
             binding,
             path,
         });
+        this.#appRoute?.register(instance.name);
     }
 
     unregisterInstance(instanceName: string): void {
-        this.#appRoute.unregister(instanceName);
+        this.#appRoute?.unregister(instanceName);
         this.#runtimeState.app.presence.revokeInstance(instanceName);
         this.#protocol.unregister(instanceName);
     }
 
     revokeMcpAppContext(ctxId: string): void {
-        this.#appRoute.revokeContext(ctxId);
+        this.#appRoute?.revokeContext(ctxId);
     }
 
     async retireMcpApp(instanceName: string): Promise<void> {
-        this.#appRoute.unregister(instanceName);
+        this.#appRoute?.unregister(instanceName);
         await this.#runtimeState.app.revokeInstance(instanceName);
     }
 
