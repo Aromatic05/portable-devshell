@@ -1,7 +1,7 @@
 import type { ContextTransport, JsonValue } from "@portable-devshell/shared";
 import type { McpEndpointCallContext } from "../protocol/call/Port.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../protocol/call/Boundary.js";
-import type { McpEndpointDispatch } from "../protocol/dispatch/Dispatch.js";
+import type { McpEndpointDispatch } from "../protocol/Api.js";
 import { readMcpContextInput } from "../protocol/context/Selector.js";
 import type { McpAppActionStore } from "./ActionStore.js";
 import type { createMcpAppViewModel } from "./ViewModel.js";
@@ -11,7 +11,7 @@ export async function deliverMcpAppReentry(
     ports: {
         actions: McpAppActionStore;
         context: Pick<ContextTransport, "resolve">;
-        dispatch: McpEndpointDispatch;
+        dispatch: Pick<McpEndpointDispatch, 'callTool'>;
         instance: string;
         view: ReturnType<typeof createMcpAppViewModel>;
     },

@@ -13,6 +13,7 @@ import { McpRuntimeState } from "../Runtime.js";
 import { HttpHost } from "../host/Http.js";
 import { McpProtocolRoute } from "./Route.js";
 import { McpAppRoute } from "../mcpapp/Route.js";
+import { McpAppCall } from "../mcpapp/Call.js";
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
@@ -110,9 +111,13 @@ export class McpHost {
                     createMcpAppMcpExtension(this.#config.publicBaseUrl),
                 ]),
                 instanceName: instance.name,
-                mcpAppActions: this.#runtimeState.app.actions,
-                mcpAppView: this.#runtimeState.mcpAppView,
-                mcpAppBootstrap: async (result, request) => {
+                toolAdapter: (dispatch) => new McpAppCall({
+                    actions: this.#runtimeState.app.actions,
+                    context: this.#contexts,
+                    dispatch,
+                    instance: instance.name,
+                    ...(this.#runtimeState.app.view === undefined ? {} : { view: this.#runtimeState.app.view }),
+                    bootstrap: async (result, request) => {
                     const structured = typeof result === "object" && result !== null && !Array.isArray(result)
                         ? result : {};
                     const ctxId = typeof structured.ctxId === "string" ? structured.ctxId : undefined;
@@ -137,7 +142,8 @@ export class McpHost {
                         token,
                         ...(liveBaseUrl === undefined ? {} : { liveBaseUrl }),
                     };
-                },
+                    },
+                }),
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,
                 tools: this.#runtimeState.tools,

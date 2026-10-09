@@ -3,7 +3,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { mcpAppActionDefinition } from "../../../../core/src/instance/mcpapp/Definition.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { McpEndpoint } from "../../../src/protocol/Endpoint.ts";
+import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
 import { McpAppActionStore } from "../../../src/mcpapp/ActionStore.ts";
 import { createTestContextRuntime } from "../../ContextRuntime.ts";
 import { TestToolSource } from "../../support/ToolSource.ts";

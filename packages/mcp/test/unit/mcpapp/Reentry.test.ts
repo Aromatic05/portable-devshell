@@ -7,7 +7,7 @@ import { GoalService } from "../../../../core/src/task/goal/index.ts";
 import { TodoService } from "../../../../core/src/task/todo/index.ts";
 import { mcpAppReentryDefinition } from "../../../../core/src/instance/mcpapp/Definition.ts";
 import { installMcpAppReentry } from "../../../../core/src/instance/mcpapp/Reentry.ts";
-import { McpEndpoint } from "../../../src/protocol/Endpoint.ts";
+import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
 import { McpAppActionStore } from "../../../src/mcpapp/ActionStore.ts";
 import { createTestContextRuntime } from "../../ContextRuntime.ts";
 import { TestToolSource } from "../../support/ToolSource.ts";
