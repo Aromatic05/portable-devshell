@@ -145,6 +145,63 @@ test("delete cleanup debt retries provider retirement before finalizing the gene
     assert.equal(finalizations, 1);
 });
 
+test("cleanup-only Worker stops after a failed Context cleanup", async () => {
+    const events: string[] = [];
+    const instance = createTestInstance(configWithInstance().instances[0]!, {
+        async start() {
+            events.push("start");
+        },
+        async releaseAlerts() {
+            events.push("releaseAlerts");
+            throw new Error("Context cleanup failed");
+        },
+        async stop() {
+            events.push("stop");
+        },
+    });
+
+    await assert.rejects(
+        instance.withWorkerForCleanup(async (worker) => {
+            await worker.releaseAlerts("/workspace");
+        }),
+        /Context cleanup failed/u,
+    );
+    assert.deepEqual(events, ["start", "releaseAlerts", "stop"]);
+});
+
+test("cleanup reuses an already-ready Worker without stopping it", async () => {
+    const events: string[] = [];
+    const instance = createTestInstance(configWithInstance().instances[0]!, {
+        async start() {
+            events.push("start");
+        },
+        async releaseReference() {
+            events.push("releaseReference");
+        },
+        async stop() {
+            events.push("stop");
+        },
+    });
+    await instance.supervision.lifecycle.start();
+    events.length = 0;
+
+    await instance.withWorkerForCleanup(async (worker) => {
+        await worker.releaseReference("ctx-test");
+    });
+    assert.deepEqual(events, ["releaseReference"]);
+});
+
+test("disabling a self-managed Instance does not stop its Worker", async () => {
+    const instance = createTestInstance(configWithInstance().instances[0]!, {
+        managementMode: "selfManaged",
+        async stop() {
+            throw new Error("self-managed Worker must not be stopped by Control");
+        },
+    });
+
+    await instance.stopWorkerForDisable();
+});
+
 function configWithInstance(): ControlConfig {
     const config = createDefaultControlConfig();
     config.mcp.enabled = true;
