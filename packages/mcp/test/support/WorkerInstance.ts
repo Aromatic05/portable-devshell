@@ -87,10 +87,12 @@ export function createTestWorkerInstance(
     );
     const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
     const instance = new WorkerInstance({
+        admission: { active: () => true, enabled: () => true },
         commandClient: new WorkerCommandClient(runtime, options.name, options.env),
         config,
         endpoint,
         events: new InstanceEventBuffer(options.name, 1024),
+        onReadyChanged: async () => undefined,
         protocolClient,
         stateMachine: new InstanceStateMachine(options.name),
         transportConnection: connection,
