@@ -55,11 +55,13 @@ test("init starts stopped Control before reconciling first-run state through RPC
                     return { enabled: true, name: "local-pc" };
                 },
             },
-            runtime: {
-                async start(instance: string) {
-                    calls.push(`start:${instance}`);
-                    return readySnapshot(instance);
-                },
+            runtime(instance: string) {
+                return {
+                    async start() {
+                        calls.push(`start:${instance}`);
+                        return readySnapshot(instance);
+                    },
+                };
             },
         },
         controlNegotiated: false,
@@ -140,11 +142,13 @@ test("init reconciles a running fresh-like Control through RPC without restartin
                     return { enabled: true, name: "local-pc" };
                 },
             },
-            runtime: {
-                async start(instance: string) {
-                    calls.push(`start:${instance}`);
-                    return readySnapshot(instance);
-                },
+            runtime(instance: string) {
+                return {
+                    async start() {
+                        calls.push(`start:${instance}`);
+                        return readySnapshot(instance);
+                    },
+                };
             },
         },
         controlNegotiated: true,
@@ -201,11 +205,13 @@ test("init preserves TUI approval and reuses an existing local instance", async 
                     throw new Error("existing local instance must be reused");
                 },
             },
-            runtime: {
-                async start(instance: string) {
-                    calls.push(`start:${instance}`);
-                    return readySnapshot(instance);
-                },
+            runtime(instance: string) {
+                return {
+                    async start() {
+                        calls.push(`start:${instance}`);
+                        return readySnapshot(instance);
+                    },
+                };
             },
         },
         controlNegotiated: true,
@@ -271,10 +277,8 @@ test("fresh interactive init offers Access choices through the optional Access c
                     return { enabled: true, name: "local-pc" };
                 },
             },
-            runtime: {
-                async start(instance: string) {
-                    return readySnapshot(instance);
-                },
+            runtime(instance: string) {
+                return { async start() { return readySnapshot(instance); } };
             },
         },
         controlNegotiated: true,
@@ -335,10 +339,8 @@ test("fresh interactive init silently skips Access when the Access command is ab
                     return { enabled: true, name: "local-pc" };
                 },
             },
-            runtime: {
-                async start(instance: string) {
-                    return readySnapshot(instance);
-                },
+            runtime(instance: string) {
+                return { async start() { return readySnapshot(instance); } };
             },
         },
         controlNegotiated: true,

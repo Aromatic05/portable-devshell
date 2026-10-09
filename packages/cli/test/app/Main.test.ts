@@ -1951,11 +1951,11 @@ function testClients(client: Record<string, unknown>) {
             startTransfer: (...args: unknown[]) =>
                 invoke("startTransfer", args),
         },
-        approval: {
-            decide: (...args: unknown[]) => invoke("decideToolApproval", args),
-            get: (...args: unknown[]) => invoke("getToolApproval", args),
-            list: (...args: unknown[]) => invoke("listToolApprovals", args),
-        },
+        approval: (instance: string) => ({
+            decide: (...args: unknown[]) => invoke("decideToolApproval", [instance, ...args]),
+            get: (...args: unknown[]) => invoke("getToolApproval", [instance, ...args]),
+            list: (...args: unknown[]) => invoke("listToolApprovals", [instance, ...args]),
+        }),
         cli: {
             command: (...args: unknown[]) => invoke("cliCommand", args),
             commands: (...args: unknown[]) =>
@@ -2023,32 +2023,32 @@ function testClients(client: Record<string, unknown>) {
             rotateToken: (...args: unknown[]) =>
                 invoke("rotateReverseDeviceToken", args),
         },
-        runtime: {
-            refresh: (...args: unknown[]) => invoke("refreshStatus", args),
-            snapshot: (...args: unknown[]) => invoke("getSnapshot", args),
-            start: (...args: unknown[]) => invoke("startInstance", args),
-            stop: (...args: unknown[]) => invoke("stopInstance", args),
-            readLogs: (...args: unknown[]) => invoke("readLogs", args),
-            subscribe: (...args: unknown[]) => invoke("subscribe", args),
-        },
-        todo: {
-            deleteTodo: (...args: unknown[]) => invoke("deleteTodo", args),
-            getTodo: (...args: unknown[]) => invoke("getTodo", args),
+        runtime: (instance: string) => ({
+            refresh: (...args: unknown[]) => invoke("refreshStatus", [instance, ...args]),
+            snapshot: (...args: unknown[]) => invoke("getSnapshot", [instance, ...args]),
+            start: (...args: unknown[]) => invoke("startInstance", [instance, ...args]),
+            stop: (...args: unknown[]) => invoke("stopInstance", [instance, ...args]),
+            readLogs: (...args: unknown[]) => invoke("readLogs", [instance, ...args]),
+            subscribe: (...args: unknown[]) => invoke("subscribe", [instance, ...args]),
+        }),
+        todo: (instance: string) => ({
+            deleteTodo: (...args: unknown[]) => invoke("deleteTodo", [instance, ...args]),
+            getTodo: (...args: unknown[]) => invoke("getTodo", [instance, ...args]),
             subscribe: (...args: unknown[]) =>
                 invoke(
                     typeof client.subscribeTodo === "function"
                         ? "subscribeTodo"
                         : "subscribe",
-                    args,
+                    [instance, ...args],
                 ),
-        },
+        }),
         web: {
             applications: (...args: unknown[]) =>
                 invoke("webApplications", args),
         },
-        tool: {
-            call: (...args: unknown[]) => invoke("callTool", args),
-            listCalls: (...args: unknown[]) => invoke("listToolCalls", args),
-        },
+        tool: (instance: string) => ({
+            call: (...args: unknown[]) => invoke("callTool", [instance, ...args]),
+            listCalls: (...args: unknown[]) => invoke("listToolCalls", [instance, ...args]),
+        }),
     } as never;
 }
