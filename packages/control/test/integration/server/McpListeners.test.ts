@@ -192,12 +192,11 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
     const serverConfig = new ControlServerConfig({
         mcp: runtime,
-        reverse: {},
+        replaceHttpRoutes: async () => undefined,
         transport: {} as never,
         web: {} as never,
     });
@@ -240,12 +239,11 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
     const serverConfig = new ControlServerConfig({
         mcp: runtime,
-        reverse: {},
+        replaceHttpRoutes: async () => undefined,
         transport: {} as never,
         web: {} as never,
     });
@@ -267,6 +265,44 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
 
     assert.equal(result.restartControlRequired, false);
     assert.ok(runtime.host);
+});
+
+test("Control HTTP route replacement failure restores both MCP and business routes", async () => {
+    const previous = createConfig(17888, 17889);
+    previous.web.enabled = false;
+    const next = structuredClone(previous);
+    next.mcp.publicBaseUrl = "https://new-endpoint.example";
+    const events: string[] = [];
+    const retired = { async stop() {} };
+    const mcp = {
+        async replaceMcpHost() { events.push("mcp.replace"); return retired; },
+        async restoreMcpHost(host: unknown, config: ControlConfig) {
+            assert.equal(host, retired);
+            assert.equal(config, previous);
+            events.push("mcp.restore");
+        },
+        async stopHost() { events.push("mcp.stop-retired"); },
+    };
+    const serverConfig = new ControlServerConfig({
+        mcp: mcp as never,
+        replaceHttpRoutes: async (config) => {
+            if (config === next) {
+                events.push("routes.replace");
+                throw new Error("route registration failed");
+            }
+            assert.equal(config, previous);
+            events.push("routes.restore");
+        },
+        transport: {} as never,
+        web: {} as never,
+    });
+    await assert.rejects(
+        serverConfig.apply(previous, next, { instanceAuth: false, mcp: true, web: false }),
+        /route registration failed/u,
+    );
+    assert.deepEqual(events, [
+        "mcp.replace", "routes.replace", "mcp.restore", "routes.restore",
+    ]);
 });
 
 test("MCP migration starts a different listener before retiring the previous listener", async (t) => {
@@ -303,7 +339,6 @@ test("MCP migration starts a different listener before retiring the previous lis
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
             wire() {
@@ -361,7 +396,6 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
             wire() {
@@ -428,7 +462,6 @@ test("MCP restore attempts every host transition and reports rollback failures",
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
             wire() {
@@ -482,7 +515,6 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
     t.after(async () => {
@@ -535,15 +567,11 @@ test("shared listener Web auth changes require an explicit control restart witho
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
         toolRegistry: owners.toolRegistry,
-        artifact: {
-            service: {},
-            installHttpRoute() {},
-        } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
     const serverConfig = new ControlServerConfig({
         mcp: runtime,
-        reverse: {},
+        replaceHttpRoutes: async () => undefined,
         transport: {} as never,
         web: {} as never,
     });
@@ -593,7 +621,6 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
     const mcp = new McpControlModule({
         http,
         config, context: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
-        artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
     const web = createWeb(config, homeDirectory, mcp, http);

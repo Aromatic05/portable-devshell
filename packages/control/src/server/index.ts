@@ -23,6 +23,7 @@ import { createOperationalOverviewRuntime } from "../overview/index.js";
 import { OperationalOverviewInstanceCollector } from "../overview/collector/Instance.js";
 import { ControlRouteRegistry } from "./Route.js";
 import { ControlHttpServer } from "./http/index.js";
+import type { ControlHttpLease } from "./http/Api.js";
 import type { McpControlModule } from "./mcp/Module.js";
 import type { ReverseIngress } from "./reverse/Ingress.js";
 import type { ControlTransportListener } from "./transport/channel/Listener.js";
@@ -36,7 +37,7 @@ import { ControlServerConfig } from "./Config.js";
 
 export interface ControlServerOptions {
     artifact: ArtifactRuntime;
-    config?: () => ControlConfig;
+    config: () => ControlConfig;
     configChanges: ConfigChangeHub;
     configEditor: ConfigEditorCoordinator;
     contexts: ContextRuntime;
@@ -64,12 +65,18 @@ export interface ControlServerOptions {
 }
 
 export class ControlServer {
+    readonly #artifact: ArtifactRuntime;
     readonly #config: ControlServerConfig;
+    readonly #readConfig: () => ControlConfig;
     readonly #extensionRoutes: ControlExtensionRouteService;
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
     readonly #http: ControlHttpServer;
+    #artifactHttp?: ControlHttpLease;
+    #artifactUninstall?: () => void;
+    #reverseHttp?: ControlHttpLease;
+    #httpRoutesConfig?: Pick<ControlConfig["mcp"], "enabled" | "listenHost" | "listenPort" | "publicBaseUrl">;
     readonly #reverseCredentials?: ReverseCredentials;
     readonly #reverseIngress?: ReverseIngress;
     readonly #routes: ControlRouteRegistry;
@@ -79,6 +86,8 @@ export class ControlServer {
     #ready = false;
 
     constructor(options: ControlServerOptions) {
+        this.#artifact = options.artifact;
+        this.#readConfig = options.config;
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#mcp = options.mcp;
@@ -136,10 +145,7 @@ export class ControlServer {
         });
         this.#config = new ControlServerConfig({
             mcp: this.#mcp,
-            reverse: {
-                credentials: this.#reverseCredentials,
-                ingress: this.#reverseIngress,
-            },
+            replaceHttpRoutes: (config) => this.#replaceHttpRoutes(config),
             transport: this.#transport,
             web: this.#web,
         });
@@ -168,10 +174,84 @@ export class ControlServer {
 
     async startHosts(): Promise<void> {
         await this.#mcp.start();
-        if (this.#reverseIngress !== undefined && this.#mcp.host !== undefined) {
-            this.#reverseIngress.install(this.#mcp.host.server);
-        }
+        await this.#replaceHttpRoutes(this.#readConfig());
         await this.#web.startHost();
+    }
+
+    /** Control owns the Artifact and Reverse routes, independently of MCP generations. */
+    async #replaceHttpRoutes(config: ControlConfig): Promise<void> {
+        const endpoint = config.mcp;
+        const current = this.#httpRoutesConfig;
+        if (current !== undefined &&
+            current.enabled === endpoint.enabled &&
+            current.listenHost === endpoint.listenHost &&
+            current.listenPort === endpoint.listenPort &&
+            current.publicBaseUrl === endpoint.publicBaseUrl) return;
+
+        const oldArtifact = this.#artifactHttp;
+        const oldUninstall = this.#artifactUninstall;
+        const oldReverse = this.#reverseHttp;
+        let nextArtifact: ControlHttpLease | undefined;
+        let nextReverse: ControlHttpLease | undefined;
+        let nextUninstall: (() => void) | undefined;
+        try {
+            if (endpoint.enabled) {
+                const address = { listenHost: endpoint.listenHost, listenPort: endpoint.listenPort };
+                nextArtifact = this.#http.acquire(address);
+                nextUninstall = this.#artifact.installHttpRoute(nextArtifact, endpoint.publicBaseUrl);
+                await nextArtifact.start();
+                if (this.#reverseIngress !== undefined) {
+                    nextReverse = this.#http.acquire(address);
+                    await nextReverse.start();
+                }
+            }
+            if (this.#reverseIngress !== undefined) {
+                if (nextReverse !== undefined) {
+                    if (endpoint.publicBaseUrl !== undefined) {
+                        this.#reverseCredentials?.setPublicBaseUrl(endpoint.publicBaseUrl);
+                        this.#reverseIngress.setPublicBaseUrl(endpoint.publicBaseUrl);
+                    }
+                    this.#reverseIngress.install(nextReverse);
+                } else {
+                    this.#reverseIngress.uninstall();
+                }
+            }
+        } catch (error) {
+            const failures: unknown[] = [];
+            try {
+                if (current?.publicBaseUrl !== undefined) {
+                    this.#reverseCredentials?.setPublicBaseUrl(current.publicBaseUrl);
+                    this.#reverseIngress?.setPublicBaseUrl(current.publicBaseUrl);
+                }
+                if (oldReverse !== undefined) this.#reverseIngress?.install(oldReverse);
+                else this.#reverseIngress?.uninstall();
+            } catch (rollbackError) { failures.push(rollbackError); }
+            try { nextUninstall?.(); }
+            catch (cleanupError) { failures.push(cleanupError); }
+            const cleanup = await Promise.allSettled([
+                nextArtifact?.dispose(), nextReverse?.dispose(),
+            ]);
+            for (const result of cleanup)
+                if (result.status === "rejected") failures.push(result.reason);
+            if (failures.length > 0)
+                throw new AggregateError([error, ...failures], "Control HTTP route replacement rollback failed.");
+            throw error;
+        }
+
+        this.#artifactHttp = nextArtifact;
+        this.#artifactUninstall = nextUninstall;
+        this.#reverseHttp = nextReverse;
+        this.#httpRoutesConfig = {
+            enabled: endpoint.enabled,
+            listenHost: endpoint.listenHost,
+            listenPort: endpoint.listenPort,
+            ...(endpoint.publicBaseUrl === undefined ? {} : { publicBaseUrl: endpoint.publicBaseUrl }),
+        };
+        oldUninstall?.();
+        const retired = await Promise.allSettled([oldArtifact?.dispose(), oldReverse?.dispose()]);
+        const failures = retired.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failures.length > 0)
+            throw new AggregateError(failures.map((result) => result.reason), "Retired Control HTTP leases failed to close.");
     }
 
     /**
@@ -185,6 +265,15 @@ export class ControlServer {
 
     async stop(): Promise<void> {
         const failures: unknown[] = [];
+        try { this.#artifactUninstall?.(); }
+        catch (error) { failures.push(error); }
+        this.#artifactUninstall = undefined;
+        try { this.#reverseIngress?.uninstall(); }
+        catch (error) { failures.push(error); }
+        await this.#artifactHttp?.dispose().catch((error) => failures.push(error));
+        await this.#reverseHttp?.dispose().catch((error) => failures.push(error));
+        this.#artifactHttp = undefined;
+        this.#reverseHttp = undefined;
         try {
             this.#internalControlEndpoint.close();
         } catch (error) {

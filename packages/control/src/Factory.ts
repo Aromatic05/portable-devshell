@@ -114,7 +114,6 @@ export class ControlFactory {
             });
             const mcp = new McpControlModule({
                 http,
-                artifact,
                 config: options.config.require(),
                 contextChanges: contexts.api.registry.changes,
                 contextRecords: () => contexts.api.registry.list(),
@@ -322,17 +321,16 @@ export class ControlFactory {
             const hasReverseInstance = reverseConfig.instances.some(
                 (instance) => instance.provider === "reverse",
             );
-            const reverseHost = mcp.host?.server;
             const reversePublicBaseUrl = reverseConfig.mcp.publicBaseUrl;
             let reverseConnections: ReverseConnections | undefined;
             let reverseCredentials: ReverseCredentials | undefined;
             let reverseIngress: ReverseIngress | undefined;
-            if (reverseHost === undefined || reversePublicBaseUrl === undefined) {
+            if (!reverseConfig.mcp.enabled || reversePublicBaseUrl === undefined) {
                 if (hasReverseInstance) {
                     throw createRemoteError({
                         code: controlErrorCodes.configValidationFailed,
                         message:
-                            "Reverse instances require enabled MCP HTTP host and mcp.publicBaseUrl.",
+                            "Reverse instances require the public HTTP endpoint to be enabled and mcp.publicBaseUrl to be set.",
                         retryable: false,
                     });
                 }

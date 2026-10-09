@@ -89,7 +89,7 @@ export interface ArtifactApi extends ArtifactRouteApi {
 
 export interface ArtifactRuntime {
     readonly service: ArtifactApi;
-    installHttpRoute(server: ArtifactHttpHost): void;
+    installHttpRoute(server: ArtifactHttpHost, publicBaseUrl?: string): () => void;
     start(): Promise<void>;
     stop(): Promise<void>;
     transferHostPath(

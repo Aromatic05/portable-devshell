@@ -24,11 +24,9 @@ import type { InstanceRegistry } from "../../instance/Api.js";
 import { McpEndpointFactory } from "./Endpoint.js";
 import { McpRuntimeFactory } from "./Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
-import type { ArtifactRuntime } from "../../artifact/Api.js";
 import type { ToolCallRegistry } from "../../toolcall/Api.js";
 
 export interface McpControlModuleOptions {
-    artifact: ArtifactRuntime;
     config: ControlConfig;
     context: Pick<ContextTransport, "resolve" | "validateForInstance">;
     contextChanges?: ContextChangeSource;
@@ -50,7 +48,6 @@ export class McpControlModule {
     readonly #factory: McpRuntimeFactory;
     readonly #instances: InstanceRegistry;
     readonly #http: McpHttpAccess;
-    readonly #artifact: ArtifactRuntime;
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpServer;
     readonly #toolRegistry: ToolCallRegistry;
@@ -65,7 +62,6 @@ export class McpControlModule {
         this.#factory = factory;
         this.#instances = options.instances;
         this.#http = options.http;
-        this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         this.#toolRegistry = options.toolRegistry;
         this.#runtimeState = new McpServer({
@@ -115,8 +111,6 @@ export class McpControlModule {
             toolSource: this.#toolRegistry,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
-        if (this.#host !== undefined)
-            options.artifact.installHttpRoute(this.#host.server);
     }
 
     get host(): McpHost | undefined {
@@ -149,10 +143,7 @@ export class McpControlModule {
             sameEndpoint(previousConfig.mcp, config.mcp);
         if (sameEndpointAsPrevious) await this.stopHost(previous);
         try {
-            if (next !== undefined) {
-                this.#artifact.installHttpRoute(next.server);
-                await this.#startHost(next);
-            }
+            if (next !== undefined) await this.#startHost(next);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             if (next instanceof McpHost) {
@@ -196,10 +187,8 @@ export class McpControlModule {
             if (current instanceof McpHost)
                 await current.dispose().catch((error) => failures.push(error));
         }
-        if (host !== undefined) {
-            this.#artifact.installHttpRoute(host.server);
+        if (host !== undefined)
             await this.#startHost(host).catch((error) => failures.push(error));
-        }
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,

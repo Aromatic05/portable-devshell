@@ -95,8 +95,12 @@ export class ReverseIngress {
     }
 
     stop(): void {
-        this.#unregister();
+        this.uninstall();
         this.#webSocketServer.close();
+    }
+
+    uninstall(): void {
+        this.#unregister();
     }
 
     #unregister(): void {

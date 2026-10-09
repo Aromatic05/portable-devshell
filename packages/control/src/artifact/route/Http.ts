@@ -32,14 +32,20 @@ export class ArtifactHttpRoute {
         this.#routeBase = artifactShareRoute(options?.publicBaseUrl);
     }
 
-    install(server: ArtifactHttpHost): void {
+    install(server: ArtifactHttpHost): () => void {
         const path = `${this.#routeBase}/:token`;
-        server.registerRawRoute("head", path, async (request, response) => {
+        const removeHead = server.registerRawRoute("head", path, async (request, response) => {
             await this.#handle(request, response, true);
         });
-        server.registerRawRoute("get", path, async (request, response) => {
-            await this.#handle(request, response, false);
-        });
+        try {
+            const removeGet = server.registerRawRoute("get", path, async (request, response) => {
+                await this.#handle(request, response, false);
+            });
+            return () => { removeGet(); removeHead(); };
+        } catch (error) {
+            removeHead();
+            throw error;
+        }
     }
 
     async #handle(

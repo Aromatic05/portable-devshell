@@ -31,7 +31,6 @@ test('MCP App reconciles terminated Contexts on startup and revokes leases on di
     t.after(unsubscribe);
     const module = new McpControlModule({
         http: new ControlHttpServer(),
-        artifact: { service: {}, installHttpRoute() {} } as never,
         config: createDefaultControlConfig(),
         context: {} as never,
         contextChanges: registry.changes,

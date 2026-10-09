@@ -1,9 +1,7 @@
 import type { ControlConfig } from "@portable-devshell/shared";
 
 import type { ConfigRuntimeChangeSet } from "../config/engine/Api.js";
-import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
 import type { McpControlModule } from "./mcp/Module.js";
-import type { ReverseIngress } from "./reverse/Ingress.js";
 import type {
     ControlWebRuntime,
     ControlWebTransportPort,
@@ -11,25 +9,20 @@ import type {
 
 export interface ControlServerConfigOptions {
     mcp: McpControlModule;
-    reverse: {
-        credentials?: ReverseCredentials;
-        ingress?: ReverseIngress;
-    };
+    replaceHttpRoutes(config: ControlConfig): Promise<void>;
     transport: ControlWebTransportPort;
     web: ControlWebRuntime;
 }
 
 export class ControlServerConfig {
     readonly #mcp: McpControlModule;
-    readonly #reverseCredentials?: ReverseCredentials;
-    readonly #reverseIngress?: ReverseIngress;
+    readonly #replaceHttpRoutes: (config: ControlConfig) => Promise<void>;
     readonly #transport: ControlWebTransportPort;
     readonly #web: ControlWebRuntime;
 
     constructor(options: ControlServerConfigOptions) {
         this.#mcp = options.mcp;
-        this.#reverseCredentials = options.reverse.credentials;
-        this.#reverseIngress = options.reverse.ingress;
+        this.#replaceHttpRoutes = options.replaceHttpRoutes;
         this.#transport = options.transport;
         this.#web = options.web;
     }
@@ -75,40 +68,15 @@ export class ControlServerConfig {
     async #replaceMcp(previous: ControlConfig, next: ControlConfig): Promise<void> {
         const retired = await this.#mcp.replaceMcpHost(previous, next);
         try {
-            const host = this.#mcp.host;
-            if (host !== undefined && this.#reverseIngress !== undefined) {
-                if (next.mcp.publicBaseUrl !== undefined) {
-                    this.#reverseCredentials?.setPublicBaseUrl(
-                        next.mcp.publicBaseUrl,
-                    );
-                    this.#reverseIngress.setPublicBaseUrl(
-                        next.mcp.publicBaseUrl,
-                    );
-                }
-                this.#reverseIngress.install(host.server);
-            }
+            await this.#replaceHttpRoutes(next);
             if (retired !== undefined) await this.#mcp.stopHost(retired);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             await this.#mcp
                 .restoreMcpHost(retired, previous)
                 .catch((rollbackError) => rollbackFailures.push(rollbackError));
-            try {
-                const host = this.#mcp.host;
-                if (host !== undefined && this.#reverseIngress !== undefined) {
-                    if (previous.mcp.publicBaseUrl !== undefined) {
-                        this.#reverseCredentials?.setPublicBaseUrl(
-                            previous.mcp.publicBaseUrl,
-                        );
-                        this.#reverseIngress.setPublicBaseUrl(
-                            previous.mcp.publicBaseUrl,
-                        );
-                    }
-                    this.#reverseIngress.install(host.server);
-                }
-            } catch (rollbackError) {
-                rollbackFailures.push(rollbackError);
-            }
+            await this.#replaceHttpRoutes(previous)
+                .catch((rollbackError) => rollbackFailures.push(rollbackError));
             if (rollbackFailures.length > 0) {
                 throw new AggregateError(
                     [error, ...rollbackFailures],

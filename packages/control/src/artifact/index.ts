@@ -57,10 +57,9 @@ class ArtifactRuntimeState implements ArtifactRuntime {
 
     installHttpRoute(
         server: Parameters<ArtifactRuntime["installHttpRoute"]>[0],
-    ): void {
-        new ArtifactHttpRoute(this.service, {
-            publicBaseUrl: this.#config().mcp.publicBaseUrl,
-        }).install(server);
+        publicBaseUrl?: string,
+    ): () => void {
+        return new ArtifactHttpRoute(this.service, { publicBaseUrl }).install(server);
     }
 
     async stop(): Promise<void> {

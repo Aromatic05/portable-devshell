@@ -34,7 +34,6 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
     const toolRegistry = createToolCallRegistry();
     const runtime = new McpControlModule({
         http: new ControlHttpServer(),
-        artifact: { service: {}, installHttpRoute() {} } as never,
         config,
         context: {} as never,
         controlPaths: new ControlPathHome(homeDirectory),
