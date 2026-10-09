@@ -36,6 +36,7 @@ import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs"
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
 import { runTestspaceLongWaitSmoke } from "./testspace/TestspaceLongWaitSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
+import { runTestspaceUpdateSmoke } from "./testspace/TestspaceUpdateSmoke.mjs";
 import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
     assertTestspaceRootOwned,
@@ -126,6 +127,9 @@ switch (command) {
         break;
     case "web-smoke":
         await webSmoke();
+        break;
+    case "update-smoke":
+        await updateSmoke();
         break;
     case "comment-smoke":
         await commentSmoke();
@@ -428,6 +432,12 @@ async function web(argv) {
 async function webSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceWebSmoke({ webPort: state.webPort });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function updateSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceUpdateSmoke(stateRuntimeDirectory(state));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

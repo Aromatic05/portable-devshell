@@ -9,6 +9,7 @@ const USER_TESTSPACE_COMMANDS = new Set([
     "status",
     "stop",
     "tui",
+    "update-smoke",
     "web",
     "web-smoke",
 ]);
