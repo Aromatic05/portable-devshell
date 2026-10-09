@@ -57,21 +57,37 @@ export class McpProtocolRoute {
     }
 
     register(entry: { binding: McpEndpointBinding; path: string; auth?: McpAuthConfig }): void {
-        const previous = this.#registry.register(entry);
-        if (!this.#active) return;
-        if (previous !== undefined) this.#unmount(previous.binding.instanceName);
-        this.#mount(entry);
+        if (!this.#active) {
+            this.#registry.register(entry);
+            return;
+        }
+        // Mount first: a failed registration must leave the previous Binding
+        // and its HTTP routes untouched.
+        const release = this.#mount(entry);
+        const instance = entry.binding.instanceName;
+        try {
+            this.#unmount(instance);
+            this.#registry.register(entry);
+            this.#releases.set(instance, release);
+        } catch (error) {
+            try { release(); }
+            catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "MCP Protocol replacement rollback failed.");
+            }
+            throw error;
+        }
     }
 
     unregister(instance: string): void {
-        this.#registry.unregister(instance);
         this.#unmount(instance);
+        this.#registry.unregister(instance);
     }
 
     start(): void {
         if (this.#active) return;
         try {
-            for (const entry of this.#registry.list()) this.#mount(entry);
+            for (const entry of this.#registry.list())
+                this.#releases.set(entry.binding.instanceName, this.#mount(entry));
             this.#active = true;
         } catch (error) {
             for (const instance of this.#releases.keys()) this.#unmount(instance);
@@ -93,7 +109,7 @@ export class McpProtocolRoute {
         this.#releases.delete(instance);
     }
 
-    #mount(entry: McpHostRouteEntry): void {
+    #mount(entry: McpHostRouteEntry): () => void {
         const { auth, binding, path } = entry;
         const releases: Array<() => void> = [];
         const resourceUrl = this.#publicBaseUrl === undefined ? undefined : new URL(this.#publicBaseUrl);
@@ -103,26 +119,37 @@ export class McpProtocolRoute {
             resourceUrl.search = "";
             resourceUrl.hash = "";
         }
-        if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceUrl !== undefined) {
-            this.#oauth.registerResource(resourceUrl, auth.oauth2);
-            const metadata = `/.well-known/oauth-protected-resource${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`;
-            releases.push(
-                this.#http.registerRawRoute("get", metadata, (_request, response) => {
-                    respond(
-                        response,
-                        200,
-                        this.#oauth!.protectedResourceMetadata(resourceUrl, auth.oauth2),
-                    );
-                }),
-            );
-        }
-        const oauthApp =
-            auth?.provider === "oauth2" && this.#oauth !== undefined && resourceUrl !== undefined
-                ? express()
-                : undefined;
-        if (oauthApp !== undefined && auth?.provider === "oauth2")
-            oauthApp.use(this.#oauth!.requestAuthHandler(resourceUrl!, auth.oauth2));
+        let released = false;
+        const releaseAll = () => {
+            if (released) return;
+            released = true;
+            const errors: unknown[] = [];
+            for (const release of [...releases].reverse()) {
+                try { release(); } catch (error) { errors.push(error); }
+            }
+            if (errors.length > 0)
+                throw new AggregateError(errors, "Failed to release MCP Protocol routes.");
+        };
         try {
+            if (auth?.provider === "oauth2" && this.#oauth !== undefined && resourceUrl !== undefined) {
+                releases.push(this.#oauth.registerResource(resourceUrl, auth.oauth2));
+                const metadata = `/.well-known/oauth-protected-resource${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`;
+                releases.push(
+                    this.#http.registerRawRoute("get", metadata, (_request, response) => {
+                        respond(
+                            response,
+                            200,
+                            this.#oauth!.protectedResourceMetadata(resourceUrl, auth.oauth2),
+                        );
+                    }),
+                );
+            }
+            const oauthApp =
+                auth?.provider === "oauth2" && this.#oauth !== undefined && resourceUrl !== undefined
+                    ? express()
+                    : undefined;
+            if (oauthApp !== undefined && auth?.provider === "oauth2")
+                oauthApp.use(this.#oauth!.requestAuthHandler(resourceUrl!, auth.oauth2));
             releases.push(
                 this.#http.registerMiddleware(path, (request, response, next) => {
                     // An Express-based test listener strips the mounted prefix from
@@ -178,12 +205,13 @@ export class McpProtocolRoute {
                 }),
             );
         } catch (error) {
-            for (const release of releases.reverse()) release();
+            try { releaseAll(); }
+            catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "MCP Protocol mount and rollback failed.");
+            }
             throw error;
         }
-        this.#releases.set(binding.instanceName, () => {
-            for (const release of releases.reverse()) release();
-        });
+        return releaseAll;
     }
 
     async #dispatch(
