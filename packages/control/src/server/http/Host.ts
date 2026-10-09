@@ -1,4 +1,5 @@
-import { createReadStream, statSync } from "node:fs";
+import { constants } from "node:fs";
+import { open, realpath, stat } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -31,7 +32,26 @@ const mime: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".txt": "text/plain; charset=utf-8",
+    ".webmanifest": "application/manifest+json; charset=utf-8",
+    ".wasm": "application/wasm",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".pdf": "application/pdf",
+    ".xml": "application/xml",
 };
+
+function within(root: string, path: string): boolean {
+    return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
 
 function matches(path: string, target: string, prefix: boolean): boolean {
     if (target === "*" || (prefix && target === "/")) return true;
@@ -197,38 +217,81 @@ export class Host {
         );
         res.setHeader("referrer-policy", "no-referrer");
         res.setHeader("x-content-type-options", "nosniff");
-        const root = resolve(route.directory!);
-        const relative = requestPath.slice(route.path === "/" ? 0 : route.path.length).replace(/^\/+/, "");
-        let file = resolve(root, relative || "index.html");
-        if (file !== root && !file.startsWith(root + sep)) {
-            res.statusCode = 403;
+        if (req.method !== "GET" && req.method !== "HEAD") {
+            res.setHeader("allow", "GET, HEAD");
+            res.statusCode = 405;
+            res.end();
+            return;
+        }
+        const encoded = requestPath.slice(route.path === "/" ? 0 : route.path.length).replace(/^\/+/, "");
+        let relative: string;
+        try {
+            relative = decodeURIComponent(encoded);
+            if (relative.includes("\0")) throw new URIError("NUL in static file path");
+        } catch {
+            res.statusCode = 400;
             res.end();
             return;
         }
         try {
-            if (statSync(file).isDirectory()) file = resolve(file, "index.html");
-            const info = statSync(file);
-            if (!info.isFile()) throw new Error();
-            res.setHeader("content-type", mime[extname(file)] ?? "application/octet-stream");
-            res.setHeader(
-                "cache-control",
-                /[/\\]assets[/\\].+\.[A-Za-z0-9]+$/u.test(file)
-                    ? "public, max-age=31536000, immutable"
-                    : "no-cache",
-            );
-            res.setHeader("content-length", info.size);
-            if (req.method === "head") {
+            const root = await realpath(resolve(route.directory!));
+            const candidate = resolve(root, relative || "index.html");
+            if (!within(root, candidate)) {
+                res.statusCode = 403;
                 res.end();
                 return;
             }
-            createReadStream(file)
-                .on("error", () => {
-                    if (!res.headersSent) res.statusCode = 404;
+            let file = await realpath(candidate);
+            if (!within(root, file)) {
+                res.statusCode = 403;
+                res.end();
+                return;
+            }
+            if ((await stat(file)).isDirectory()) file = await realpath(resolve(file, "index.html"));
+            if (!within(root, file)) {
+                res.statusCode = 403;
+                res.end();
+                return;
+            }
+            // Check the opened descriptor on Linux to prevent intermediate
+            // directory swaps between realpath and open.
+            const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+            let closeHandle = true;
+            try {
+                if (process.platform === "linux" && !within(root, await realpath(`/proc/self/fd/${handle.fd}`))) {
+                    res.statusCode = 403;
                     res.end();
-                })
-                .pipe(res);
-        } catch {
-            res.statusCode = 404;
+                    return;
+                }
+                const info = await handle.stat();
+                if (!info.isFile()) {
+                    res.statusCode = 404;
+                    res.end();
+                    return;
+                }
+                res.setHeader("content-type", mime[extname(file).toLowerCase()] ?? "application/octet-stream");
+                res.setHeader(
+                    "cache-control",
+                    /[/\\]assets[/\\].+\.[A-Za-z0-9]+$/u.test(file)
+                        ? "public, max-age=31536000, immutable"
+                        : "no-cache",
+                );
+                res.setHeader("content-length", info.size);
+                if (req.method === "HEAD") {
+                    res.end();
+                    return;
+                }
+                const stream = handle.createReadStream({ autoClose: true });
+                closeHandle = false;
+                stream.on("error", (error) => res.destroy(error));
+                res.on("close", () => stream.destroy());
+                stream.pipe(res);
+            } finally {
+                if (closeHandle) await handle.close();
+            }
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            res.statusCode = code === "EACCES" || code === "EPERM" || code === "ELOOP" ? 403 : 404;
             res.end();
         }
     }
