@@ -567,25 +567,16 @@ test("namespace auth updates apply runtime protection before exposing OAuth", as
     assert.equal(applyCalls, 1);
 });
 
-test("config editor reconfigures and disables a running instance without replacing it", async () => {
+test("config editor hot-applies approval policy and rejects live worker rebuild", async () => {
     let config = createConfig();
-    const reconfigureCalls: Array<Record<string, unknown>> = [];
     const approvalPolicies: unknown[] = [];
     let stopCalls = 0;
     const instanceDescriptor = descriptor(
         {
-            reconfigure(input: Record<string, unknown>) {
-                reconfigureCalls.push(input);
-            },
             snapshot: runningSnapshot,
             async stop() {
                 stopCalls += 1;
-                return {
-                    ...runningSnapshot(),
-                    daemonState: "stopped",
-                    ready: false,
-                    status: "stopped",
-                };
+                return { ...runningSnapshot(), daemonState: "stopped", ready: false, status: "stopped" };
             },
         },
         {
@@ -598,51 +589,49 @@ test("config editor reconfigures and disables a running instance without replaci
             },
         },
     );
+    const originalUpdate = instanceDescriptor.update.bind(instanceDescriptor);
+    instanceDescriptor.update = (next) => {
+        approvalPolicies.push(next.approvalPolicy);
+        originalUpdate(next);
+    };
     const registry = new InstanceRegistry([instanceDescriptor]);
     const service = createService(
         () => config,
-        (next) => {
-            config = next;
-        },
+        (next) => { config = next; },
         registry,
     );
     registerLifecycle(service, instanceDescriptor);
 
+    const previous = config;
+    await assert.rejects(
+        service.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 } },
+        }),
+        /must be stopped before rebuilding/u,
+    );
+    assert.equal(config, previous);
+    assert.equal(registry.get("demo-local"), instanceDescriptor);
     await service.updateInstanceConfig({
         instanceName: "demo-local",
-        patch: {
-            alerts: { intervalMs: 2_000, maxUncommittedChanges: 5 },
-            approvalPolicy: { mode: "ask" },
-        },
+        patch: { approvalPolicy: { mode: "ask" } },
     });
+    assert.equal(registry.get("demo-local"), instanceDescriptor);
+    assert.equal(config.instances[0]?.approvalPolicy?.mode, "ask");
+    assert.deepEqual(config.instances[0]?.alerts, previous.instances[0]?.alerts);
+
     const enabledChanges: boolean[] = [];
     service.changes.onChange(() => {
         enabledChanges.push(registry.get("demo-local")?.config.enabled === true);
     });
     await service.disableInstance({ instanceName: "demo-local" });
-
     assert.equal(config.instances[0]?.enabled, false);
     assert.equal(stopCalls, 1);
     assert.equal(config.instances[0]?.security.mode, "disabled");
-    assert.equal(reconfigureCalls.length, 1);
-    const reconfigure = reconfigureCalls[0] as {
-        alerts?: { intervalMs?: number; maxUncommittedChanges?: number };
-        approvalPolicy?: { mode?: string };
-        effectiveSecurityMode?: string;
-        env?: Record<string, string>;
-    };
-    assert.equal(reconfigure.alerts?.intervalMs, 2_000);
-    assert.equal(reconfigure.alerts?.maxUncommittedChanges, 5);
     assert.deepEqual(approvalPolicies, [
         { mode: "ask", rules: undefined },
         { mode: "ask", rules: undefined },
     ]);
-    assert.equal(reconfigure.effectiveSecurityMode, "disabled");
-    assert.equal(
-        reconfigure.env?.DEVSHELL_WORKER_INTERNAL_SECURITY_MODE,
-        "disabled",
-    );
-    assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "disabled");
     assert.equal(registry.get("demo-local"), undefined);
     assert.deepEqual(enabledChanges, [false]);
 
@@ -1150,26 +1139,18 @@ test("batch instance failure restores a hot-applied endpoint before configuratio
     const actions: string[] = [];
     const writes: ControlConfig[] = [];
     const failure = new Error("worker reconfigure failed");
-    let runtimeSecurityMode = "disabled";
+    let runtimePolicyMode = "none";
     let runtimeWebEnabled = previous.web.enabled;
-    let reconfigureCalls = 0;
-    const worker = {
-        reconfigure(input: { effectiveSecurityMode?: string }) {
-            reconfigureCalls += 1;
-            runtimeSecurityMode = input.effectiveSecurityMode ?? "";
-            actions.push(`worker:${runtimeSecurityMode}`);
-            if (reconfigureCalls === 1) throw failure;
-        },
-        snapshot: () => ({
-            connectionState: "disconnected",
-            daemonState: "stopped",
-            lastSeq: 0,
-            name: "demo-local",
-            ready: false,
-            status: "stopped",
-        }),
+    let updateCalls = 0;
+    const originalDescriptor = descriptor({ snapshot: stoppedSnapshot });
+    const originalUpdate = originalDescriptor.update.bind(originalDescriptor);
+    originalDescriptor.update = (next) => {
+        updateCalls += 1;
+        runtimePolicyMode = next.approvalPolicy?.mode ?? "none";
+        actions.push(`instance:${runtimePolicyMode}`);
+        if (updateCalls === 1) throw failure;
+        originalUpdate(next);
     };
-    const originalDescriptor = descriptor(worker);
     const registry = new InstanceRegistry([originalDescriptor]);
     const changes = new ConfigChangeHub();
     const engine = configEngine(
@@ -1222,16 +1203,16 @@ test("batch instance failure restores a hot-applied endpoint before configuratio
     assert.deepEqual(actions, [
         "persist:true",
         "runtime:true",
-        "worker:disabled",
+        "instance:ask",
         "runtime:false",
         "persist:false",
-        "worker:disabled",
+        "instance:none",
     ]);
     assert.equal(writes.length, 2);
     assert.equal(writes[1], previous);
     assert.equal(config, previous);
-    assert.equal(runtimeSecurityMode, "disabled");
-    assert.equal(reconfigureCalls, 2);
+    assert.equal(runtimePolicyMode, "none");
+    assert.equal(updateCalls, 2);
     assert.equal(runtimeWebEnabled, previous.web.enabled);
     assert.equal(registry.get("demo-local"), originalDescriptor);
     assert.equal(changes.revision, 0);
@@ -1240,26 +1221,19 @@ test("batch instance failure restores a hot-applied endpoint before configuratio
 test("instance reconfigure failure restores persisted and runtime configuration", async () => {
     let config = createConfig();
     const writes: ControlConfig[] = [];
-    let runtimeSecurityMode = "disabled";
+    let runtimePolicyMode = "none";
     let failNext = true;
-    const worker = {
-        reconfigure(input: { effectiveSecurityMode?: string }) {
-            runtimeSecurityMode = input.effectiveSecurityMode ?? "";
-            if (failNext) {
-                failNext = false;
-                throw new Error("worker reconfigure failed");
-            }
-        },
-        snapshot: () => ({
-            connectionState: "disconnected",
-            daemonState: "stopped",
-            lastSeq: 0,
-            name: "demo-local",
-            ready: false,
-            status: "stopped",
-        }),
+    const originalDescriptor = descriptor({ snapshot: stoppedSnapshot });
+    const originalUpdate = originalDescriptor.update.bind(originalDescriptor);
+    originalDescriptor.update = (next) => {
+        runtimePolicyMode = next.approvalPolicy?.mode ?? "none";
+        if (failNext) {
+            failNext = false;
+            throw new Error("instance update failed");
+        }
+        originalUpdate(next);
     };
-    const registry = new InstanceRegistry([descriptor(worker)]);
+    const registry = new InstanceRegistry([originalDescriptor]);
     const service = new InstanceEditorCoordinator({
         engine: configEngine(
             () => config,
@@ -1283,13 +1257,15 @@ test("instance reconfigure failure restores persisted and runtime configuration"
             instanceName: "demo-local",
             patch: { approvalPolicy: { mode: "ask" } },
         }),
-        /worker reconfigure failed/u,
+        /instance update failed/u,
     );
 
     assert.equal(writes.length, 2);
     assert.equal(config.instances[0]?.security.mode, "disabled");
     assert.equal(config.instances[0]?.approvalPolicy, undefined);
-    assert.equal(runtimeSecurityMode, "disabled");
+    assert.equal(runtimePolicyMode, "none");
+    assert.equal(registry.get("demo-local"), originalDescriptor);
+    assert.equal(originalDescriptor.config.enabled, true);
 });
 
 test("successful instance rebuild replaces the descriptor then closes the old Worker generation", async () => {
@@ -2560,17 +2536,12 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
     const registered: Array<{
         auth: unknown;
         instance: string;
-        workspaceEnabled?: boolean;
     }> = [];
     const retiredMcpApps: string[] = [];
     const unregistered: string[] = [];
     const mcp = {
-        registerInstance(
-            instance: string,
-            auth: unknown,
-            workspaceEnabled?: boolean,
-        ) {
-            registered.push({ auth, instance, workspaceEnabled });
+        registerInstance(instance: string, auth: unknown) {
+            registered.push({ auth, instance });
         },
         async retireMcpApp(instanceName: string) {
             retiredMcpApps.push(instanceName);
@@ -2618,7 +2589,8 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         instanceName: "demo-local",
         patch: { mcp: { contextMode: "openai-session" } },
     });
-    assert.equal(registered[1]?.workspaceEnabled, true);
+    assert.equal(registered[1]?.instance, "demo-local");
+    assert.equal(config.instances[0]?.workspace.enabled, true);
     assert.equal(registry.get("demo-local")?.config.mcpContextMode, "openai-session");
 
     await service.updateInstanceConfig({
@@ -2626,7 +2598,7 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
         patch: { workspace: { enabled: false } },
     });
     assert.deepEqual(retiredMcpApps, ["demo-local"]);
-    assert.equal(registered[2]?.workspaceEnabled, false);
+    assert.equal(registered[2]?.instance, "demo-local");
     assert.equal(config.instances[0]?.workspace.enabled, false);
 
     const authUpdate = (await service.updateInstanceConfig({
@@ -2652,13 +2624,13 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
     assert.deepEqual(retiredMcpApps, ["demo-local", "demo-local"]);
     await service.enableInstance({ instanceName: "demo-local" });
     assert.equal(registered.length, 5);
-    assert.equal(registered[4]?.workspaceEnabled, false);
+    assert.equal(config.instances[0]?.workspace.enabled, false);
     await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: { workspace: { enabled: true } },
     });
     assert.equal(registered.length, 6);
-    assert.equal(registered[5]?.workspaceEnabled, true);
+    assert.equal(config.instances[0]?.workspace.enabled, true);
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);
