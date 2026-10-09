@@ -3,10 +3,7 @@ import type { McpHttpAccess, McpHttpListener } from "./Api.js";
 import type { McpAuthConfig, McpOAuthApprovalConfig } from "../oauth/Config.js";
 import type { McpOAuthProtectedResource } from "../oauth/Route.js";
 import type { McpOAuthApprovalService } from "../oauth/interaction/Approval.js";
-import { McpEndpointBinding } from "../protocol/Binding.js";
-import { McpEndpoint } from "../protocol/Endpoint.js";
 import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
-import { McpExtensionRegistry } from "../protocol/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
 import type { McpToolSource } from "../protocol/tool/Source.js";
 import type { McpRuntimeState } from "../Runtime.js";
@@ -134,14 +131,13 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
-        const binding = new McpEndpointBinding(
-            new McpEndpoint({
+        const path = instance.path ?? `/${instance.name}/mcp`;
+        this.#protocol.registerInstance(
+            {
                 auth: instance.auth,
                 context: this.#contexts,
                 contextMode: instance.contextMode ?? "explicit",
-                extensions: new McpExtensionRegistry([
-                    createMcpAppMcpExtension(this.#config.publicBaseUrl),
-                ]),
+                extensions: [createMcpAppMcpExtension(this.#config.publicBaseUrl)],
                 instanceName: instance.name,
                 toolAdapter: (dispatch) =>
                     new McpAppCall({
@@ -165,16 +161,10 @@ export class McpHost {
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,
                 tools: this.#runtimeState.tools,
-            }),
+            },
+            path,
             this.#config.serverVersion,
         );
-        const path = instance.path ?? `/${instance.name}/mcp`;
-
-        this.#protocol.register({
-            auth: instance.auth ?? { enabled: false, provider: "none" },
-            binding,
-            path,
-        });
         this.#appRoute?.register(instance.name);
     }
 

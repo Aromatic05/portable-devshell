@@ -1,6 +1,6 @@
 import { createToolCallProvenanceRuntime, type ToolCallProvenanceApi } from "@portable-devshell/shared";
 
-/** Protocol-scoped provenance survives HTTP listener replacement. */
+/** Persistent Protocol state survives HTTP generations; McpProtocolRoute owns per-generation Endpoints/Bindings. */
 export class McpProtocolRuntime {
     readonly provenance: ToolCallProvenanceApi;
     constructor(filePath: string) { this.provenance = createToolCallProvenanceRuntime(filePath); }

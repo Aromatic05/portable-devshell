@@ -7,7 +7,10 @@ import type { McpHttpRoute } from "../server/Api.js";
 import type { McpAuthConfig } from "../oauth/Config.js";
 import { McpAuthProviderToken } from "../oauth/Provider.js";
 import type { McpOAuthProtectedResource } from "../oauth/Route.js";
-import type { McpEndpointBinding } from "./Binding.js";
+import { McpEndpointBinding } from "./Binding.js";
+import { McpEndpoint, type McpEndpointOptions } from "./Endpoint.js";
+import { McpExtensionRegistry } from "./extension/Registry.js";
+import type { McpExtension } from "./extension/Contract.js";
 import { McpHostRouteRegistry, type McpHostRouteEntry } from "./Registry.js";
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
@@ -31,6 +34,26 @@ export class McpProtocolRoute {
         this.#http = http;
         this.#oauth = options.oauth;
         this.#publicBaseUrl = options.publicBaseUrl;
+    }
+
+    /** Each Protocol Route generation owns its Endpoint, extension registry and Binding. */
+    registerInstance(
+        options: Omit<McpEndpointOptions, "extensions"> & { extensions?: readonly McpExtension[] },
+        path: string,
+        serverVersion?: string,
+    ): void {
+        const binding = new McpEndpointBinding(
+            new McpEndpoint({
+                ...options,
+                extensions: new McpExtensionRegistry(options.extensions),
+            }),
+            serverVersion,
+        );
+        this.register({
+            auth: options.auth ?? { enabled: false, provider: "none" },
+            binding,
+            path,
+        });
     }
 
     register(entry: { binding: McpEndpointBinding; path: string; auth?: McpAuthConfig }): void {
