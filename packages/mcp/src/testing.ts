@@ -16,7 +16,8 @@ export * from "./protocol/tool/Source.js";
 export * from "./protocol/tool/Metadata.js";
 export * from "./protocol/tool/Schema.js";
 
-export * from "./host/Host.js";
+export * from "./protocol/index.js";
+export { McpRuntimeState } from "./Runtime.js";
 export { HttpHost } from "./host/Http.js";
 export * from "./protocol/Registry.js";
 

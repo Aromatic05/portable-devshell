@@ -5,5 +5,6 @@ export { McpOAuthApprovalService } from "./oauth/interaction/Approval.js";
 export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } from "./oauth/provider/Provider.js";
 export { type McpToolProvenanceRecorder } from "./protocol/tool/Provenance.js";
 export { type McpToolSource } from "./protocol/tool/Source.js";
-export { McpHost, type McpHostInstanceConfig, McpRuntimeState } from "./host/Host.js";
+export { McpHost, type McpHostInstanceConfig } from "./protocol/index.js";
+export { McpRuntimeState } from "./Runtime.js";
 export { HttpHost } from "./host/Http.js";

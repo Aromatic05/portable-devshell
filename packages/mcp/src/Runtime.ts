@@ -1,0 +1,41 @@
+import type { ContextTransport, Endpoint, ToolCallApi } from '@portable-devshell/shared';
+import type { McpOAuth2Config, McpOAuthApprovalConfig } from './oauth/Config.js';
+import { McpOAuthRuntime } from './oauth/index.js';
+import type { McpOAuthProtectedResource } from './oauth/Resource.js';
+import { McpAppRuntime } from './mcpapp/index.js';
+
+/** Composes Domain owners across MCP listener replacement; owns no domain stores directly. */
+export class McpRuntimeState {
+    readonly context: Pick<ContextTransport, 'resolve' | 'validateForInstance'>;
+    readonly tools: ToolCallApi;
+    readonly oauth: McpOAuthRuntime;
+    readonly app: McpAppRuntime;
+
+    constructor(config: {
+        context: Pick<ContextTransport, 'resolve' | 'validateForInstance'>;
+        endpoint?: Endpoint;
+        tools: ToolCallApi;
+        storageDir?: string;
+        mcpAppLeaseFile?: string;
+    }) {
+        this.context = config.context;
+        this.tools = config.tools;
+        this.oauth = new McpOAuthRuntime(config.storageDir);
+        this.app = new McpAppRuntime({
+            ...(config.endpoint === undefined ? {} : { endpoint: config.endpoint }),
+            ...(config.mcpAppLeaseFile === undefined ? {} : { filePath: config.mcpAppLeaseFile }),
+        });
+    }
+
+    initialize(): Promise<void> { return this.app.initialize(); }
+    get oauthApprovals() { return this.oauth.approvals; }
+    get mcpAppLeases() { return this.app.leases; }
+    get workspaceActions() { return this.app.actions; }
+    get mcpAppPresence() { return this.app.presence; }
+    get mcpAppView() { return this.app.view; }
+
+    oauthResource(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string,
+        approval: McpOAuthApprovalConfig, trustProxy: boolean): McpOAuthProtectedResource {
+        return this.oauth.resource(config, publicBaseUrl, storageDir, approval, trustProxy);
+    }
+}
