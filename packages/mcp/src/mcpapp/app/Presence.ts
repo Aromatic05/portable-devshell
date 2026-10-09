@@ -108,6 +108,11 @@ export class McpAppPresenceStore {
         return this.isActive(instance, ctxId, livenessMs);
     }
 
+    close(): void {
+        this.#states.clear();
+        for (const key of this.#waiters.keys()) this.#notify(key);
+    }
+
     revokeContext(ctxId: string): void {
         this.#remove((key) => key.endsWith(`\0${ctxId}`));
     }

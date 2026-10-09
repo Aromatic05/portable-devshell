@@ -13,9 +13,9 @@ export function installMcpAppLive(options: {
     leases: McpAppLeaseStore;
     presence: McpAppPresenceStore;
     view: ReturnType<typeof createMcpAppViewModel>;
-}): () => void {
+}): (() => void) & { revokeContext(ctxId: string): void } {
     const base = `/api/live/${encodeURIComponent(options.instance)}/workspace`;
-    const pending = new Map<AbortController, ServerResponse>();
+    const pending = new Map<AbortController, { ctxId: string; response: ServerResponse }>();
     const revalidate = async (ctxId: string, token: string, workspace: string | undefined): Promise<number> => {
         if (!await options.leases.verify(options.instance, ctxId, token)) return 401;
         try {
@@ -64,7 +64,7 @@ export function installMcpAppLive(options: {
         }
         options.presence.beginWatch(options.instance, ctxId);
         const controller = new AbortController();
-        pending.set(controller, response);
+        pending.set(controller, { ctxId, response });
         const onClose = () => controller.abort();
         response.once("close", onClose);
         try {
@@ -95,17 +95,25 @@ export function installMcpAppLive(options: {
     const watch = options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, true));
     const preflightSnapshot = options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); });
     const preflightWatch = options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); });
-    return () => {
-        for (const [controller, response] of pending) {
-            controller.abort();
-            if (!response.destroyed && !response.writableEnded)
-                reply(response, 410, { error: "MCP App Instance unavailable" });
+    const abortWatch = (controller: AbortController, response: ServerResponse) => {
+        controller.abort();
+        if (!response.destroyed && !response.writableEnded)
+            reply(response, 410, { error: "MCP App Context unavailable" });
+    };
+    const cleanup = (() => {
+        for (const [controller, { response }] of pending) {
+            abortWatch(controller, response);
         }
         preflightWatch();
         preflightSnapshot();
         watch();
         snapshot();
+    }) as (() => void) & { revokeContext(ctxId: string): void };
+    cleanup.revokeContext = (ctxId: string) => {
+        for (const [controller, current] of pending)
+            if (current.ctxId === ctxId) abortWatch(controller, current.response);
     };
+    return cleanup;
 }
 
 function setHeaders(response: ServerResponse): void {

@@ -1,6 +1,7 @@
 
 export interface ContextCommittedChange {
     readonly ctxIds: readonly string[];
+    readonly terminalCtxIds?: readonly string[];
     readonly revision: number;
 }
 
@@ -44,12 +45,13 @@ export class ContextChangeHub {
         return () => this.#listeners.delete(listener);
     }
 
-    publish(ctxIds: readonly string[]): number {
+    publish(ctxIds: readonly string[], terminalCtxIds: readonly string[] = []): number {
         const unique = [...new Set(ctxIds)].sort();
         if (unique.length === 0) return this.#revision;
         this.#revision += 1;
         const change = Object.freeze({
             ctxIds: Object.freeze(unique),
+            ...(terminalCtxIds.length === 0 ? {} : { terminalCtxIds: Object.freeze([...new Set(terminalCtxIds)]) }),
             revision: this.#revision,
         });
         this.#history.push(change);

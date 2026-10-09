@@ -119,6 +119,13 @@ export class McpAppLeaseStore {
         });
     }
 
+    async contextIds(): Promise<string[]> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            return [...new Set([...this.#leases.values()].map((lease) => lease.ctxId))];
+        });
+    }
+
     async revokeContext(ctxId: string): Promise<void> {
         await this.#remove((lease) => lease.ctxId === ctxId);
     }

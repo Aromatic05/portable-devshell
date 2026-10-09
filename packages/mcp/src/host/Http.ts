@@ -16,7 +16,7 @@ import type { AuthInfo } from "@modelcontextprotocol/server";
 
 import type { McpAuthConfig } from "../oauth/Config.js";
 import { McpAuthProviderToken } from "../oauth/Provider.js";
-import { McpOAuthProtectedResource } from "../oauth/Resource.js";
+import { McpOAuthProtectedResource } from "../oauth/Route.js";
 import { McpEndpointBinding } from "../protocol/Binding.js";
 
 type JsonValue =

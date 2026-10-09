@@ -189,6 +189,13 @@ export class McpAppActionStore {
             .map((receipt) => structuredClone(receipt.effect!)));
     }
 
+    async contextIds(): Promise<string[]> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            return [...new Set([...this.#receipts.values()].map((receipt) => receipt.ctxId))];
+        });
+    }
+
     async revokeContext(ctxId: string): Promise<void> {
         await this.#revoke((receipt) => receipt.ctxId === ctxId);
     }

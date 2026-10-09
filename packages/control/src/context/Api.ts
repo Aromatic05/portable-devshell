@@ -147,6 +147,7 @@ export interface ContextLifecycleCleanupPort extends ContextCleanupPort {
 
 export interface ContextCommittedChange {
     readonly ctxIds: readonly string[];
+    readonly terminalCtxIds?: readonly string[];
     readonly revision: number;
 }
 

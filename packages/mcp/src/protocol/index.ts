@@ -1,10 +1,9 @@
 import type { ContextTransport, ControlMcpContextMode } from "@portable-devshell/shared";
 import type { McpAuthConfig, McpOAuthApprovalConfig } from "../oauth/Config.js";
-import { McpOAuthProtectedResource } from "../oauth/Resource.js";
+import { McpOAuthProtectedResource } from "../oauth/Route.js";
 import type { McpOAuthApprovalService } from "../oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../protocol/Binding.js";
 import { McpEndpoint } from "../protocol/Endpoint.js";
-import { createMcpContextSelector } from "../protocol/context/Selector.js";
 import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
 import { McpExtensionRegistry } from "../protocol/extension/Registry.js";
 import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
@@ -76,28 +75,35 @@ export class McpHost {
         }
     }
 
-    async start(): Promise<void> {
-        if (
-            oauthConfig(this.#config.instances) !== undefined &&
-            this.#oauth === undefined
-        ) {
-            throw new Error(
-                "mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth",
-            );
-        }
+    /** Mounts MCP protocol and App routes without binding an HTTP listener. */
+    async prepare(): Promise<void> {
+        if (this.#started) return;
+        if (oauthConfig(this.#config.instances) !== undefined && this.#oauth === undefined)
+            throw new Error('mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth');
         await this.#runtimeState.initialize();
         await this.#oauth?.warmup();
         this.#protocol.start();
         for (const entry of this.#protocol.list()) this.#appRoute.register(entry.binding.instanceName);
-        await this.#httpServer.start();
         this.#started = true;
     }
 
-    async stop(): Promise<void> {
+    /** Unmounts routes; the transport owner closes the underlying listener. */
+    retire(): void {
         this.#protocol.stop();
         this.#appRoute.stop();
-        await this.#httpServer.stop();
         this.#started = false;
+    }
+
+    // Standalone MCP consumers retain the combined start/stop convenience.
+    async start(): Promise<void> {
+        await this.prepare();
+        try { await this.#httpServer.start(); }
+        catch (error) { this.retire(); throw error; }
+    }
+
+    async stop(): Promise<void> {
+        this.retire();
+        await this.#httpServer.stop();
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
@@ -117,32 +123,14 @@ export class McpHost {
                     dispatch,
                     instance: instance.name,
                     ...(this.#runtimeState.app.view === undefined ? {} : { view: this.#runtimeState.app.view }),
-                    bootstrap: async (result, request) => {
-                    const structured = typeof result === "object" && result !== null && !Array.isArray(result)
-                        ? result : {};
-                    const ctxId = typeof structured.ctxId === "string" ? structured.ctxId : undefined;
-                    const selector = createMcpContextSelector(instance.contextMode ?? "explicit");
-                    const externalBindings = selector.bindings(request);
-                    if (ctxId === undefined && externalBindings.length === 0) return undefined;
-                    const record = await this.#contexts.resolve({
-                        ...(ctxId === undefined ? { externalBindings } : { ctxId }),
+                    bootstrap: (result, request) => this.#runtimeState.app.bootstrap({
+                        context: this.#contexts,
+                        contextMode: instance.contextMode,
                         instance: instance.name,
-                        principal: request.principal,
-                        touch: false,
-                    });
-                    if (record.status !== "active" || !record.environments.some((item) => item.instance === instance.name))
-                        return undefined;
-                    const token = await this.#runtimeState.app.leases.issue(instance.name, record.ctxId);
-                    this.#runtimeState.app.presence.open(instance.name, record.ctxId);
-                    const base = this.#config.publicBaseUrl;
-                    const liveBaseUrl = base === undefined ? undefined
-                        : `${base.replace(/\/+$/u, "")}/api/live/${encodeURIComponent(instance.name)}/workspace`;
-                    return {
-                        ctxId: record.ctxId,
-                        token,
-                        ...(liveBaseUrl === undefined ? {} : { liveBaseUrl }),
-                    };
-                    },
+                        publicBaseUrl: this.#config.publicBaseUrl,
+                        request,
+                        result,
+                    }),
                 }),
                 toolProvenance: this.#config.toolProvenance,
                 toolSource: this.#config.toolSource,
@@ -163,6 +151,10 @@ export class McpHost {
         this.#appRoute.unregister(instanceName);
         this.#runtimeState.app.presence.revokeInstance(instanceName);
         this.#protocol.unregister(instanceName);
+    }
+
+    revokeMcpAppContext(ctxId: string): void {
+        this.#appRoute.revokeContext(ctxId);
     }
 
     async retireMcpApp(instanceName: string): Promise<void> {

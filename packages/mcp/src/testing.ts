@@ -1,7 +1,7 @@
 export * from "./oauth/Config.js";
 export * from "./oauth/Middleware.js";
 export * from "./oauth/Provider.js";
-export * from "./oauth/Resource.js";
+export * from "./oauth/Route.js";
 export * from "./oauth/interaction/Approval.js";
 
 

@@ -142,14 +142,10 @@ export class InstanceRetirementCoordinator {
         descriptor: InstanceDescriptor,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
-        if (
-            existing !== undefined &&
-            next !== undefined &&
-            descriptor !== undefined &&
-            existing.enabled
-        ) {
+        if (existing !== undefined && next !== undefined && existing.enabled) {
             const instanceDisabled = !next.enabled;
-            if (!descriptor.lifecycle.active) {
+            const mcpDisabled = existing.mcp.enabled && !next.mcp.enabled;
+            if (descriptor !== undefined && !descriptor.lifecycle.active) {
                 await this.hooks
                     .retireGenerationResources(existing)
                     .catch((error) => failures.push(error));
@@ -161,7 +157,7 @@ export class InstanceRetirementCoordinator {
             }
             const workspaceDisabled =
                 existing.workspace.enabled && !next.workspace.enabled;
-            if (workspaceDisabled || instanceDisabled) {
+            if (workspaceDisabled || instanceDisabled || mcpDisabled) {
                 await this.#mcp
                     ?.retireMcpApp(existing.name)
                     .catch((error) => failures.push(error));
@@ -198,6 +194,8 @@ export class InstanceRetirementCoordinator {
             failures.push(error);
             return failures;
         }
+        await this.#mcp?.retireMcpApp(existing.name)
+            .catch((error) => failures.push(error));
         if (descriptor !== undefined && !descriptor.lifecycle.active) {
             await this.hooks
                 .retireGenerationResources(existing)

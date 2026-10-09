@@ -259,3 +259,52 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
         await host.stop();
     }
 });
+
+test('MCP App Live cancels only the terminated Context watcher', async () => {
+    const host = new HttpHost({ listenHost: '127.0.0.1', listenPort: 0 });
+    const leases = new McpAppLeaseStore();
+    const presence = new McpAppPresenceStore();
+    let enter!: () => void;
+    let count = 0;
+    const bothEntered = new Promise<void>((resolve) => { enter = resolve; });
+    let otherAborted = false;
+    const stop = installMcpAppLive({
+        host, instance: 'demo', leases, presence,
+        contexts: { async validateForInstance(ctxId, instance) {
+            return { ctxId, status: 'active', principal: 'local',
+                environments: [{ instance, workspace: '/workspace' }] } as ContextRecord;
+        } },
+        view: {
+            async snapshot() { throw new Error('Unexpected snapshot'); },
+            async watch(_instance, ctxId, _workspace, cursor, signal) {
+                if (++count === 2) enter();
+                return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
+                    signal?.addEventListener('abort', () => {
+                        if (ctxId === 'ctx-b') otherAborted = true;
+                        resolve({ changed: false, cursor });
+                    }, { once: true });
+                });
+            },
+        },
+    });
+    await host.start();
+    try {
+        const address = host.address;
+        assert.ok(typeof address === 'object' && address !== null);
+        const base = `http://127.0.0.1:${address.port}/api/live/demo/workspace/watch`;
+        const a = await leases.issue('demo', 'ctx-a');
+        const b = await leases.issue('demo', 'ctx-b');
+        const first = fetch(`${base}?ctxId=ctx-a&cursor=0`, { headers: { Authorization: `Bearer ${a}` } });
+        const second = fetch(`${base}?ctxId=ctx-b&cursor=0`, { headers: { Authorization: `Bearer ${b}` } });
+        await bothEntered;
+        stop.revokeContext('ctx-a');
+        assert.equal((await first).status, 410);
+        assert.equal(otherAborted, false);
+        stop();
+        assert.equal((await second).status, 410);
+        assert.equal(otherAborted, true);
+    } finally {
+        stop();
+        await host.stop();
+    }
+});

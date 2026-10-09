@@ -9,7 +9,7 @@ export class McpAppRoute {
     readonly #host: HttpHost;
     readonly #runtime: McpAppRuntime;
     readonly #contexts: Pick<ContextTransport, 'validateForInstance'>;
-    readonly #live = new Map<string, () => void>();
+    readonly #live = new Map<string, ReturnType<typeof installMcpAppLive>>();
 
     constructor(host: HttpHost, runtime: McpAppRuntime,
         contexts: Pick<ContextTransport, 'validateForInstance'>) {
@@ -39,6 +39,10 @@ export class McpAppRoute {
 
     stop(): void {
         for (const instance of this.#live.keys()) this.unregister(instance);
+    }
+
+    revokeContext(ctxId: string): void {
+        for (const route of this.#live.values()) route.revokeContext(ctxId);
     }
 
     has(instance: string): boolean { return this.#live.has(instance); }

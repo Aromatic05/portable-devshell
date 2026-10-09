@@ -1,6 +1,6 @@
 export { resolvePortableDevshellApplicationVersion } from "./Version.js";
-export { type McpAuthConfig, type McpOAuthApprovalConfig } from "./oauth/Config.js";
-export { McpOAuthProtectedResource } from "./oauth/Resource.js";
+export { type McpAuthConfig, type McpOAuth2Config, type McpOAuthApprovalConfig } from "./oauth/Config.js";
+export { McpOAuthProtectedResource } from "./oauth/Route.js";
 export { McpOAuthApprovalService } from "./oauth/interaction/Approval.js";
 export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } from "./oauth/provider/Provider.js";
 export { type McpToolProvenanceRecorder } from "./protocol/tool/Provenance.js";

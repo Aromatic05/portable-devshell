@@ -1,16 +1,21 @@
 import {
     McpRuntimeState,
-    type McpHost,
+    McpHost,
     type McpOAuthApprovalService,
+    type McpOAuth2Config,
+    type McpOAuthApprovalConfig,
+    type McpOAuthProtectedResource,
 } from "@portable-devshell/mcp";
 import type {
     ContextTransport,
+    ContextRecord,
     ControlConfig,
     Endpoint,
     JsonValue,
 } from "@portable-devshell/shared";
 
 import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
+import type { ContextChangeSource } from "../../context/Api.js";
 import {
     createToolCallProvenanceRuntime,
     type ToolCallProvenanceApi,
@@ -26,6 +31,8 @@ export interface McpControlModuleOptions {
     artifact: ArtifactRuntime;
     config: ControlConfig;
     context: Pick<ContextTransport, "resolve" | "validateForInstance">;
+    contextChanges?: ContextChangeSource;
+    contextRecords?: () => Promise<ContextRecord[]>;
     endpoint?: Endpoint;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
@@ -45,6 +52,11 @@ export class McpControlModule {
     readonly #controlPaths: ControlPathHome;
     readonly #runtimeState: McpRuntimeState;
     readonly #toolRegistry: ToolCallRegistry;
+    readonly #contextRecords?: () => Promise<ContextRecord[]>;
+    readonly #contextChanges?: ContextChangeSource;
+    #unsubscribeContexts?: () => void;
+    #contextCleanup: Promise<void> = Promise.resolve();
+    readonly #contextCleanupFailures: unknown[] = [];
 
     constructor(options: McpControlModuleOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
@@ -65,6 +77,9 @@ export class McpControlModule {
             storageDir: options.controlPaths.oauthDir,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
+        this.#contextRecords = options.contextRecords;
+        this.#contextChanges = options.contextChanges;
+        this.#subscribeContexts();
         this.toolProvenance = createToolCallProvenanceRuntime(
             options.controlPaths.toolProvenanceFile,
         );
@@ -84,7 +99,8 @@ export class McpControlModule {
                 this.#host?.unregisterInstance(instance);
             },
             retireMcpApp: async (instance) => {
-                await this.#host?.retireMcpApp(instance);
+                if (this.#host !== undefined) await this.#host.retireMcpApp(instance);
+                else await this.#runtimeState.app.revokeInstance(instance);
             },
         };
         this.#host = factory.wire(config, options.instances, {
@@ -125,17 +141,16 @@ export class McpControlModule {
         const sameEndpointAsPrevious =
             previous !== undefined &&
             sameEndpoint(previousConfig.mcp, config.mcp);
-        if (sameEndpointAsPrevious) await previous.stop();
+        if (sameEndpointAsPrevious) await this.stopHost(previous);
         try {
             if (next !== undefined) {
                 this.#artifact.installHttpRoute(next.server);
-                await next.start();
+                await this.#startHost(next);
             }
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             if (sameEndpointAsPrevious) {
-                await previous
-                    ?.start()
+                await this.#startHost(previous)
                     .catch((rollbackError) =>
                         rollbackFailures.push(rollbackError),
                     );
@@ -168,11 +183,11 @@ export class McpControlModule {
             : undefined;
         const failures: unknown[] = [];
         if (current !== undefined && current !== host) {
-            await current.stop().catch((error) => failures.push(error));
+            await this.stopHost(current).catch((error) => failures.push(error));
         }
         if (host !== undefined) {
             this.#artifact.installHttpRoute(host.server);
-            await host.start().catch((error) => failures.push(error));
+            await this.#startHost(host).catch((error) => failures.push(error));
         }
         if (failures.length > 0) {
             throw new AggregateError(
@@ -180,6 +195,11 @@ export class McpControlModule {
                 "MCP host rollback was incomplete.",
             );
         }
+    }
+
+    oauthResource(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string,
+        approval: McpOAuthApprovalConfig, trustProxy: boolean): McpOAuthProtectedResource {
+        return this.#runtimeState.oauth.resource(config, publicBaseUrl, storageDir, approval, trustProxy);
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {
@@ -203,16 +223,55 @@ export class McpControlModule {
         );
     }
 
+    #subscribeContexts(): void {
+        if (this.#unsubscribeContexts !== undefined) return;
+        this.#unsubscribeContexts = this.#contextChanges?.onChange((change) => {
+            for (const ctxId of change.terminalCtxIds ?? []) {
+                this.#contextCleanup = this.#contextCleanup.then(async () => {
+                    this.#host?.revokeMcpAppContext(ctxId);
+                    await this.#runtimeState.app.revokeContext(ctxId);
+                }).catch((error: unknown) => { this.#contextCleanupFailures.push(error); });
+            }
+        });
+    }
+
     async start(): Promise<void> {
-        await this.#host?.start();
+        this.#subscribeContexts();
+        await this.#runtimeState.app.initialize();
+        await this.#contextCleanup;
+        if (this.#contextCleanupFailures.length > 0)
+            throw new AggregateError(this.#contextCleanupFailures, 'MCP App Context cleanup failed.');
+        if (this.#contextRecords !== undefined)
+            await this.#runtimeState.app.reconcileContexts(await this.#contextRecords());
+        if (this.#host !== undefined) await this.#startHost(this.#host);
+    }
+
+    // Physical HTTP listening is controlled by ControlServer through this module.
+    async #startHost(host: Pick<McpHost, "start" | "stop">): Promise<void> {
+        if (!(host instanceof McpHost)) { await host.start(); return; }
+        await host.prepare();
+        try { await host.server.start(); }
+        catch (error) { host.retire(); throw error; }
+    }
+
+    async stopHost(host: Pick<McpHost, "start" | "stop">): Promise<void> {
+        if (!(host instanceof McpHost)) { await host.stop(); return; }
+        host.retire();
+        await host.server.stop();
     }
 
     async stop(): Promise<void> {
-        const failures: unknown[] = [];
-        await this.#host?.stop().catch((error) => failures.push(error));
+        this.#unsubscribeContexts?.();
+        this.#unsubscribeContexts = undefined;
+        await this.#contextCleanup;
+        const failures: unknown[] = this.#contextCleanupFailures.splice(0);
+        if (this.#host !== undefined)
+            await this.stopHost(this.#host).catch((error) => failures.push(error));
         await this.toolProvenance
             .flush()
             .catch((error) => failures.push(error));
+        try { this.#runtimeState.close(); }
+        catch (error) { failures.push(error); }
         if (failures.length > 0) {
             throw new AggregateError(failures, "MCP module shutdown failed.");
         }

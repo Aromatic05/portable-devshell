@@ -87,7 +87,7 @@ export class ControlServerConfig {
                 }
                 this.#reverseIngress.install(host.server);
             }
-            await retired?.stop();
+            if (retired !== undefined) await this.#mcp.stopHost(retired);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             await this.#mcp

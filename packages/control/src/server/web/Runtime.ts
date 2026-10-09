@@ -1,5 +1,7 @@
 import {
-    McpOAuthProtectedResource,
+    type McpOAuthProtectedResource,
+    type McpOAuth2Config,
+    type McpOAuthApprovalConfig,
     HttpHost,
     type McpHost,
 } from "@portable-devshell/mcp";
@@ -24,6 +26,8 @@ export interface ControlWebMcpPort {
     readonly host?: Pick<McpHost, "oauthProtectedResource" | "server">;
     readonly oauthApproval: ControlConfig["mcp"]["oauth2"];
     readonly publicBaseUrl?: string;
+    oauthResource(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string,
+        approval: McpOAuthApprovalConfig, trustProxy: boolean): McpOAuthProtectedResource;
 }
 
 export interface ControlWebTransportPort {
@@ -256,17 +260,13 @@ export class ControlWebRuntime {
             requiredScopes: [...this.#auth.oauth2.requiredScopes],
             resourceName: this.#auth.oauth2.resourceName,
         };
-        const protectedResource =
-            reused ??
-            new McpOAuthProtectedResource(
-                providerConfig,
-                new URL(publicBaseUrl).origin,
-                this.#oauthDirectory,
-                {
-                    approval: toMcpOAuthApprovalConfig(this.#mcp.oauthApproval),
-                    trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl),
-                },
-            );
+        const protectedResource = reused ?? this.#mcp.oauthResource(
+            providerConfig,
+            new URL(publicBaseUrl).origin,
+            this.#oauthDirectory,
+            toMcpOAuthApprovalConfig(this.#mcp.oauthApproval),
+            isLoopbackPublicBaseUrl(publicBaseUrl),
+        );
 
         return new ControlWebOAuthFlow({
             basePath,

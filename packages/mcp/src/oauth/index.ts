@@ -1,6 +1,6 @@
 import type { McpOAuth2Config, McpOAuthApprovalConfig } from './Config.js';
 import { McpOAuthApprovalService } from './interaction/Approval.js';
-import { McpOAuthProtectedResource } from './Resource.js';
+import { McpOAuthProtectedResource } from './Route.js';
 
 /** Owns OAuth approvals and providers independently of replaceable MCP HTTP listeners. */
 export class McpOAuthRuntime {
@@ -10,6 +10,8 @@ export class McpOAuthRuntime {
     constructor(storageDir?: string) {
         this.approvals = storageDir === undefined ? undefined : new McpOAuthApprovalService(storageDir);
     }
+
+    close(): void { this.#resources.clear(); }
 
     resource(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string,
         approval: McpOAuthApprovalConfig, trustProxy: boolean): McpOAuthProtectedResource {

@@ -420,6 +420,10 @@ export class InstanceCleanupDebt {
                 return failures;
             }
         }
+        if (record.operation === "delete") {
+            await this.#mcp?.retireMcpApp(record.instance.name)
+                .catch((error) => failures.push(error));
+        }
         if (!descriptor.lifecycle.retired) {
             await descriptor.retire().catch((error) => failures.push(error));
         }

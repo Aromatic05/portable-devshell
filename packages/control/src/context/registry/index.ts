@@ -893,7 +893,11 @@ export class ContextRegistry implements ContextRegistryPort {
         this.#publicRecords.clear();
         for (const [ctxId, record] of current)
             this.#publicRecords.set(ctxId, record);
-        this.changes.publish(changed);
+        const terminal = changed.filter((ctxId) => {
+            const record = this.#contexts.get(ctxId);
+            return record === undefined || record.status === "disabled";
+        });
+        this.changes.publish(changed, terminal);
     }
 
     async #run<T>(operation: () => Promise<T>): Promise<T> {

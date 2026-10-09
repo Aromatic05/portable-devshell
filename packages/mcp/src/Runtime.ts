@@ -1,7 +1,7 @@
 import type { ContextTransport, Endpoint, ToolCallApi } from '@portable-devshell/shared';
 import type { McpOAuth2Config, McpOAuthApprovalConfig } from './oauth/Config.js';
 import { McpOAuthRuntime } from './oauth/index.js';
-import type { McpOAuthProtectedResource } from './oauth/Resource.js';
+import type { McpOAuthProtectedResource } from './oauth/Route.js';
 import { McpAppRuntime } from './mcpapp/index.js';
 
 /** Composes Domain owners across MCP listener replacement; owns no domain stores directly. */
@@ -28,6 +28,7 @@ export class McpRuntimeState {
     }
 
     initialize(): Promise<void> { return this.app.initialize(); }
+    close(): void { this.app.close(); this.oauth.close(); }
     get oauthApprovals() { return this.oauth.approvals; }
     get mcpAppLeases() { return this.app.leases; }
     get workspaceActions() { return this.app.actions; }

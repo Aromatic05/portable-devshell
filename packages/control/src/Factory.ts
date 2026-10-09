@@ -113,6 +113,8 @@ export class ControlFactory {
             const mcp = new McpControlModule({
                 artifact,
                 config: options.config.require(),
+                contextChanges: contexts.api.registry.changes,
+                contextRecords: () => contexts.api.registry.list(),
                 context: {
                     resolve: (input) => contexts.api.resolve(input),
                     validateForInstance: (ctxId, instance) =>
