@@ -16,8 +16,9 @@ import {
     type InstanceEditorCoordinatorOptions,
 } from "../../../../src/instance/editor/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
-import { InstanceRegistry, Instance, type Instance } from "@portable-devshell/core/instance";
-import { createContextRuntime } from "@portable-devshell/core/context";
+import { Instance } from "@portable-devshell/core/instance";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
+import { createContextRuntime } from "../../../../src/context/index.ts";
 import { createDefaultControlConfig, type ControlConfig } from "@portable-devshell/shared";
 import {
     buildTestInstanceRegistry,
