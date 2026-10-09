@@ -41,6 +41,7 @@ export class ReverseIngress {
     readonly #connections: ReverseConnections;
     readonly #credentials: ReverseCredentials;
     #publicBaseUrl: string;
+    #unregisterRoutes: Array<() => void> = [];
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
         noServer: true,
@@ -57,38 +58,49 @@ export class ReverseIngress {
     }
 
     install(server: ReverseHttpHost): void {
-        const enrollPath = reverseRoute(this.#publicBaseUrl, ENROLL_SUFFIX);
-        const ssePath = reverseRoute(this.#publicBaseUrl, SSE_SUFFIX);
-        const upstreamPath = reverseRoute(this.#publicBaseUrl, UPSTREAM_SUFFIX);
-        const wssPath = reverseRoute(this.#publicBaseUrl, WSS_SUFFIX);
+        this.#unregister();
+        try {
+            const enrollPath = reverseRoute(this.#publicBaseUrl, ENROLL_SUFFIX);
+            const ssePath = reverseRoute(this.#publicBaseUrl, SSE_SUFFIX);
+            const upstreamPath = reverseRoute(this.#publicBaseUrl, UPSTREAM_SUFFIX);
+            const wssPath = reverseRoute(this.#publicBaseUrl, WSS_SUFFIX);
 
-        server.registerRawRoute(
-            "post",
-            enrollPath,
-            async (request, response) => {
-                await this.#handleEnroll(request, response);
-            },
-        );
-        server.registerRawRoute("get", ssePath, async (request, response) => {
-            await this.#handleSse(request, response);
-        });
-        server.registerRawRoute(
-            "post",
-            upstreamPath,
-            async (request, response) => {
-                await this.#handleUpstream(request, response);
-            },
-        );
-        server.registerUpgradeHandler(
-            wssPath,
-            async (request, socket, head) => {
-                await this.#handleWebSocketUpgrade(request, socket, head);
-            },
-        );
+            this.#unregisterRoutes.push(server.registerRawRoute(
+                "post",
+                enrollPath,
+                async (request, response) => {
+                    await this.#handleEnroll(request, response);
+                },
+            ));
+            this.#unregisterRoutes.push(server.registerRawRoute("get", ssePath, async (request, response) => {
+                await this.#handleSse(request, response);
+            }));
+            this.#unregisterRoutes.push(server.registerRawRoute(
+                "post",
+                upstreamPath,
+                async (request, response) => {
+                    await this.#handleUpstream(request, response);
+                },
+            ));
+            this.#unregisterRoutes.push(server.registerUpgradeHandler(
+                wssPath,
+                async (request, socket, head) => {
+                    await this.#handleWebSocketUpgrade(request, socket, head);
+                },
+            ));
+        } catch (error) {
+            this.#unregister();
+            throw error;
+        }
     }
 
     stop(): void {
+        this.#unregister();
         this.#webSocketServer.close();
+    }
+
+    #unregister(): void {
+        for (const remove of this.#unregisterRoutes.splice(0).reverse()) remove();
     }
 
     async #handleEnroll(

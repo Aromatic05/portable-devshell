@@ -12,15 +12,16 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 class RecordingHttpHost {
     readonly rawPaths: string[] = [];
     readonly upgradePaths: string[] = [];
+    readonly removedPaths: string[] = [];
 
     registerRawRoute(_method: string, path: string): () => void {
         this.rawPaths.push(path);
-        return () => undefined;
+        return () => { this.removedPaths.push(path); };
     }
 
     registerUpgradeHandler(path: string): () => void {
         this.upgradePaths.push(path);
-        return () => undefined;
+        return () => { this.removedPaths.push(path); };
     }
 }
 
@@ -48,6 +49,7 @@ test("reverse ingress can install before the first reverse instance exists", asy
     assert.equal(host.rawPaths.includes("/reverse/v1/enroll"), true);
     assert.equal(host.upgradePaths.includes("/reverse/v1/connect"), true);
     ingress.stop();
+    assert.equal(host.removedPaths.length, 4);
 });
 
 test("reverse ingress and credentials adopt a replacement public URL", async (t) => {
@@ -82,6 +84,7 @@ test("reverse ingress and credentials adopt a replacement public URL", async (t)
     ingress.setPublicBaseUrl("https://controller.example.test/new");
     const nextHost = new RecordingHttpHost();
     ingress.install(nextHost as never);
+    assert.equal(firstHost.removedPaths.length, 4);
 
     assert.equal(nextHost.rawPaths.includes("/new/reverse/v1/enroll"), true);
     assert.equal(
