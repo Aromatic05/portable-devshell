@@ -77,11 +77,13 @@ export function createTestInstance(
             tunnel: {},
         },
         provision: {
-            async retireProviderResources() {
-                await overrides.retireProviderResources?.();
-            },
-            async retireRuntime() {
-                await overrides.retireRuntime?.();
+            async retire(skipRuntimeRetirement = false) {
+                const failures: unknown[] = [];
+                if (!skipRuntimeRetirement)
+                    await overrides.retireRuntime?.().catch((error) => failures.push(error));
+                await overrides.retireProviderResources?.().catch((error) => failures.push(error));
+                if (failures.length > 0)
+                    throw new AggregateError(failures, "Worker resource cleanup failed.");
             },
         },
         supervision: {

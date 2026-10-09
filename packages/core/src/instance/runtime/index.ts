@@ -161,8 +161,6 @@ export class WorkerInstance implements WorkerInstanceApi {
                     ? dependencies.transportConnection
                     : undefined,
             retire: (skipRuntimeRetirement) => retirement.retire(skipRuntimeRetirement),
-            retireProviderResources: () => retirement.retireProviderResources(),
-            retireRuntime: () => retirement.retireRuntime(),
         };
         this.supervision = {
             endpoint: components.endpoint,

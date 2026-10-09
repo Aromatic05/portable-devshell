@@ -45,8 +45,6 @@ export interface WorkerEnvironment {
 export interface WorkerProvision {
     readonly reverseConnection?: TransportConnection;
     retire(skipRuntimeRetirement?: boolean): Promise<void>;
-    retireProviderResources(): Promise<void>;
-    retireRuntime(): Promise<void>;
 }
 
 export interface WorkerSupervision {
