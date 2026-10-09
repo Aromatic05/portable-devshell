@@ -37,9 +37,11 @@ test("Extension generation drains existing leases before disposal and rejects ne
     });
     generation.activate();
     const lease = generation.acquire();
+    assert.equal(lease.retirementSignal.aborted, false);
     const retired = generation.retire();
 
     assert.equal(generation.state, "draining");
+    assert.equal(lease.retirementSignal.aborted, true);
     assert.equal(generation.inFlight, 1);
     assert.equal(disposeCount, 0);
     assert.throws(() => generation.acquire(), /not active/u);
