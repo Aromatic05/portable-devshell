@@ -629,7 +629,7 @@ function createInstanceHarness(): { attach: (socket: Socket) => void } {
                 new Rpc(endpoint.bind("extension", "@control"), {
                     cliCommands: () => [],
                 }),
-                new Rpc(endpoint.bind("config", "@control"), {
+                new Rpc(endpoint.bind("instance", "@control"), {
                     listInstances: () => [
                         {
                             enabled: true,
