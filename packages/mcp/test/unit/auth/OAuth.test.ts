@@ -464,6 +464,37 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
         resourceName: "aromatic",
     };
 
+    test("OAuth Resource registrations are reference-counted across overlapping Host generations", () => {
+        const storageDir = "/virtual/oauth-resource-references";
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+        const oldUrl = new URL("https://mcp.example.test/old/demo/mcp");
+        const newUrl = new URL("https://mcp.example.test/new/demo/mcp");
+        const oldFirst = runtime.registerResource(oldUrl, config);
+        const oldSecond = runtime.registerResource(oldUrl, config);
+        const newer = runtime.registerResource(newUrl, config);
+        assert.deepEqual(runtime.registeredResources, [oldUrl.href, newUrl.href]);
+
+        // Retiring an older generation must not unregister its successor.
+        oldFirst();
+        oldFirst();
+        assert.deepEqual(runtime.registeredResources, [oldUrl.href, newUrl.href]);
+        newer();
+        assert.deepEqual(runtime.registeredResources, [oldUrl.href]);
+        oldSecond();
+        oldSecond();
+        assert.deepEqual(runtime.registeredResources, []);
+
+        const restored = runtime.registerResource(newUrl, config);
+        assert.deepEqual(runtime.registeredResources, [newUrl.href]);
+        restored();
+        assert.deepEqual(runtime.registeredResources, []);
+    });
+
     test("McpOAuthProviderRuntime owns provider lifecycle, resources, metadata, and durable signing keys", async () => {
         const storageDir = await createTestTempDirectory(
             "mcp-oauth-provider-runtime",
@@ -495,6 +526,12 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
                     "/.well-known/openid-configuration",
                 ),
                 true,
+            );
+            assert.equal(
+                runtime.shouldHandleProviderPath(
+                    "/.well-known/oauth-protected-resource/devshell/demo/mcp",
+                ),
+                false,
             );
             assert.equal(
                 runtime.shouldHandleProviderPath("/devshell/authorize"),

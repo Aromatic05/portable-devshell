@@ -70,7 +70,9 @@ export class McpOAuthProviderRuntime {
     readonly #basePath: string;
     readonly #config: McpOAuth2Config;
     readonly #issuerUrl: URL;
-    readonly #registeredResources = new Map<string, McpOAuth2Config>();
+    // Each Resource URI can be leased by multiple overlapping MCP Host generations.
+    // The latest active registration supplies its configuration.
+    readonly #registeredResources = new Map<string, Array<{ config: McpOAuth2Config }>>();
     readonly #revocationListeners = new Set<
         (revocation: McpOAuthAccessRevocation) => void
     >();
@@ -123,10 +125,25 @@ export class McpOAuthProviderRuntime {
         return () => this.#revocationListeners.delete(listener);
     }
 
-    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
-        this.#registeredResources.set(
-            resourceUrlFromServerUrl(resourceServerUrl).href,
-            config,
+    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): () => void {
+        const uri = resourceUrlFromServerUrl(resourceServerUrl).href;
+        const registrations = this.#registeredResources.get(uri) ?? [];
+        const registration = { config };
+        registrations.push(registration);
+        this.#registeredResources.set(uri, registrations);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            const index = registrations.indexOf(registration);
+            if (index !== -1) registrations.splice(index, 1);
+            if (registrations.length === 0) this.#registeredResources.delete(uri);
+        };
+    }
+
+    #resourceConfigs(): McpOAuth2Config[] {
+        return [...this.#registeredResources.values()].map(
+            (registrations) => registrations[registrations.length - 1]!.config,
         );
     }
 
@@ -151,7 +168,7 @@ export class McpOAuthProviderRuntime {
             ...new Set([
                 ...DYNAMIC_CLIENT_REQUIRED_SCOPES,
                 ...this.#config.requiredScopes,
-                ...[...this.#registeredResources.values()].flatMap(
+                ...this.#resourceConfigs().flatMap(
                     (resource) => resource.requiredScopes,
                 ),
             ]),
@@ -221,10 +238,9 @@ export class McpOAuthProviderRuntime {
                             _ctx,
                             resourceIndicator,
                         ) => {
-                            const resourceConfig =
-                                this.#registeredResources.get(
-                                    resourceIndicator,
-                                );
+                            const resourceConfig = this.#registeredResources.get(
+                                resourceIndicator,
+                            )?.at(-1)?.config;
                             if (resourceConfig === undefined) {
                                 throw new Error(
                                     `Unknown resource indicator: ${resourceIndicator}`,
@@ -273,7 +289,7 @@ export class McpOAuthProviderRuntime {
                     "offline_access",
                     ...new Set([
                         ...this.#config.requiredScopes,
-                        ...[...this.#registeredResources.values()].flatMap(
+                        ...this.#resourceConfigs().flatMap(
                             (resource) => resource.requiredScopes,
                         ),
                     ]),
@@ -313,6 +329,10 @@ export class McpOAuthProviderRuntime {
     }
 
     shouldHandleProviderPath(pathname: string): boolean {
+        // Resource metadata belongs to Protocol Route, including a newer Host
+        // generation that can share this Provider's HTTP listener.
+        if (pathname === "/.well-known/oauth-protected-resource" ||
+            pathname.startsWith("/.well-known/oauth-protected-resource/")) return false;
         if (pathname.startsWith("/.well-known/")) {
             return true;
         }
@@ -380,7 +400,7 @@ export class McpOAuthProviderRuntime {
         const config =
             this.#registeredResources.get(
                 resourceUrlFromServerUrl(resourceServerUrl).href,
-            ) ?? this.#config;
+            )?.at(-1)?.config ?? this.#config;
         const verified = await new McpOAuthResourceVerifier(
             this.provider,
             resourceServerUrl,

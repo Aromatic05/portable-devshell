@@ -55,8 +55,8 @@ export class McpOAuthProtectedResource {
         return this.#runtime.issuerUrl;
     }
 
-    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
-        this.#runtime.registerResource(resourceServerUrl, config);
+    registerResource(resourceServerUrl: URL, config: McpOAuth2Config): () => void {
+        return this.#runtime.registerResource(resourceServerUrl, config);
     }
 
     onAccessRevoked(
