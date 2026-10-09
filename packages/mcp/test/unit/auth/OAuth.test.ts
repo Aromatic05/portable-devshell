@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { mkdir, rm, access, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { McpOAuthApprovalService } from "../../../src/auth/oauth/interaction/Approval.ts";
+import { McpOAuthApprovalService } from "../../../src/oauth/interaction/Approval.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
-import { McpOAuthInteraction } from "../../../src/auth/oauth/interaction/Interaction.ts";
-import { createMcpOAuthOidcFileAdapterFactory } from "../../../src/auth/oauth/provider/Adapter.ts";
-import { McpOAuthProviderRuntime } from "../../../src/auth/oauth/provider/Provider.ts";
-import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction/Registration.ts";
+import { McpOAuthInteraction } from "../../../src/oauth/interaction/Interaction.ts";
+import { createMcpOAuthOidcFileAdapterFactory } from "../../../src/oauth/provider/Adapter.ts";
+import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts";
+import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Registration.ts";
 
 {
     test("OAuth approvals persist registration and authorization decisions", async () => {

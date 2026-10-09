@@ -8,16 +8,16 @@ import type {
     McpAuthConfig,
     McpOAuth2Config,
     McpOAuthApprovalConfig,
-} from "../auth/Config.js";
-import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
-import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
-import { McpEndpointBinding } from "../endpoint/Binding.js";
-import { McpEndpoint } from "../endpoint/Endpoint.js";
-import { createMcpContextSelector } from "../context/Selector.js";
-import { createMcpAppMcpExtension } from "../endpoint/extension/McpApp.js";
-import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
-import type { McpToolProvenanceRecorder } from "../endpoint/tool/Provenance.js";
-import type { McpToolSource } from "../endpoint/tool/Source.js";
+} from "../oauth/Config.js";
+import { McpOAuthProtectedResource } from "../oauth/Resource.js";
+import { McpOAuthApprovalService } from "../oauth/interaction/Approval.js";
+import { McpEndpointBinding } from "../protocol/Binding.js";
+import { McpEndpoint } from "../protocol/Endpoint.js";
+import { createMcpContextSelector } from "../protocol/context/Selector.js";
+import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
+import { McpExtensionRegistry } from "../protocol/extension/Registry.js";
+import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
+import type { McpToolSource } from "../protocol/tool/Source.js";
 import { McpAppLeaseStore } from "../mcpapp/app/Lease.js";
 import { installMcpAppLive } from "../mcpapp/app/Live.js";
 import { mcpAppAssetDirectory } from "../mcpapp/app/App.js";
@@ -25,7 +25,7 @@ import { McpAppPresenceStore } from "../mcpapp/app/Presence.js";
 import { McpAppActionStore } from "../mcpapp/ActionStore.js";
 import { createMcpAppViewModel } from "../mcpapp/ViewModel.js";
 import { HttpHost } from "./Http.js";
-import { McpHostRouteRegistry } from "./Route.js";
+import { McpHostRouteRegistry } from "../protocol/Registry.js";
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;

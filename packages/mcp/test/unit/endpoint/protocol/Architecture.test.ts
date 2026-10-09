@@ -11,9 +11,9 @@ import {
     type ToolCallPresentation,
     type ToolDefinition,
 } from "@portable-devshell/shared";
-import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
-import { McpEndpointDispatch } from "../../../../src/endpoint/dispatch/Dispatch.ts";
-import { McpNativeToolResult } from "../../../../src/endpoint/call/Boundary.ts";
+import { McpEndpointCatalog } from "../../../../src/protocol/tool/Catalog.ts";
+import { McpEndpointDispatch } from "../../../../src/protocol/dispatch/Dispatch.ts";
+import { McpNativeToolResult } from "../../../../src/protocol/call/Boundary.ts";
 import { TestToolSource } from "../../../support/ToolSource.ts";
 
 const contextRecord: ContextRecord = {

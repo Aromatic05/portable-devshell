@@ -6,7 +6,7 @@ import { toolNamespace, type ToolDefinition } from "@portable-devshell/shared";
 import type {
     McpToolSource,
     McpToolSourceEntry,
-} from "../../src/endpoint/tool/Source.ts";
+} from "../../src/protocol/tool/Source.ts";
 
 export const allTestToolInstances = "*" as const;
 

@@ -14,10 +14,10 @@ import express, {
 } from "express";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 
-import type { McpAuthConfig } from "../auth/Config.js";
-import { McpAuthProviderToken } from "../auth/Provider.js";
-import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
-import { McpEndpointBinding } from "../endpoint/Binding.js";
+import type { McpAuthConfig } from "../oauth/Config.js";
+import { McpAuthProviderToken } from "../oauth/Provider.js";
+import { McpOAuthProtectedResource } from "../oauth/Resource.js";
+import { McpEndpointBinding } from "../protocol/Binding.js";
 
 type JsonValue =
     | boolean

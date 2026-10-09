@@ -1,5 +1,5 @@
-import type { McpEndpointBinding } from "../endpoint/Binding.js";
-import type { McpAuthConfig } from "../auth/Config.js";
+import type { McpEndpointBinding } from "./Binding.js";
+import type { McpAuthConfig } from "../oauth/Config.js";
 
 export interface McpHostRouteMatch {
     instanceName: string;

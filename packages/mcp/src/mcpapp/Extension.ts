@@ -1,13 +1,13 @@
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 
-import type { McpExtension } from "./Contract.js";
+import type { McpExtension } from "../protocol/extension/Contract.js";
 import {
     mcpAppHtmlForPublicBaseUrl,
     mcpAppLegacyResourceUris,
     mcpAppResourceMetaForPublicBaseUrl,
     mcpAppResourceUri,
     mcpAppStableResourceUri,
-} from "../../mcpapp/app/App.js";
+} from "./app/App.js";
 
 export function createMcpAppMcpExtension(
     publicBaseUrl?: string,

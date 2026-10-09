@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveMcpLegacyTool } from "../../../../src/endpoint/tool/Compatibility.ts";
+import { resolveMcpLegacyTool } from "../../../../src/protocol/tool/Compatibility.ts";
 
 test("v0.6.15 MCP App protocol remains a hidden wire compatibility surface", () => {
     for (const [name, replacement] of [

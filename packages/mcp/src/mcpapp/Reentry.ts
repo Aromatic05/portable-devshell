@@ -1,8 +1,8 @@
 import type { ContextTransport, JsonValue } from "@portable-devshell/shared";
-import type { McpEndpointCallContext } from "../endpoint/call/Port.js";
-import { McpNativeToolResult, type McpEndpointResult } from "../endpoint/call/Boundary.js";
-import type { McpEndpointDispatch } from "../endpoint/dispatch/Dispatch.js";
-import { readMcpContextInput } from "../context/Selector.js";
+import type { McpEndpointCallContext } from "../protocol/call/Port.js";
+import { McpNativeToolResult, type McpEndpointResult } from "../protocol/call/Boundary.js";
+import type { McpEndpointDispatch } from "../protocol/dispatch/Dispatch.js";
+import { readMcpContextInput } from "../protocol/context/Selector.js";
 import type { McpAppActionStore } from "./ActionStore.js";
 import type { createMcpAppViewModel } from "./ViewModel.js";
 

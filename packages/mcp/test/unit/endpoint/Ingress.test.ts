@@ -11,9 +11,9 @@ import {
     type ToolCallIngressPort,
     type ToolDefinition,
 } from "@portable-devshell/shared";
-import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
-import { McpNativeToolResult } from "../../../src/endpoint/call/Boundary.ts";
-import { readMcpRoutedInput } from "../../../src/endpoint/tool/Input.ts";
+import { McpEndpoint } from "../../../src/protocol/Endpoint.ts";
+import { McpNativeToolResult } from "../../../src/protocol/call/Boundary.ts";
+import { readMcpRoutedInput } from "../../../src/protocol/tool/Input.ts";
 import { TestToolSource } from "../../support/ToolSource.ts";
 
 const contextRecord: ContextRecord = {

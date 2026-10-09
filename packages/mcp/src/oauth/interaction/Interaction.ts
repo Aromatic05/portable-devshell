@@ -4,7 +4,7 @@ import express, { type Express, type Request, type Response } from "express";
 import Provider from "oidc-provider";
 import type { OAuthApprovalRequest } from "@portable-devshell/shared";
 
-import type { McpOAuthApprovalConfig } from "../../Config.js";
+import type { McpOAuthApprovalConfig } from "../Config.js";
 import { readOAuthClientName, readOAuthStringArray } from "../Input.js";
 
 import {

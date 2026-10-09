@@ -6,7 +6,7 @@ import {
     controlErrorCodes,
 } from "@portable-devshell/shared";
 
-import { McpToolSchemaUnavailableError } from "../tool/Schema.js";
+import { McpToolSchemaUnavailableError } from "./Schema.js";
 
 export function withMcpContextId(
     tool: ToolDefinition,

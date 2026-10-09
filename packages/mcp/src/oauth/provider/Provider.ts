@@ -29,7 +29,7 @@ const INTERACTION_TTL_SECONDS = 10 * 60;
 const LONG_LIVED_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DYNAMIC_CLIENT_REQUIRED_SCOPES = ["openid", "offline_access"] as const;
 
-import type { McpOAuth2Config } from "../../Config.js";
+import type { McpOAuth2Config } from "../Config.js";
 import {
     McpOAuthApprovalService,
     OAuthApprovalCapacityError,

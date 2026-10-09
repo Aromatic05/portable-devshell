@@ -5,11 +5,11 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-import type { McpAuthConfig } from "../../auth/Config.js";
+import type { McpAuthConfig } from "../../oauth/Config.js";
 import {
     createMcpContextSelector,
     type McpContextSelector,
-} from "../../context/Selector.js";
+} from "../context/Selector.js";
 import {
     mcpToolAnnotations,
     mcpToolHiddenInputProperties,

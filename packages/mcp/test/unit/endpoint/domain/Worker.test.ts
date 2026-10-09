@@ -11,18 +11,18 @@ import type {
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
-import type { McpToolProvenanceRecorder } from "../../../../src/endpoint/tool/Provenance.ts";
+import type { McpToolProvenanceRecorder } from "../../../../src/protocol/tool/Provenance.ts";
 import { contextToolDefinitions } from "../../../../../control/src/context/tool/Definition.ts";
 import { todoToolDefinitions } from "../../../../../core/src/task/todo/tool/Definition.ts";
 import {
     createTestMcpRuntimeState,
 } from "../../../ContextRuntime.ts";
-import { McpEndpoint } from "../../../../src/endpoint/Endpoint.ts";
+import { McpEndpoint } from "../../../../src/protocol/Endpoint.ts";
 import { TestToolSource } from "../../../support/ToolSource.ts";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
-} from "../../../../src/endpoint/tool/Input.ts";
+} from "../../../../src/protocol/tool/Input.ts";
 
 const bashTool: ToolDefinition = {
     requiredCapabilities: ["execute"],

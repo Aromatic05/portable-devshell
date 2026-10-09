@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { McpNativeToolResult, presentMcpEndpointResult } from "../../../src/endpoint/call/Boundary.ts";
+import { McpNativeToolResult, presentMcpEndpointResult } from "../../../src/protocol/call/Boundary.ts";
 
 test("ToolCall image presentation maps to native MCP image content", () => {
     const result = presentMcpEndpointResult(
