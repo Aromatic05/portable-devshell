@@ -1,6 +1,5 @@
 import {
     CONTROL_PROTOCOL_VERSION,
-    STREAM_GAP_CODE,
     Endpoint,
     connectControlChannel,
     createApprovalTransport,
@@ -13,7 +12,6 @@ import {
     createAuthTransport,
     createMessageTransport,
     createOverviewTransport,
-    createRemoteError,
     createConnectionTransport,
     createProcessTransport,
     createServerTransport,
@@ -26,16 +24,12 @@ import {
     type ControlChannelOptions,
     type DebugTransport,
     type ExtensionRuntimeTransport,
-    type InstanceEventRecord,
-    type InstanceEventStreamPort,
-    type JsonValue,
     type AuthTransport,
     type MessageTransport,
     type OverviewTransport,
     type ConnectionTransport,
     type ProcessTransport,
     type ServerTransport,
-    type StreamMessage,
     type TaskEvent,
     type TaskTransport,
     type ToolTransport,
@@ -44,6 +38,9 @@ import {
 import { CliRenderError } from "../app/Failure.js";
 import { createCliRuntimeAdapter, type CliClientRuntime } from "./Runtime.js";
 import { createCliCommandAdapter, type CliClientCommand } from "./Command.js";
+import { CliClientEventStream } from "./Stream.js";
+
+export { CliClientEventStream };
 
 export interface CliClientOptions extends ControlChannelOptions {}
 
@@ -126,49 +123,4 @@ export async function negotiateCliControl(clients: CliClients): Promise<void> {
             `Incompatible control protocol version: ${hello.protocolVersion}.`,
         );
     }
-}
-
-export class CliClientEventStream<
-    Event extends InstanceEventRecord = InstanceEventRecord,
-> {
-    readonly #stream: InstanceEventStreamPort<Event>;
-    #closed = false;
-
-    constructor(stream: InstanceEventStreamPort<Event>) {
-        this.#stream = stream;
-    }
-
-    async nextEvent(): Promise<Event> {
-        const message = await this.#stream.next();
-        if (message.kind === "event") return message.event;
-        if (message.kind === "gap") {
-            throw createRemoteError({
-                code: STREAM_GAP_CODE,
-                message:
-                    "Requested event sequence is no longer available. Pull a fresh snapshot.",
-                retryable: true,
-                details: gapDetails(message),
-            });
-        }
-        if (message.error !== undefined) throw message.error;
-        throw new Error("control stream completed");
-    }
-
-    close(): void {
-        if (this.#closed) return;
-        this.#closed = true;
-        this.#stream.close();
-    }
-}
-
-function gapDetails<Event>(
-    message: Extract<StreamMessage<Event>, { kind: "gap" }>,
-): JsonValue {
-    return (
-        message.details ?? {
-            latestSeq: message.gap.lastSeq,
-            oldestAvailableSeq: message.gap.nextSeq,
-            requestedFromSeq: message.gap.fromSeq,
-        }
-    );
 }

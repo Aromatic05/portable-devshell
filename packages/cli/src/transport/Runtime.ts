@@ -9,7 +9,7 @@ import {
     type ProcessTransport,
 } from "@portable-devshell/shared";
 
-import { CliClientEventStream } from "./Client.js";
+import { CliClientEventStream } from "./Stream.js";
 
 export interface CliClientRuntimeTerminalRelay {
     input: NodeJS.ReadableStream;
