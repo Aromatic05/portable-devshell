@@ -25,11 +25,14 @@ export interface ExtensionGenerationLease {
     readonly generation: string;
     readonly manifest: ExtensionManifest;
     readonly registrations: ExtensionRegistrationSet;
+    /** Signals long-lived consumers to reconnect when this runtime retires. */
+    readonly retirementSignal: AbortSignal;
     release(): void;
 }
 
 export class ExtensionGeneration {
     readonly #faultListeners = new Set<() => void>();
+    readonly #retirementController = new AbortController();
     readonly generation: string;
     readonly manifest: ExtensionManifest;
     readonly registrations: ExtensionRegistrationSet;
@@ -98,6 +101,7 @@ export class ExtensionGeneration {
             generation: this.generation,
             manifest: this.manifest,
             registrations: this.registrations,
+            retirementSignal: this.#retirementController.signal,
             release: () => {
                 if (released) return;
                 released = true;
@@ -143,6 +147,7 @@ export class ExtensionGeneration {
             this.#state === "faulted"
         ) {
             this.#state = "draining";
+            this.#retirementController.abort(new Error("Extension generation retired."));
             this.#maybeDispose();
         }
         return this.#retirement;

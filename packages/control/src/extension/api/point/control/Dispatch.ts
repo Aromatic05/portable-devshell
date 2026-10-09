@@ -122,7 +122,10 @@ export class ControlExtensionRouteService {
     ): Promise<void> {
         const { extensionId, lease, registration } = await this.#extensions.acquireRegistration(streams.id, id);
         const controller = new AbortController();
-        const signal = AbortSignal.any([context.signal, controller.signal]);
+        // Re-loading the same immutable generation creates a new runtime with
+        // the same generation string. The lease's lifetime, not that string,
+        // must end long-lived subscriptions on retirement.
+        const signal = AbortSignal.any([context.signal, controller.signal, lease.retirementSignal]);
         const checkGeneration = () => {
             const current = this.#extensions.listDeclarations(streams.id).find((entry) => entry.id === id);
             if (current?.extensionId !== extensionId || current.generation !== lease.generation)
