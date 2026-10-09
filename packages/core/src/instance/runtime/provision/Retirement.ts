@@ -20,6 +20,18 @@ export class WorkerInstanceRetirement {
         this.#config = options.config;
     }
 
+    async retire(skipRuntimeRetirement = false): Promise<void> {
+        const failures: unknown[] = [];
+        if (!skipRuntimeRetirement)
+            await this.retireRuntime().catch((error) => failures.push(error));
+        await this.retireProviderResources().catch((error) => failures.push(error));
+        if (failures.length > 0)
+            throw new AggregateError(
+                failures,
+                `Instance ${this.#config.name} Worker resource retirement was incomplete.`,
+            );
+    }
+
     async retireRuntime(): Promise<void> {
         if (this.#commandClient === undefined) return;
         const result = await this.#commandClient.retireRuntime();

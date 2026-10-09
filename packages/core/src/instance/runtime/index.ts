@@ -160,6 +160,7 @@ export class WorkerInstance implements WorkerInstanceApi {
                 managementMode === "selfManaged"
                     ? dependencies.transportConnection
                     : undefined,
+            retire: (skipRuntimeRetirement) => retirement.retire(skipRuntimeRetirement),
             retireProviderResources: () => retirement.retireProviderResources(),
             retireRuntime: () => retirement.retireRuntime(),
         };

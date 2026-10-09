@@ -183,6 +183,42 @@ export class Instance {
         this.#subscriptions.unsubscribeConnection(connectionId);
     }
 
+    async stopWorkerForDisable(): Promise<void> {
+        if (this.#worker.supervision.managementMode === "selfManaged") return;
+        await this.#worker.supervision.lifecycle.stop();
+    }
+
+    async retireWorkerResources(skipRuntimeRetirement = false): Promise<void> {
+        await this.#worker.provision.retire(skipRuntimeRetirement);
+    }
+
+    async withWorkerForCleanup(
+        operation: (worker: {
+            releaseAlerts(workspace: string): Promise<void>;
+            releaseReference(reference: string): Promise<void>;
+        }) => Promise<void>,
+    ): Promise<void> {
+        const { supervision, execution } = this.#worker;
+        let startedForCleanup = false;
+        if (!supervision.snapshot().ready) {
+            try {
+                await supervision.lifecycle.start();
+                startedForCleanup = true;
+            } catch (error) {
+                await supervision.lifecycle.stop().catch(() => undefined);
+                throw error;
+            }
+        }
+        try {
+            await operation({
+                releaseAlerts: (workspace) => execution.environment.releaseAlerts(workspace),
+                releaseReference: (reference) => supervision.ownership.releaseReference(reference),
+            });
+        } finally {
+            if (startedForCleanup) await supervision.lifecycle.stop();
+        }
+    }
+
     retire(): Promise<void> {
         if (this.#retirePromise !== undefined) return this.#retirePromise;
         this.#lifecycle.beginRetirement();
