@@ -22,6 +22,7 @@ pnpm testspace web-smoke
 pnpm testspace comment-smoke
 pnpm testspace update-smoke
 pnpm testspace workflow-smoke
+pnpm testspace approval-smoke
 pnpm testspace exec -- <command...>
 ```
 
@@ -30,6 +31,8 @@ pnpm testspace exec -- <command...>
 `update-smoke` 在隔离 Testspace 中验证 Control Web 监听器热替换、端口占用导致的更新拒绝、Instance 模型能力热更新与运行中 Worker 重建拒绝。每个阶段检查配置版本号及两台 Worker 状态，退出前恢复 Web/Instance 原配置；不修改主机实际 `~/.devshell`。它验证预检查失败的无副作用，不代表已经覆盖运行时提交后失败的回滚。
 
 `workflow-smoke` 通过真实 MCP Client → Instance ToolCall → Todo/Bash → MCPApp Action/Reentry 运行一条 Context 级工作流，检查任务的暂停/恢复、Action 重试去重、持久化恢复收据和审计。脚本使用管理端 Task Transport 清理自身创建的测试任务。它没有真实 ChatGPT Host，恢复消息被明确报告为 `simulated-rejected`；不能将其作为 Host `sendMessage` 成功或 Agent 真正续跑的证据。
+
+`approval-smoke` 只将隔离测试实例 MCP 侧的 `file_grep` 配置为 `ask`，检查 ToolCall 等待审批、MCPApp Action 同意/拒绝，以及 Instance Audit 的 `completed`/`denied` 记录。其他工具保持 `allow`，避免阻塞活动 Connector。退出时恢复审批策略并清理测试 Context 的待决审批。它模拟授权用户调用 MCPApp Action，不代表真实 ChatGPT Host 点击成功。
 
 活动 connector 默认周期是 2 秒，可通过：
 

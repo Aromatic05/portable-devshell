@@ -173,6 +173,7 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("web-smoke"), "web-smoke");
     assert.equal(resolveTestspaceCommand("update-smoke"), "update-smoke");
     assert.equal(resolveTestspaceCommand("workflow-smoke"), "workflow-smoke");
+    assert.equal(resolveTestspaceCommand("approval-smoke"), "approval-smoke");
     assert.equal(resolveTestspaceCommand("comment-smoke"), "comment-smoke");
     assert.equal(resolveTestspaceCommand("smoke"), "smoke");
     assert.equal(resolveTestspaceCommand("status"), "status");
