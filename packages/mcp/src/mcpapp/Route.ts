@@ -20,7 +20,7 @@ export class McpAppRoute {
     }
 
     register(instance: string): void {
-        this.unregister(instance);
+        if (this.#live.has(instance)) return;
         if (this.#runtime.view === undefined) return;
         this.#live.set(instance, installMcpAppLive({
             contexts: this.#contexts,
