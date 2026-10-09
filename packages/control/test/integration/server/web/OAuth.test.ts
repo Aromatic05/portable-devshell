@@ -128,7 +128,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
             ),
     });
     t.after(() => endpoint.close());
-    const service = new Rpc(await endpoint.connect("@control", "service"));
+    const service = new Rpc(await endpoint.connect("@control", "server"));
     t.after(() => service.close());
     await service.request("hello", {
         clientKind: "web",
@@ -610,7 +610,7 @@ function createRouteHosts(): readonly ControlHostDefinition[] {
             host: "@control",
             ports: [
                 {
-                    name: "service",
+                    name: "server",
                     operations: [
                         {
                             name: "hello",
