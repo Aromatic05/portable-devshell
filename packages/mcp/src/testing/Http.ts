@@ -175,7 +175,7 @@ export class HttpHost {
     }
 
     get address() {
-        return this.#server?.address();
+        return this.#server?.address() ?? null;
     }
 
     installOAuth(oauth: McpOAuthProtectedResource): void {
@@ -202,6 +202,19 @@ export class HttpHost {
                     response as unknown as ServerResponse,
                 ),
         );
+    }
+
+    /** Compatibility for MCP tests while the production host is Control-owned. */
+    registerMiddleware(
+        path: string,
+        handler: (request: IncomingMessage, response: ServerResponse, next: () => void) => void | Promise<void>,
+    ): () => void {
+        let active = true;
+        this.#app.use(path, (request: Request, response: Response, next: NextFunction) => {
+            if (!active) { next(); return; }
+            void Promise.resolve(handler(request, response, next)).catch(next);
+        });
+        return () => { active = false; };
     }
 
     registerRawPrefix(

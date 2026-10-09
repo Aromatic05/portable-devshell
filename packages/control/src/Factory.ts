@@ -32,6 +32,7 @@ import { ExtensionConfigControl } from "./extension/api/cap/config/index.js";
 import { McpRuntimeFactory } from "./server/mcp/Runtime.js";
 import { createArtifactRuntime } from "./artifact/index.js";
 import { ControlServer } from "./server/index.js";
+import { ControlHttpServer } from "./server/http/index.js";
 import { ControlState } from "./State.js";
 import type { ControlConfig } from "./config/index.js";
 import type { ControlInstances } from "./instance/index.js";
@@ -77,6 +78,7 @@ export class ControlFactory {
             options.homeDirectory ?? homedir(),
         );
         const toolRegistry = createToolCallRegistry();
+        const http = new ControlHttpServer();
         const artifact = createArtifactRuntime({
             config: () => options.config.require(),
             controlPaths,
@@ -111,6 +113,7 @@ export class ControlFactory {
                     createInstanceRuntimeTransport(internalEndpoint, name),
             });
             const mcp = new McpControlModule({
+                http,
                 artifact,
                 config: options.config.require(),
                 contextChanges: contexts.api.registry.changes,
@@ -309,6 +312,7 @@ export class ControlFactory {
                     }),
             });
             const web = new ControlWebRuntime({
+                http,
                 config: options.config.require(),
                 extensions,
                 mcp,
@@ -384,6 +388,7 @@ export class ControlFactory {
                 },
             );
             const composedServer = new ControlServer({
+                http,
                 artifact: state.artifact,
                 config: () => options.config.require(),
                 configChanges: options.config.changes,

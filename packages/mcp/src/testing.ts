@@ -18,7 +18,7 @@ export * from "./protocol/tool/Schema.js";
 
 export * from "./protocol/index.js";
 export { McpRuntimeState } from "./Runtime.js";
-export { HttpHost } from "./host/Http.js";
+export { HttpHost } from "./testing/Http.js";
 export * from "./protocol/Registry.js";
 
 export * from "./mcpapp/app/App.js";

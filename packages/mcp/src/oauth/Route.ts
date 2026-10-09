@@ -1,4 +1,5 @@
-import type { Express, RequestHandler } from "express";
+import express, { type Express, type RequestHandler } from "express";
+import type { McpHttpRoute } from "../server/Api.js";
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
 import type { McpOAuth2Config, McpOAuthApprovalConfig } from "./Config.js";
 import { McpOAuthApprovalService } from "./interaction/Approval.js";
@@ -79,6 +80,15 @@ export class McpOAuthProtectedResource {
         this.#installRegistrationGuard(app);
         this.#interaction.install(app);
         this.#installProvider(app);
+    }
+
+    /** Mount OAuth's own application on an injected HTTP route port. */
+    attach(http: Pick<McpHttpRoute, "registerMiddleware">): () => void {
+        const app = express();
+        this.install(app);
+        return http.registerMiddleware("/", (request, response, next) => {
+            app(request as Parameters<Express>[0], response as Parameters<Express>[1], next);
+        });
     }
 
     protectedResourceMetadataHandler(

@@ -7,6 +7,7 @@ import { McpAppLeaseStore } from '../../../../../mcp/src/mcpapp/app/Lease.ts';
 import { McpAppRuntime } from '../../../../../mcp/src/mcpapp/index.ts';
 import { createTestTempDirectory } from '../../../../../../test/TestTempDirectory.ts';
 import { ContextRegistry } from '../../../../src/context/registry/index.ts';
+import { ControlHttpServer } from "../../../../src/server/http/index.ts";
 import { McpControlModule } from '../../../../src/server/mcp/Module.ts';
 import { createToolCallRegistry } from '../../../../src/toolcall/index.ts';
 
@@ -29,6 +30,7 @@ test('MCP App reconciles terminated Contexts on startup and revokes leases on di
     const unsubscribe = registry.changes.onChange((change) => changes.push(change));
     t.after(unsubscribe);
     const module = new McpControlModule({
+        http: new ControlHttpServer(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         config: createDefaultControlConfig(),
         context: {} as never,

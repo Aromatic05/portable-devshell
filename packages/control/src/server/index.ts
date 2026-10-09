@@ -22,6 +22,7 @@ import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
 import { createOperationalOverviewRuntime } from "../overview/index.js";
 import { OperationalOverviewInstanceCollector } from "../overview/collector/Instance.js";
 import { ControlRouteRegistry } from "./Route.js";
+import { ControlHttpServer } from "./http/index.js";
 import type { McpControlModule } from "./mcp/Module.js";
 import type { ReverseIngress } from "./reverse/Ingress.js";
 import type { ControlTransportListener } from "./transport/channel/Listener.js";
@@ -46,6 +47,7 @@ export interface ControlServerOptions {
     instanceChanges: InstanceChangeHub;
     instances: InstanceRegistry;
     onConnectionDetached(connectionId: string): void;
+    http: ControlHttpServer;
     internalControl: {
         endpoint: Endpoint;
         server: ServerTransport;
@@ -67,6 +69,7 @@ export class ControlServer {
     readonly #internalControlEndpoint: Endpoint;
     readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
+    readonly #http: ControlHttpServer;
     readonly #reverseCredentials?: ReverseCredentials;
     readonly #reverseIngress?: ReverseIngress;
     readonly #routes: ControlRouteRegistry;
@@ -79,6 +82,7 @@ export class ControlServer {
         this.#internalControlEndpoint = options.internalControl.endpoint;
         this.#internalControlServer = options.internalControl.server;
         this.#mcp = options.mcp;
+        this.#http = options.http;
         this.#reverseCredentials = options.reverse.credentials;
         this.#reverseIngress = options.reverse.ingress;
 
@@ -189,6 +193,7 @@ export class ControlServer {
         await this.#transport.close().catch((error) => failures.push(error));
         await this.#web.stopHost().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
+        await this.#http.close().catch((error) => failures.push(error));
         this.#web.stop();
         try {
             this.#reverseIngress?.stop();

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 
-import { HttpHost } from "@portable-devshell/mcp";
+import { HttpHost } from "@portable-devshell/mcp/testing";
 import { TestMcpHost } from "../../../../../mcp/test/ContextRuntime.ts";
 import {
     CONTROL_PROTOCOL_RANGE,

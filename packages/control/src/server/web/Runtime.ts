@@ -2,9 +2,10 @@ import {
     type McpOAuthProtectedResource,
     type McpOAuth2Config,
     type McpOAuthApprovalConfig,
-    HttpHost,
     type McpHost,
 } from "@portable-devshell/mcp";
+import { ControlHttpServer } from "../http/index.js";
+import type { ControlHttpLease as HttpHost } from "../http/Api.js";
 import {
     controlRemoteRpcPath,
     controlWebBasePath,
@@ -23,7 +24,7 @@ import { ControlWebSocketListener } from "./Socket.js";
 import { ExtensionWebGateway } from "./extension/application/Gateway.js";
 
 export interface ControlWebMcpPort {
-    readonly host?: Pick<McpHost, "oauthProtectedResource" | "server">;
+    readonly host?: Pick<McpHost, "oauthProtectedResource" | "server"> & Partial<Pick<McpHost, "status">>;
     readonly oauthApproval: ControlConfig["mcp"]["oauth2"];
     readonly publicBaseUrl?: string;
     oauthResource(config: McpOAuth2Config, publicBaseUrl: string, storageDir: string,
@@ -40,6 +41,7 @@ export interface ControlWebTransportPort {
 export interface ControlWebRuntimeOptions {
     config: ControlConfig;
     extensions: ExtensionRuntime;
+    http: ControlHttpServer;
     mcp: ControlWebMcpPort;
     oauthDirectory: string;
 }
@@ -53,6 +55,8 @@ interface WebRuntimeGeneration {
 export class ControlWebRuntime {
     #auth: ControlWebAuthConfig;
     readonly #extensions: ExtensionRuntime;
+    readonly #http: ControlHttpServer;
+    #mcpSharesListener: boolean;
     #enabled: boolean;
     #flow?: ControlWebOAuthFlow;
     #flowUninstall?: () => void;
@@ -64,6 +68,8 @@ export class ControlWebRuntime {
 
     constructor(options: ControlWebRuntimeOptions) {
         this.#extensions = options.extensions;
+        this.#http = options.http;
+        this.#mcpSharesListener = options.config.mcp.enabled && sameEndpoint(options.config.mcp, options.config.web);
         this.#mcp = options.mcp;
         this.#oauthDirectory = options.oauthDirectory;
         this.#auth = options.config.web.auth;
@@ -89,13 +95,13 @@ export class ControlWebRuntime {
     }
 
     async startHost(): Promise<void> {
-        if (this.#host !== undefined && this.#host !== this.#mcp.host?.server) {
+        if (this.#host !== undefined) {
             await this.#host.start();
         }
     }
 
     async stopHost(): Promise<void> {
-        if (this.#host !== undefined && this.#host !== this.#mcp.host?.server) {
+        if (this.#host !== undefined) {
             await this.#host.stop();
         }
     }
@@ -232,13 +238,10 @@ export class ControlWebRuntime {
 
     #createHost(config: ControlConfig): HttpHost | undefined {
         if (!config.web.enabled) return undefined;
-        return this.#mcp.host !== undefined &&
-            sameEndpoint(config.mcp, config.web)
-            ? this.#mcp.host.server
-            : new HttpHost({
-                  listenHost: config.web.listenHost,
-                  listenPort: config.web.listenPort,
-              });
+        return this.#http.acquire({
+            listenHost: config.web.listenHost,
+            listenPort: config.web.listenPort,
+        });
     }
 
     #createOAuthFlow(
@@ -272,7 +275,7 @@ export class ControlWebRuntime {
             basePath,
             clientStateFile: `${this.#oauthDirectory}/client.json`,
             config: providerConfig,
-            installProvider: reused === undefined || http !== mcpHost?.server,
+            installProvider: reused === undefined || !this.#mcpSharesListener || mcpHost?.status?.().authMode !== "oauth2",
             ownsProvider: reused === undefined,
             protectedResource,
             publicBaseUrl,
@@ -291,19 +294,14 @@ export class ControlWebRuntime {
             previous !== undefined &&
             next !== undefined &&
             next !== previous &&
-            next !== this.#mcp.host?.server &&
-            previous !== this.#mcp.host?.server &&
             sameEndpoint(previousConfig.web, config.web);
         if (same) await previous.stop();
-        if (
-            next !== undefined &&
-            next !== previous &&
-            next !== this.#mcp.host?.server
-        ) {
+        if (next !== undefined && next !== previous) {
             try {
                 await next.start();
             } catch (error) {
                 const rollbackFailures: unknown[] = [];
+                await next.dispose().catch((cleanupError) => rollbackFailures.push(cleanupError));
                 if (same) {
                     await previous
                         .start()
@@ -320,6 +318,7 @@ export class ControlWebRuntime {
                 throw error;
             }
         }
+        this.#mcpSharesListener = config.mcp.enabled && sameEndpoint(config.mcp, config.web);
         this.#auth = config.web.auth;
         this.#enabled = config.web.enabled;
         this.#publicBaseUrl = config.web.enabled
@@ -334,31 +333,24 @@ export class ControlWebRuntime {
         config: ControlConfig,
     ): Promise<void> {
         const current = this.#host;
+        this.#mcpSharesListener = config.mcp.enabled && sameEndpoint(config.mcp, config.web);
         this.#auth = config.web.auth;
         this.#enabled = config.web.enabled;
         this.#publicBaseUrl = config.web.enabled
             ? config.web.publicBaseUrl
             : undefined;
         this.#host = host;
-        if (
-            current !== undefined &&
-            current !== host &&
-            current !== this.#mcp.host?.server
-        ) {
-            await current.stop();
+        if (current !== undefined && current !== host) {
+            await current.dispose();
         }
-        if (host !== undefined && host !== this.#mcp.host?.server) {
+        if (host !== undefined) {
             await host.start();
         }
     }
 
     async #stopRetiredHost(host: HttpHost | undefined): Promise<void> {
-        if (
-            host !== undefined &&
-            host !== this.#host &&
-            host !== this.#mcp.host?.server
-        ) {
-            await host.stop();
+        if (host !== undefined && host !== this.#host) {
+            await host.dispose();
         }
     }
 }

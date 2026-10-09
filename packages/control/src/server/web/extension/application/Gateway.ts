@@ -11,7 +11,8 @@ import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 
-import type { HttpHost } from "@portable-devshell/mcp";
+import type { ControlHttpLease } from "../../../http/Api.js";
+type HttpHost = Pick<ControlHttpLease, "registerRawPrefix" | "registerUpgradePrefix">;
 import type { WebApplicationBinding } from "@portable-devshell/extension/web";
 
 import type { ExtensionRuntime } from "../../../../extension/Api.js";

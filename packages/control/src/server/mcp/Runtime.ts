@@ -1,5 +1,6 @@
 import {
     McpHost,
+    type McpHttpAccess,
     McpRuntimeState,
     resolvePortableDevshellApplicationVersion,
     type McpOAuthApprovalConfig,
@@ -28,6 +29,7 @@ export class McpRuntimeFactory {
         registry: InstanceRegistry,
         options?: {
             runtimeState?: McpRuntimeState;
+            http: McpHttpAccess;
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
             toolSource: McpToolSource;
@@ -83,6 +85,7 @@ export class McpRuntimeFactory {
                       }),
             },
             options.runtimeState,
+            options.http,
         );
     }
 }

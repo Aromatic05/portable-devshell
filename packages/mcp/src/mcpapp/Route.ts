@@ -1,24 +1,29 @@
 import type { ContextTransport } from '@portable-devshell/shared';
-import type { HttpHost } from '../host/Http.js';
+import type { McpHttpRoute } from '../server/Api.js';
 import { mcpAppAssetDirectory } from './app/Resource.js';
 import { installMcpAppLive } from './app/Live.js';
 import type { McpAppRuntime } from './index.js';
 
 /** Owns the MCP App's public assets and per-Instance Live HTTP registrations. */
 export class McpAppRoute {
-    readonly #host: HttpHost;
+    readonly #host: McpHttpRoute;
     readonly #runtime: McpAppRuntime;
     readonly #contexts: Pick<ContextTransport, 'validateForInstance'>;
     readonly #unregisterAssets: () => void;
     #closed = false;
     readonly #live = new Map<string, ReturnType<typeof installMcpAppLive>>();
 
-    constructor(host: HttpHost, runtime: McpAppRuntime,
+    constructor(host: McpHttpRoute, runtime: McpAppRuntime,
         contexts: Pick<ContextTransport, 'validateForInstance'>) {
         this.#host = host;
         this.#runtime = runtime;
         this.#contexts = contexts;
-        this.#unregisterAssets = this.#host.registerStaticDirectory('/mcpapp/assets', mcpAppAssetDirectory);
+        const removeCors = this.#host.registerMiddleware('/mcpapp/assets', (_request, response, next) => {
+            response.setHeader('Access-Control-Allow-Origin', '*');
+            next();
+        });
+        const removeAssets = this.#host.registerStaticDirectory('/mcpapp/assets', mcpAppAssetDirectory);
+        this.#unregisterAssets = () => { removeAssets(); removeCors(); };
     }
 
     register(instance: string): void {

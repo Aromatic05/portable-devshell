@@ -3,7 +3,7 @@ import test from "node:test";
 import { Endpoint, type ContextRecord } from "@portable-devshell/shared";
 import { createTestMcpRuntimeState, TestMcpHost } from "../ContextRuntime.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
-import { HttpHost } from "../../src/host/Http.ts";
+import { HttpHost } from "../../src/testing/Http.ts";
 import { McpAppLeaseStore } from "../../src/mcpapp/app/Lease.ts";
 import { McpAppPresenceStore } from "../../src/mcpapp/app/Presence.ts";
 import { installMcpAppLive } from "../../src/mcpapp/app/Live.ts";

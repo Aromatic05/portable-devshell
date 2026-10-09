@@ -117,6 +117,9 @@ export class ControlServerConfig {
             }
             throw error;
         }
+        if (retired !== undefined && retired !== this.#mcp.host && "dispose" in retired &&
+            typeof retired.dispose === "function")
+            await retired.dispose();
     }
 }
 

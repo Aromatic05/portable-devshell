@@ -1,6 +1,7 @@
 import {
-    McpRuntimeState,
+    McpServer,
     McpHost,
+    type McpHttpAccess,
     type McpOAuthApprovalService,
     type McpOAuth2Config,
     type McpOAuthApprovalConfig,
@@ -35,6 +36,7 @@ export interface McpControlModuleOptions {
     endpoint?: Endpoint;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
+    http: McpHttpAccess;
     instances: InstanceRegistry;
     toolRegistry: ToolCallRegistry;
 }
@@ -47,9 +49,10 @@ export class McpControlModule {
     #host?: McpHost;
     readonly #factory: McpRuntimeFactory;
     readonly #instances: InstanceRegistry;
+    readonly #http: McpHttpAccess;
     readonly #artifact: ArtifactRuntime;
     readonly #controlPaths: ControlPathHome;
-    readonly #runtimeState: McpRuntimeState;
+    readonly #runtimeState: McpServer;
     readonly #toolRegistry: ToolCallRegistry;
     readonly #contextRecords?: () => Promise<ContextRecord[]>;
     readonly #contextChanges?: ContextChangeSource;
@@ -61,10 +64,11 @@ export class McpControlModule {
         const factory = options.factory ?? new McpRuntimeFactory();
         this.#factory = factory;
         this.#instances = options.instances;
+        this.#http = options.http;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         this.#toolRegistry = options.toolRegistry;
-        this.#runtimeState = new McpRuntimeState({
+        this.#runtimeState = new McpServer({
             context: options.context,
             ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
             tools: { call: (instance, ...args) => {
@@ -106,6 +110,7 @@ export class McpControlModule {
         this.#host = factory.wire(config, options.instances, {
             storageDir: options.controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
+            http: this.#http,
             toolProvenance: this.toolProvenance,
             toolSource: this.#toolRegistry,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
@@ -133,6 +138,7 @@ export class McpControlModule {
         const next = this.#factory.wire(config, this.#instances, {
             storageDir: this.#controlPaths.oauthDir,
             runtimeState: this.#runtimeState,
+            http: this.#http,
             toolProvenance: this.toolProvenance,
             toolSource: this.#toolRegistry,
             mcpAppLeaseFile: this.#controlPaths.mcpAppLeasesFile,
@@ -149,6 +155,9 @@ export class McpControlModule {
             }
         } catch (error) {
             const rollbackFailures: unknown[] = [];
+            if (next instanceof McpHost) {
+                await next.dispose().catch((cleanupError) => rollbackFailures.push(cleanupError));
+            }
             if (sameEndpointAsPrevious) {
                 await this.#startHost(previous)
                     .catch((rollbackError) =>
@@ -184,6 +193,8 @@ export class McpControlModule {
         const failures: unknown[] = [];
         if (current !== undefined && current !== host) {
             await this.stopHost(current).catch((error) => failures.push(error));
+            if (current instanceof McpHost)
+                await current.dispose().catch((error) => failures.push(error));
         }
         if (host !== undefined) {
             this.#artifact.installHttpRoute(host.server);
@@ -267,8 +278,11 @@ export class McpControlModule {
         this.#unsubscribeContexts = undefined;
         await this.#contextCleanup;
         const failures: unknown[] = this.#contextCleanupFailures.splice(0);
-        if (this.#host !== undefined)
+        if (this.#host !== undefined) {
             await this.stopHost(this.#host).catch((error) => failures.push(error));
+            if (this.#host instanceof McpHost)
+                await this.#host.dispose().catch((error) => failures.push(error));
+        }
         await this.#runtimeState.close().catch((error) => failures.push(error));
         if (failures.length > 0) {
             throw new AggregateError(failures, "MCP module shutdown failed.");

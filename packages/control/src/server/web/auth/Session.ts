@@ -1,7 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { HttpHost } from "@portable-devshell/mcp";
+import type { ControlHttpLease } from "../../http/Api.js";
+type HttpHost = Pick<ControlHttpLease, "registerRawRoute">;
 import {
     CONTROL_WEB_BASE_PATH,
     type ControlWebAuthConfig,

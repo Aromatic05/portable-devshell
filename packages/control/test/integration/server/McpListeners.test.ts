@@ -14,6 +14,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpControlModule } from "../../../src/server/mcp/Module.ts";
+import { ControlHttpServer } from "../../../src/server/http/index.ts";
 import { ControlServerConfig } from "../../../src/server/Config.ts";
 import { ControlWebRuntime } from "../../../src/server/web/Runtime.ts";
 import type { ConfigRuntimeChangeSet } from "../../../src/config/engine/Api.ts";
@@ -186,6 +187,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
         },
     });
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -233,6 +235,7 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
         },
     });
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -295,6 +298,7 @@ test("MCP migration starts a different listener before retiring the previous lis
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -352,6 +356,7 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -418,6 +423,7 @@ test("MCP restore attempts every host transition and reports rollback failures",
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -471,6 +477,7 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     config.web.listenPort = address.port;
     const owners = await createOwners(config, homeDirectory);
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -523,6 +530,7 @@ test("shared listener Web auth changes require an explicit control restart witho
         },
     });
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         config: owners.config.require(),
         context: createContextTransport(new Endpoint({ host: "listener-test" })),
         instances: owners.instances.registry,
@@ -566,9 +574,10 @@ test("shared listener Web auth changes require an explicit control restart witho
     assert.equal(view.restartControlRequired, true);
 });
 
-function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControlModule): ControlWebRuntime {
+function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControlModule, http = new ControlHttpServer()): ControlWebRuntime {
     return new ControlWebRuntime({
         config,
+        http,
         extensions: {
             generationDirectory: () => "",
         } as never,
@@ -580,12 +589,14 @@ function createWeb(config: ControlConfig, homeDirectory: string, mcp: McpControl
 async function createRuntime(config: ControlConfig, homeDirectory: string) {
     const owners = await createOwners(config, homeDirectory);
     const endpoint = new Endpoint({ host: "listener-test" });
+    const http = new ControlHttpServer();
     const mcp = new McpControlModule({
+        http,
         config, context: createContextTransport(endpoint), instances: owners.instances.registry, toolRegistry: owners.toolRegistry,
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
     });
-    const web = createWeb(config, homeDirectory, mcp);
+    const web = createWeb(config, homeDirectory, mcp, http);
     return {
         mcp, web,
         async start() {
@@ -600,6 +611,7 @@ async function createRuntime(config: ControlConfig, homeDirectory: string) {
                 () => { web.stop(); },
                 () => web.stopHost(),
                 () => mcp.stop(),
+                () => http.close(),
                 () => { endpoint.close(); },
                 () => owners.close(),
             );

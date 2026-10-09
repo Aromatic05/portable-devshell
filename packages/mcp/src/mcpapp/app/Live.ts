@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ContextTransport } from "@portable-devshell/shared";
-import type { HttpHost } from "../../host/Http.js";
+import type { McpHttpRoute } from "../../server/Api.js";
 import type { McpAppLeaseStore } from "./Lease.js";
 import type { McpAppPresenceStore } from "./Presence.js";
 import type { createMcpAppViewModel } from "../ViewModel.js";
@@ -8,7 +8,7 @@ import type { createMcpAppViewModel } from "../ViewModel.js";
 /** A read-only bearer-capability endpoint. Neither ctxId nor Instance name grants access. */
 export function installMcpAppLive(options: {
     contexts: Pick<ContextTransport, "validateForInstance">;
-    host: HttpHost;
+    host: McpHttpRoute;
     instance: string;
     leases: McpAppLeaseStore;
     presence: McpAppPresenceStore;

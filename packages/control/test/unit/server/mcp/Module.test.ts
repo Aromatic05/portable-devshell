@@ -8,6 +8,7 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 
+import { ControlHttpServer } from "../../../../src/server/http/index.ts";
 import { McpControlModule } from "../../../../src/server/mcp/Module.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
@@ -32,6 +33,7 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
     let config = createDefaultControlConfig();
     const toolRegistry = createToolCallRegistry();
     const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         config,
         context: {} as never,

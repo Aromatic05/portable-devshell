@@ -1,7 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 
-import type { HttpHost } from "@portable-devshell/mcp";
+import type { ControlHttpLease } from "../http/Api.js";
+type HttpHost = Pick<ControlHttpLease, "registerRawRoute" | "registerRawPrefix" | "registerStaticDirectory" | "registerUpgradeHandler" | "registerUpgradePrefix">;
 import {
     CONTROL_REMOTE_RPC_PATH,
     CONTROL_REMOTE_RPC_SUBPROTOCOL,

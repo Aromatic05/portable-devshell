@@ -4,11 +4,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname } from "node:path";
 
 import type {
-    HttpHost,
     McpOAuthAccessRevocation,
     McpOAuthAccessTokenVerification,
     McpOAuthProtectedResource,
 } from "@portable-devshell/mcp";
+import type { ControlHttpLease } from "../../http/Api.js";
+type HttpHost = Pick<ControlHttpLease, "registerRawRoute" | "registerMiddleware">;
 import type { ControlWebOAuth2Config } from "@portable-devshell/shared";
 
 import type { ControlWebSessionService } from "./Session.js";
@@ -137,10 +138,11 @@ export class ControlWebOAuthFlow {
                 );
             },
         );
-        if (this.#installProvider) {
-            http.installOAuth(this.#protectedResource);
-        }
+        const removeProvider = this.#installProvider
+            ? this.#protectedResource.attach(http)
+            : undefined;
         return () => {
+            removeProvider?.();
             removeMetadata();
             removeStart();
             removeCallback();

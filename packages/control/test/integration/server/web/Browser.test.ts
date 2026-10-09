@@ -13,8 +13,8 @@ import { cleanupInOrder } from "../../../../../../test/TestCleanup.ts";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import { chromiumTestOptions } from "../../../../../../test/TestPlatformSupport.ts";
 
+import { HttpHost } from "@portable-devshell/mcp/testing";
 import {
-    HttpHost,
     McpOAuthProtectedResource,
     type McpOAuthApprovalService,
 } from "@portable-devshell/mcp";

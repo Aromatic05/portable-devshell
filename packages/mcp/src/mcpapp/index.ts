@@ -6,7 +6,7 @@ import { McpAppLeaseStore } from './app/Lease.js';
 import { McpAppPresenceStore } from './app/Presence.js';
 import { createMcpAppViewModel } from './ViewModel.js';
 import { McpAppRoute } from './Route.js';
-import type { HttpHost } from '../host/Http.js';
+import type { McpHttpRoute } from '../server/Api.js';
 
 /** Owner for MCP App capabilities, durable action receipts, and presentation state. */
 export class McpAppRuntime {
@@ -14,7 +14,7 @@ export class McpAppRuntime {
     readonly actions: McpAppActionStore;
     readonly presence = new McpAppPresenceStore();
     readonly view?: ReturnType<typeof createMcpAppViewModel>;
-    readonly #routes = new Map<HttpHost, McpAppRoute>();
+    readonly #routes = new Map<McpHttpRoute, McpAppRoute>();
     #initializePromise?: Promise<void>;
 
     constructor(options: { filePath?: string; endpoint?: Endpoint }) {
@@ -26,7 +26,7 @@ export class McpAppRuntime {
     }
 
     /** One App Domain owns the Live Route for every attached HTTP host generation. */
-    attachHost(host: HttpHost, contexts: Pick<ContextTransport, 'validateForInstance'>): McpAppRoute {
+    attachHost(host: McpHttpRoute, contexts: Pick<ContextTransport, 'validateForInstance'>): McpAppRoute {
         let route = this.#routes.get(host);
         if (route === undefined) {
             route = new McpAppRoute(host, this, contexts);
@@ -35,7 +35,7 @@ export class McpAppRuntime {
         return route;
     }
 
-    detachHost(host: HttpHost): void {
+    detachHost(host: McpHttpRoute): void {
         this.#routes.get(host)?.close();
         this.#routes.delete(host);
     }

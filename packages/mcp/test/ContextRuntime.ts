@@ -32,11 +32,13 @@ import {
     McpEndpoint,
     type McpEndpointOptions,
 } from "../src/endpoint/Endpoint.ts";
-import { McpHost, McpRuntimeState } from "../src/host/Host.ts";
+import { McpHost } from "../src/server/Host.ts";
+import { McpRuntimeState } from "../src/Runtime.ts";
+import { HttpHost } from "../src/testing/Http.ts";
 import type {
     McpHostConfig,
     McpHostInstanceConfig,
-} from "../src/host/Host.ts";
+} from "../src/server/Host.ts";
 import {
     createTestWorkerToolRuntime,
     createTestWorkerInstance,
@@ -294,7 +296,9 @@ export class TestMcpHost extends McpHost {
             ...hostConfig,
             instances: config.instances.map(({ worker: _worker, ...instance }) => instance),
             toolSource,
-        }, testRuntime.state);
+        }, testRuntime.state, {
+            acquire: (address) => new HttpHost(address),
+        });
         for (const [name, registration] of toolRegistrations)
             this.#toolRegistrations.set(name, registration);
         for (const [name, listTools] of workerToolListings)
