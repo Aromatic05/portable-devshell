@@ -103,6 +103,7 @@ export class WorkerInstanceState {
     readonly #events: InstanceEventPort;
     readonly #onReadyChanged: (ready: boolean) => Promise<void>;
     readonly #stateMachine: InstanceStateMachine;
+    #cursorLoaded = false;
 
     constructor(options: {
         config: ResolvedWorkerInstanceConfig;
@@ -114,10 +115,10 @@ export class WorkerInstanceState {
         this.#events = options.events;
         this.#onReadyChanged = options.onReadyChanged;
         this.#stateMachine = options.stateMachine;
-        this.#stateMachine.apply({ lastSeq: this.#events.cursor() });
     }
 
     snapshot(reverse?: ReverseInstanceStatus): InstanceSnapshot {
+        this.#loadCursor();
         return {
             ...this.#stateMachine.snapshot(),
             effectiveSecurityMode: this.#config.effectiveSecurityMode,
@@ -126,6 +127,7 @@ export class WorkerInstanceState {
     }
 
     subscribe(fromSeq = 1): InstanceEventStreamGap | InstanceEventStreamSlice {
+        this.#loadCursor();
         return this.#events.readFrom(fromSeq);
     }
 
@@ -136,7 +138,14 @@ export class WorkerInstanceState {
             type,
         });
         this.#stateMachine.apply({ lastSeq: event.seq });
+        this.#cursorLoaded = true;
         return event;
+    }
+
+    #loadCursor(): void {
+        if (this.#cursorLoaded) return;
+        this.#stateMachine.apply({ lastSeq: this.#events.cursor() });
+        this.#cursorLoaded = true;
     }
 
     async apply(
