@@ -57,6 +57,7 @@ interface BoundPort {
     readonly rpc: Rpc;
     readonly stream: Stream;
     readonly offOpen: () => void;
+    update(definition: ControlPortDefinition): void;
 }
 
 interface ActiveConnection {
@@ -291,50 +292,54 @@ export class ControlTransportServer {
             }
 
         for (const [key, definition] of definitions) {
-            if (this.#ports.has(key)) continue;
+            const bound = this.#ports.get(key);
+            if (bound !== undefined) {
+                bound.update(definition.port);
+                continue;
+            }
             const port = this.#endpoint.bind(
                 definition.port.name,
                 definition.host,
             );
-            const handlers = Object.fromEntries(
-                definition.port.operations.map((operation) => [
-                    operation.name,
-                    async (payload: unknown, rpc: RpcContext) => {
-                        const prepared = this.#context(
-                            rpc.local.host,
-                            definition.port.name,
-                            operation.name,
-                            payload as JsonValue | undefined,
-                            rpc,
-                        );
-                        try {
-                            const result = await operation.handle(
-                                {
-                                    id: rpc.requestId,
-                                    name: operation.name,
-                                    ...(payload === undefined
-                                        ? {}
-                                        : { payload: payload as JsonValue }),
-                                },
-                                prepared.context,
-                            );
-                            prepared.finish(true);
-                            return result;
-                        } catch (error) {
-                            prepared.finish(false);
-                            throw error;
-                        }
-                    },
-                ]),
-            );
-            const rpc = new Rpc(port, handlers);
+            const rpc = new Rpc(port);
             const stream = new Stream(port);
-            const streamHandlers = new Map(
-                (definition.port.streams ?? []).map((operation) => [
-                    operation.name,
-                    operation.handle,
-                ]),
+            let operations = new Map(
+                definition.port.operations.map((operation) => [operation.name, operation.handle]),
             );
+            let streamHandlers = new Map(
+                (definition.port.streams ?? []).map((operation) => [operation.name, operation.handle]),
+            );
+            const registered = new Map<string, () => void>();
+            const register = (name: string) => {
+                registered.set(name, rpc.handle(name, async (payload: unknown, rpc: RpcContext) => {
+                    const operation = operations.get(name)!;
+                    const prepared = this.#context(
+                        rpc.local.host,
+                        definition.port.name,
+                        name,
+                        payload as JsonValue | undefined,
+                        rpc,
+                    );
+                    try {
+                        const result = await operation(
+                            {
+                                id: rpc.requestId,
+                                name,
+                                ...(payload === undefined
+                                    ? {}
+                                    : { payload: payload as JsonValue }),
+                            },
+                            prepared.context,
+                        );
+                        prepared.finish(true);
+                        return result;
+                    } catch (error) {
+                        prepared.finish(false);
+                        throw error;
+                    }
+                }));
+            };
+            for (const name of operations.keys()) register(name);
             const offOpen = stream.onOpen(
                 async (messageStream, name, payload, peer, local) => {
                     const handle = streamHandlers.get(name);
@@ -383,7 +388,28 @@ export class ControlTransportServer {
                     }
                 },
             );
-            this.#ports.set(key, { port, rpc, stream, offOpen });
+            this.#ports.set(key, {
+                port, rpc, stream, offOpen,
+                update: (next) => {
+                    const nextOperations = new Map(next.operations.map((operation) => [
+                        operation.name, operation.handle,
+                    ]));
+                    const nextStreams = new Map((next.streams ?? []).map((operation) => [
+                        operation.name, operation.handle,
+                    ]));
+                    // Keep the Port and active streams/RPC requests alive across route generations.
+                    operations = nextOperations;
+                    streamHandlers = nextStreams;
+                    for (const [name, release] of registered) {
+                        if (nextOperations.has(name)) continue;
+                        release();
+                        registered.delete(name);
+                    }
+                    for (const name of nextOperations.keys()) {
+                        if (!registered.has(name)) register(name);
+                    }
+                },
+            });
         }
     }
 

@@ -6,10 +6,12 @@ import {
     CONTROL_PROTOCOL_VERSION,
     Endpoint,
     Rpc,
+    Stream,
     controlErrorCodes,
     type Channel,
     type JsonValue,
     type ControlHostDefinition,
+    type MessageStream,
 } from "@portable-devshell/shared";
 
 import { ControlTransportServer } from "../../../../src/server/transport/endpoint/Server.ts";
@@ -628,8 +630,89 @@ test("ControlTransportServer rolls back a replacement when the previous provider
     assert.deepEqual(replacement.events, ["start:1", "close:1"]);
 });
 
+test("ControlTransportServer refreshes RPC and stream routes without terminating active calls", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const listeners = new Set<() => void>();
+    let generation = 1;
+    let startedCall!: () => void;
+    let startedStream!: () => void;
+    let finishCall!: () => void;
+    let finishStream!: () => void;
+    const callStarted = new Promise<void>((resolve) => { startedCall = resolve; });
+    const streamStarted = new Promise<void>((resolve) => { startedStream = resolve; });
+    const callFinished = new Promise<void>((resolve) => { finishCall = resolve; });
+    const streamFinished = new Promise<void>((resolve) => { finishStream = resolve; });
+    const routes = {
+        hosts: (): readonly ControlHostDefinition[] => [
+            ...createRouteHosts(),
+            {
+                host: "@control",
+                ports: [{
+                    name: "dynamic",
+                    operations: [
+                        {
+                            name: "version",
+                            handle: generation === 1
+                                ? async () => {
+                                      startedCall();
+                                      await callFinished;
+                                      return { generation: 1 };
+                                  }
+                                : () => ({ generation: 2 }),
+                        },
+                        ...(generation === 1
+                            ? [{ name: "removed", handle: () => ({ removed: true }) }]
+                            : [{ name: "added", handle: () => ({ added: true }) }]),
+                    ],
+                    streams: [{
+                        name: "watch",
+                        handle: generation === 1
+                            ? async (stream: MessageStream) => {
+                                  startedStream();
+                                  await streamFinished;
+                                  await stream.close({ generation: 1 });
+                              }
+                            : async (stream: MessageStream) => {
+                                  await stream.close({ generation: 2 });
+                              },
+                    }],
+                }],
+            },
+        ],
+        onChange(listener: () => void) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+    };
+    const server = new ControlTransportServer({ listeners: [provider], routes });
+    await server.start();
+    t.after(async () => await server.close());
+    const client = createClient(provider, "tui");
+    t.after(() => client.close());
+    await negotiate(client, "tui");
+
+    const first = client.request("@control", "dynamic", "version");
+    await callStarted;
+    const firstWatch = await client.open("@control", "dynamic", "watch");
+    await streamStarted;
+    generation = 2;
+    for (const listener of listeners) listener();
+
+    assert.deepEqual(await client.request("@control", "dynamic", "version"), { generation: 2 });
+    assert.deepEqual(await client.request("@control", "dynamic", "added"), { added: true });
+    await assert.rejects(client.request("@control", "dynamic", "removed"), /not found/iu);
+    const secondWatch = await client.open("@control", "dynamic", "watch");
+    assert.deepEqual((await secondWatch.readMessage()).message, { generation: 2 });
+
+    finishCall();
+    finishStream();
+    assert.deepEqual(await first, { generation: 1 });
+    assert.deepEqual((await firstWatch.readMessage()).message, { generation: 1 });
+});
+
 interface TestClient {
     close(): void;
+    open(host: string, port: string, method: string): Promise<MessageStream>;
     request<T = JsonValue>(
         host: string,
         port: string,
@@ -646,10 +729,21 @@ function createClient(
         connectChannel: async () => provider.connect(),
     });
     const rpcs = new Map<string, Rpc>();
+    const streams = new Map<string, Stream>();
     return {
         close() {
             for (const rpc of rpcs.values()) rpc.close();
+            for (const stream of streams.values()) stream.close();
             endpoint.close();
+        },
+        async open(host: string, port: string, method: string): Promise<MessageStream> {
+            const key = `${host}\u0000${port}`;
+            let stream = streams.get(key);
+            if (stream === undefined) {
+                stream = new Stream(await endpoint.connect(host, port));
+                streams.set(key, stream);
+            }
+            return await stream.open(method);
         },
         async request<T = JsonValue>(
             host: string,
