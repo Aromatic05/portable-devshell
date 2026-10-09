@@ -9,6 +9,7 @@ export class InstanceLifecycle {
     #admitted = 0;
     #phase: "active" | "retiring" | "retired" | "closed" = "active";
     readonly #waiters = new Set<() => void>();
+    readonly #retiringListeners = new Set<() => void>();
 
     constructor(private readonly instance: Instance) {}
 
@@ -50,7 +51,26 @@ export class InstanceLifecycle {
     }
 
     beginRetirement(): void {
-        if (this.#phase === "active") this.#phase = "retiring";
+        if (this.#phase !== "active") return;
+        this.#phase = "retiring";
+        const listeners = [...this.#retiringListeners];
+        this.#retiringListeners.clear();
+        for (const listener of listeners) {
+            try {
+                listener();
+            } catch (error) {
+                console.warn(`Instance ${this.instance.config.name} retirement listener failed.`, error);
+            }
+        }
+    }
+
+    onRetiring(listener: () => void): () => void {
+        if (!this.active) {
+            listener();
+            return () => undefined;
+        }
+        this.#retiringListeners.add(listener);
+        return () => this.#retiringListeners.delete(listener);
     }
 
     async drain(): Promise<void> {

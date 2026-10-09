@@ -17,6 +17,7 @@ import { ReverseConnections } from "@portable-devshell/core";
 import { createExtensionRuntime } from "./extension/index.js";
 import { ExtensionArtifactCapabilityControl } from "./extension/api/cap/artifact/index.js";
 import { ExtensionAssetCapabilityControl } from "./extension/api/cap/asset/index.js";
+import { ExtensionWorkerCapabilityControl } from "./extension/api/cap/worker/index.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
@@ -290,6 +291,20 @@ export class ControlFactory {
                     ).listCalls(query);
                 },
                 toolCallDecorator: mcp.toolProvenance,
+                workerDelegateFactory: ({ allowed, extensionId }) =>
+                    new ExtensionWorkerCapabilityControl({
+                        allowed,
+                        extensionId,
+                        instances: options.instances.registry,
+                        recording: "caller",
+                    }),
+                workerExecuteFactory: ({ allowed, extensionId }) =>
+                    new ExtensionWorkerCapabilityControl({
+                        allowed,
+                        extensionId,
+                        instances: options.instances.registry,
+                        recording: "host",
+                    }),
             });
             const web = new ControlWebRuntime({
                 config: options.config.require(),

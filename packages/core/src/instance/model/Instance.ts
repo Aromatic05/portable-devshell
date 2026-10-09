@@ -162,6 +162,37 @@ export class Instance {
         return this.#state.toolCalls.api;
     }
 
+    async openToolSession(workspace: string, sessionId: string) {
+        const lease = this.#lifecycle.acquireLease();
+        try {
+            const prepared = await this.#state.tools.openSession(workspace, sessionId);
+            const handshake = this.#worker.supervision.handshake;
+            if (handshake === undefined)
+                throw new Error(`Instance ${this.config.name} has no Worker handshake.`);
+            return {
+                environment: {
+                    homeDirectory: handshake.homeDirectory,
+                    platform: handshake.platform,
+                },
+                tools: this.#state.tools.listTools().map(({ name, description, inputSchema }) => ({
+                    name, description, inputSchema,
+                })),
+                workspace: prepared.workspace,
+            };
+        } catch (error) {
+            await this.#state.tools.releaseSession(sessionId).catch((cleanupError) => {
+                throw new AggregateError([error, cleanupError], "Failed to release Worker tool session.");
+            });
+            throw error;
+        } finally {
+            lease.release();
+        }
+    }
+
+    async closeToolSession(sessionId: string): Promise<void> {
+        await this.#state.tools.releaseSession(sessionId);
+    }
+
     attachToolCallEndpoint(endpoint: Endpoint): void {
         this.#state.attachToolCallEndpoint(endpoint);
     }
