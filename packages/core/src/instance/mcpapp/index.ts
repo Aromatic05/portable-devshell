@@ -44,7 +44,10 @@ export function installMcpAppAction(
             });
         } else {
             if (action.expectedRevision === undefined) throw denied("Task revision is required.");
-            const todo = await api.task.todo.read({ taskId: action.itemId });
+            // A targeted Todo read returns the task's items, not the task
+            // summaries carrying Context ownership. Read the active catalog
+            // before the revision-checked mutation.
+            const todo = await api.task.todo.read();
             if (!todo.tasks?.some((task) => task.taskId === action.itemId && task.ctxId === ctxId))
                 throw denied("The Task is unavailable in this Context.");
             signal?.throwIfAborted();
