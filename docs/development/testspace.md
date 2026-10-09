@@ -20,10 +20,13 @@ pnpm testspace stop
 ```bash
 pnpm testspace web-smoke
 pnpm testspace comment-smoke
+pnpm testspace update-smoke
 pnpm testspace exec -- <command...>
 ```
 
 `pnpm testspace` 等价于 start。默认会先执行项目 build 和 `test:prepare`；开发者已经明确准备好构建产物时可以使用 `--skip-build`。
+
+`update-smoke` 在隔离 Testspace 中验证 Control Web 监听器热替换、端口占用导致的更新拒绝、Instance 模型能力热更新与运行中 Worker 重建拒绝。每个阶段检查配置版本号及两台 Worker 状态，退出前恢复 Web/Instance 原配置；不修改主机实际 `~/.devshell`。它验证预检查失败的无副作用，不代表已经覆盖运行时提交后失败的回滚。
 
 活动 connector 默认周期是 2 秒，可通过：
 
