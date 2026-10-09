@@ -8,6 +8,7 @@ import {
     type JsonValue,
     type ToolDefinition,
     createToolCallRuntime,
+    createToolCallTargetTransport,
     type ToolCallRuntime,
     type WorkerWorkspacePrepareResult,
 } from "@portable-devshell/shared";
@@ -67,6 +68,7 @@ export class InstanceState {
     readonly #workerToolRegistration: InstanceToolDefinitionRegistration;
     readonly #domainToolRegistration: InstanceToolDefinitionRegistration;
     readonly #toolCallUnregister: readonly (() => void)[];
+    #toolCallEndpoint?: Endpoint;
     #closePromise?: Promise<void>;
     #retirePromise?: Promise<void>;
     #retiring = false;
@@ -109,15 +111,16 @@ export class InstanceState {
         );
         this.toolCalls = createToolCallRuntime({
             resolveTarget: (target) => {
-                if (target !== instanceName) {
+                if (target === instanceName) return this.target();
+                if (this.#toolCallEndpoint === undefined) {
                     throw createRemoteError({
-                        code: runtimeErrorCodes.instanceConflict,
+                        code: runtimeErrorCodes.instanceNotReady,
                         details: { instance: target },
-                        message: `Tool call target ${target} does not match instance ${instanceName}.`,
+                        message: `Instance ${instanceName} cannot route a tool call to ${target} before its host endpoint is attached.`,
                         retryable: false,
                     });
                 }
-                return this.target();
+                return createToolCallTargetTransport(this.#toolCallEndpoint, target);
             },
         });
         this.#toolCallUnregister = [
@@ -140,6 +143,10 @@ export class InstanceState {
 
     get toolDefinitions(): InstanceToolCatalog {
         return this.#toolDefinitions;
+    }
+
+    attachToolCallEndpoint(endpoint: Endpoint): void {
+        this.#toolCallEndpoint = endpoint;
     }
 
     async callTool(request: ToolCallDispatchRequest): Promise<JsonValue> {

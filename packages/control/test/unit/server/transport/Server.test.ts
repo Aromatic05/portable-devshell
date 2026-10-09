@@ -7,6 +7,10 @@ import {
     Endpoint,
     Rpc,
     Stream,
+    asInstanceName,
+    createToolCallRuntime,
+    createToolCallTargetTransport,
+    createToolRouteModule,
     controlErrorCodes,
     type Channel,
     type JsonValue,
@@ -710,7 +714,89 @@ test("ControlTransportServer refreshes RPC and stream routes without terminating
     assert.deepEqual((await firstWatch.readMessage()).message, { generation: 1 });
 });
 
+test("rewritten ToolCall reaches the destination host through its tool route", async (t) => {
+    const provider = new MemoryControlTransportListener();
+    const targetCalls: string[] = [];
+    const server = new ControlTransportServer({
+        listeners: [provider],
+        routes: createRouteProvider(() => [
+            ...createRouteHosts(),
+            {
+                host: "destination",
+                ports: [createToolRouteModule({
+                    name: "destination",
+                    worker: {
+                        readWorkerTools: async () => [],
+                        prepareWorkspace: async (workspace) => ({ workspace }),
+                        readToolCalls: async () => [],
+                        readToolCallFailureSummary: async () => ({ count: 0 }),
+                        releaseToolSession: async () => undefined,
+                        dispatchToolCall: async (request) => {
+                            targetCalls.push(request.value.context.instance);
+                            const result = await request.execute!(
+                                request.callId,
+                                request.value.payload,
+                                request.value,
+                            );
+                            const value = await request.hooks.rewrite({
+                                callId: request.callId,
+                                direction: "outbound",
+                                value: {
+                                    ...request.value,
+                                    kind: "result",
+                                    payload: result as JsonValue,
+                                },
+                            });
+                            const review = await request.hooks.review({
+                                callId: request.callId,
+                                direction: "outbound",
+                                value,
+                            });
+                            assert.equal(review.decision, "continue");
+                            return value.payload;
+                        },
+                    },
+                })],
+            },
+        ]),
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const client = createClient(provider, "tui");
+    t.after(() => client.close());
+    await negotiate(client, "tui");
+
+    const source = createToolCallRuntime({
+        resolveTarget: (instance) => createToolCallTargetTransport(client.endpoint, instance),
+    });
+    source.hooks.registerContributor(() => ({
+        rewrites: [{
+            hook: "route",
+            id: "redirect",
+            rewrite: (input) => input.direction === "inbound"
+                ? {
+                      ...input.value,
+                      context: { ...input.value.context, instance: asInstanceName("destination") },
+                      toolName: "virtual_execute",
+                  }
+                : input.value,
+        }],
+        release() {},
+    }));
+    source.hooks.registerExecute("virtual_execute", async (_callId, input) => ({ input }));
+    const result = await source.api.call(
+        "source",
+        "original_tool",
+        { value: 7 },
+        { source: "tui" },
+    );
+    assert.deepEqual(result, { input: { value: 7 } });
+    assert.deepEqual(targetCalls, ["destination"]);
+    source.close();
+});
+
 interface TestClient {
+    endpoint: Endpoint;
     close(): void;
     open(host: string, port: string, method: string): Promise<MessageStream>;
     request<T = JsonValue>(
@@ -731,6 +817,7 @@ function createClient(
     const rpcs = new Map<string, Rpc>();
     const streams = new Map<string, Stream>();
     return {
+        endpoint,
         close() {
             for (const rpc of rpcs.values()) rpc.close();
             for (const stream of streams.values()) stream.close();

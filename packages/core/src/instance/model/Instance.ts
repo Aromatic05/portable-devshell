@@ -8,6 +8,7 @@ import {
     type ControlPortDefinition,
     type ToolCallHooks,
     type ToolCallApi,
+    type Endpoint,
     type WorkerArtifactApi,
 } from "@portable-devshell/shared";
 
@@ -159,6 +160,10 @@ export class Instance {
 
     get toolCallIngress(): ToolCallApi {
         return this.#state.toolCalls.api;
+    }
+
+    attachToolCallEndpoint(endpoint: Endpoint): void {
+        this.#state.attachToolCallEndpoint(endpoint);
     }
 
     get lifecycle(): InstanceLifecycle {

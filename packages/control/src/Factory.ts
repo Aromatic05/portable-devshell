@@ -43,7 +43,6 @@ import { ConfigEngine } from "./config/engine/index.js";
 import { HttpEndpointPreflight } from "./config/engine/Http.js";
 import { InstanceEditorCoordinator } from "./instance/editor/index.js";
 import { InstanceCreateCoordinator } from "./instance/editor/create/index.js";
-import { createInstance } from "@portable-devshell/core";
 import { ReverseCredentials } from "./instance/reverse/Credentials.js";
 import { ReverseCredentialStore } from "./instance/reverse/credential/Store.js";
 import { ReverseIngress } from "./server/reverse/Ingress.js";
@@ -150,7 +149,7 @@ export class ControlFactory {
                 setConfig: (config) => options.config.set(config),
             });
             const instanceEditor = new InstanceEditorCoordinator({
-                createRuntimeInstance: (config) => createInstance(config),
+                createRuntimeInstance: (config) => options.instances.createRuntimeInstance(config),
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 cleanupDebtFile: controlPaths.lifecycleCleanupFile,
                 engine: configEngine,
@@ -164,7 +163,7 @@ export class ControlFactory {
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({
-                createRuntimeInstance: (config) => createInstance(config),
+                createRuntimeInstance: (config) => options.instances.createRuntimeInstance(config),
                 engine: configEngine,
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
                 assertCleanupSettled: async (instance) =>
@@ -402,6 +401,7 @@ export class ControlFactory {
             );
             options.instances.attachRuntime({
                 editor: instanceEditor,
+                toolCallEndpoint: internalEndpoint,
                 ...(reverseConnections === undefined
                     ? {}
                     : { reverseConnections }),

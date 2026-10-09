@@ -1,6 +1,6 @@
 import { createInstance, type Instance } from "@portable-devshell/core";
 import type { ReverseConnections } from "@portable-devshell/core";
-import type { ControlConfig } from "@portable-devshell/shared";
+import type { ControlConfig, ControlInstanceConfig, Endpoint } from "@portable-devshell/shared";
 
 import { InstanceChangeHub } from "./Change.js";
 import type { InstanceEditorCoordinator } from "./editor/index.js";
@@ -9,6 +9,7 @@ import { InstanceRegistry } from "./Registry.js";
 export interface ControlInstancesRuntime {
     editor: InstanceEditorCoordinator;
     reverseConnections?: ReverseConnections;
+    toolCallEndpoint: Endpoint;
 }
 
 export class ControlInstances {
@@ -16,6 +17,7 @@ export class ControlInstances {
     #editor?: InstanceEditorCoordinator;
     #registry = new InstanceRegistry([]);
     #reverseConnections?: ReverseConnections;
+    #toolCallEndpoint?: Endpoint;
 
     get registry(): InstanceRegistry {
         return this.#registry;
@@ -24,6 +26,16 @@ export class ControlInstances {
     attachRuntime(runtime: ControlInstancesRuntime): void {
         this.#editor = runtime.editor;
         this.#reverseConnections = runtime.reverseConnections;
+        this.#toolCallEndpoint = runtime.toolCallEndpoint;
+        for (const instance of this.#registry.list())
+            instance.attachToolCallEndpoint(runtime.toolCallEndpoint);
+    }
+
+    createRuntimeInstance(config: ControlInstanceConfig): Instance {
+        const instance = createInstance(config);
+        if (this.#toolCallEndpoint !== undefined)
+            instance.attachToolCallEndpoint(this.#toolCallEndpoint);
+        return instance;
     }
 
     async reconcile(): Promise<void> {
@@ -40,7 +52,7 @@ export class ControlInstances {
         try {
             for (const definition of config.instances) {
                 if (!definition.enabled) continue;
-                created.push(createInstance(definition));
+                created.push(this.createRuntimeInstance(definition));
             }
             this.#registry = new InstanceRegistry(created);
         } catch (error) {
@@ -82,5 +94,6 @@ export class ControlInstances {
         this.#editor = undefined;
         this.#registry = new InstanceRegistry([]);
         this.#reverseConnections = undefined;
+        this.#toolCallEndpoint = undefined;
     }
 }
