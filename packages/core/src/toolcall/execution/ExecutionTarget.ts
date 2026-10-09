@@ -92,6 +92,10 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         );
 
         if (hostRecorded) await this.#audit.requested(scope);
+        if (request.rejection !== undefined) {
+            if (hostRecorded) await this.#audit.denied(scope, request.rejection.code);
+            throw createErrorFromBody(request.rejection);
+        }
 
         let innerInput: JsonValue;
         try {

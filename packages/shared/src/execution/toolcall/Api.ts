@@ -1,4 +1,5 @@
 import type { InstanceName } from "../../types/Instance.js";
+import type { RemoteErrorBody } from "../../transport/Error.js";
 import type { JsonValue } from "../../types/Json.js";
 import type { ToolCallRecord } from "./Model.js";
 import type {
@@ -81,6 +82,8 @@ export type ToolNameHandle = () => ToolDefinition;
 
 export interface ToolCallDispatchRequest {
     readonly callId: string;
+    /** Rejected inbound Review, audited by the owning Instance target. */
+    readonly rejection?: RemoteErrorBody;
     readonly execute?: ToolCallExecutor;
     readonly hooks: ToolCallHookSequenceApi;
     readonly invocationInput?: (

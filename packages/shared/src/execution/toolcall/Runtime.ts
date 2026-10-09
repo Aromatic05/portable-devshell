@@ -232,7 +232,7 @@ class ToolCallPipeline implements ToolCallApi {
                               message: rejectionMessage,
                               retryable: false,
                           });
-                throw createRemoteError({
+                const rejection = createRemoteError({
                     code: runtimeErrorCodes.toolCallRejected,
                     ...(rejectionCause === undefined
                         ? {}
@@ -245,6 +245,14 @@ class ToolCallPipeline implements ToolCallApi {
                     },
                     message: rejectionMessage,
                     retryable: false,
+                });
+                // Rejection is terminal, but still reaches the owning
+                // Instance Target to record denied Audit before returning.
+                return await this.#resolveTarget(hookValue.context.instance).dispatch({
+                    callId, hooks, recording,
+                    ...(signal === undefined ? {} : { signal }),
+                    rejection: rejection.toBody(),
+                    value: hookValue,
                 });
             }
             hookValue = await hooks.rewrite({

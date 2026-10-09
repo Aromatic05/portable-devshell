@@ -31,6 +31,7 @@ import {
 
 interface DispatchOpenPayload {
     callId: string;
+    rejection?: RemoteErrorBody;
     callbacks: {
         execute: boolean;
         invocationInput: boolean;
@@ -109,6 +110,7 @@ export async function serveToolCallTargetDispatch(
     try {
         const request: ToolCallDispatchRequest = {
             callId: opened.callId,
+            ...(opened.rejection === undefined ? {} : { rejection: opened.rejection }),
             hooks: {
                 review: async (input) =>
                     readReviewResult(
@@ -207,6 +209,7 @@ async function dispatchOverTransport(
                 transformResult: request.transformResult !== undefined,
             },
             recording: request.recording,
+            ...(request.rejection === undefined ? {} : { rejection: request.rejection }),
             value: request.value,
         } satisfies DispatchOpenPayload,
         request.signal,
@@ -410,6 +413,7 @@ function readDispatchOpenPayload(value: unknown): DispatchOpenPayload {
         typeof callbacks.execute !== "boolean" ||
         typeof callbacks.invocationInput !== "boolean" ||
         typeof callbacks.transformResult !== "boolean" ||
+        (input.rejection !== undefined && !isRemoteErrorBody(input.rejection)) ||
         input.value === undefined
     )
         throw new TypeError("Invalid ToolCall dispatch request.");
@@ -421,6 +425,7 @@ function readDispatchOpenPayload(value: unknown): DispatchOpenPayload {
             transformResult: callbacks.transformResult,
         },
         recording: input.recording,
+        ...(input.rejection === undefined ? {} : { rejection: input.rejection as RemoteErrorBody }),
         value: readHookValue(input.value),
     };
 }

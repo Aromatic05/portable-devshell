@@ -67,6 +67,18 @@ export class WorkerInstanceToolAudit {
         );
     }
 
+    async denied(scope: ToolCallScope, errorCode: string): Promise<void> {
+        const completedAt = new Date().toISOString();
+        await this.#toolCallHistory.denied(scope.callId, errorCode, completedAt);
+        await this.#appendEvent("toolCall.denied", toEventData({
+            ...scope.eventContext,
+            completedAt,
+            errorCode,
+            startedAt: scope.startedAt,
+            status: "denied",
+        }));
+    }
+
     async queued(scope: ToolCallScope): Promise<void> {
         if (!this.#toolCallHistory.hasActive(scope.callId))
             await this.requested(scope);
