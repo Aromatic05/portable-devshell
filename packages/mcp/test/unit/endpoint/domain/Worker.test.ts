@@ -524,11 +524,19 @@ async function rewrittenEndpoint(
     const values: ToolCallHookValue[] = [];
     const callIds: string[] = [];
     const reviews: string[] = [];
+    const denials: Array<{ instance: string; toolName: string }> = [];
     const pipeline = createToolCallRuntime({
         resolveTarget(target) {
-            assert.equal(target, instance);
+            // Rejected inbound review occurs before rewrite and belongs to the original Instance.
+            assert.equal(target, reject ? "main-pc" : instance);
             return {
                 async dispatch(request): Promise<JsonValue> {
+                    if (request.rejection !== undefined) {
+                        denials.push({ instance: target, toolName: request.value.toolName });
+                        throw Object.assign(new Error(request.rejection.message), {
+                            code: request.rejection.code,
+                        });
+                    }
                     values.push(request.value);
                     callIds.push(request.callId);
                     inputs.push(await request.invocationInput?.(
@@ -631,6 +639,7 @@ async function rewrittenEndpoint(
         values,
         callIds,
         reviews,
+        denials,
         async close() {
             state.toolCallRuntime.close();
             await state.contexts.close();
@@ -733,6 +742,7 @@ for (const name of ["bash_run", "ext_original", "tmux_run"]) {
             ),
             { code: "core.toolCallRejected" },
         );
+        assert.deepEqual(h.denials, [{ instance: "main-pc", toolName: name }]);
         assert.deepEqual(h.changes, []);
         assert.deepEqual(h.values, []);
         assert.deepEqual(h.provenance, []);

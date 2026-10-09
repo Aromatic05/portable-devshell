@@ -398,15 +398,7 @@ import { tmpdir } from "node:os";
                     join(homeDirectory, "audit.sqlite"),
                 );
                 assert.equal(auditDatabase.size > 0, true);
-
-                const replay = instance.worker.subscribe(1);
-                assert.equal(replay.kind, "events");
-                assert.equal(
-                    replay.events.some(
-                        (event) => event.type === "mcp.toolCalled",
-                    ),
-                    true,
-                );
+                // Instance ToolCall Audit is authoritative; MCP no longer emits a separate mcp.toolCalled event.
             } finally {
                 await host.stop();
                 await instance.close();
