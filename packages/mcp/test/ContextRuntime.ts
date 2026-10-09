@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -447,10 +447,13 @@ function createContextChangeStream(
 }
 
 const testEnvironment: EnvironmentTransport = {
-    async prepareExtensionResource() {
-        throw new Error("Test MCP extension resources are not configured.");
+    async prepareExtensionResource(input) {
+        if (input.collection !== "managed" || input.extensionId !== "skill")
+            throw new Error("Unexpected MCP test extension resource.");
+        return { directory: "/skills" };
     },
     async prepareWorkspace(workspace) {
+        await mkdir(join(workspace, "tmp"), { recursive: true });
         return {
             projectMemoryAgentFile: `${workspace}/AGENTS.md`,
             projectMemoryDirectory: workspace,
