@@ -101,6 +101,9 @@ function createHarness(
             async failed() {
                 audit.push("failed");
             },
+            async denied() {
+                audit.push("denied");
+            },
             async failActive() {
                 audit.push("failActive");
             },
@@ -165,7 +168,7 @@ function createHarness(
     return { audit, invoked, runtime, target, scheduled, released };
 }
 
-test("ToolCallPipeline rejects during review before rewrite and target resolution", async () => {
+test("ToolCallPipeline audits review rejection in Instance without rewrite or execution", async () => {
     const calls: string[] = [];
     const harness = createHarness("instance-a", {
         resolveTarget: () => {
@@ -202,8 +205,8 @@ test("ToolCallPipeline rejects during review before rewrite and target resolutio
         },
     );
 
-    assert.deepEqual(calls, ["review"]);
-    assert.deepEqual(harness.audit, []);
+    assert.deepEqual(calls, ["review", "resolve"]);
+    assert.deepEqual(harness.audit, ["requested", "denied"]);
     assert.deepEqual(harness.scheduled, []);
     assert.deepEqual(harness.released, ["release"]);
     assert.equal(harness.invoked.length, 0);

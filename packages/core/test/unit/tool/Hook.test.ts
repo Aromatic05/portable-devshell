@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     asInstanceName,
+    createRemoteError,
     createToolCallRuntime,
     runtimeErrorCodes,
     type JsonValue,
@@ -53,7 +54,18 @@ test("review receives one frozen value and stops at reject", async () => {
     const calls: string[] = [];
     const runtime = createToolCallRuntime({
         resolveTarget() {
-            assert.fail("rejected calls must not resolve a target");
+            calls.push("target");
+            return {
+                async dispatch(request) {
+                    assert.equal(request.rejection?.code, runtimeErrorCodes.toolCallRejected);
+                    assert.deepEqual(request.value.payload, payload);
+                    throw createRemoteError({
+                        code: request.rejection!.code,
+                        message: request.rejection!.message,
+                        retryable: false,
+                    });
+                },
+            };
         },
     });
     registerHooks(runtime, [
@@ -81,7 +93,7 @@ test("review receives one frozen value and stops at reject", async () => {
         { code: runtimeErrorCodes.toolCallRejected },
     );
 
-    assert.deepEqual(calls, ["100", "500"]);
+    assert.deepEqual(calls, ["100", "500", "target"]);
     assert.equal(seen[0], seen[1]);
     assert.notEqual(seen[0]?.payload, payload);
     assert.equal(Object.isFrozen(payload), false);
