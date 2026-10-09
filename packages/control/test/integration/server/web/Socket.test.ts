@@ -103,7 +103,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     await negotiate(connection, "web");
 
     assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
+        await connection.request<JsonValue>("@control", "server", "ping"),
         { pong: true },
     );
 
@@ -138,7 +138,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
 
     await waitUntil(() => closedConnections.length === 1);
     await assert.rejects(
-        connection.request("@control", "service", "ping"),
+        connection.request("@control", "server", "ping"),
         /closed|revoked/iu,
     );
     const rejectedAfterLogout = await openRejected(
@@ -212,7 +212,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     const connection = createClient(async () => webSocket);
     await negotiate(connection, "web");
     assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
+        await connection.request<JsonValue>("@control", "server", "ping"),
         { pong: true },
     );
 });
@@ -280,7 +280,7 @@ test("web token auth exchanges the configured web bearer token for a session coo
     const connection = createClient(async () => webSocket);
     await negotiate(connection, "web");
     assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
+        await connection.request<JsonValue>("@control", "server", "ping"),
         { pong: true },
     );
 });
@@ -403,7 +403,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     t.after(() => connection.close());
     await negotiate(connection, "web");
     assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
+        await connection.request<JsonValue>("@control", "server", "ping"),
         { pong: true },
     );
 });
@@ -622,7 +622,7 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
         t.after(() => connection.close());
         await negotiate(connection, peer);
         assert.deepEqual(
-            await connection.request<JsonValue>("@control", "service", "ping"),
+            await connection.request<JsonValue>("@control", "server", "ping"),
             { pong: true },
         );
     }
@@ -746,7 +746,7 @@ function createRouteHosts(): readonly ControlHostDefinition[] {
             host: "@control",
             ports: [
                 {
-                    name: "service",
+                    name: "server",
                     operations: [
                         {
                             name: "hello",
@@ -805,7 +805,7 @@ async function negotiate(
     connection: TestClient,
     clientKind: "cli" | "tui" | "web",
 ): Promise<void> {
-    await connection.request("@control", "service", "hello", {
+    await connection.request("@control", "server", "hello", {
         clientKind,
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });
