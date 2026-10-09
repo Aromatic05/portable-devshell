@@ -33,6 +33,7 @@ import {
 } from "./testspace/TestspaceReverse.mjs";
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
+import { runTestspaceApprovalSmoke } from "./testspace/TestspaceApprovalSmoke.mjs";
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
 import { runTestspaceLongWaitSmoke } from "./testspace/TestspaceLongWaitSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
@@ -137,6 +138,9 @@ switch (command) {
         break;
     case "comment-smoke":
         await commentSmoke();
+        break;
+    case "approval-smoke":
+        await approvalSmoke();
         break;
     case "exec":
         await execInTestspace(args);
@@ -448,6 +452,17 @@ async function updateSmoke() {
 async function workflowSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceWorkflowSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        runtimeDirectory: stateRuntimeDirectory(state),
+        workspace: paths.workspace,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function approvalSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceApprovalSmoke({
         endpoint: testspaceUrls(state).mcp,
         instance: TESTSPACE_INSTANCE,
         runtimeDirectory: stateRuntimeDirectory(state),

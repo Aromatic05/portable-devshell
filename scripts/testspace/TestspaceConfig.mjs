@@ -2,6 +2,7 @@ export const TESTSPACE_INSTANCE = "testspace-local";
 export const TESTSPACE_REVERSE_INSTANCE = "testspace-reverse";
 export const DEFAULT_TESTSPACE_COMMAND = "start";
 const USER_TESTSPACE_COMMANDS = new Set([
+    "approval-smoke",
     "comment-smoke",
     "exec",
     "long-smoke",
