@@ -11,13 +11,11 @@ import type {
 
 import type { ContextApi } from "../../../../../context/Api.js";
 import type { CliExtensionCommandService } from "./index.js";
-import type { InstanceRegistry } from "../../../../../instance/Registry.js";
-import type { InstanceChangeHub } from "../../../../../instance/Change.js";
 
 /** Connect Worker-owned command sessions to authorized model CLI extensions. */
 export class ModelCommandBroker {
     readonly #active = new Map<string, AbortController>();
-    readonly #instances: InstanceRegistry;
+    readonly #instances: { list(): readonly Instance[] };
     readonly #contexts: ContextApi;
     readonly #commands: CliExtensionCommandService;
     readonly #endpoint: Endpoint;
@@ -25,11 +23,11 @@ export class ModelCommandBroker {
     readonly #unsubscribe: () => void;
 
     constructor(options: {
-        changes: InstanceChangeHub;
+        changes: { onChange(listener: () => void): () => void };
         commands: CliExtensionCommandService;
         contexts: ContextApi;
         endpoint: Endpoint;
-        instances: InstanceRegistry;
+        instances: { list(): readonly Instance[] };
     }) {
         this.#instances = options.instances;
         this.#contexts = options.contexts;
