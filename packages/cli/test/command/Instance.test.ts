@@ -334,7 +334,7 @@ async function runStartupFailureDiagnostics(): Promise<void> {
         assert.notEqual(await runCli(["start"]), 0);
         const failure = stderr.flush();
         assert.match(failure, /control startup log/u);
-        assert.match(failure, /STARTUP control state load started/u);
+        assert.match(failure, /STARTUP control config load started/u);
         assert.match(failure, /Invalid TOML document/u);
         assert.doesNotMatch(failure, /HISTORICAL_STARTUP_MARKER/u);
         assert.equal(stdout.flush(), "");
@@ -413,7 +413,8 @@ async function runControlStartupWithLockedAudit(): Promise<void> {
             BEGIN EXCLUSIVE;
         `);
 
-        assert.equal(await runCli(["start"]), 0);
+        const startCode = await runCli(["start"]);
+        assert.equal(startCode, 0, startCode === 0 ? undefined : stderr.flush());
         controlStarted = true;
         assert.match(stdout.flush(), /control: running/u);
         assert.equal(stderr.flush(), "");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
-import { InstanceStateMachine } from "../../../../src/instance/runtime/supervision/State.ts";
+import { InstanceStateMachine, WorkerInstanceState } from "../../../../src/instance/runtime/supervision/State.ts";
 
 test("InstanceStateMachine derives ready running stale failed and stopped snapshots", () => {
     const stateMachine = new InstanceStateMachine(
@@ -72,4 +72,25 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
     assert.equal(stopped.status, "stopped");
     assert.equal(stopped.lastErrorCode, undefined);
     assert.equal(stopped.lastErrorMessage, undefined);
+});
+
+test("WorkerInstanceState defers Audit cursor access until a real snapshot", () => {
+    let reads = 0;
+    const state = new WorkerInstanceState({
+        config: { effectiveSecurityMode: "workspace" } as never,
+        events: {
+            cursor() {
+                reads += 1;
+                return 42;
+            },
+            readFrom: () => ({ kind: "events", events: [], lastSeq: 42 }),
+        } as never,
+        onReadyChanged: async () => undefined,
+        stateMachine: new InstanceStateMachine(asInstanceName("stopped-instance")),
+    });
+    assert.equal(reads, 0, "Control must not open Worker Audit during registration");
+    assert.equal(state.snapshot().lastSeq, 42);
+    assert.equal(reads, 1);
+    assert.equal(state.snapshot().lastSeq, 42);
+    assert.equal(reads, 1, "The persisted cursor is read exactly once");
 });
