@@ -67,14 +67,20 @@ export async function executeControlLifecycle(
             const current = await lifecycle.status();
             if (current.running && !context.controlNegotiated)
                 await context.negotiate();
+            // Control lists configured Instances only; its snapshots are
+            // inactive placeholders. Check each Instance's own live Process.
             const restore = current.running
-                ? (await context.clients.instance.listInstances()).filter(
-                      (entry) =>
-                          entry.snapshot.reverse === undefined &&
-                          (entry.snapshot.daemonState === "running" ||
-                              entry.snapshot.daemonState === "starting" ||
-                              entry.snapshot.daemonState === "stale"),
-                  )
+                ? (await Promise.all((await context.clients.instance.listInstances())
+                    .filter((entry) => entry.enabled)
+                    .map(async (entry) => ({
+                        name: entry.name,
+                        snapshot: (await context.clients.runtime(entry.name).snapshot()).snapshot,
+                    })))).filter(({ snapshot }) =>
+                    snapshot.reverse === undefined &&
+                    (snapshot.daemonState === "running" ||
+                        snapshot.daemonState === "starting" ||
+                        snapshot.daemonState === "stale"),
+                )
                 : [];
             await lifecycle.stop();
             const status = await lifecycle.start();
