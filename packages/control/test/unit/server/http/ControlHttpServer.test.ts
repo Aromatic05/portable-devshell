@@ -108,7 +108,7 @@ test("static HTTP respects MIME, encoded paths, allowed methods, and HEAD", asyn
     }
 });
 
-test("static HTTP rejects symlink escapes and decoded traversal", async () => {
+test("static HTTP rejects symlink escapes and decoded traversal", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "control-static-symlink-"));
     const root = join(directory, "assets");
     const outside = join(directory, "secret.txt");
@@ -118,8 +118,18 @@ test("static HTTP rejects symlink escapes and decoded traversal", async () => {
         await mkdir(root);
         await writeFile(outside, "not public", "utf8");
         await writeFile(join(root, "public.txt"), "public", "utf8");
-        await symlink(outside, join(root, "escape.txt"));
-        await symlink(directory, join(root, "escape-dir"));
+        try {
+            await symlink(outside, join(root, "escape.txt"), "file");
+            await symlink(directory, join(root, "escape-dir"), "dir");
+        } catch (error) {
+            if (process.platform === "win32" &&
+                ((error as NodeJS.ErrnoException).code === "EPERM" ||
+                    (error as NodeJS.ErrnoException).code === "EACCES")) {
+                t.skip("Windows does not permit symlink creation in this environment");
+                return;
+            }
+            throw error;
+        }
         lease.registerStaticDirectory("/static", root);
         await lease.start();
         const address = lease.address;
