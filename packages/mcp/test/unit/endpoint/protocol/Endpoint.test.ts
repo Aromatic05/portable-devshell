@@ -592,9 +592,9 @@ test("tools/call delegates through the host ToolCall API", async () => {
         assert.equal(harness.calls[0]?.toolName, "bash_run");
         assert.deepEqual(
             harness.events.map((event) => event.type),
-            ["mcp.toolCalled", "mcp.toolCalled"],
+            ["mcp.toolCalled"],
         );
-        assert.deepEqual(harness.events[1]?.data, {
+        assert.deepEqual(harness.events[0]?.data, {
             ctxId,
             requestId: "req-tools-call",
             source: "mcp",
