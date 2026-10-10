@@ -1,17 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
-import {
-    WorkerBinary,
-    WorkerRpcBridge,
-    WorkerRpcClient,
-    WorkerTransportConnection,
-    WorkerTransportDriverLocal,
-} from "../packages/core/dist/testing.js";
-import {
-    WORKER_LEGACY_PROTOCOL_VERSION,
-    WORKER_PROTOCOL_VERSION,
-} from "../packages/core/dist/worker/protocol/Client.js";
+import { WORKER_PROTOCOL_VERSION } from "../packages/shared/dist/index.js";
+import { WorkerBinary } from "../packages/core/dist/instance/runtime/Binary.js";
+import { LocalExecution } from "../packages/core/dist/instance/runtime/execution/provider/Local.js";
+import { WorkerTerminal } from "../packages/core/dist/instance/runtime/execution/capability/terminal/Terminal.js";
+import { TransportConnection } from "../packages/core/dist/instance/transport/endpoint/Connection.js";
+import { TransportFactory } from "../packages/core/dist/instance/transport/endpoint/Factory.js";
+import { WorkerProtocolClient } from "../packages/core/dist/instance/transport/packet/Client.js";
+import { WorkerToolCatalog } from "../packages/core/dist/toolcall/worker/Catalog.js";
+import { WorkerToolInvoker } from "../packages/core/dist/toolcall/worker/Invoker.js";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
@@ -23,7 +21,7 @@ const worker = isAbsolute(workerArgument)
     : resolve(process.cwd(), workerArgument);
 const root = await createTestTempDirectory("worker-smoke");
 const workspace = resolve(root, "workspace");
-const instance = `windows-smoke-${process.pid}`;
+const instance = `worker-smoke-${process.pid}`;
 const env = {
     ...process.env,
     PORTABLE_DEVSHELL_HOME: resolve(root, "home"),
@@ -36,37 +34,33 @@ await mkdir(workspace, { recursive: true });
 try {
     stage("start worker");
     runWorker(["start", "--instance", instance]);
-    stage("open frame rpc service");
-    const transport = new WorkerTransportDriverLocal({
+    stage("open Worker Endpoint");
+    const transport = new LocalExecution({
         workerBinary: new WorkerBinary(worker),
     });
-    const connection = WorkerTransportConnection.fromTransport(transport, {
-        env,
-        instanceName: instance,
-    });
-    const bridge = new WorkerRpcBridge({
-        connection,
-        rpcOptions: { env, instanceName: instance },
-    });
-    const client = new WorkerRpcClient(bridge);
-    const rpc = {
-        request: async (method, params) =>
-            await client.request(method, params, { workspace }),
-    };
+    const connection = new TransportConnection(() =>
+        transport.connectChannel({ env, instanceName: instance }),
+    );
+    const workerHost = `${instance}-worker`;
+    const endpoint = TransportFactory.createEndpoint(connection, instance, workerHost);
+    const protocol = new WorkerProtocolClient(endpoint, workerHost);
+    const terminalPort = new WorkerTerminal(endpoint, workerHost);
+    const catalog = new WorkerToolCatalog();
+    const invoker = new WorkerToolInvoker(endpoint, workerHost, catalog);
+    const callTool = (name, input) => invoker.invoke(name, input, { workspace });
     try {
         stage("worker.handshake");
-        const handshake = await rpc.request("worker.handshake", {
+        const handshake = await protocol.handshake({
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
-            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
-            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
             protocolRange: {
                 max: WORKER_PROTOCOL_VERSION,
                 min: WORKER_PROTOCOL_VERSION,
             },
         });
         stage("tools.list");
-        const tools = await rpc.request("tools.list", {});
+        const tools = await protocol.listTools();
+        catalog.refresh(tools.tools);
         const names = tools.tools.map((tool) => tool.name);
         if (!names.includes("bash_run"))
             throw new Error("bash_run is missing from tools.list");
@@ -92,7 +86,7 @@ try {
         }
 
         stage("file_edit");
-        const written = await rpc.request("file_edit", {
+        const written = await callTool("file_edit", {
             changes:
                 "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit",
         });
@@ -108,7 +102,7 @@ try {
             );
         }
         stage("file_read");
-        const read = await rpc.request("file_read", {
+        const read = await callTool("file_read", {
             files: [{ path: "./portable-devshell-smoke.txt" }],
         });
         const readEntry = Array.isArray(read.files) ? read.files[0] : undefined;
@@ -124,7 +118,7 @@ try {
             handshake.platform.os === "windows"
                 ? "Write-Output 'portable-devshell-smoke'"
                 : "printf 'portable-devshell-smoke\\n'";
-        const result = await rpc.request("bash_run", {
+        const result = await callTool("bash_run", {
             command,
             maxCaptureBytes: 4096,
             timeoutMs: 10_000,
@@ -137,17 +131,7 @@ try {
         }
 
         stage("terminal.open");
-        const terminalCapabilities = handshake.capabilities?.terminalPty;
-        if (
-            terminalCapabilities?.supported !== true ||
-            terminalCapabilities.resize !== true ||
-            terminalCapabilities.replay !== true
-        ) {
-            throw new Error(
-                `worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`,
-            );
-        }
-        const terminal = await rpc.request("terminal.open", {
+        const terminal = await terminalPort.open({
             cols: 80,
             rows: 24,
             workspace,
@@ -161,13 +145,13 @@ try {
         };
         if (terminalClient.windows) {
             await waitForTerminalOutput(
-                rpc,
+                terminalPort,
                 terminal,
                 terminalClient,
                 "\u001B[6n",
             );
         }
-        await rpc.request("terminal.write", {
+        await terminalPort.write({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
@@ -178,14 +162,14 @@ try {
             ).toString("base64"),
         });
         await waitForTerminalOutput(
-            rpc,
+            terminalPort,
             terminal,
             terminalClient,
             "worker-pty-smoke",
         );
 
         stage("terminal.resize");
-        const resized = await rpc.request("terminal.resize", {
+        const resized = await terminalPort.resize({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
@@ -194,7 +178,7 @@ try {
             rows: 40,
         });
         terminalClient.version = resized.version;
-        await rpc.request("terminal.write", {
+        await terminalPort.write({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
@@ -203,19 +187,19 @@ try {
                 "base64",
             ),
         });
-        await waitForTerminalOutput(rpc, terminal, terminalClient, "40 100");
+        await waitForTerminalOutput(terminalPort, terminal, terminalClient, "40 100");
 
         stage("terminal.kill");
-        await rpc.request("terminal.kill", {
+        await terminalPort.kill({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
             clientSeq: terminalClient.clientSeq++,
         });
-        await waitForTerminalExit(rpc, terminal);
+        await waitForTerminalExit(terminalPort, terminal);
     } finally {
-        stage("close frame rpc service");
-        bridge.close();
+        stage("close Worker Endpoint");
+        endpoint.close();
         connection.close();
     }
 
@@ -254,11 +238,11 @@ function terminalSizeProbeCommand() {
         : "stty size\r";
 }
 
-async function waitForTerminalOutput(rpc, terminal, client, expected) {
+async function waitForTerminalOutput(terminalPort, terminal, client, expected) {
     const deadline = Date.now() + (client.windows ? 30_000 : 10_000);
     let output = "";
     while (Date.now() < deadline) {
-        const attached = await rpc.request("terminal.attach", {
+        const attached = await terminalPort.attach({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             fromSeq: client.fromSeq,
@@ -272,7 +256,7 @@ async function waitForTerminalOutput(rpc, terminal, client, expected) {
             output += data;
             if (client.windows) {
                 await respondToCursorPositionQueries(
-                    rpc,
+                    terminalPort,
                     terminal,
                     client,
                     data,
@@ -287,7 +271,7 @@ async function waitForTerminalOutput(rpc, terminal, client, expected) {
     );
 }
 
-async function respondToCursorPositionQueries(rpc, terminal, client, data) {
+async function respondToCursorPositionQueries(terminalPort, terminal, client, data) {
     const query = "\u001B[6n";
     client.responseTail += data;
     while (true) {
@@ -301,7 +285,7 @@ async function respondToCursorPositionQueries(rpc, terminal, client, data) {
         client.responseTail = client.responseTail.slice(
             queryIndex + query.length,
         );
-        await rpc.request("terminal.write", {
+        await terminalPort.write({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: client.version,
@@ -311,10 +295,10 @@ async function respondToCursorPositionQueries(rpc, terminal, client, data) {
     }
 }
 
-async function waitForTerminalExit(rpc, terminal) {
+async function waitForTerminalExit(terminalPort, terminal) {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-        const attached = await rpc.request("terminal.attach", {
+        const attached = await terminalPort.attach({
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             fromSeq: 0,
@@ -361,7 +345,7 @@ async function reportFailure(error) {
             : "worker.log was unavailable",
     ].join("\n\n");
     process.stderr.write(
-        `::error title=Windows worker smoke::${escapeWorkflowCommand(rendered)}\n`,
+        `::error title=Worker smoke::${escapeWorkflowCommand(rendered)}\n`,
     );
 }
 
