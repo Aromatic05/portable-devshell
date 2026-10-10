@@ -292,12 +292,14 @@ export class Instance {
         await this.#state
             .prepareRetirement()
             .catch((error) => failures.push(error));
-        await this.#lifecycle.drain();
         try {
+            // Watches may wait for an event forever while holding an Instance
+            // lease. Stop them before waiting for finite accepted operations.
             this.#subscriptions.close();
         } catch (error) {
             failures.push(error);
         }
+        await this.#lifecycle.drain();
         await this.#state.retire().catch((error) => failures.push(error));
         if (failures.length === 0) {
             this.#lifecycle.completeRetirement();

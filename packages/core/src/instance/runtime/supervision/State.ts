@@ -153,6 +153,16 @@ export class WorkerInstanceState {
         reverse?: ReverseInstanceStatus,
     ): Promise<InstanceSnapshot> {
         const previous = this.snapshot(reverse);
+        const enteringReady = !previous.ready && isReadyState(
+            update.daemonState ?? previous.daemonState,
+            update.connectionState ?? previous.connectionState,
+        );
+        if (enteringReady) {
+            // Never publish ready before the associated Worker tool catalog
+            // is available. Reverse clients can issue ToolCalls immediately
+            // after observing the ready snapshot.
+            await this.#onReadyChanged(true);
+        }
         this.#stateMachine.apply(update);
         const next = this.snapshot(reverse);
         if (
@@ -176,7 +186,7 @@ export class WorkerInstanceState {
                 "instance.readyChanged",
                 createReadyChangedEventData(previous, next),
             );
-            await this.#onReadyChanged(next.ready);
+            if (!next.ready) await this.#onReadyChanged(false);
         }
         return this.snapshot(reverse);
     }

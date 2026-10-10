@@ -94,3 +94,27 @@ test("WorkerInstanceState defers Audit cursor access until a real snapshot", () 
     assert.equal(state.snapshot().lastSeq, 42);
     assert.equal(reads, 1, "The persisted cursor is read exactly once");
 });
+
+test("Worker ready is visible only after asynchronous tool-catalog refresh", async () => {
+    let finishRefresh!: () => void;
+    const refreshing = new Promise<void>((resolve) => { finishRefresh = resolve; });
+    const events: string[] = [];
+    const state = new WorkerInstanceState({
+        config: { effectiveSecurityMode: "workspace" } as never,
+        events: {
+            cursor: () => 0,
+            readFrom: () => ({ kind: "events", events: [], lastSeq: 0 }),
+            append: async (event: { type: string }) => { events.push(event.type); return { seq: events.length }; },
+        } as never,
+        onReadyChanged: async (ready) => { if (ready) await refreshing; },
+        stateMachine: new InstanceStateMachine(asInstanceName("reverse-ready-test")),
+    });
+    const transition = state.apply({ connectionState: "connected", daemonState: "running" });
+    await Promise.resolve();
+    assert.equal(state.snapshot().ready, false);
+    assert.equal(events.length, 0, "ready cannot be announced before the tool schema is available");
+    finishRefresh();
+    await transition;
+    assert.equal(state.snapshot().ready, true);
+    assert.ok(events.includes("instance.readyChanged"));
+});

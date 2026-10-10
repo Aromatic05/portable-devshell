@@ -22,6 +22,7 @@ interface TerminalRouteModuleOptions {
     backend: TerminalBackend;
     instance: string;
     maxUnackedBytes?: number;
+    onRetiring?: (detach: () => void) => () => void;
     sessions: TerminalSessionApi;
 }
 
@@ -277,14 +278,34 @@ export function createTerminalRouteModule(
                     onOutput: enqueueOutput,
                     terminalId: input.terminalId,
                 });
-                for (const frame of attachment.replay) enqueueOutput(frame);
-                if (attachment.exit !== undefined) enqueueExit(attachment.exit);
-                await sendTail;
-                if (!endedFlag) await ended;
-                await sendTail;
-                offData();
-                offClose();
-                offCancel();
+                let resolveRetiring!: () => void;
+                const retiring = new Promise<void>((resolve) => {
+                    resolveRetiring = resolve;
+                });
+                const offRetiring = options.onRetiring?.(() => {
+                    // Detach only this stream: the remote PTY and its durable
+                    // session must remain alive for reconnect/replay. Releasing
+                    // the wait here lets the Instance drain its stream lease.
+                    end();
+                    resolveRetiring();
+                    void sendTail.then(() => stream.close()).catch(() => undefined);
+                });
+                try {
+                    for (const frame of attachment.replay) enqueueOutput(frame);
+                    if (attachment.exit !== undefined) enqueueExit(attachment.exit);
+                    // A client can indefinitely backpressure a send. Retiring
+                    // an Instance must still detach and release the stream
+                    // lease rather than waiting on that client's network IO.
+                    await Promise.race([sendTail, retiring]);
+                    if (!endedFlag) await ended;
+                    await Promise.race([sendTail, retiring]);
+                } finally {
+                    offRetiring?.();
+                    end();
+                    offData();
+                    offClose();
+                    offCancel();
+                }
             },
         },
     );

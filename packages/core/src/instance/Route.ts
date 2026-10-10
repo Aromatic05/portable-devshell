@@ -53,6 +53,7 @@ export function createInstanceHost(
         createTerminalRouteModule({
             backend: state.terminal.api,
             instance: name,
+            onRetiring: (detach) => descriptor.lifecycle.onRetiring(detach),
             sessions: state.terminal.sessions.api,
         }),
         createGoalTaskRouteModule({ events, goal: state.task.api.goal }),
