@@ -4,8 +4,9 @@ use std::io::{self, Read, Write};
 use serde_json::Value;
 
 use crate::support::frame::{
-    decode_reset_message, encode_frame, encode_open, read_transport_frame, try_read_envelope,
     FRAME_DATA, FRAME_FIN, FRAME_MAX_DATA_SIZE, FRAME_RESET, FRAME_WINDOW, RPC_STREAM_ID,
+    decode_reset_message, encode_envelope, encode_frame, encode_open, read_transport_frame,
+    try_read_envelope,
 };
 
 pub struct TransportEndpointWriter<W: Write> {
@@ -24,16 +25,7 @@ impl<W: Write> TransportEndpointWriter<W> {
     }
 
     pub fn send(&mut self, port: &str, packet: &Value) -> io::Result<()> {
-        let envelope = serde_json::json!({
-            "source": { "host": "test", "port": port },
-            "dest": { "host": format!("{}-worker", self.instance), "port": port },
-            "packet": packet,
-        });
-        let body = serde_json::to_vec(&envelope)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let mut encoded = Vec::with_capacity(4 + body.len());
-        encoded.extend_from_slice(&(body.len() as u32).to_be_bytes());
-        encoded.extend_from_slice(&body);
+        let encoded = encode_envelope(&self.instance, port, packet)?;
         for chunk in encoded.chunks(FRAME_MAX_DATA_SIZE) {
             self.inner
                 .write_all(&encode_frame(FRAME_DATA, RPC_STREAM_ID, chunk))?;

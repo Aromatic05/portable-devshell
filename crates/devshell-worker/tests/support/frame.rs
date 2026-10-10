@@ -1,7 +1,12 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
+use prost::Message;
 use serde_json::Value;
+
+mod wire {
+    include!(concat!(env!("OUT_DIR"), "/devshell.transport.rs"));
+}
 
 const FRAME_PROTOCOL_VERSION: u8 = 1;
 const FRAME_OPEN: u8 = 1;
@@ -23,16 +28,7 @@ pub(super) fn exchange_rpc(
     writer.write_all(&encode_open("envelope"))?;
     writer.flush()?;
 
-    let envelope = serde_json::json!({
-        "source": { "host": "test", "port": port },
-        "dest": { "host": format!("{instance}-worker"), "port": port },
-        "packet": packet,
-    });
-    let body = serde_json::to_vec(&envelope)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let mut encoded = Vec::with_capacity(4 + body.len());
-    encoded.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    encoded.extend_from_slice(&body);
+    let encoded = encode_envelope(instance, port, packet)?;
 
     let expected_id = packet.get("id").and_then(Value::as_str);
     let mut send_credit = 0_u32;
@@ -68,6 +64,24 @@ pub(super) fn exchange_rpc(
     }
 }
 
+pub(crate) fn encode_envelope(instance: &str, port: &str, packet: &Value) -> io::Result<Vec<u8>> {
+    let data = serde_json::to_vec(packet)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(wire::Envelope {
+        source: Some(wire::Address {
+            host: "test".into(),
+            port: port.into(),
+        }),
+        dest: Some(wire::Address {
+            host: format!("{instance}-worker"),
+            port: port.into(),
+        }),
+        packet: Some(wire::Packet {
+            value: Some(wire::packet::Value::Json(data)),
+        }),
+    }
+    .encode_length_delimited_to_vec())
+}
 
 pub(crate) fn encode_open(service: &str) -> Vec<u8> {
     let service = service.as_bytes();
@@ -89,7 +103,9 @@ pub(crate) fn encode_frame(frame_type: u8, stream_id: u32, payload: &[u8]) -> Ve
     output
 }
 
-pub(crate) fn read_transport_frame(reader: &mut impl Read) -> io::Result<Option<(u8, u32, Vec<u8>)>> {
+pub(crate) fn read_transport_frame(
+    reader: &mut impl Read,
+) -> io::Result<Option<(u8, u32, Vec<u8>)>> {
     let mut length = [0_u8; 4];
     match reader.read_exact(&mut length) {
         Ok(()) => {}
@@ -170,19 +186,41 @@ fn pump_transport(
 }
 
 pub(crate) fn try_read_envelope(buffer: &mut VecDeque<u8>) -> io::Result<Option<Value>> {
-    if buffer.len() < 4 {
+    let data = buffer.make_contiguous();
+    let Some(delimiter_len) = data
+        .iter()
+        .take(10)
+        .position(|byte| byte & 0x80 == 0)
+        .map(|n| n + 1)
+    else {
+        if data.len() < 10 {
+            return Ok(None);
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Envelope delimiter exceeds 10 bytes",
+        ));
+    };
+    let payload_len = prost::decode_length_delimiter(&data[..delimiter_len])
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if data.len() < delimiter_len + payload_len {
         return Ok(None);
     }
-    let header = buffer.make_contiguous();
-    let payload_len = u32::from_be_bytes(header[..4].try_into().expect("Envelope length")) as usize;
-    if buffer.len() < 4 + payload_len {
-        return Ok(None);
-    }
-    buffer.drain(..4);
-    let payload = buffer.drain(..payload_len).collect::<Vec<_>>();
-    serde_json::from_slice(&payload)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    let envelope = wire::Envelope::decode(&data[delimiter_len..delimiter_len + payload_len])
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    buffer.drain(..delimiter_len + payload_len);
+    let packet = envelope
+        .packet
+        .and_then(|packet| packet.value)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Envelope packet missing"))?;
+    let packet = match packet {
+        wire::packet::Value::Json(data) => serde_json::from_slice(&data)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+        wire::packet::Value::StreamData(data) => serde_json::json!({
+            "protocol": "stream", "type": "data", "id": data.id, "seq": data.seq, "bytes": data.data,
+        }),
+    };
+    Ok(Some(serde_json::json!({ "packet": packet })))
 }
 
 pub(crate) fn decode_reset_message(payload: &[u8]) -> String {
