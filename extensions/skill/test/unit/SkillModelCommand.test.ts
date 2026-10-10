@@ -90,20 +90,39 @@ function session(
                 };
             }
             if (name === "file_read") {
-                if ("files" in (input as object)) {
+                const request = asRecord(input);
+                const requested = Array.isArray(request.files)
+                    ? asRecord(request.files[0])
+                    : {};
+                const path =
+                    typeof requested.path === "string"
+                        ? requested.path
+                        : "./.agents/skills/review/SKILL.md";
+                if (
+                    path === "./.agents/skills/review/references/checklist.md"
+                ) {
                     return {
                         files: [
                             {
-                                content:
-                                    "1:---\n2:description: Review remote changes\n3:---\n4:# Review",
-                                path: "./.agents/skills/review/SKILL.md",
+                                path,
+                                error: {
+                                    code: "file.readFailed",
+                                    details: { path },
+                                    message: "permission denied",
+                                    retryable: false,
+                                },
                             },
                         ],
                     };
                 }
                 return {
-                    content:
-                        "1:---\n2:description: Review remote changes\n3:---\n4:# Review",
+                    files: [
+                        {
+                            content:
+                                "1:---\n2:description: Review remote changes\n3:---\n4:# Review",
+                            path,
+                        },
+                    ],
                 };
             }
             throw new Error(`unexpected tool ${name}`);
@@ -161,3 +180,30 @@ test("Skill model load reads the current Worker project Skill without Control cw
     assert.match(value?.content ?? "", /Review remote changes/u);
     assert.equal(calls[0], "open:remote-one:/remote/workspace");
 });
+
+test("Skill model read surfaces Worker batch error details", async () => {
+    const calls: string[] = [];
+    await assert.rejects(
+        executeSkillModelCommand(
+            context(calls),
+            ["read", "review", "references/checklist.md"],
+            invocation(),
+        ),
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "file.readFailed");
+            assert.equal((error as Error).message, "permission denied");
+            assert.deepEqual((error as { details?: unknown }).details, {
+                path: "./.agents/skills/review/references/checklist.md",
+            });
+            assert.equal((error as { retryable?: boolean }).retryable, false);
+            return true;
+        },
+    );
+    assert.equal(calls.at(-1), "close");
+});
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+}

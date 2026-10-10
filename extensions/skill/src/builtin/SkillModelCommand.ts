@@ -269,11 +269,33 @@ async function workerRead(
     signal: AbortSignal,
 ): Promise<string> {
     const result = asRecord(
-        await session.callTool("file_read", { path }, { signal }),
+        await session.callTool("file_read", { files: [{ path }] }, { signal }),
     );
-    if (typeof result.content !== "string")
-        throw new Error(`Worker file_read returned no content for ${path}.`);
-    return stripLineNumbers(result.content);
+    const files = Array.isArray(result.files) ? result.files : [];
+    const file = asRecord(files[0]);
+    if (typeof file.content === "string")
+        return stripLineNumbers(file.content);
+    throw workerReadError(path, file.error);
+}
+
+function workerReadError(path: string, error: unknown): Error {
+    const detail = asRecord(error);
+    const code =
+        typeof detail.code === "string" ? detail.code : "file.readFailed";
+    const message =
+        typeof detail.message === "string"
+            ? detail.message
+            : `Worker file_read returned no content for ${path}.`;
+    const failure = new Error(message) as Error & {
+        code: string;
+        details?: unknown;
+        retryable?: boolean;
+    };
+    failure.code = code;
+    if ("details" in detail) failure.details = detail.details;
+    if (typeof detail.retryable === "boolean")
+        failure.retryable = detail.retryable;
+    return failure;
 }
 
 function sanitizeLoaded(value: LoadedSkill): Omit<LoadedSkill, "sourcePath"> {

@@ -510,7 +510,7 @@ impl ArtifactReceiveStore {
     ) -> Result<(), ToolError> {
         let rebound = match (&metadata.workspace, &metadata.requested_target_path) {
             (Some(_), Some(_)) => match self.rebind_target(metadata) {
-                Ok(resolved) => Some(resolved),
+                Ok(resolved) => resolved,
                 Err(_)
                     if metadata.phase != ArtifactReceivePhase::Committing
                         && metadata.backup_path.is_none()
@@ -530,23 +530,6 @@ impl ArtifactReceiveStore {
                     ));
                 }
             },
-            // @compat artifact-receive-recovery-v1
-            // @removeAt 0.7.10
-            (None, None)
-                if metadata.phase != ArtifactReceivePhase::Committing
-                    && metadata.backup_path.is_none()
-                    && metadata.staged_path.is_none() =>
-            {
-                let _ = fs::remove_file(&metadata.temporary_path);
-                let _ = fs::remove_file(self.metadata_path(&metadata.receive_id));
-                return Ok(());
-            }
-            (None, None) => {
-                return Err(ToolError::new(
-                    "artifact.recoveryFailed",
-                    "legacy artifact recovery state cannot be safely rebound; recovery state was preserved",
-                ));
-            }
             _ => {
                 return Err(ToolError::new(
                     "artifact.recoveryFailed",
@@ -554,60 +537,42 @@ impl ArtifactReceiveStore {
                 ));
             }
         };
-        if let Some(resolved) = rebound.as_ref() {
-            let target = resolved
-                .target()
-                .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?;
-            if metadata.backup_path.is_some() {
-                let backup = target
-                    .sibling(&format!(".devshell-receive-{}.backup", metadata.receive_id))
-                    .map_err(|error| {
-                        ToolError::new("artifact.recoveryFailed", error.to_string())
-                    })?;
-                let target_exists = target
-                    .metadata(false)
-                    .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?
-                    .is_some();
-                let backup_exists = backup
-                    .metadata(false)
-                    .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?
-                    .is_some();
-                if backup_exists && !target_exists {
-                    backup.rename_to(&target).map_err(|error| {
-                        ToolError::new("artifact.recoveryFailed", error.to_string())
-                    })?;
-                } else if backup_exists && target_exists {
-                    backup.remove().map_err(|error| {
-                        ToolError::new("artifact.recoveryFailed", error.to_string())
-                    })?;
-                }
-            }
-            if metadata.staged_path.is_some() {
-                let staged = target
-                    .sibling(&receive_staged_name(metadata))
-                    .map_err(|error| {
-                        ToolError::new("artifact.recoveryFailed", error.to_string())
-                    })?;
-                staged.remove().map_err(|error| {
+        let target = rebound
+            .target()
+            .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?;
+        if metadata.backup_path.is_some() {
+            let backup = target
+                .sibling(&format!(".devshell-receive-{}.backup", metadata.receive_id))
+                .map_err(|error| {
+                    ToolError::new("artifact.recoveryFailed", error.to_string())
+                })?;
+            let target_exists = target
+                .metadata(false)
+                .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?
+                .is_some();
+            let backup_exists = backup
+                .metadata(false)
+                .map_err(|error| ToolError::new("artifact.recoveryFailed", error.to_string()))?
+                .is_some();
+            if backup_exists && !target_exists {
+                backup.rename_to(&target).map_err(|error| {
+                    ToolError::new("artifact.recoveryFailed", error.to_string())
+                })?;
+            } else if backup_exists && target_exists {
+                backup.remove().map_err(|error| {
                     ToolError::new("artifact.recoveryFailed", error.to_string())
                 })?;
             }
-        } else {
-            let target_path = metadata.target_path.as_path();
-            if let Some(backup) = &metadata.backup_path {
-                let target_exists = target_path.symlink_metadata().is_ok();
-                let backup_exists = backup.symlink_metadata().is_ok();
-                if backup_exists && !target_exists {
-                    fs::rename(backup, target_path).map_err(|error| {
-                        ToolError::new("artifact.recoveryFailed", error.to_string())
-                    })?;
-                } else if backup_exists && target_exists {
-                    remove_path_if_exists(backup)?;
-                }
-            }
-            if let Some(staged) = &metadata.staged_path {
-                remove_path_if_exists(staged)?;
-            }
+        }
+        if metadata.staged_path.is_some() {
+            let staged = target
+                .sibling(&receive_staged_name(metadata))
+                .map_err(|error| {
+                    ToolError::new("artifact.recoveryFailed", error.to_string())
+                })?;
+            staged.remove().map_err(|error| {
+                ToolError::new("artifact.recoveryFailed", error.to_string())
+            })?;
         }
         let _ = fs::remove_file(&metadata.temporary_path);
         let _ = fs::remove_file(self.metadata_path(&metadata.receive_id));
@@ -978,23 +943,6 @@ fn sibling_path(target: &Path, name: &str) -> Result<PathBuf, ToolError> {
         .parent()
         .map(|parent| parent.join(name))
         .ok_or_else(|| ToolError::new("artifact.invalidTarget", "target has no parent"))
-}
-
-fn remove_path_if_exists(path: &Path) -> Result<(), ToolError> {
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(ToolError::new("artifact.receiveFailed", error.to_string()));
-        }
-    };
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        fs::remove_dir_all(path)
-            .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))
-    } else {
-        fs::remove_file(path)
-            .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))
-    }
 }
 
 fn sync_tree(root: &ResolvedDirectory) -> Result<(), ToolError> {

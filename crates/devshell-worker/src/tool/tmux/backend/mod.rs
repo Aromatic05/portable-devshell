@@ -1330,21 +1330,6 @@ pub fn validate_pane_name(name: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn session_exists(socket: &Path) -> bool {
-    if !socket.exists() {
-        return false;
-    }
-    let Ok(mut command) = tmux_command() else {
-        return false;
-    };
-    configure_endpoint(&mut command, socket);
-    command
-        .args(["has-session", "-t", TMUX_SESSION])
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
 fn workspace_key(instance_root: &Path, workspace: &Path) -> String {
     let mut hasher = blake3::Hasher::new();
     hash_path(&mut hasher, instance_root);
@@ -1412,22 +1397,6 @@ fn workspace_storage(
         workspace,
         workspace_key,
     );
-    // @compat tmux-unscoped-workspace
-    // @removeAt 0.7.10
-    let legacy_marker = tmux_root.join("legacy-workspace.json");
-    if let Some(claimed_key) = read_legacy_workspace_key(&legacy_marker)? {
-        return if claimed_key == workspace_key {
-            Ok((tmux_root, socket_paths.tmux_socket_file.clone()))
-        } else {
-            Ok((scoped_root, scoped_socket))
-        };
-    }
-    if session_exists(&socket_paths.tmux_socket_file)
-        && legacy_session_is_within(&socket_paths.tmux_socket_file, workspace)?
-    {
-        atomic_write_json(&legacy_marker, &workspace_key.to_string())?;
-        return Ok((tmux_root, socket_paths.tmux_socket_file.clone()));
-    }
     Ok((scoped_root, scoped_socket))
 }
 
@@ -1447,55 +1416,6 @@ fn workspace_storage(
         workspace_key,
     );
     Ok((scoped_root, namespace))
-}
-
-#[cfg(unix)]
-fn read_legacy_workspace_key(path: &Path) -> Result<Option<String>, ToolError> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(ToolError::new("tmux.storageFailed", error.to_string())),
-    };
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|error| ToolError::new("tmux.storageFailed", error.to_string()))
-}
-
-#[cfg(unix)]
-fn legacy_session_is_within(socket: &Path, workspace: &Path) -> Result<bool, ToolError> {
-    let output = Command::new("tmux")
-        .arg("-S")
-        .arg(socket)
-        .args([
-            "list-panes",
-            "-s",
-            "-t",
-            TMUX_SESSION,
-            "-F",
-            "#{q:pane_current_path}",
-        ])
-        .output()
-        .map_err(|error| ToolError::new("tmux.inspectFailed", error.to_string()))?;
-    if !output.status.success() {
-        return Ok(false);
-    }
-    let raw = String::from_utf8(output.stdout)
-        .map_err(|error| ToolError::new("tmux.inspectFailed", error.to_string()))?;
-    let mut saw_pane = false;
-    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-        saw_pane = true;
-        let decoded = decode_tmux_argument(line)?;
-        let canonical = PathBuf::from(decoded).canonicalize().map_err(|error| {
-            ToolError::new(
-                "tmux.inspectFailed",
-                format!("failed to resolve legacy pane cwd: {error}"),
-            )
-        })?;
-        if !canonical.starts_with(workspace) {
-            return Ok(false);
-        }
-    }
-    Ok(saw_pane)
 }
 
 fn status_text(record: &PaneStatusRecord) -> String {

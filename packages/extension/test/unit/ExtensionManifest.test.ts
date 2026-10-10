@@ -202,7 +202,7 @@ test("Extension manifest rejects the retired v4 capability names", () => {
     }
 });
 
-test("Extension manifest requires activation in schema 1.1+ and defaults schema 1.0 to lazy", () => {
+test("Extension manifest always requires activation regardless of schema version", () => {
     assert.equal(
         parseExtensionManifest({ ...base, activation: "eager" }).activation,
         "eager",
@@ -216,12 +216,13 @@ test("Extension manifest requires activation in schema 1.1+ and defaults schema 
         () => parseExtensionManifest(withoutActivation),
         /activation/u,
     );
-    assert.equal(
-        parseExtensionManifest({
-            ...withoutActivation,
-            schemaVersion: "1.0.0",
-        }).activation,
-        "lazy",
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...withoutActivation,
+                schemaVersion: "1.0.0",
+            }),
+        /activation/u,
     );
 });
 
@@ -310,7 +311,7 @@ test("Extension manifest defaults extensions and hostDependencies to empty colle
     assert.deepEqual(parseExtensionManifest(base).hostDependencies, {});
 });
 
-test("Extension manifest accepts compatible same-major versions and legacy integers", () => {
+test("Extension manifest accepts compatible same-major string versions and rejects legacy integers", () => {
     const [apiMajor, apiMinor] = EXTENSION_API_VERSION.split(".").map(Number);
     assert.equal(
         parseExtensionManifest({
@@ -320,23 +321,13 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
         }).apiVersion,
         "5.0.0",
     );
-    const { activation: _activation, ...legacyBase } = base;
-    assert.deepEqual(
-        parseExtensionManifest({
-            ...legacyBase,
-            apiVersion: 5,
-            hostDependencies: ["@modelcontextprotocol/client"],
-            schemaVersion: 1,
-        }).hostDependencies,
-        { "@modelcontextprotocol/client": "*" },
+    assert.throws(
+        () => parseExtensionManifest({ ...base, apiVersion: 5 }),
+        /apiVersion/u,
     );
-    assert.equal(
-        parseExtensionManifest({
-            ...legacyBase,
-            apiVersion: 5,
-            schemaVersion: 1,
-        }).schemaVersion,
-        "1.0.0",
+    assert.throws(
+        () => parseExtensionManifest({ ...base, schemaVersion: 1 }),
+        /schemaVersion/u,
     );
     assert.throws(
         () =>
@@ -353,16 +344,6 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
                 apiVersion: `${apiMajor + 1}.0.0`,
             }),
         /apiVersion/u,
-    );
-    assert.throws(
-        () =>
-            parseExtensionManifest({
-                ...base,
-                schemaVersion: "1.0.0",
-                config: { access: { "mcp.listenPort": "read" } },
-                activation: undefined,
-            }),
-        /Unknown Extension manifest field/u,
     );
 });
 

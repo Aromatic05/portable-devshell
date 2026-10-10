@@ -3,13 +3,12 @@ import {
     lstat,
     mkdir,
     readFile,
-    readlink,
     rename,
     rm,
     writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
@@ -114,30 +113,9 @@ async function inspectExistingCommand(
         throw error;
     });
     if (metadata === undefined) return "absent";
-    /**
-     * @compat agent-core-pi-launcher
-     * @removeAt 0.7.10
-     */
-    if (metadata.isSymbolicLink()) {
-        const target = await readlink(path);
-        return isLegacyCorePiLauncher(target) ? "owned" : "foreign";
-    }
     if (!metadata.isFile()) return "foreign";
     const source = await readFile(path, "utf8").catch(() => "");
-    if (source.includes(OWNED_MARKER)) return "owned";
-    if (
-        source.includes("portable-devshell-pi-launcher.mjs") &&
-        source.includes("portable-devshell")
-    )
-        return "owned";
-    return "foreign";
-}
-
-function isLegacyCorePiLauncher(target: string): boolean {
-    return (
-        basename(target) === "portable-devshell-pi-launcher.mjs" &&
-        target.includes("portable-devshell")
-    );
+    return source.includes(OWNED_MARKER) ? "owned" : "foreign";
 }
 
 function isMissing(error: unknown): boolean {

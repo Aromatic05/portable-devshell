@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import {
     lstat,
     mkdir,
+    readFile,
     rm,
     symlink,
     writeFile,
@@ -82,7 +83,7 @@ async function withRestrictiveUmask<T>(
     }
 }
 
-test("Agent Pi Provider migrates the legacy core-owned pi launcher", async (t) => {
+test("Agent Pi Provider never adopts the retired core-owned pi launcher symlink", async (t) => {
     const h = await harness(t);
     await mkdir(h.binDirectory, { recursive: true });
     const legacy = join(
@@ -103,9 +104,37 @@ test("Agent Pi Provider migrates the legacy core-owned pi launcher", async (t) =
         platform: "linux",
     });
 
-    assert.equal(result.installed, true);
-    assert.equal((await lstat(result.command)).isSymbolicLink(), false);
-    assert.equal((await runFile(result.command)).stdout, "current\n");
+    assert.deepEqual(result, {
+        command: join(h.binDirectory, "pi"),
+        installed: false,
+        reason: "collision",
+    });
+    assert.equal((await lstat(result.command)).isSymbolicLink(), true);
+    assert.equal(await readFile(legacy, "utf8"), "// legacy\n");
+});
+
+test("Agent Pi Provider never adopts a wrapper that references the retired core pi launcher", async (t) => {
+    const h = await harness(t);
+    await mkdir(h.binDirectory, { recursive: true });
+    const command = join(h.binDirectory, "pi");
+    await writeFile(
+        command,
+        [
+            "#!/usr/bin/env node",
+            'await import("./portable-devshell-pi-launcher.mjs");',
+            "",
+        ].join("\n"),
+        { mode: 0o755 },
+    );
+
+    const result = await ensurePiCommand(h.context, {
+        environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
+        homeDirectory: h.root,
+        platform: "linux",
+    });
+
+    assert.deepEqual(result, { command, installed: false, reason: "collision" });
+    assert.match(await readFile(command, "utf8"), /portable-devshell-pi-launcher/);
 });
 
 test("Agent Pi command follows the current Extension generation", async (t) => {

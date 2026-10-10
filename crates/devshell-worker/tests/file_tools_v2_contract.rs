@@ -58,25 +58,26 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./small.rs" }),
+        json!({ "files": [{ "path": "./small.rs" }] }),
     );
 
     assert_eq!(response["type"], "reply", "{response}");
-    assert_eq!(response["message"]["view"], "content");
-    assert!(response["message"].get("path").is_none());
-    assert!(response["message"].get("returnedRanges").is_none());
-    assert!(response["message"].get("totalLines").is_none());
-    assert!(response["message"].get("totalBytes").is_none());
-    assert!(response["message"].get("truncated").is_none());
+    let entry = &response["message"]["files"][0];
+    assert_eq!(entry["path"], "./small.rs");
+    assert_eq!(entry["view"], "content");
+    assert!(entry.get("returnedRanges").is_none());
+    assert!(entry.get("totalLines").is_none());
+    assert!(entry.get("totalBytes").is_none());
+    assert!(entry.get("truncated").is_none());
     assert!(
-        response["message"]["content"]
+        entry["content"]
             .as_str()
             .unwrap()
             .starts_with("1:fn main")
     );
-    assert!(response["message"].get("snapshotId").is_none());
-    assert!(response["message"].get("snapshotTag").is_none());
-    assert!(response["message"].get("revision").is_none());
+    assert!(entry.get("snapshotId").is_none());
+    assert!(entry.get("snapshotTag").is_none());
+    assert!(entry.get("revision").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -115,7 +116,7 @@ fn file_read_batch_reads_multiple_files_and_keeps_paths_in_results() {
 }
 
 #[test]
-fn file_read_legacy_wire_input_keeps_the_legacy_result_shape() {
+fn file_read_rejects_the_removed_single_object_wire() {
     let env = TestEnv::new();
     let instance = "aromatic-file-read-legacy-wire";
     fs::write(env.workspace().join("legacy.txt"), "legacy\n").unwrap();
@@ -130,10 +131,8 @@ fn file_read_legacy_wire_input_keeps_the_legacy_result_shape() {
         json!({ "path": "./legacy.txt", "view": "content", "selector": "1-1:raw" }),
     );
 
-    assert_eq!(response["type"], "reply", "{response}");
-    assert_eq!(response["message"]["content"], "1:legacy");
-    assert!(response["message"].get("files").is_none());
-    assert!(response["message"].get("path").is_none());
+    assert_eq!(response["type"], "error", "{response}");
+    assert_eq!(response["error"]["code"], "tool.invalidArguments", "{response}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -217,17 +216,18 @@ fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./large.rs" }),
+        json!({ "files": [{ "path": "./large.rs" }] }),
     );
 
     assert_eq!(response["type"], "reply", "{response}");
-    assert_eq!(response["message"]["view"], "outline");
-    let content = response["message"]["content"].as_str().unwrap();
+    let entry = &response["message"]["files"][0];
+    assert_eq!(entry["view"], "outline");
+    let content = entry["content"].as_str().unwrap();
     assert!(content.contains("1-1 struct Demo"), "{content}");
     assert!(content.contains("3-6 impl Demo"), "{content}");
     assert!(content.contains("  4-4 fn first"), "{content}");
-    assert!(response["message"].get("parseStatus").is_none());
-    assert!(response["message"].get("nextSelector").is_none());
+    assert!(entry.get("parseStatus").is_none());
+    assert!(entry.get("nextSelector").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -245,7 +245,7 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "view": "content" }),
+        json!({ "files": [{ "path": "./document.txt", "view": "content" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -294,7 +294,7 @@ fn file_edit_successful_patch_carries_generated_coverage_across_calls() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "2-2:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "2-2:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -359,7 +359,7 @@ fn file_edit_failed_patch_neither_expands_nor_discards_coverage() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -450,7 +450,7 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
         "3",
         "ctx-a",
         "file_read",
-        json!({ "path": "source.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "source.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -495,7 +495,7 @@ fn file_edit_rewrite_carries_generated_knowledge_across_calls() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "view": "content" }),
+        json!({ "files": [{ "path": "document.txt", "view": "content" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -541,7 +541,7 @@ fn file_edit_delete_clears_knowledge_for_a_recreated_path() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -591,7 +591,7 @@ fn file_read_outline_establishes_only_rendered_signature_coverage() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "sample.rs", "view": "outline" }),
+        json!({ "files": [{ "path": "sample.rs", "view": "outline" }] }),
     );
     assert_eq!(outline["type"], "reply", "{outline}");
 
@@ -843,7 +843,7 @@ fn file_edit_applies_all_five_operations_in_order() {
             &format!("read-{index}"),
             "ctx-a",
             "file_read",
-            json!({ "path": format!("./{path}"), "view": "content" }),
+            json!({ "files": [{ "path": format!("./{path}"), "view": "content" }] }),
         );
         assert_eq!(read["type"], "reply", "{read}");
     }
@@ -926,7 +926,7 @@ fn file_edit_creates_missing_parent_directories_for_write_add_and_move() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "move-source.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "move-source.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -1026,7 +1026,7 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "view": "content", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "./document.txt", "view": "content", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -1067,7 +1067,7 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "view": "content" }),
+        json!({ "files": [{ "path": "./document.txt", "view": "content" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
     fs::write(
@@ -1110,7 +1110,7 @@ fn closing_transport_session_does_not_release_context_snapshots() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt" }),
+        json!({ "files": [{ "path": "./document.txt" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
     let closed = env.rpc(
@@ -1277,7 +1277,7 @@ fn file_tools_reject_non_canonical_workspace_paths() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "././document.txt" }),
+        json!({ "files": [{ "path": "././document.txt" }] }),
     );
 
     assert_eq!(response["type"], "error", "{response}");
@@ -1299,11 +1299,12 @@ fn file_tools_omit_absent_pagination_fields() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "./document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
-    assert!(read["message"].get("nextSelector").is_none());
-    assert!(read["message"].get("truncated").is_none());
+    let entry = &read["message"]["files"][0];
+    assert!(entry.get("nextSelector").is_none());
+    assert!(entry.get("truncated").is_none());
 
     let found = call(
         &env,
@@ -1619,7 +1620,7 @@ fn file_edit_preserves_the_detected_line_ending_style() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "view": "content" }),
+        json!({ "files": [{ "path": "./document.txt", "view": "content" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -1662,7 +1663,7 @@ fn file_edit_streams_sparse_patch_for_files_larger_than_the_snapshot_limit() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -1706,7 +1707,7 @@ fn file_edit_sparse_rewrite_preserves_bom_and_crlf_without_old_content_diff() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -1745,7 +1746,7 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "./document.txt", "view": "content" }),
+        json!({ "files": [{ "path": "./document.txt", "view": "content" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
     fs::write(
@@ -2239,7 +2240,7 @@ fn file_edit_accepts_common_apply_patch_aliases() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2290,7 +2291,7 @@ fn file_edit_accepts_pi_v2_redundant_apply_patch_trailer() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2335,7 +2336,7 @@ fn file_edit_canonical_wrapper_does_not_absorb_end_patch_trailer() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2489,7 +2490,7 @@ fn file_edit_semantic_failure_leaves_entire_changeset_unapplied() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "existing.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2614,10 +2615,10 @@ fn file_read_selector_clamps_eof_but_rejects_fully_out_of_bounds_ranges() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "2-999:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "2-999:raw" }] }),
     );
     assert_eq!(clamped["type"], "reply", "{clamped}");
-    assert_eq!(clamped["message"]["content"], "2:two\n3:three");
+    assert_eq!(clamped["message"]["files"][0]["content"], "2:two\n3:three");
 
     let outside = call(
         &env,
@@ -2625,10 +2626,14 @@ fn file_read_selector_clamps_eof_but_rejects_fully_out_of_bounds_ranges() {
         "2",
         "ctx-a",
         "file_read",
-        json!({ "path": "document.txt", "selector": "99-120:raw" }),
+        json!({ "files": [{ "path": "document.txt", "selector": "99-120:raw" }] }),
     );
-    assert_eq!(outside["type"], "error", "{outside}");
-    assert_eq!(outside["error"]["code"], "file.invalidRange");
+    assert_eq!(outside["type"], "reply", "{outside}");
+    assert_eq!(
+        outside["message"]["files"][0]["error"]["code"],
+        "file.invalidRange",
+        "{outside}"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2690,7 +2695,7 @@ fn file_edit_semantic_validation_handles_large_existing_files_without_partial_co
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "large.txt", "selector": "2200001-2200001:raw" }),
+        json!({ "files": [{ "path": "large.txt", "selector": "2200001-2200001:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2776,7 +2781,7 @@ fn file_edit_external_revision_failure_before_commit_keeps_prior_operations_unap
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "existing.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
     fs::write(env.workspace().join("existing.txt"), "external\n").unwrap();
@@ -2870,7 +2875,7 @@ fn file_edit_semantic_failure_does_not_create_missing_parent_directories() {
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "existing.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 
@@ -2923,7 +2928,7 @@ fn file_edit_semantic_failure_at_operation_limit_leaves_all_prior_writes_unappli
         "1",
         "ctx-a",
         "file_read",
-        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+        json!({ "files": [{ "path": "existing.txt", "selector": "1-1:raw" }] }),
     );
     assert_eq!(read["type"], "reply", "{read}");
 

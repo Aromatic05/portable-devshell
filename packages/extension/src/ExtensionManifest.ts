@@ -38,10 +38,6 @@ export interface ExtensionManifest {
 
 const capabilities = new Set<ExtensionCapability>(EXTENSION_CAPABILITY_IDS);
 
-/**
- * @compat extension-manifest-schema-v1
- * @removeAt 0.7.10
- */
 export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (!isRecord(value))
         throw new TypeError("Extension manifest must be an object.");
@@ -55,18 +51,11 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         EXTENSION_MANIFEST_SCHEMA_VERSION,
         "schemaVersion",
     );
-    const schema = parseSemVer(schemaVersion, "schemaVersion");
-    const supportsActivation =
-        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
-    const supportsConfig =
-        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
-    const supportsHostDependencyRanges =
-        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
     assertOnlyKeys(value, [
-        ...(supportsActivation ? ["activation"] : []),
+        "activation",
         "apiVersion",
         "capabilities",
-        ...(supportsConfig ? ["config"] : []),
+        "config",
         "entry",
         "extensions",
         "hostDependencies",
@@ -78,9 +67,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
 
     const apiVersion = readCompatibilityVersion(value.apiVersion, "apiVersion");
     assertCompatibleVersion(apiVersion, EXTENSION_API_VERSION, "apiVersion");
-    const activation = supportsActivation
-        ? readActivationPolicy(value.activation)
-        : "lazy";
+    const activation = readActivationPolicy(value.activation);
     const id = readLocalId(value.id, "id");
     const entry = readString(value.entry, "entry");
     if (
@@ -112,9 +99,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         );
     }
     const config =
-        supportsConfig && value.config !== undefined
-            ? readConfig(value.config)
-            : undefined;
+        value.config !== undefined ? readConfig(value.config) : undefined;
     const hasCoreConfigCapability = parsedCapabilities.includes("config.core");
     const hasCoreConfigScope = config?.coreAccess !== undefined;
     if (hasCoreConfigCapability !== hasCoreConfigScope) {
@@ -129,10 +114,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         ...(config === undefined ? {} : { config }),
         entry,
         extensions: readExtensions(value.extensions),
-        hostDependencies: readHostDependencies(
-            value.hostDependencies,
-            supportsHostDependencyRanges,
-        ),
+        hostDependencies: readHostDependencies(value.hostDependencies),
         id,
         name: readString(value.name, "name"),
         schemaVersion,
@@ -228,13 +210,7 @@ function assertOnlyKeys(
         throw new TypeError(`Unknown Extension manifest field: ${unknown[0]}.`);
 }
 
-/**
- * @compat extension-manifest-integer-version
- * @removeAt 0.7.10
- */
 function readCompatibilityVersion(value: unknown, field: string): string {
-    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
-        return `${value}.0.0`;
     if (typeof value === "string") {
         parseSemVer(value, field);
         return value;
@@ -384,24 +360,8 @@ function cloneJsonValue(value: unknown, field: string): ExtensionJsonValue {
 
 function readHostDependencies(
     value: unknown,
-    supportsRanges: boolean,
 ): Readonly<Record<string, string>> {
     if (value === undefined) return {};
-    if (!supportsRanges) {
-        if (!Array.isArray(value))
-            throw new TypeError("Extension hostDependencies must be an array.");
-        const dependencies: Record<string, string> = {};
-        for (const candidate of value) {
-            const dependency = readHostDependencyPackage(candidate);
-            if (Object.hasOwn(dependencies, dependency)) {
-                throw new TypeError(
-                    "Extension hostDependencies must not contain duplicates.",
-                );
-            }
-            dependencies[dependency] = "*";
-        }
-        return dependencies;
-    }
     if (!isRecord(value) || Array.isArray(value)) {
         throw new TypeError(
             "Extension hostDependencies must map package roots to version ranges.",

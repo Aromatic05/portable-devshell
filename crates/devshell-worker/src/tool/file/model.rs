@@ -70,15 +70,6 @@ pub struct FileReadBatchInput {
     pub files: Vec<FileReadRequest>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-// @compat file-read-single-wire
-// @removeAt 0.7.10
-pub enum FileReadInput {
-    Batch(FileReadBatchInput),
-    Legacy(FileReadRequest),
-}
-
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReadOutput {

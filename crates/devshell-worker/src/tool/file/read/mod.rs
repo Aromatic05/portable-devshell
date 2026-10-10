@@ -10,8 +10,7 @@ use crate::instance::sandbox::path::normalize_requested_path;
 use crate::instance::sandbox::path::{ResolvedEntry, ResolvedMetadata, ResolvedPath};
 use crate::tool::file::model::{
     FileEntryType, FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput,
-    FileReadInput, FileReadMetadata, FileReadOutput, FileReadRequest, FileReadResolvedView,
-    FileReadView,
+    FileReadMetadata, FileReadOutput, FileReadRequest, FileReadResolvedView, FileReadView,
 };
 use crate::tool::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
 use crate::tool::file::{FileToolState, resolve_existing, resolve_info};
@@ -67,14 +66,8 @@ impl ToolHandler for FileReadTool {
     }
     fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
         call.check_cancelled()?;
-        let input: FileReadInput = call.parse_params()?;
-        match input {
-            FileReadInput::Legacy(input) => {
-                let output = self.read_one(&call, &input)?;
-                crate::tool::contract::serialize(output)
-            }
-            FileReadInput::Batch(input) => self.read_batch(&call, input),
-        }
+        let input: FileReadBatchInput = call.parse_params()?;
+        self.read_batch(&call, input)
     }
 }
 
