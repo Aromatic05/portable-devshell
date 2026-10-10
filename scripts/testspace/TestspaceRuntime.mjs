@@ -73,22 +73,15 @@ export async function assertTestspaceRootOwned(repositoryRoot, root) {
     const resolvedRoot = resolve(root);
     if (!existsSync(resolvedRoot)) return false;
 
-    /**
-     * @compat testspace-default-root
-     * @removeAt 0.7.10
-     */
-    const legacyDefaultRoot = resolve(resolvedRepository, ".testspace");
-    if (resolvedRoot !== legacyDefaultRoot) {
-        const marker = await readTestspaceOwner(resolvedRoot);
-        if (
-            marker?.kind !== TESTSPACE_OWNER_KIND ||
-            marker?.repositoryRoot !== resolvedRepository ||
-            marker?.root !== resolvedRoot
-        ) {
-            throw new Error(
-                `Refusing recursive cleanup because ${resolvedRoot} is not owned by portable-devshell Testspace.`,
-            );
-        }
+    const marker = await readTestspaceOwner(resolvedRoot);
+    if (
+        marker?.kind !== TESTSPACE_OWNER_KIND ||
+        marker?.repositoryRoot !== resolvedRepository ||
+        marker?.root !== resolvedRoot
+    ) {
+        throw new Error(
+            `Refusing recursive cleanup because ${resolvedRoot} is not owned by portable-devshell Testspace.`,
+        );
     }
 
     return true;

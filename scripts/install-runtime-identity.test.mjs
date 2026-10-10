@@ -15,15 +15,17 @@ test("installer accepts a running Control owned by the activated application gen
     );
 });
 
-test("installer accepts the legacy Control daemon entrypoint during upgrades", () => {
-    assert.doesNotThrow(() =>
-        assertRunningControlMatchesApplication({
-            applicationDirectory: "/opt/devshell/versions/0.6.16",
-            commandLine:
-                "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
-            controlRunning: true,
-            pid: 123,
-        }),
+test("installer rejects the retired Control daemon entrypoint before stopping any process", () => {
+    assert.throws(
+        () =>
+            assertRunningControlMatchesApplication({
+                applicationDirectory: "/opt/devshell/versions/0.6.16",
+                commandLine:
+                    "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
+                controlRunning: true,
+                pid: 123,
+            }),
+        /running Control.*activated application/iu,
     );
 });
 

@@ -84,11 +84,6 @@ const paths = {
         "control",
         "instances",
     ),
-    /**
-     * @compat testspace-runtime-directory
-     * @removeAt 0.7.10
-     */
-    legacyRuntime: join(root, "runtime"),
     reverseDevshellHome: join(root, "reverse-home", ".devshell"),
     reverseConnectorHealth: join(root, "reverse-connector-health.json"),
     reverseConnectorLog: join(root, "reverse-connector.jsonl"),
@@ -784,17 +779,12 @@ function stateRuntimeDirectory(state) {
     return typeof state?.runtimeDirectory === "string" &&
         state.runtimeDirectory.length > 0
         ? state.runtimeDirectory
-        : paths.legacyRuntime;
+        : paths.runtime;
 }
 
 function runtimeDirectories(primary) {
     return [
-        ...new Set([
-            primary,
-            paths.runtime,
-            paths.reverseRuntime,
-            paths.legacyRuntime,
-        ]),
+        ...new Set([primary, paths.runtime, paths.reverseRuntime]),
     ];
 }
 

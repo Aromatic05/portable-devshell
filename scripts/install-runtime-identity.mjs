@@ -1,12 +1,7 @@
 import { sep } from "node:path";
 
-/**
- * @compat control-daemon-entrypoint
- * @removeAt 0.7.10
- */
 const CONTROL_DAEMON_RELATIVE_PATHS = [
     "node_modules/@portable-devshell/control/dist/server/Daemon.js",
-    "node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
 ];
 
 export function assertRunningControlMatchesApplication({
