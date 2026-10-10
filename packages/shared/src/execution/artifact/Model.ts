@@ -69,19 +69,17 @@ export interface ArtifactShareRevokeResult {
     shareId: string;
 }
 
-const artifactTransferStatuses = [
-    "queued",
-    "preparing",
-    "transferring",
-    "verifying",
-    "committing",
-    "completed",
-    "failed",
-    "cancelling",
-    "cancelled",
-    "interrupted",
-] as const;
-export type ArtifactTransferStatus = (typeof artifactTransferStatuses)[number];
+export type ArtifactTransferStatus =
+    | "queued"
+    | "preparing"
+    | "transferring"
+    | "verifying"
+    | "committing"
+    | "completed"
+    | "failed"
+    | "cancelling"
+    | "cancelled"
+    | "interrupted";
 
 const terminalArtifactTransferStatuses = new Set<ArtifactTransferStatus>([
     "completed",
@@ -201,20 +199,18 @@ export interface ArtifactSnapshot {
     transfers: ArtifactTransferRecord[];
 }
 
-const artifactEventTypes = [
-    "artifact.shareCreated",
-    "artifact.shareDownloaded",
-    "artifact.shareExhausted",
-    "artifact.shareExpired",
-    "artifact.shareRevoked",
-    "artifact.transferStarted",
-    "artifact.transferProgress",
-    "artifact.transferCompleted",
-    "artifact.transferFailed",
-    "artifact.transferCancelled",
-    "artifact.transferInterrupted",
-] as const;
-export type ArtifactEventType = (typeof artifactEventTypes)[number];
+export type ArtifactEventType =
+    | "artifact.shareCreated"
+    | "artifact.shareDownloaded"
+    | "artifact.shareExhausted"
+    | "artifact.shareExpired"
+    | "artifact.shareRevoked"
+    | "artifact.transferStarted"
+    | "artifact.transferProgress"
+    | "artifact.transferCompleted"
+    | "artifact.transferFailed"
+    | "artifact.transferCancelled"
+    | "artifact.transferInterrupted";
 
 /**
  * A change signal for the artifact domain. Artifact state is global (shares and
