@@ -396,8 +396,9 @@ export class TuiDomainHarness {
         this.#approvalRecords = options.approvalRecords ?? [];
         this.#contextRecords = options.contextRecords ?? [];
         this.#toolCallRecords = options.toolCallRecords ?? [];
-        const self = this;
 
+        // Server callbacks are declared before their transport is assembled.
+        // eslint-disable-next-line prefer-const
         let runServerHandshake!: (
             source: TestDomainSource<any>,
         ) => Promise<void>;
@@ -433,17 +434,17 @@ export class TuiDomainHarness {
                 get: async () => config.state.view,
                 refresh: async () => {
                     config.patch({
-                        view: self.#configView as unknown as ConfigView,
+                        view: this.#configView as unknown as ConfigView,
                     });
-                    return self.#configView as unknown as ConfigView;
+                    return this.#configView as unknown as ConfigView;
                 },
                 update: async (request: unknown) => {
-                    self.#configUpdates.push(request);
-                    return (self.#options.configUpdate?.(request) ??
+                    this.#configUpdates.push(request);
+                    return (this.#options.configUpdate?.(request) ??
                         {}) as ConfigView;
                 },
                 updateInstance: async (request: unknown) => {
-                    self.#configUpdates.push(request);
+                    this.#configUpdates.push(request);
                     return {} as ConfigView;
                 },
                 updateMcpEndpoint: async () => ({}) as ConfigView,
@@ -475,7 +476,7 @@ export class TuiDomainHarness {
                 load: async () => undefined,
                 refresh: async () => {
                     mcp.patch({
-                        approvals: [...self.#approvalRecords],
+                        approvals: [...this.#approvalRecords],
                         status: { running: false } as any,
                     });
                 },
@@ -513,10 +514,10 @@ export class TuiDomainHarness {
             {
                 close: () => undefined,
                 refresh: async () => {
-                    const list = self.#normalizedInstances();
+                    const list = this.#normalizedInstances();
                     instances.patch({ instances: list });
                     for (const entry of list) {
-                        self.#loadRuntimeSnapshot(entry.name);
+                        this.#loadRuntimeSnapshot(entry.name);
                     }
                 },
             },
@@ -541,7 +542,7 @@ export class TuiDomainHarness {
                 close: () => undefined,
                 disable: async (ctxId: string) => ({ ctxId }),
                 refresh: async () => {
-                    context.patch({ contexts: [...self.#contextRecords] });
+                    context.patch({ contexts: [...this.#contextRecords] });
                 },
                 renew: async (ctxId: string) => ({ ctxId }),
             },
@@ -612,7 +613,7 @@ export class TuiDomainHarness {
                         instances: {
                             ...toolCalls.state.instances,
                             [instance]: {
-                                calls: [...self.#toolCallRecords],
+                                calls: [...this.#toolCallRecords],
                                 lastSeq: 2,
                                 status: "stopped",
                             },
@@ -620,7 +621,7 @@ export class TuiDomainHarness {
                     });
                 },
                 readDetail: async (instance: string, callId: string) =>
-                    self.#toolCallRecords.filter(
+                    this.#toolCallRecords.filter(
                         (call) =>
                             call.instance === instance &&
                             call.callId === callId,
@@ -634,15 +635,15 @@ export class TuiDomainHarness {
             createShare: async () => ({}) as any,
             getTransfer: async () => ({}) as any,
             readImage: async (imageRef: string) => {
-                self.#imageRefReads.push(imageRef);
-                if (self.#options.image === undefined) {
+                this.#imageRefReads.push(imageRef);
+                if (this.#options.image === undefined) {
                     throw new Error("No image fixture configured.");
                 }
                 const {
                     name: _name,
                     source: _source,
                     ...stored
-                } = self.#options.image;
+                } = this.#options.image;
                 return stored;
             },
             revokeShare: async () => ({}) as any,
@@ -652,11 +653,11 @@ export class TuiDomainHarness {
                 throw new Error("Artifact subscription is not supported.");
             },
             viewImage: async (instance: string, input: unknown) => {
-                self.#imageReads.push({ input, instance });
-                if (self.#options.image === undefined) {
+                this.#imageReads.push({ input, instance });
+                if (this.#options.image === undefined) {
                     throw new Error("No image fixture configured.");
                 }
-                return self.#options.image;
+                return this.#options.image;
             },
         };
         const instanceTransport = {
@@ -666,7 +667,7 @@ export class TuiDomainHarness {
                     name: draft.name,
                 }) as any,
             createInstanceSchema: async () => {
-                self.#createSchemaCalls += 1;
+                this.#createSchemaCalls += 1;
                 return {
                     container: {
                         defaultMode: "preset" as const,
@@ -690,9 +691,9 @@ export class TuiDomainHarness {
             deleteInstance: async () => ({}) as Record<string, JsonValue>,
             disableInstance: async () => ({}) as Record<string, JsonValue>,
             enableInstance: async () => ({}) as Record<string, JsonValue>,
-            listInstances: async () => self.#normalizedInstances(),
+            listInstances: async () => this.#normalizedInstances(),
             snapshotInstances: async () => ({
-                instances: self.#normalizedInstances(),
+                instances: this.#normalizedInstances(),
                 revision: 0,
             }),
             subscribeInstances: async () => {
@@ -717,13 +718,13 @@ export class TuiDomainHarness {
                 }) as any,
         };
         const configTransport = {
-            get: async () => self.#configView as unknown as ConfigView,
+            get: async () => this.#configView as unknown as ConfigView,
             getMessagePreferences: async () =>
                 messagePreferences.state.preferences,
             snapshot: async () =>
                 ({
                     revision: 0,
-                    view: self.#configView,
+                    view: this.#configView,
                 }) as any,
             subscribe: async () => {
                 throw new Error("Config subscription is not supported.");
@@ -752,8 +753,8 @@ export class TuiDomainHarness {
                 protocolVersion: "1.0.0",
             }),
             ping: async () => {
-                if (self.#options.pingError !== undefined) {
-                    throw self.#options.pingError;
+                if (this.#options.pingError !== undefined) {
+                    throw this.#options.pingError;
                 }
                 return { pong: true };
             },
@@ -804,18 +805,18 @@ export class TuiDomainHarness {
                 input: JsonValue,
                 _workspace: string,
             ) => {
-                self.#toolCalls.push({ input, instance, toolName });
-                return (self.#options.toolCall?.(instance, toolName, input) ??
+                this.#toolCalls.push({ input, instance, toolName });
+                return (this.#options.toolCall?.(instance, toolName, input) ??
                     {}) as JsonValue;
             },
             callStreaming: async (
                 toolName: string,
                 input: JsonValue,
             ) =>
-                (self.#options.toolCall?.(instance, toolName, input) ??
+                (this.#options.toolCall?.(instance, toolName, input) ??
                     {}) as JsonValue,
             closeSession: async () => ({}) as Record<string, never>,
-            listCalls: async () => self.#toolCallRecords.filter((call) => call.instance === instance),
+            listCalls: async () => this.#toolCallRecords.filter((call) => call.instance === instance),
             openSession: async () => ({}) as any,
         });
         const terminalTransport = {} as any;
@@ -892,7 +893,6 @@ export class TuiDomainHarness {
     runtime(instance: string): any {
         let source = this.#runtimes.get(instance);
         if (source !== undefined) return source;
-        const self = this;
         source = Object.assign(
             new TestDomainSource({
                 connection: "stopped",
@@ -904,21 +904,21 @@ export class TuiDomainHarness {
             {
                 close: () => undefined,
                 load: async () => {
-                    self.#refreshCount += 1;
+                    this.#refreshCount += 1;
                     source.patch({
                         connection: "stopped",
-                        snapshot: self.#runtimeSnapshot(instance),
+                        snapshot: this.#runtimeSnapshot(instance),
                     });
                 },
                 readLogs: async () => source.state.logs,
                 refresh: async () => {
-                    self.#refreshCount += 1;
-                    const snapshot = self.#runtimeSnapshot(instance);
+                    this.#refreshCount += 1;
+                    const snapshot = this.#runtimeSnapshot(instance);
                     source.patch({ snapshot });
                     return { lastSeq: snapshot.lastSeq, snapshot };
                 },
                 start: async () => {
-                    self.#lifecycleActions.push(`start:${instance}`);
+                    this.#lifecycleActions.push(`start:${instance}`);
                     const snapshot = {
                         ...readySnapshot(instance),
                         lastSeq: 4,
@@ -927,7 +927,7 @@ export class TuiDomainHarness {
                     return snapshot;
                 },
                 stop: async () => {
-                    self.#lifecycleActions.push(`stop:${instance}`);
+                    this.#lifecycleActions.push(`stop:${instance}`);
                     const snapshot = {
                         ...readySnapshot(instance),
                         connectionState: "disconnected",
@@ -948,7 +948,6 @@ export class TuiDomainHarness {
     approval(instance: string): any {
         let source = this.#approvals.get(instance);
         if (source !== undefined) return source;
-        const self = this;
         source = Object.assign(
             new TestDomainSource({
                 approvals: [] as any[],
@@ -965,7 +964,7 @@ export class TuiDomainHarness {
                     }) as any,
                 load: async () => {
                     source.patch({
-                        approvals: [...self.#approvalRecords],
+                        approvals: [...this.#approvalRecords],
                         lastSeq: 2,
                     });
                 },

@@ -162,6 +162,8 @@ export class TuiRuntime {
                 xdgRuntimeDir: options.xdgRuntimeDir,
             });
         this.domains = domains;
+        // Reader subscriptions can attach before the scheduler is constructed.
+        // eslint-disable-next-line prefer-const
         let scheduler: TuiRenderScheduler | undefined;
         const pending = new Set<{
             detach?: () => void;

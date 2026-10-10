@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     ReverseConnections,
+    type Instance,
     type ReverseConnectionIdentity,
 } from "@portable-devshell/core";
 import {
@@ -120,7 +121,8 @@ test("credential rotation disconnects the active core transport", async () => {
 });
 
 function reverseDescriptor(onAttach: (generation: number) => void = () => undefined) {
-    const descriptor: any = {
+    // Only the fields observed by ReverseConnections are implemented here.
+    const descriptor: Instance = {
         config: {
             name: asInstanceName("remote-test"),
             provider: "reverse" as const,
@@ -140,11 +142,11 @@ function reverseDescriptor(onAttach: (generation: number) => void = () => undefi
                 },
             },
         },
-    };
+    } as unknown as Instance;
     return descriptor;
 }
 
-function instanceLookup(descriptor: any) {
+function instanceLookup(descriptor: Instance) {
     return {
         get(name: string) {
             return name === descriptor.config.name ? descriptor : undefined;
@@ -152,7 +154,7 @@ function instanceLookup(descriptor: any) {
     };
 }
 
-function identity(descriptor: any, generation: number): ReverseConnectionIdentity {
+function identity(descriptor: Instance, generation: number): ReverseConnectionIdentity {
     return { descriptor, generation };
 }
 

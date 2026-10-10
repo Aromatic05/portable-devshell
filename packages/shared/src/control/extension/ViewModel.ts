@@ -341,7 +341,7 @@ export class ExtensionViewModel {
         const records = this.#state.extensions.filter(
             (current) => current.id !== record.id,
         );
-        const { retired, ...publicRecord } = record;
+        const { retired: _retired, ...publicRecord } = record;
         records.push(publicRecord);
         this.#state = {
             ...this.#state,

@@ -293,7 +293,6 @@ export function Instances({
 function InstanceDetail({
     artifactActivity,
     artifactFailure,
-    disabled,
     enabled,
     entry,
     interactive,

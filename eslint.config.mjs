@@ -294,6 +294,7 @@ export default [
             "target/**",
             ".codegraph/**",
             ".testspace/**",
+            "var/backup/**",
         ],
     },
     js.configs.recommended,
@@ -381,6 +382,18 @@ export default [
         ],
         rules: {
             "@typescript-eslint/no-unused-vars": "off",
+        },
+    },
+    {
+        // Synthetic domain session fixtures deliberately expose partial,
+        // dynamically shaped states. Application sources and other tests
+        // still enforce no-explicit-any.
+        files: [
+            "packages/tui/test/support/DomainHarness.ts",
+            "packages/web/test/support/DomainHarness.tsx",
+        ],
+        rules: {
+            "@typescript-eslint/no-explicit-any": "off",
         },
     },
 ];

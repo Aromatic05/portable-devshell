@@ -3,7 +3,6 @@ import type {
     TerminalSessionDescriptor,
     TerminalStreamMessage,
     TerminalTransport,
-    TerminalVersionedIdentity,
 } from "@portable-devshell/shared";
 
 import type {

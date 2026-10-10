@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import test from "node:test";
 
-import { ReverseConnections } from "@portable-devshell/core";
+import { ReverseConnections, type Instance } from "@portable-devshell/core";
 
 import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
 import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";
@@ -57,9 +57,9 @@ test("reverse ingress and credentials adopt a replacement public URL", async (t)
     t.after(
         async () => await rm(homeDirectory, { force: true, recursive: true }),
     );
-    const descriptor: any = {
+    const descriptor = {
         config: { name: "reverse-worker", provider: "reverse" },
-    };
+    } as unknown as Instance;
     const instances = {
         get(name: string) {
             return name === descriptor.config.name ? descriptor : undefined;

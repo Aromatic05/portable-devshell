@@ -8,7 +8,6 @@ import type {
     ConfigTransport,
     InstanceTransport,
     ConnectionTransport,
-    ProcessStartOptions,
     ServerTransport,
     TaskTransport,
     ToolTransport,
