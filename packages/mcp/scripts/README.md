@@ -1,7 +1,5 @@
-# MCP App browser assets
+# MCP App production browser assets
 
-The production MCP App is the React application at `packages/mcpapp/src/`. It is built by Vite and its manifest is installed into `dist/mcpapp` by `scripts/install-mcpapp-assets.mjs`. `mcpAppHtmlForPublicBaseUrl()` serves these assets.
+The sole MCP App browser implementation is the React application in `packages/mcpapp/src/`. Its Vite output is installed into `packages/mcp/dist/mcpapp/` via `scripts/install-mcpapp-assets.mjs`. The MCP App HTTP route exposes those assets and `mcpAppHtmlForPublicBaseUrl()` references them.
 
-`node scripts/build-mcpapp-client.mjs` separately builds `dist/mcpapp-client.js` from the deprecated TypeScript client under `src/mcpapp/app/client/`. This is **test-only compatibility** for `src/mcpapp/app/Legacy.ts` and fixtures imported through `@portable-devshell/mcp/testing`. It is not the deployed React MCP App.
-
-The package `build` and `test` scripts still generate this bundle because existing MCP/Control browser fixtures require it. The explicit removal prerequisites are recorded in `packages/mcp/docs/mcpapp-legacy.md`.
+`pnpm --filter @portable-devshell/mcp build` compiles the MCP package and installs the React assets; `pnpm --filter @portable-devshell/mcp test` builds the React app, installs the assets, and runs MCP tests. The MCP package does not build or bundle another browser client.

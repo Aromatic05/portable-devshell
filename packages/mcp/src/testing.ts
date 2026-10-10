@@ -22,7 +22,5 @@ export { HttpHost } from "./testing/Http.js";
 export * from "./protocol/Registry.js";
 
 export * from "./mcpapp/app/App.js";
-// Only older browser fixtures use the previous inline HTML renderer.
-export { mcpAppHtml } from "./mcpapp/app/Legacy.js";
 export * from "./mcpapp/app/Lease.js";
 export * from "./mcpapp/app/Presence.js";
