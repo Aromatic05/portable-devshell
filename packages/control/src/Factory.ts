@@ -15,6 +15,7 @@ import {
 } from "@portable-devshell/shared";
 import { ReverseConnections } from "@portable-devshell/core";
 import { createExtensionRuntime } from "./extension/index.js";
+import type { ExtensionRuntime } from "./extension/Api.js";
 import { ExtensionArtifactCapabilityControl } from "./extension/api/cap/artifact/index.js";
 import { ExtensionAssetCapabilityControl } from "./extension/api/cap/asset/index.js";
 import { ExtensionWorkerCapabilityControl } from "./extension/api/cap/worker/index.js";
@@ -86,6 +87,11 @@ export class ControlFactory {
             instances: options.instances.registry,
         });
         let composedState: ControlState | undefined;
+        let server: ControlServer | undefined;
+        let mcpOwner: McpControlModule | undefined;
+        let webOwner: ControlWebRuntime | undefined;
+        let extensionsOwner: ExtensionRuntime | undefined;
+        let closeInternalEndpoint: (() => void) | undefined;
         try {
             const internalEndpoint = new Endpoint({
                 connectChannel: (signal) =>
@@ -94,6 +100,7 @@ export class ControlFactory {
                         signal,
                     ),
             });
+            closeInternalEndpoint = () => internalEndpoint.close();
             const serverTransport = createServerTransport(internalEndpoint, {
                 clientKind: "cli",
             });
@@ -128,7 +135,7 @@ export class ControlFactory {
                 instances: options.instances.registry,
                 toolRegistry,
             });
-            let server: ControlServer | undefined;
+            mcpOwner = mcp;
             const configEngine = new ConfigEngine({
                 configStore: options.config.store,
                 getConfig: () => options.config.require(),
@@ -310,6 +317,7 @@ export class ControlFactory {
                         recording: "host",
                     }),
             });
+            extensionsOwner = extensions;
             const web = new ControlWebRuntime({
                 http,
                 config: options.config.require(),
@@ -317,6 +325,7 @@ export class ControlFactory {
                 mcp,
                 oauthDirectory: join(controlPaths.oauthDir, "web"),
             });
+            webOwner = web;
             const reverseConfig = options.config.require();
             const hasReverseInstance = reverseConfig.instances.some(
                 (instance) => instance.provider === "reverse",
@@ -414,6 +423,7 @@ export class ControlFactory {
                 socketPath: options.socketPath,
                 web,
             });
+            server = composedServer;
             instanceEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await composedServer.retireInstanceGeneration(instance.name);
@@ -426,18 +436,26 @@ export class ControlFactory {
                     ? {}
                     : { reverseConnections }),
             });
-            server = composedServer;
             return { server: composedServer, state };
         } catch (error) {
-            try {
-                if (composedState === undefined) await artifact.stop();
-                else await composedState.close();
-            } catch (cleanupError) {
-                throw new AggregateError(
-                    [error, cleanupError],
-                    "Control composition failed and cleanup was incomplete.",
-                );
+            const cleanupFailures: unknown[] = [];
+            if (server !== undefined) {
+                await server.stop().catch((failure) => cleanupFailures.push(failure));
+            } else {
+                try { webOwner?.stop(); } catch (failure) { cleanupFailures.push(failure); }
+                await webOwner?.stopHost().catch((failure) => cleanupFailures.push(failure));
+                await mcpOwner?.stop().catch((failure) => cleanupFailures.push(failure));
+                await http.close().catch((failure) => cleanupFailures.push(failure));
+                try { closeInternalEndpoint?.(); } catch (failure) { cleanupFailures.push(failure); }
             }
+            if (composedState === undefined) {
+                await extensionsOwner?.stop().catch((failure) => cleanupFailures.push(failure));
+                await artifact.stop().catch((failure) => cleanupFailures.push(failure));
+            } else {
+                await composedState.close().catch((failure) => cleanupFailures.push(failure));
+            }
+            if (cleanupFailures.length > 0)
+                throw new AggregateError([error, ...cleanupFailures], "Control composition failed and cleanup was incomplete.");
             throw error;
         }
     }
