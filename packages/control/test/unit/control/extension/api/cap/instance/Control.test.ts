@@ -2,18 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    asInstanceName,
+    type InstanceRuntimeTransport,
+    type ProcessTransport,
+} from "@portable-devshell/shared";
+
+import {
     ExtensionInstanceEventPublishCapabilityControl,
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
 } from "../../../../../../../src/extension/api/cap/instance/index.ts";
-import { Instance, InstanceRegistry } from "@portable-devshell/core/instance";
-import { ProcessSubscriptionManager } from "@portable-devshell/core/instance";
 
 const readySnapshot = {
     connectionState: "connected" as const,
     daemonState: "running" as const,
     lastSeq: 1,
-    name: "demo-local",
+    name: asInstanceName("demo-local"),
     ready: true,
     status: "ready" as const,
 };
@@ -22,56 +26,86 @@ const stoppedSnapshot = {
     connectionState: "disconnected" as const,
     daemonState: "stopped" as const,
     lastSeq: 2,
-    name: "demo-local",
+    name: asInstanceName("demo-local"),
     ready: false,
     status: "stopped" as const,
 };
 
-function testInstance(name: string, worker: object, enabled = true): Instance {
-    return new Instance({
-        enabled,
-        mcpEnabled: true,
-        mcpPath: "",
-        modelExtensions: [],
-        name,
-        provider: "local",
-        worker: worker as never,
-    });
+function processStub(
+    overrides: Partial<ProcessTransport> = {},
+): ProcessTransport {
+    return {
+        readLogs: async () => [],
+        refresh: async () => ({ lastSeq: 1, snapshot: readySnapshot }),
+        snapshot: async () => ({ lastSeq: 1, snapshot: readySnapshot }),
+        start: async () => ({
+            cancel() {},
+            requestId: "request",
+            snapshot: Promise.resolve(readySnapshot),
+        }),
+        stop: async () => stoppedSnapshot,
+        subscribe: async () => ({
+            close() {},
+            next: async () => ({ kind: "closed" as const }),
+        }),
+        ...overrides,
+    };
+}
+
+function runtimeStub(
+    overrides: Partial<InstanceRuntimeTransport> = {},
+): InstanceRuntimeTransport {
+    return {
+        acquireReference: async () => ({}),
+        appendEvent: async () => {},
+        readEvents: async () => ({
+            events: [],
+            kind: "events" as const,
+            lastSeq: 0,
+        }),
+        releaseReference: async () => {},
+        subscribeEvents: async () => ({
+            close() {},
+            next: async () => ({ kind: "closed" as const }),
+        }),
+        ...overrides,
+    };
 }
 
 test("Instance observe capability watchEvents filters authoritative runtime events and stops on cancellation", async () => {
     let subscriptions = 0;
-    const worker = {
-        subscribe(fromSeq: number) {
+    const runtime = runtimeStub({
+        async subscribeEvents(fromSeq) {
             assert.equal(fromSeq, 1);
             subscriptions += 1;
-            if (subscriptions === 1)
-                return { events: [], kind: "events" as const, lastSeq: 0 };
+            let closed = false;
+            let step = 0;
             return {
-                events: [
-                    {
-                        at: "now",
-                        instanceName: "demo-local",
-                        seq: 1,
-                        type: "log.appended",
-                    },
-                    {
-                        at: "now",
-                        instanceName: "demo-local",
-                        seq: 1,
-                        type: "instance.readyChanged",
-                    },
-                ],
-                kind: "events" as const,
-                lastSeq: 1,
+                close() {
+                    closed = true;
+                },
+                async next() {
+                    if (closed) return { kind: "closed" as const };
+                    step += 1;
+                    return {
+                        event: {
+                            at: "now",
+                            instanceName: asInstanceName("demo-local"),
+                            seq: step,
+                            type:
+                                step === 1
+                                    ? "log.appended"
+                                    : "instance.readyChanged",
+                        },
+                        kind: "event" as const,
+                    };
+                },
             };
         },
-    };
-    const instances = new InstanceRegistry([testInstance("demo-local", worker)]);
+    });
     const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true,
         extensionId: "instance",
-        instances,
         listConfigured: () => [
             {
                 enabled: true,
@@ -80,8 +114,8 @@ test("Instance observe capability watchEvents filters authoritative runtime even
                 provider: "local",
             },
         ],
-        readLogs: async () => [],
-        subscriptions: new ProcessSubscriptionManager(1),
+        process: () => processStub(),
+        runtime: () => runtime,
     });
     const controller = new AbortController();
     const events: string[] = [];
@@ -97,17 +131,16 @@ test("Instance observe capability watchEvents filters authoritative runtime even
     });
 
     assert.deepEqual(events, ["1:log.appended"]);
-    assert.ok(subscriptions >= 2);
+    assert.equal(subscriptions, 1);
 });
 
 test("Instance observe capability never exposes lifecycle mutation", async () => {
     const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true,
         extensionId: "instance",
-        instances: new InstanceRegistry([]),
         listConfigured: () => [],
-        readLogs: async () => [],
-        subscriptions: new ProcessSubscriptionManager(1),
+        process: () => processStub(),
+        runtime: () => runtimeStub(),
     });
 
     assert.deepEqual(
@@ -142,19 +175,9 @@ test("Instance observe capability never exposes lifecycle mutation", async () =>
 test("Instance observe capability lists configured instances with authoritative snapshots", async () => {
     let refreshes = 0;
     const logQuery = { fromSeq: 2, limit: 7 };
-    const instances = new InstanceRegistry([
-        testInstance("demo-local", {
-            snapshot: () => readySnapshot,
-            async refreshStatus() {
-                refreshes += 1;
-                return stoppedSnapshot;
-            },
-        }),
-    ]);
     const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true,
         extensionId: "instance",
-        instances,
         listConfigured: () => [
             {
                 enabled: true,
@@ -169,18 +192,28 @@ test("Instance observe capability lists configured instances with authoritative 
                 provider: "ssh",
             },
         ],
-        async readLogs(name, query) {
-            assert.equal(name, "demo-local");
-            assert.deepEqual(query, logQuery);
-            return [{
-                at: "now",
-                instanceName: name,
-                message: "worker output",
-                seq: 2,
-                stream: "stdout",
-            }];
-        },
-        subscriptions: new ProcessSubscriptionManager(1),
+        process: (name) =>
+            processStub({
+                async readLogs(query) {
+                    assert.equal(name, "demo-local");
+                    assert.deepEqual(query, logQuery);
+                    return [{
+                        at: "now",
+                        instanceName: asInstanceName(name),
+                        message: "worker output",
+                        seq: 2,
+                        stream: "stdout",
+                    }];
+                },
+                async refresh() {
+                    refreshes += 1;
+                    return { lastSeq: 2, snapshot: stoppedSnapshot };
+                },
+                async snapshot() {
+                    return { lastSeq: 1, snapshot: readySnapshot };
+                },
+            }),
+        runtime: () => runtimeStub(),
     });
 
     assert.deepEqual(await capability.list(), [
@@ -203,7 +236,7 @@ test("Instance observe capability lists configured instances with authoritative 
     assert.equal(refreshes, 1);
     assert.deepEqual(await capability.readLogs("demo-local", logQuery), [{
         at: "now",
-        instanceName: "demo-local",
+        instanceName: asInstanceName("demo-local"),
         message: "worker output",
         seq: 2,
         stream: "stdout",
@@ -212,23 +245,6 @@ test("Instance observe capability lists configured instances with authoritative 
 
 test("Instance manage capability owns lifecycle operations without observation", async () => {
     const calls: string[] = [];
-    const instances = new InstanceRegistry([
-        testInstance("demo-local", {
-                async start() {
-                    calls.push("start");
-                    return readySnapshot;
-                },
-                async stop() {
-                    calls.push("stop");
-                    return stoppedSnapshot;
-                },
-        }),
-        testInstance("disabled", {
-                async start() {
-                    throw new Error("disabled instance must not start");
-                },
-        }, false),
-    ]);
     const capability = new ExtensionInstanceManageCapabilityControl({
         allowed: true,
         create: {
@@ -238,15 +254,45 @@ test("Instance manage capability owns lifecycle operations without observation",
                     enabled: true,
                     mcpPath: "/mcp",
                     name: "created",
-                    snapshot: readySnapshot as never,
+                    snapshot: readySnapshot,
                 };
             },
             getSchema() {
-                return {} as never;
+                return {
+                    container: {
+                        defaultMode: "preset",
+                        modes: [
+                            "preset",
+                            "dockerfile",
+                            "compose",
+                            "existingImage",
+                            "existingStoppedContainer",
+                        ],
+                        presets: [],
+                    },
+                    providers: ["local"],
+                    defaultProvider: "local",
+                    defaultEnabled: true,
+                    defaultMcpEnabled: false,
+                    defaultModelExtensions: [],
+                    defaultSecurityMode: "disabled",
+                };
             },
             validateDraft(draft) {
                 calls.push(`validate:${JSON.stringify(draft)}`);
-                return { name: "created" } as never;
+                return {
+                    enabled: true,
+                    extensions: { model: [] },
+                    mcp: {
+                        auth: { mode: "none" },
+                        contextMode: "explicit",
+                        enabled: true,
+                        path: "/mcp",
+                    },
+                    name: "created",
+                    provider: "local",
+                    security: { mode: "disabled" },
+                };
             },
         },
         editor: {
@@ -270,7 +316,23 @@ test("Instance manage capability owns lifecycle operations without observation",
             },
         },
         extensionId: "instance",
-        instances,
+        process: (name) =>
+            processStub({
+                async start() {
+                    if (name === "disabled")
+                        throw new Error("Instance disabled is disabled.");
+                    calls.push(`start:${name}`);
+                    return {
+                        cancel() {},
+                        requestId: "request",
+                        snapshot: Promise.resolve(readySnapshot),
+                    };
+                },
+                async stop() {
+                    calls.push(`stop:${name}`);
+                    return stoppedSnapshot;
+                },
+            }),
     });
 
     // Management owns the lifecycle surface; observation methods are absent.
@@ -302,9 +364,37 @@ test("Instance manage capability owns lifecycle operations without observation",
         );
     }
 
-    assert.deepEqual(await capability.createSchema(), {});
+    assert.deepEqual(await capability.createSchema(), {
+        container: {
+            defaultMode: "preset",
+            modes: [
+                "preset",
+                "dockerfile",
+                "compose",
+                "existingImage",
+                "existingStoppedContainer",
+            ],
+            presets: [],
+        },
+        defaultEnabled: true,
+        defaultMcpEnabled: false,
+        defaultModelExtensions: [],
+        defaultProvider: "local",
+        defaultSecurityMode: "disabled",
+        providers: ["local"],
+    });
     assert.deepEqual(await capability.validateCreate({ name: "created" }), {
+        enabled: true,
+        extensions: { model: [] },
+        mcp: {
+            auth: { mode: "none" },
+            contextMode: "explicit",
+            enabled: true,
+            path: "/mcp",
+        },
         name: "created",
+        provider: "local",
+        security: { mode: "disabled" },
     });
     assert.deepEqual(await capability.create({ name: "created" }), {
         enabled: true,
@@ -315,9 +405,7 @@ test("Instance manage capability owns lifecycle operations without observation",
     await capability.enable("demo-local");
     await capability.disable("demo-local");
     assert.deepEqual(await capability.start("demo-local"), readySnapshot);
-    assert.equal(instances.get("demo-local")?.owned, true);
     assert.deepEqual(await capability.stop("demo-local"), stoppedSnapshot);
-    assert.equal(instances.get("demo-local")?.owned, false);
     await assert.rejects(capability.start("disabled"), /is disabled/u);
     await capability.delete("demo-local");
 
@@ -326,25 +414,25 @@ test("Instance manage capability owns lifecycle operations without observation",
         'create:{"name":"created"}',
         "enable:demo-local",
         "disable:demo-local",
-        "start",
-        "stop",
+        "start:demo-local",
+        "stop:demo-local",
         "delete:demo-local",
     ]);
 });
 
 test("Instance event publish capability is write-only and does not observe or manage", async () => {
     const appended: Array<{ data: unknown; type: string }> = [];
-    const instances = new InstanceRegistry([
-        testInstance("demo-local", {
-                async appendControlEvent(type: string, data: unknown) {
-                    appended.push({ data, type });
-                },
-        }),
-    ]);
     const capability = new ExtensionInstanceEventPublishCapabilityControl({
         allowed: true,
         extensionId: "comment",
-        instances,
+        runtime: (name) =>
+            runtimeStub({
+                async appendEvent(type, data) {
+                    if (name !== "demo-local")
+                        throw new Error(`Instance ${name} was not found.`);
+                    appended.push({ data, type });
+                },
+            }),
     });
 
     assert.deepEqual(
@@ -392,26 +480,62 @@ test("Instance event publish capability is write-only and does not observe or ma
 });
 
 test("Instance capabilities reject undeclared access independently", async () => {
-    const instances = new InstanceRegistry([]);
     const observe = new ExtensionInstanceObserveCapabilityControl({
         allowed: false,
         extensionId: "example",
-        instances,
         listConfigured: () => [],
-        readLogs: async () => [],
-        subscriptions: new ProcessSubscriptionManager(1),
+        process: () => processStub(),
+        runtime: () => runtimeStub(),
     });
     const manage = new ExtensionInstanceManageCapabilityControl({
         allowed: false,
-        create: {} as never,
-        editor: {} as never,
+        create: {
+            async createInstance() {
+                throw new Error("must not create");
+            },
+            getSchema() {
+                return {
+                    container: {
+                        defaultMode: "preset",
+                        modes: [
+                            "preset",
+                            "dockerfile",
+                            "compose",
+                            "existingImage",
+                            "existingStoppedContainer",
+                        ],
+                        presets: [],
+                    },
+                    providers: ["local"],
+                    defaultProvider: "local",
+                    defaultEnabled: true,
+                    defaultMcpEnabled: false,
+                    defaultModelExtensions: [],
+                    defaultSecurityMode: "disabled",
+                };
+            },
+            validateDraft() {
+                throw new Error("must not validate");
+            },
+        },
+        editor: {
+            async deleteInstance() {
+                throw new Error("must not delete");
+            },
+            async disableInstance() {
+                throw new Error("must not disable");
+            },
+            async enableInstance() {
+                throw new Error("must not enable");
+            },
+        },
         extensionId: "example",
-        instances,
+        process: () => processStub(),
     });
     const eventPublish = new ExtensionInstanceEventPublishCapabilityControl({
         allowed: false,
         extensionId: "example",
-        instances,
+        runtime: () => runtimeStub(),
     });
 
     await assert.rejects(

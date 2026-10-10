@@ -224,7 +224,7 @@ async function runRealWorkerSmoke(): Promise<void> {
                 "aromatic-pc",
                 workspacePath,
                 "file_read",
-                JSON.stringify({ path: installedSkill }),
+                JSON.stringify({ files: [{ path: installedSkill }] }),
             ]),
             0,
         );
@@ -777,7 +777,7 @@ function createBuffer(): {
 
 function createRealConfig(): string {
     return [
-        "version = 1",
+        "version = 2",
         "",
         "[control]",
         'logLevel = "info"',
@@ -787,15 +787,13 @@ function createRealConfig(): string {
         'listenHost = "127.0.0.1"',
         "listenPort = 17890",
         "",
-        "[mcp.auth]",
-        'mode = "none"',
         "",
     ].join("\n");
 }
 
 function createCreateConfig(): string {
     return [
-        "version = 1",
+        "version = 2",
         "",
         "[control]",
         'logLevel = "info"',
@@ -806,15 +804,13 @@ function createCreateConfig(): string {
         "listenPort = 17890",
         'publicBaseUrl = "http://127.0.0.1:17890"',
         "",
-        "[mcp.auth]",
-        'mode = "none"',
         "",
     ].join("\n");
 }
 
 function createLocalInstanceConfig(name: string): string {
     return [
-        "version = 3",
+        "version = 4",
         `name = ${JSON.stringify(name)}`,
         "enabled = true",
         'provider = "local"',
@@ -822,9 +818,6 @@ function createLocalInstanceConfig(name: string): string {
         "[mcp]",
         "enabled = false",
         "",
-        "[mcp.tools]",
-        'groups = ["file", "bash", "artifact"]',
-        'capabilities = ["read", "write", "execute"]',
         "",
         "[logs]",
         "eventBufferSize = 50",

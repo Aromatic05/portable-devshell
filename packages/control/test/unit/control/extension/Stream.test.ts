@@ -120,7 +120,13 @@ test("stream admission releases the host handler while instance and extension re
         acquireRegistration: async () => ({
             extensionId: "comment",
             registration: { binding, declaration, id: declaration.id, pointId: "control.streams" },
-            lease: { generation, release: () => { releases += 1; } } as never,
+            lease: {
+                generation,
+                release: () => { releases += 1; },
+                retirementSignal: new AbortController().signal,
+                manifest: {} as never,
+                registrations: {} as never,
+            },
         }),
     });
     const stream = {

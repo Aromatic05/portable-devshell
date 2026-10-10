@@ -15,11 +15,10 @@ import { asInstanceName, type JsonValue, type ToolCallContext, type ToolDefiniti
 import { CONTEXT_MESSAGE_PUSH_TOOL_BUDGET } from "@portable-devshell/shared/testing";
 
 import { createToolCallScope } from "../../../../core/src/toolcall/execution/Context.ts";
-import { ToolCallHookRegistry } from "../../../../core/src/toolcall/registration/index.ts";
-import { ToolCallPipeline } from "../../../../core/src/toolcall/execution/Pipeline.ts";
 import { ToolCallExecutionTarget } from "../../../../core/src/toolcall/execution/ExecutionTarget.ts";
 import { ToolCallExtensionBinding } from "../../../src/extension/api/point/toolcall/index.ts";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
+import { modernRpcHeaders, modernRpcRequest } from "../../../../mcp/test/integration/ModernProtocol.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -60,12 +59,9 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         },
         preferencesFile: join(root, "message-preferences.json"),
     });
-    const registry = new ToolCallHookRegistry();
     const binding = new ToolCallExtensionBinding(
         commentReviewRegistrationHost(comment.comment),
     );
-    const uninstall = binding.install(registry);
-    t.after(uninstall);
     let executions = 0;
     const target = new ToolCallExecutionTarget({
         assertReady() {},
@@ -109,13 +105,16 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             },
         },
     } as never);
-    const execution = new ToolCallPipeline({
-        hooks: registry.provider(),
-        resolveTarget: () => target,
-    });
     const worker = createWorker(workspace);
     const host = new TestMcpHost({
-        tools: execution,
+        // Use one ToolCall runtime for the real Context bootstrap and Comment
+        // review/rewrite gates. Overriding `tools` with a separate runtime
+        // bypasses the Context installer and misroutes environ_info to bash.
+        configureToolCalls(runtime) {
+            const uninstall = binding.install(runtime.hooks);
+            t.after(uninstall);
+        },
+        resolveTarget: () => target,
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
@@ -133,39 +132,21 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
 
     await host.start();
     const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/${instanceName}/mcp`;
-    const initialize = await postJson(endpoint, {
-        id: "initialize",
-        jsonrpc: "2.0",
-        method: "initialize",
-        params: {
-            capabilities: {},
-            clientInfo: { name: "comment-boundary-test", version: "1" },
-            protocolVersion: "2025-06-18",
-        },
-    });
-    assert.equal(initialize.error, undefined, JSON.stringify(initialize));
-    const headers = {
-        "mcp-protocol-version": String(
-            initialize.result?.protocolVersion ?? "",
-        ),
-    };
-    await postRaw(
+    const discover = await postJson(
         endpoint,
-        { jsonrpc: "2.0", method: "notifications/initialized" },
-        headers,
+        modernRpcRequest("discover", "server/discover"),
+        modernRpcHeaders("server/discover"),
     );
+    assert.equal(discover.error, undefined, JSON.stringify(discover));
+    const headers: Record<string, string> = {};
+    const environmentParams = {
+        arguments: { workspace },
+        name: "environ_info",
+    };
     const context = await postJson(
         endpoint,
-        {
-            id: "environment",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: {
-                arguments: { workspace },
-                name: "environ_info",
-            },
-        },
-        headers,
+        modernRpcRequest("environment", "tools/call", environmentParams),
+        modernRpcHeaders("tools/call", environmentParams),
     );
     const ctxId = context.result?.structuredContent?.ctxId;
     assert.ok(typeof ctxId === "string", JSON.stringify(context));
@@ -417,18 +398,14 @@ async function callBash(
     label: string,
 ): Promise<TestRpcResponse> {
     callSequence += 1;
+    const params = {
+        arguments: { command: `printf ${label}`, ctxId },
+        name: "bash_run",
+    };
     return await postJson(
         endpoint,
-        {
-            id: `bash-${callSequence}`,
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: {
-                arguments: { command: `printf ${label}`, ctxId },
-                name: "bash_run",
-            },
-        },
-        headers,
+        modernRpcRequest(`bash-${callSequence}`, "tools/call", params),
+        { ...headers, ...modernRpcHeaders("tools/call", params) },
     );
 }
 
@@ -447,7 +424,7 @@ interface TestRpcResponse {
 
 async function postJson(
     url: string,
-    body: JsonValue,
+    body: unknown,
     extraHeaders: Record<string, string> = {},
 ): Promise<TestRpcResponse> {
     const response = await fetch(url, {
@@ -466,21 +443,4 @@ async function postJson(
         .filter((line) => line.startsWith("data: "))
         .map((line) => line.slice(6));
     return JSON.parse(data.at(-1) ?? text) as TestRpcResponse;
-}
-
-async function postRaw(
-    url: string,
-    body: JsonValue,
-    extraHeaders: Record<string, string>,
-): Promise<void> {
-    const response = await fetch(url, {
-        body: JSON.stringify(body),
-        headers: {
-            accept: "application/json, text/event-stream",
-            "content-type": "application/json",
-            ...extraHeaders,
-        },
-        method: "POST",
-    });
-    assert.equal(response.status, 202, await response.text());
 }

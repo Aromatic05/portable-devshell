@@ -152,8 +152,8 @@ test("update preflight validates current Control Worker and Frame protocol range
     const currentApplicationDirectory = join(root, "current");
     t.after(async () => await rm(root, { force: true, recursive: true }));
     await writeCurrentProtocolModules(currentApplicationDirectory, {
-        control: 1,
-        frame: 1,
+        control: "1.0.0",
+        frame: "1.0.0",
         worker: "1.0.0",
     });
 
@@ -232,7 +232,7 @@ test("update preflight rejects unsafe semantic protocol components", async (t) =
     );
 });
 
-test("update preflight reports persistent migration as a rollback blocker", async (t) => {
+test("update preflight rejects retired persistent schema without altering it", async (t) => {
     const root = await createTestTempDirectory("rollback-update-preflight");
     const homeDirectory = join(root, "home");
     const paths = new ControlPathHome(homeDirectory);
@@ -254,15 +254,13 @@ test("update preflight reports persistent migration as a rollback blocker", asyn
         "utf8",
     );
 
-    const result = await preflightControlUpdate({ homeDirectory });
-    assert.deepEqual(result.migration, {
-        domains: ["config"],
-        required: true,
-    });
-    assert.deepEqual(result.rollback, {
-        blockers: ["persistentMigrationRequired"],
-        feasible: false,
-    });
+    const before = await readFile(paths.configFile, "utf8");
+    await assert.rejects(
+        preflightControlUpdate({ homeDirectory }),
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.configParseFailed",
+    );
+    assert.equal(await readFile(paths.configFile, "utf8"), before);
 });
 
 async function writeCurrentProtocolModules(

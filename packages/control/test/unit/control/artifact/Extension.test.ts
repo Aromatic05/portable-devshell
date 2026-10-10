@@ -86,7 +86,7 @@ async function harness(t: test.TestContext) {
         instances: {
             get(name: string) {
                 return name === "remote-one"
-                    ? { worker: { artifact: target } }
+                    ? { artifact: target }
                     : undefined;
             },
         } as never,

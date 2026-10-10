@@ -13,8 +13,10 @@ import {
 import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
+import type { InstanceRuntimeTransport } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/extension/registration/Points.ts";
+import { InstanceRegistry } from "../../../../../src/instance/Registry.ts";
 
 import {
     ExtensionLoader,
@@ -22,6 +24,20 @@ import {
 import type { ExtensionWorkerRuntime } from "../../../../../src/extension/api/cap/index.ts";
 import { ExtensionPathLayout } from "../../../../../src/extension/state/Layout.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+
+const testInstanceRuntime: InstanceRuntimeTransport = {
+    async acquireReference() {
+        return {};
+    },
+    async appendEvent() {},
+    async readEvents() {
+        throw new Error("Unused test instance runtime.");
+    },
+    async releaseReference() {},
+    async subscribeEvents() {
+        throw new Error("Unused test instance runtime.");
+    },
+};
 
 interface LoaderHarness {
     cleanup(): Promise<void>;
@@ -134,7 +150,8 @@ test("Extension loader reads and validates a generation manifest without activat
             imports += 1;
             return { activate() {} };
         },
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -178,7 +195,8 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
                 events.push("module.deactivate");
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),
@@ -251,7 +269,8 @@ test("Extension loader binds execute and delegate through independent Worker aut
                 seenContext = context;
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerDelegateFactory: (input) => {
@@ -332,7 +351,8 @@ test("Extension loader validates declared Config and injects context.config", as
                 assert.equal(await context.config?.get(`${id}.enabled`), false);
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -393,7 +413,8 @@ test("Extension loader projects scoped Core Config without owning a Config domai
                 );
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -424,7 +445,8 @@ test("Extension loader isolates runtime directories for overlapping loads of the
                 );
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -472,7 +494,8 @@ test("Extension loader rejects incompatible API without owning the CLI command n
             imports += 1;
             return {};
         },
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -500,7 +523,8 @@ test("Extension loader rejects manifest identity mismatch", async (t) => {
     const loader = new ExtensionLoader({
         readToolCalls: async () => [],
         importer: async () => ({ activate() {} }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
     });
@@ -528,7 +552,8 @@ test("Extension loader rolls back Worker resources and runtime directory when ac
                 throw new Error("activation failed");
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),
@@ -562,7 +587,8 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
                 events.push("module.deactivate");
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),
@@ -590,7 +616,8 @@ test("Extension loader separates Instance generation notification from host-mana
                 events.push(`module.retire:${event.instance}`);
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),
@@ -632,7 +659,8 @@ test("Extension loader notifies retired Context environments without touching Wo
                 );
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),
@@ -671,7 +699,8 @@ test("Extension loader rejects Web file bindings escaping the immutable generati
                 events.push("module.deactivate");
             },
         }),
-        instances: { list: () => [] } as never,
+        instanceRuntime: () => testInstanceRuntime,
+        instances: new InstanceRegistry([]),
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
         workerExecuteFactory: () => fakeWorker(events),

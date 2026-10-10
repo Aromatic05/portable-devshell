@@ -27,7 +27,7 @@ import {
 
 import { Control } from "../../../src/Control.ts";
 import { ControlFactory } from "../../../src/Factory.ts";
-import type { InstanceRegistry } from "@portable-devshell/core/instance";
+import type { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../../src/instance/reverse/credential/Store.ts";
 import {
@@ -241,7 +241,7 @@ test(
                 workspace,
             },
         );
-        assert.equal(result.exitCode, 0);
+        assert.equal(result.exitCode, 0, JSON.stringify(result));
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
 
         const workerInstance = factory.registry?.get("reverse-test");
@@ -899,7 +899,7 @@ async function assertReverseMarker(
             workspace,
         },
     );
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
     assert.match(result.stdout, new RegExp(expected, "u"));
 }
 

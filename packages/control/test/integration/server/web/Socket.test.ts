@@ -173,7 +173,10 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
     const sessions = new ControlWebSessionService();
     const channels = new ControlTransportServer({
         listeners: [
-            new ControlWebSocketListener({ http: host.server, sessions }),
+            new ControlWebSocketListener({
+                http: host.server as unknown as HttpHost,
+                sessions,
+            }),
         ],
         routes: {
             hosts: createRouteHosts,
@@ -811,8 +814,10 @@ async function negotiate(
     });
 }
 
-function httpOrigin(server: HttpHost): string {
-    const address = server.address as AddressInfo | null | undefined;
+function httpOrigin(server: {
+    address: AddressInfo | string | null | undefined;
+}): string {
+    const address = server.address;
     if (
         address === null ||
         address === undefined ||

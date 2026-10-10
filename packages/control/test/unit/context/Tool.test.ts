@@ -7,13 +7,12 @@ import test from "node:test";
 
 import {
     asInstanceName,
+    createToolCallRuntime,
     type EnvironmentTransport,
     type InstanceProcessEnvelope,
     type InstanceRuntimeTransport,
     type JsonValue,
     type ProcessTransport,
-    type ToolCallExecutor,
-    type ToolCallHooks,
 } from "@portable-devshell/shared";
 
 import type { ContextApi } from "../../../src/context/Api.ts";
@@ -22,19 +21,43 @@ import {
     contextToolDefinitions,
     installContextTools,
 } from "../../../src/context/Public.ts";
-import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
+import { InstanceChangeHub } from "../../../src/instance/Change.ts";
+import {
+    createToolCallRegistry,
+    type InstanceToolCatalogSource,
+} from "../../../src/toolcall/index.ts";
 
-function createHooks() {
-    const executes = new Map<string, ToolCallExecutor>();
-    const hooks: ToolCallHooks = {
-        registerContributor: () => () => undefined,
-        registerExecute: (name, execute) => {
-            executes.set(name, execute);
-            return () => executes.delete(name);
+function createBoundRegistry() {
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            dispatch: async (request) => {
+                if (request.execute === undefined)
+                    throw new Error("no execute registered");
+                return (await request.execute(
+                    request.callId,
+                    request.value.payload,
+                    request.value,
+                )) as JsonValue;
+            },
+        }),
+    });
+    const source: InstanceToolCatalogSource = {
+        config: { mcpEnabled: true, name: "local" },
+        toolCallHooks: runtime.hooks,
+        toolDefinitions: {
+            list: () => [],
+            register: () => ({ dispose() {}, replace() {} }),
         },
-        registerReview: () => () => undefined,
     };
-    return { executes, hooks };
+    const registry = createToolCallRegistry();
+    const unbind = registry.bind({
+        changes: new InstanceChangeHub(),
+        instances: {
+            list: () => [source],
+            onAdding: () => () => undefined,
+        },
+    });
+    return { registry, toolRuntime: runtime, unbind };
 }
 
 const environmentTransport: EnvironmentTransport = {
@@ -133,9 +156,7 @@ test("Context owns environ tool definitions with structured environment output",
 });
 
 test("Context registers definitions and executes environ_info through ToolCall hook", async () => {
-    const { executes, hooks } = createHooks();
-    const registry = createToolCallRegistry();
-    const unbind = registry.bind(hooks);
+    const { registry, toolRuntime, unbind } = createBoundRegistry();
 
     const contextFile = join(
         tmpdir(),
@@ -194,22 +215,15 @@ test("Context registers definitions and executes environ_info through ToolCall h
             registry.get("local", "environ_info")?.definition.name,
             "environ_info",
         );
-        const execute = executes.get("environ_info");
-        assert.ok(execute);
-        const result = await execute(
-            "call-1",
+        const result = await toolRuntime.api.call(
+            "local",
+            "environ_info",
             { workspace: "/repo" },
             {
-                context: {
-                    contextMode: "explicit",
-                    externalBindings: [{ kind: "session", value: "s-1" }],
-                    instance: asInstanceName("local"),
-                    principal: "alice",
-                    source: "mcp",
-                },
-                kind: "call",
-                payload: { workspace: "/repo" },
-                toolName: "environ_info",
+                contextMode: "explicit",
+                externalBindings: [{ kind: "session", value: "s-1" }],
+                principal: "alice",
+                source: "mcp",
             },
         );
         const record = result as Record<string, JsonValue>;

@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    asInstanceName,
+    createToolCallRuntime,
     type ArtifactViewImageInput,
-    type ToolCallExecutor,
-    type ToolCallHooks,
+    type JsonValue,
     type ToolCallPresentedResult,
 } from "@portable-devshell/shared";
 
@@ -13,34 +12,79 @@ import type { ArtifactImageApi } from "../../../src/artifact/Api.ts";
 import { installArtifactTools } from "../../../src/artifact/tool/index.ts";
 import { InstanceChangeHub } from "../../../src/instance/Change.ts";
 import { InstanceRegistry } from "../../../src/instance/Registry.ts";
-import { createToolCallRegistry } from "../../../src/toolcall/index.ts";
+import {
+    createToolCallRegistry,
+    type InstanceToolCatalogSource,
+} from "../../../src/toolcall/index.ts";
 
 interface InstanceEntry {
     config: { mcpEnabled: boolean; name: string };
 }
 
-function createHooks() {
-    const executes = new Map<string, ToolCallExecutor>();
-    const hooks: ToolCallHooks = {
-        registerContributor: () => () => undefined,
-        registerExecute: (name, execute) => {
-            executes.set(name, execute);
-            return () => executes.delete(name);
-        },
-        registerReview: () => () => undefined,
-    };
-    return { executes, hooks };
+type TestToolCallRuntime = ReturnType<typeof createToolCallRuntime>;
+
+interface TestInstanceCatalog {
+    instance: InstanceToolCatalogSource;
+    runtime: TestToolCallRuntime;
 }
 
-function createInstances(
-    list: () => readonly InstanceEntry[],
-): InstanceRegistry {
+function createRuntime(): TestToolCallRuntime {
+    return createToolCallRuntime({
+        resolveTarget: () => ({
+            dispatch: async (request) => {
+                if (request.execute === undefined)
+                    throw new Error("no execute registered");
+                return (await request.execute(
+                    request.callId,
+                    request.value.payload,
+                    request.value,
+                )) as JsonValue;
+            },
+        }),
+    });
+}
+
+function createInstances(list: () => readonly InstanceEntry[]): {
+    instances: InstanceRegistry;
+    runtimeFor(name: string): TestToolCallRuntime;
+} {
     const registry = new InstanceRegistry([]);
+    const catalogs = new Map<string, TestInstanceCatalog>();
+    const source = (entry: InstanceEntry): InstanceToolCatalogSource => {
+        const existing = catalogs.get(entry.config.name);
+        if (
+            existing !== undefined &&
+            existing.instance.config.mcpEnabled === entry.config.mcpEnabled
+        )
+            return existing.instance;
+        existing?.runtime.close();
+        const runtime = createRuntime();
+        catalogs.set(entry.config.name, {
+            instance: {
+                config: entry.config,
+                toolCallHooks: runtime.hooks,
+                toolDefinitions: {
+                    list: () => [],
+                    register: () => ({ dispose() {}, replace() {} }),
+                },
+            },
+            runtime,
+        });
+        return catalogs.get(entry.config.name)!.instance;
+    };
     Object.defineProperty(registry, "list", {
         configurable: true,
-        value: list,
+        value: () => list().map(source),
     });
-    return registry;
+    return {
+        instances: registry,
+        runtimeFor(name: string): TestToolCallRuntime {
+            const catalog = catalogs.get(name);
+            if (catalog === undefined)
+                throw new Error(`No test catalog for instance ${name}.`);
+            return catalog.runtime;
+        },
+    };
 }
 
 test("Artifact registers image definition for MCP-enabled instance scopes", () => {
@@ -49,10 +93,9 @@ test("Artifact registers image definition for MCP-enabled instance scopes", () =
         { config: { mcpEnabled: false, name: "hidden" } },
     ];
     const changes = new InstanceChangeHub();
-    const instances = createInstances(() => descriptors);
-    const { hooks } = createHooks();
+    const { instances } = createInstances(() => descriptors);
     const registry = createToolCallRegistry();
-    const unbind = registry.bind(hooks);
+    const unbind = registry.bind({ changes, instances });
     const uninstall = installArtifactTools(
         unusedArtifact(),
         instances,
@@ -105,12 +148,14 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
             };
         },
     };
-    const instances = createInstances(() => [
+    const { instances, runtimeFor } = createInstances(() => [
         { config: { mcpEnabled: true, name: "remote" } },
     ]);
-    const { executes, hooks } = createHooks();
     const registry = createToolCallRegistry();
-    const unbind = registry.bind(hooks);
+    const unbind = registry.bind({
+        changes: new InstanceChangeHub(),
+        instances,
+    });
     const uninstall = installArtifactTools(
         artifact,
         instances,
@@ -118,28 +163,18 @@ test("Artifact execute hook uses ToolCall instance/workspace and presents native
         registry,
     );
     try {
-        const execute = executes.get("artifact_viewImage");
-        assert.ok(execute);
-        const result = await execute(
-            "call-1",
+        const result = await runtimeFor("remote").api.call(
+            "remote",
+            "artifact_viewImage",
             { path: "./pixel.png" },
             {
-                context: {
-                    ctxId: "ctx-1",
-                    instance: asInstanceName("remote"),
-                    source: "mcp",
-                    workspace: "/repo",
-                },
-                kind: "call",
-                payload: { path: "./pixel.png" },
-                toolName: "artifact_viewImage",
+                ctxId: "ctx-1",
+                source: "mcp",
+                workspace: "/repo",
             },
         );
-        assert.equal(
-            (result as ToolCallPresentedResult).type,
-            "presented-tool-call-result",
-        );
-        const presented = result as ToolCallPresentedResult;
+        const presented = result as unknown as ToolCallPresentedResult;
+        assert.equal(presented.type, "presented-tool-call-result");
         assert.deepEqual(calls, [
             {
                 input: { path: "./pixel.png", workspace: "/repo" },

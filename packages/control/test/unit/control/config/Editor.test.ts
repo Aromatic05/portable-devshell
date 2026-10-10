@@ -5,11 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
-import {
-    ConfigEngine,
-    type ConfigEngineOptions,
-    type ConfigRuntimeChangeSet,
-} from "../../../../src/config/engine/index.ts";
+import { ConfigEngine } from "../../../../src/config/engine/index.ts";
+import type {
+    ConfigEngineOptions,
+    ConfigRuntimeChangeSet,
+} from "../../../../src/config/engine/Api.ts";
 import { HttpEndpointPreflight } from "../../../../src/config/engine/Http.ts";
 import {
     InstanceEditorCoordinator as ProductionInstanceEditorCoordinator,
@@ -19,7 +19,7 @@ import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { Instance } from "@portable-devshell/core/instance";
 import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
 import { createContextRuntime } from "../../../../src/context/index.ts";
-import { createDefaultControlConfig, type ControlConfig } from "@portable-devshell/shared";
+import { createDefaultControlConfig, asInstanceName, type ControlConfig, type EnvironmentTransport, type InstanceProcessEnvelope, type InstanceRuntimeTransport, type ProcessTransport } from "@portable-devshell/shared";
 import {
     buildTestInstanceRegistry,
     createTestInstance,
@@ -32,6 +32,83 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+
+const testEnvironmentTransport: EnvironmentTransport = {
+    async prepareExtensionResource() {
+        throw new Error("Unused test environment transport.");
+    },
+    async prepareWorkspace(workspace) {
+        return {
+            projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+            projectMemoryDirectory: `${workspace}/.agent`,
+            temporaryDirectory: "/tmp/context",
+            workspace,
+        };
+    },
+    async readAlerts() {
+        return { advice: [] };
+    },
+    async releaseAlerts() {},
+    async touchAlerts() {
+        return { advice: [] };
+    },
+    async touchTemporaryDirectory() {},
+};
+
+const testProcessTransport: ProcessTransport = {
+    async readLogs() {
+        return [];
+    },
+    async refresh() {
+        return testProcessEnvelope();
+    },
+    async snapshot() {
+        return testProcessEnvelope();
+    },
+    async start() {
+        throw new Error("Unused test process transport.");
+    },
+    async stop() {
+        throw new Error("Unused test process transport.");
+    },
+    async subscribe() {
+        throw new Error("Unused test process transport.");
+    },
+};
+
+const testInstanceRuntimeTransport: InstanceRuntimeTransport = {
+    async acquireReference() {
+        return {};
+    },
+    async appendEvent() {},
+    async readEvents() {
+        throw new Error("Unused test instance runtime.");
+    },
+    async releaseReference() {},
+    async subscribeEvents() {
+        throw new Error("Unused test instance runtime.");
+    },
+};
+
+function testProcessEnvelope(): InstanceProcessEnvelope {
+    return {
+        lastSeq: 0,
+        snapshot: {
+            connectionState: "connected",
+            daemonState: "running",
+            lastSeq: 0,
+            name: asInstanceName("local"),
+            ready: true,
+            status: "ready",
+        },
+        worker: {
+            capabilities: { cancel: true, streaming: true, tools: true },
+            platform: { arch: "x86_64", os: "linux" },
+            protocolVersion: "1",
+            version: "test",
+        },
+    };
+}
 
 class InstanceRegistryFactory {
     build(config: ControlConfig): InstanceRegistry {
@@ -52,16 +129,6 @@ class InstanceEditorCoordinator extends ProductionInstanceEditorCoordinator {
             ...defaults,
             instanceChanges: changes,
             ...options,
-            updateApprovalPolicy:
-                options.updateApprovalPolicy ??
-                (async (instance, policy) => {
-                    const descriptor = options.instanceRegistry.get(instance) as
-                        | (ReturnType<typeof options.instanceRegistry.get> & {
-                              approval?: { setPolicy(policy: unknown): void };
-                          })
-                        | undefined;
-                    descriptor?.approval?.setPolicy(policy);
-            }),
         });
         this.changes = changes;
     }
@@ -1576,7 +1643,10 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
     const instances = new InstanceRegistry([]);
     const contexts = createContextRuntime({
         contextFile: contextPath,
-        instances,
+        environment: () => testEnvironmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => testProcessTransport,
+        runtime: () => testInstanceRuntimeTransport,
     });
     await contexts.initialize();
     const context = await contexts.api.registry.create({
@@ -1606,7 +1676,10 @@ test("deleting a disabled MCP instance preserves and reattaches its Context", as
 
     const restoredContexts = createContextRuntime({
         contextFile: contextPath,
-        instances,
+        environment: () => testEnvironmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => testProcessTransport,
+        runtime: () => testInstanceRuntimeTransport,
     });
     await restoredContexts.initialize();
     assert.deepEqual(
@@ -1682,9 +1755,10 @@ test("instance deletion starts cleanup-only worker before releasing pending Cont
     const cleanupOnly = new Map<string, ReturnType<typeof descriptor>>();
     const contexts = createContextRuntime({
         contextFile: join(contextHome, "contexts.json"),
-        instances: {
-            get: (instance) => instances.get(instance) ?? cleanupOnly.get(instance),
-        },
+        environment: () => testEnvironmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => testProcessTransport,
+        runtime: () => testInstanceRuntimeTransport,
     });
     await contexts.initialize();
     const context = await contexts.api.registry.create({
@@ -1797,9 +1871,10 @@ test("failed Context cleanup keeps both debts and cleanup capability through ret
         const cleanupOnly = new Map<string, ReturnType<typeof descriptor>>();
         const contexts = createContextRuntime({
             contextFile: contextPath,
-            instances: {
-                get: (instance) => instances.get(instance) ?? cleanupOnly.get(instance),
-            },
+            environment: () => testEnvironmentTransport,
+            leaseInstance: () => ({ release() {} }),
+            process: () => testProcessTransport,
+            runtime: () => testInstanceRuntimeTransport,
         });
         await contexts.initialize();
         const context = await contexts.api.registry.create({
@@ -2838,12 +2913,6 @@ function descriptor(
     });
     const instance = createTestInstance(config, {
         managementMode: "controllerManaged",
-        async listApprovals() {
-            return [];
-        },
-        async cancelApproval() {
-            throw new Error("no pending approval");
-        },
         async retireRuntime() {},
         async retireProviderResources() {},
         ...worker,

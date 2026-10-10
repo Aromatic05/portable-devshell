@@ -3,62 +3,54 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-    WORKER_PROTOCOL_VERSION,
-    WorkerInstanceFactory,
-    TransportConnection,
-} from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import {
     Endpoint,
     Rpc,
+    WORKER_PROTOCOL_VERSION,
     asInstanceName,
+    normalizeConfigInstanceDraft,
     type Channel,
     type JsonValue,
 } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
-import {
-    InstanceRegistry,
-    ReverseConnectionGateway,
-    ReverseCredentialService,
-    ReverseCredentialStore,
-} from "../../src/testing.ts";
+import { Instance } from "@portable-devshell/core/instance";
+import { ReverseConnections } from "@portable-devshell/core";
+import { InstanceRegistry } from "../../src/instance/Registry.ts";
+import { ReverseCredentials } from "../../src/instance/reverse/Credentials.ts";
+import { ReverseCredentialStore } from "../../src/instance/reverse/credential/Store.ts";
+import { ReverseIngress } from "../../src/server/reverse/Ingress.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
     const home = await createTestTempDirectory("devshell-reverse-gateway");
-    const connection = new TransportConnection();
-    const worker = new WorkerInstanceFactory().create({
-        homeDirectory: home,
-        managementMode: "selfManaged",
-        name: asInstanceName("reverse-test"),
-        transportConnection: connection,
-    });
-    const registry = new InstanceRegistry([
-        {
+    const instance = Instance.create(
+        normalizeConfigInstanceDraft({
             enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/reverse-test/mcp",
-            modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
-            reverseConnection: connection,
-            worker,
-        },
-    ]);
+        }),
+    );
+    const registry = new InstanceRegistry([instance]);
     const credentialStore = new ReverseCredentialStore(home);
     const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl: "http://127.0.0.1/base",
     });
-    const gateway = new ReverseConnectionGateway({
+    const connections = new ReverseConnections({ instances: registry });
+    const credentials = new ReverseCredentials({
         credentialStore,
         instanceRegistry: registry,
         publicBaseUrl: "http://127.0.0.1/base",
     });
-    gateway.install(server);
+    const ingress = new ReverseIngress({
+        connections,
+        credentials,
+        publicBaseUrl: "http://127.0.0.1/base",
+    });
+    ingress.install(server);
     await server.start();
 
     try {
@@ -89,10 +81,10 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         await first.opened;
         await Promise.race([
             waitUntil(
-                () => worker.snapshot().ready === true,
+                () => instance.supervision.snapshot().ready === true,
                 () =>
                     JSON.stringify({
-                        snapshot: worker.snapshot(),
+                        snapshot: instance.supervision.snapshot(),
                         methods: first.methods,
                         errors: first.errors,
                     }),
@@ -103,28 +95,24 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
                 );
             }),
         ]);
-        assert.equal(worker.snapshot().reverse?.transport, "wss");
-        assert.equal(worker.snapshot().reverse?.generation, 1);
+        assert.equal(instance.supervision.snapshot().reverse?.transport, "wss");
+        assert.equal(instance.supervision.snapshot().reverse?.generation, 1);
 
         const firstClosed = first.closed;
         const second = connectWorker(port, enrollment.deviceToken, 2);
         await second.opened;
         await waitUntil(
             () =>
-                worker.snapshot().reverse?.generation === 2 &&
-                worker.snapshot().ready === true,
-            () => JSON.stringify(worker.snapshot()),
+                instance.supervision.snapshot().reverse?.generation === 2 &&
+                instance.supervision.snapshot().ready === true,
+            () => JSON.stringify(instance.supervision.snapshot()),
         );
         await firstClosed;
-        assert.equal(worker.snapshot().reverse?.transport, "wss");
+        assert.equal(instance.supervision.snapshot().reverse?.transport, "wss");
 
-        const reverseControl = new ReverseCredentialService({
-            credentialStore,
-            instanceRegistry: registry,
-            publicBaseUrl: "http://127.0.0.1/base",
-        });
-        reverseControl.setDisconnectHandler((instance) =>
-            gateway.disconnect(instance),
+        const reverseControl = credentials;
+        reverseControl.setDisconnectHandler((instanceName) =>
+            connections.disconnect(instanceName),
         );
         const secondClosed = second.closed;
         const rotated = await reverseControl.rotateDeviceToken("reverse-test");
@@ -145,48 +133,43 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         );
         await secondClosed;
         await waitUntil(
-            () => worker.snapshot().reverse?.availability === "offline",
-            () => JSON.stringify(worker.snapshot()),
+            () => instance.supervision.snapshot().reverse?.availability === "offline",
+            () => JSON.stringify(instance.supervision.snapshot()),
         );
     } finally {
-        gateway.stop();
+        ingress.stop();
         await server.stop();
     }
 });
 
 test("SSE plus POST fallback completes RPC handshake and deduplicates repeated upstream frames", async () => {
     const home = await createTestTempDirectory("devshell-reverse-sse");
-    const connection = new TransportConnection();
-    const worker = new WorkerInstanceFactory().create({
-        homeDirectory: home,
-        managementMode: "selfManaged",
-        name: asInstanceName("reverse-test"),
-        transportConnection: connection,
-    });
-    const registry = new InstanceRegistry([
-        {
+    const instance = Instance.create(
+        normalizeConfigInstanceDraft({
             enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/reverse-test/mcp",
-            modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
-            reverseConnection: connection,
-            worker,
-        },
-    ]);
+        }),
+    );
+    const registry = new InstanceRegistry([instance]);
     const credentialStore = new ReverseCredentialStore(home);
     const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl: "http://127.0.0.1/base",
     });
-    const gateway = new ReverseConnectionGateway({
+    const connections = new ReverseConnections({ instances: registry });
+    const credentials = new ReverseCredentials({
         credentialStore,
         instanceRegistry: registry,
         publicBaseUrl: "http://127.0.0.1/base",
     });
-    gateway.install(server);
+    const ingress = new ReverseIngress({
+        connections,
+        credentials,
+        publicBaseUrl: "http://127.0.0.1/base",
+    });
+    ingress.install(server);
     await server.start();
 
     try {
@@ -294,23 +277,23 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         }
 
         await waitUntil(
-            () => worker.snapshot().ready === true,
-            () => JSON.stringify({ methods, snapshot: worker.snapshot() }),
+            () => instance.supervision.snapshot().ready === true,
+            () => JSON.stringify({ methods, snapshot: instance.supervision.snapshot() }),
         );
         assert.deepEqual(methods, [
             "worker.ping",
             "worker.handshake",
             "tools.list",
         ]);
-        assert.equal(worker.snapshot().reverse?.transport, "sse");
+        assert.equal(instance.supervision.snapshot().reverse?.transport, "sse");
         await reader.cancel();
         sseChannel.finish();
         await waitUntil(
-            () => worker.snapshot().reverse?.availability === "offline",
-            () => JSON.stringify(worker.snapshot()),
+            () => instance.supervision.snapshot().reverse?.availability === "offline",
+            () => JSON.stringify(instance.supervision.snapshot()),
         );
     } finally {
-        gateway.stop();
+        ingress.stop();
         await server.stop();
     }
 });

@@ -17,9 +17,9 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteRegistry } from "../../../../src/server/Route.ts";
-import { createTestInstanceDomainRuntime } from "../../../../src/testing.ts";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
+import type { OperationalOverviewApi } from "../../../../src/overview/Api.ts";
 import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
-import { InstanceRegistry } from "@portable-devshell/core";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
@@ -36,8 +36,8 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         }),
     ]);
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -109,8 +109,8 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         }),
     ]);
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -159,13 +159,21 @@ interface TestConnection {
     ): Promise<MessageStream>;
 }
 
+function createTestOverview(): OperationalOverviewApi {
+    return {
+        async read() {
+            throw new Error("Operational overview is unused by route fixtures.");
+        },
+    };
+}
+
 async function connect(socketPath: string): Promise<TestConnection> {
     const endpoint = new Endpoint({
         connectChannel: (signal) =>
             LocalChannel.connect(socketPath, { signal }),
     });
     const protocols: Array<Rpc | Stream> = [];
-    const service = new Rpc(await endpoint.connect("@control", "service"));
+    const service = new Rpc(await endpoint.connect("@control", "server"));
     protocols.push(service);
     await service.request("hello", {
         clientKind: "cli",

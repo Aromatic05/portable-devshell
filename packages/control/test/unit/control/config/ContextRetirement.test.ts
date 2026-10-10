@@ -4,21 +4,19 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-    createContextRuntime,
-} from "@portable-devshell/core/context";
-import {
-    InstanceRegistry,
-    type WorkerInstance,
-} from "@portable-devshell/core/instance";
-import {
     createDefaultControlConfig,
     normalizeConfigInstanceDraft,
     type ControlConfig,
 } from "@portable-devshell/shared";
+import { createContextRuntime } from "../../../../src/context/index.ts";
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { InstanceEditorCoordinator } from "../../../../src/instance/editor/index.ts";
-import { createTestInstance } from "../../../support/ControlFixtures.ts";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
+import {
+    createTestInstance,
+    type TestInstanceRuntimeOverrides,
+} from "../../../support/InstanceRuntime.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 for (const descriptorState of ["present", "missing"] as const) {
@@ -33,9 +31,12 @@ for (const descriptorState of ["present", "missing"] as const) {
         let allowAlertsRelease = false;
         let releaseAttempts = 0;
         let factoryCalls = 0;
-        const makeWorker = (): WorkerInstance => ({
+        const workerOverrides = (): TestInstanceRuntimeOverrides => ({
             managementMode: "controllerManaged",
-            snapshot: () => ({ daemonState: ready ? "running" : "stopped", ready }),
+            snapshot: () => ({
+                daemonState: ready ? "running" : "stopped",
+                ready,
+            }),
             async start() {
                 events.push("worker.start.cleanup-only");
                 ready = true;
@@ -46,17 +47,7 @@ for (const descriptorState of ["present", "missing"] as const) {
                 ready = false;
                 return { daemonState: "stopped", ready: false };
             },
-            async prepareWorkspace(path: string) {
-                assert.equal(ready, true);
-                return {
-                    projectMemoryAgentFile: join(path, "AGENTS.md"),
-                    projectMemoryDirectory: path,
-                    projectMemoryPresent: false,
-                    temporaryDirectory: join(path, ".tmp"),
-                    workspace: path,
-                };
-            },
-            async releaseAlerts(path: string) {
+            async releaseAlerts(path) {
                 releaseAttempts += 1;
                 events.push(
                     allowAlertsRelease
@@ -76,31 +67,51 @@ for (const descriptorState of ["present", "missing"] as const) {
             async close() {
                 events.push("worker.close");
             },
-        } as unknown as WorkerInstance);
+        });
 
         const config = createDefaultControlConfig();
         config.mcp.enabled = false;
-        config.instances = [
-            normalizeConfigInstanceDraft({
-                mcp: { enabled: true },
-                name: instanceName,
-                provider: "local",
-                security: { mode: "disabled" },
-            }),
-        ];
+        const instanceConfig = normalizeConfigInstanceDraft({
+            mcp: { enabled: true },
+            name: instanceName,
+            provider: "local",
+            security: { mode: "disabled" },
+        });
+        config.instances = [instanceConfig];
         const instances = new InstanceRegistry([
-            createTestInstance(makeWorker(), {
-                enabled: true,
-                mcpEnabled: true,
-                mcpPath: `/${instanceName}/mcp`,
-                modelExtensions: [],
-                name: instanceName,
-                provider: "local",
-            }),
+            createTestInstance(instanceConfig, workerOverrides()),
         ]);
         const contexts = createContextRuntime({
             contextFile: join(home, "contexts.json"),
-            instances,
+            environment: () => ({
+                prepareExtensionResource: async () => {
+                    throw new Error("Environment resource preparation is unused.");
+                },
+                async prepareWorkspace(path) {
+                    return {
+                        projectMemoryAgentFile: join(path, "AGENTS.md"),
+                        projectMemoryDirectory: path,
+                        projectMemoryPresent: false,
+                        temporaryDirectory: join(path, ".tmp"),
+                        workspace: path,
+                    };
+                },
+                readAlerts: async () => ({ advice: [] }),
+                releaseAlerts: async () => {
+                    throw new Error(
+                        "Context environment alerts release is unused; cleanup must target the Instance worker.",
+                    );
+                },
+                touchAlerts: async () => ({ advice: [] }),
+                touchTemporaryDirectory: async () => {},
+            }),
+            leaseInstance: () => ({ release() {} }),
+            process: () => {
+                throw new Error("Context runtime process port is unused.");
+            },
+            runtime: () => {
+                throw new Error("Context runtime runtime port is unused.");
+            },
         });
         await contexts.initialize();
         const context = await contexts.api.registry.create({ principal: "local" });
@@ -128,16 +139,9 @@ for (const descriptorState of ["present", "missing"] as const) {
         const cleanupDebtFile = join(home, "instance-cleanup.json");
         const coordinator = new InstanceEditorCoordinator({
             cleanupDebtFile,
-            createRuntimeInstance: () => {
+            createRuntimeInstance: (runtimeConfig) => {
                 factoryCalls += 1;
-                return createTestInstance(makeWorker(), {
-                    enabled: true,
-                    mcpEnabled: true,
-                    mcpPath: `/${instanceName}/mcp`,
-                    modelExtensions: [],
-                    name: instanceName,
-                    provider: "local",
-                });
+                return createTestInstance(runtimeConfig, workerOverrides());
             },
             detachContextInstance: async (instance) => {
                 await contexts.api.detachInstance(instance);
@@ -147,11 +151,9 @@ for (const descriptorState of ["present", "missing"] as const) {
             instanceRegistry: instances,
             reconcileContextInstanceCleanup: async (instance, target) =>
                 await contexts.api.cleanup.reconcileInstance(instance, target),
-            retireRuntimeInstance: async () => {},
             finalizeRuntimeInstance: async (descriptor) => {
                 await descriptor.close();
             },
-            updateApprovalPolicy: async () => {},
         });
 
         const warnings: unknown[] = [];
@@ -181,6 +183,9 @@ for (const descriptorState of ["present", "missing"] as const) {
             ],
         );
         assert.equal(releaseAttempts, 1);
+        assert.ok(events.includes("worker.start.cleanup-only"));
+        assert.equal(events.includes("worker.retireRuntime"), false);
+        assert.equal(events.includes("worker.retireProviderResources"), false);
         assert.equal(events.includes("worker.close"), false);
 
         allowAlertsRelease = true;
@@ -205,6 +210,5 @@ for (const descriptorState of ["present", "missing"] as const) {
             events.indexOf("alerts.release.success") <
                 events.indexOf("worker.close"),
         );
-        assert.equal(events.includes("worker.stop"), false);
     });
 }

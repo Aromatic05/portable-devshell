@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { AuditDatabase } from "../../../../core/src/audit/database/index.ts";
 import {
     asInstanceName,
+    createToolCallProvenanceRuntime,
     type ToolCallQuery,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -19,8 +20,9 @@ import { ExtensionHost } from "../../../src/extension/host/index.ts";
 import { ExtensionInstallService } from "../../../src/extension/install/index.ts";
 import { ExtensionPathLayout } from "../../../src/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../src/extension/state/Store.ts";
-import { Instance, InstanceRegistry, type WorkerInstance } from "@portable-devshell/core/instance";
-import { createToolCallProvenanceRuntime } from "@portable-devshell/core/toolcall";
+import { Instance } from "@portable-devshell/core/instance";
+import type { WorkerInstance } from "../../../../core/src/instance/runtime/index.ts";
+import { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const RECALL_SOURCE = fileURLToPath(
@@ -72,12 +74,13 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
     });
 
     const instance = new Instance({
-        enabled: true,
-        mcpEnabled: false,
-        mcpPath: "/alpha/mcp",
-        modelExtensions: [],
-        name: instanceName,
-        provider: "local",
+        config: {
+            name: instanceName,
+            provider: "local",
+        } as never,
+        eventLog: {} as never,
+        state: {} as never,
+        subscriptions: {} as never,
         worker: { snapshot: () => ({ ready: false }) } as unknown as WorkerInstance,
     });
     const instances = new InstanceRegistry([instance]);
@@ -96,6 +99,7 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
                 }),
             instances,
             readToolCalls: async (_name, query) => await audit.readQuery(query ?? {}),
+            instanceRuntime: () => ({}) as never,
             paths,
             points: createControlExtensionPointRegistry(),
             toolCallDecorator: provenance,

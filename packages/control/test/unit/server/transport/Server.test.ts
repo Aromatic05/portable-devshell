@@ -804,12 +804,18 @@ test("ControlTransportServer refreshes RPC and stream routes without terminating
     assert.deepEqual(await client.request("@control", "dynamic", "added"), { added: true });
     await assert.rejects(client.request("@control", "dynamic", "removed"), /not found/iu);
     const secondWatch = await client.open("@control", "dynamic", "watch");
-    assert.deepEqual((await secondWatch.readMessage()).message, { generation: 2 });
+    assert.deepEqual(await secondWatch.readMessage(), {
+        type: "close",
+        message: { generation: 2 },
+    });
 
     finishCall();
     finishStream();
     assert.deepEqual(await first, { generation: 1 });
-    assert.deepEqual((await firstWatch.readMessage()).message, { generation: 1 });
+    assert.deepEqual(await firstWatch.readMessage(), {
+        type: "close",
+        message: { generation: 1 },
+    });
 });
 
 test("rewritten ToolCall reaches the destination host through its tool route", async (t) => {

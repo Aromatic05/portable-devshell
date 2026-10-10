@@ -3,11 +3,9 @@ import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import type {
-    WorkerCommandInteractiveSession,
-    WorkerInstance,
-} from "@portable-devshell/core/testing";
-import type { TerminalProcess, TerminalProcessExit } from "../../../../../core/src/terminal/Backend.ts";
+import type { WorkerCommandInteractiveSession } from "../../../../../core/src/instance/Api.ts";
+import type { WorkerInstance } from "../../../../../core/src/instance/runtime/index.ts";
+import type { TerminalProcess, TerminalProcessExit } from "../../../../../core/src/terminal/Api.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
@@ -16,7 +14,6 @@ import {
     Rpc,
     Stream,
     asInstanceName,
-    type ActiveTodoSummary,
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
     controlErrorCodes,
@@ -30,17 +27,14 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlRouteRegistry } from "../../../../src/server/Route.ts";
-import {
-    createTestInstanceDomainRuntime,
-    createTestTaskApi,
-} from "../../../../src/testing.ts";
+import type { OperationalOverviewApi } from "../../../../src/overview/Api.ts";
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
 import { ControlConfigStore } from "../../../../src/config/store/index.ts";
-import { createDebugRuntime } from "../../../../src/debug/index.ts";
-import { InstanceRegistry } from "@portable-devshell/core";
-import { InstanceRegistryFactory } from "@portable-devshell/core";
+import { DebugPatchManager } from "../../../../src/debug/Patch.ts";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { ControlSocketServer } from "../../../../src/server/transport/endpoint/Socket.ts";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
@@ -65,7 +59,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
     }
 
     assert.deepEqual(
-        (await request(harness.socketPath, "@control", "service.ping")).payload,
+        (await request(harness.socketPath, "@control", "server.ping")).payload,
         { pong: true },
     );
     assert.deepEqual(
@@ -75,6 +69,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
             instanceCount: 1,
             ok: true,
             pid: process.pid,
+            ready: true,
         },
     );
     assert.deepEqual(
@@ -127,7 +122,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
     );
 
     const listed = (
-        await request(harness.socketPath, "@control", "config.listInstances")
+        await request(harness.socketPath, "@control", "instance.listInstances")
     ).payload as Array<{
         name: string;
     }>;
@@ -265,11 +260,17 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     const socketPath = createTestIpcPath("control-debug-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
-    const debug = createDebugRuntime({ instances: registry, target: (instance) => instance.worker });
+    const debug = new DebugPatchManager();
+    debug.registerTarget("worker:alpha", worker, {
+        callTool: {
+            project: (args) => ({ toolName: String(args[0]), input: args[1] as JsonValue }),
+            scope: (args) => ({ ctxId: (args[2] as { ctxId?: string })?.ctxId ?? "", toolName: String(args[0]) }),
+        },
+    });
     const routes = new ControlRouteRegistry({
         debug,
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -277,7 +278,7 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
     t.after(async () => {
         await cleanupInOrder(
             () => server.stop(),
-            () => debug.close(),
+            () => debug.dispose(),
             () => routes.dispose(),
             () => rm(directory, { force: true, recursive: true }),
         );
@@ -349,7 +350,7 @@ test("config RPC masks the Web token across get, validate, and update responses"
     config.web.auth = { mode: "token", token: strongToken };
     await configStore.write(config, homeDirectory);
 
-    const registry = new InstanceRegistryFactory().build(config);
+    const registry = new InstanceRegistry([]);
     const engine = new ConfigEngine({
         configStore,
         getConfig: () => config,
@@ -362,8 +363,8 @@ test("config RPC masks the Web token across get, validate, and update responses"
     const editor = new ConfigEditorCoordinator({ engine });
     const routes = new ControlRouteRegistry({
         config: editor,
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -449,8 +450,8 @@ test("ControlSocketServer exposes server-backed Message preferences through the 
                 return () => undefined;
             },
         },
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -541,9 +542,11 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     const directory = await createTestTempDirectory("route-snapshot");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
+    const instanceChanges = new InstanceChangeHub();
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: registry,
+        instanceChanges,
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -562,6 +565,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
     );
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
+    instanceChanges.publish("registry");
 
     const after = await request(
         socketPath,
@@ -576,18 +580,7 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
 });
 
 test("interactive runtime receives stream input while the root handler is still running", async (t) => {
-    const activeTodos: ActiveTodoSummary[] = [
-        {
-            completed: 1,
-            currentItem: "Verify release lifecycle",
-            revision: 3,
-            status: "in_progress",
-            taskId: "release-review",
-            title: "Release review",
-            total: 2,
-        },
-    ];
-    const harness = await createHarness(activeTodos);
+    const harness = await createHarness();
     t.after(() => harness.cleanup());
     const client = createClient(harness.socketPath, "cli");
     await negotiateClient(client, "cli");
@@ -611,21 +604,15 @@ test("interactive runtime receives stream input while the root handler is still 
     const completed = await stream.readMessage();
     assert.equal(completed.type, "close");
     assert.equal((completed.message as { ready: boolean }).ready, true);
-    assert.deepEqual(
-        (completed.message as { activeTodos?: ActiveTodoSummary[] })
-            .activeTodos,
-        activeTodos,
-    );
+    assert.equal((completed.message as { daemonState: string }).daemonState, "running");
 
     const stopped = await request(
         harness.socketPath,
         asInstanceName("alpha"),
         "process.stop",
     );
-    assert.deepEqual(
-        (stopped.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
-        activeTodos,
-    );
+    assert.equal((stopped.payload as { ready: boolean }).ready, false);
+    assert.equal((stopped.payload as { daemonState: string }).daemonState, "stopped");
 });
 
 test("terminal RPC streams real session input, resize, detach, and sequence resume", async (t) => {
@@ -636,15 +623,12 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         new FakeWorker("alpha") as unknown as WorkerInstance,
         {
             name: "alpha",
+            terminalProcess: process,
         },
     );
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime({
-            services: () => ({
-                terminal: { open: async () => process },
-            }),
-        }),
         instances: new InstanceRegistry([descriptor]),
+        overview: createTestOverview(),
         shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
@@ -783,17 +767,12 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
     const process = new FakeTerminalProcess();
     const descriptor = createTestInstanceDescriptor(
         new FakeWorker("alpha") as unknown as WorkerInstance,
-        { name: "alpha" },
+        { name: "alpha", terminalProcess: process },
     );
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime({
-            services: () => ({
-                terminal: { open: async () => process },
-            }),
-        }),
         instances: new InstanceRegistry([descriptor]),
+        overview: createTestOverview(),
         shutdown() {},
-        terminalMaxUnackedBytes: 8,
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -826,8 +805,12 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         },
     );
     assert.equal((await readStreamData(attached)).name, "seed");
-    process.emit("12345");
-    process.emit("67890");
+    // The production terminal route has a 1 MiB unacknowledged-output window;
+    // exercise cumulative backpressure rather than the retired tiny fixture.
+    const firstBurst = "12345".repeat(123_000);
+    const secondBurst = "67890".repeat(123_000);
+    process.emit(firstBurst);
+    process.emit(secondBurst);
 
     await assert.rejects(
         async () => {
@@ -852,19 +835,19 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
     );
     assert.equal((await readStreamData(resumed)).name, "seed");
     assert.deepEqual((await readStreamData(resumed)).payload, {
-        data: "12345",
+        data: firstBurst,
         seq: 1,
     });
     await resumed.close();
 });
 
-test("service.shutdown replies before invoking the shutdown action", async (t) => {
+test("server.shutdown replies before invoking the shutdown action", async (t) => {
     const directory = await createTestTempDirectory("shutdown-reply");
     const socketPath = createTestIpcPath("control-rpc", directory);
     let shutdownRequested = false;
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime(),
         instances: new InstanceRegistry([]),
+        overview: createTestOverview(),
         shutdown() {
             shutdownRequested = true;
         },
@@ -879,33 +862,20 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
         );
     });
 
-    const reply = await request(socketPath, "@control", "service.shutdown");
+    const reply = await request(socketPath, "@control", "server.shutdown");
     assert.deepEqual(reply.payload, { accepted: true });
     await waitFor(() => shutdownRequested);
 });
 
-async function createHarness(
-    activeTodos: ActiveTodoSummary[] = [],
-): Promise<Harness> {
+async function createHarness(): Promise<Harness> {
     const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
     const registry = new InstanceRegistry([createDescriptor(worker)]);
     const routes = new ControlRouteRegistry({
-        instanceDomains: createTestInstanceDomainRuntime({
-            services: () => ({ task: createActiveTodosTask(activeTodos) }),
-        }),
         instances: registry,
+        overview: createTestOverview(),
         shutdown() {},
-        toolCalls: {
-            async call(_instance, toolName, input, context) {
-                return await worker.callTool(toolName, input, {
-                    ctxId: context.ctxId,
-                    requestId: context.requestId,
-                    source: context.source,
-                });
-            },
-        },
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -931,15 +901,6 @@ function createDescriptor(worker: FakeWorker) {
     });
 }
 
-function createActiveTodosTask(activeTodos: ActiveTodoSummary[]) {
-    return createTestTaskApi({
-        todo: {
-            ...createTestTaskApi().todo,
-            summaries: () => activeTodos,
-        },
-    });
-}
-
 interface TestClient {
     close(): void;
     open(
@@ -954,6 +915,44 @@ interface TestClient {
         operation: string,
         payload?: JsonValue,
     ): Promise<T>;
+}
+
+function createTestOverview(): OperationalOverviewApi {
+    return {
+        async read() {
+            return {
+                activity: [],
+                alerts: [],
+                controller: { pid: process.pid, uptimeSeconds: 0 },
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: 0,
+                    instancesAttention: 0,
+                    instancesCritical: 0,
+                    instancesReady: 0,
+                    instancesTotal: 1,
+                    pendingApprovals: 0,
+                },
+                generatedAt: new Date().toISOString(),
+                health: "healthy" as const,
+                instances: [{
+                    mcpEnabled: false,
+                    name: asInstanceName("alpha"),
+                    pendingApprovals: 0,
+                    provider: "local" as const,
+                    snapshot: {
+                        connectionState: "disconnected" as const,
+                        daemonState: "stopped" as const,
+                        lastSeq: 0,
+                        name: asInstanceName("alpha"),
+                        ready: false,
+                        status: "stopped" as const,
+                    },
+                }],
+                todos: [],
+            };
+        },
+    };
 }
 
 function createClient(
@@ -998,7 +997,7 @@ async function negotiateClient(
     connection: TestClient,
     peer: "cli" | "tui" | "web",
 ): Promise<void> {
-    await connection.request("@control", "service", "hello", {
+    await connection.request("@control", "server", "hello", {
         clientKind: peer,
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });
