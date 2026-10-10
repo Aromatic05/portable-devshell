@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ApprovalRequest, GoalSnapshot, TodoTaskSummary, WaitRecord } from "@portable-devshell/shared";
-import { projectMcpAppSnapshot } from "../../src/mcpapp/ViewModel.ts";
+import { asInstanceName, type ApprovalRequest, type GoalSnapshot, type TodoTaskSummary, type WaitRecord } from "@portable-devshell/shared";
+import { mcpAppEventAffectsContext, projectMcpAppSnapshot } from "../../src/mcpapp/ViewModel.ts";
+
+test("MCP App ViewModel ignores unrelated Context events but observes global and unknown events", () => {
+    const event = (type: string, data?: Record<string, string>) => ({
+        at: "", instanceName: asInstanceName("demo"), seq: 17, type,
+        ...(data === undefined ? {} : { data }),
+    });
+    for (const type of ["goal.updated", "wait.resolved", "toolCall.completed"]) {
+        assert.equal(mcpAppEventAffectsContext(event(type, { ctxId: "other" }), "ctx-a"), false);
+        assert.equal(mcpAppEventAffectsContext(event(type, { ctxId: "ctx-a" }), "ctx-a"), true);
+        assert.equal(mcpAppEventAffectsContext(event(type), "ctx-a"), true);
+    }
+    assert.equal(mcpAppEventAffectsContext(event("todo.changed", { ctxId: "other" }), "ctx-a"), true);
+    assert.equal(mcpAppEventAffectsContext(event("instance.started"), "ctx-a"), true);
+});
 
 test("MCP App ViewModel isolates Context approvals, tasks, waits, and Context-owned goal", () => {
     const goal = (goalId: string, workspace: string): GoalSnapshot => ({

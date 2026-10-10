@@ -171,11 +171,14 @@ export class McpAppActionStore {
         await this.#run(async () => {
             this.#assertInitialized();
             const previous = new Map(this.#receipts);
+            let changed = false;
             for (const [id, receipt] of this.#receipts) {
                 if (matches(receipt) && receipt.status === "applied" && receipt.effect !== undefined) {
                     this.#receipts.set(id, this.#record({ ...receipt, status: "suppressed" }));
+                    changed = true;
                 }
             }
+            if (!changed) return;
             try {
                 await this.#persist();
             } catch (error) {
@@ -211,7 +214,12 @@ export class McpAppActionStore {
         await this.#run(async () => {
             this.#assertInitialized();
             const previous = new Map(this.#receipts);
-            for (const [id, receipt] of this.#receipts) if (matches(receipt)) this.#receipts.delete(id);
+            let changed = false;
+            for (const [id, receipt] of this.#receipts) if (matches(receipt)) {
+                this.#receipts.delete(id);
+                changed = true;
+            }
+            if (!changed) return;
             try {
                 await this.#persist();
             } catch (error) {

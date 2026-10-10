@@ -7,6 +7,7 @@ import {
     type GoalSnapshot,
     type TodoReadResult,
     type WaitRecord,
+    type InstanceEventRecord,
 } from "@portable-devshell/shared";
 import { mcpAppModelContext } from "./ModelContext.js";
 import { projectMcpAppReentry } from "./ReentryView.js";
@@ -129,6 +130,16 @@ export function projectMcpAppSnapshot(input: {
 }
 
 /** Reads existing Instance authorities; holds no independent workspace state. */
+export function mcpAppEventAffectsContext(event: InstanceEventRecord, ctxId: string): boolean {
+    // These event families are emitted with their owning Context ID. Unknown
+    // and Instance-global events conservatively trigger an authoritative read.
+    if (event.type !== "goal.updated" && !event.type.startsWith("wait.") &&
+        !event.type.startsWith("toolCall.")) return true;
+    const data = event.data;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return true;
+    return typeof data.ctxId !== "string" || data.ctxId === ctxId;
+}
+
 export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppActionStore) {
     const snapshot = async (instance: string, ctxId: string, workspace?: string) => {
         const task = createTaskTransport(endpoint, instance);
@@ -172,10 +183,12 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             }
             if (result.kind === "closed")
                 throw result.error ?? new Error("Instance Event stream closed unexpectedly.");
-            const next = await snapshot(instance, ctxId, workspace);
             // An event not relevant to this Context must still advance the
             // cursor. Otherwise the next watch replays the same event forever.
             const observed = result.kind === "event" ? result.event.seq : result.gap.lastSeq;
+            if (result.kind === "event" && !mcpAppEventAffectsContext(result.event, ctxId))
+                return { changed: false, cursor: Math.max(observed, cursor) };
+            const next = await snapshot(instance, ctxId, workspace);
             next.cursor = Math.max(next.cursor, observed, cursor);
             return { changed: true, cursor: next.cursor, snapshot: next };
         } finally {
