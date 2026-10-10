@@ -26,10 +26,10 @@ export class McpAppRuntime {
     }
 
     /** One App Domain owns the Live Route for every attached HTTP host generation. */
-    attachHost(host: McpHttpRoute, contexts: Pick<ContextTransport, 'validateForInstance'>): McpAppRoute {
+    attachHost(host: McpHttpRoute, contexts: Pick<ContextTransport, 'validateForInstance'>, publicBaseUrl?: string): McpAppRoute {
         let route = this.#routes.get(host);
         if (route === undefined) {
-            route = new McpAppRoute(host, this, contexts);
+            route = new McpAppRoute(host, this, contexts, publicBaseUrl);
             this.#routes.set(host, route);
         }
         return route;

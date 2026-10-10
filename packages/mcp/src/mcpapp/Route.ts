@@ -10,20 +10,34 @@ export class McpAppRoute {
     readonly #runtime: McpAppRuntime;
     readonly #contexts: Pick<ContextTransport, 'validateForInstance'>;
     readonly #unregisterAssets: () => void;
+    readonly #pathPrefix: string;
     #closed = false;
     readonly #live = new Map<string, ReturnType<typeof installMcpAppLive>>();
 
     constructor(host: McpHttpRoute, runtime: McpAppRuntime,
-        contexts: Pick<ContextTransport, 'validateForInstance'>) {
+        contexts: Pick<ContextTransport, 'validateForInstance'>, publicBaseUrl?: string) {
         this.#host = host;
         this.#runtime = runtime;
         this.#contexts = contexts;
-        const removeCors = this.#host.registerMiddleware('/mcpapp/assets', (_request, response, next) => {
+        this.#pathPrefix = publicBaseUrl === undefined ? '' : new URL(publicBaseUrl).pathname.replace(/\/+$/u, '');
+        const path = `${this.#pathPrefix}/mcpapp/assets`;
+        const removeCors = this.#host.registerMiddleware(path, (_request, response, next) => {
             response.setHeader('Access-Control-Allow-Origin', '*');
             next();
         });
-        const removeAssets = this.#host.registerStaticDirectory('/mcpapp/assets', mcpAppAssetDirectory);
-        this.#unregisterAssets = () => { removeAssets(); removeCors(); };
+        try {
+            const removeAssets = this.#host.registerStaticDirectory(path, mcpAppAssetDirectory);
+            this.#unregisterAssets = () => {
+                const failures: unknown[] = [];
+                try { removeAssets(); } catch (error) { failures.push(error); }
+                try { removeCors(); } catch (error) { failures.push(error); }
+                if (failures.length > 0) throw new AggregateError(failures, 'MCP App asset cleanup failed');
+            };
+        } catch (error) {
+            try { removeCors(); }
+            catch (cleanupError) { throw new AggregateError([error, cleanupError], 'MCP App asset registration rollback failed'); }
+            throw error;
+        }
     }
 
     register(instance: string): void {
@@ -37,6 +51,7 @@ export class McpAppRoute {
             leases: this.#runtime.leases,
             presence: this.#runtime.presence,
             view: this.#runtime.view,
+            pathPrefix: this.#pathPrefix,
         }));
     }
 
@@ -46,14 +61,21 @@ export class McpAppRoute {
     }
 
     stop(): void {
-        for (const instance of this.#live.keys()) this.unregister(instance);
+        const errors: unknown[] = [];
+        for (const instance of [...this.#live.keys()]) {
+            try { this.unregister(instance); }
+            catch (error) { errors.push(error); }
+        }
+        if (errors.length > 0) throw new AggregateError(errors, 'MCP App Live route cleanup failed');
     }
 
     close(): void {
         if (this.#closed) return;
         this.#closed = true;
-        this.stop();
-        this.#unregisterAssets();
+        const errors: unknown[] = [];
+        try { this.stop(); } catch (error) { errors.push(error); }
+        try { this.#unregisterAssets(); } catch (error) { errors.push(error); }
+        if (errors.length > 0) throw new AggregateError(errors, 'MCP App route cleanup failed');
     }
 
     revokeContext(ctxId: string): void {

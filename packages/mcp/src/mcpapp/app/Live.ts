@@ -10,11 +10,12 @@ export function installMcpAppLive(options: {
     contexts: Pick<ContextTransport, "validateForInstance">;
     host: McpHttpRoute;
     instance: string;
+    pathPrefix?: string;
     leases: McpAppLeaseStore;
     presence: McpAppPresenceStore;
     view: ReturnType<typeof createMcpAppViewModel>;
 }): (() => void) & { revokeContext(ctxId: string): void } {
-    const base = `/api/live/${encodeURIComponent(options.instance)}/workspace`;
+    const base = `${options.pathPrefix ?? ''}/api/live/${encodeURIComponent(options.instance)}/workspace`;
     const pending = new Map<AbortController, { ctxId: string; response: ServerResponse }>();
     const revalidate = async (ctxId: string, token: string, workspace: string | undefined): Promise<number> => {
         if (!await options.leases.verify(options.instance, ctxId, token)) return 401;
@@ -91,10 +92,24 @@ export function installMcpAppLive(options: {
             else reply(response, 503, { error: "Workspace temporarily unavailable" });
         }
     };
-    const snapshot = options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, false));
-    const watch = options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, true));
-    const preflightSnapshot = options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); });
-    const preflightWatch = options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); });
+    const releases: Array<() => void> = [];
+    const releaseRoutes = () => {
+        const failures: unknown[] = [];
+        for (const release of releases.splice(0).reverse()) {
+            try { release(); } catch (error) { failures.push(error); }
+        }
+        if (failures.length > 0) throw new AggregateError(failures, 'MCP App Live route cleanup failed');
+    };
+    try {
+        releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, false)));
+        releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, true)));
+        releases.push(options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
+        releases.push(options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
+    } catch (error) {
+        try { releaseRoutes(); }
+        catch (cleanupError) { throw new AggregateError([error, cleanupError], 'MCP App Live route registration rollback failed'); }
+        throw error;
+    }
     const abortWatch = (controller: AbortController, response: ServerResponse) => {
         controller.abort();
         if (!response.destroyed && !response.writableEnded)
@@ -104,10 +119,7 @@ export function installMcpAppLive(options: {
         for (const [controller, { response }] of pending) {
             abortWatch(controller, response);
         }
-        preflightWatch();
-        preflightSnapshot();
-        watch();
-        snapshot();
+        releaseRoutes();
     }) as (() => void) & { revokeContext(ctxId: string): void };
     cleanup.revokeContext = (ctxId: string) => {
         for (const [controller, current] of pending)
