@@ -194,10 +194,6 @@ export class McpHost {
         this.#syncOAuthRoutes();
     }
 
-    revokeMcpAppContext(ctxId: string): void {
-        this.#appRoute?.revokeContext(ctxId);
-    }
-
     #requiresOAuth(): boolean {
         return this.#protocol.list().some((entry) => entry.auth?.provider === "oauth2");
     }

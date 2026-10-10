@@ -15,7 +15,6 @@ import { createToolCallRegistry } from "../../../../src/toolcall/index.ts";
 
 test("hot enabling and disabling MCP updates status and OAuth approval exposure", async (t) => {
     const homeDirectory = await createTestTempDirectory("mcp-hot-enable-status");
-    const approvals = { async list() { return []; } };
     let running = false;
     const status = () => ({
         authMode: "oauth2" as const,
@@ -24,7 +23,6 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
         running,
     });
     const host = {
-        oauthApprovals: approvals,
         server: {},
         async start() { running = true; },
         async stop() { running = false; },
@@ -54,7 +52,8 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
         reason: "MCP runtime is disabled.",
         running: false,
     });
-    assert.equal(runtime.oauthApprovals, undefined);
+    const approvals = runtime.oauthApprovals;
+    assert.ok(approvals, "OAuth Approval owner exists without MCP Host");
 
     const enabled = structuredClone(config);
     enabled.mcp.enabled = true;
@@ -72,7 +71,7 @@ test("hot enabling and disabling MCP updates status and OAuth approval exposure"
     disabled.mcp.enabled = false;
     await runtime.replaceMcpHost(config, disabled);
 
-    assert.equal(runtime.oauthApprovals, undefined);
+    assert.equal(runtime.oauthApprovals, approvals);
     assert.deepEqual(runtime.status(), {
         reason: "MCP runtime is disabled.",
         running: false,

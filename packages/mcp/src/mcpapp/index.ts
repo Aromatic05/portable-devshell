@@ -16,6 +16,11 @@ export class McpAppRuntime {
     readonly view?: ReturnType<typeof createMcpAppViewModel>;
     readonly #routes = new Map<McpHttpRoute, McpAppRoute>();
     #initializePromise?: Promise<void>;
+    readonly #pendingContextCleanup = new Set<string>();
+    #contextCleanup?: Promise<void>;
+    #cleanupRetry?: ReturnType<typeof setTimeout>;
+    #cleanupRetryCount = 0;
+    #closed = false;
 
     constructor(options: { filePath?: string; endpoint?: Endpoint }) {
         this.leases = new McpAppLeaseStore({ filePath: options.filePath });
@@ -40,9 +45,73 @@ export class McpAppRuntime {
         this.#routes.delete(host);
     }
 
-    close(): void {
-        for (const host of this.#routes.keys()) this.detachHost(host);
+    async close(): Promise<void> {
+        this.#closed = true;
+        if (this.#cleanupRetry !== undefined) clearTimeout(this.#cleanupRetry);
+        const failures: unknown[] = [];
+        for (const host of [...this.#routes.keys()]) {
+            try { this.detachHost(host); } catch (error) { failures.push(error); }
+        }
         this.presence.close();
+        await this.flushContextCleanup().catch((error) => failures.push(error));
+        if (failures.length > 0) throw new AggregateError(failures, 'MCP App shutdown cleanup failed');
+    }
+
+    /** Control reports terminal Contexts; only App owns durable cleanup and retry. */
+    onContextTerminated(ctxId: string): void {
+        for (const route of this.#routes.values()) {
+            try { route.revokeContext(ctxId); }
+            catch (error) { console.warn('MCP App Live Context revocation failed:', error); }
+        }
+        this.presence.revokeContext(ctxId);
+        this.#pendingContextCleanup.add(ctxId);
+        this.#scheduleContextCleanup();
+    }
+
+    async flushContextCleanup(): Promise<void> {
+        if (this.#cleanupRetry !== undefined) clearTimeout(this.#cleanupRetry);
+        this.#cleanupRetry = undefined;
+        await this.#contextCleanup?.catch(() => undefined);
+        if (this.#pendingContextCleanup.size === 0) return;
+        try { await this.#drainContextCleanup(); }
+        catch (error) { this.#scheduleCleanupRetry(); throw error; }
+    }
+
+    #scheduleContextCleanup(): void {
+        if (this.#contextCleanup !== undefined || this.#closed) return;
+        if (this.#cleanupRetry !== undefined) clearTimeout(this.#cleanupRetry);
+        this.#cleanupRetry = undefined;
+        const pending = this.#drainContextCleanup();
+        this.#contextCleanup = pending;
+        void pending.catch((error: unknown) => {
+            console.warn('MCP App Context cleanup failed; retry scheduled:', error);
+        }).finally(() => {
+            if (this.#contextCleanup === pending) this.#contextCleanup = undefined;
+            if (this.#pendingContextCleanup.size > 0) this.#scheduleCleanupRetry();
+        });
+    }
+
+    async #drainContextCleanup(): Promise<void> {
+        await this.initialize();
+        const failures: unknown[] = [];
+        for (const ctxId of [...this.#pendingContextCleanup]) {
+            try {
+                await this.revokeContext(ctxId);
+                this.#pendingContextCleanup.delete(ctxId);
+            } catch (error) { failures.push(error); }
+        }
+        if (failures.length > 0) throw new AggregateError(failures, 'MCP App Context cleanup failed');
+        this.#cleanupRetryCount = 0;
+    }
+
+    #scheduleCleanupRetry(): void {
+        if (this.#closed || this.#cleanupRetry !== undefined || this.#pendingContextCleanup.size === 0) return;
+        const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(this.#cleanupRetryCount++, 5));
+        this.#cleanupRetry = setTimeout(() => {
+            this.#cleanupRetry = undefined;
+            this.#scheduleContextCleanup();
+        }, delayMs);
+        this.#cleanupRetry.unref();
     }
 
     async initialize(): Promise<void> {
@@ -62,7 +131,10 @@ export class McpAppRuntime {
         const retained = new Set(records.filter((record) => record.status !== "disabled")
             .map((record) => record.ctxId));
         const ids = new Set([...await this.leases.contextIds(), ...await this.actions.contextIds()]);
-        for (const ctxId of ids) if (!retained.has(ctxId)) await this.revokeContext(ctxId);
+        for (const ctxId of ids) if (!retained.has(ctxId)) {
+            await this.revokeContext(ctxId);
+            this.#pendingContextCleanup.delete(ctxId);
+        }
     }
 
     /** Issues an Instance-bound capability for an authenticated MCP bootstrap result. */

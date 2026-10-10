@@ -38,9 +38,11 @@ export class McpServer {
         return this.app.initialize();
     }
     async close(): Promise<void> {
-        this.app.close();
-        this.oauth.close();
-        await this.protocol?.close();
+        const failures: unknown[] = [];
+        await this.app.close().catch((error) => failures.push(error));
+        try { this.oauth.close(); } catch (error) { failures.push(error); }
+        await this.protocol?.close().catch((error) => failures.push(error));
+        if (failures.length > 0) throw new AggregateError(failures, 'MCP Domain shutdown was incomplete');
     }
     get oauthApprovals() {
         return this.oauth.approvals;

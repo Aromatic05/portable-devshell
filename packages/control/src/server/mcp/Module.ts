@@ -54,8 +54,6 @@ export class McpControlModule {
     readonly #contextRecords?: () => Promise<ContextRecord[]>;
     readonly #contextChanges?: ContextChangeSource;
     #unsubscribeContexts?: () => void;
-    #contextCleanup: Promise<void> = Promise.resolve();
-    readonly #contextCleanupFailures: unknown[] = [];
 
     constructor(options: McpControlModuleOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
@@ -203,7 +201,7 @@ export class McpControlModule {
     }
 
     get oauthApprovals(): McpOAuthApprovalService | undefined {
-        return this.#host?.oauthApprovals;
+        return this.#runtimeState.oauthApprovals;
     }
 
     status(): JsonValue {
@@ -226,21 +224,15 @@ export class McpControlModule {
     #subscribeContexts(): void {
         if (this.#unsubscribeContexts !== undefined) return;
         this.#unsubscribeContexts = this.#contextChanges?.onChange((change) => {
-            for (const ctxId of change.terminalCtxIds ?? []) {
-                this.#contextCleanup = this.#contextCleanup.then(async () => {
-                    this.#host?.revokeMcpAppContext(ctxId);
-                    await this.#runtimeState.app.revokeContext(ctxId);
-                }).catch((error: unknown) => { this.#contextCleanupFailures.push(error); });
-            }
+            for (const ctxId of change.terminalCtxIds ?? [])
+                this.#runtimeState.app.onContextTerminated(ctxId);
         });
     }
 
     async start(): Promise<void> {
         this.#subscribeContexts();
         await this.#runtimeState.app.initialize();
-        await this.#contextCleanup;
-        if (this.#contextCleanupFailures.length > 0)
-            throw new AggregateError(this.#contextCleanupFailures, 'MCP App Context cleanup failed.');
+        await this.#runtimeState.app.flushContextCleanup();
         if (this.#contextRecords !== undefined)
             await this.#runtimeState.app.reconcileContexts(await this.#contextRecords());
         if (this.#host !== undefined) await this.#startHost(this.#host);
@@ -265,8 +257,8 @@ export class McpControlModule {
     async stop(): Promise<void> {
         this.#unsubscribeContexts?.();
         this.#unsubscribeContexts = undefined;
-        await this.#contextCleanup;
-        const failures: unknown[] = this.#contextCleanupFailures.splice(0);
+        const failures: unknown[] = [];
+        await this.#runtimeState.app.flushContextCleanup().catch((error) => failures.push(error));
         if (this.#host !== undefined) {
             await this.stopHost(this.#host).catch((error) => failures.push(error));
             if (this.#host instanceof McpHost)
