@@ -33,13 +33,9 @@ export class McpEndpointBinding {
     constructor(endpoint: McpEndpoint, serverVersion = "0.0.0") {
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
-        /**
-         * @compat mcp-stateless-transport
-         * @removeAt 0.7.10
-         */
         this.#handler = createMcpHandler(() => this.#createServer(), {
             keepAliveMs: 15_000,
-            legacy: "stateless",
+            legacy: "reject",
             responseMode: "sse",
         });
         this.#nodeHandler = toNodeHandler(this.#handler);

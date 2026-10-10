@@ -29,6 +29,11 @@ import {
 } from "../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
+import {
+    MODERN_PROTOCOL_VERSION,
+    modernRpcHeaders,
+    modernRpcRequest,
+} from "./ModernProtocol.ts";
 import { tmpdir } from "node:os";
 
 {
@@ -54,6 +59,7 @@ import { tmpdir } from "node:os";
             isError?: boolean;
             protocolVersion?: string;
             structuredContent?: Record<string, JsonValue>;
+            supportedVersions?: string[];
             tools?: JsonValue[];
         };
     }
@@ -119,31 +125,18 @@ import { tmpdir } from "node:os";
                 const port = requireTcpPort(host.server.address);
                 const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
 
-                const initialize = await postJson(
+                const discovery = await postJson(
                     endpoint,
-                    await readFixture("mcp-initialize.json"),
+                    modernRpcRequest("req-init", "server/discover"),
                 );
-                assert.equal(initialize.error, undefined);
+                assert.equal(discovery.error, undefined);
                 assert.equal(
-                    typeof initialize.result?.protocolVersion,
-                    "string",
-                );
-                const sessionHeaders = {
-                    "mcp-protocol-version": String(
-                        initialize.result?.protocolVersion ?? "",
+                    discovery.result?.supportedVersions?.includes(
+                        MODERN_PROTOCOL_VERSION,
                     ),
-                };
-                assert.equal(initialize.headers.get("mcp-session-id"), null);
-
-                const initialized = await postRawJson(
-                    endpoint,
-                    {
-                        jsonrpc: "2.0",
-                        method: "notifications/initialized",
-                    },
-                    sessionHeaders,
+                    true,
                 );
-                assert.equal(initialized.status, 202);
+                assert.equal(discovery.headers.get("mcp-session-id"), null);
 
                 const list = await postJson(
                     endpoint,
@@ -152,7 +145,6 @@ import { tmpdir } from "node:os";
                         jsonrpc: "2.0",
                         method: "tools/list",
                     },
-                    sessionHeaders,
                 );
                 assert.equal(list.error, undefined);
                 const tools = list.result?.tools as Array<{
@@ -324,38 +316,41 @@ import { tmpdir } from "node:os";
 
                 const ctxId = await createContext(
                     endpoint,
-                    sessionHeaders,
                     selectedWorkspacePath,
                 );
-                const legacyRead = await postJson(
+                const batchRead = await postJson(
                     endpoint,
                     {
-                        id: "req-stale-file-read",
+                        id: "req-file-read-batch",
                         jsonrpc: "2.0",
                         method: "tools/call",
                         params: {
                             arguments: {
                                 ctxId,
-                                path: "./legacy-read.txt",
-                                selector: "1-1:raw",
-                                view: "content",
+                                files: [
+                                    {
+                                        path: "./legacy-read.txt",
+                                        selector: "1-1:raw",
+                                        view: "content",
+                                    },
+                                ],
                             },
                             name: "file_read",
                         },
                     },
-                    sessionHeaders,
                 );
                 assert.equal(
-                    legacyRead.error,
+                    batchRead.error,
                     undefined,
-                    JSON.stringify(legacyRead),
+                    JSON.stringify(batchRead),
                 );
-                assert.equal(legacyRead.result?.isError, false);
+                assert.equal(batchRead.result?.isError, false);
                 assert.equal(
                     (
-                        legacyRead.result?.structuredContent as
-                            { content?: JsonValue } | undefined
-                    )?.content,
+                        batchRead.result?.structuredContent as
+                            | { files?: Array<{ content?: JsonValue }> }
+                            | undefined
+                    )?.files?.[0]?.content,
                     "1:legacy read",
                 );
                 const callRequest = withToolContext(
@@ -367,7 +362,6 @@ import { tmpdir } from "node:os";
                 const call = await postJson(
                     endpoint,
                     callRequest as JsonValue,
-                    sessionHeaders,
                 );
                 assert.equal(call.error, undefined);
                 assert.equal(call.result?.isError, false);
@@ -414,7 +408,6 @@ import { tmpdir } from "node:os";
 
     async function createContext(
         endpoint: string,
-        headers: Record<string, string>,
         workspace: string,
     ): Promise<string> {
         const response = await postJson(
@@ -425,7 +418,6 @@ import { tmpdir } from "node:os";
                 method: "tools/call",
                 params: { arguments: { workspace }, name: "environ_info" },
             },
-            headers,
         );
         const ctxId = response.result?.structuredContent?.ctxId;
         const memoryDirectory =
@@ -457,12 +449,28 @@ import { tmpdir } from "node:os";
 
     async function postJson(
         url: string,
-        body: JsonValue,
-        extraHeaders?: Record<string, string>,
+        body: JsonValue | Record<string, unknown>,
     ): Promise<JsonRpcResponse> {
-        const response = await postRawJson(url, body, extraHeaders);
+        const request = body as {
+            id?: string | number;
+            method?: string;
+            params?: Record<string, JsonValue>;
+        };
+        if (typeof request.method !== "string") {
+            throw new TypeError("postJson requires a JSON-RPC method");
+        }
+        const params = request.params ?? {};
+        const response = await postRawJson(
+            url,
+            modernRpcRequest(
+                request.id ?? request.method,
+                request.method,
+                params,
+            ),
+            modernRpcHeaders(request.method, params),
+        );
 
-        assert.equal(response.status, 200);
+        assert.equal(response.status, 200, response.text);
         return {
             headers: response.headers,
             ...parseMcpHttpResponse<Omit<JsonRpcResponse, "headers">>(
@@ -473,7 +481,7 @@ import { tmpdir } from "node:os";
 
     async function postRawJson(
         url: string,
-        body: JsonValue,
+        body: JsonValue | Record<string, unknown>,
         extraHeaders?: Record<string, string>,
     ) {
         const response = await fetch(url, {
@@ -973,6 +981,7 @@ import { tmpdir } from "node:os";
         result?: {
             protocolVersion?: string;
             structuredContent?: ToolStructuredContent;
+            supportedVersions?: string[];
             tools?: ToolSummary[];
         };
     }
@@ -1037,36 +1046,22 @@ import { tmpdir } from "node:os";
             await host.start();
             const port = requireTcpPort(host.server.address);
             const endpoint = `http://127.0.0.1:${port}/${instanceName}/mcp`;
-            const initialize = await postJson(endpoint, {
-                id: "initialize",
-                jsonrpc: "2.0",
-                method: "initialize",
-                params: {
-                    capabilities: {},
-                    clientInfo: { name: "tmux-contract-test", version: "1" },
-                    protocolVersion: "2025-06-18",
-                },
-            });
-            assert.equal(
-                initialize.error,
-                undefined,
-                JSON.stringify(initialize),
-            );
-            const headers = {
-                "mcp-protocol-version": String(
-                    initialize.result?.protocolVersion ?? "",
-                ),
-            };
-            assert.equal(initialize.headers.get("mcp-session-id"), null);
-            const initialized = await postRawJson(
+            const discovery = await postJson(
                 endpoint,
-                {
-                    jsonrpc: "2.0",
-                    method: "notifications/initialized",
-                },
-                headers,
+                modernRpcRequest("server-discover", "server/discover"),
             );
-            assert.equal(initialized.status, 202);
+            assert.equal(
+                discovery.error,
+                undefined,
+                JSON.stringify(discovery),
+            );
+            assert.equal(
+                discovery.result?.supportedVersions?.includes(
+                    MODERN_PROTOCOL_VERSION,
+                ),
+                true,
+            );
+            assert.equal(discovery.headers.get("mcp-session-id"), null);
 
             const callTool = async (
                 requestId: string,
@@ -1081,7 +1076,6 @@ import { tmpdir } from "node:os";
                         method: "tools/call",
                         params: { arguments: args, name },
                     },
-                    headers,
                 )) as ToolResponse;
             const createContext = async (): Promise<string> => {
                 const response = await callTool(
@@ -1107,7 +1101,6 @@ import { tmpdir } from "node:os";
                         jsonrpc: "2.0",
                         method: "tools/list",
                     },
-                    headers,
                 );
                 return response.result?.tools ?? [];
             };
@@ -1217,10 +1210,26 @@ import { tmpdir } from "node:os";
 
     async function postJson(
         url: string,
-        body: JsonValue,
-        extraHeaders?: Record<string, string>,
+        body: JsonValue | Record<string, unknown>,
     ): Promise<JsonRpcResponse> {
-        const response = await postRawJson(url, body, extraHeaders);
+        const request = body as {
+            id?: string | number;
+            method?: string;
+            params?: Record<string, JsonValue>;
+        };
+        if (typeof request.method !== "string") {
+            throw new TypeError("postJson requires a JSON-RPC method");
+        }
+        const params = request.params ?? {};
+        const response = await postRawJson(
+            url,
+            modernRpcRequest(
+                request.id ?? request.method,
+                request.method,
+                params,
+            ),
+            modernRpcHeaders(request.method, params),
+        );
         assert.equal(response.status, 200, response.text);
         return {
             headers: response.headers,
@@ -1230,7 +1239,7 @@ import { tmpdir } from "node:os";
 
     async function postRawJson(
         url: string,
-        body: JsonValue,
+        body: JsonValue | Record<string, unknown>,
         extraHeaders?: Record<string, string>,
     ) {
         const response = await fetch(url, {

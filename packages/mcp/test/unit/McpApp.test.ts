@@ -76,7 +76,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
         }
     });
 
-    test("McpAppLeaseStore loads version 1 single-token leases without invalidating them", async () => {
+    test("McpAppLeaseStore rejects and cleans up version 1 single-token leases", async () => {
         const root = await createTestTempDirectory("workspace-app-lease-v1");
         const filePath = join(root, "leases.json");
         const token = "workspace-token-legacy-0001";
@@ -98,9 +98,31 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     version: 1,
                 }),
             );
+
+            // The expired v1 lease format is rejected, never migrated.
             const store = new McpAppLeaseStore({ filePath });
-            await store.initialize();
-            assert.equal(await store.verify("alpha", "ctx-one", token), true);
+            await assert.rejects(
+                store.initialize(),
+                /Invalid MCP App lease store/u,
+            );
+            await assert.rejects(
+                store.verify("alpha", "ctx-one", token),
+                /not initialized/u,
+            );
+
+            // A restarted store still rejects the same legacy document.
+            const retried = new McpAppLeaseStore({ filePath });
+            await assert.rejects(
+                retried.initialize(),
+                /Invalid MCP App lease store/u,
+            );
+
+            // Cleanup: removing the expired file starts a clean store that
+            // never resurrects the legacy capability.
+            await rm(filePath, { force: true });
+            const cleaned = new McpAppLeaseStore({ filePath });
+            await cleaned.initialize();
+            assert.equal(await cleaned.verify("alpha", "ctx-one", token), false);
         } finally {
             await rm(root, { force: true, recursive: true });
         }

@@ -5,6 +5,10 @@ import { ControlHttpServer } from "../../../control/src/server/http/index.ts";
 import { McpHost } from "../../src/server/Host.ts";
 import { mcpAppAssetDirectory } from "../../src/mcpapp/app/Resource.ts";
 import { createTestMcpRuntimeState } from "../ContextRuntime.ts";
+import {
+    modernRpcHeaders,
+    modernRpcRequest,
+} from "./ModernProtocol.ts";
 
 function port(address: { port: number } | string | null): number {
     assert.ok(address !== null && typeof address !== "string");
@@ -33,10 +37,8 @@ test("MCP App assets and Live HTTP endpoints honor the public URL path prefix", 
         assert.equal((await fetch(`${origin}/mcpapp/assets/${asset}`)).status, 404);
         assert.equal((await fetch(`${origin}/prefix/api/live/demo/workspace/snapshot`)).status, 401);
         assert.equal((await fetch(`${origin}/api/live/demo/workspace/snapshot`)).status, 404);
-        const request = { method: 'POST', headers: {
-            accept: 'application/json, text/event-stream',
-            'content-type': 'application/json',
-        }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) };
+        const request = { method: 'POST', headers: modernRpcHeaders('tools/list'),
+            body: JSON.stringify(modernRpcRequest(1, 'tools/list')) };
         const prefixed = await fetch(`${origin}/prefix/demo/mcp`, request);
         assert.equal(prefixed.status, 200);
         assert.match(await prefixed.text(), /tools/u);

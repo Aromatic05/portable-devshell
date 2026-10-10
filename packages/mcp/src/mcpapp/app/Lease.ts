@@ -264,22 +264,13 @@ function restoreLeaseMap(
         leases.set(key, { ...lease, tokenHashes: [...lease.tokenHashes] });
 }
 
-/**
- * @compat mcpapp-lease-v1
- * @removeAt 0.7.10
- */
 function parseDocument(value: unknown): McpAppLeaseDocument | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return undefined;
     const document = value as { leases?: unknown; version?: unknown };
-    if (
-        (document.version !== 1 && document.version !== 2) ||
-        !Array.isArray(document.leases)
-    )
+    if (document.version !== 2 || !Array.isArray(document.leases))
         return undefined;
-    const leases = document.leases.map((lease) =>
-        document.version === 1 ? parseLegacyLease(lease) : parseLease(lease),
-    );
+    const leases = document.leases.map(parseLease);
     if (leases.some((lease) => lease === undefined)) return undefined;
     const keys = new Set<string>();
     for (const lease of leases as McpAppLeaseRecord[]) {
@@ -326,32 +317,6 @@ function parseLease(value: unknown): McpAppLeaseRecord | undefined {
         ctxId: lease.ctxId,
         instance: lease.instance,
         tokenHashes,
-        updatedAt: lease.updatedAt,
-    };
-}
-
-function parseLegacyLease(value: unknown): McpAppLeaseRecord | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        return undefined;
-    const lease = value as Partial<
-        Omit<McpAppLeaseRecord, "tokenHashes">
-    > & { tokenHash?: unknown };
-    if (
-        typeof lease.createdAt !== "string" ||
-        typeof lease.ctxId !== "string" ||
-        lease.ctxId.length === 0 ||
-        typeof lease.instance !== "string" ||
-        lease.instance.length === 0 ||
-        typeof lease.tokenHash !== "string" ||
-        !/^[0-9a-f]{64}$/u.test(lease.tokenHash) ||
-        typeof lease.updatedAt !== "string"
-    )
-        return undefined;
-    return {
-        createdAt: lease.createdAt,
-        ctxId: lease.ctxId,
-        instance: lease.instance,
-        tokenHashes: [lease.tokenHash],
         updatedAt: lease.updatedAt,
     };
 }

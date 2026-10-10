@@ -6,6 +6,10 @@ import { ControlHttpServer } from "../../../control/src/server/http/index.ts";
 import { McpHost } from "../../src/server/Host.ts";
 import { mcpAppAssetDirectory } from "../../src/mcpapp/app/Resource.ts";
 import { createTestMcpRuntimeState } from "../ContextRuntime.ts";
+import {
+    modernRpcHeaders,
+    modernRpcRequest,
+} from "./ModernProtocol.ts";
 
 function port(address: { port: number } | string | null): number {
     assert.ok(address !== null && typeof address !== "string");
@@ -13,14 +17,14 @@ function port(address: { port: number } | string | null): number {
 }
 
 function mcpRequest(address: number, token?: string, path = "/demo/mcp"): Promise<Response> {
+    const body = modernRpcRequest(1, "tools/list");
     return fetch(`http://127.0.0.1:${address}${path}`, {
         method: "POST",
         headers: {
-            accept: "application/json, text/event-stream",
-            "content-type": "application/json",
+            ...modernRpcHeaders("tools/list"),
             ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
         },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(5_000),
     });
 }

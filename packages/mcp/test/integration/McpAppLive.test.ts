@@ -3,6 +3,7 @@ import test from "node:test";
 import { Endpoint, type ContextRecord } from "@portable-devshell/shared";
 import { createTestMcpRuntimeState, TestMcpHost } from "../ContextRuntime.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
+import { postModern } from "./ModernProtocol.ts";
 import { HttpHost } from "../../src/testing/Http.ts";
 import { McpAppLeaseStore } from "../../src/mcpapp/app/Lease.ts";
 import { McpAppPresenceStore } from "../../src/mcpapp/app/Presence.ts";
@@ -135,14 +136,12 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
         assert.ok(typeof address === "object" && address !== null);
         const endpoint = `http://127.0.0.1:${address.port}/demo/mcp`;
         const call = async () => {
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
-                body: JSON.stringify({
-                    id: "test-bootstrap", jsonrpc: "2.0", method: "tools/call",
-                    params: { name: "environ_info", arguments: {} },
-                }),
-            });
+            const response = await postModern(
+                endpoint,
+                "test-bootstrap",
+                "tools/call",
+                { arguments: {}, name: "environ_info" },
+            );
             assert.equal(response.status, 200);
             return parseMcpHttpResponse<{
                 error?: { message?: string };
@@ -198,14 +197,16 @@ test("MCP App bootstrap resolves OpenAI-session Context without making its ID mo
         );
         const address = host.server.address;
         assert.ok(typeof address === "object" && address !== null);
-        const response = await fetch(`http://127.0.0.1:${address.port}/demo/mcp`, {
-            method: "POST",
-            headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
-            body: JSON.stringify({
-                id: "test-openai-session", jsonrpc: "2.0", method: "tools/call",
-                params: { name: "environ_info", arguments: {}, _meta: { "openai/session": "chat-session-mcpapp" } },
-            }),
-        });
+        const response = await postModern(
+            `http://127.0.0.1:${address.port}/demo/mcp`,
+            "test-openai-session",
+            "tools/call",
+            {
+                arguments: {},
+                name: "environ_info",
+                _meta: { "openai/session": "chat-session-mcpapp" },
+            },
+        );
         assert.equal(response.status, 200);
         const payload = parseMcpHttpResponse<{
             error?: { message?: string };

@@ -2,6 +2,10 @@ import { asInstanceName } from "@portable-devshell/shared";
 import type { ContextRecord, ContextTransport, ToolCallApi } from "@portable-devshell/shared";
 import { contextToolDefinitions } from "../../../../../control/src/context/tool/Definition.ts";
 import type { ToolCallHookValue } from "@portable-devshell/shared";
+import {
+    Client,
+    StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -34,6 +38,29 @@ const fixturesDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "../../../fixtures",
 );
+
+const modernProtocolVersion = "2026-07-28";
+
+function modernEnvelope(): Record<string, JsonValue> {
+    return {
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {
+            name: "portable-devshell-test-client",
+            version: "0.0.0",
+        },
+        "io.modelcontextprotocol/protocolVersion": modernProtocolVersion,
+    };
+}
+
+function discoverRequest(): JsonValue {
+    return {
+        id: "req-discover",
+        jsonrpc: "2.0",
+        method: "server/discover",
+        params: { _meta: modernEnvelope() },
+    };
+}
+
 type JsonValue =
     | boolean
     | number
@@ -65,27 +92,78 @@ interface ToolDefinition {
     outputSchema: JsonValue;
 }
 
-test("initialize succeeds over SDK transport", async () => {
+test("server/discover negotiates the modern wire over HTTP", async () => {
     const binding = createBinding(createWorkerHarness(), {
         serverVersion: "9.8.7",
     });
     const server = await createBindingServer(binding);
 
     try {
-        const response = await postJson(
-            server.url,
-            await readFixture("mcp-initialize.json"),
-        );
+        const response = await postJson(server.url, discoverRequest());
 
         assert.equal(response.status, 200);
-        assert.equal(typeof response.body.result?.protocolVersion, "string");
+        assert.deepEqual(response.body.result?.supportedVersions, [
+            modernProtocolVersion,
+        ]);
         assert.equal(
-            response.body.result?.serverInfo?.name,
+            response.body.result?._meta?.["io.modelcontextprotocol/serverInfo"]
+                ?.name,
             "portable-devshell-mcp",
         );
-        assert.equal(response.body.result?.serverInfo?.version, "9.8.7");
+        assert.equal(
+            response.body.result?._meta?.["io.modelcontextprotocol/serverInfo"]
+                ?.version,
+            "9.8.7",
+        );
         assert.equal(response.headers.get("mcp-session-id"), null);
     } finally {
+        await server.close();
+    }
+});
+
+test("a real SDK v2 client negotiates the modern wire and drives tools/list and tools/call", async () => {
+    const harness = createWorkerHarness();
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+    const client = new Client(
+        { name: "portable-devshell-real-client", version: "0.0.0" },
+        { versionNegotiation: { mode: "auto" } },
+    );
+
+    try {
+        await client.connect(
+            new StreamableHTTPClientTransport(new URL(server.url)),
+        );
+
+        const listed = await client.listTools();
+        assert.equal(
+            listed.tools.some((tool) => tool.name === "bash_run"),
+            true,
+        );
+
+        const environment = await client.callTool({
+            arguments: { workspace: "/workspace" },
+            name: "environ_info",
+        });
+        const ctxId = (environment.structuredContent as { ctxId?: unknown })
+            .ctxId;
+        assert.equal(typeof ctxId, "string");
+
+        const called = await client.callTool({
+            arguments: { command: "pwd", ctxId },
+            name: "bash_run",
+        });
+        assert.equal(called.isError, false);
+        assert.deepEqual(called.structuredContent, {
+            exitCode: 0,
+            stderr: "",
+            stdout: "/workspace\n",
+        });
+        assert.equal(harness.calls.length, 1);
+        assert.equal(harness.calls[0]?.toolName, "bash_run");
+        assert.equal(harness.calls[0]?.ctxId, ctxId);
+    } finally {
+        await client.close();
         await server.close();
     }
 });
@@ -446,25 +524,25 @@ test("Workspace MCP App does not advertise a wildcard listener as its component 
     }
 });
 
-test("stateless endpoint serves every request without sessions", async () => {
+test("modern endpoint serves each request from its envelope without sessions", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
     try {
         const staleHeaders = { "mcp-session-id": "stale-session" };
-        const initializeResponse = await postJson(
+        const discoverResponse = await postJson(
             server.url,
-            await readFixture("mcp-initialize.json"),
+            discoverRequest(),
             staleHeaders,
         );
-        assert.equal(initializeResponse.status, 200);
-        assert.equal(initializeResponse.headers.get("mcp-session-id"), null);
+        assert.equal(discoverResponse.status, 200);
+        assert.equal(discoverResponse.headers.get("mcp-session-id"), null);
 
         const listResponse = await postJson(
             server.url,
             {
-                id: "req-stateless-tools-list",
+                id: "req-modern-tools-list",
                 jsonrpc: "2.0",
                 method: "tools/list",
                 params: {},
@@ -517,7 +595,7 @@ test("tools/list exposes the fixed worker catalog without group or capability fi
     }
 });
 
-test("cached removed tool recipients return a structured tombstone over MCP", async () => {
+test("removed tool recipients are strictly rejected over MCP", async () => {
     const binding = createBinding();
     const server = await createBindingServer(binding);
 
@@ -549,20 +627,14 @@ test("cached removed tool recipients return a structured tombstone over MCP", as
         );
 
         assert.equal(response.status, 200);
-        assert.equal(response.body.error, undefined);
-        assert.equal(response.body.result?.isError, false);
+        assert.equal(response.body.result, undefined);
+        assert.equal(
+            response.body.error?.data?.code,
+            "core.toolSchemaUnavailable",
+        );
         assert.match(
-            response.body.result?.content?.[0]?.text ?? "",
-            /Cached tool context_message_read was removed/,
-        );
-        assert.equal(
-            response.body.result?.structuredContent?.staleToolSnapshot?.name,
-            "context_message_read",
-        );
-        assert.equal(
-            response.body.result?.structuredContent?.staleToolSnapshot
-                ?.replacement,
-            undefined,
+            response.body.error?.message ?? "",
+            /context_message_read is not exposed/u,
         );
     } finally {
         await server.close();
@@ -1017,19 +1089,21 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
         const session = await initialize(server.url);
         const ctxId = await createContext(server.url, session.headers);
         const requestController = new AbortController();
+        const callBody: JsonValue = {
+            id: "req-disconnect-tool",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: { command: "sleep 30", ctxId },
+                name: "bash_run",
+            },
+        };
         const pendingCall = fetch(server.url, {
-            body: JSON.stringify({
-                id: "req-disconnect-tool",
-                jsonrpc: "2.0",
-                method: "tools/call",
-                params: {
-                    arguments: { command: "sleep 30", ctxId },
-                    name: "bash_run",
-                },
-            }),
+            body: JSON.stringify(withModernEnvelope(callBody, modernEnvelope())),
             headers: {
                 accept: "application/json, text/event-stream",
                 "content-type": "application/json",
+                ...modernWireHeaders(callBody),
                 ...session.headers,
             },
             method: "POST",
@@ -1192,30 +1266,18 @@ async function initialize(url: string): Promise<{
         capabilities?: { extensions?: Record<string, JsonValue> };
     };
 }> {
-    const response = await postJson(
-        url,
-        await readFixture("mcp-initialize.json"),
-    );
+    const response = await postJson(url, discoverRequest());
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("mcp-session-id"), null);
-
-    const headers: Record<string, string> = {
-        "mcp-protocol-version": String(
-            response.body.result?.protocolVersion ?? "",
-        ),
-    };
-    const initialized = await postRawJson(
-        url,
-        {
-            jsonrpc: "2.0",
-            method: "notifications/initialized",
-        },
-        headers,
+    const supportedVersions = response.body.result?.supportedVersions;
+    assert.equal(
+        Array.isArray(supportedVersions) &&
+            supportedVersions.includes(modernProtocolVersion),
+        true,
     );
 
-    assert.equal(initialized.status, 202);
     return {
-        headers,
+        headers: {},
         initializeResult: response.body.result as
             | {
                   capabilities?: { extensions?: Record<string, JsonValue> };
@@ -1279,10 +1341,11 @@ async function postRawJson(
     extraHeaders?: Record<string, string>,
 ) {
     const response = await fetch(url, {
-        body: JSON.stringify(body),
+        body: JSON.stringify(withModernEnvelope(body, modernEnvelope())),
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
+            ...modernWireHeaders(body),
             ...extraHeaders,
         },
         method: "POST",
@@ -1293,6 +1356,51 @@ async function postRawJson(
         text: await response.text(),
         status: response.status,
     };
+}
+
+function withModernEnvelope(
+    body: JsonValue,
+    envelope: Record<string, JsonValue>,
+): JsonValue {
+    if (typeof body !== "object" || body === null || Array.isArray(body))
+        return body;
+    const request = structuredClone(body) as {
+        method?: JsonValue;
+        params?: Record<string, JsonValue>;
+    };
+    if (typeof request.method !== "string") return request as JsonValue;
+    const existing = request.params?._meta;
+    request.params = {
+        ...(request.params ?? {}),
+        _meta: {
+            ...envelope,
+            ...(typeof existing === "object" &&
+            existing !== null &&
+            !Array.isArray(existing)
+                ? (existing as Record<string, JsonValue>)
+                : {}),
+        },
+    };
+    return request as JsonValue;
+}
+
+function modernWireHeaders(body: JsonValue): Record<string, string> {
+    if (typeof body !== "object" || body === null || Array.isArray(body))
+        return {};
+    const request = body as {
+        method?: JsonValue;
+        params?: Record<string, JsonValue>;
+    };
+    if (typeof request.method !== "string") return {};
+    const headers: Record<string, string> = {
+        "mcp-method": request.method,
+        "mcp-protocol-version": modernProtocolVersion,
+    };
+    const name = request.params?.name;
+    const uri = request.params?.uri;
+    if (typeof name === "string") headers["mcp-name"] = name;
+    else if (typeof uri === "string") headers["mcp-name"] = uri;
+    return headers;
 }
 
 async function readFixture(name: string): Promise<JsonValue> {

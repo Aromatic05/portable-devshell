@@ -20,10 +20,6 @@ import {
     presentMcpEndpointResult,
     throwIfMcpEndpointAborted,
 } from "../call/Boundary.js";
-import {
-    mcpLegacyToolTombstone,
-    resolveMcpLegacyTool,
-} from "../tool/Compatibility.js";
 import type { McpEndpointCatalog } from "../tool/Catalog.js";
 import {
     readMcpProvenanceInput,
@@ -76,16 +72,6 @@ export class McpEndpointDispatch {
         onExecuted?: (callId: string, value: Readonly<ToolCallHookValue>, result: JsonValue) => void,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
-        const compatibility = resolveMcpLegacyTool(toolName);
-        if (compatibility?.kind === "tombstone") {
-            return mcpLegacyToolTombstone(toolName, compatibility);
-        }
-        if (
-            compatibility?.kind === "alias" ||
-            compatibility?.kind === "workspace-app-v0615"
-        ) {
-            toolName = compatibility.replacement;
-        }
         const snapshot = this.#catalog.snapshot();
         const selected = snapshot.entries.find(
             (entry) => entry.definition.name === toolName,

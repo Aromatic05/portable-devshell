@@ -650,6 +650,12 @@ async function rewrittenEndpoint(
 for (const remote of [true, false]) {
     test(`MCP accepted bookkeeping uses final instance, tool and Context (${remote ? "remote" : "local"})`, async () => {
         const h = await rewrittenEndpoint("file_read", remote);
+        // lastAccessedAt is persisted at millisecond precision. Ensure the
+        // initial record's millisecond has elapsed before asserting a touch;
+        // otherwise a correct touch can retain the same ISO timestamp.
+        await new Promise<void>((resolve) =>
+            setTimeout(resolve, Math.max(1, Date.parse(h.final.lastAccessedAt) - Date.now() + 2)),
+        );
         await h.endpoint.callTool(
             "bash_run",
             {

@@ -21,6 +21,11 @@ import { TestMcpHost as McpHost, type TestMcpHostInstanceConfig } from "../Conte
 import { mcpAppResourceUri } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig } from "@portable-devshell/mcp";
 
+import {
+    discoverModern,
+    postModern,
+} from "./ModernProtocol.ts";
+
 const fixturesDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "../fixtures",
@@ -55,14 +60,15 @@ test("missing instance returns 404", async () => {
     }
 });
 
-test("initialize succeeds over HTTP", async () => {
+test("legacy initialize is strictly rejected while server/discover negotiates the modern protocol", async () => {
     const host = createHost();
     await host.start();
 
     try {
         const port = requireTcpPort(host.server.address);
+        const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
 
-        const response = await fetch(`http://127.0.0.1:${port}/demo/mcp`, {
+        const legacy = await fetch(endpoint, {
             method: "POST",
             headers: {
                 accept: "application/json, text/event-stream",
@@ -70,13 +76,23 @@ test("initialize succeeds over HTTP", async () => {
             },
             body: JSON.stringify(await readFixture("mcp-initialize.json")),
         });
-        const payload = parseMcpHttpResponse<{
-            result?: { protocolVersion?: string };
-        }>(await response.text());
+        assert.equal(legacy.status, 400);
+        const legacyError = parseMcpHttpResponse<{
+            error?: { code?: number; data?: { supported?: string[] } };
+        }>(await legacy.text());
+        assert.equal(legacyError.error?.code, -32022);
+        assert.deepEqual(legacyError.error?.data?.supported, ["2026-07-28"]);
 
-        assert.equal(response.status, 200);
-        assert.equal(typeof payload.result?.protocolVersion, "string");
-        assert.equal(response.headers.get("mcp-session-id"), null);
+        const discovery = await discoverModern(endpoint);
+        assert.equal(discovery.status, 200);
+        const payload = parseMcpHttpResponse<{
+            result?: { supportedVersions?: string[] };
+        }>(await discovery.text());
+        assert.equal(
+            payload.result?.supportedVersions?.includes("2026-07-28"),
+            true,
+        );
+        assert.equal(discovery.headers.get("mcp-session-id"), null);
     } finally {
         await host.stop();
     }
@@ -89,14 +105,12 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         const port = requireTcpPort(host.server.address);
         const endpoint = `http://127.0.0.1:${port}/demo/mcp`;
         const request = async (method: string, params: JsonValue = {}) => {
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: {
-                    accept: "application/json, text/event-stream",
-                    "content-type": "application/json",
-                },
-                body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
-            });
+            const response = await postModern(
+                endpoint,
+                method,
+                method,
+                params as Record<string, unknown>,
+            );
             assert.equal(response.status, 200);
             return parseMcpHttpResponse<{
                 result?: {
@@ -136,14 +150,9 @@ test("a namespace with no auth remains runnable behind a public MCP URL", async 
 
     try {
         const port = requireTcpPort(host.server.address);
-        const response = await fetch(`http://127.0.0.1:${port}/demo/mcp`, {
-            method: "POST",
-            headers: {
-                accept: "application/json, text/event-stream",
-                "content-type": "application/json",
-            },
-            body: JSON.stringify(await readFixture("mcp-initialize.json")),
-        });
+        const response = await discoverModern(
+            `http://127.0.0.1:${port}/demo/mcp`,
+        );
 
         assert.equal(response.status, 200);
     } finally {
@@ -357,14 +366,7 @@ test("running host replaces and unregisters instance bindings without restart", 
 
         host.unregisterInstance("demo");
         host.replaceTestTools("demo", []);
-        const missing = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                accept: "application/json, text/event-stream",
-                "content-type": "application/json",
-            },
-            body: JSON.stringify(await readFixture("mcp-initialize.json")),
-        });
+        const missing = await postModern(endpoint, "list-tools", "tools/list");
         assert.equal(missing.status, 404);
     } finally {
         await host.stop();
@@ -372,46 +374,11 @@ test("running host replaces and unregisters instance bindings without restart", 
 });
 
 async function initializeAndListTools(endpoint: string): Promise<string[]> {
-    const initialize = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-            accept: "application/json, text/event-stream",
-            "content-type": "application/json",
-        },
-        body: JSON.stringify(await readFixture("mcp-initialize.json")),
-    });
-    assert.equal(initialize.status, 200);
-    const initializeBody = parseMcpHttpResponse<{
-        result?: { protocolVersion?: string };
-    }>(await initialize.text());
-    assert.equal(initialize.headers.get("mcp-session-id"), null);
-    const headers = {
-        accept: "application/json, text/event-stream",
-        "content-type": "application/json",
-        "mcp-protocol-version": String(
-            initializeBody.result?.protocolVersion ?? "",
-        ),
-    };
+    const discovery = await discoverModern(endpoint);
+    assert.equal(discovery.status, 200);
+    assert.equal(discovery.headers.get("mcp-session-id"), null);
 
-    const initialized = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-            jsonrpc: "2.0",
-            method: "notifications/initialized",
-        }),
-    });
-    assert.equal(initialized.status, 202);
-
-    const listed = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-            id: "list-tools",
-            jsonrpc: "2.0",
-            method: "tools/list",
-        }),
-    });
+    const listed = await postModern(endpoint, "list-tools", "tools/list");
     assert.equal(listed.status, 200);
     const payload = parseMcpHttpResponse<{
         result?: { tools?: Array<{ name: string }> };
@@ -432,18 +399,9 @@ async function callMcpTool(
         structuredContent?: unknown;
     };
 }> {
-    const response = await fetch(endpoint, {
-        body: JSON.stringify({
-            id: `call-${name}`,
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: { arguments: args, name },
-        }),
-        headers: {
-            accept: "application/json, text/event-stream",
-            "content-type": "application/json",
-        },
-        method: "POST",
+    const response = await postModern(endpoint, `call-${name}`, "tools/call", {
+        arguments: args,
+        name,
     });
     assert.equal(response.status, 200);
     return parseMcpHttpResponse(await response.text());
