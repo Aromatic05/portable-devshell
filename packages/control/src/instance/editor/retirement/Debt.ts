@@ -339,8 +339,7 @@ export class InstanceCleanupDebt {
         let candidate = this.#instanceRegistry.get(record.instance.name);
         if (candidate !== undefined) {
             try {
-                await this.#instanceRegistry.remove(record.instance.name, candidate);
-                this.#instanceChanges.publish("registry");
+                await this.#instanceRegistry.remove(record.instance.name, candidate, () => this.#instanceChanges.publish("registry"));
             } catch (error) {
                 failures.push(error);
                 return failures;
@@ -383,9 +382,8 @@ export class InstanceCleanupDebt {
                 this.#instanceRegistry.get(record.instance.name) === candidate
             ) {
                 await this.#instanceRegistry
-                    .remove(record.instance.name, candidate)
+                    .remove(record.instance.name, candidate, () => this.#instanceChanges.publish("registry"))
                     .catch((cleanupError) => failures.push(cleanupError));
-                this.#instanceChanges.publish("registry");
                 await this.#syncMcpEndpoint(record.instance.name).catch(
                     (cleanupError) => failures.push(cleanupError),
                 );

@@ -108,9 +108,8 @@ export class InstanceRetirementCoordinator {
         if (descriptor !== undefined) {
             cleanup.retainDescriptor(instanceName, descriptor);
             await this.#instanceRegistry
-                .remove(instanceName, descriptor)
+                .remove(instanceName, descriptor, () => this.#instanceChanges.publish("registry"))
                 .catch((error) => cleanupFailures.push(error));
-            this.#instanceChanges.publish("registry");
         }
         try {
             this.#mcp?.unregisterInstance(instanceName);

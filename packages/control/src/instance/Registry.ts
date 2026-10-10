@@ -47,6 +47,7 @@ export class InstanceRegistry {
     async remove(
         name: string,
         expected?: Instance,
+        onRemoved?: () => void,
     ): Promise<Instance | undefined> {
         const instance = this.#instances.get(name);
         if (instance === undefined) return undefined;
@@ -55,7 +56,14 @@ export class InstanceRegistry {
         }
         const retiring = instance.retire();
         this.#instances.delete(name);
-        await retiring;
+        // The coordinator commits its revision synchronously with visibility.
+        // The following lease drain can wait indefinitely on finite operations.
+        // Registry itself does not own the revision publisher.
+        try {
+            onRemoved?.();
+        } finally {
+            await retiring;
+        }
         return instance;
     }
 

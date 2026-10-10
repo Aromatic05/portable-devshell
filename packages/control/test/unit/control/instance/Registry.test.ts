@@ -7,6 +7,9 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlInstances } from "../../../../src/instance/index.ts";
+import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
+import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
+import { createTestInstance } from "../../../support/InstanceRuntime.ts";
 
 test("ControlInstances loads only enabled instance generations without starting workers", async (t) => {
     const config = createDefaultControlConfig();
@@ -71,4 +74,38 @@ test("ControlInstances closes only owned workers and preserves failed ownership 
     await instances.close();
     assert.deepEqual(stopped, ["owned-fail"]);
     assert.equal(ownedFail.supervision.ownership.owned, false);
+});
+
+test("Instance removal publishes the committed snapshot before waiting for leases", async () => {
+    const instance = createTestInstance(normalizeConfigInstanceDraft({
+        name: "demo-registry",
+        provider: "local",
+    }));
+    const registry = new InstanceRegistry([instance]);
+    const changes = new InstanceChangeHub();
+    const snapshots: Array<{ revision: number; names: string[] }> = [];
+    changes.onChange(({ revision }) => snapshots.push({
+        revision,
+        names: registry.list().map((entry) => entry.config.name),
+    }));
+
+    const lease = instance.lifecycle.acquireLease();
+    const retiring = registry.remove("demo-registry", instance, () => {
+        changes.publish("registry");
+    });
+
+    assert.equal(registry.get("demo-registry"), undefined);
+    assert.equal(changes.revision, 1);
+    assert.deepEqual(snapshots, [{ revision: 1, names: [] }]);
+    let completed = false;
+    void retiring.then(() => { completed = true; });
+    await Promise.resolve();
+    assert.equal(completed, false, "retirement must still drain the held lease");
+
+    lease.release();
+    assert.equal(await retiring, instance);
+    assert.equal(completed, true);
+    assert.equal(changes.revision, 1, "cleanup does not republish a committed removal");
+    assert.equal(await registry.remove("demo-registry", instance, () => changes.publish("registry")), undefined);
+    assert.equal(changes.revision, 1);
 });

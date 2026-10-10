@@ -399,7 +399,7 @@ export class InstanceReconfigurationCoordinator {
             const current = this.#instanceRegistry.get(existing.name);
             if (current !== undefined)
                 await this.#instanceRegistry
-                    .remove(existing.name, current)
+                    .remove(existing.name, current, () => this.#instanceChanges.publish("registry"))
                     .catch((error) => failures.push(error));
             if (existing.enabled) {
                 try {
@@ -413,7 +413,7 @@ export class InstanceReconfigurationCoordinator {
             try {
                 const current = this.#instanceRegistry.get(existing.name);
                 if (current !== undefined && current !== descriptor) {
-                    await this.#instanceRegistry.remove(existing.name, current);
+                    await this.#instanceRegistry.remove(existing.name, current, () => this.#instanceChanges.publish("registry"));
                 }
                 descriptor.update(existing);
                 if (this.#instanceRegistry.get(existing.name) !== descriptor)
@@ -468,8 +468,7 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         if (!instance.enabled) {
             if (descriptor !== undefined) {
-                await this.#instanceRegistry.remove(instance.name, descriptor);
-                this.#instanceChanges.publish("registry");
+                await this.#instanceRegistry.remove(instance.name, descriptor, () => this.#instanceChanges.publish("registry"));
             }
             return;
         }
@@ -485,8 +484,7 @@ export class InstanceReconfigurationCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            await this.#instanceRegistry.remove(instance.name, descriptor);
-            this.#instanceChanges.publish("registry");
+            await this.#instanceRegistry.remove(instance.name, descriptor, () => this.#instanceChanges.publish("registry"));
             return;
         }
         descriptor.update(instance);
@@ -609,11 +607,10 @@ export class InstanceReconfigurationCoordinator {
                     preparedDescriptor
                 ) {
                     await this.#instanceRegistry
-                        .remove(existing.name, preparedDescriptor)
+                        .remove(existing.name, preparedDescriptor, () => this.#instanceChanges.publish("registry"))
                         .catch((cleanupError) =>
                             failures.push(cleanupError),
                         );
-                    this.#instanceChanges.publish("registry");
                     await this.syncMcpEndpoint(existing.name).catch(
                         (cleanupError) => failures.push(cleanupError),
                     );
