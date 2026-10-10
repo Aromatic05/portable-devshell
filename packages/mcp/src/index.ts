@@ -1,3 +1,5 @@
+import { McpServer } from "./server/index.js";
+
 export { resolvePortableDevshellApplicationVersion } from "./Version.js";
 export { type McpAuthConfig, type McpOAuth2Config, type McpOAuthApprovalConfig } from "./oauth/Config.js";
 export { McpOAuthProtectedResource } from "./oauth/Route.js";
@@ -5,7 +7,6 @@ export { McpOAuthApprovalService } from "./oauth/interaction/Approval.js";
 export { type McpOAuthAccessRevocation, type McpOAuthAccessTokenVerification } from "./oauth/provider/Provider.js";
 export { type McpToolProvenanceRecorder } from "./protocol/tool/Provenance.js";
 export { type McpToolSource } from "./protocol/tool/Source.js";
-export { McpServer } from "./server/index.js";
+export { McpServer };
 export { McpHost, type McpHostInstanceConfig } from "./server/Host.js";
 export type { McpHttpAccess, McpHttpListener, McpHttpRoute } from "./server/Api.js";
-export { McpRuntimeState } from "./Runtime.js";

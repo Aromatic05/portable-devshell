@@ -33,7 +33,7 @@ import {
     type McpEndpointOptions,
 } from "../src/endpoint/Endpoint.ts";
 import { McpHost } from "../src/server/Host.ts";
-import { McpRuntimeState } from "../src/Runtime.ts";
+import { McpServer } from "../src/server/index.ts";
 import { HttpHost } from "../src/testing/Http.ts";
 import type {
     McpHostConfig,
@@ -56,11 +56,11 @@ export interface TestContextRuntime extends Omit<ContextRuntime, "close">, Conte
 export interface TestMcpRuntimeState {
     readonly contexts: TestContextRuntime;
     readonly contextTransport: ContextTransport;
-    readonly state: McpRuntimeState;
+    readonly state: McpServer;
     readonly toolCallRuntime: ReturnType<typeof createToolCallRuntime>;
     readonly toolSource: TestToolSource;
     readonly closeContextTools: () => void;
-    readonly oauthResource: McpRuntimeState["oauthResource"];
+    readonly oauthResource: McpServer["oauthResource"];
 }
 
 export interface TestMcpRuntimeOptions {
@@ -204,7 +204,7 @@ export function createTestMcpRuntimeState(
         },
     );
     options.configureToolCalls?.(toolCallRuntime);
-    const state = new McpRuntimeState({
+    const state = new McpServer({
         context,
         ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
         tools: options.tools ?? toolCallRuntime.api,

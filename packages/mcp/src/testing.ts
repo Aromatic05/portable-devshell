@@ -1,3 +1,5 @@
+import { McpProtocolRuntime } from "./protocol/index.js";
+
 export * from "./oauth/Config.js";
 export * from "./oauth/Middleware.js";
 export * from "./oauth/Provider.js";
@@ -16,8 +18,7 @@ export * from "./protocol/tool/Source.js";
 export * from "./protocol/tool/Metadata.js";
 export * from "./protocol/tool/Schema.js";
 
-export * from "./protocol/index.js";
-export { McpRuntimeState } from "./Runtime.js";
+export { McpProtocolRuntime };
 export { HttpHost } from "./testing/Http.js";
 export * from "./protocol/Registry.js";
 

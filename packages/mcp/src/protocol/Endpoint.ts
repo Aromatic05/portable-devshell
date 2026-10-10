@@ -15,7 +15,7 @@ import { McpEndpointCatalog } from "./tool/Catalog.js";
 import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type { McpEndpointCallContext } from "./call/Port.js";
-import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
+import type { McpEndpointResult } from "./call/Boundary.js";
 
 export type { McpEndpointCallContext } from "./call/Port.js";
 

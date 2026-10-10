@@ -6,7 +6,7 @@ import type { McpOAuthApprovalService } from "../oauth/interaction/Approval.js";
 import { createMcpAppMcpExtension } from "../mcpapp/Extension.js";
 import type { McpToolProvenanceRecorder } from "../protocol/tool/Provenance.js";
 import type { McpToolSource } from "../protocol/tool/Source.js";
-import type { McpRuntimeState } from "../Runtime.js";
+import type { McpServer } from "./index.js";
 import { McpProtocolRoute } from "../protocol/Route.js";
 import { McpAppRoute } from "../mcpapp/Route.js";
 import { McpAppCall } from "../mcpapp/Call.js";
@@ -38,12 +38,12 @@ export class McpHost {
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #protocol: McpProtocolRoute;
     #appRoute?: McpAppRoute;
-    readonly #runtimeState: McpRuntimeState;
+    readonly #runtimeState: McpServer;
     #started = false;
     #disposed = false;
     #oauthUninstall?: () => void;
 
-    constructor(config: McpHostConfig, state: McpRuntimeState, http: McpHttpAccess) {
+    constructor(config: McpHostConfig, state: McpServer, http: McpHttpAccess) {
         this.#config = config;
         this.#runtimeState = state;
         this.#contexts = state.context;

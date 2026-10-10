@@ -1,5 +1,5 @@
 // Test-only compatibility for the pre-domain endpoint constructor.
-import type { ContextTransport, JsonValue } from '@portable-devshell/shared';
+import type { JsonValue } from '@portable-devshell/shared';
 import { McpEndpoint as ProtocolEndpoint, type McpEndpointOptions as ProtocolOptions } from '../protocol/Endpoint.js';
 import { McpAppCall } from '../mcpapp/Call.js';
 import { McpAppActionStore } from '../mcpapp/ActionStore.js';
