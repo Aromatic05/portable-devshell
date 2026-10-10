@@ -34,6 +34,37 @@ import {
 const WEB_RESOURCE_NAME = "demo-web";
 const WEB_SCOPES = ["web"];
 
+test("Web OAuth registration is idempotent and released when its Flow retires", async () => {
+    let registrations = 0;
+    let releases = 0;
+    const protectedResource = {
+        registerResource() {
+            registrations += 1;
+            return () => { releases += 1; };
+        },
+    } as unknown as McpOAuthProtectedResource;
+    const config = { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME };
+    const flow = new ControlWebOAuthFlow({
+        basePath: "/web",
+        config,
+        ownsProvider: false,
+        protectedResource,
+        publicBaseUrl: "http://127.0.0.1",
+        sessions: new ControlWebSessionService({ auth: { mode: "oauth2", oauth2: config }, basePath: "/web" }),
+    });
+
+    await flow.warmup();
+    await flow.warmup();
+    assert.equal(registrations, 1);
+    flow.close();
+    flow.close();
+    assert.equal(releases, 1);
+    await flow.warmup();
+    assert.equal(registrations, 2);
+    flow.close();
+    assert.equal(releases, 2);
+});
+
 test("web oauth2 completes browser PKCE and authenticates the real control WebSocket", async (t) => {
     const storage = await createTestTempDirectory("web-oauth");
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });

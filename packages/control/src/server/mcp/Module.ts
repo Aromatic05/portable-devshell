@@ -77,7 +77,6 @@ export class McpControlModule {
         });
         this.#contextRecords = options.contextRecords;
         this.#contextChanges = options.contextChanges;
-        this.#subscribeContexts();
         if (this.#runtimeState.protocol === undefined)
             throw new Error('MCP protocol provenance runtime is unavailable.');
         this.toolProvenance = this.#runtimeState.protocol.provenance;
@@ -109,6 +108,7 @@ export class McpControlModule {
             toolSource: this.#toolRegistry,
             mcpAppLeaseFile: options.controlPaths.mcpAppLeasesFile,
         });
+        this.#subscribeContexts();
     }
 
     get host(): McpHost | undefined {
@@ -139,12 +139,12 @@ export class McpControlModule {
         const sameEndpointAsPrevious =
             previous !== undefined &&
             sameEndpoint(previousConfig.mcp, config.mcp);
-        if (sameEndpointAsPrevious) await this.stopHost(previous);
         try {
+            if (sameEndpointAsPrevious) await this.stopHost(previous);
             if (next !== undefined) await this.#startHost(next);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
-            if (next instanceof McpHost) {
+            if (next !== undefined) {
                 await next.dispose().catch((cleanupError) => rollbackFailures.push(cleanupError));
             }
             if (sameEndpointAsPrevious) {

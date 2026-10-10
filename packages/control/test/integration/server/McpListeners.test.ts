@@ -387,6 +387,9 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
         async stop() {
             events.push("new.stop");
         },
+        async dispose() {
+            events.push("new.dispose");
+        },
     };
     let wireCalls = 0;
     const owners = await createOwners(previous, homeDirectory);
@@ -419,7 +422,76 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
             return true;
         },
     );
-    assert.deepEqual(events, ["old.stop", "new.start", "old.start"]);
+    assert.deepEqual(events, ["old.stop", "new.start", "new.dispose", "old.start"]);
+});
+
+test("MCP stop failure disposes the uncommitted Host and restores the previous Host", async (t) => {
+    const homeDirectory = await createTestTempDirectory("runtime-mcp-stop-rollback");
+    const previous = createConfig(17893, 17894);
+    previous.web.enabled = false;
+    const next = structuredClone(previous);
+    next.mcp.publicBaseUrl = "https://replacement.example";
+    const events: string[] = [];
+    let failStop = true;
+    const oldHost = {
+        async start() { events.push("old.start"); },
+        async stop() {
+            events.push("old.stop");
+            if (failStop) { failStop = false; throw new Error("old stop failed"); }
+        },
+    };
+    const newHost = {
+        async start() { events.push("new.start"); },
+        async stop() { events.push("new.stop"); },
+        async dispose() { events.push("new.dispose"); },
+    };
+    let wires = 0;
+    const owners = await createOwners(previous, homeDirectory);
+    const runtime = new McpControlModule({
+        http: new ControlHttpServer(),
+        config: owners.config.require(),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
+        controlPaths: new ControlPathHome(homeDirectory),
+        factory: { wire() { return ++wires === 1 ? oldHost : newHost; } } as never,
+    });
+    t.after(async () => await cleanupInOrder(
+        () => runtime.stop(),
+        () => rm(homeDirectory, { force: true, recursive: true }),
+    ));
+
+    await assert.rejects(runtime.replaceMcpHost(previous, next), /old stop failed/u);
+    assert.deepEqual(events, ["old.stop", "new.dispose", "old.start"]);
+    assert.equal(runtime.host, oldHost);
+    assert.equal(runtime.publicBaseUrl, previous.mcp.publicBaseUrl);
+});
+
+test("retired MCP cleanup failure does not reject an already committed replacement", async (t) => {
+    const previous = createConfig(17888, 17889);
+    previous.web.enabled = false;
+    const next = structuredClone(previous);
+    next.mcp.publicBaseUrl = "https://replacement.example";
+    const events: string[] = [];
+    const retired = {
+        async dispose() { events.push("retired.dispose"); throw new Error("cleanup failed"); },
+    };
+    const mcp = {
+        host: {},
+        async replaceMcpHost() { events.push("mcp.replace"); return retired; },
+        async stopHost() { events.push("retired.stop"); },
+        async restoreMcpHost() { events.push("mcp.restore"); },
+    };
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const serverConfig = new ControlServerConfig({
+        mcp: mcp as never,
+        replaceHttpRoutes: async () => { events.push("routes.replace"); },
+        transport: {} as never,
+        web: {} as never,
+    });
+    assert.equal(await serverConfig.apply(previous, next, { instanceAuth: false, mcp: true, web: false }), true);
+    assert.deepEqual(events, ["mcp.replace", "routes.replace", "retired.stop", "retired.dispose"]);
+    assert.equal(warning.mock.callCount(), 1);
 });
 
 test("MCP restore attempts every host transition and reports rollback failures", async (t) => {
@@ -546,6 +618,60 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
             return true;
         },
     );
+});
+
+test("Web same-endpoint stop failure disposes the new HTTP Lease and restores the old listener", async (t) => {
+    const homeDirectory = await createTestTempDirectory("runtime-web-stop-rollback");
+    const config = await createIndependentConfig();
+    config.web.listenHost = "127.0.0.1";
+    const owners = await createOwners(config, homeDirectory);
+    const mcp = new McpControlModule({
+        http: new ControlHttpServer(),
+        config: owners.config.require(),
+        context: createContextTransport(new Endpoint({ host: "listener-test" })),
+        instances: owners.instances.registry,
+        toolRegistry: owners.toolRegistry,
+        controlPaths: new ControlPathHome(homeDirectory),
+    });
+    const http = new ControlHttpServer();
+    const acquire = http.acquire.bind(http);
+    let calls = 0;
+    let nextDisposed = false;
+    http.acquire = (address) => {
+        const lease = acquire(address);
+        calls += 1;
+        if (calls === 1) {
+            const stop = lease.stop.bind(lease);
+            let failOnce = true;
+            lease.stop = async () => {
+                await stop();
+                if (failOnce) { failOnce = false; throw new Error("old HTTP stop failed"); }
+            };
+        } else {
+            const dispose = lease.dispose.bind(lease);
+            lease.dispose = async () => { nextDisposed = true; await dispose(); };
+        }
+        return lease;
+    };
+    const web = createWeb(config, homeDirectory, mcp, http);
+    t.after(async () => await cleanupInOrder(
+        () => web.listener?.close(),
+        () => { web.stop(); },
+        () => web.stopHost(),
+        () => mcp.stop(),
+        () => http.close(),
+        () => rm(homeDirectory, { force: true, recursive: true }),
+    ));
+    await web.prepare();
+    await web.listener?.start(() => undefined);
+    await web.startHost();
+    await assert.rejects(
+        web.replace(config, structuredClone(config), { async replaceListener() {} }),
+        /old HTTP stop failed/u,
+    );
+    assert.equal(nextDisposed, true);
+    const response = await fetch(`http://127.0.0.1:${config.web.listenPort}/web/session`, { method: "POST" });
+    assert.equal(response.status, 200);
 });
 
 test("shared listener Web auth changes require an explicit control restart without stopping the current runtime", async (t) => {

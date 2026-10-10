@@ -57,6 +57,7 @@ export class ControlWebOAuthFlow {
     readonly #sessions: ControlWebSessionService;
     #clientId?: string;
     #endpoints?: OAuthEndpoints;
+    #releaseResource?: () => void;
 
     constructor(options: ControlWebOAuthFlowOptions) {
         this.#basePath = normalizeBasePath(options.basePath);
@@ -93,13 +94,23 @@ export class ControlWebOAuthFlow {
 
     async warmup(): Promise<void> {
         await this.#loadClientState();
-        this.#protectedResource.registerResource(
-            this.resourceUrl,
-            this.#providerConfig(),
+        this.#releaseResource ??= this.#protectedResource.registerResource(
+            this.resourceUrl, this.#providerConfig(),
         );
-        if (this.#ownsProvider) {
-            await this.#protectedResource.warmup();
+        try {
+            if (this.#ownsProvider) await this.#protectedResource.warmup();
+        } catch (error) {
+            try { this.close(); }
+            catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], "Web OAuth initialization and cleanup failed.");
+            }
+            throw error;
         }
+    }
+
+    close(): void {
+        this.#releaseResource?.();
+        this.#releaseResource = undefined;
     }
 
     install(http: HttpHost): () => void {

@@ -107,9 +107,12 @@ export class ControlWebRuntime {
     }
 
     stop(): void {
-        this.#flowUninstall?.();
+        const failures: unknown[] = [];
+        try { this.#flowUninstall?.(); } catch (error) { failures.push(error); }
+        try { this.#flow?.close(); } catch (error) { failures.push(error); }
         this.#flow = undefined;
         this.#flowUninstall = undefined;
+        if (failures.length > 0) throw new AggregateError(failures, "Web OAuth cleanup failed.");
     }
 
     async replace(
@@ -150,6 +153,8 @@ export class ControlWebRuntime {
             await this.#stopRetiredHost(previousHost).catch(
                 reportRetiredWebHostFailure,
             );
+            try { previousFlow?.close(); }
+            catch (error) { reportRetiredWebHostFailure(error); }
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             try {
@@ -157,6 +162,8 @@ export class ControlWebRuntime {
             } catch (rollbackError) {
                 rollbackFailures.push(rollbackError);
             }
+            try { nextRuntime?.flow?.close(); }
+            catch (rollbackError) { rollbackFailures.push(rollbackError); }
             await this.#restoreHost(previousHost, previousConfig).catch(
                 (rollbackError) => {
                     rollbackFailures.push(rollbackError);
@@ -295,28 +302,18 @@ export class ControlWebRuntime {
             next !== undefined &&
             next !== previous &&
             sameEndpoint(previousConfig.web, config.web);
-        if (same) await previous.stop();
-        if (next !== undefined && next !== previous) {
-            try {
+        try {
+            if (same) await previous.stop();
+            if (next !== undefined && next !== previous) {
                 await next.start();
-            } catch (error) {
-                const rollbackFailures: unknown[] = [];
-                await next.dispose().catch((cleanupError) => rollbackFailures.push(cleanupError));
-                if (same) {
-                    await previous
-                        .start()
-                        .catch((rollbackError) =>
-                            rollbackFailures.push(rollbackError),
-                        );
-                }
-                if (rollbackFailures.length > 0) {
-                    throw new AggregateError(
-                        [error, ...rollbackFailures],
-                        "Web host replacement failed and rollback was incomplete.",
-                    );
-                }
-                throw error;
             }
+        } catch (error) {
+            const rollbackFailures: unknown[] = [];
+            await next?.dispose().catch((cleanupError) => rollbackFailures.push(cleanupError));
+            if (same) await previous.start().catch((rollbackError) => rollbackFailures.push(rollbackError));
+            if (rollbackFailures.length > 0)
+                throw new AggregateError([error, ...rollbackFailures], "Web host replacement failed and rollback was incomplete.");
+            throw error;
         }
         this.#mcpSharesListener = config.mcp.enabled && sameEndpoint(config.mcp, config.web);
         this.#auth = config.web.auth;
@@ -340,12 +337,14 @@ export class ControlWebRuntime {
             ? config.web.publicBaseUrl
             : undefined;
         this.#host = host;
+        const failures: unknown[] = [];
         if (current !== undefined && current !== host) {
-            await current.dispose();
+            await current.dispose().catch((error) => failures.push(error));
         }
         if (host !== undefined) {
-            await host.start();
+            await host.start().catch((error) => failures.push(error));
         }
+        if (failures.length > 0) throw new AggregateError(failures, "Web Host rollback was incomplete.");
     }
 
     async #stopRetiredHost(host: HttpHost | undefined): Promise<void> {

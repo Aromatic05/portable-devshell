@@ -281,9 +281,9 @@ export class ControlServer {
         }
         await this.#transport.close().catch((error) => failures.push(error));
         await this.#web.stopHost().catch((error) => failures.push(error));
+        try { this.#web.stop(); } catch (error) { failures.push(error); }
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#http.close().catch((error) => failures.push(error));
-        this.#web.stop();
         try {
             this.#reverseIngress?.stop();
         } catch (error) {

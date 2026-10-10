@@ -87,7 +87,11 @@ export class ControlServerConfig {
         }
         if (retired !== undefined && retired !== this.#mcp.host && "dispose" in retired &&
             typeof retired.dispose === "function")
-            await retired.dispose();
+            await retired.dispose().catch((error: unknown) => {
+                // Replacement is committed: a retired-owner cleanup failure must
+                // not make ConfigEngine restore a config the runtime no longer uses.
+                console.warn("Retired MCP Host cleanup failed:", error);
+            });
     }
 }
 
