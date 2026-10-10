@@ -9,6 +9,19 @@ import { McpAppPresenceStore } from "../../src/mcpapp/app/Presence.ts";
 import { installMcpAppLive } from "../../src/mcpapp/app/Live.ts";
 import type { McpAppSnapshot } from "../../src/mcpapp/model/Contract.ts";
 
+function testContextRecord(ctxId: string, instance: string, status: ContextRecord["status"] = "active"): ContextRecord {
+    const now = new Date().toISOString();
+    return {
+        createdAt: now,
+        ctxId,
+        environments: [{ instance, workspace: "/workspace" }],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        lastAccessedAt: now,
+        principal: "local",
+        status,
+    };
+}
+
 test("MCP App Live requires a valid Instance+Context Lease, validates Context and supports CORS watch", async () => {
     const host = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
     const leases = new McpAppLeaseStore();
@@ -28,10 +41,7 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
             async validateForInstance(ctxId, instance) {
                 assert.equal(instance, "demo");
                 assert.equal(ctxId, "ctx-a");
-                return {
-                    ctxId, environments: [{ instance, workspace: "/workspace" }],
-                    principal: "test", status: contextActive ? "active" : "disabled",
-                } as ContextRecord;
+                return testContextRecord(ctxId, instance, contextActive ? "active" : "disabled");
             },
         },
         view: {
@@ -222,8 +232,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
     const stop = installMcpAppLive({
         host, instance: "demo", leases, presence,
         contexts: { async validateForInstance(ctxId, instance) {
-            return { ctxId, status: "active", principal: "local",
-                environments: [{ instance, workspace: "/workspace" }] } as ContextRecord;
+            return testContextRecord(ctxId, instance);
         } },
         view: {
             async snapshot() { throw new Error("Unexpected snapshot"); },
@@ -271,8 +280,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
     const stop = installMcpAppLive({
         host, instance: 'demo', leases, presence,
         contexts: { async validateForInstance(ctxId, instance) {
-            return { ctxId, status: 'active', principal: 'local',
-                environments: [{ instance, workspace: '/workspace' }] } as ContextRecord;
+            return testContextRecord(ctxId, instance);
         } },
         view: {
             async snapshot() { throw new Error('Unexpected snapshot'); },
@@ -319,8 +327,7 @@ test('MCP App Domain owns HTTP asset and Live Route lifetime across listener rea
     const host = new HttpHost({ listenHost: '127.0.0.1', listenPort: 0 });
     const runtime = new McpAppRuntime({ endpoint: new Endpoint({ host: 'app-lifecycle-test' }) });
     const contexts = { async validateForInstance(ctxId: string, instance: string) {
-        return { ctxId, instance, status: 'active', principal: 'local',
-            environments: [{ instance, workspace: '/workspace' }] } as ContextRecord;
+        return testContextRecord(ctxId, instance);
     } };
     const first = runtime.attachHost(host, contexts);
     assert.equal(runtime.attachHost(host, contexts), first);

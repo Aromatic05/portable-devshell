@@ -99,8 +99,9 @@ export function createTestWorkerInstance(
     });
     return {
         endpoint,
-        appendControlEvent: async (type, data) =>
-            await instance.supervision.state.appendEvent(type as never, data),
+        appendControlEvent: async (type, data) => {
+            await instance.supervision.state.appendEvent(type as never, data);
+        },
         close: () => instance.supervision.close(),
         readTools: async () => (await protocolClient.listTools()).tools,
         snapshot: () => instance.supervision.snapshot(),

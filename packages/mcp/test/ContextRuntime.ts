@@ -478,7 +478,7 @@ const testInstanceRuntime: InstanceRuntimeTransport = {
     },
     async appendEvent() {},
     async readEvents() {
-        return { events: [], gap: false, latestSeq: 0 };
+        return { events: [], kind: "events", lastSeq: 0 };
     },
     async releaseReference() {},
     async subscribeEvents() {

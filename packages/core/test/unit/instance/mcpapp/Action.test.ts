@@ -100,7 +100,8 @@ test("MCPApp Task Action validates Context and revision against persisted TodoSe
     const created = await todo.write({ revision: 0, title: "Context-owned task", todos: [
         { id: "work", content: "Verify Context ownership", status: "in_progress" },
     ] }, "ctx-owner");
-    assert.ok(created.taskId);
+    const taskId = created.taskId;
+    assert.ok(taskId);
     const runtime = createToolCallRuntime({ resolveTarget: () => ({
         async dispatch(request) {
             assert.ok(request.execute);
@@ -111,7 +112,7 @@ test("MCPApp Task Action validates Context and revision against persisted TodoSe
         approval: {}, task: { todo },
     } as never);
     const call = (ctxId: string, revision = created.revision) => runtime.api.call("local", "mcpapp_action", {
-        actionId: "task-pause", itemId: created.taskId, expectedRevision: revision,
+        actionId: "task-pause", itemId: taskId, expectedRevision: revision,
         requestId: "test-real-todo-action-12345678",
     }, { ctxId, workspace: "/repo", source: "mcp" });
     try {

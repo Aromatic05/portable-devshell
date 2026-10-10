@@ -17,12 +17,9 @@ import {
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
-import { TestMcpHost as McpHost } from "../ContextRuntime.ts";
+import { TestMcpHost as McpHost, type TestMcpHostInstanceConfig } from "../ContextRuntime.ts";
 import { mcpAppResourceUri } from "@portable-devshell/mcp/testing";
-import type {
-    McpAuthConfig,
-    McpHostInstanceConfig,
-} from "@portable-devshell/mcp";
+import type { McpAuthConfig } from "@portable-devshell/mcp";
 
 const fixturesDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -351,7 +348,6 @@ test("running host replaces and unregisters instance bindings without restart", 
         host.replaceTestTools("demo", [fileTool]);
         host.registerInstance({
             name: "demo",
-            worker: createToolWorker(fileTool),
         });
         assert.deepEqual(await initializeAndListTools(endpoint), [
             "environ_info",
@@ -423,41 +419,6 @@ async function initializeAndListTools(endpoint: string): Promise<string[]> {
     return payload.result?.tools?.map((tool) => tool.name) ?? [];
 }
 
-function createToolWorker(tool: {
-    requiredCapabilities: readonly ("execute" | "read" | "write")[];
-    group: string;
-    name: string;
-}) {
-    return {
-        async appendMcpSessionClosed(_sessionId: string) {},
-        async appendMcpSessionOpened(_sessionId: string) {},
-        async appendMcpToolCalled(
-            _toolName: string,
-            _context: { ctxId?: string; requestId?: string },
-        ) {},
-        snapshot() {
-            return { ready: true };
-        },
-        listTools() {
-            return [
-                {
-                    ...tool,
-                    description: tool.name,
-                    inputSchema: { type: "object" },
-                    outputSchema: { type: "object" },
-                },
-            ];
-        },
-        async callTool(
-            _toolName: string,
-            _input: unknown,
-            _context: { source: "mcp" },
-        ) {
-            return { ok: true };
-        },
-    } as never;
-}
-
 async function callMcpTool(
     endpoint: string,
     name: string,
@@ -518,7 +479,7 @@ function createHost(overrides?: {
 function createInstance(
     name: string,
     auth: McpAuthConfig,
-): McpHostInstanceConfig {
+): TestMcpHostInstanceConfig {
     return {
         auth,
         name,
