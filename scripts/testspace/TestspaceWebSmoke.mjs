@@ -234,7 +234,7 @@ async function exerciseInstanceLifecycle(devtools, instanceName, timeoutMs) {
 }
 
 async function clickButton(devtools, label, options = {}) {
-    await evaluateRequired(
+    await waitForCondition(
         devtools,
         `(() => {
             const target = [...document.querySelectorAll('button')]
@@ -254,6 +254,7 @@ async function clickButton(devtools, label, options = {}) {
             target.click();
             return true;
         })()`,
+        DEFAULT_TIMEOUT_MS,
         `Button ${label} is not clickable.`,
     );
 }

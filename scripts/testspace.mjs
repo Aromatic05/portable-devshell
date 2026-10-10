@@ -304,7 +304,10 @@ async function start(argv) {
     ]);
 
     const mcpPort = await reservePort(18790);
-    const webPort = await reservePort(mcpPort === 18791 ? 18792 : 18791);
+    const webPort = await reservePort(
+        mcpPort === 18791 ? 18792 : 18791,
+        new Set([mcpPort]),
+    );
     await writeFile(
         paths.controlConfig,
         buildTestspaceGlobalConfig({ mcpPort, webPort }),
@@ -956,8 +959,9 @@ async function ensureWorkspace(directory, role) {
     );
 }
 
-async function reservePort(preferred) {
+async function reservePort(preferred, excluded = new Set()) {
     for (let port = preferred; port < preferred + 100; port += 1) {
+        if (excluded.has(port)) continue;
         if (await portAvailable(port)) return port;
     }
     throw new Error(`unable to reserve a port near ${preferred}`);
