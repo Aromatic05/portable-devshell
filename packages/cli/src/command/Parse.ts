@@ -230,9 +230,13 @@ function parseUpdateCommand(argv: readonly string[]): CliParsedCommand {
     if (argv.length !== 2)
         throw CliRenderError.usage("Usage: devshell update [version]");
     const version = argv[1]!;
-    if (!/^v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version)) {
+    const prerelease = version.match(/-(.+)$/u)?.[1];
+    if (
+        !/^v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(version) ||
+        prerelease?.split(".").some((part) => /^0\d+$/u.test(part))
+    ) {
         throw CliRenderError.usage(
-            "update version must be an x.y.z release version",
+            "update version must be an x.y.z[-prerelease] release version",
         );
     }
     return { kind: "update", version };

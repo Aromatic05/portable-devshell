@@ -153,7 +153,29 @@ test("publishing creates one immutable release and has no upload or clobber fall
         assert.equal(calls[0].args.includes("upload"), false);
         assert.equal(calls[0].args.includes("--clobber"), false);
         assert.equal(calls[0].args.includes("--verify-tag"), true);
+        assert.equal(calls[0].args.includes("--prerelease"), false);
         assert.equal(calls[0].args.includes("--notes"), false);
+    } finally {
+        await rm(fixture.root, { force: true, recursive: true });
+    }
+});
+
+test("publishing marks alpha releases as prereleases rather than stable latest", async () => {
+    const fixture = await createReleaseAssets();
+    const calls = [];
+    try {
+        await publishRelease({
+            assetDirectory: fixture.directory,
+            tag: "v1.0.0-alpha.0",
+            runCommand(command, args) {
+                calls.push({ command, args });
+                return { status: 0, stderr: "", stdout: "" };
+            },
+        });
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].command, "gh");
+        assert.equal(calls[0].args.includes("--prerelease"), true);
+        assert.equal(calls[0].args.includes("--verify-tag"), true);
     } finally {
         await rm(fixture.root, { force: true, recursive: true });
     }

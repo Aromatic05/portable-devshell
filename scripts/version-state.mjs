@@ -5,16 +5,26 @@ import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = fileURLToPath(new URL("../", import.meta.url));
-const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const versionPattern =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u;
 
 export function parseVersion(value) {
     const match = versionPattern.exec(value);
     if (match === null) {
         throw new Error(
-            `version must use x.y.z without a prefix or prerelease suffix: ${value}`,
+            `version must use x.y.z or x.y.z-prerelease without a prefix: ${value}`,
         );
     }
-    return match.slice(1).map(Number);
+    const numbers = match.slice(1, 4).map(Number);
+    if (
+        numbers.some((number) => !Number.isSafeInteger(number)) ||
+        match[4]?.split(".").some((part) =>
+            /^\d+$/u.test(part) && part.length > 1 && part.startsWith("0"),
+        )
+    ) {
+        throw new Error(`version contains an invalid numeric identifier: ${value}`);
+    }
+    return numbers;
 }
 
 export function compareVersions(left, right) {
@@ -24,11 +34,42 @@ export function compareVersions(left, right) {
         const difference = leftParts[index] - rightParts[index];
         if (difference !== 0) return Math.sign(difference);
     }
+    const leftIdentifiers = versionPattern.exec(left)?.[4]?.split(".");
+    const rightIdentifiers = versionPattern.exec(right)?.[4]?.split(".");
+    if (leftIdentifiers === undefined) return rightIdentifiers === undefined ? 0 : 1;
+    if (rightIdentifiers === undefined) return -1;
+    for (let index = 0; index < Math.max(leftIdentifiers.length, rightIdentifiers.length); index += 1) {
+        const a = leftIdentifiers[index];
+        const b = rightIdentifiers[index];
+        if (a === undefined) return -1;
+        if (b === undefined) return 1;
+        const aNumeric = /^\d+$/u.test(a);
+        const bNumeric = /^\d+$/u.test(b);
+        if (aNumeric && bNumeric) {
+            const difference = BigInt(a) - BigInt(b);
+            if (difference !== 0n) return difference < 0n ? -1 : 1;
+        } else if (aNumeric !== bNumeric) {
+            return aNumeric ? -1 : 1;
+        } else if (a !== b) {
+            return a < b ? -1 : 1;
+        }
+    }
     return 0;
 }
 
 export function nextPatchVersion(version) {
     const [major, minor, patch] = parseVersion(version);
+    const prerelease = versionPattern.exec(version)?.[4];
+    if (prerelease !== undefined) {
+        const parts = prerelease.split(".");
+        const last = parts.at(-1);
+        if (last !== undefined && /^\d+$/u.test(last)) {
+            parts[parts.length - 1] = (BigInt(last) + 1n).toString();
+        } else {
+            parts.push("1");
+        }
+        return `${major}.${minor}.${patch}-${parts.join(".")}`;
+    }
     return `${major}.${minor}.${patch + 1}`;
 }
 
@@ -155,7 +196,15 @@ function readLatestReleaseVersion(root) {
     }
     const versions = output
         .split(/\r?\n/u)
-        .filter((tag) => /^v\d+\.\d+\.\d+$/u.test(tag))
+        .filter((tag) => {
+            if (!tag.startsWith("v")) return false;
+            try {
+                parseVersion(tag.slice(1));
+                return true;
+            } catch {
+                return false;
+            }
+        })
         .map((tag) => tag.slice(1))
         .sort(compareVersions);
     return versions.at(-1);
@@ -228,7 +277,7 @@ async function main(args) {
     switch (command) {
         case "set":
             if (value === undefined)
-                throw new Error("usage: version-state.mjs set <x.y.z>");
+                throw new Error("usage: version-state.mjs set <x.y.z[-prerelease]>");
             await setProjectVersion(value, root);
             process.stdout.write(`${value}\n`);
             return;
@@ -242,14 +291,14 @@ async function main(args) {
         case "check-release":
             if (value === undefined)
                 throw new Error(
-                    "usage: version-state.mjs check-release <vX.Y.Z>",
+                    "usage: version-state.mjs check-release <vX.Y.Z[-prerelease]>",
                 );
             process.stdout.write(`${await checkReleaseVersion(value, root)}\n`);
             return;
         case "advance-after-release": {
             if (value === undefined)
                 throw new Error(
-                    "usage: version-state.mjs advance-after-release <vX.Y.Z>",
+                    "usage: version-state.mjs advance-after-release <vX.Y.Z[-prerelease]>",
                 );
             const result = await advanceAfterRelease(value, root);
             process.stdout.write(

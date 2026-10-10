@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
+import { compareVersions, parseVersion } from "./version-state.mjs";
 
 const script = fileURLToPath(new URL("./version-state.mjs", import.meta.url));
 
@@ -130,6 +131,43 @@ test("release check requires an exact tag and post-release advance bumps one pat
             JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
                 .version,
             "0.4.3",
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("prerelease ordering follows SemVer precedence without treating alpha as stable", () => {
+    const ordered = [
+        "0.7.10", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.2",
+        "1.0.0-alpha.10", "1.0.0-beta", "1.0.0-rc.1", "1.0.0",
+    ];
+    for (let index = 1; index < ordered.length; index += 1) {
+        assert.equal(compareVersions(ordered[index - 1], ordered[index]), -1);
+        assert.equal(compareVersions(ordered[index], ordered[index - 1]), 1);
+    }
+    assert.equal(compareVersions("1.0.0-alpha.1", "1.0.0-alpha.1"), 0);
+    for (const invalid of ["v1.0.0-alpha", "1.0.0-alpha.01", "1.0.0-", "1.0.0+meta", "1.0.0-alpha..2"]) {
+        assert.throws(() => parseVersion(invalid));
+    }
+});
+
+test("prerelease release advances its own numeric identifier without skipping to stable", async () => {
+    const root = await createRepository("1.0.0-alpha.0", "v0.7.8");
+    try {
+        assert.equal(run(root, "check-development").status, 0);
+        assert.equal(run(root, "check-release", "v1.0.0-alpha.0").status, 0);
+        assert.equal(run(root, "check-release", "v1.0.0").status, 1);
+        assert.equal(run(root, "advance-after-release", "v1.0.0-alpha.0").status, 0);
+        assert.equal(
+            JSON.parse(await readFile(join(root, "package.json"), "utf8")).version,
+            "1.0.0-alpha.1",
+        );
+        assert.equal(run(root, "check-development").status, 0);
+        assert.equal(run(root, "advance-after-release", "v1.0.0-alpha.0").status, 0);
+        assert.equal(
+            JSON.parse(await readFile(join(root, "package.json"), "utf8")).version,
+            "1.0.0-alpha.1",
         );
     } finally {
         await rm(root, { force: true, recursive: true });

@@ -45,8 +45,17 @@ test("CliParser parses update with an optional release version", () => {
         kind: "update",
         version: "v1.0.0",
     });
+    assert.deepEqual(parser.parse(["update", "v1.0.0-alpha.0"]), {
+        kind: "update",
+        version: "v1.0.0-alpha.0",
+    });
+    assert.deepEqual(parser.parse(["update", "1.0.0-alpha"]), {
+        kind: "update",
+        version: "1.0.0-alpha",
+    });
     assert.deepEqual(parser.parse(["update", "--help"]), { kind: "help" });
     assert.throws(() => parser.parse(["update", "0.7"]));
+    assert.throws(() => parser.parse(["update", "1.0.0-alpha.01"]));
     assert.throws(() => parser.parse(["update", "0.7.7", "extra"]));
 });
 

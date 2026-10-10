@@ -129,6 +129,7 @@ export async function publishRelease({
         "create",
         tag,
         "--verify-tag",
+        ...(tag.includes("-") ? ["--prerelease"] : []),
         "--generate-notes",
         "--title",
         tag,

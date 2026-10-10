@@ -85,6 +85,29 @@ test("compat annotations expire at the declared release boundary", async () => {
     }
 });
 
+test("alpha releases beyond the debt deadline cannot retain old compatibility paths", async () => {
+    const root = await createFixture("1.0.0-alpha.0", {
+        "src/legacy.ts": [
+            "// @compat legacy-tool-surface",
+            "// @removeAt 0.7.10",
+            "export const oldTool = true;",
+        ].join("\n"),
+    });
+    try {
+        await assert.rejects(
+            () => checkCompatibilityExpiry({ files: ["src/legacy.ts"], root }),
+            (error) => {
+                assert.equal(error instanceof CompatibilityExpiryError, true);
+                assert.equal(error.issues[0]?.kind, "expired");
+                assert.equal(error.issues[0]?.currentVersion, "1.0.0-alpha.0");
+                return true;
+            },
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
 test("compatibility debt deadlines cannot move past 0.7.10", async () => {
     const root = await createFixture("0.7.6", {
         "src/legacy.ts": [
