@@ -5,7 +5,7 @@ import type { McpEndpointCallContext, McpEndpointResult, McpEndpointDispatch } f
 import { McpNativeToolResult } from '../protocol/Public.js';
 import { deliverMcpAppReentry } from './Reentry.js';
 import type { McpAppActionOperation } from './model/Contract.js';
-import type { McpAppActionStore } from './ActionStore.js';
+import type { McpAppActionReceipt, McpAppActionStore } from './ActionStore.js';
 import type { createMcpAppViewModel } from './ViewModel.js';
 
 /** Owns one Instance's MCP App action receipts, reentry and result presentation. */
@@ -112,21 +112,51 @@ export class McpAppCall {
                 if (stored.ctxId !== ctxId || stored.instance !== this.#instance ||
                     JSON.stringify(stored.resolved) !== JSON.stringify(resolved))
                     throw new Error("MCP App action receipt conflicts with another request.");
-                if (stored.status === "applied") return { status: "applied", itemId, actionId };
+                if (stored.status === "applied") return {
+                    status: "applied", itemId: stored.execution?.itemId ?? itemId,
+                    actionId: stored.execution?.actionId ?? actionId,
+                };
                 // A prepared receipt surviving process restart is uncertain.
                 // The Instance state is authoritative; never blindly replay it.
                 return { status: "stale", itemId, actionId };
             }
+            let execution: McpAppActionReceipt["execution"] | undefined;
+            let actualResult: JsonValue | undefined;
+            let executedCtxId: string | undefined;
             try {
-                const result = await this.#dispatch.callTool("mcpapp_action", input, requestContext, signal);
+                const result = await this.#dispatch.callTool("mcpapp_action", input, requestContext, signal,
+                    (callId, value, rawResult) => {
+                        const payload = typeof value.payload === "object" && value.payload !== null &&
+                            !Array.isArray(value.payload) ? value.payload : {};
+                        execution = {
+                            callId, instance: value.context.instance, toolName: value.toolName,
+                            ...(typeof payload.itemId === "string" ? { itemId: payload.itemId } : {}),
+                            ...(typeof payload.actionId === "string" ? { actionId: payload.actionId } : {}),
+                        };
+                        executedCtxId = value.context.ctxId;
+                        actualResult = rawResult;
+                    });
                 if (result instanceof McpNativeToolResult && result.isError)
                     throw new Error("MCP App action failed.");
-                await store.apply(key, actionId === "goal-resume" || actionId === "goal-retry" || actionId === "task-resume"
-                    ? { kind: "reentry", intent: actionId, sourceId: itemId, id: key }
-                    : undefined);
+                const actual = typeof actualResult === "object" && actualResult !== null &&
+                    !Array.isArray(actualResult) ? actualResult : {};
+                const executedAction = execution?.actionId;
+                const executedItem = execution?.itemId;
+                if (execution?.instance !== this.#instance || execution.toolName !== "mcpapp_action" ||
+                    executedCtxId !== ctxId || typeof executedAction !== "string" ||
+                    !allowed.includes(executedAction) || typeof executedItem !== "string" ||
+                    actual.status !== "applied" || actual.actionId !== executedAction || actual.itemId !== executedItem) {
+                    // Synthetic results, rewritten targets and stale actions must
+                    // never generate a Reentry based on the original UI intent.
+                    await store.conflict(key, execution);
+                    return result;
+                }
+                await store.apply(key, executedAction === "goal-resume" || executedAction === "goal-retry" || executedAction === "task-resume"
+                    ? { kind: "reentry", intent: executedAction, sourceId: executedItem, id: key }
+                    : undefined, execution);
                 return result;
             } catch (error) {
-                await store.conflict(key).catch(() => undefined);
+                await store.conflict(key, execution).catch(() => undefined);
                 throw error;
             }
         })();

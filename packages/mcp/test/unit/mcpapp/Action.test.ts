@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
+import { asInstanceName, type ToolCallApi } from "@portable-devshell/shared";
 import { mcpAppActionDefinition } from "../../../../core/src/instance/mcpapp/Definition.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { McpEndpoint } from "../../../src/endpoint/Endpoint.ts";
@@ -21,14 +22,20 @@ test("MCPApp Action receipt replays only an applied result, never its Instance e
         source.register("local", [mcpAppActionDefinition()]);
         let mutations = 0;
         const transport = { resolve: contexts.resolve };
-        const tools = {
-            async call(instance: string, toolName: string, input: unknown, context: unknown) {
+        const tools: ToolCallApi = {
+            async call(instance, toolName, input, context, _signal, transformResult, invocationInput) {
                 assert.equal(instance, "local");
                 assert.equal(toolName, "mcpapp_action");
-                assert.equal((context as { ctxId: string }).ctxId, record.ctxId);
+                assert.equal(context.ctxId, record.ctxId);
+                await invocationInput?.(input, "test-toolcall", {
+                    kind: "call", payload: input, toolName,
+                    context: { ...context, instance: asInstanceName(instance) },
+                });
                 mutations++;
-                return { status: "applied", itemId: (input as { itemId: string }).itemId,
+                const result = { status: "applied", itemId: (input as { itemId: string }).itemId,
                     actionId: (input as { actionId: string }).actionId };
+                await transformResult?.(result, "test-toolcall");
+                return result;
             },
         };
         const store = new McpAppActionStore({ filePath });

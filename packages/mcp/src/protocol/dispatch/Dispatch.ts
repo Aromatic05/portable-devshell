@@ -73,6 +73,7 @@ export class McpEndpointDispatch {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
+        onExecuted?: (callId: string, value: Readonly<ToolCallHookValue>, result: JsonValue) => void,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const compatibility = resolveMcpLegacyTool(toolName);
@@ -169,6 +170,7 @@ export class McpEndpointDispatch {
                 signal,
                 async (structured, _callId, nextPresentation) => {
                     presentation = nextPresentation;
+                    if (accepted !== undefined) onExecuted?.(_callId, accepted.value, structured);
                     return structured;
                 },
                 async (rewrittenInput, callId, value) => {

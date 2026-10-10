@@ -10,6 +10,8 @@ export interface McpAppActionReceipt {
     ctxId: string;
     instance: string;
     resolved: McpAppResolvedAction;
+    /** Actual ToolCall after inbound Rewrite; resolved remains the original UI intent. */
+    execution?: { callId: string; instance: string; toolName: string; itemId?: string; actionId?: string };
     status: McpAppActionReceiptStatus;
     effect?: McpAppActionEffect;
     outcome?: "accepted" | "rejected" | "uncertain";
@@ -88,18 +90,19 @@ export class McpAppActionStore {
         });
     }
 
-    async apply(actionId: string, effect?: McpAppActionEffect): Promise<McpAppActionReceipt> {
+    async apply(actionId: string, effect?: McpAppActionEffect, execution?: McpAppActionReceipt["execution"]): Promise<McpAppActionReceipt> {
         return (await this.#change(actionId, (current) => {
             if (current === undefined) throw new Error("McpApp action receipt is missing.");
             if (current.status !== "prepared") return current;
-            return this.#record({ ...current, status: "applied", ...(effect === undefined ? {} : { effect }) });
+            return this.#record({ ...current, status: "applied", ...(effect === undefined ? {} : { effect }),
+                ...(execution === undefined ? {} : { execution }) });
         }))!;
     }
 
-    async conflict(actionId: string): Promise<void> {
+    async conflict(actionId: string, execution?: McpAppActionReceipt["execution"]): Promise<void> {
         await this.#change(actionId, (current) => {
             if (current === undefined || current.status !== "prepared") throw new Error("McpApp action receipt is not prepared.");
-            return this.#record({ ...current, status: "conflicted" });
+            return this.#record({ ...current, status: "conflicted", ...(execution === undefined ? {} : { execution }) });
         });
     }
 
