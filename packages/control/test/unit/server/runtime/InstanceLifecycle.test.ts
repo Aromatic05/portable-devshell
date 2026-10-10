@@ -33,11 +33,19 @@ test("close retries a failed worker close without reopening the retired generati
     await assert.rejects(instance.close(), /temporary close failure/u);
     assert.equal(instance.lifecycle.retired, true);
     assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
+    // A failed Supervision close must leave Audit writable for its retry.
+    await instance.supervision.state.appendEvent("test.closeRetry", { attempt: 1 });
 
     instance.supervision.close = originalClose;
     await instance.close();
     assert.equal(instance.lifecycle.closed, true);
     assert.throws(() => instance.lifecycle.acquireLease(), /retired/u);
+    await assert.rejects(
+        instance.toolCallIngress.call(instance.config.name, "shell_run", {}, {
+            ctxId: "retired-ctx", source: "cli", workspace: "/workspace",
+        }),
+        /retired/u,
+    );
 });
 
 test("shutdown waits for admitted work and closes every instance audit", { timeout: 5000 }, async (t) => {
@@ -122,9 +130,25 @@ test("retirement cancels a pending approval before waiting for its admitted call
     });
     assert.equal((pending[0] as { status?: string }).status, "pending");
 
-    await instance.close();
-    const result = (await pendingCall) as { error?: { code?: string } };
-    assert.equal(result.error?.code, runtimeErrorCodes.toolCallRejected);
+    // Hold retirement so the admitted call must write its denial to Audit
+    // before the irreversible database close.
+    const heldLease = instance.lifecycle.acquireLease();
+    const closing = instance.close();
+    try {
+        await waitForPhase(instance, "retiring");
+        const result = (await pendingCall) as { error?: { code?: string } };
+        assert.equal(result.error?.code, runtimeErrorCodes.toolCallRejected);
+        const events = instance.supervision.state.subscribe(1);
+        assert.ok(events.kind === "events" && events.events.some((event) =>
+            event.type === "toolCall.denied" &&
+            typeof event.data === "object" && event.data !== null &&
+            !Array.isArray(event.data) &&
+            event.data.errorCode === runtimeErrorCodes.toolCallRejected,
+        ), "an admitted rejected ToolCall must reach the Instance Audit");
+    } finally {
+        heldLease.release();
+        await closing;
+    }
     assert.equal(instance.lifecycle.closed, true);
 });
 

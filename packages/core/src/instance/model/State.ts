@@ -111,7 +111,11 @@ export class InstanceState {
         );
         this.toolCalls = createToolCallRuntime({
             resolveTarget: (target) => {
-                if (target === instanceName) return this.target();
+                // Local calls already hold admission at the Host Route or
+                // Instance ingress. A second lease after Approval would reject
+                // an admitted call once retirement has begun.
+                if (target === instanceName)
+                    return { dispatch: (request) => this.callTool(request) };
                 if (this.#toolCallEndpoint === undefined) {
                     throw createRemoteError({
                         code: runtimeErrorCodes.instanceNotReady,

@@ -159,7 +159,18 @@ export class Instance {
     }
 
     get toolCallIngress(): ToolCallApi {
-        return this.#state.toolCalls.api;
+        // Ingress admission spans Review, Rewrite and Target execution, even
+        // when retirement begins during asynchronous Approval.
+        return {
+            call: async (...args) => {
+                const lease = this.#lifecycle.acquireLease();
+                try {
+                    return await this.#state.toolCalls.api.call(...args);
+                } finally {
+                    lease.release();
+                }
+            },
+        };
     }
 
     async openToolSession(workspace: string, sessionId: string) {
