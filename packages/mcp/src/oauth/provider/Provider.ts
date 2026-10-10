@@ -80,6 +80,8 @@ export class McpOAuthProviderRuntime {
     readonly #storageSecurity: McpOAuthStorageSecurity;
     readonly #trustProxy: boolean;
     #provider?: Provider;
+    #refreshProvider?: () => void;
+    readonly #supportedScopes = new Set<string>();
 
     constructor(options: McpOAuthProviderRuntimeOptions) {
         this.#accountId = options.accountId ?? readLocalAccountId();
@@ -131,6 +133,14 @@ export class McpOAuthProviderRuntime {
         const registration = { config };
         registrations.push(registration);
         this.#registeredResources.set(uri, registrations);
+        if (this.#provider !== undefined && config.requiredScopes.some((scope) => !this.#supportedScopes.has(scope))) {
+            try { this.#refreshProvider?.(); }
+            catch (error) {
+                registrations.pop();
+                if (registrations.length === 0) this.#registeredResources.delete(uri);
+                throw error;
+            }
+        }
         let released = false;
         return () => {
             if (released) return;
@@ -173,159 +183,167 @@ export class McpOAuthProviderRuntime {
                 ),
             ]),
         ];
-        const provider = new Provider(
-            stripTrailingSlash(this.#issuerUrl.href),
-            {
-                adapter: createDynamicClientScopeAdapterFactory(
-                    createMcpOAuthOidcFileAdapterFactory(
-                        join(this.#storageDir, "adapter"),
-                        async (path) =>
-                            await this.#storageSecurity.secureStorage(path),
-                        async (path) =>
-                            await this.#storageSecurity.secureFile(path),
-                    ),
-                    dynamicClientRequiredScopes,
-                    async (clientId, payload) => {
-                        try {
-                            await this.#approvals.registerClient(
-                                toRegistrationApprovalInputFromPayload(
-                                    clientId,
-                                    payload,
-                                ),
-                            );
-                        } catch (error) {
-                            if (error instanceof OAuthApprovalCapacityError) {
-                                throw new errors.InvalidRequest(
-                                    error.message,
-                                    429,
-                                );
-                            }
-                            throw error;
-                        }
-                    },
-                ),
-                clientDefaults: {
-                    grant_types: ["authorization_code", "refresh_token"],
-                    response_types: ["code"],
-                    token_endpoint_auth_method: "none",
-                },
-                claims: {
-                    openid: ["sub"],
-                },
-                features: {
-                    devInteractions: { enabled: false },
-                    registration: {
-                        enabled: true,
-                        initialAccessToken: false,
-                    },
-                    registrationManagement: {
-                        enabled: true,
-                    },
-                    resourceIndicators: {
-                        defaultResource: async (_ctx, _client, oneOf) => {
-                            if (Array.isArray(oneOf) && oneOf.length === 1) {
-                                return oneOf[0];
-                            }
-                            if (this.#registeredResources.size === 1) {
-                                return [...this.#registeredResources.keys()][0];
-                            }
-                            throw new Error(
-                                "Unable to determine a default resource indicator.",
-                            );
-                        },
-                        enabled: true,
-                        getResourceServerInfo: async (
-                            _ctx,
-                            resourceIndicator,
-                        ) => {
-                            const resourceConfig = this.#registeredResources.get(
-                                resourceIndicator,
-                            )?.at(-1)?.config;
-                            if (resourceConfig === undefined) {
-                                throw new Error(
-                                    `Unknown resource indicator: ${resourceIndicator}`,
-                                );
-                            }
-                            return {
-                                accessTokenFormat: "opaque" as const,
-                                audience: resourceIndicator,
-                                scope: resourceConfig.requiredScopes.join(" "),
-                            };
-                        },
-                        useGrantedResource: async () => true,
-                    },
-                    revocation: {
-                        allowedPolicy: async (_ctx, client, token) =>
-                            token.clientId === client.clientId,
-                        enabled: true,
-                    },
-                },
-                findAccount: async (_ctx, sub) => {
-                    if (sub !== this.#accountId) {
-                        return undefined;
-                    }
-                    return {
-                        accountId: this.#accountId,
-                        claims: async () => ({ sub: this.#accountId }),
-                    };
-                },
-                interactions: {
-                    url: async (_ctx, interaction) => {
-                        return `${this.#basePath}/interaction/${interaction.uid}`;
-                    },
-                },
-                jwks,
-                routes: {
-                    authorization: "/authorize",
-                    end_session: "/session/end",
-                    jwks: "/jwks",
-                    registration: "/register",
-                    revocation: "/revoke",
-                    token: "/token",
-                    userinfo: "/userinfo",
-                },
-                scopes: [
-                    "openid",
-                    "offline_access",
-                    ...new Set([
-                        ...this.#config.requiredScopes,
-                        ...this.#resourceConfigs().flatMap(
-                            (resource) => resource.requiredScopes,
+        const buildProvider = () => {
+            const provider = new Provider(
+                stripTrailingSlash(this.#issuerUrl.href),
+                {
+                    adapter: createDynamicClientScopeAdapterFactory(
+                        createMcpOAuthOidcFileAdapterFactory(
+                            join(this.#storageDir, "adapter"),
+                            async (path) =>
+                                await this.#storageSecurity.secureStorage(path),
+                            async (path) =>
+                                await this.#storageSecurity.secureFile(path),
                         ),
-                    ]),
-                ],
-                ttl: {
-                    AccessToken: () => ACCESS_TOKEN_TTL_SECONDS,
-                    Grant: () => LONG_LIVED_TTL_SECONDS,
-                    IdToken: () => ID_TOKEN_TTL_SECONDS,
-                    Interaction: () => INTERACTION_TTL_SECONDS,
-                    RefreshToken: () => LONG_LIVED_TTL_SECONDS,
-                    Session: () => LONG_LIVED_TTL_SECONDS,
+                        dynamicClientRequiredScopes,
+                        async (clientId, payload) => {
+                            try {
+                                await this.#approvals.registerClient(
+                                    toRegistrationApprovalInputFromPayload(
+                                        clientId,
+                                        payload,
+                                    ),
+                                );
+                            } catch (error) {
+                                if (error instanceof OAuthApprovalCapacityError) {
+                                    throw new errors.InvalidRequest(
+                                        error.message,
+                                        429,
+                                    );
+                                }
+                                throw error;
+                            }
+                        },
+                    ),
+                    clientDefaults: {
+                        grant_types: ["authorization_code", "refresh_token"],
+                        response_types: ["code"],
+                        token_endpoint_auth_method: "none",
+                    },
+                    claims: {
+                        openid: ["sub"],
+                    },
+                    features: {
+                        devInteractions: { enabled: false },
+                        registration: {
+                            enabled: true,
+                            initialAccessToken: false,
+                        },
+                        registrationManagement: {
+                            enabled: true,
+                        },
+                        resourceIndicators: {
+                            defaultResource: async (_ctx, _client, oneOf) => {
+                                if (Array.isArray(oneOf) && oneOf.length === 1) {
+                                    return oneOf[0];
+                                }
+                                if (this.#registeredResources.size === 1) {
+                                    return [...this.#registeredResources.keys()][0];
+                                }
+                                throw new Error(
+                                    "Unable to determine a default resource indicator.",
+                                );
+                            },
+                            enabled: true,
+                            getResourceServerInfo: async (
+                                _ctx,
+                                resourceIndicator,
+                            ) => {
+                                const resourceConfig = this.#registeredResources.get(
+                                    resourceIndicator,
+                                )?.at(-1)?.config;
+                                if (resourceConfig === undefined) {
+                                    throw new Error(
+                                        `Unknown resource indicator: ${resourceIndicator}`,
+                                    );
+                                }
+                                return {
+                                    accessTokenFormat: "opaque" as const,
+                                    audience: resourceIndicator,
+                                    scope: resourceConfig.requiredScopes.join(" "),
+                                };
+                            },
+                            useGrantedResource: async () => true,
+                        },
+                        revocation: {
+                            allowedPolicy: async (_ctx, client, token) =>
+                                token.clientId === client.clientId,
+                            enabled: true,
+                        },
+                    },
+                    findAccount: async (_ctx, sub) => {
+                        if (sub !== this.#accountId) {
+                            return undefined;
+                        }
+                        return {
+                            accountId: this.#accountId,
+                            claims: async () => ({ sub: this.#accountId }),
+                        };
+                    },
+                    interactions: {
+                        url: async (_ctx, interaction) => {
+                            return `${this.#basePath}/interaction/${interaction.uid}`;
+                        },
+                    },
+                    jwks,
+                    routes: {
+                        authorization: "/authorize",
+                        end_session: "/session/end",
+                        jwks: "/jwks",
+                        registration: "/register",
+                        revocation: "/revoke",
+                        token: "/token",
+                        userinfo: "/userinfo",
+                    },
+                    scopes: [
+                        "openid",
+                        "offline_access",
+                        ...new Set([
+                            ...this.#supportedScopes,
+                            ...this.#config.requiredScopes,
+                            ...this.#resourceConfigs().flatMap(
+                                (resource) => resource.requiredScopes,
+                            ),
+                        ]),
+                    ],
+                    ttl: {
+                        AccessToken: () => ACCESS_TOKEN_TTL_SECONDS,
+                        Grant: () => LONG_LIVED_TTL_SECONDS,
+                        IdToken: () => ID_TOKEN_TTL_SECONDS,
+                        Interaction: () => INTERACTION_TTL_SECONDS,
+                        RefreshToken: () => LONG_LIVED_TTL_SECONDS,
+                        Session: () => LONG_LIVED_TTL_SECONDS,
+                    },
                 },
-            },
-        );
-        provider.proxy = this.#trustProxy;
-        provider.on("registration_create.success", (context, client) => {
-            const scope = extendDynamicClientScope(
-                client.scope,
-                dynamicClientRequiredScopes(),
             );
-            (client as unknown as { scope: string }).scope = scope;
-            if (isRecord(context.body)) {
-                context.body.scope = scope;
-            }
-        });
-        provider.on("access_token.destroyed", (token) => {
-            if (typeof token.grantId === "string") {
-                this.#notifyAccessRevoked({ grantId: token.grantId });
-            }
-        });
-        provider.on("grant.revoked", (_context, grantId) => {
-            if (typeof grantId === "string") {
-                this.#notifyAccessRevoked({ grantId });
-            }
-        });
-        this.#provider = provider;
+            provider.proxy = this.#trustProxy;
+            provider.on("registration_create.success", (context, client) => {
+                const scope = extendDynamicClientScope(
+                    client.scope,
+                    dynamicClientRequiredScopes(),
+                );
+                (client as unknown as { scope: string }).scope = scope;
+                if (isRecord(context.body)) {
+                    context.body.scope = scope;
+                }
+            });
+            provider.on("access_token.destroyed", (token) => {
+                if (typeof token.grantId === "string") {
+                    this.#notifyAccessRevoked({ grantId: token.grantId });
+                }
+            });
+            provider.on("grant.revoked", (_context, grantId) => {
+                if (typeof grantId === "string") {
+                    this.#notifyAccessRevoked({ grantId });
+                }
+            });
+            this.#provider = provider;
+            for (const scope of ["openid", "offline_access", ...this.#config.requiredScopes,
+                ...this.#resourceConfigs().flatMap((resource) => resource.requiredScopes)])
+                this.#supportedScopes.add(scope);
+        };
+        this.#refreshProvider = buildProvider;
+        buildProvider();
     }
 
     shouldHandleProviderPath(pathname: string): boolean {

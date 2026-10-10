@@ -74,7 +74,7 @@ export class McpHost {
     async prepare(): Promise<void> {
         if (this.#disposed) throw new Error("MCP Host has been disposed.");
         if (this.#started) return;
-        if (oauthConfig(this.#config.instances) !== undefined && this.#oauth === undefined)
+        if (this.#requiresOAuth() && this.#oauth === undefined)
             throw new Error(
                 "mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth",
             );
@@ -82,9 +82,9 @@ export class McpHost {
         await this.#oauth?.warmup();
         try {
             this.#protocol.start();
-            if (this.#oauth !== undefined && oauthConfig(this.#config.instances) !== undefined)
+            if (this.#oauth !== undefined && this.#requiresOAuth())
                 this.#oauthUninstall = this.#oauth.attach(this.#httpServer);
-            const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts);
+            const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts, this.#config.publicBaseUrl);
             for (const entry of this.#protocol.list()) route.register(entry.binding.instanceName);
             this.#appRoute = route;
             this.#started = true;
@@ -131,51 +131,81 @@ export class McpHost {
     }
 
     registerInstance(instance: McpHostInstanceConfig): void {
+        if (this.#disposed) throw new Error("MCP Host has been disposed.");
+        const wantsOAuth = instance.auth?.provider === "oauth2";
+        // Initial declarations are validated by prepare() before HTTP mounts;
+        // live additions must fail before mutating a running Host.
+        if (this.#started && wantsOAuth && this.#oauth === undefined)
+            throw new Error("mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth");
+        const mountOAuth = this.#started && wantsOAuth && this.#oauthUninstall === undefined;
+        if (mountOAuth) this.#oauthUninstall = this.#oauth!.attach(this.#httpServer);
+        const mountApp = this.#appRoute !== undefined && !this.#appRoute.has(instance.name);
         const path = instance.path ?? `/${instance.name}/mcp`;
-        this.#protocol.registerInstance(
-            {
-                auth: instance.auth,
-                context: this.#contexts,
-                contextMode: instance.contextMode ?? "explicit",
-                extensions: [createMcpAppMcpExtension(this.#config.publicBaseUrl)],
-                instanceName: instance.name,
-                toolAdapter: (dispatch) =>
-                    new McpAppCall({
-                        actions: this.#runtimeState.app.actions,
-                        context: this.#contexts,
-                        dispatch,
-                        instance: instance.name,
-                        ...(this.#runtimeState.app.view === undefined
-                            ? {}
-                            : { view: this.#runtimeState.app.view }),
-                        bootstrap: (result, request) =>
-                            this.#runtimeState.app.bootstrap({
-                                context: this.#contexts,
-                                contextMode: instance.contextMode,
-                                instance: instance.name,
-                                publicBaseUrl: this.#config.publicBaseUrl,
-                                request,
-                                result,
-                            }),
-                    }),
-                toolProvenance: this.#config.toolProvenance,
-                toolSource: this.#config.toolSource,
-                tools: this.#runtimeState.tools,
-            },
-            path,
-            this.#config.serverVersion,
-        );
-        this.#appRoute?.register(instance.name);
+        try {
+            if (mountApp) this.#appRoute?.register(instance.name);
+            this.#protocol.registerInstance(
+                {
+                    auth: instance.auth,
+                    context: this.#contexts,
+                    contextMode: instance.contextMode ?? "explicit",
+                    extensions: [createMcpAppMcpExtension(this.#config.publicBaseUrl)],
+                    instanceName: instance.name,
+                    toolAdapter: (dispatch) =>
+                        new McpAppCall({
+                            actions: this.#runtimeState.app.actions,
+                            context: this.#contexts,
+                            dispatch,
+                            instance: instance.name,
+                            ...(this.#runtimeState.app.view === undefined
+                                ? {}
+                                : { view: this.#runtimeState.app.view }),
+                            bootstrap: (result, request) =>
+                                this.#runtimeState.app.bootstrap({
+                                    context: this.#contexts,
+                                    contextMode: instance.contextMode,
+                                    instance: instance.name,
+                                    publicBaseUrl: this.#config.publicBaseUrl,
+                                    request,
+                                    result,
+                                }),
+                        }),
+                    toolProvenance: this.#config.toolProvenance,
+                    toolSource: this.#config.toolSource,
+                    tools: this.#runtimeState.tools,
+                },
+                path,
+                this.#config.serverVersion,
+            );
+        } catch (error) {
+            if (mountApp) this.#appRoute?.unregister(instance.name);
+            if (mountOAuth) {
+                this.#oauthUninstall?.();
+                this.#oauthUninstall = undefined;
+            }
+            throw error;
+        }
+        this.#syncOAuthRoutes();
     }
 
     unregisterInstance(instanceName: string): void {
+        this.#protocol.unregister(instanceName);
         this.#appRoute?.unregister(instanceName);
         this.#runtimeState.app.presence.revokeInstance(instanceName);
-        this.#protocol.unregister(instanceName);
+        this.#syncOAuthRoutes();
     }
 
     revokeMcpAppContext(ctxId: string): void {
         this.#appRoute?.revokeContext(ctxId);
+    }
+
+    #requiresOAuth(): boolean {
+        return this.#protocol.list().some((entry) => entry.auth?.provider === "oauth2");
+    }
+
+    #syncOAuthRoutes(): void {
+        if (!this.#started || this.#requiresOAuth() || this.#oauthUninstall === undefined) return;
+        this.#oauthUninstall();
+        this.#oauthUninstall = undefined;
     }
 
     async retireMcpApp(instanceName: string): Promise<void> {
