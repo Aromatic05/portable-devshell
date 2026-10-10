@@ -12,8 +12,8 @@ function port(address: { port: number } | string | null): number {
     return address.port;
 }
 
-function mcpRequest(address: number, token?: string): Promise<Response> {
-    return fetch(`http://127.0.0.1:${address}/demo/mcp`, {
+function mcpRequest(address: number, token?: string, path = "/demo/mcp"): Promise<Response> {
+    return fetch(`http://127.0.0.1:${address}${path}`, {
         method: "POST",
         headers: {
             accept: "application/json, text/event-stream",
@@ -161,11 +161,14 @@ test("overlapping OAuth MCP Host generations keep active routes and revoke retir
         await oldest.start();
         await sameUrl.start();
         assert.equal((await metadata("/old")).status, 200);
+        assert.equal((await mcpRequest(port(web.address), undefined, "/old/demo/mcp")).status, 401);
+        assert.equal((await mcpRequest(port(web.address))).status, 404);
         await oldest.stop();
         assert.equal((await metadata("/old")).status, 200);
 
         await moved.start();
         assert.equal((await metadata("/new")).status, 200);
+        assert.equal((await mcpRequest(port(web.address), undefined, "/new/demo/mcp")).status, 401);
         await sameUrl.stop();
         assert.equal((await metadata("/old")).status, 404);
         assert.equal((await metadata("/new")).status, 200);

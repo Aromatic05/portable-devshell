@@ -33,6 +33,14 @@ test("MCP App assets and Live HTTP endpoints honor the public URL path prefix", 
         assert.equal((await fetch(`${origin}/mcpapp/assets/${asset}`)).status, 404);
         assert.equal((await fetch(`${origin}/prefix/api/live/demo/workspace/snapshot`)).status, 401);
         assert.equal((await fetch(`${origin}/api/live/demo/workspace/snapshot`)).status, 404);
+        const request = { method: 'POST', headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+        }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) };
+        const prefixed = await fetch(`${origin}/prefix/demo/mcp`, request);
+        assert.equal(prefixed.status, 200);
+        assert.match(await prefixed.text(), /tools/u);
+        assert.equal((await fetch(`${origin}/demo/mcp`, request)).status, 404);
     } finally {
         await host.dispose();
         await runtime.state.close();

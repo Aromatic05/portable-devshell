@@ -111,13 +111,13 @@ test("failed OAuth middleware or metadata registration releases the new Resource
 
     for (const failingPath of [
         "/.well-known/oauth-protected-resource/old/fail",
-        "/fail",
+        "/old/fail",
     ]) {
         port.reject(failingPath);
         assert.throws(() => protocol.register(makeEntry("demo", "/fail", auth)), /HTTP registration failed/u);
         assert.equal(protocol.list()[0]?.binding, original.binding);
         assert.deepEqual([...resources.keys()], ["https://controller.example/old/ok"]);
-        assert.deepEqual(port.paths(), ["/.well-known/oauth-protected-resource/old/ok", "/ok"]);
+        assert.deepEqual(port.paths(), ["/.well-known/oauth-protected-resource/old/ok", "/old/ok"]);
     }
     protocol.stop();
     assert.deepEqual([...resources.keys()], []);

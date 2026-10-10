@@ -119,6 +119,7 @@ export class McpProtocolRoute {
             resourceUrl.search = "";
             resourceUrl.hash = "";
         }
+        const requestPath = resourceUrl?.pathname ?? path;
         let released = false;
         const releaseAll = () => {
             if (released) return;
@@ -151,13 +152,13 @@ export class McpProtocolRoute {
             if (oauthApp !== undefined && auth?.provider === "oauth2")
                 oauthApp.use(this.#oauth!.requestAuthHandler(resourceUrl!, auth.oauth2));
             releases.push(
-                this.#http.registerMiddleware(path, (request, response, next) => {
+                this.#http.registerMiddleware(requestPath, (request, response, next) => {
                     // An Express-based test listener strips the mounted prefix from
                     // request.url; the Control HTTP owner preserves the original URL.
                     const original = request as IncomingMessage & { originalUrl?: string };
                     const pathname = new URL(original.originalUrl ?? request.url ?? "/", "http://localhost")
                         .pathname;
-                    if (pathname !== path) {
+                    if (pathname !== requestPath) {
                         next();
                         return;
                     }
