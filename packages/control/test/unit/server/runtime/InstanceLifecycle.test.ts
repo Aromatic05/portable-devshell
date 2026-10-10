@@ -152,6 +152,36 @@ test("retirement cancels a pending approval before waiting for its admitted call
     assert.equal(instance.lifecycle.closed, true);
 });
 
+test("direct ToolCall ingress retains admission until retirement cancels Approval", { timeout: 5000 }, async (t) => {
+    const root = await createTestTempDirectory("instance-direct-ingress-drain");
+    const restoreHome = redirectHome(root);
+    const instance = createInstance(normalizeConfigInstanceDraft({
+        approvalPolicy: { mode: "ask" },
+        name: "direct-ingress",
+        provider: "local",
+    }));
+    t.after(async () => {
+        await instance.close().catch(() => undefined);
+        restoreHome();
+        await rm(root, { force: true, recursive: true });
+    });
+    const list = routeOperation(routePort(instance.host(), "approval"), "list");
+    const pendingCall = instance.toolCallIngress.call(instance.config.name, "shell_run", {}, {
+        ctxId: "direct-context", source: "cli", workspace: "/workspace",
+    });
+    await waitFor(async () => {
+        const pending = await list.handle(
+            { id: "direct-list", name: "list", payload: { pendingOnly: true } },
+            createContext(instance.config.name),
+        );
+        return Array.isArray(pending) && pending.length === 1 ? pending : undefined;
+    });
+    const closing = instance.close();
+    await assert.rejects(pendingCall, { code: runtimeErrorCodes.toolCallRejected });
+    await closing;
+    assert.equal(instance.lifecycle.closed, true);
+});
+
 test("instance generations resume the persisted event cursor after finalization", async (t) => {
     const root = await createTestTempDirectory("instance-event-generation");
     const restoreHome = redirectHome(root);
