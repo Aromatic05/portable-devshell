@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 [control]
 logLevel = "info"
@@ -8,6 +8,3 @@ enabled = true
 listenHost = "0.0.0.0"
 listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
-
-[mcp.auth]
-mode = "none"

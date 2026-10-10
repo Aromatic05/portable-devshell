@@ -5,20 +5,18 @@ import {
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
-import { migrateInstanceConfigV2OrV3 } from "../Migration.js";
-
 import type { ConfigTomlDocument } from "../TomlCodec.js";
 
 export class ControlInstanceTomlDocument {
     decode(document: ConfigTomlDocument): ConfigInstanceDraft {
         const record = asRecord(document);
         const version = readDocumentVersion(record.version);
-        if (version !== 2 && version !== 3 && version !== 4) {
+        if (version !== 4) {
             throw configInputError(
                 "parse",
                 ["version"],
                 "config.document.versionUnsupported",
-                "must be 2, 3, or 4",
+                "must be 4",
             );
         }
         rejectLegacyField(record, "workerBinaryPath", "is not supported");
@@ -29,17 +27,8 @@ export class ControlInstanceTomlDocument {
             "sshBinary",
             "is not supported; use ssh.command",
         );
-        if (version === 3) {
-            rejectLegacyField(
-                record,
-                "workspace",
-                "is not supported; select an absolute workspace when creating an environment context",
-            );
-        }
         const { version: _version, ...versionless } = record;
-        return version === 4
-            ? parseConfigInstanceDraft(versionless)
-            : migrateInstanceConfigV2OrV3(versionless, version);
+        return parseConfigInstanceDraft(versionless);
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {

@@ -146,19 +146,6 @@ const candidateProtocolRanges = {
     worker: WORKER_PROTOCOL_RANGE,
 } satisfies Record<ProtocolSurface, ControlUpdateProtocolRange>;
 
-/**
- * @compat update-preflight-legacy-protocol-generations
- * @removeAt 0.7.10
- */
-const legacyProtocolVersions: Record<
-    ProtocolSurface,
-    ReadonlyMap<number, string>
-> = {
-    control: new Map([[1, "1.0.0"]]),
-    frame: new Map([[1, "1.0.0"]]),
-    worker: new Map([[7, "1.0.0"]]),
-};
-
 async function inspectProtocolCompatibility(
     currentApplicationDirectory: string | undefined,
 ): Promise<ControlUpdatePreflightResult["protocols"]> {
@@ -275,10 +262,6 @@ async function readProtocolModuleRange(
     if (typeof version === "string") {
         parseProtocolVersion(version);
         return { max: version, min: version };
-    }
-    if (typeof version === "number") {
-        const mapped = legacyProtocolVersions[surface].get(version);
-        if (mapped !== undefined) return { max: mapped, min: mapped };
     }
     throw new Error(
         `Current ${surface} protocol contract does not expose a supported range.`,

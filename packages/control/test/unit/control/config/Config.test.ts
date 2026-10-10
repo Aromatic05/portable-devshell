@@ -25,6 +25,40 @@ const toml = new ControlConfigTomlCodec();
 const globalDocument = new ControlGlobalTomlDocument();
 const instanceDocument = new ControlInstanceTomlDocument();
 
+async function assertRetiredConfigRejected(options: {
+    globalSource?: string;
+    instanceName?: string;
+    instanceSource?: string;
+}): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("control-legacy");
+    try {
+        const paths = new ControlPathHome(homeDirectory);
+        const configFile = options.instanceName === undefined
+            ? paths.configFile
+            : paths.instanceConfigFile(options.instanceName);
+        const source = options.globalSource ?? options.instanceSource;
+        if (source === undefined) throw new Error("missing Config rejection fixture");
+        if (options.instanceName !== undefined) {
+            await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        }
+        await writeFileWithParents(configFile, source);
+        await assert.rejects(
+            new ControlConfigStore().readOrCreate(homeDirectory),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, "control.configParseFailed");
+                assert.equal(
+                    (error as { details?: { fieldPath?: string } }).details?.fieldPath,
+                    "version",
+                );
+                return true;
+            },
+        );
+        assert.equal(await readFile(configFile, "utf8"), source);
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+}
+
 test("readOrCreate persists a private control config", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
@@ -108,314 +142,47 @@ test("instance TOML preserves Workspace feature enablement", () => {
     );
 });
 
-test("version 1 global MCP auth normalizes on read and migrates explicitly to version 2", async () => {
-    const homeDirectory = await createTestTempDirectory("control-home");
-    const token = "0123456789abcdef0123456789abcdef";
-
-    try {
-        const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(
-            paths.configFile,
-            [
-                "version = 1",
-                "[control]",
-                'logLevel = "info"',
-                "[mcp]",
-                "enabled = true",
-                'listenHost = "127.0.0.1"',
-                "listenPort = 17890",
-                "[mcp.auth]",
-                'mode = "token"',
-                `token = "${token}"`,
-                "[web]",
-                "enabled = true",
-            ].join("\n"),
-        );
-        await writeFileWithParents(
-            paths.instanceConfigFile("demo-local"),
-            encodeInstance(createInstanceConfig()),
-        );
-
-        const config = await new ControlConfigStore().readOrCreate(
-            homeDirectory,
-        );
-        assert.deepEqual(config.instances[0]?.mcp.auth, {
-            mode: "token",
-            token,
-        });
-        assert.match(
-            await readFile(paths.configFile, "utf8"),
-            /^version = 1$/mu,
-        );
-        assert.deepEqual(
-            await new ControlConfigStore().inspectMigration(homeDirectory),
-            { changed: true },
-        );
-        assert.deepEqual(
-            await new ControlConfigStore().migrate(homeDirectory),
-            {
-                changed: true,
-            },
-        );
-        const global = await readFile(paths.configFile, "utf8");
-        const instance = await readFile(
-            paths.instanceConfigFile("demo-local"),
-            "utf8",
-        );
-        assert.match(global, /^version = 2$/mu);
-        assert.doesNotMatch(global, /\[mcp\.auth\]/u);
-        assert.match(instance, /auth = "token"/u);
-        assert.deepEqual(
-            await new ControlConfigStore().migrate(homeDirectory),
-            {
-                changed: false,
-            },
-        );
-        assert.deepEqual(
-            await new ControlConfigStore().inspectMigration(homeDirectory),
-            { changed: false },
-        );
-    } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
+test("global v1 MCP auth cannot be loaded or silently upgraded", async () => {
+    await assertRetiredConfigRejected({
+        globalSource: [
+            "version = 1", "[mcp]", "enabled = true",
+            "[mcp.auth]", 'mode = "token"',
+            'token = "0123456789abcdef0123456789abcdef"',
+        ].join("\n"),
+    });
 });
 
-test("legacy instance migration keeps explicit MCP context mode without legacy global auth", async () => {
-    const homeDirectory = await createTestTempDirectory("control-home");
-
-    try {
-        const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(
-            paths.configFile,
-            toml.encode(
-                globalDocument.encode(
-                    normalizeConfigGlobalDraft({ mcp: { enabled: true } }),
-                ),
-            ),
-        );
-        await writeFileWithParents(
-            paths.instanceConfigFile("legacy-no-auth"),
-            toml.encode({
-                enabled: true,
-                mcp: { enabled: true },
-                name: "legacy-no-auth",
-                provider: "local",
-                version: 3,
-            }),
-        );
-
-        const store = new ControlConfigStore();
-        const config = await store.readOrCreate(homeDirectory);
-        assert.equal(config.instances[0]?.mcp.contextMode, "explicit");
-
-        assert.deepEqual(await store.migrate(homeDirectory), {
-            changed: true,
-        });
-        const source = await readFile(
-            paths.instanceConfigFile("legacy-no-auth"),
-            "utf8",
-        );
-        assert.match(source, /^version = 4$/mu);
-        assert.match(source, /contextMode = "explicit"/u);
-    } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
+test("retired instance v3 cannot regain default context authority", async () => {
+    await assertRetiredConfigRejected({
+        instanceName: "legacy-no-auth",
+        instanceSource: toml.encode({
+            enabled: true, mcp: { enabled: true },
+            name: "legacy-no-auth", provider: "local", version: 3,
+        }),
+    });
 });
 
-test("version 2 instance documents normalize on read and migrate explicitly to version 4", async () => {
-    const homeDirectory = await createTestTempDirectory("control-home");
-
-    try {
-        const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(
-            paths.configFile,
-            await readFixture("config-valid.toml"),
-        );
-        await writeFileWithParents(
-            paths.instanceConfigFile("legacy-default"),
-            toml.encode({
-                enabled: true,
-                mcp: {
-                    enabled: true,
-                    tools: {
-                        capabilities: ["read", "write", "execute"],
-                        groups: [
-                            "file",
-                            "bash",
-                            "artifact",
-                            "tmux",
-                            "todo",
-                            "instance",
-                        ],
-                    },
-                },
-                name: "legacy-default",
-                provider: "local",
-                version: 2,
-                workspace: "/tmp/legacy-default",
-            }),
-        );
-        await writeFileWithParents(
-            paths.instanceConfigFile("custom-policy"),
-            toml.encode({
-                enabled: true,
-                mcp: {
-                    enabled: true,
-                    tools: {
-                        capabilities: ["read"],
-                        groups: ["file", "context", "todo"],
-                    },
-                },
-                name: "custom-policy",
-                provider: "local",
-                version: 2,
-                workspace: "/tmp/custom-policy",
-            }),
-        );
-
-        const config = await new ControlConfigStore().readOrCreate(
-            homeDirectory,
-        );
-        assert.deepEqual(
-            config.instances.find(
-                (instance) => instance.name === "legacy-default",
-            )?.extensions.model,
-            ["artifact", "instance", "mcp", "secret", "skill"],
-        );
-        assert.deepEqual(
-            config.instances.find(
-                (instance) => instance.name === "custom-policy",
-            )?.extensions.model,
-            ["artifact", "instance", "mcp", "secret", "skill"],
-        );
-        assert.equal(
-            config.instances.find(
-                (instance) => instance.name === "legacy-default",
-            )?.mcp.contextMode,
-            "explicit",
-        );
-        assert.equal(
-            config.instances.find(
-                (instance) => instance.name === "custom-policy",
-            )?.mcp.contextMode,
-            "explicit",
-        );
-        assert.match(
-            await readFile(paths.instanceConfigFile("legacy-default"), "utf8"),
-            /^version = 2$/mu,
-        );
-        assert.deepEqual(
-            await new ControlConfigStore().migrate(homeDirectory),
-            {
-                changed: true,
-            },
-        );
-        const migratedDefault = await readFile(
-            paths.instanceConfigFile("legacy-default"),
-            "utf8",
-        );
-        const migratedCustom = await readFile(
-            paths.instanceConfigFile("custom-policy"),
-            "utf8",
-        );
-        for (const source of [migratedDefault, migratedCustom]) {
-            assert.match(source, /^version = 4$/mu);
-            assert.doesNotMatch(source, /^workspace\s*=/mu);
-            assert.match(source, /\[workspace\][\s\S]*enabled = true/u);
-            assert.doesNotMatch(
-                source,
-                /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u,
-            );
-            assert.match(source, /contextMode = "explicit"/u);
-            assert.match(source, /\[extensions\]/u);
-            assert.match(
-                source,
-                /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u,
-            );
-        }
-        assert.deepEqual(config.instances[0]!.workspace, { enabled: true });
-        assert.deepEqual(config.instances[1]!.workspace, { enabled: true });
-    } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
+test("retired instance v2 with workspace and MCP group policy is rejected unchanged", async () => {
+    await assertRetiredConfigRejected({
+        instanceName: "legacy-default",
+        instanceSource: toml.encode({
+            enabled: true,
+            mcp: { enabled: true, tools: { capabilities: ["read"], groups: ["file", "todo"] } },
+            name: "legacy-default", provider: "local", version: 2,
+            workspace: "/tmp/legacy-default",
+        }),
+    });
 });
 
-test("version 3 MCP tool policy normalizes on read and migrates explicitly to version 4", async () => {
-    const homeDirectory = await createTestTempDirectory("control-home");
-
-    try {
-        const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(
-            paths.configFile,
-            await readFixture("config-valid.toml"),
-        );
-        await writeFileWithParents(
-            paths.instanceConfigFile("canonical-groups"),
-            toml.encode({
-                enabled: true,
-                mcp: {
-                    enabled: true,
-                    tools: {
-                        capabilities: ["read"],
-                        groups: [
-                            "file",
-                            "environment",
-                            "environ",
-                            "interaction",
-                            "file",
-                        ],
-                    },
-                },
-                name: "canonical-groups",
-                provider: "local",
-                version: 3,
-            }),
-        );
-
-        const config = await new ControlConfigStore().readOrCreate(
-            homeDirectory,
-        );
-        assert.deepEqual(config.instances[0]?.extensions.model, [
-            "artifact",
-            "instance",
-            "mcp",
-            "secret",
-            "skill",
-        ]);
-        assert.equal(config.instances[0]?.mcp.contextMode, "explicit");
-
-        assert.match(
-            await readFile(
-                paths.instanceConfigFile("canonical-groups"),
-                "utf8",
-            ),
-            /^version = 3$/mu,
-        );
-        assert.deepEqual(
-            await new ControlConfigStore().migrate(homeDirectory),
-            {
-                changed: true,
-            },
-        );
-
-        const source = await readFile(
-            paths.instanceConfigFile("canonical-groups"),
-            "utf8",
-        );
-        assert.match(source, /^version = 4$/mu);
-        assert.match(source, /contextMode = "explicit"/u);
-        assert.match(source, /\[extensions\]/u);
-        assert.match(
-            source,
-            /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u,
-        );
-        assert.doesNotMatch(
-            source,
-            /\[mcp\.tools\]|groups\s*=|capabilities\s*=|environment|environ|interaction/u,
-        );
-    } finally {
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
+test("retired instance v3 tool policy is not silently normalized into current permissions", async () => {
+    await assertRetiredConfigRejected({
+        instanceName: "canonical-groups",
+        instanceSource: toml.encode({
+            enabled: true,
+            mcp: { enabled: true, tools: { capabilities: ["read"], groups: ["file"] } },
+            name: "canonical-groups", provider: "local", version: 3,
+        }),
+    });
 });
 
 test("global TOML round-trips the independent WebUI enable switch", () => {

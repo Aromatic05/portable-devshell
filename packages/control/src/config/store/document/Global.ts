@@ -5,8 +5,6 @@ import {
     type ControlGlobalConfig,
 } from "@portable-devshell/shared";
 
-import { migrateGlobalConfigV1 } from "../Migration.js";
-
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
@@ -23,12 +21,12 @@ export class ControlGlobalTomlDocument {
     decode(document: ConfigTomlDocument): ConfigGlobalDraft {
         const record = asRecord(document);
         const version = readDocumentVersion(record.version);
-        if (version !== 1 && version !== 2) {
+        if (version !== 2) {
             throw configInputError(
                 "parse",
                 ["version"],
                 "config.document.versionUnsupported",
-                "must be 1 or 2",
+                "must be 2",
             );
         }
         if (record.instances !== undefined) {
@@ -41,7 +39,6 @@ export class ControlGlobalTomlDocument {
         }
         const { version: _version, ...config } = record;
         assertRegisteredGlobalDomains(config, this.#registry);
-        if (version === 1) return migrateGlobalConfigV1(config);
         return parseConfigGlobalDraft(config);
     }
 

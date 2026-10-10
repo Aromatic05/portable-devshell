@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 [control]
 logLevel = "info"
@@ -8,7 +8,3 @@ enabled = true
 listenHost = "127.0.0.1"
 listenPort = 17890
 publicBaseUrl = "http://127.0.0.1:17890"
-
-[mcp.auth]
-mode = "token"
-token = "0123456789abcdef0123456789abcdef"

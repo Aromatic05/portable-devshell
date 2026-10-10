@@ -19,16 +19,11 @@ import {
     controlErrorCodes,
     formatConfigPath,
     normalizeConfigGlobalDraft,
+    normalizeConfigInstanceDraft,
     type ControlConfig,
     type ControlGlobalConfig,
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
-
-import {
-    type ConfigGlobalMigrationState,
-    inspectGlobalConfigMigration,
-    normalizeMigratedInstanceConfig,
-} from "./Migration.js";
 
 import { ControlConfigValidator } from "../engine/Validator.js";
 import {
@@ -67,68 +62,48 @@ export class ControlConfigStore {
     }
 
     async readOrCreate(homeDirectory?: string): Promise<ControlConfig> {
-        const loaded = await this.#read(homeDirectory);
-        if (loaded.config !== undefined) return loaded.config;
+        const config = await this.#read(homeDirectory);
+        if (config !== undefined) return config;
 
-        const config = this.#validator.validate(createDefaultControlConfig());
-        await this.write(config, homeDirectory);
-        return config;
+        const created = this.#validator.validate(createDefaultControlConfig());
+        await this.write(created, homeDirectory);
+        return created;
     }
 
     async migrate(
         homeDirectory?: string,
     ): Promise<ControlConfigMigrationResult> {
-        const loaded = await this.#read(homeDirectory);
-        if (loaded.config === undefined || !loaded.migrated)
-            return { changed: false };
-        await this.write(loaded.config, homeDirectory);
-        return { changed: true };
+        await this.#read(homeDirectory);
+        return { changed: false };
     }
 
     async inspectMigration(
         homeDirectory?: string,
     ): Promise<ControlConfigMigrationResult> {
-        const loaded = await this.#read(homeDirectory);
-        return { changed: loaded.config !== undefined && loaded.migrated };
+        await this.#read(homeDirectory);
+        return { changed: false };
     }
 
-    async #read(homeDirectory?: string): Promise<{
-        config?: ControlConfig;
-        migrated: boolean;
-    }> {
+    async #read(homeDirectory?: string): Promise<ControlConfig | undefined> {
         const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
         let globalConfig: ControlGlobalConfig | undefined;
-        let configMigration: ConfigGlobalMigrationState = { required: false };
 
         try {
             const source = await readFile(paths.configFile, "utf8");
             await secureFile(paths.configFile);
-            const draft = this.#globalDocument.decode(
-                this.#tomlCodec.decode(source),
+            globalConfig = normalizeConfigGlobalDraft(
+                this.#globalDocument.decode(this.#tomlCodec.decode(source)),
             );
-            configMigration = inspectGlobalConfigMigration(draft);
-            globalConfig = normalizeConfigGlobalDraft(draft);
         } catch (error) {
             if (!isFileMissingError(error))
                 throw attachConfigFile(error, paths.configFile);
         }
 
-        if (globalConfig === undefined)
-            return { config: undefined, migrated: false };
+        if (globalConfig === undefined) return undefined;
 
-        const loadedInstances = await this.#readInstances(
-            paths,
-            configMigration,
-        );
-        const config = this.#validator.validate({
-            ...globalConfig,
-            instances: loadedInstances.instances,
-        });
-        return {
-            config,
-            migrated: configMigration.required || loadedInstances.migrated,
-        };
+        const instances = await this.#readInstances(paths);
+        return this.#validator.validate({ ...globalConfig, instances });
     }
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
@@ -176,8 +151,7 @@ export class ControlConfigStore {
 
     async #readInstances(
         paths: ControlPathHome,
-        configMigration: ConfigGlobalMigrationState,
-    ): Promise<{ instances: ControlInstanceConfig[]; migrated: boolean }> {
+    ): Promise<ControlInstanceConfig[]> {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, {
@@ -189,7 +163,7 @@ export class ControlConfigStore {
             }
         } catch (error) {
             if (isFileMissingError(error))
-                return { instances: [], migrated: false };
+                return [];
             throw createRemoteError({
                 code: controlErrorCodes.configLoadFailed,
                 cause: error,
@@ -200,7 +174,6 @@ export class ControlConfigStore {
         }
 
         const instances: ControlInstanceConfig[] = [];
-        let migrated = false;
         for (const fileName of entries
             .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
             .map((entry) => entry.name)
@@ -212,17 +185,12 @@ export class ControlConfigStore {
                 const draft = this.#instanceDocument.decode(
                     this.#tomlCodec.decode(source),
                 );
-                const migration = normalizeMigratedInstanceConfig(
-                    draft,
-                    configMigration,
-                );
-                migrated ||= migration.required;
-                instances.push(migration.config);
+                instances.push(normalizeConfigInstanceDraft(draft));
             } catch (error) {
                 throw attachConfigFile(error, filePath);
             }
         }
-        return { instances, migrated };
+        return instances;
     }
 
     async #removeStaleInstances(
