@@ -7,6 +7,8 @@ const host = vi.hoisted(() => ({
     recovery: undefined as undefined | ((request: Record<string, unknown>) => Record<string, unknown>),
     sent: [] as unknown[],
     modelContexts: [] as unknown[],
+    failModelContext: false,
+    failSend: false,
     clients: [] as Array<{
         ontoolinput?: (input: { arguments?: Record<string, unknown> }) => void;
         ontoolresult?: (result: unknown) => void;
@@ -29,8 +31,16 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
                 return { isError: false, content: [], structuredContent: host.recovery(params.arguments) };
             return { isError: false, content: [], structuredContent: { status: "applied" } };
         }
-        async updateModelContext(value: unknown) { host.modelContexts.push(value); return {}; }
-        async sendMessage(value: unknown) { host.sent.push(value); return { isError: false }; }
+        async updateModelContext(value: unknown) {
+            host.modelContexts.push(value);
+            if (host.failModelContext) throw new Error("Host rejected model context");
+            return {};
+        }
+        async sendMessage(value: unknown) {
+            host.sent.push(value);
+            if (host.failSend) throw new Error("Host delivery outcome unknown");
+            return { isError: false };
+        }
         async close() {}
     },
     applyDocumentTheme: vi.fn(),
@@ -56,6 +66,8 @@ afterEach(async () => {
     host.recovery = undefined;
     host.sent.length = 0;
     host.modelContexts.length = 0;
+    host.failModelContext = false;
+    host.failSend = false;
     globalThis.fetch = originalFetch;
 });
 
@@ -308,4 +320,70 @@ test("server Task resume directive delivers exactly one Host message", async () 
     expect(host.sent).toEqual([{ role: "user", content: [{ type: "text", text: "Resume authorized Todo" }] }]);
     expect(host.modelContexts).toHaveLength(1);
     expect(container.textContent).not.toContain("private-task-lease");
+});
+
+function recoverySnapshotForFailure() {
+    return {
+        ctxId: "ctx-failure", instance: "demo", cursor: 12, agentBusy: false,
+        presentation: { work: [], background: [] },
+        reentry: { pending: true, directives: [{
+            kind: "reentry", id: "receipt-failure", intent: "goal-resume", sourceId: "goal-a",
+        }] },
+    };
+}
+
+async function mountRecoveryFailure(kind: "model-context" | "send-message") {
+    host.failModelContext = kind === "model-context";
+    host.failSend = kind === "send-message";
+    host.recovery = (request) => {
+        if (request.action === "claim") return { claimed: true, delivery: {
+            message: "Resume Goal after failed Host handoff",
+            modelContext: { structuredContent: { portableDevshellMcpApp: { ctxId: "ctx-failure" } } },
+        } };
+        if (request.action === "validate") return { valid: true };
+        if (request.action === "attempt") return { attempted: true };
+        return {};
+    };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot"))
+            return Promise.resolve(new Response(JSON.stringify(recoverySnapshotForFailure()), { status: 200 }));
+        if (String(input).includes("/watch")) return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+        throw new Error("Unexpected MCP App request");
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => {
+        host.clients[0]?.ontoolresult?.({ _meta: { "portable-devshell/mcpapp": {
+            ctxId: "ctx-failure", token: "private-reentry-capability",
+            liveBaseUrl: "https://devshell.example/api/live/demo/workspace",
+        } } });
+    });
+}
+
+test("React MCP App releases a claimed Reentry when Host model-context injection fails", async () => {
+    await mountRecoveryFailure("model-context");
+    await vi.waitFor(() => expect(host.actions.map((call) => call.arguments.action))
+        .toEqual(["claim", "validate", "release"]));
+    expect(host.modelContexts).toHaveLength(1);
+    expect(host.sent).toHaveLength(0);
+    expect(host.actions.some((call) => call.arguments.action === "attempt")).toBe(false);
+    expect(container!.textContent).toContain("Host rejected model context");
+});
+
+test("React MCP App reports uncertain Host delivery without replaying a Reentry", async () => {
+    await mountRecoveryFailure("send-message");
+    await vi.waitFor(() => expect(host.actions.map((call) => call.arguments.action))
+        .toEqual(["claim", "validate", "attempt", "report"]));
+    expect(host.actions.at(-1)?.arguments.outcome).toBe("uncertain");
+    expect(host.sent).toHaveLength(1);
+    expect(host.modelContexts).toHaveLength(1);
+    await vi.waitFor(() => expect(container!.textContent).toContain("Host delivery outcome unknown"));
+    await act(async () => { await Promise.resolve(); });
+    expect(host.actions.filter((call) => call.arguments.action === "claim")).toHaveLength(1);
+    expect(host.sent).toHaveLength(1);
 });
