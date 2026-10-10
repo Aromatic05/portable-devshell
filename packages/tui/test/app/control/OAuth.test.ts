@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { type ReadStream, type WriteStream } from "node:tty";
@@ -16,6 +16,7 @@ import {
     type MessageStream,
 } from "@portable-devshell/shared";
 import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
+import { modernRpcHeaders, modernRpcRequest } from "../../../../mcp/test/integration/ModernProtocol.ts";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import {
     requireTcpPort,
@@ -31,12 +32,32 @@ import {
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 {
-    test("real TUI keyboard approval completes registration, authorization, token exchange, and MCP login", async (t) => {
+    test("real TUI keyboard approval completes first-party client onboarding, authorization, token exchange and modern MCP login", async (t) => {
         const directory = await createTestTempDirectory("tui-oauth-login");
         const socketPath = createTestIpcPath("tui-oauth-login", directory);
         const proxy = await startLoopbackHttpProxy();
         const origin = proxy.origin;
         const endpoint = `${origin}/demo/mcp`;
+        // The public DCR endpoint is intentionally retired. This is a real
+        // non-DCR client stored in the owning OIDC adapter before Host warmup.
+        const client = {
+            client_id: "portable-devshell-tui-keyboard-client",
+            redirect_uris: ["https://client.example/callback"],
+        };
+        const adapterDir = join(directory, "oauth", "adapter");
+        await mkdir(adapterDir, { recursive: true });
+        await writeFile(join(adapterDir, "Client.json"), JSON.stringify({
+            [client.client_id]: {
+                payload: {
+                    ...client,
+                    client_name: "TUI keyboard acceptance client",
+                    grant_types: ["authorization_code", "refresh_token"],
+                    response_types: ["code"],
+                    scope: "openid offline_access mcp",
+                    token_endpoint_auth_method: "none",
+                },
+            },
+        }));
         const host = new TestMcpHost({
             instances: [
                 {
@@ -124,6 +145,17 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                                 };
                             },
                         }),
+                        // A real TUI client initializes every domain on one
+                        // Endpoint. Missing Artifact subscription routes used
+                        // to race startup with the OAuth keyboard workflow and
+                        // leak a foreign route failure into its confirmation.
+                        routeModule(
+                            "artifact",
+                            {
+                                snapshot: () => ({ lastSeq: 0, shares: [], transfers: [] }),
+                            },
+                            { subscribe: emptySubscription },
+                        ),
                         routeModule(
                             "config",
                             {
@@ -202,39 +234,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             assert.equal(metadataResponse.status, 200);
             const metadata = (await metadataResponse.json()) as {
                 authorization_endpoint: string;
-                registration_endpoint: string;
                 token_endpoint: string;
             };
-
-            const registrationRequest = fetch(
-                metadata.registration_endpoint,
-                {
-                    body: JSON.stringify({
-                        application_type: "native",
-                        client_name: "TUI keyboard acceptance client",
-                        grant_types: ["authorization_code", "refresh_token"],
-                        redirect_uris: ["https://client.example/callback"],
-                        response_types: ["code"],
-                        scope: "mcp",
-                        token_endpoint_auth_method: "none",
-                    }),
-                    headers: { "content-type": "application/json" },
-                    method: "POST",
-                },
-            );
-            await approvePendingWithKeyboard(
-                runtime,
-                terminal,
-                host.oauthApprovals!,
-                "registration",
-            );
-            const registrationResponse = await registrationRequest;
-            assert.equal(registrationResponse.status, 201);
-            const client = (await registrationResponse.json()) as {
-                client_id: string;
-                redirect_uris: string[];
-            };
-            assert.equal(typeof client.client_id, "string");
+            assert.equal("registration_endpoint" in metadata, false);
 
             const verifier = randomBytes(32).toString("base64url");
             const challenge = createHash("sha256")
@@ -281,20 +283,10 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             assert.equal(typeof tokens.refresh_token, "string");
 
             const login = await fetch(endpoint, {
-                body: JSON.stringify({
-                    id: "login",
-                    jsonrpc: "2.0",
-                    method: "initialize",
-                    params: {
-                        capabilities: {},
-                        clientInfo: { name: "tui-keyboard-test", version: "1" },
-                        protocolVersion: "2025-03-26",
-                    },
-                }),
+                body: JSON.stringify(modernRpcRequest("login", "server/discover")),
                 headers: {
-                    accept: "application/json, text/event-stream",
+                    ...modernRpcHeaders("server/discover"),
                     authorization: `Bearer ${tokens.access_token}`,
-                    "content-type": "application/json",
                 },
                 method: "POST",
             });
@@ -392,7 +384,25 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 (approval) => approval.approvalId === pending.approvalId,
             );
             return current?.status === "approved";
+        }).catch(async (error: unknown) => {
+            const current = (await approvals.list()).find(
+                (approval) => approval.approvalId === pending.approvalId,
+            );
+            throw new Error(
+                `TUI ${kind} approval ${pending.approvalId} not completed: ${JSON.stringify({
+                    status: current?.status,
+                    overlay: topTuiOverlay(runtime.store.getState().interaction.overlays),
+                    focus: runtime.store.getState().interaction.focusScope,
+                })}`,
+                { cause: error },
+            );
         });
+        // The persisted approval can be visible before Ink dismisses its
+        // confirmation modal. A subsequent keyboard approval must not enter
+        // while that modal still owns the focus.
+        await waitUntil(() =>
+            runtime.store.getState().interaction.focusScope !== "confirm",
+        );
     }
 
     async function enterMainBoxes(runtime: TuiRuntime): Promise<void> {
@@ -517,6 +527,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         let currentUrl = initialUrl;
         let cookieHeader = "";
         let method: "GET" | "POST" = "GET";
+        let approvalKind: "authorization" | "registration" = "registration";
         for (let step = 0; step < 20; step += 1) {
             const response: Response = await fetch(currentUrl, {
                 body:
@@ -542,12 +553,20 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
             if (response.status === 200) {
                 const html = await response.text();
                 assert.match(html, /interaction-form/u);
+                if (html.includes("window.location.reload()")) {
+                    await approvePendingWithKeyboard(
+                        runtime, terminal, approvals, "registration",
+                    );
+                    approvalKind = "authorization";
+                    method = "GET";
+                    continue;
+                }
                 if (html.includes("Waiting for administrator approval.")) {
                     await approvePendingWithKeyboard(
                         runtime,
                         terminal,
                         approvals,
-                        "authorization",
+                        approvalKind,
                     );
                 }
                 method = "POST";
@@ -559,7 +578,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     runtime,
                     terminal,
                     approvals,
-                    "authorization",
+                    approvalKind,
                 );
                 method = "POST";
                 continue;

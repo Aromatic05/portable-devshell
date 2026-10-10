@@ -564,7 +564,6 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         const commentStore = new MessageStore({
             filePath: join(root, "message.sqlite3"),
             instanceName: "alpha",
-            legacyContextMessagesFile: join(root, "context-messages.json"),
         });
         const messages = new CommentService({
             appendEvent: async () => undefined,

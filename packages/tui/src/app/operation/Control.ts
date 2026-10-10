@@ -246,7 +246,10 @@ export class TuiRuntimeControlOperations {
         decision: "approve" | "deny",
     ): Promise<void> {
         await this.options.domains.mcp.decideApproval(approvalId, decision);
-        await this.#refreshBestEffort(
+        // The decision is committed at this point. Refetching the entire MCP
+        // panel is best-effort and may stall on a slow domain connection; it
+        // must not keep the keyboard confirmation overlay busy after approval.
+        void this.#refreshBestEffort(
             this.#panelKey("connections"),
             async () => {
                 await this.options.domains.mcp.refresh();
