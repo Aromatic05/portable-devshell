@@ -317,14 +317,12 @@ export class Instance {
         await this.#eventLog.flush().catch((error) => {
             failures.push(error);
         });
-        let resourcesClosed = false;
-        await this.#state
-            .close()
-            .then(() => {
-                resourcesClosed = true;
-            })
-            .catch((error) => failures.push(error));
-        if (resourcesClosed) this.#lifecycle.completeClose();
+        // Supervision still writes Instance events when it closes. Only close
+        // Audit after every Audit-dependent stage succeeded.
+        if (failures.length === 0) {
+            await this.#state.close().catch((error) => failures.push(error));
+            if (failures.length === 0) this.#lifecycle.completeClose();
+        }
         if (failures.length === 0) return;
         if (failures.length === 1) throw failures[0];
         throw new AggregateError(

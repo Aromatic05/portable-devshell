@@ -231,17 +231,9 @@ export class InstanceState {
     }
 
     async #close(): Promise<void> {
-        const failures: unknown[] = [];
-        await this.retire().catch((error) => {
-            failures.push(error);
-        });
-        await this.audit.close().catch((error) => {
-            failures.push(error);
-        });
-        if (failures.length > 0)
-            throw new AggregateError(
-                failures,
-                `Instance ${this.#instanceName} failed to close.`,
-            );
+        // Domain retirement may append terminal Audit events. Preserve the
+        // database if retirement fails so the next close() can retry safely.
+        await this.retire();
+        await this.audit.close();
     }
 }
