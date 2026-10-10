@@ -14,10 +14,17 @@ import type { McpExtension } from "./extension/Contract.js";
 import { McpHostRouteRegistry, type McpHostRouteEntry } from "./Registry.js";
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MCP_DRAIN_TIMEOUT_MS = 5_000;
+
+interface AcceptedMcpRequest {
+    done: Promise<void>;
+    response: ServerResponse;
+}
 
 /** Protocol routes consume HTTP registration; they never create or close listeners. */
 export class McpProtocolRoute {
     readonly #registry = new McpHostRouteRegistry();
+    readonly #inFlight = new Set<AcceptedMcpRequest>();
     readonly #http: McpHttpRoute;
     readonly #oauth?: McpOAuthProtectedResource;
     readonly #publicBaseUrl?: string;
@@ -100,6 +107,54 @@ export class McpProtocolRoute {
         for (const instance of [...this.#releases.keys()]) this.#unmount(instance);
     }
 
+    /**
+     * Stop admission via stop() first; then wait for responses accepted by
+     * this generation. Hot replacement deliberately does not call drain().
+     * A final shutdown may bound the grace period and close only stragglers.
+     */
+    async drain(options: { timeoutMs?: number; force?: boolean } = {}): Promise<void> {
+        const timeoutMs = options.timeoutMs ?? MCP_DRAIN_TIMEOUT_MS;
+        if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+            throw new TypeError("MCP drain timeout must be a non-negative safe integer.");
+        }
+        const accepted = [...this.#inFlight];
+        if (accepted.length === 0) return;
+        const done = Promise.all(accepted.map((entry) => entry.done));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timedOut = await Promise.race([
+            done.then(() => false),
+            new Promise<boolean>((resolve) => {
+                timer = setTimeout(() => resolve(true), timeoutMs);
+            }),
+        ]);
+        if (timer !== undefined) clearTimeout(timer);
+        if (!timedOut) return;
+        if (!options.force) {
+            throw new Error(`MCP generation still has ${this.#inFlight.size} in-flight response(s).`);
+        }
+        for (const entry of accepted) {
+            if (this.#inFlight.has(entry)) {
+                entry.response.destroy(new Error("MCP generation final shutdown grace expired."));
+            }
+        }
+        await done;
+    }
+
+    #accept(response: ServerResponse): void {
+        let finish!: () => void;
+        const done = new Promise<void>((resolve) => { finish = resolve; });
+        const accepted: AcceptedMcpRequest = { done, response };
+        const complete = () => {
+            if (!this.#inFlight.delete(accepted)) return;
+            response.off("finish", complete);
+            response.off("close", complete);
+            finish();
+        };
+        this.#inFlight.add(accepted);
+        response.once("finish", complete);
+        response.once("close", complete);
+    }
+
     list(): McpHostRouteEntry[] {
         return this.#registry.list();
     }
@@ -162,8 +217,16 @@ export class McpProtocolRoute {
                         next();
                         return;
                     }
+                    if (released) {
+                        respond(response, 503, { error: "MCP generation no longer accepts requests" });
+                        return;
+                    }
+                    // Count from admission through HTTP response completion,
+                    // including OAuth verification, body parsing and SSE.
+                    this.#accept(response);
                     const dispatch = () => {
                         void this.#dispatch(binding, request, response).catch((error: unknown) => {
+                            if (response.destroyed) return;
                             if (response.headersSent) {
                                 response.end();
                                 return;

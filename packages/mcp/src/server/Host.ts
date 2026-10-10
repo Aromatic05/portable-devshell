@@ -117,14 +117,23 @@ export class McpHost {
 
     async stop(): Promise<void> {
         this.retire();
+        await this.drain({ timeoutMs: 5_000, force: true });
         await this.#httpServer.stop();
+    }
+
+    /** Explicit final-shutdown barrier; not used when hot-replacing a Host. */
+    async drain(options: { timeoutMs?: number; force?: boolean } = {}): Promise<void> {
+        await this.#protocol.drain(options);
     }
 
     async dispose(): Promise<void> {
         if (this.#disposed) return;
         this.#disposed = true;
         try {
-            await this.stop();
+            // Disposal after hot replacement releases the HTTP lease but leaves
+            // previously admitted requests running on their captured Binding.
+            this.retire();
+            await this.#httpServer.stop();
         } finally {
             await this.#httpServer.dispose?.();
         }

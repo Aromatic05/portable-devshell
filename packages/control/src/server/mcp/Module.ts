@@ -260,6 +260,11 @@ export class McpControlModule {
         const failures: unknown[] = [];
         await this.#runtimeState.app.flushContextCleanup().catch((error) => failures.push(error));
         if (this.#host !== undefined) {
+            if (this.#host instanceof McpHost) {
+                this.#host.retire();
+                await this.#host.drain({ timeoutMs: 5_000, force: true })
+                    .catch((error) => failures.push(error));
+            }
             await this.stopHost(this.#host).catch((error) => failures.push(error));
             if (this.#host instanceof McpHost)
                 await this.#host.dispose().catch((error) => failures.push(error));
