@@ -1,5 +1,7 @@
-# MCP App browser asset
+# MCP App browser assets
 
-`node scripts/build-mcpapp-client.mjs` builds `dist/mcpapp-client.js` directly from the client TypeScript modules, without requiring the package's Node source build. `pnpm --filter @portable-devshell/mcp test` runs it before loading Resource or tests.
+The production MCP App is the React application at `packages/mcpapp/src/`. It is built by Vite and its manifest is installed into `dist/mcpapp` by `scripts/install-mcpapp-assets.mjs`. `mcpAppHtmlForPublicBaseUrl()` serves these assets.
 
-Before running another package's MCP App browser tests, run `pnpm --filter @portable-devshell/mcp exec node scripts/build-mcpapp-client.mjs` so Resource loads a current bundle. Resource deliberately fails when the asset is missing; it never uses a runtime fallback. The package build runs TypeScript first, then produces the same browser asset.
+`node scripts/build-mcpapp-client.mjs` separately builds `dist/mcpapp-client.js` from the deprecated TypeScript client under `src/mcpapp/app/client/`. This is **test-only compatibility** for `src/mcpapp/app/Legacy.ts` and fixtures imported through `@portable-devshell/mcp/testing`. It is not the deployed React MCP App.
+
+The package `build` and `test` scripts still generate this bundle because existing MCP/Control browser fixtures require it. The explicit removal prerequisites are recorded in `packages/mcp/docs/mcpapp-legacy.md`.
