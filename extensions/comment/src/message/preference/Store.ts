@@ -18,12 +18,10 @@ import {
 
 export class MessagePreferenceStore {
     readonly #filePath: string;
-    readonly #legacyFilePath?: string;
     #operationQueue = Promise.resolve();
 
-    constructor(filePath: string, legacyFilePath?: string) {
+    constructor(filePath: string) {
         this.#filePath = filePath;
-        this.#legacyFilePath = legacyFilePath;
     }
 
     async read(): Promise<MessagePreferencesSnapshot> {
@@ -50,28 +48,10 @@ export class MessagePreferenceStore {
                 throw error;
             },
         );
-        if (source === undefined) return await this.#readLegacy();
+        if (source === undefined) return createEmptyMessagePreferences();
         return parseMessagePreferencesSnapshot(
             JSON.parse(source) as unknown,
         );
-    }
-
-    async #readLegacy(): Promise<MessagePreferencesSnapshot> {
-        if (this.#legacyFilePath === undefined)
-            return createEmptyMessagePreferences();
-        const source = await readFile(this.#legacyFilePath, "utf8").catch(
-            (error: unknown) => {
-                if (isMissing(error)) return undefined;
-                throw error;
-            },
-        );
-        if (source === undefined) return createEmptyMessagePreferences();
-        const preferences = parseMessagePreferencesSnapshot(
-            JSON.parse(source) as unknown,
-        );
-        await this.#write(preferences);
-        await unlink(this.#legacyFilePath).catch(() => undefined);
-        return preferences;
     }
 
     async #write(snapshot: MessagePreferencesSnapshot): Promise<void> {

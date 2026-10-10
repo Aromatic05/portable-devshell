@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
-
-import {
-    asInstanceName,
-    type ContextMessageRecord,
-    type ToolCallRecord,
-} from "@portable-devshell/shared";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { MessageStore } from "../../src/message/store/MessageStore.ts";
@@ -18,170 +11,21 @@ import {
 } from "../../src/message/store/Schema.ts";
 import { MessageService } from "../../src/message/MessageService.ts";
 
-test("MessageStore migrates legacy Comments to current SQLite and preserves the source as a backup", async () => {
-    const root = await createTestTempDirectory(
-        "message-comment-migration",
-    );
-    const legacyFile = join(root, "context-messages.json");
-    const databaseFile = join(root, "message.sqlite3");
-    const legacy: ContextMessageRecord = {
-        callId: "call-comment",
-        createdAt: "2026-09-10T10:00:00.000Z",
-        ctxId: "ctx-a",
-        deliveredAt: "2026-09-10T10:01:00.000Z",
-        id: "message-a",
-        instance: "alpha",
-        status: "delivered",
-        text: "Preserve this Comment",
-    };
-    const source = `${JSON.stringify({ messages: [legacy], version: 1 })}\n`;
-    writeFileSync(legacyFile, source, { mode: 0o600 });
-
-    const store = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-        legacyContextMessagesFile: legacyFile,
-    });
-    assert.deepEqual(store.listComments(), [legacy]);
-    assert.equal(
-        readUserVersion(databaseFile),
-        MESSAGE_DATABASE_SCHEMA_VERSION,
-    );
-    assert.equal(existsSync(legacyFile), false);
-    assert.equal(readFileSync(`${legacyFile}.migrated-v1.bak`, "utf8"), source);
-    store.close();
-
-    const reopened = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-        legacyContextMessagesFile: legacyFile,
-    });
-    assert.deepEqual(reopened.listComments(), [legacy]);
-    reopened.close();
-});
-
-test("MessageStore migrates the legacy conversation database file and v1 table names once", async () => {
+test("MessageStore migrates v1 conversation table names once", async () => {
     const root = await createTestTempDirectory("message-database-v1-migration");
-    const legacyDatabaseFile = join(root, "conversation.sqlite3");
     const databaseFile = join(root, "message.sqlite3");
-    createLegacyMessageDatabaseV1(legacyDatabaseFile);
+    createLegacyMessageDatabaseV1(databaseFile);
 
     const store = new MessageStore({
         filePath: databaseFile,
         instanceName: "alpha",
-        legacyDatabaseFile,
     });
     assert.deepEqual(
         store.listComments().map(({ ctxId, id, text }) => ({ ctxId, id, text })),
         [{ ctxId: "ctx-legacy", id: "legacy-comment", text: "Legacy message" }],
     );
-    assert.equal(existsSync(legacyDatabaseFile), false);
-    assert.equal(existsSync(databaseFile), true);
     assert.equal(readUserVersion(databaseFile), MESSAGE_DATABASE_SCHEMA_VERSION);
     store.close();
-});
-
-test("MessageStore backfills durable control state from pre-metadata history once", async () => {
-    const root = await createTestTempDirectory("message-control-backfill");
-    const databaseFile = join(root, "message.sqlite3");
-    const store = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    store.insertComment({
-        createdAt: "2026-09-10T10:00:00.000Z",
-        ctxId: "ctx-a",
-        deliveredAt: "2026-09-10T10:00:01.000Z",
-        id: "legacy-stop",
-        instance: "alpha",
-        status: "delivered",
-        text: "#stop Preserve this fence",
-    });
-    store.close();
-    mutateMessageDatabase(
-        databaseFile,
-        `
-        DELETE FROM message_metadata
-        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v3'
-    `,
-    );
-
-    const backfilled = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    assert.deepEqual(backfilled.readControlState("ctx-a"), {
-        stoppedByCommentId: "legacy-stop",
-    });
-    backfilled.close();
-    mutateMessageDatabase(
-        databaseFile,
-        "DELETE FROM message_entries WHERE ctx_id = 'ctx-a'",
-    );
-    const withoutHistory = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    assert.deepEqual(withoutHistory.readControlState("ctx-a"), {
-        stoppedByCommentId: "legacy-stop",
-    });
-    withoutHistory.close();
-});
-
-test("MessageStore v3 control migration rebuilds push_message from history", async () => {
-    const root = await createTestTempDirectory("message-control-v2-push");
-    const databaseFile = join(root, "message.sqlite3");
-    const store = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    store.insertComment({
-        createdAt: "2026-09-10T10:00:00.000Z",
-        ctxId: "ctx-a",
-        deliveredAt: "2026-09-10T10:00:01.000Z",
-        id: "push-1",
-        instance: "alpha",
-        status: "delivered",
-        text: "#push 报告进度",
-    });
-    store.insertComment({
-        createdAt: "2026-09-10T10:00:02.000Z",
-        ctxId: "ctx-a",
-        deliveredAt: "2026-09-10T10:00:03.000Z",
-        id: "follow-up-1",
-        instance: "alpha",
-        status: "delivered",
-        text: "还要说明阻塞点",
-    });
-    store.close();
-    mutateMessageDatabase(
-        databaseFile,
-        `
-        DELETE FROM message_metadata
-        WHERE key = 'migration:context-control-v3';
-        INSERT INTO message_metadata(key, value)
-        VALUES ('migration:context-control-v2', 'complete')
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        INSERT INTO message_metadata(key, value)
-        VALUES (
-            'context-control:v1:ctx-a',
-            '{"pendingPushCommentId":"push-1","pendingReplyCommentId":"push-1","pushToolCallsRemaining":0}'
-        )
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-    `,
-    );
-
-    const migrated = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    assert.deepEqual(migrated.readControlState("ctx-a"), {
-        pendingPushCommentId: "push-1",
-        pendingReplyCommentId: "follow-up-1",
-        pushMessage: "#push 报告进度\n\n还要说明阻塞点",
-        pushToolCallsRemaining: 0,
-    });
-    migrated.close();
 });
 
 test("MessageStore clears only the #push snapshot acknowledged by a report", async () => {
@@ -243,50 +87,6 @@ test("MessageStore clears only the #push snapshot acknowledged by a report", asy
     });
     assert.deepEqual(store.readControlState("ctx-a"), {});
     store.close();
-});
-
-test("MessageStore v3 control migration restores standalone #push", async () => {
-    const root = await createTestTempDirectory(
-        "message-control-v3-standalone-push",
-    );
-    const databaseFile = join(root, "message.sqlite3");
-    const store = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    store.insertComment({
-        createdAt: "2026-09-20T08:15:17.222Z",
-        ctxId: "ctx-push-only",
-        deliveredAt: "2026-09-20T08:15:17.233Z",
-        id: "push-only",
-        instance: "alpha",
-        status: "delivered",
-        text: "#push 报告进度",
-    });
-    store.close();
-    mutateMessageDatabase(
-        databaseFile,
-        `
-        DELETE FROM message_metadata
-        WHERE key = 'migration:context-control-v3';
-        INSERT INTO message_metadata(key, value)
-        VALUES ('migration:context-control-v2', 'complete')
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        DELETE FROM message_metadata
-        WHERE key = 'context-control:v1:ctx-push-only';
-    `,
-    );
-
-    const migrated = new MessageStore({
-        filePath: databaseFile,
-        instanceName: "alpha",
-    });
-    assert.deepEqual(migrated.readControlState("ctx-push-only"), {
-        pendingPushCommentId: "push-only",
-        pushMessage: "#push 报告进度",
-        pushToolCallsRemaining: 0,
-    });
-    migrated.close();
 });
 
 test("MessageStore rejects a newer schema without modifying it", async () => {
@@ -461,111 +261,20 @@ test("MessageStore capacity evicts oldest terminal history before protected Comm
     store.close();
 });
 
-test("MessageService imports historical todo_report calls and records new reports idempotently", async () => {
-    const root = await createTestTempDirectory("message-report-migration");
+test("MessageService fences new work after retirement", async () => {
+    const root = await createTestTempDirectory("message-retirement");
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
         instanceName: "alpha",
     });
-    let migrations = 0;
-    const historical: ToolCallRecord = {
-        callId: "call-old",
-        completedAt: "2026-09-10T10:02:00.000Z",
-        ctxId: "ctx-a",
-        input: { message: "Historical report" },
-        inputSummary: "Historical report",
-        instance: asInstanceName("alpha"),
-        source: "mcp",
-        startedAt: "2026-09-10T10:01:00.000Z",
-        status: "completed",
-        toolName: "todo_report",
-    };
-    const service = new MessageService({
-        instanceName: "alpha",
-        legacyReports: async () => {
-            migrations += 1;
-            return [historical];
-        },
-        store,
-    });
-
-    assert.deepEqual(await service.list(), [
-        {
-            callId: "call-old",
-            createdAt: "2026-09-10T10:02:00.000Z",
-            ctxId: "ctx-a",
-            id: "call-old",
-            kind: "report",
-            text: "Historical report",
-        },
-    ]);
+    const service = new MessageService({ instanceName: "alpha", store });
     await service.recordReport({
-        callId: "call-new",
-        createdAt: "2026-09-10T10:03:00.000Z",
+        callId: "call-before",
         ctxId: "ctx-a",
-        text: "New report",
-    });
-    await service.recordReport({
-        callId: "call-new",
-        createdAt: "2026-09-10T10:03:00.000Z",
-        ctxId: "ctx-a",
-        text: "New report",
-    });
-    assert.deepEqual(
-        (await service.list()).map((entry) => [entry.id, entry.text]),
-        [
-            ["call-old", "Historical report"],
-            ["call-new", "New report"],
-        ],
-    );
-    assert.equal(migrations, 1);
-    service.close();
-});
-
-test("MessageService retirement fences new work and drains an in-flight legacy migration before close", async () => {
-    const root = await createTestTempDirectory("message-retirement-drain");
-    const store = new MessageStore({
-        filePath: join(root, "message.sqlite3"),
-        instanceName: "alpha",
-    });
-    let releaseMigration!: () => void;
-    const migrationGate = new Promise<void>((resolve) => {
-        releaseMigration = resolve;
-    });
-    let markMigrationStarted!: () => void;
-    const migrationStarted = new Promise<void>((resolve) => {
-        markMigrationStarted = resolve;
-    });
-    const historical: ToolCallRecord = {
-        callId: "call-old",
-        completedAt: "2026-09-10T10:02:00.000Z",
-        ctxId: "ctx-a",
-        input: { message: "Historical report" },
-        inputSummary: "Historical report",
-        instance: asInstanceName("alpha"),
-        source: "mcp",
-        startedAt: "2026-09-10T10:01:00.000Z",
-        status: "completed",
-        toolName: "todo_report",
-    };
-    const service = new MessageService({
-        instanceName: "alpha",
-        legacyReports: async () => {
-            markMigrationStarted();
-            await migrationGate;
-            return [historical];
-        },
-        store,
+        text: "Before retirement",
     });
 
-    const listing = service.list();
-    await migrationStarted;
-    let retirementFinished = false;
-    const retirement = service.retire().then(() => {
-        retirementFinished = true;
-    });
-    await Promise.resolve();
-    assert.equal(retirementFinished, false);
+    await service.retire();
     await assert.rejects(
         service.recordReport({
             callId: "call-late",
@@ -575,11 +284,6 @@ test("MessageService retirement fences new work and drains an in-flight legacy m
         /not found or is disabled/u,
     );
     await assert.rejects(service.list(), /not found or is disabled/u);
-
-    releaseMigration();
-    assert.equal((await listing)[0]?.text, "Historical report");
-    await retirement;
-    assert.equal(retirementFinished, true);
     service.close();
 
     const reopened = new MessageStore({
@@ -588,7 +292,7 @@ test("MessageService retirement fences new work and drains an in-flight legacy m
     });
     assert.deepEqual(
         reopened.list().map((entry) => entry.text),
-        ["Historical report"],
+        ["Before retirement"],
     );
     reopened.close();
 });
@@ -643,18 +347,6 @@ function createLegacyMessageDatabaseV1(filePath: string): void {
             );
             PRAGMA user_version = 1;
         `);
-    } finally {
-        database.close();
-    }
-}
-
-function mutateMessageDatabase(filePath: string, sql: string): void {
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } =
-        require("node:sqlite") as typeof import("node:sqlite");
-    const database = new DatabaseSync(filePath);
-    try {
-        database.exec(sql);
     } finally {
         database.close();
     }

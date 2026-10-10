@@ -4,38 +4,26 @@ import type {
     MessageListInput,
     JsonValue,
     ControlPortDefinition,
-    ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { migrateLegacyReports } from "./migration/Report.js";
 import { MessageStore } from "./store/MessageStore.js";
 
 export class MessageService {
     readonly #instanceName: string;
-    readonly #legacyReports?: () => Promise<ToolCallRecord[]>;
     readonly #store: MessageStore;
-    #migration?: Promise<void>;
     #operation: Promise<void> = Promise.resolve();
     #retired = false;
     #retirement?: Promise<void>;
 
-    constructor(options: {
-        instanceName: string;
-        legacyReports?: () => Promise<ToolCallRecord[]>;
-        store: MessageStore;
-    }) {
+    constructor(options: { instanceName: string; store: MessageStore }) {
         this.#instanceName = options.instanceName;
-        this.#legacyReports = options.legacyReports;
         this.#store = options.store;
     }
 
     async list(
         input: MessageListInput = {},
     ): Promise<MessageEntry[]> {
-        return await this.#runExclusive(async () => {
-            await this.#ensureLegacyReportsMigrated();
-            return this.#store.list(input);
-        });
+        return await this.#runExclusive(async () => this.#store.list(input));
     }
 
     async recordReport(input: {
@@ -47,7 +35,6 @@ export class MessageService {
         text: string;
     }): Promise<void> {
         await this.#runExclusive(async () => {
-            await this.#ensureLegacyReportsMigrated();
             this.#store.appendReport({
                 callId: input.callId,
                 createdAt: input.createdAt ?? new Date().toISOString(),
@@ -70,17 +57,6 @@ export class MessageService {
 
     close(): void {
         this.#store.close();
-    }
-
-    async #ensureLegacyReportsMigrated(): Promise<void> {
-        if (this.#store.isLegacyReportMigrationComplete()) return;
-        if (this.#migration !== undefined) return await this.#migration;
-        this.#migration = migrateLegacyReports(this.#store, this.#legacyReports);
-        try {
-            await this.#migration;
-        } finally {
-            this.#migration = undefined;
-        }
     }
 
     async #runExclusive<T>(

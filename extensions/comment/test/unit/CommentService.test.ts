@@ -23,7 +23,6 @@ function createCommentService(
         store: new MessageStore({
             filePath: join(root, "message.sqlite3"),
             instanceName: "alpha",
-            legacyContextMessagesFile: join(root, "context-messages.json"),
         }),
     });
 }

@@ -1,5 +1,4 @@
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -26,8 +25,6 @@ import {
 import {
     review,
     rewrite,
-    type ToolCallHistoryCapability,
-    type ToolCallHistoryQuery,
     type ToolCallReviewBinding,
     type ToolCallReviewInvocation,
     type ToolCallReviewResult,
@@ -42,7 +39,6 @@ import type {
     JsonValue,
     ControlPortDefinition,
     MessageEventType,
-    ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -56,6 +52,7 @@ import {
 import { createMessagePreferenceRouteModule } from "./message/preference/Route.js";
 import { MessagePreferenceStore } from "./message/preference/Store.js";
 import { MessageStore } from "./message/store/MessageStore.js";
+import { migrateMessageDatabase } from "./message/store/MessageStorage.js";
 import { createMessageSubscriptionBinding } from "./message/Route.js";
 import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
@@ -88,13 +85,6 @@ export interface CommentExtensionInstance {
     messageDatabaseFile: string;
     enabled: boolean;
     key: object;
-    /**
-     * @compat comment-legacy-migration-inputs
-     * @removeAt 0.7.10
-     */
-    legacyDatabaseFile?: string;
-    legacyContextMessagesFile?: string;
-    legacyReports?: () => Promise<ToolCallRecord[]>;
     name: string;
 }
 
@@ -184,14 +174,10 @@ export class CommentExtension {
 
     constructor(options: {
         instances: CommentInstanceSource;
-        legacyPreferencesFile?: string;
         preferencesFile: string;
     }) {
         this.#source = options.instances;
-        const preferences = new MessagePreferenceStore(
-            options.preferencesFile,
-            options.legacyPreferencesFile,
-        );
+        const preferences = new MessagePreferenceStore(options.preferencesFile);
         const comment: CommentPort = {
             beforeTodoToolCall: async (instance, ctxId, toolName) =>
                 await this.#require(instance).report.beforeTodoToolCall(
@@ -312,15 +298,6 @@ export class CommentExtension {
             const store = new MessageStore({
                 filePath: instance.messageDatabaseFile,
                 instanceName: instance.name,
-                ...(instance.legacyDatabaseFile === undefined
-                    ? {}
-                    : { legacyDatabaseFile: instance.legacyDatabaseFile }),
-                ...(instance.legacyContextMessagesFile === undefined
-                    ? {}
-                    : {
-                          legacyContextMessagesFile:
-                              instance.legacyContextMessagesFile,
-                      }),
             });
             const commentService = new CommentService({
                 appendEvent: instance.appendEvent,
@@ -329,7 +306,6 @@ export class CommentExtension {
             });
             const messageService = new MessageService({
                 instanceName: instance.name,
-                legacyReports: instance.legacyReports,
                 store,
             });
             const next: CommentExtensionInstanceState = {
@@ -430,23 +406,14 @@ export async function activate(context: ExtensionContext): Promise<void> {
             "Comment Extension requires the instanceEventPublish capability.",
         );
     }
-    const toolCallHistory = context.capabilities.toolCallHistory;
-    if (toolCallHistory === undefined) {
-        throw new Error(
-            "Comment Extension requires the toolCallHistory capability.",
-        );
-    }
     const source = new BuiltinCommentInstanceSource(
         instanceObserve,
         instanceEventPublish,
-        toolCallHistory,
+        context.paths.dataDirectory,
     );
     await source.refresh();
     const comment = new CommentExtension({
         instances: source,
-        legacyPreferencesFile: legacyMessagePreferencesFile(
-            context.paths.stateDirectory,
-        ),
         preferencesFile: join(
             context.paths.stateDirectory,
             "message-preferences.json",
@@ -830,7 +797,8 @@ function invalidTodoReportInput(message: string): ExtensionError {
 class BuiltinCommentInstanceSource implements CommentInstanceSource {
     readonly #instanceObserve: ExtensionInstanceObserveCapability;
     readonly #instanceEventPublish: ExtensionInstanceEventPublishCapability;
-    readonly #toolCallHistory: ToolCallHistoryCapability;
+    readonly #dataDirectory: string;
+    readonly #prepared = new Set<string>();
     readonly #keys = new Map<string, object>();
     readonly #listeners = new Set<() => void>();
     #records: readonly { enabled: boolean; name: string }[] = [];
@@ -838,22 +806,15 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
     constructor(
         instanceObserve: ExtensionInstanceObserveCapability,
         instanceEventPublish: ExtensionInstanceEventPublishCapability,
-        toolCallHistory: ToolCallHistoryCapability,
+        dataDirectory: string,
     ) {
         this.#instanceObserve = instanceObserve;
         this.#instanceEventPublish = instanceEventPublish;
-        this.#toolCallHistory = toolCallHistory;
+        this.#dataDirectory = dataDirectory;
     }
 
     list(): readonly CommentExtensionInstance[] {
-        const homeDirectory = resolveWorkerHomeDirectory();
         return this.#records.map((record) => {
-            const root = join(
-                homeDirectory,
-                ".devshell",
-                record.name,
-                "control-worker",
-            );
             return {
                 appendEvent: async (type, data) =>
                     await this.#instanceEventPublish.appendEvent(
@@ -862,22 +823,13 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
                         data as unknown as ExtensionJsonValue,
                     ),
                 messageDatabaseFile: join(
-                    root,
+                    this.#dataDirectory,
+                    "instances",
+                    encodeURIComponent(record.name),
                     "message.sqlite3",
                 ),
-                legacyDatabaseFile: join(root, "conversation.sqlite3"),
                 enabled: record.enabled,
                 key: this.#requireKey(record.name),
-                legacyContextMessagesFile: join(
-                    root,
-                    "context-messages.json",
-                ),
-                legacyReports: async () =>
-                    (await this.#toolCallHistory.read(record.name, {
-                        includeInput: true,
-                        includeOutput: false,
-                        toolName: "todo_report",
-                    } as ToolCallHistoryQuery)) as unknown as ToolCallRecord[],
                 name: record.name,
             };
         });
@@ -897,6 +849,19 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
             enabled: record.enabled,
             name: record.name,
         }));
+        for (const record of next) {
+            if (this.#prepared.has(record.name)) continue;
+            await migrateMessageDatabase({
+                instance: record.name,
+                targetFile: join(
+                    this.#dataDirectory,
+                    "instances",
+                    encodeURIComponent(record.name),
+                    "message.sqlite3",
+                ),
+            });
+            this.#prepared.add(record.name);
+        }
         const previousSignature = instanceSignature(this.#records);
         const nextNames = new Set(next.map((record) => record.name));
         for (const name of [...this.#keys.keys()]) {
@@ -995,45 +960,6 @@ function instanceSignature(
     return records
         .map((record) => `${record.name}\u0000${record.enabled ? "1" : "0"}`)
         .join("\u0001");
-}
-
-/**
- * @compat comment-control-storage-v1
- * @removeAt 0.7.10
- */
-function legacyMessagePreferencesFile(stateDirectory: string): string {
-    return resolve(stateDirectory, "../../..", "conversation-preferences.json");
-}
-
-/**
- * @compat comment-instance-storage-v1
- * @removeAt 0.7.10
- */
-function resolveWorkerHomeDirectory(): string {
-    const environment = process.env;
-    const configured =
-        process.platform === "win32"
-            ? firstNonEmpty(
-                  environment.USERPROFILE,
-                  environment.HOMEDRIVE !== undefined &&
-                      environment.HOMEPATH !== undefined
-                      ? `${environment.HOMEDRIVE}${environment.HOMEPATH}`
-                      : undefined,
-                  environment.HOME,
-              )
-            : firstNonEmpty(environment.HOME, environment.USERPROFILE);
-    const resolved = configured ?? homedir();
-    if (resolved.length === 0)
-        throw new Error("the current user home directory is unavailable");
-    return resolved;
-}
-
-function firstNonEmpty(
-    ...values: readonly (string | undefined)[]
-): string | undefined {
-    return values.find(
-        (value): value is string => value !== undefined && value.length > 0,
-    );
 }
 
 export function commentExtensionDirectory(): string {

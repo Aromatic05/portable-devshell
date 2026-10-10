@@ -53,7 +53,6 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
     const root = await createTestTempDirectory("comment-extension-owner");
     const preferencesFile = join(root, "message-preferences.json");
     const messageDatabaseFile = join(root, "message.sqlite3");
-    const legacyContextMessagesFile = join(root, "context-messages.json");
     const events: Array<{ data: JsonValue; type: string }> = [];
     const firstKey = {};
     const instances = new TestCommentInstances([
@@ -64,8 +63,6 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             messageDatabaseFile,
             enabled: true,
             key: firstKey,
-            legacyContextMessagesFile,
-            legacyReports: async () => [],
             name: "alpha",
         },
     ]);
@@ -105,8 +102,6 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             messageDatabaseFile,
             enabled: true,
             key: {},
-            legacyContextMessagesFile,
-            legacyReports: async () => [],
             name: "alpha",
         },
     ]);
@@ -181,7 +176,6 @@ test("CommentExtension preserves state across a transient disable until committe
         messageDatabaseFile,
         enabled,
         key,
-        legacyReports: async () => [],
         name: "alpha",
     });
     const instances = new TestCommentInstances([source(true)]);
@@ -251,7 +245,6 @@ test("CommentExtension fences a captured route before committed retirement drain
             messageDatabaseFile,
             enabled: true,
             key: {},
-            legacyReports: async () => [],
             name: "alpha",
         },
     ]);

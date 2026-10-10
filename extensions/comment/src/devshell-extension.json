@@ -8,8 +8,7 @@
     "entry": "index.ts",
     "capabilities": [
         "instance.observe",
-        "instance.events.publish",
-        "toolcall.history"
+        "instance.events.publish"
     ],
     "extensions": {
         "control.streams": [

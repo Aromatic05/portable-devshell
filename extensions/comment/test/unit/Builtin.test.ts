@@ -30,7 +30,7 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
     ]);
 });
 
-test("Comment Extension activates from observe, event-publish, and history capabilities without a Comment host interface", async (t) => {
+test("Comment Extension activates from observe and event-publish capabilities without a Comment host interface", async (t) => {
     const registrations: Array<{ id: string; pointId: string; binding: unknown }> = [];
     let lists = 0;
     const context = {
@@ -53,14 +53,6 @@ test("Comment Extension activates from observe, event-publish, and history capab
             },
             instanceEventPublish: {
                 async appendEvent() {},
-            },
-            toolCallHistory: {
-                async listInstances() {
-                    return [];
-                },
-                async read() {
-                    return [];
-                },
             },
         },
         paths: {

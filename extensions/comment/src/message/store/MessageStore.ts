@@ -1,4 +1,4 @@
-import { existsSync, renameSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -8,7 +8,6 @@ import type {
     MessageListInput,
 } from "@portable-devshell/shared";
 
-import { migrateLegacyComments } from "../migration/Comment.js";
 import {
     applyDeliveredControls,
     applyQueuedControl,
@@ -18,11 +17,6 @@ import {
     readMessageControlState,
     writeMessageControlState,
 } from "../MessageControl.js";
-import { migrateMessageControlState } from "../migration/Control.js";
-import {
-    completeLegacyReportMigration,
-    isLegacyReportMigrationComplete,
-} from "../migration/Report.js";
 import {
     applyByteBudget,
     messagePayloadBytesSql,
@@ -58,7 +52,6 @@ export interface MessageStoreStats {
 export class MessageStore {
     readonly #filePath: string;
     readonly #instanceName: string;
-    readonly #legacyContextMessagesFile?: string;
     readonly #maxBytes: number;
     readonly #now: () => number;
     readonly #retentionDays: number;
@@ -70,19 +63,10 @@ export class MessageStore {
     constructor(options: {
         filePath: string;
         instanceName: string;
-        legacyDatabaseFile?: string;
-        legacyContextMessagesFile?: string;
         maxBytes?: number;
         now?: () => number;
         retentionDays?: number;
     }) {
-        if (
-            options.legacyDatabaseFile !== undefined &&
-            !existsSync(options.filePath) &&
-            existsSync(options.legacyDatabaseFile)
-        ) {
-            renameSync(options.legacyDatabaseFile, options.filePath);
-        }
         const maxBytes =
             options.maxBytes ?? defaultMessageStorageLimits.maxBytes;
         const retentionDays =
@@ -100,7 +84,6 @@ export class MessageStore {
         }
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
-        this.#legacyContextMessagesFile = options.legacyContextMessagesFile;
         this.#maxBytes = maxBytes;
         this.#now = options.now ?? Date.now;
         this.#retentionDays = retentionDays;
@@ -433,21 +416,11 @@ export class MessageStore {
         };
     }
 
-    isLegacyReportMigrationComplete(): boolean {
-        return isLegacyReportMigrationComplete(this.#open());
-    }
-
-    completeLegacyReportMigration(): void {
-        completeLegacyReportMigration(this.#open());
-    }
-
     #open(): DatabaseSync {
         if (this.#database !== undefined) return this.#database;
         const database = openMessageDatabase(this.#filePath);
         try {
             this.#database = database;
-            migrateLegacyComments(database, this.#legacyContextMessagesFile);
-            migrateMessageControlState(database);
             this.#payloadBytes = readMessagePayloadBytes(database);
             this.#cleanup(database, true);
             return database;

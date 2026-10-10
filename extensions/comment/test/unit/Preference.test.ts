@@ -1,30 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
 import { MessagePreferenceStore } from "../../src/message/preference/Store.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
-
-test("MessagePreferenceStore migrates the legacy conversation preferences file once", async () => {
-    const root = await createTestTempDirectory("message-preferences-v1-migration");
-    const legacyFile = join(root, "conversation-preferences.json");
-    const filePath = join(root, "message-preferences.json");
-    const legacy = {
-        hiddenContexts: { "ctx-a": true },
-        orderByWorkspace: { "/work/a": ["alpha\u0000ctx-a"] },
-        titles: { "alpha\u0000ctx-a": "Legacy title" },
-        version: 1 as const,
-        workspaceOrder: ["/work/a"],
-    };
-    writeFileSync(legacyFile, `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
-
-    const store = new MessagePreferenceStore(filePath, legacyFile);
-    assert.deepEqual(await store.read(), legacy);
-    assert.equal(existsSync(filePath), true);
-    assert.equal(existsSync(legacyFile), false);
-    assert.deepEqual(await new MessagePreferenceStore(filePath).read(), legacy);
-});
 
 test("MessagePreferenceStore persists titles and ordering across reopen", async () => {
     const root = await createTestTempDirectory("message-preferences");
