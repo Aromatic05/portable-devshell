@@ -9,10 +9,12 @@ import { readOAuthClientName, readOAuthStringArray } from "../Input.js";
 
 import {
     McpOAuthApprovalService,
+    OAuthApprovalCapacityError,
     type OAuthApprovalInput,
 } from "./Approval.js";
 
 type ProviderGrant = InstanceType<Provider["Grant"]>;
+type OAuthClient = Awaited<ReturnType<Provider["Client"]["find"]>>;
 
 export interface McpOAuthInteractionPageInput {
     accountId: string;
@@ -24,6 +26,7 @@ export interface McpOAuthInteractionPageInput {
     clientName: string;
     error?: string;
     promptName: "consent" | "login";
+    redirectUris: string[];
     requestedResources: Array<{
         indicator: string;
         scopes: string[];
@@ -93,6 +96,15 @@ export class McpOAuthInteraction {
                 return `<li><strong>${escapeHtml(indicator)}</strong><ul>${entries}</ul></li>`;
             })
             .join("");
+        const redirects = input.redirectUris
+            .map(
+                (uri) =>
+                    `<li><code>${escapeHtml(redirectHost(uri))}</code> <span class="muted">${escapeHtml(uri)}</span></li>`,
+            )
+            .join("");
+        const localhostOnly =
+            input.redirectUris.length > 0 &&
+            input.redirectUris.every(isLoopbackRedirect);
         const waiting = input.approvalStatus === "pending";
         const approvalPath = `${this.#basePath}/oauth/approvals/${input.approvalId}`;
         const approvedAction =
@@ -178,12 +190,16 @@ export class McpOAuthInteraction {
     code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     pre { overflow-x: auto; background: #f1ede4; border-radius: 8px; padding: 12px; }
     .error { color: #9b1c1c; }
+    .warning { color: #8a5a00; font-weight: 600; }
+    .muted { color: #6b6250; }
   </style>
 </head>
 <body>
   <main>
     <h1>OAuth2 Approval</h1>
     <p><strong>${escapeHtml(input.clientName)}</strong> is requesting access as <strong>${escapeHtml(input.accountId)}</strong>.</p>
+    ${redirects.length > 0 ? `<p>Redirect URIs:</p><ul>${redirects}</ul>` : ""}
+    ${localhostOnly ? `<p class="warning" role="alert">This client only redirects to localhost. Approve only if you started this request from this machine.</p>` : ""}
     ${scopes.length > 0 ? `<p>Scopes:</p><ul>${scopes}</ul>` : ""}
     ${resources.length > 0 ? `<p>Resource access:</p><ul>${resources}</ul>` : ""}
     ${approvalUi}
@@ -208,11 +224,15 @@ export class McpOAuthInteraction {
             return;
         }
 
-        const approval = await this.#approvals.requestAuthorization(
-            String(details.uid),
-            authorizationTransactionId(details),
-            toAuthorizationApprovalInput(details),
+        const client = await resolveProviderClient(provider, details);
+        const approval = await this.#requestAuthorization(
+            response,
+            details,
+            client,
         );
+        if (approval === undefined) {
+            return;
+        }
         if (approval.status === "denied" || approval.status === "expired") {
             await this.#finishDeniedInteraction(
                 provider,
@@ -228,7 +248,7 @@ export class McpOAuthInteraction {
             .type("html")
             .send(
                 this.renderPage(
-                    this.#pageInput(details, approval),
+                    this.#pageInput(details, approval, client),
                 ),
             );
     }
@@ -253,11 +273,15 @@ export class McpOAuthInteraction {
             return;
         }
 
-        let approval = await this.#approvals.requestAuthorization(
-            String(interaction.uid),
-            authorizationTransactionId(interaction),
-            toAuthorizationApprovalInput(interaction),
+        const client = await resolveProviderClient(provider, interaction);
+        let approval = await this.#requestAuthorization(
+            response,
+            interaction,
+            client,
         );
+        if (approval === undefined) {
+            return;
+        }
         if (approval.status === "denied" || approval.status === "expired") {
             await this.#finishDeniedInteraction(
                 provider,
@@ -275,7 +299,7 @@ export class McpOAuthInteraction {
                 response
                     .status(503)
                     .type("html")
-                    .send(this.renderPage(this.#pageInput(interaction, approval)));
+                    .send(this.renderPage(this.#pageInput(interaction, approval, client)));
                 return;
             }
             if (!tokensEqual(configuredToken, suppliedToken)) {
@@ -287,6 +311,7 @@ export class McpOAuthInteraction {
                             this.#pageInput(
                                 interaction,
                                 approval,
+                                client,
                                 "The approval token is invalid.",
                             ),
                         ),
@@ -304,7 +329,7 @@ export class McpOAuthInteraction {
                 approval = await this.#approvals.requestAuthorization(
                     String(interaction.uid),
                     authorizationTransactionId(interaction),
-                    toAuthorizationApprovalInput(interaction),
+                    toAuthorizationApprovalInput(interaction, client),
                 );
                 if (approval.status === "pending") {
                     approval = await this.#approvals.decide(
@@ -387,9 +412,34 @@ export class McpOAuthInteraction {
         await this.#approvals.completeAuthorization(String(interaction.uid));
     }
 
+    async #requestAuthorization(
+        response: Response,
+        details: Awaited<ReturnType<Provider["interactionDetails"]>>,
+        client: OAuthClient,
+    ): Promise<OAuthApprovalRequest | undefined> {
+        try {
+            return await this.#approvals.requestAuthorization(
+                String(details.uid),
+                authorizationTransactionId(details),
+                toAuthorizationApprovalInput(details, client),
+            );
+        } catch (error) {
+            if (error instanceof OAuthApprovalCapacityError) {
+                response
+                    .setHeader("retry-after", "60")
+                    .status(429)
+                    .type("text/plain")
+                    .send(error.message);
+                return undefined;
+            }
+            throw error;
+        }
+    }
+
     #pageInput(
         details: Awaited<ReturnType<Provider["interactionDetails"]>>,
         approval: OAuthApprovalRequest,
+        client: OAuthClient,
         error?: string,
     ): McpOAuthInteractionPageInput {
         return {
@@ -402,12 +452,14 @@ export class McpOAuthInteraction {
             approvalTokenConfigured:
                 this.#approval.mode === "token" &&
                 this.#approval.token !== undefined,
-            clientName: readOAuthClientName(
+            clientName: resolveClientName(
+                client,
                 details.params.client_id,
                 details.params.client_name,
             ),
             ...(error === undefined ? {} : { error }),
             promptName: details.prompt.name as "consent" | "login",
+            redirectUris: readRedirectUris(details, client),
             requiredScopes: readOAuthStringArray(
                 details.prompt.details.missingOIDCScope,
             ),
@@ -460,22 +512,85 @@ function authorizationTransactionId(
     return JSON.stringify({ clientId, transactionNonce });
 }
 
+async function resolveProviderClient(
+    provider: Provider,
+    details: Awaited<ReturnType<Provider["interactionDetails"]>>,
+): Promise<OAuthClient> {
+    const clientId = details.params.client_id;
+    if (typeof clientId !== "string" || clientId.length === 0) {
+        return undefined;
+    }
+    return await provider.Client.find(clientId);
+}
+
+function resolveClientName(
+    client: OAuthClient,
+    clientId: unknown,
+    clientName: unknown,
+): string {
+    if (
+        client !== undefined &&
+        typeof client.clientName === "string" &&
+        client.clientName.length > 0
+    ) {
+        return client.clientName;
+    }
+    return readOAuthClientName(clientId, clientName);
+}
+
+function readRedirectUris(
+    details: Awaited<ReturnType<Provider["interactionDetails"]>>,
+    client: OAuthClient,
+): string[] {
+    if (client !== undefined && Array.isArray(client.redirectUris)) {
+        const redirectUris = client.redirectUris.filter(
+            (uri): uri is string => typeof uri === "string",
+        );
+        if (redirectUris.length > 0) {
+            return [...redirectUris];
+        }
+    }
+    return typeof details.params.redirect_uri === "string"
+        ? [details.params.redirect_uri]
+        : [];
+}
+
+function redirectHost(uri: string): string {
+    try {
+        return new URL(uri).host;
+    } catch {
+        return uri;
+    }
+}
+
+function isLoopbackRedirect(uri: string): boolean {
+    try {
+        const { hostname } = new URL(uri);
+        return (
+            hostname.toLowerCase() === "localhost" ||
+            hostname === "127.0.0.1" ||
+            hostname === "[::1]"
+        );
+    } catch {
+        return false;
+    }
+}
+
 function toAuthorizationApprovalInput(
     details: Awaited<ReturnType<Provider["interactionDetails"]>>,
+    client: OAuthClient,
 ): OAuthApprovalInput {
     return {
         clientId:
             typeof details.params.client_id === "string"
                 ? details.params.client_id
                 : "unknown-client",
-        clientName: readOAuthClientName(
+        clientName: resolveClientName(
+            client,
             details.params.client_id,
             details.params.client_name,
         ),
-        redirectUris:
-            typeof details.params.redirect_uri === "string"
-                ? [details.params.redirect_uri]
-                : [],
+        redirectUris: readRedirectUris(details, client),
         requestedResources:
             typeof details.params.resource === "string"
                 ? [details.params.resource]

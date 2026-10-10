@@ -280,7 +280,6 @@ export class ControlWebRuntime {
 
         return new ControlWebOAuthFlow({
             basePath,
-            clientStateFile: `${this.#oauthDirectory}/client.json`,
             config: providerConfig,
             installProvider: reused === undefined || !this.#mcpSharesListener || mcpHost?.status?.().authMode !== "oauth2",
             ownsProvider: reused === undefined,

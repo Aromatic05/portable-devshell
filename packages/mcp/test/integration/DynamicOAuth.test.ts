@@ -9,11 +9,30 @@ function port(address: { port: number } | string | null): number {
     return address.port;
 }
 
-test("enabling OAuth on a running MCP Host installs authorization routes and disabling removes them", async () => {
-    const { mkdtemp, rm } = await import("node:fs/promises");
+test("enabling OAuth on a running MCP Host installs authorization routes and disables dynamic registration", async () => {
+    const { mkdir, mkdtemp, rm, writeFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
     const storage = await mkdtemp(join(tmpdir(), "mcp-dynamic-oauth-http-"));
+    const clientId = "portable-devshell-dynamic-client";
+    const adapterDir = join(storage, "adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(
+        join(adapterDir, "Client.json"),
+        JSON.stringify({
+            [clientId]: {
+                payload: {
+                    client_id: clientId,
+                    client_name: "Pre-registered MCP test",
+                    grant_types: ["authorization_code", "refresh_token"],
+                    redirect_uris: ["http://localhost/callback"],
+                    response_types: ["code"],
+                    token_endpoint_auth_method: "none",
+                },
+            },
+        }),
+        "utf8",
+    );
     const http = new ControlHttpServer();
     const runtime = createTestMcpRuntimeState({ storageDir: storage });
     const host = new McpHost({
@@ -40,27 +59,24 @@ test("enabling OAuth on a running MCP Host installs authorization routes and dis
         assert.equal((await metadata()).status, 200);
         assert.notEqual((await authorize()).status, 404);
 
-        // A client asking for a scope introduced after Provider warmup must
-        // reach authorization, not fail OIDC client metadata validation.
+        // Dynamic client registration is retired: the endpoint must be gone.
         const registered = await fetch(`${origin}/register`, {
             method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                client_name: "Dynamic MCP test", redirect_uris: ["http://localhost/callback"],
-                grant_types: ["authorization_code", "refresh_token"], response_types: ["code"],
-                token_endpoint_auth_method: "none",
-            }),
+            body: JSON.stringify({ redirect_uris: ["http://localhost/callback"] }),
         });
-        assert.equal(registered.status, 201);
-        const client = await registered.json() as { client_id: string };
+        assert.equal(registered.status, 404);
+
+        // A pre-registered client without a declared scope must accept a scope
+        // introduced after Provider warmup, without dynamic registration.
         const authorization = new URL(`${origin}/authorize`);
         for (const [name, value] of Object.entries({
-            client_id: client.client_id, redirect_uri: "http://localhost/callback", response_type: "code",
+            client_id: clientId, redirect_uri: "http://localhost/callback", response_type: "code",
             scope: "openid offline_access mcp-dynamic", state: "dynamic-scopes-123",
             code_challenge: "B".repeat(43), code_challenge_method: "S256",
             resource: "http://127.0.0.1/demo/mcp",
         })) authorization.searchParams.set(name, value);
         const authRequest = await fetch(authorization, { redirect: "manual" });
-        assert.equal(authRequest.status, 303, "Dynamic scopes must not be rejected by OIDC metadata validation");
+        assert.equal(authRequest.status, 303, "Scopes introduced after warmup must not be rejected by OIDC metadata validation");
         assert.match(authRequest.headers.get("location") ?? "", /^\/interaction\//u);
 
         host.registerInstance({ name: "demo", auth: { enabled: false, provider: "none" } });

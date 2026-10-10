@@ -6,7 +6,7 @@ import type {
 } from "@portable-devshell/shared";
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -54,9 +54,46 @@ import {
     TestMcpHost as McpHost,
 } from "../ContextRuntime.ts";
 import type { McpAuthConfig } from "@portable-devshell/mcp";
+import {
+    modernRpcHeaders,
+    modernRpcRequest,
+} from "./ModernProtocol.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
+const preRegisteredClientId = "portable-devshell-pre-registered-client";
+const preRegisteredRedirectUri = "http://127.0.0.1:33418/callback";
+
+/**
+ * Seeds a pre-registered (non-DCR) client directly into the OIDC Client
+ * adapter. CIMD cannot be exercised end-to-end here because the provider's
+ * document fetch is real-SSRF-protected against loopback addresses and no
+ * fetch seam may be threaded through the Host inside this change.
+ */
+async function seedPreRegisteredClient(
+    storageDir: string,
+    scope: string,
+): Promise<void> {
+    const adapterDir = join(storageDir, "adapter");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(
+        join(adapterDir, "Client.json"),
+        JSON.stringify({
+            [preRegisteredClientId]: {
+                payload: {
+                    client_id: preRegisteredClientId,
+                    client_name: "Portable Devshell Real MCP Client",
+                    grant_types: ["authorization_code", "refresh_token"],
+                    redirect_uris: [preRegisteredRedirectUri],
+                    response_types: ["code"],
+                    scope,
+                    token_endpoint_auth_method: "none",
+                },
+            },
+        }),
+        "utf8",
+    );
+}
 
 const commentRouteContext: ControlPortContext = {
     afterReply() {},
@@ -126,7 +163,9 @@ test(
 
         try {
             const endpoint = endpointFor(host, "real-none");
-            const client = new Client(clientInfo);
+            const client = new Client(clientInfo, {
+                versionNegotiation: { mode: "auto" },
+            });
             await client.connect(
                 new StreamableHTTPClientTransport(new URL(endpoint)),
             );
@@ -277,7 +316,7 @@ test(
         cleanupDirs.push(contextRoot);
 
         try {
-            const client = new Client(clientInfo);
+            const client = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await client.connect(
                 new StreamableHTTPClientTransport(
                     new URL(endpointFor(host, "real-comment")),
@@ -424,7 +463,7 @@ test(
         try {
             const endpoint = endpointFor(host, "real-token");
 
-            const anonymous = new Client(clientInfo);
+            const anonymous = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await assert.rejects(
                 anonymous.connect(
                     new StreamableHTTPClientTransport(new URL(endpoint)),
@@ -434,7 +473,7 @@ test(
                     /401|unauthorized/iu.test(String(error)),
             );
 
-            const client = new Client(clientInfo);
+            const client = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await client.connect(
                 new StreamableHTTPClientTransport(new URL(endpoint), {
                     requestInit: {
@@ -528,6 +567,7 @@ test(
         });
 
         try {
+            await seedPreRegisteredClient(storageDir, "mcp offline_access");
             await instance.start();
             await host.start();
             proxy.setTarget(
@@ -538,18 +578,33 @@ test(
             const approvals = host.oauthApprovals;
             assert.notEqual(approvals, undefined);
 
-            const challenge = await fetch(endpoint, {
+            const asMetadataResponse = await fetch(
+                `${origin}/.well-known/openid-configuration`,
+            );
+            assert.equal(asMetadataResponse.status, 200);
+            const asMetadata = (await asMetadataResponse.json()) as Record<
+                string,
+                unknown
+            >;
+            assert.equal(
+                asMetadata.client_id_metadata_document_supported,
+                true,
+            );
+            assert.equal("registration_endpoint" in asMetadata, false);
+            const registerResponse = await fetch(`${origin}/register`, {
                 body: JSON.stringify({
-                    id: "anonymous-initialize",
-                    jsonrpc: "2.0",
-                    method: "initialize",
-                    params: {
-                        capabilities: {},
-                        clientInfo,
-                        protocolVersion: "2025-06-18",
-                    },
+                    redirect_uris: [preRegisteredRedirectUri],
                 }),
                 headers: { "content-type": "application/json" },
+                method: "POST",
+            });
+            assert.equal(registerResponse.status, 404);
+
+            const challenge = await fetch(endpoint, {
+                body: JSON.stringify(
+                    modernRpcRequest("anonymous-discover", "server/discover"),
+                ),
+                headers: modernRpcHeaders("server/discover"),
                 method: "POST",
             });
             assert.equal(challenge.status, 401);
@@ -559,9 +614,11 @@ test(
             assert.match(wwwAuthenticate, /scope="mcp"/u);
             assert.match(wwwAuthenticate, /resource_metadata="https?:\/\//u);
 
-            const provider = new InMemoryOAuthClientProvider();
+            const provider = new InMemoryOAuthClientProvider(
+                preRegisteredClientId,
+            );
 
-            const anonymous = new Client(clientInfo);
+            const anonymous = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await assert.rejects(
                 anonymous.connect(
                     new StreamableHTTPClientTransport(new URL(endpoint), {
@@ -573,19 +630,15 @@ test(
                     /unauthorized/iu.test(String(error)),
             );
 
-            assert.notEqual(
-                provider.clientInformation(),
-                undefined,
-                "SDK consumer performed dynamic client registration",
-            );
             assert.equal(
-                (await approvals!.list()).some(
-                    (request) =>
-                        request.kind === "registration" &&
-                        request.status === "pending",
-                ),
-                true,
-                "dynamic client registration created a real registration approval",
+                provider.clientInformation()?.client_id,
+                preRegisteredClientId,
+                "the SDK consumer must use the pre-registered client without dynamic registration",
+            );
+            assert.deepEqual(
+                await approvals!.list(),
+                [],
+                "no approval may be created before authorization without dynamic registration",
             );
 
             const scope = "mcp offline_access";
@@ -639,7 +692,7 @@ test(
             assert.equal(typeof tokens?.access_token, "string");
             assert.equal(typeof tokens?.refresh_token, "string");
 
-            const client = new Client(clientInfo);
+            const client = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await client.connect(
                 new StreamableHTTPClientTransport(new URL(endpoint), {
                     authProvider: provider,
@@ -738,7 +791,7 @@ test(
                 "refreshing with a revoked refresh token must fail",
             );
 
-            const afterRevocation = new Client(clientInfo);
+            const afterRevocation = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await assert.rejects(
                 afterRevocation.connect(
                     new StreamableHTTPClientTransport(new URL(endpoint), {
@@ -816,6 +869,7 @@ test(
         });
 
         try {
+            await seedPreRegisteredClient(storageDir, "mcp offline_access");
             await instance.start();
             await host.start();
             proxy.setTarget(
@@ -823,8 +877,10 @@ test(
             );
 
             const endpoint = `${origin}/real-oauth-token/mcp`;
-            const provider = new InMemoryOAuthClientProvider();
-            const anonymous = new Client(clientInfo);
+            const provider = new InMemoryOAuthClientProvider(
+                preRegisteredClientId,
+            );
+            const anonymous = new Client(clientInfo, { versionNegotiation: { mode: "auto" } });
             await assert.rejects(
                 anonymous.connect(
                     new StreamableHTTPClientTransport(new URL(endpoint), {
@@ -901,6 +957,10 @@ class InMemoryOAuthClientProvider implements OAuthClientProvider {
     #discoveryState?: OAuthDiscoveryState;
     #tokens?: OAuthTokens;
     lastAuthorizationUrl?: URL;
+
+    constructor(clientId: string) {
+        this.#clientInformation = { client_id: clientId };
+    }
 
     clientInformation(): OAuthClientInformationMixed | undefined {
         return this.#clientInformation;

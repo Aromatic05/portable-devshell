@@ -9,7 +9,6 @@ import {
     type McpOAuthAccessRevocation,
     type McpOAuthAccessTokenVerification,
 } from "./provider/Provider.js";
-import { McpOAuthRegistrationLimiter } from "./interaction/Registration.js";
 
 export interface McpOAuthProtectedResourceOptions {
     approval?: McpOAuthApprovalConfig;
@@ -20,7 +19,6 @@ export interface McpOAuthProtectedResourceOptions {
 export class McpOAuthProtectedResource {
     readonly #approvals: McpOAuthApprovalService;
     readonly #interaction: McpOAuthInteraction;
-    readonly #registrationLimiter = new McpOAuthRegistrationLimiter();
     readonly #runtime: McpOAuthProviderRuntime;
 
     constructor(
@@ -59,6 +57,14 @@ export class McpOAuthProtectedResource {
         return this.#runtime.registerResource(resourceServerUrl, config);
     }
 
+    /** Provision an embedded Control Web client without exposing public DCR. */
+    async registerFirstPartyWebClient(
+        redirectUri: string,
+        requiredScopes: readonly string[],
+    ): Promise<string> {
+        return await this.#runtime.registerFirstPartyWebClient(redirectUri, requiredScopes);
+    }
+
     onAccessRevoked(
         listener: (revocation: McpOAuthAccessRevocation) => void,
     ): () => void {
@@ -77,7 +83,6 @@ export class McpOAuthProtectedResource {
     }
 
     install(app: Express): void {
-        this.#installRegistrationGuard(app);
         this.#interaction.install(app);
         this.#installProvider(app);
     }
@@ -126,26 +131,6 @@ export class McpOAuthProtectedResource {
             }
             this.#ensureOfflineConsent(request);
             this.#runtime.provider.callback()(request, response);
-        });
-    }
-
-    #installRegistrationGuard(app: Express): void {
-        const registrationPath = `${this.#runtime.basePath}/register`;
-        app.use((request, response, next) => {
-            const pathname = this.#requestPathname(request.url);
-            if (request.method !== "POST" || pathname !== registrationPath) {
-                next();
-                return;
-            }
-            const key = request.socket.remoteAddress ?? "unknown";
-            if (!this.#registrationLimiter.accept(key)) {
-                response.setHeader("retry-after", "60");
-                response.status(429).json({
-                    error: "OAuth client registration rate limit exceeded.",
-                });
-                return;
-            }
-            next();
         });
     }
 

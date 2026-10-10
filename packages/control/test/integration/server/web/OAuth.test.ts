@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -42,6 +42,7 @@ test("Web OAuth registration is idempotent and released when its Flow retires", 
             registrations += 1;
             return () => { releases += 1; };
         },
+        async registerFirstPartyWebClient() { return "test-first-party"; },
     } as unknown as McpOAuthProtectedResource;
     const config = { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME };
     const flow = new ControlWebOAuthFlow({
@@ -217,11 +218,10 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
     assert.equal(forged.status, 400);
 });
 
-test("web oauth2 reuses its persisted dynamic client after runtime recreation", async (t) => {
+test("web oauth2 persists its first-party PKCE client without public registration", async (t) => {
     const proxy = await startLoopbackHttpProxy();
     const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-client-state");
-    const clientStateFile = join(storage, "web-client.json");
     const runtimes: HttpHost[] = [];
     t.after(async () => {
         await cleanupInOrder(
@@ -251,7 +251,6 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
         });
         const flow = new ControlWebOAuthFlow({
             basePath: "/web",
-            clientStateFile,
             config: {
                 requiredScopes: WEB_SCOPES,
                 resourceName: WEB_RESOURCE_NAME,
@@ -275,16 +274,11 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
         redirect: "manual",
     });
     assert.equal(firstStart.status, 302);
-    await waitFor(
-        async () =>
-            (await first.protectedResource.approvals.list()).filter(
-                (approval) => approval.kind === "registration",
-            ).length === 1,
-    );
-    const firstRegistration = (
-        await first.protectedResource.approvals.list()
-    ).find((approval) => approval.kind === "registration");
-    assert.notEqual(firstRegistration, undefined);
+    const firstClientId = new URL(firstStart.headers.get("location")!).searchParams.get("client_id");
+    assert.match(firstClientId ?? "", /^devshell-web-[a-f0-9]{64}$/u);
+    const clientState = JSON.parse(await readFile(join(storage, "adapter", "Client.json"), "utf8")) as Record<string, { payload?: { redirect_uris?: string[] } }>;
+    assert.deepEqual(clientState[firstClientId!]?.payload?.redirect_uris, [`${publicBaseUrl}/web/oauth/callback`]);
+    assert.deepEqual(await first.protectedResource.approvals.list(), []);
     await first.http.stop();
 
     const originalFetch = globalThis.fetch;
@@ -303,12 +297,10 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
         redirect: "manual",
     });
     assert.equal(secondStart.status, 302);
+    const secondClientId = new URL(secondStart.headers.get("location")!).searchParams.get("client_id");
+    assert.equal(secondClientId, firstClientId);
     assert.deepEqual(secondRuntimePosts, []);
-    const registrations = (
-        await second.protectedResource.approvals.list()
-    ).filter((approval) => approval.kind === "registration");
-    assert.equal(registrations.length, 1);
-    assert.equal(registrations[0]?.clientId, firstRegistration?.clientId);
+    assert.deepEqual(await second.protectedResource.approvals.list(), []);
 });
 
 test("web oauth2 shares one provider with MCP on a shared listener without route conflicts", async (t) => {
@@ -527,8 +519,7 @@ async function walkBrowserFlow(
             const html = await response.text();
             if (html.includes("window.location.reload()")) {
                 await approvePending(approvals, approvalKind);
-                if (approvalKind === "registration")
-                    approvalKind = "authorization";
+                if (approvalKind === "registration") approvalKind = "authorization";
                 method = "GET";
                 continue;
             }

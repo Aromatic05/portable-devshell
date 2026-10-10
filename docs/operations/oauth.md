@@ -76,9 +76,9 @@ devshell tui
 
 Control 配置 API 会热应用支持的 listener/endpoint 变化，并在确实需要时报告 restart requirement；不要把所有 OAuth 配置变更都固定写成一次完整 Control restart。
 
-进入 TUI 的 `OAuth` 页面处理当前客户端发起的注册和授权请求。待审批请求有过期时间；不要把审批留在后台长期无人处理。
+进入 TUI 的 `OAuth` 页面处理当前客户端发起的授权请求。provider 会为首次出现的 `client_id` 建立一条 registration 审批（展示客户端名称、redirect URI 主机；全部为 localhost 时给出额外警示），随后才是对应的 authorization 审批。待审批请求有过期时间；不要把审批留在后台长期无人处理。
 
-当前 compatibility flow 仍支持很多 Host 正在使用的 Dynamic Client Registration。MCP 2026-07-28 上游已经开始把 client registration/identity 迁向新的模型；portable-devshell 的 OAuth compatibility path 与 v2 MCP transport 解耦，因此现有客户端可以继续使用，而不要求一次性迁移全部 OAuth client。
+Provider 采用 MCP 2026-07-28 的 OAuth Client ID Metadata Document（CIMD）进行客户端身份识别：客户端把 `client_id` 设为自身 HTTPS 元数据文档 URL，provider 直接在授权时获取并校验该文档（`client_id` 必须与 URL 精确一致，redirect URI 必须命中文档声明，SSRF 由内置 socket 防护与策略共同约束）。旧的 Dynamic Client Registration（`/register`）端点已移除。已预先注册的客户端（写入 Client adapter 的静态客户端，包括历史 DCR 已注册的客户端）继续可用；其 `client_id` 不以 `https://` 开头时按预注册处理，已有 token / refresh / revoke 生命周期不受影响，但不能再通过 DCR 新建客户端。新客户端请使用 CIMD，或通过预先配置注册。
 
 ## URL
 
@@ -102,7 +102,7 @@ OpenID/OAuth 元数据
 https://devshell.example.com/.well-known/openid-configuration
 ```
 
-OAuth provider 还提供注册、授权、token、撤销、JWKS 和会话相关 endpoint。
+OAuth provider 还提供授权、token、撤销、JWKS 和会话相关 endpoint；不再提供 Dynamic Client Registration（`/register`）。
 
 ## 持久化
 

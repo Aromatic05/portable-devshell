@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, rm, access, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import express from "express";
 import { McpOAuthApprovalService } from "../../../src/oauth/interaction/Approval.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { execFile } from "node:child_process";
@@ -10,7 +11,6 @@ import { promisify } from "node:util";
 import { McpOAuthInteraction } from "../../../src/oauth/interaction/Interaction.ts";
 import { createMcpOAuthOidcFileAdapterFactory } from "../../../src/oauth/provider/Adapter.ts";
 import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts";
-import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Registration.ts";
 
 {
     test("OAuth approvals persist registration and authorization decisions", async () => {
@@ -689,9 +689,9 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
         },
     );
 
-    test("McpOAuthProviderRuntime upgrades persisted dynamic clients with required resource scopes", async () => {
+    test("McpOAuthProviderRuntime preserves persisted client scopes without dynamic scope inflation", async () => {
         const storageDir = await createTestTempDirectory(
-            "mcp-oauth-client-scope-upgrade",
+            "mcp-oauth-legacy-client-scope",
         );
         const adapterDir = join(storageDir, "adapter");
         const clientFile = join(adapterDir, "Client.json");
@@ -727,31 +727,222 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
             assert.notEqual(client, undefined);
             assert.deepEqual(
                 new Set(client!.scope?.split(" ")),
-                new Set(["mcp", "openid", "offline_access"]),
+                new Set(["openid", "offline_access"]),
             );
             const persisted = JSON.parse(
                 await readFile(clientFile, "utf8"),
             ) as {
                 "claude-code": { payload: { scope?: string } };
             };
-            assert.deepEqual(
-                new Set(persisted["claude-code"].payload.scope?.split(" ")),
-                new Set(["mcp", "openid", "offline_access"]),
+            assert.equal(
+                persisted["claude-code"].payload.scope,
+                "openid offline_access",
+                "persisted client scopes must not be widened to the resource scopes",
             );
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }
     });
 
-    test("dynamic registration fails before credentials are issued when registration approval capacity is exhausted", async () => {
+    test("OAuth provider discovery advertises Client ID Metadata Documents without a registration endpoint", async () => {
         const storageDir = await createTestTempDirectory(
-            "mcp-oauth-registration-overflow",
+            "mcp-oauth-cimd-discovery",
         );
-        const approvals = new McpOAuthApprovalService(storageDir, {
-            maxPendingRegistrations: 1,
-        });
         const runtime = new McpOAuthProviderRuntime({
-            approvals,
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+        const server = await startCallbackServer(runtime);
+
+        try {
+            assert.equal(runtime.shouldHandleProviderPath("/register"), false);
+            assert.equal(
+                runtime.shouldHandleProviderPath("/.well-known/oauth-protected-resource/x"),
+                false,
+            );
+            assert.equal(runtime.shouldHandleProviderPath("/token"), true);
+
+            const discovery = await fetch(
+                `${server.origin}/.well-known/openid-configuration`,
+            );
+            assert.equal(discovery.status, 200);
+            const metadata = (await discovery.json()) as Record<string, unknown>;
+            assert.equal(
+                metadata.client_id_metadata_document_supported,
+                true,
+            );
+            assert.equal("registration_endpoint" in metadata, false);
+
+            const register = await fetch(`${server.origin}/register`, {
+                body: JSON.stringify({
+                    redirect_uris: ["https://client.example.test/callback"],
+                }),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            });
+            assert.equal(register.status, 404);
+            assert.equal(
+                (await fetch(`${server.origin}/register/some-client`)).status,
+                404,
+            );
+        } finally {
+            await server.close();
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("Client ID Metadata Documents resolve unregistered clients without persisting them", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-cimd-resolve",
+        );
+        const clientId = "https://client.example.test/oauth/client-metadata.json";
+        const document = {
+            client_id: clientId,
+            client_name: "ChatGPT",
+            redirect_uris: [
+                "https://chatgpt.com/connector_platform_oauth_redirect",
+            ],
+            token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+        };
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            fetch: cimdFetchFor(
+                clientId,
+                () => jsonDocumentResponse(document),
+            ),
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+
+        try {
+            await runtime.warmup();
+            const client = await runtime.provider.Client.find(clientId);
+            assert.notEqual(client, undefined);
+            assert.equal(client!.clientName, "ChatGPT");
+            assert.equal(client!.tokenEndpointAuthMethod, "none");
+            assert.deepEqual(
+                new Set(client!.grantTypes),
+                new Set(["authorization_code", "refresh_token"]),
+            );
+            assert.ok(
+                (client!.redirectUris ?? []).includes(
+                    "https://chatgpt.com/connector_platform_oauth_redirect",
+                ),
+            );
+            await assert.rejects(
+                access(join(storageDir, "adapter", "Client.json")),
+                (error: unknown) =>
+                    (error as NodeJS.ErrnoException).code === "ENOENT",
+            );
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("Client ID Metadata Document validation rejects unsafe or invalid documents", async () => {
+        const clientId = "https://client.example.test/metadata.json";
+        const validDocument = (overrides: Record<string, unknown> = {}) => ({
+            client_id: clientId,
+            client_name: "Example Client",
+            redirect_uris: ["https://client.example.test/callback"],
+            ...overrides,
+        });
+
+        await assert.rejects(
+            findCimdClient(
+                clientId,
+                () =>
+                    jsonDocumentResponse(
+                        validDocument({
+                            client_id: "https://evil.example.test/metadata.json",
+                        }),
+                    ),
+            ),
+            /client_id|metadata/iu,
+        );
+        await assert.rejects(
+            findCimdClient(
+                clientId,
+                () =>
+                    new Response("not json", {
+                        headers: { "content-type": "application/json" },
+                        status: 200,
+                    }),
+            ),
+            /invalid_client|metadata|fetch/iu,
+        );
+        await assert.rejects(
+            findCimdClient(clientId, () =>
+                jsonDocumentResponse(
+                    validDocument({ padding: "x".repeat(6 * 1024) }),
+                ),
+            ),
+            /invalid_client|metadata|fetch/iu,
+        );
+        await assert.rejects(
+            findCimdClient(
+                clientId,
+                () =>
+                    new Response("", {
+                        headers: { location: "https://elsewhere.example.test/" },
+                        status: 302,
+                    }),
+            ),
+            /invalid_client|metadata|fetch/iu,
+        );
+        await assert.rejects(
+            findCimdClient(clientId, () =>
+                jsonDocumentResponse(
+                    validDocument({
+                        token_endpoint_auth_method: "client_secret_basic",
+                    }),
+                ),
+            ),
+            /metadata|secret/iu,
+        );
+        await assert.rejects(
+            findCimdClient(clientId, () =>
+                jsonDocumentResponse(validDocument({ client_secret: "s3cr3t" })),
+            ),
+            /invalid_client|secret/iu,
+        );
+        await assert.rejects(
+            findCimdClient(clientId, () =>
+                jsonDocumentResponse(
+                    validDocument({
+                        client_uri: "http://client.example.test/",
+                    }),
+                ),
+            ),
+            /metadata|https/iu,
+        );
+        await assert.rejects(
+            findCimdClient(`${clientId}?probe=1`, () =>
+                jsonDocumentResponse(
+                    validDocument({ client_id: `${clientId}?probe=1` }),
+                ),
+            ),
+            /allowed|client/iu,
+        );
+    });
+
+    test("Client ID Metadata Document fetch must reject loopback addresses via socket-level SSRF protection", async () => {
+        const storageDir = await createTestTempDirectory("mcp-oauth-cimd-ssrf");
+        const local = createServer((_request, response) => response.end("{}"));
+        await new Promise<void>((resolve, reject) => {
+            local.once("error", reject);
+            local.listen(0, "127.0.0.1", resolve);
+        });
+        const address = local.address();
+        if (address === null || typeof address === "string") {
+            throw new Error("SSRF probe server did not expose a TCP address.");
+        }
+        const clientId = `https://127.0.0.1:${address.port}/metadata.json`;
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
             config,
             publicBaseUrl: "https://mcp.example.test/",
             storageDir,
@@ -759,52 +950,188 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
 
         try {
             await runtime.warmup();
+            // BLOCKER (reported, not waived): oidc-provider 9.12.2 derives its
+            // SSRF Agent from undici's global dispatcher and destroys the socket
+            // on the Agent "connect" event. On Node 24 that event does not fire
+            // for HTTPS connections, so the loopback fetch proceeds to TLS and
+            // the guard is inert. This assertion is intentionally strict; do not
+            // relax it to a bare rejection, which a TLS failure would satisfy.
+            await assert.rejects(
+                runtime.provider.Client.find(clientId),
+                (error: unknown) => {
+                    let cursor: unknown = error;
+                    for (
+                        let depth = 0;
+                        depth < 8 && cursor instanceof Error;
+                        depth += 1
+                    ) {
+                        if (/special-use|SSRF/iu.test(cursor.message)) {
+                            return true;
+                        }
+                        cursor = cursor.cause;
+                    }
+                    return false;
+                },
+            );
+        } finally {
+            await new Promise<void>((resolve, reject) =>
+                local.close((error) =>
+                    error === undefined ? resolve() : reject(error),
+                ),
+            );
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("Client ID Metadata Document scope is enforced strictly at authorization", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-cimd-scope",
+        );
+        const clientId = "https://client.example.test/scope-metadata.json";
+        const redirectUri = "https://client.example.test/callback";
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            fetch: cimdFetchFor(clientId, () =>
+                jsonDocumentResponse({
+                    client_id: clientId,
+                    client_name: "Narrow Client",
+                    redirect_uris: [redirectUri],
+                    scope: "openid",
+                }),
+            ),
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+        const server = await startCallbackServer(runtime);
+
+        try {
+            const authorize = new URL(`${server.origin}/authorize`);
+            for (const [name, value] of Object.entries({
+                client_id: clientId,
+                code_challenge: "B".repeat(43),
+                code_challenge_method: "S256",
+                redirect_uri: redirectUri,
+                response_type: "code",
+                scope: "openid mcp",
+                state: "narrow-scope-state",
+            })) {
+                authorize.searchParams.set(name, value);
+            }
+
+            const response = await fetch(authorize, { redirect: "manual" });
+            assert.equal(response.status, 303);
+            const location = response.headers.get("location") ?? "";
+            assert.match(location, /error=invalid_scope/u);
+        } finally {
+            await server.close();
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("OAuth interaction reports approval capacity exhaustion with 429", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-cimd-capacity",
+        );
+        const clientId = "https://client.example.test/capacity-metadata.json";
+        const redirectUri = "https://client.example.test/callback";
+        const approvals = new McpOAuthApprovalService(storageDir, {
+            maxPendingRegistrations: 1,
+        });
+        const runtime = new McpOAuthProviderRuntime({
+            approvals,
+            config,
+            fetch: cimdFetchFor(clientId, () =>
+                jsonDocumentResponse({
+                    client_id: clientId,
+                    client_name: "Capacity Client",
+                    redirect_uris: [redirectUri],
+                }),
+            ),
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+        runtime.registerResource(
+            new URL("https://mcp.example.test/capacity/mcp"),
+            config,
+        );
+        await runtime.warmup();
+        const interaction = new McpOAuthInteraction({
+            accountId: "aromatic",
+            approval: { mode: "tui" },
+            approvals,
+            basePath: "",
+            provider: () => runtime.provider,
+        });
+        const app = express();
+        interaction.install(app);
+        app.use((request, response, next) => {
+            const pathname = new URL(
+                request.url ?? "/",
+                "http://127.0.0.1",
+            ).pathname;
+            if (runtime.shouldHandleProviderPath(pathname)) {
+                runtime.provider.callback()(request, response);
+                return;
+            }
+            next();
+        });
+        const server = createServer(app);
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+        });
+        const address = server.address();
+        if (address === null || typeof address === "string") {
+            throw new Error(
+                "OAuth capacity test server did not expose a TCP address.",
+            );
+        }
+        const origin = `http://127.0.0.1:${address.port}`;
+
+        try {
             await approvals.registerClient({
                 clientId: "pending-client",
                 clientName: "Pending Client",
-                redirectUris: ["http://localhost/pending"],
+                redirectUris: ["https://pending.example.test/callback"],
             });
-            const server = createServer(runtime.provider.callback());
-            await new Promise<void>((resolve, reject) => {
-                server.once("error", reject);
-                server.listen(0, "127.0.0.1", resolve);
-            });
-            const address = server.address();
-            if (address === null || typeof address === "string") {
-                throw new Error(
-                    "OAuth registration test server did not expose a TCP address.",
-                );
+
+            const authorize = new URL(`${origin}/authorize`);
+            for (const [name, value] of Object.entries({
+                client_id: clientId,
+                code_challenge: "B".repeat(43),
+                code_challenge_method: "S256",
+                redirect_uri: redirectUri,
+                resource: "https://mcp.example.test/capacity/mcp",
+                response_type: "code",
+                scope: "openid",
+                state: "capacity-state",
+            })) {
+                authorize.searchParams.set(name, value);
             }
-            const response = await fetch(
-                `http://127.0.0.1:${address.port}/register`,
-                {
-                    body: JSON.stringify({
-                        client_name: "Overflow Client",
-                        grant_types: ["authorization_code", "refresh_token"],
-                        redirect_uris: ["http://localhost/overflow"],
-                        response_types: ["code"],
-                        token_endpoint_auth_method: "none",
-                    }),
-                    headers: { "content-type": "application/json" },
-                    method: "POST",
-                },
+            const authResponse = await fetch(authorize, { redirect: "manual" });
+            assert.equal(authResponse.status, 303);
+            const interactionUrl = new URL(
+                authResponse.headers.get("location") ?? "",
+                origin,
             );
-            const body = (await response.json()) as Record<string, unknown>;
+            const interactionCookie = readResponseCookieHeader(authResponse.headers);
+
+            const page = await fetch(interactionUrl, {
+                headers:
+                    interactionCookie.length === 0
+                        ? {}
+                        : { cookie: interactionCookie },
+                redirect: "manual",
+            });
+            assert.equal(page.status, 429);
+            assert.equal(page.headers.get("retry-after"), "60");
+        } finally {
             await new Promise<void>((resolve, reject) =>
                 server.close((error) =>
                     error === undefined ? resolve() : reject(error),
                 ),
             );
-
-            assert.equal(response.status, 429);
-            assert.equal(body.error, "invalid_request");
-            assert.equal("client_id" in body, false);
-            assert.equal("registration_access_token" in body, false);
-            assert.deepEqual(
-                (await approvals.list()).map((request) => request.clientId),
-                ["pending-client"],
-            );
-        } finally {
             await rm(storageDir, { force: true, recursive: true });
         }
     });
@@ -981,6 +1308,10 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
                 approvalTokenConfigured: false,
                 clientName: "Client <script>",
                 promptName: "consent",
+                redirectUris: [
+                    "http://127.0.0.1:33418/callback",
+                    "https://app.example.test/callback?a=<b>",
+                ],
                 requestedResources: [
                     {
                         indicator: "https://mcp.example.test/demo/mcp?a=<b>",
@@ -995,6 +1326,13 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
             assert.match(html, /write&lt;all&gt;/u);
             assert.match(html, /\/devshell\/oauth\/approvals\/approval-1/u);
             assert.doesNotMatch(html, /Client <script>/u);
+            assert.match(html, /127\.0\.0\.1:33418/u);
+            assert.match(html, /app\.example\.test/u);
+            assert.doesNotMatch(
+                html,
+                /client only redirects to localhost/iu,
+                "a mixed redirect set is not localhost-only",
+            );
             assert.match(html, /Connections → OAuth Approvals/u);
             assert.match(html, /devshell oauth approve approval-1/u);
             assert.match(html, /Waiting for approval/u);
@@ -1028,6 +1366,7 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
                 approvalTokenConfigured: false,
                 clientName: "ChatGPT",
                 promptName: "login",
+                redirectUris: [],
                 requestedResources: [],
                 requiredScopes: [],
             });
@@ -1068,6 +1407,7 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
                 approvalTokenConfigured: true,
                 clientName: "ChatGPT",
                 promptName: "consent",
+                redirectUris: [],
                 requestedResources: [],
                 requiredScopes: ["mcp"],
             });
@@ -1075,6 +1415,42 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
             assert.match(html, /name="approvalToken"/u);
             assert.match(html, />Approve<\/button>/u);
             assert.doesNotMatch(html, /Connections → OAuth Approvals/u);
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("McpOAuthInteraction warns when a client only uses localhost redirect URIs", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-localhost-warning",
+        );
+        const interaction = new McpOAuthInteraction({
+            accountId: "aromatic",
+            approval: { mode: "tui" },
+            approvals: new McpOAuthApprovalService(storageDir),
+            basePath: "",
+            provider: () => {
+                throw new Error("provider is not needed for rendering");
+            },
+        });
+
+        try {
+            const html = interaction.renderPage({
+                accountId: "aromatic",
+                approvalId: "approval-localhost",
+                approvalKind: "authorization",
+                approvalMode: "tui",
+                approvalStatus: "pending",
+                approvalTokenConfigured: false,
+                clientName: "Local Client",
+                promptName: "consent",
+                redirectUris: ["http://127.0.0.1:33418/callback"],
+                requestedResources: [],
+                requiredScopes: ["mcp"],
+            });
+
+            assert.match(html, /127\.0\.0\.1:33418/u);
+            assert.match(html, /client only redirects to localhost/iu);
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }
@@ -1226,19 +1602,92 @@ import { McpOAuthRegistrationLimiter } from "../../../src/oauth/interaction/Regi
         }
     });
 
-    test("OAuth registration limiter rejects bursts above its configured quota", () => {
-        let now = 0;
-        const limiter = new McpOAuthRegistrationLimiter({
-            maxRequests: 2,
-            now: () => now,
-            windowMs: 1000,
+    function jsonDocumentResponse(
+        document: Record<string, unknown>,
+    ): Response {
+        return new Response(JSON.stringify(document), {
+            headers: { "content-type": "application/json" },
+            status: 200,
         });
-        assert.equal(limiter.accept("client-a"), true);
-        assert.equal(limiter.accept("client-a"), true);
-        assert.equal(limiter.accept("client-a"), false);
-        now = 1001;
-        assert.equal(limiter.accept("client-a"), true);
-    });
+    }
+
+    function cimdFetchFor(
+        clientId: string,
+        respond: () => Response,
+    ): typeof globalThis.fetch {
+        return async (input, init) => {
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
+            if (url === clientId) {
+                return respond();
+            }
+            return globalThis.fetch(input, init);
+        };
+    }
+
+    async function findCimdClient(
+        clientId: string,
+        respond: () => Response,
+    ): Promise<unknown> {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-cimd-reject",
+        );
+        const runtime = new McpOAuthProviderRuntime({
+            approvals: new McpOAuthApprovalService(storageDir),
+            config,
+            fetch: cimdFetchFor(clientId, respond),
+            publicBaseUrl: "https://mcp.example.test/",
+            storageDir,
+        });
+        await runtime.warmup();
+        try {
+            return await runtime.provider.Client.find(clientId);
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    }
+
+    async function startCallbackServer(
+        runtime: McpOAuthProviderRuntime,
+    ): Promise<{ origin: string; close: () => Promise<void> }> {
+        await runtime.warmup();
+        const server = createServer(runtime.provider.callback());
+        await new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+        });
+        const address = server.address();
+        if (address === null || typeof address === "string") {
+            throw new Error("OAuth test server did not expose a TCP address.");
+        }
+        return {
+            origin: `http://127.0.0.1:${address.port}`,
+            close: async () => {
+                await new Promise<void>((resolve, reject) =>
+                    server.close((error) =>
+                        error === undefined ? resolve() : reject(error),
+                    ),
+                );
+            },
+        };
+    }
+
+    function readResponseCookieHeader(headers: Headers): string {
+        const entries =
+            typeof headers.getSetCookie === "function"
+                ? headers.getSetCookie()
+                : headers.get("set-cookie") === null
+                  ? []
+                  : [headers.get("set-cookie")!];
+        return entries
+            .map((entry) => entry.split(";", 1)[0]!)
+            .filter((pair) => pair.length > 0)
+            .join("; ");
+    }
 
     interface WindowsAclSnapshot {
         currentSid: string;

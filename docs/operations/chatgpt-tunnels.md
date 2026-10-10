@@ -60,8 +60,8 @@ Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、
 - request-scoped SSE 与 15 秒 keepalive；
 - `401` Bearer challenge 与 `resource_metadata`；
 - OAuth protected-resource metadata 和 authorization-server discovery；
-- Dynamic Client Registration compatibility；
-- public client、PKCE `S256` 和 ChatGPT 动态 callback URI；
+- OAuth Client ID Metadata Document（CIMD）客户端身份：AS metadata 广播 `client_id_metadata_document_supported`，不再提供 Dynamic Client Registration（`/register` 返回 404）；
+- public client、PKCE `S256` 和 ChatGPT 的 callback/redirect URI；
 - authorization request 与 token request 中的 RFC 8707 `resource`；
 - 按 instance 校验 token audience 和 scope；
 - `offline_access`、refresh token 签发和 refresh grant；
@@ -70,7 +70,7 @@ Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、
 
 Access token 默认有效期为 1 小时；refresh token、grant 和登录 session 默认保留 90 天。用户无需在 control 重启后重新注册 Web 内置 OAuth client。
 
-MCP 2026-07-28 已把 client identity/registration 继续向新模型推进，但现有 Host 仍大量使用 DCR。portable-devshell 继续保留 DCR compatibility，而 v2 MCP transport 不依赖它。工具 schema 已提供名称、描述、输入和输出 schema；安全语义仍以实际 capability、approval policy 和工具实现为准，不能仅根据名称推断 destructive/read-only 行为。
+MCP 2026-07-28 以 Client ID Metadata Document（CIMD）取代 Dynamic Client Registration：客户端把 `client_id` 设为 HTTPS 元数据文档 URL，provider 在授权时获取并校验该文档，旧的 `/register` 端点不再挂载。portable-devshell 仍支持预先注册的静态客户端（包括历史 DCR 注册、已签发 token 的客户端继续 refresh/revoke），但不再接受新的 DCR 客户端。工具 schema 已提供名称、描述、输入和输出 schema；安全语义仍以实际 capability、approval policy 和工具实现为准，不能仅根据名称推断 destructive/read-only 行为。
 
 ## 公共前提
 
