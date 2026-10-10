@@ -883,21 +883,20 @@ describe("Messages", () => {
         expect(navigate).not.toHaveBeenCalled();
     });
 
-    it("migrates legacy browser preferences once and deletes them only after server persistence succeeds", async () => {
+    it("uses server titles and ordering rather than retired browser preferences", async () => {
         const domains = twoActiveDomains();
-        localStorage.setItem(
-            "portable-devshell:web:conversation-preferences:v1",
-            JSON.stringify({
-                orderByWorkspace: {
-                    "/work/portable-devshell": [
-                        "alpha\u0000ctx-first",
-                        "alpha\u0000ctx-second",
-                    ],
-                },
-                titles: { "alpha\u0000ctx-second": "Legacy title" },
-                workspaceOrder: ["/work/portable-devshell"],
-            }),
-        );
+        domains.messagePreferences.patch({
+            preferences: {
+                ...domains.messagePreferences.state.preferences,
+                titles: { "alpha\u0000ctx-second": "Server title" },
+            },
+        });
+        const stale = JSON.stringify({
+            titles: { "alpha\u0000ctx-second": "Legacy title" },
+            workspaceOrder: ["/work/retired"],
+        });
+        const key = "portable-devshell:web:conversation-preferences:v1";
+        localStorage.setItem(key, stale);
         const updateMessagePreferences = vi.spyOn(
             domains.messagePreferences,
             "update",
@@ -909,40 +908,33 @@ describe("Messages", () => {
             webStore(domains),
         );
 
+        expect(screen.getByRole("button", { name: /Server title/u })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Legacy title/u })).not.toBeInTheDocument();
         await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith({
-                ifMissing: true,
-                orderByWorkspace: {
-                    "/work/portable-devshell": [
-                        "alpha\u0000ctx-first",
-                        "alpha\u0000ctx-second",
-                    ],
-                },
+            expect(domains.messagePreferences.state.preferences.workspaceOrder).toContain(
+                "/work/portable-devshell",
+            ),
+        );
+        expect(updateMessagePreferences).not.toHaveBeenCalledWith(
+            expect.objectContaining({
                 titles: { "alpha\u0000ctx-second": "Legacy title" },
-                workspaceOrder: ["/work/portable-devshell"],
             }),
         );
-        await waitFor(() =>
-            expect(
-                localStorage.getItem(
-                    "portable-devshell:web:conversation-preferences:v1",
-                ),
-            ).toBeNull(),
-        );
+        expect(localStorage.getItem(key)).toBe(stale);
     });
 
-    it("retains legacy browser preferences when server migration fails", async () => {
+    it("ignores retired browser hidden-context preferences instead of importing them to the server", async () => {
         const domains = twoActiveDomains();
-        const legacy = JSON.stringify({
+        const stale = JSON.stringify({
+            hiddenContexts: { "ctx-first": true, "ctx-second": true },
             titles: { "alpha\u0000ctx-second": "Legacy title" },
         });
-        localStorage.setItem(
-            "portable-devshell:web:conversation-preferences:v1",
-            legacy,
+        const key = "portable-devshell:web:conversation-preferences:v1";
+        localStorage.setItem(key, stale);
+        const updateMessagePreferences = vi.spyOn(
+            domains.messagePreferences,
+            "update",
         );
-        const updateMessagePreferences = vi
-            .spyOn(domains.messagePreferences, "update")
-            .mockRejectedValueOnce(new Error("server migration failed"));
 
         await renderMessages(
             domains,
@@ -950,19 +942,18 @@ describe("Messages", () => {
             webStore(domains),
         );
 
-        await waitFor(() =>
-            expect(updateMessagePreferences).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    ifMissing: true,
-                    titles: { "alpha\u0000ctx-second": "Legacy title" },
-                }),
-            ),
-        );
         expect(
-            localStorage.getItem(
-                "portable-devshell:web:conversation-preferences:v1",
-            ),
-        ).toBe(legacy);
+            screen.getByRole("button", { name: /Investigate the first regression/u }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: /Review the Messages navigation/u }),
+        ).toBeInTheDocument();
+        expect(updateMessagePreferences).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                hiddenContexts: { "ctx-first": true, "ctx-second": true },
+            }),
+        );
+        expect(localStorage.getItem(key)).toBe(stale);
     });
 
     it("discovers new server ordering entries without pruning unloaded workspaces or overwriting existing order", async () => {

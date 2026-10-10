@@ -283,14 +283,6 @@ export function isMessageHidden(
     return preferences.hiddenContexts?.[session.ctxId] === true;
 }
 
-export interface LegacyMessagePreferences {
-    legacyOrder: string[];
-    preferences: MessagePreferencesSnapshot;
-}
-
-const legacyMessagePreferencesStorageKey =
-    "portable-devshell:web:conversation-preferences:v1";
-
 export function messageKey(
     session: Pick<WebMessageSession, "ctxId" | "instance">,
 ): string {
@@ -301,90 +293,6 @@ export function workspacePreferenceKey(
     session: Pick<WebMessageSession, "instance" | "workspace">,
 ): string {
     return session.workspace ?? `\u0000${session.instance}`;
-}
-
-/**
- * @compat web-message-preferences-v1
- * @removeAt 0.7.10
- */
-export function readLegacyMessagePreferences():
-    LegacyMessagePreferences | undefined {
-    if (typeof window === "undefined") return undefined;
-    try {
-        const raw = window.localStorage.getItem(
-            legacyMessagePreferencesStorageKey,
-        );
-        if (raw === null) return undefined;
-        const parsed = JSON.parse(raw) as {
-            order?: unknown;
-            orderByWorkspace?: unknown;
-            titles?: unknown;
-            workspaceOrder?: unknown;
-        };
-        const legacyOrder = Array.isArray(parsed.order)
-            ? parsed.order.filter(
-                  (value): value is string => typeof value === "string",
-              )
-            : [];
-        const orderByWorkspace =
-            typeof parsed.orderByWorkspace === "object" &&
-            parsed.orderByWorkspace !== null &&
-            !Array.isArray(parsed.orderByWorkspace)
-                ? Object.fromEntries(
-                      Object.entries(parsed.orderByWorkspace).flatMap(
-                          ([workspace, value]) =>
-                              Array.isArray(value)
-                                  ? [
-                                        [
-                                            workspace,
-                                            value.filter(
-                                                (item): item is string =>
-                                                    typeof item === "string",
-                                            ),
-                                        ],
-                                    ]
-                                  : [],
-                      ),
-                  )
-                : {};
-        const titles =
-            typeof parsed.titles === "object" &&
-            parsed.titles !== null &&
-            !Array.isArray(parsed.titles)
-                ? Object.fromEntries(
-                      Object.entries(parsed.titles).filter(
-                          (entry): entry is [string, string] =>
-                              typeof entry[1] === "string",
-                      ),
-                  )
-                : {};
-        const workspaceOrder = Array.isArray(parsed.workspaceOrder)
-            ? parsed.workspaceOrder.filter(
-                  (value): value is string => typeof value === "string",
-              )
-            : [];
-        return {
-            legacyOrder,
-            preferences: {
-                hiddenContexts: {},
-                orderByWorkspace,
-                titles,
-                version: 1,
-                workspaceOrder,
-            },
-        };
-    } catch {
-        return undefined;
-    }
-}
-
-export function removeLegacyMessagePreferences(): void {
-    if (typeof window === "undefined") return;
-    try {
-        window.localStorage.removeItem(legacyMessagePreferencesStorageKey);
-    } catch {
-        // Migration cleanup is best-effort after the server has accepted the preferences.
-    }
 }
 
 export function applyMessagePreferences(
@@ -439,7 +347,6 @@ export function applyMessagePreferences(
 export function ensureMessagePreferenceOrder(
     preferences: MessagePreferencesSnapshot,
     sessions: readonly WebMessageSession[],
-    legacyOrder: readonly string[] = [],
 ): MessagePreferencesSnapshot {
     const workspaceSessions = new Map<string, WebMessageSession[]>();
     for (const session of sessions) {
@@ -464,10 +371,7 @@ export function ensureMessagePreferenceOrder(
         );
     for (const [workspace, values] of workspaceSessions) {
         const loadedKeys = values.map(messageKey);
-        const loaded = new Set(loadedKeys);
-        const previous =
-            orderByWorkspace[workspace] ??
-            legacyOrder.filter((key) => loaded.has(key));
+        const previous = orderByWorkspace[workspace] ?? [];
         const previousKeys = new Set(previous);
         const missing = loadedKeys.filter((key) => !previousKeys.has(key));
         const next = [...missing, ...previous];

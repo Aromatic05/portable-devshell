@@ -18,13 +18,10 @@ import {
     messageKey,
     messageOrderPatch,
     ensureMessagePreferenceOrder,
-    readLegacyMessagePreferences,
-    removeLegacyMessagePreferences,
     selectWebMessageEntries,
     selectWebMessageHistorySessions,
     selectWebMessageSession,
     selectWebMessageSessions,
-    type LegacyMessagePreferences,
     type WebMessageProjection,
 } from "./Model.js";
 
@@ -51,17 +48,10 @@ export function Messages({
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [clockNow, setClockNow] = useState(() => Date.now());
     const [preferencesReady, setPreferencesReady] = useState(false);
-    const [legacyMessagePreferences] = useState<
-        LegacyMessagePreferences | undefined
-    >(() => readLegacyMessagePreferences());
-    const [legacyMigrationPending, setLegacyMigrationPending] = useState(
-        () => legacyMessagePreferences !== undefined,
-    );
     const [currentMessageKeys, setCurrentMessageKeys] = useState<
         Set<string>
     >(() => new Set());
     const drawerTriggerRef = useRef<HTMLButtonElement>(null);
-    const legacyMigrationStartedRef = useRef(false);
     const preferenceOrderSyncRef = useRef(false);
 
     const projection = useMemo<WebMessageProjection>(
@@ -161,45 +151,7 @@ export function Messages({
     }, [activeSessions]);
 
     useEffect(() => {
-        if (
-            !legacyMigrationPending ||
-            legacyMessagePreferences === undefined ||
-            !preferencesLoaded ||
-            legacyMigrationStartedRef.current
-        )
-            return;
-        legacyMigrationStartedRef.current = true;
-        const imported = ensureMessagePreferenceOrder(
-            legacyMessagePreferences.preferences,
-            allBaseSessions,
-            legacyMessagePreferences.legacyOrder,
-        );
-        void store
-            .updateMessagePreferences({
-                ifMissing: true,
-                orderByWorkspace: imported.orderByWorkspace,
-                titles: imported.titles,
-                workspaceOrder: imported.workspaceOrder,
-            })
-            .then((succeeded) => {
-                if (succeeded) removeLegacyMessagePreferences();
-                setLegacyMigrationPending(false);
-            });
-    }, [
-        allBaseSessions,
-        legacyMessagePreferences,
-        legacyMigrationPending,
-        preferencesLoaded,
-        store,
-    ]);
-
-    useEffect(() => {
-        if (
-            !preferencesLoaded ||
-            legacyMigrationPending ||
-            preferenceOrderSyncRef.current
-        )
-            return;
+        if (!preferencesLoaded || preferenceOrderSyncRef.current) return;
         const next = ensureMessagePreferenceOrder(
             messagePreferences,
             allBaseSessions,
@@ -215,12 +167,7 @@ export function Messages({
                 preferenceOrderSyncRef.current = false;
             },
         );
-    }, [
-        allBaseSessions,
-        messagePreferences,
-        legacyMigrationPending,
-        preferencesLoaded,
-    ]);
+    }, [allBaseSessions, messagePreferences, preferencesLoaded]);
 
     useEffect(() => {
         setDrawerOpen(false);

@@ -967,15 +967,22 @@ describe("hash routing", () => {
             expect(readHashRoute(webRouteHref(route))).toEqual(route);
     });
 
-    it("maps the legacy activity URL onto Audit without keeping activity as a page", () => {
-        expect(readHashRoute("#/activity")).toEqual(pageRoute("audit"));
-        expect(readHashRoute("#/approvals")).toEqual(pageRoute("audit"));
-        expect(readHashRoute("#/config/dev%2Fmain")).toEqual({
+    it("rejects retired browser aliases while retaining canonical Audit and Instance routes", () => {
+        for (const alias of [
+            "#/activity",
+            "#/approvals",
+            "#/config/dev%2Fmain",
+            "#/connections/dev%2Fmain",
+        ]) {
+            expect(readHashRoute(alias)).toEqual(pageRoute("overview"));
+        }
+        expect(readHashRoute("#/audit")).toEqual(pageRoute("audit"));
+        expect(readHashRoute("#/instances/dev%2Fmain?view=config")).toEqual({
             page: "instances",
             instance: "dev/main",
             view: "config",
         });
-        expect(readHashRoute("#/connections/dev%2Fmain")).toEqual({
+        expect(readHashRoute("#/instances/dev%2Fmain?view=connections")).toEqual({
             page: "instances",
             instance: "dev/main",
             view: "connections",
