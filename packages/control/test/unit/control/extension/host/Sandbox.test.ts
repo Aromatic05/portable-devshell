@@ -1286,7 +1286,9 @@ export function activate(context) {
 }
 `,
             {
-                externalMemoryLimitMb: 24,
+                // Worker bootstrap can itself exceed 24 MiB; validate that
+                // the runaway invocation, not startup, trips the watchdog.
+                externalMemoryLimitMb: 96,
                 memoryWatchIntervalMs: 10,
                 onFault: (error) => faults.push(error),
                 resourceLimits: {
@@ -1297,6 +1299,7 @@ export function activate(context) {
             },
         );
         await sandbox.start();
+        assert.equal(faults.length, 0);
         await assert.rejects(
             sandboxCliCommand(
                 sandbox,
@@ -1304,7 +1307,7 @@ export function activate(context) {
                 [],
                 invocation("external-memory"),
             ),
-            /external memory exceeded 24 MiB/u,
+            /external memory exceeded 96 MiB/u,
         );
         assert.equal(faults.length, 1);
     },
