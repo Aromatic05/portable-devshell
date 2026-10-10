@@ -74,8 +74,7 @@ export class WorkerInstance implements WorkerInstanceApi {
             workerHost,
         );
         const terminal = new WorkerTerminal(dependencies.endpoint, workerHost);
-        let connection!: WorkerInstanceConnection;
-        connection = new WorkerInstanceConnection({
+        const connection: WorkerInstanceConnection = new WorkerInstanceConnection({
             appendEvent: (type, data) => state.appendEvent(type, data),
             applyStateUpdate: (update) =>
                 state.apply(update, connection.snapshotReverse()),

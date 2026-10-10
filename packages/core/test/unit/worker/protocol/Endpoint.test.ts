@@ -15,18 +15,16 @@ function channelPair(): { client: Channel; server: Channel } {
     const leftToRight = new PassThrough();
     const rightToLeft = new PassThrough();
     let closed = false;
-    let left: StreamChannel;
-    let right: StreamChannel;
     const close = (error?: Error) => {
         if (closed) return;
         closed = true;
         left.close(error);
         right.close(error);
     };
-    left = new StreamChannel(rightToLeft, leftToRight, {
+    const left = new StreamChannel(rightToLeft, leftToRight, {
         closeTransport: close,
     });
-    right = new StreamChannel(leftToRight, rightToLeft, {
+    const right = new StreamChannel(leftToRight, rightToLeft, {
         closeTransport: close,
     });
     return { client: left, server: right };

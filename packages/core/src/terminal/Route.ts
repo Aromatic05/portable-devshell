@@ -121,6 +121,9 @@ export function createTerminalRouteModule(
                 let pendingBytes = 0;
                 let lastAckedSeq = input.fromSeq;
                 const pendingFrames = new Map<number, number>();
+                // Registered stream callbacks can close before attach completes.
+                // Keep this binding unset until a durable attachment exists.
+                // eslint-disable-next-line prefer-const
                 let attachment: TerminalAttachment | undefined;
 
                 const offData = stream.onData(async (message) => {

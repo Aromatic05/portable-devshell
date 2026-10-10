@@ -1,8 +1,4 @@
-export {
-    ReverseConnections,
-    type ReverseConnectionIdentity,
-    type ReverseConnectionsOptions,
-} from "./transport/reverse/Connections.js";
+export { ReverseConnections } from "./transport/reverse/Connections.js";
 export { createInstanceHost } from "./Route.js";
 export { Instance } from "./model/Instance.js";
 export { InstanceLifecycle } from "./model/Lifecycle.js";

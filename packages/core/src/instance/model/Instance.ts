@@ -65,8 +65,6 @@ export class Instance {
             filePath: paths.auditDatabaseFile,
             instanceName,
         });
-        let instance!: Instance;
-        let state!: InstanceState;
         const eventLog = createInstanceEventLog(audit, instanceName);
         const subscriptions = new ProcessSubscriptionManager();
         const { protocolClient, worker } = createWorkerInstance(
@@ -80,7 +78,7 @@ export class Instance {
                 await state.handleReadyChanged(ready);
             },
         );
-        state = new InstanceState({
+        const state: InstanceState = new InstanceState({
             acquireLease: () => instance.lifecycle.acquireLease(),
             appendEvent: async (type, data) => {
                 await worker.supervision.state.appendEvent(type, data);
@@ -106,7 +104,7 @@ export class Instance {
                 await worker.execution.environment.releaseAlerts(workspace),
             terminal: worker.execution.terminal,
         });
-        instance = new Instance({
+        const instance: Instance = new Instance({
             config: toInstanceConfig(config),
             eventLog,
             state,
