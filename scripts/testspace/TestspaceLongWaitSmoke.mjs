@@ -15,7 +15,7 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
     const client = new Client({
         name: "portable-devshell-testspace-long-wait-smoke",
         version: "0.0.0",
-    });
+    }, { versionNegotiation: { mode: "auto" } });
     try {
         await client.connect(
             new StreamableHTTPClientTransport(new URL(endpoint)),

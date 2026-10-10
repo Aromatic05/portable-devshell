@@ -36,7 +36,7 @@ export async function runTestspaceCommentSmoke({
     const mcp = new Client({
         name: "portable-devshell-testspace-comment-smoke",
         version: "0.0.0",
-    });
+    }, { versionNegotiation: { mode: "auto" } });
     try {
         await session.start();
         await waitFor(

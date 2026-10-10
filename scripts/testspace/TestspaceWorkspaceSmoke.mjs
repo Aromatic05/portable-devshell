@@ -13,7 +13,7 @@ export async function runTestspaceWorkspaceSmoke({
     const client = new Client({
         name: "testspace-workspace-smoke",
         version: "0.0.0",
-    });
+    }, { versionNegotiation: { mode: "auto" } });
     try {
         await client.connect(
             new StreamableHTTPClientTransport(new URL(endpoint)),

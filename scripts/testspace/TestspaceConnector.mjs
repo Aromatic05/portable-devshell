@@ -312,7 +312,7 @@ async function connect(endpoint, workspace) {
     const client = new Client({
         name: "testspace-gpt-connector",
         version: "0.0.0",
-    });
+    }, { versionNegotiation: { mode: "auto" } });
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
     const listed = await client.listTools();
     const environment = await client.callTool({

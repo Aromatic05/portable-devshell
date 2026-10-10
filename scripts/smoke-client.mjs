@@ -77,17 +77,18 @@ await writeFile(
 await writeFile(
     resolve(devshellHome, "control", "instances", `${instance}.toml`),
     [
-        "version = 3",
+        "version = 4",
         `name = ${tomlString(instance)}`,
         "enabled = true",
         'provider = "local"',
         "",
         "[mcp]",
         "enabled = false",
+        'auth = "none"',
+        'contextMode = "explicit"',
         "",
-        "[mcp.tools]",
-        'groups = ["file", "bash", "artifact", "todo"]',
-        'capabilities = ["read", "write", "execute"]',
+        "[extensions]",
+        'model = ["artifact", "instance", "mcp", "secret", "skill"]',
         "",
         "[approvalPolicy]",
         'mode = "disabled"',
@@ -103,20 +104,27 @@ let currentStage = "initialization";
 let controlStarted = false;
 let instanceStarted = false;
 try {
-    stage("migrate legacy instance config");
+    stage("validate canonical instance configuration");
+    const instanceConfigFile = resolve(
+        devshellHome, "control", "instances", `${instance}.toml`,
+    );
+    const beforeMigration = await readFile(instanceConfigFile, "utf8");
     runCli(["migrate"]);
     const migratedInstanceConfig = await readFile(
-        resolve(devshellHome, "control", "instances", `${instance}.toml`),
+        instanceConfigFile,
         "utf8",
     );
+    if (migratedInstanceConfig !== beforeMigration) {
+        throw new Error("migrate unexpectedly rewrote the current v4 instance");
+    }
     if (!/^version = 4$/mu.test(migratedInstanceConfig)) {
         throw new Error(
-            `legacy instance config was not rewritten to version 4:\n${migratedInstanceConfig}`,
+            `instance config is not current version 4:\n${migratedInstanceConfig}`,
         );
     }
     if (/^\[mcp\.tools\]$/mu.test(migratedInstanceConfig)) {
         throw new Error(
-            `legacy mcp.tools policy survived version 4 migration:\n${migratedInstanceConfig}`,
+            `retired mcp.tools policy unexpectedly exists in current v4 config:\n${migratedInstanceConfig}`,
         );
     }
     for (const extensionId of [
@@ -132,7 +140,7 @@ try {
             )
         ) {
             throw new Error(
-                `version 4 migration did not grant bundled model Extension ${extensionId}:\n${migratedInstanceConfig}`,
+                `version 4 config does not allow bundled model Extension ${extensionId}:\n${migratedInstanceConfig}`,
             );
         }
     }

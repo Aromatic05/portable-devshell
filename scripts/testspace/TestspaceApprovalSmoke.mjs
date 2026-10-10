@@ -7,7 +7,7 @@ import { withTestspaceControlConnection } from "./TestspaceReverse.mjs";
 
 /** Exercise MCP ToolCall -> pending Approval -> MCPApp human action -> Audit. */
 export async function runTestspaceApprovalSmoke({ endpoint, instance, runtimeDirectory, workspace }) {
-    const client = new Client({ name: "testspace-approval-smoke", version: "0.0.0" });
+    const client = new Client({ name: "testspace-approval-smoke", version: "0.0.0" }, { versionNegotiation: { mode: "auto" } });
     let ctxId;
     let originalPolicy;
     let changed = false;

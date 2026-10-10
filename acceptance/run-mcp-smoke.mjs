@@ -12,38 +12,17 @@ try {
     runCli(["instance", "start", "aromatic-pc"], fixture.env);
     const endpoint = `http://127.0.0.1:${fixture.port}/aromatic-pc/mcp`;
 
-    const initialize = await postJson(endpoint, {
+    const discover = await postJson(endpoint, {
         jsonrpc: "2.0",
-        id: "req-init",
-        method: "initialize",
-        params: {
-            protocolVersion: "2025-03-26",
-            capabilities: {},
-            clientInfo: { name: "acceptance", version: "0.0.0" },
-        },
+        id: "req-discover",
+        method: "server/discover",
     });
-    const protocolVersion = String(
-        initialize.body.result?.protocolVersion ?? "",
-    );
-    assert.equal(initialize.headers.get("mcp-session-id"), null);
-    assert.notEqual(protocolVersion, "");
+    assert.deepEqual(discover.body.result?.supportedVersions, ["2026-07-28"]);
+    assert.equal(discover.headers.get("mcp-session-id"), null);
     assert.equal(
-        initialize.body.result?.serverInfo?.version,
+        discover.body.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.version,
         applicationVersion,
     );
-    const headers = {
-        "mcp-protocol-version": protocolVersion,
-    };
-
-    const initialized = await post(
-        endpoint,
-        {
-            jsonrpc: "2.0",
-            method: "notifications/initialized",
-        },
-        headers,
-    );
-    assert.equal(initialized.status, 202);
 
     const toolsList = await postJson(
         endpoint,
@@ -52,7 +31,6 @@ try {
             id: "req-tools-list",
             method: "tools/list",
         },
-        headers,
     );
     const toolNames =
         toolsList.body.result?.tools?.map((tool) => tool.name) ?? [];
@@ -72,7 +50,6 @@ try {
                 arguments: { workspace: fixture.workspace },
             },
         },
-        headers,
     );
     const environment = environmentCall.body.result?.structuredContent;
     const ctxId = environment?.ctxId;
@@ -103,7 +80,6 @@ try {
                 arguments: { command: "pwd", ctxId, timeoutMs: 30_000 },
             },
         },
-        headers,
     );
     assert.deepEqual(toolCall.body.result?.content, []);
     const output = String(
@@ -115,7 +91,7 @@ try {
         JSON.stringify(
             {
                 environmentCall: environmentCall.body,
-                initialize: initialize.body,
+                discover: discover.body,
                 toolsList: toolsList.body,
                 toolCall: toolCall.body,
             },
@@ -162,13 +138,37 @@ function parseMcpResponseBody(response, text) {
 }
 
 async function post(url, body, headers = {}) {
+    const params = body.params ?? {};
+    const name = body.method === "resources/read"
+        ? params.uri
+        : body.method === "tools/call" || body.method === "prompts/get"
+          ? params.name
+          : undefined;
+    const request = {
+        ...body,
+        params: {
+            ...params,
+            _meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {
+                    name: "portable-devshell-acceptance",
+                    version: "0.0.0",
+                },
+                "io.modelcontextprotocol/clientCapabilities": {},
+                ...(params._meta ?? {}),
+            },
+        },
+    };
     return await fetch(url, {
         method: "POST",
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
+            "mcp-protocol-version": "2026-07-28",
+            "mcp-method": body.method,
+            ...(typeof name === "string" ? { "mcp-name": name } : {}),
             ...headers,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(request),
     });
 }

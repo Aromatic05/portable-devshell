@@ -109,11 +109,12 @@ try {
         }
         stage("file_read");
         const read = await rpc.request("file_read", {
-            path: "./portable-devshell-smoke.txt",
+            files: [{ path: "./portable-devshell-smoke.txt" }],
         });
+        const readEntry = Array.isArray(read.files) ? read.files[0] : undefined;
         if (
-            typeof read.content !== "string" ||
-            !read.content.includes("portable-devshell-file-smoke")
+            typeof readEntry?.content !== "string" ||
+            !readEntry.content.includes("portable-devshell-file-smoke")
         ) {
             throw new Error(`file_read smoke failed: ${JSON.stringify(read)}`);
         }

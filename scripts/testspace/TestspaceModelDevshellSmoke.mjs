@@ -14,7 +14,7 @@ export async function runTestspaceModelDevshellSmoke({
     const client = new Client({
         name: "portable-devshell-testspace-model-devshell-smoke",
         version: "0.0.0",
-    });
+    }, { versionNegotiation: { mode: "auto" } });
     let remoteClient;
     try {
         await client.connect(
@@ -123,7 +123,7 @@ export async function runTestspaceModelDevshellSmoke({
         remoteClient = new Client({
             name: "portable-devshell-testspace-remote-model-smoke",
             version: "0.0.0",
-        });
+        }, { versionNegotiation: { mode: "auto" } });
         await remoteClient.connect(new StreamableHTTPClientTransport(new URL(remoteEndpoint)));
         const remotePwd = await runBash(remoteClient, ctxId, "pwd");
         assertExit(remotePwd, 0, "remote bash after environ_remote attach");

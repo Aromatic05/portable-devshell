@@ -7,7 +7,7 @@ import { withTestspaceControlConnection } from "./TestspaceReverse.mjs";
 
 /** A real MCP client drives Instance Todo, ToolCall, MCPApp Action and Reentry. */
 export async function runTestspaceWorkflowSmoke({ endpoint, instance, runtimeDirectory, workspace }) {
-    const client = new Client({ name: "testspace-workflow-smoke", version: "0.0.0" });
+    const client = new Client({ name: "testspace-workflow-smoke", version: "0.0.0" }, { versionNegotiation: { mode: "auto" } });
     let taskId;
     try {
         await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
