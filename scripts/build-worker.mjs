@@ -97,7 +97,7 @@ function ensureZigBuild(baseEnvironment) {
     const environment = { ...baseEnvironment };
 
     if (
-        !commandSucceeds(CARGO_COMMAND, ["zigbuild", "--version"], environment)
+        !commandSucceeds(CARGO_COMMAND, ["zigbuild", "--help"], environment)
     ) {
         run(
             CARGO_COMMAND,
@@ -112,15 +112,21 @@ function ensureZigBuild(baseEnvironment) {
         );
     }
 
-    if (commandSucceeds(ZIG_COMMAND, ["version"], environment)) {
+    const actualVersion = readZigVersion(environment);
+    if (actualVersion === ZIG_VERSION) {
         return environment;
+    }
+    if (process.env.PORTABLE_DEVSHELL_BUILD_ZIG !== undefined) {
+        throw new Error(
+            `PORTABLE_DEVSHELL_BUILD_ZIG must report Zig ${ZIG_VERSION}, got ${actualVersion ?? "unavailable"}.`,
+        );
     }
 
     const zigDirectory = installZig();
     environment.PATH = `${zigDirectory}${delimiter}${environment.PATH ?? ""}`;
-    if (!commandSucceeds(ZIG_COMMAND, ["version"], environment)) {
+    if (readZigVersion(environment) !== ZIG_VERSION) {
         throw new Error(
-            `Zig ${ZIG_VERSION} was installed but is not executable from ${zigDirectory}`,
+            `Zig ${ZIG_VERSION} was installed but is not available from ${zigDirectory}`,
         );
     }
     return environment;
@@ -194,6 +200,17 @@ function commandSucceeds(command, args, environment) {
         stdio: "ignore",
     });
     return result.status === 0;
+}
+
+function readZigVersion(environment) {
+    const spec = normalizeCommandSpec(ZIG_COMMAND);
+    const result = spawnSync(spec.command, [...spec.args, "version"], {
+        cwd: repoRoot,
+        env: environment,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+    });
+    return result.status === 0 ? result.stdout.trim() : undefined;
 }
 
 function run(command, args, options = {}) {

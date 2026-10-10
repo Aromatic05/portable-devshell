@@ -37,6 +37,14 @@ for (const target of [
             assert.ok(cargoArgs.includes("--locked"));
             assert.ok(cargoArgs.includes("--release"));
             assert.equal(valueAfter(cargoArgs, "--target"), target.rustTarget);
+            if (target.cargoSubcommand === "zigbuild") {
+                const commands = await readFile(
+                    resolve(fixture.root, "cargo-history"),
+                    "utf8",
+                );
+                assert.match(commands, /^zigbuild --help$/m);
+                assert.doesNotMatch(commands, /^install /m);
+            }
         } finally {
             await rm(fixture.root, { force: true, recursive: true });
         }
@@ -53,6 +61,21 @@ test("build-worker defaults to the host target when no target is provided", asyn
         assert.equal(cargoArgs[0], target.cargoSubcommand);
         assert.equal(valueAfter(cargoArgs, "--target"), target.rustTarget);
         assert.ok(cargoArgs.includes("--release"));
+    } finally {
+        await rm(fixture.root, { force: true, recursive: true });
+    }
+});
+
+test("build-worker rejects an unpinned Zig override before compilation", async () => {
+    const fixture = await createFixture();
+    try {
+        await writeFile(fixture.zigScript, 'process.stdout.write("0.16.0\\n");\n', "utf8");
+        const result = runFixture(fixture, ["linux-x64"]);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /must report Zig 0\.14\.1, got 0\.16\.0/);
+        const history = await readFile(resolve(fixture.root, "cargo-history"), "utf8");
+        assert.doesNotMatch(history, /^install /m);
+        assert.doesNotMatch(history, /^zigbuild --locked /m);
     } finally {
         await rm(fixture.root, { force: true, recursive: true });
     }
@@ -108,13 +131,16 @@ async function writeFakeCargo(path) {
     await writeFile(
         path,
         `
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 const args = process.argv.slice(2);
 const root = process.env.BUILD_WORKER_TEST_ROOT;
 if (!root) throw new Error("BUILD_WORKER_TEST_ROOT is required");
 writeFileSync(resolve(root, "cargo-args"), args.join("\\n") + "\\n", "utf8");
-if (args.includes("--version") || args[0] === "install") process.exit(0);
+appendFileSync(resolve(root, "cargo-history"), args.join(" ") + "\\n", "utf8");
+if (args[0] === "zigbuild" && args.includes("--version")) process.exit(2);
+if (args[0] === "zigbuild" && args.includes("--help")) process.exit(0);
+if (args[0] === "install") throw new Error("unnecessary cargo-zigbuild install");
 const targetIndex = args.indexOf("--target");
 const target = targetIndex === -1 ? undefined : args[targetIndex + 1];
 if (!target) throw new Error("missing --target");
