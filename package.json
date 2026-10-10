@@ -1,6 +1,6 @@
 {
     "name": "portable-devshell",
-    "version": "0.7.8",
+    "version": "1.0.0-alpha.1",
     "private": true,
     "packageManager": "pnpm@10.13.1",
     "engines": {
