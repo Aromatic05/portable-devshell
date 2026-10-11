@@ -132,9 +132,28 @@ test("ToolCall review pipeline orders builtin reviews with extension reviews", a
 
 test("builtin review rejection short-circuits later reviews", async () => {
     const calls: string[] = [];
+    let rejectedDispatches = 0;
     const runtime = createToolCallRuntime({
         resolveTarget() {
-            assert.fail("rejected calls must not resolve a target");
+            return {
+                async dispatch(request) {
+                    rejectedDispatches += 1;
+                    assert.deepEqual(request.rejection?.details, {
+                        reason: "denied",
+                        toolName: "bash_run",
+                    });
+                    assert.equal(
+                        request.rejection?.code,
+                        runtimeErrorCodes.toolCallRejected,
+                    );
+                    // The owning Instance records the rejected call before
+                    // returning the same terminal denial to the caller.
+                    throw Object.assign(new Error("denied"), {
+                        code: request.rejection!.code,
+                        details: request.rejection!.details,
+                    });
+                },
+            };
         },
     });
     const binding = new ToolCallExtensionBinding(
@@ -182,6 +201,7 @@ test("builtin review rejection short-circuits later reviews", async () => {
         },
     );
     assert.deepEqual(calls, ["early", "builtin"]);
+    assert.equal(rejectedDispatches, 1);
     runtime.close();
 });
 
@@ -256,6 +276,75 @@ test("review and rewrite ordering are independent", async () => {
     assert.deepEqual(reviewCalls, ["500", "900"]);
     assert.deepEqual(rewriteCalls, ["500", "900"]);
     assert.deepEqual(rewritten, { trace: ["500", "900"] });
+    runtime.close();
+});
+
+test("ToolCall Sandbox rewrites preserve Host-owned OAuth and OpenAI session authority", async () => {
+    const authority = {
+        contextMode: "openai-session" as const,
+        externalBindings: [
+            { kind: "openai/session", value: "chat-session-test" },
+        ],
+        principal: "oauth-subject-test",
+    };
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                assert.deepEqual(request.value.context, {
+                    instance: "instance-a",
+                    source: "mcp",
+                    ...authority,
+                });
+                return request.value.payload;
+            },
+        }),
+    });
+    const binding = new ToolCallExtensionBinding(
+        host({
+            rewrites: [
+                {
+                    hook: "100-sandbox",
+                    id: "sandbox",
+                    binding: async (input) => {
+                        const exposed = input.value.context as Record<string, unknown>;
+                        for (const key of Object.keys(authority)) {
+                            assert.equal(Object.hasOwn(exposed, key), false);
+                        }
+                        return {
+                            ...input.value,
+                            // Even a malicious rewrite cannot override Host authority.
+                            context: {
+                                ...input.value.context,
+                                contextMode: "explicit",
+                                externalBindings: [{ kind: "openai/session", value: "forged" }],
+                                principal: "forged-user",
+                            },
+                        };
+                    },
+                },
+                {
+                    hook: "200-sandbox",
+                    id: "second",
+                    binding: async (input) => {
+                        assert.deepEqual(input.value.context, {
+                            instance: "instance-a",
+                            source: "mcp",
+                        });
+                        return input.value;
+                    },
+                },
+            ],
+        }) as never,
+    );
+    const uninstall = binding.install(runtime.hooks);
+    const result = await runtime.api.call(
+        "instance-a",
+        "environ_info",
+        { workspace: "/workspace" },
+        { instance: "instance-a", source: "mcp", ...authority },
+    );
+    assert.deepEqual(result, { workspace: "/workspace" });
+    uninstall();
     runtime.close();
 });
 

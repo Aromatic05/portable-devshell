@@ -135,6 +135,7 @@ export class ToolCallExtensionBinding {
                             invocation,
                             secret.context(invocation, signal),
                         ),
+                        input.value.context,
                     );
                 },
             });
@@ -144,17 +145,45 @@ export class ToolCallExtensionBinding {
 }
 
 function extensionValue(value: Readonly<ToolCallHookValue>): ToolCallValue {
+    // OAuth identity and external session authority belong to the Host,
+    // not to the Extension's rewritable ToolCall context.
+    const {
+        principal: _principal,
+        externalBindings: _externalBindings,
+        contextMode: _contextMode,
+        ...context
+    } = value.context;
     return {
-        context: { ...value.context },
+        context,
         kind: value.kind,
         payload: value.payload,
         toolName: value.toolName,
     };
 }
 
-function hookValue(value: ToolCallValue): ToolCallHookValue {
+function hookValue(
+    value: ToolCallValue,
+    original: Readonly<ToolCallHookValue["context"]>,
+): ToolCallHookValue {
+    const {
+        principal: _principal,
+        externalBindings: _externalBindings,
+        contextMode: _contextMode,
+        ...context
+    } = value.context as ToolCallHookValue["context"];
     return {
-        context: value.context as ToolCallHookValue["context"],
+        context: {
+            ...context,
+            ...(original.principal === undefined
+                ? {}
+                : { principal: original.principal }),
+            ...(original.externalBindings === undefined
+                ? {}
+                : { externalBindings: original.externalBindings }),
+            ...(original.contextMode === undefined
+                ? {}
+                : { contextMode: original.contextMode }),
+        },
         kind: value.kind,
         payload: value.payload as JsonValue,
         toolName: value.toolName,
