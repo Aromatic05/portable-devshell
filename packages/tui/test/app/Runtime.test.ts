@@ -30,6 +30,47 @@ import {
 } from "../support/DomainHarness.ts";
 
 {
+    test("route chosen before Control startup completes still loads its domain data", async () => {
+        const terminal = createTerminal();
+        const domains = createDomains();
+        const runtime = new TuiRuntime(
+            { stdin: terminal.stdin, stdout: terminal.stdout },
+            { domains: domains.session, inkDebug: true },
+        );
+        const startSession = runtime.session.start.bind(runtime.session);
+        let finishStartup!: () => void;
+        const startupGate = new Promise<void>((resolve) => {
+            finishStartup = resolve;
+        });
+        runtime.session.start = async () => {
+            await startSession();
+            await startupGate;
+        };
+        const loadToolCalls = domains.session.toolCalls.load.bind(domains.session.toolCalls);
+        let auditLoads = 0;
+        domains.session.toolCalls.load = async (...args) => {
+            auditLoads += 1;
+            await loadToolCalls(...args);
+        };
+        const running = runtime.run();
+
+        try {
+            await waitUntil(
+                () => runtime.store.getState().connection.status === "connected",
+            );
+            // Control is online, but its complete startup has not returned.
+            runtime.store.setSelectedPage("audit");
+            runtime.store.setSelectedInstance("alpha");
+            finishStartup();
+            await waitUntil(() => auditLoads > 0, 1_500);
+        } finally {
+            finishStartup();
+            terminal.write("\u0004");
+            await running;
+            await runtime.stop();
+        }
+    });
+
     test("real Ink runtime handles keyboard navigation, search, redraw, and terminal cleanup", async () => {
         const terminal = createTerminal();
         const domains = createDomains();

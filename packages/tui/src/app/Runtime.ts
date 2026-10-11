@@ -486,7 +486,13 @@ export class TuiRuntime {
         this.#startCursorBlink();
         this.#mountInk();
         await this.session.start();
-        this.routeLifecycle.start(true);
+        // Startup already loads the default Overview, but input may navigate
+        // elsewhere while the remaining Control domains are still hydrating.
+        // That route must receive its first load instead of being skipped.
+        this.routeLifecycle.start(
+            this.store.getState().ui.selectedPage === "overview" &&
+                this.store.getState().ui.selectedInstance === undefined,
+        );
 
         while (!this.#stopped) {
             const ink = this.#ink;

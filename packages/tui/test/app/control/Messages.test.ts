@@ -1028,7 +1028,14 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         );
         await waitUntil(
             () => box(harness.runtime, "audit-context:ctx-alpha") !== undefined,
-        );
+        ).catch((error) => {
+            const state = harness.runtime.store.getState();
+            const calls = harness.runtime.reader.toolCalls.instances.alpha;
+            throw new Error(
+                `Audit context missing: route=${JSON.stringify(currentTuiRoute(state))} selectedInstance=${state.ui.selectedInstance ?? "none"} contexts=${harness.runtime.reader.context.contexts.map((entry) => entry.ctxId).join(",")} toolCalls=${calls?.calls.length ?? "not loaded"} toolError=${calls?.failure?.message ?? "none"}`,
+                { cause: error },
+            );
+        });
         for (let attempt = 0; attempt < 5; attempt += 1) {
             const outputBefore = harness.terminal.output.length;
             harness.terminal.write("\t");
