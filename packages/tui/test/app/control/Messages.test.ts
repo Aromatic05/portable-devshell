@@ -636,6 +636,15 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         (instance) => instance.name === "alpha",
                     ),
                 );
+                await waitUntil(() =>
+                    runtime.reader.context.contexts.some(
+                        (context) => context.ctxId === "ctx-alpha",
+                    ),
+                ).catch((error) => {
+                    throw new Error(
+                        `${error instanceof Error ? error.message : String(error)}: ${String(runtime.reader.context.failure?.message ?? "Context has not loaded")}`,
+                    );
+                });
                 await waitUntil(() => terminal.rawModes.includes(true)).catch(
                     (error) => {
                         throw new Error(
@@ -796,27 +805,33 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         name: "context",
                         operations: [
                             {
-                                name: "list",
-                                handle: () => [
-                                    {
-                                        createdAt: "2026-08-03T00:00:00.000Z",
-                                        ctxId: "ctx-alpha",
-                                        environments: [
-                                            {
-                                                instance: "alpha",
-                                                workspace: "/workspace/alpha",
-                                            },
-                                        ],
-                                        expiresAt: "2099-08-03T01:00:00.000Z",
-                                        instance: "alpha",
-                                        lastAccessedAt:
-                                            "2026-08-03T00:05:00.000Z",
-                                        principal: "client-alpha",
-                                        status: "active",
-                                        workspace: "/workspace/alpha",
-                                    },
-                                ],
+                                name: "snapshot",
+                                handle: () => ({
+                                    revision: 1,
+                                    contexts: [
+                                        {
+                                            createdAt: "2026-08-03T00:00:00.000Z",
+                                            ctxId: "ctx-alpha",
+                                            environments: [
+                                                {
+                                                    instance: "alpha",
+                                                    workspace: "/workspace/alpha",
+                                                },
+                                            ],
+                                            expiresAt: "2099-08-03T01:00:00.000Z",
+                                            instance: "alpha",
+                                            lastAccessedAt:
+                                                "2026-08-03T00:05:00.000Z",
+                                            principal: "client-alpha",
+                                            status: "active",
+                                            workspace: "/workspace/alpha",
+                                        },
+                                    ],
+                                }),
                             },
+                        ],
+                        streams: [
+                            { name: "subscribe", handle: emptySubscription },
                         ],
                     },
                     {
