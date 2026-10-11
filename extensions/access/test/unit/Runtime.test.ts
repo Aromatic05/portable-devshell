@@ -138,16 +138,44 @@ class SelectiveFailSshProvider implements AccessProvider {
     }
 }
 
+function scopedConfig(config: MemoryConfig, owner: "access" | "core"): ExtensionConfig {
+    const allowed = (path: string): boolean =>
+        owner === "access"
+            ? path.startsWith("access.")
+            : path.startsWith("mcp.") || path.startsWith("web.");
+    const requireAccess = (path: string): void => {
+        if (!allowed(path))
+            throw new Error(`${owner} Config does not own path ${path}.`);
+    };
+    return {
+        async get(path) {
+            requireAccess(path);
+            return await config.get(path);
+        },
+        onChange(listener) {
+            return config.onChange((change) => {
+                const paths = change.paths.filter(allowed);
+                if (paths.length > 0) listener({ paths });
+            });
+        },
+        async update(patch) {
+            for (const path of Object.keys(patch)) requireAccess(path);
+            await config.update(patch);
+        },
+    };
+}
+
 function context(directory: string, config: MemoryConfig): ExtensionContext {
     return {
         capabilities: {
+            configCore: scopedConfig(config, "core"),
             processes: {
                 async start() {
                     throw new Error("Runtime test must use the injected fake provider.");
                 },
             },
         },
-        config,
+        config: scopedConfig(config, "access"),
         generation: "test-generation",
         id: "access",
         logger: {

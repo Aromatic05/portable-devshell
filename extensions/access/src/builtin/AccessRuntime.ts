@@ -3,6 +3,7 @@ import type {
     ExtensionContext,
     ExtensionJsonValue,
 } from "@portable-devshell/extension";
+import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 
 import { AccessBinaryManager } from "./binary/AccessBinaryManager.js";
 import {
@@ -58,6 +59,7 @@ export interface AccessRuntimeOptions {
 
 export class AccessRuntime {
     readonly #config: ExtensionConfig;
+    readonly #coreConfig: ExtensionCoreConfigCapability;
     readonly #context: ExtensionContext;
     readonly #providers: ReadonlyMap<AccessProviderKind, AccessProvider>;
     readonly #records = new Map<string, ActiveEndpoint>();
@@ -73,10 +75,14 @@ export class AccessRuntime {
         const config = context.config;
         if (config === undefined)
             throw new Error("Access Extension requires declared Config access.");
+        const coreConfig = context.capabilities.configCore;
+        if (coreConfig === undefined)
+            throw new Error("Access Extension requires the config.core capability.");
         const processes = context.capabilities.processes;
         if (processes === undefined)
             throw new Error("Access Extension requires the processes capability.");
         this.#config = config;
+        this.#coreConfig = coreConfig;
         this.#context = context;
         this.#reconcileDelayMs = options.reconcileDelayMs ?? 100;
         const binaries = new AccessBinaryManager(context.paths.dataDirectory, {
@@ -101,18 +107,22 @@ export class AccessRuntime {
             mapped.set(provider.kind, provider);
         }
         this.#providers = mapped;
-        this.#unsubscribeConfig = config.onChange((change) => {
+        const unsubscribeOwned = config.onChange((change) => {
+            if (change.paths.some((path) => path.startsWith("access.")))
+                this.#scheduleReconcile(0);
+        });
+        const unsubscribeCore = coreConfig.onChange((change) => {
             if (
                 change.paths.some(
-                    (path) =>
-                        path.startsWith("access.") ||
-                        path.startsWith("mcp.") ||
-                        path.startsWith("web."),
+                    (path) => path.startsWith("mcp.") || path.startsWith("web."),
                 )
-            ) {
+            )
                 this.#scheduleReconcile(0);
-            }
         });
+        this.#unsubscribeConfig = () => {
+            unsubscribeOwned();
+            unsubscribeCore();
+        };
         this.#scheduleReconcile(this.#reconcileDelayMs);
     }
 
@@ -298,7 +308,7 @@ export class AccessRuntime {
 
         let resolved;
         try {
-            resolved = await resolveAccessTarget(this.#config, endpoint.target);
+            resolved = await resolveAccessTarget(this.#coreConfig, endpoint.target);
         } catch (error) {
             const stopFailure = await this.#stopActive(active);
             if (stopFailure !== undefined) {
@@ -530,7 +540,7 @@ export class AccessRuntime {
     ): Promise<void> {
         if (this.#disposed || active.token !== token) return;
         const path = `${endpoint.target}.publicBaseUrl`;
-        const current = await this.#config.get(path);
+        const current = await this.#coreConfig.get(path);
         if (
             current !== undefined &&
             current !== active.publishedPublicUrl &&
@@ -542,7 +552,7 @@ export class AccessRuntime {
             active.publishedPublicUrl = publicUrl;
             return;
         }
-        await this.#config.update({ [path]: publicUrl });
+        await this.#coreConfig.update({ [path]: publicUrl });
         active.publishedPublicUrl = publicUrl;
     }
 

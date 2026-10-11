@@ -1,4 +1,5 @@
-import type { ExtensionConfig, ExtensionJsonValue } from "@portable-devshell/extension";
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
+import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 
 import type { AccessTargetKind } from "./Config.js";
 
@@ -13,7 +14,7 @@ export type AccessTargetResolution =
     | { readonly available: false; readonly reason: string };
 
 export async function resolveAccessTarget(
-    config: ExtensionConfig,
+    config: ExtensionCoreConfigCapability,
     kind: AccessTargetKind,
 ): Promise<AccessTargetResolution> {
     const [enabled, listenHost, listenPort, publicBaseUrl] = await Promise.all([
