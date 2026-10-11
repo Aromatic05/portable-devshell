@@ -216,9 +216,9 @@ test("update preflight rejects unsafe semantic protocol components", async (t) =
             "@portable-devshell",
             "shared",
             "dist",
-            "protocol",
             "control",
-            "ControlProtocol.js",
+            "server",
+            "Model.js",
         ),
         'export const CONTROL_PROTOCOL_RANGE = { min: "1.0.0", max: "9007199254740993.0.0" };\n',
         "utf8",
@@ -278,31 +278,19 @@ async function writeCurrentProtocolModules(
         "shared",
         "dist",
     );
-    const core = join(
-        applicationDirectory,
-        "node_modules",
-        "@portable-devshell",
-        "core",
-        "dist",
-    );
     const controlModule = join(
         shared,
-        "protocol",
         "control",
-        "ControlProtocol.js",
+        "server",
+        "Model.js",
     );
     const frameModule = join(shared, "transport", "frame", "Codec.js");
-    const workerModule = join(core, "worker", "protocol", "Client.js");
+    const workerModule = join(shared, "types", "Worker.js");
     await mkdir(dirname(controlModule), { recursive: true });
     await mkdir(dirname(frameModule), { recursive: true });
     await mkdir(dirname(workerModule), { recursive: true });
     await writeFile(
         join(shared, "..", "package.json"),
-        '{"type":"module"}\n',
-        "utf8",
-    );
-    await writeFile(
-        join(core, "..", "package.json"),
         '{"type":"module"}\n',
         "utf8",
     );

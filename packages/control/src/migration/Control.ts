@@ -214,17 +214,10 @@ async function readCurrentProtocolRanges(
         "shared",
         "dist",
     );
-    const core = join(
-        applicationDirectory,
-        "node_modules",
-        "@portable-devshell",
-        "core",
-        "dist",
-    );
     const [control, frame, worker] = await Promise.all([
         readProtocolModuleRange(
             "control",
-            join(shared, "protocol", "control", "ControlProtocol.js"),
+            join(shared, "control", "server", "Model.js"),
             "CONTROL_PROTOCOL_RANGE",
             "CONTROL_PROTOCOL_VERSION",
         ),
@@ -236,7 +229,7 @@ async function readCurrentProtocolRanges(
         ),
         readProtocolModuleRange(
             "worker",
-            join(core, "worker", "protocol", "Client.js"),
+            join(shared, "types", "Worker.js"),
             "WORKER_PROTOCOL_RANGE",
             "WORKER_PROTOCOL_VERSION",
         ),
