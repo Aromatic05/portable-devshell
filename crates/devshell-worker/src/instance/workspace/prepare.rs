@@ -419,7 +419,12 @@ mod tests {
         assert_ne!(first.temporary_directory, second.temporary_directory);
         assert!(!first.project_memory_present);
 
-        let memory = workspace.path().join("var").join("agent-work");
+        let memory = workspace
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("var")
+            .join("agent-work");
         std::fs::create_dir_all(&memory).unwrap();
         std::fs::write(memory.join("INDEX.md"), "# Agent work index\n").unwrap();
         let third = prepare(workspace.path()).unwrap();

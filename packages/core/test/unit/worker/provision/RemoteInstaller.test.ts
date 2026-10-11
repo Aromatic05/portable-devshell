@@ -18,7 +18,7 @@ import { RemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
 
 import type { WorkerConnection } from "../../../../src/instance/transport/endpoint/channel/worker/index.ts";
 import { WorkerInstallerRemote } from "../../../../src/instance/runtime/provision/install/Remote.ts";
-import { getWorkerTargetByKey } from "../../../../src/instance/runtime/provision/Target.ts";
+import { getWorkerTargetByKey, probeLocalWorkerTarget } from "../../../../src/instance/runtime/provision/Target.ts";
 import type { WorkerAsset } from "../../../../src/instance/runtime/provision/Asset.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -37,7 +37,7 @@ test(
             await rm(remoteHome, { recursive: true, force: true });
             await rm(assets, { recursive: true, force: true });
         });
-        const target = getWorkerTargetByKey("linux-x64");
+        const target = probeLocalWorkerTarget("test-remote");
         const first = await writeAsset(assets, "worker-v1", target);
         const firstInstaller = createInstaller(
             remoteHome,
@@ -116,7 +116,7 @@ test(
             await rm(assets, { recursive: true, force: true });
         });
 
-        const target = getWorkerTargetByKey("linux-x64");
+        const target = probeLocalWorkerTarget("test-remote");
         const generations = join(
             remoteHome,
             ".devshell",
@@ -182,7 +182,12 @@ function createInstaller(
         provider: "test-remote",
         connection: {
             async runCommand(operation, command, options) {
-                const child = spawn(command[0]!, command.slice(1), {
+                // This fake connection has no OS login account; a macOS login
+                // shell would reset the fixture HOME to the real runner home.
+                const args = command[0] === "sh" && command[1] === "-lc"
+                    ? ["-c", ...command.slice(2)]
+                    : command.slice(1);
+                const child = spawn(command[0]!, args, {
                     env: { ...process.env, HOME: home, PATH: path },
                     stdio: ["pipe", "pipe", "pipe"],
                 });

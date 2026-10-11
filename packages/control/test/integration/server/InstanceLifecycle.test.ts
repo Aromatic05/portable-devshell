@@ -5,9 +5,15 @@ import { Endpoint, LocalChannel, createInstanceTransport, createServerTransport 
 import { Control } from "../../../src/Control.ts";
 import { ControlFactory } from "../../../src/Factory.ts";
 import { ControlConfigStore } from "../../../src/config/store/index.ts";
+import { resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("current Control composition creates, updates and retires instances over RPC and persists restart state", async (t) => {
+    const worker = resolveTestWorkerBinary();
+    assert.ok(worker, "Control lifecycle integration requires a prepared Worker binary");
+    const workerEnv = workerPathEnvironmentName();
+    const previousWorker = process.env[workerEnv];
+    process.env[workerEnv] = worker;
     const root = await createTestTempDirectory("control-instance-lifecycle");
     const store = new ControlConfigStore();
     const server = new Control({
@@ -19,8 +25,13 @@ test("current Control composition creates, updates and retires instances over RP
     const endpoint = new Endpoint({ connectChannel: signal => LocalChannel.connect(server.socketPath, { signal }) });
     t.after(async () => {
         endpoint.close();
-        await server.stop();
-        await rm(root, { force: true, recursive: true });
+        try {
+            await server.stop();
+        } finally {
+            if (previousWorker === undefined) delete process.env[workerEnv];
+            else process.env[workerEnv] = previousWorker;
+            await rm(root, { force: true, recursive: true });
+        }
     });
     await server.start();
     await createServerTransport(endpoint, { clientKind: "cli" }).hello();
