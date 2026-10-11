@@ -18,7 +18,7 @@ const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 
 /**
  * Build the platform-neutral Agent Extension archive used for local development
- * and Extension distribution. Core release CI does not publish this artifact.
+ * and Extension distribution. The release matrix packages it on Linux x64.
  */
 export async function packageAgentArtifacts(options = {}) {
     const outputDirectory = resolve(
@@ -54,7 +54,7 @@ export async function packageAgentArtifacts(options = {}) {
             pathToFileURL(
                 resolve(
                     repoRoot,
-                    "packages/control/dist/control/artifact/host/storage/Archive.js",
+                    "packages/control/dist/artifact/Archive.js",
                 ),
             ).href
         );

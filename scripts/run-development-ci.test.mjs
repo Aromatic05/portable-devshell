@@ -163,10 +163,17 @@ test("Linux x64 target CI runs final integration without repeating unit gates", 
     const steps = createTargetCiSteps("linux-x64", "linux");
     const names = steps.map((step) => step.name);
     assert.equal(names.at(-1), "Final integration");
-    assert.equal(names.at(-2), "Unix release installer smoke");
+    assert.equal(names.at(-2), "Package Agent artifacts");
+    assert.equal(names.at(-3), "Unix release installer smoke");
     assert.equal(names.includes("Final acceptance"), false);
-    assert.equal(names.includes("Package Agent artifacts"), false);
     assert.equal(names.includes("Agent package smoke"), false);
+    const agent = steps.at(-2);
+    assert.deepEqual(agent.args.slice(-4), [
+        "package:agent",
+        "--",
+        "--output-dir",
+        "./ci-artifacts",
+    ]);
     const integration = steps.at(-1);
     assert.equal(integration.command, "bash");
     assert.deepEqual(integration.args.slice(0, 1), ["-lc"]);

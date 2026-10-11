@@ -200,6 +200,16 @@ export function createTargetCiSteps(target, platform = process.platform) {
     );
 
     if (target === "linux-x64") {
+        // The release workflow also builds the platform-neutral Agent archive
+        // on Linux x64. Exercise that exact packaging path before dev-tagging.
+        steps.push(
+            pnpmStep("Package Agent artifacts", [
+                "package:agent",
+                "--",
+                "--output-dir",
+                "./ci-artifacts",
+            ]),
+        );
         steps.push({
             args: [
                 "-lc",
