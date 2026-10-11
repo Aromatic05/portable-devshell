@@ -633,77 +633,74 @@ test("Extension remove disables routing, waits for the leased generation to drai
     const h = await harness(t);
     const source = await h.source("drain", {
         body: [
-            "import { existsSync, writeFileSync } from 'node:fs';",
+            "import { writeFileSync } from 'node:fs';",
             "import { join } from 'node:path';",
             "let disposedFile;",
-            "export async function activate(context) {",
-            "  const stateDirectory = context.paths.stateDirectory;",
-            "  const releaseFile = join(stateDirectory, 'release.txt');",
-            "  disposedFile = join(stateDirectory, 'disposed.txt');",
-            "  let releaseHold;",
-            "  const hold = new Promise((resolve) => { releaseHold = resolve; });",
-            "  const releaseCheck = setInterval(() => {",
-            "    if (!existsSync(releaseFile)) return;",
-            "    clearInterval(releaseCheck);",
-            "    releaseHold();",
-            "  }, 20);",
-            "  context.register({ id: 'cli.native-commands' }, 'example', async () => {",
-            "    writeFileSync(join(stateDirectory, 'entered.txt'), 'entered\\n');",
-            "    await hold;",
-            "    return { kind: 'text', text: 'released' };",
-            "  });",
+            "export function activate(context) {",
+            "  disposedFile = join(context.paths.stateDirectory, 'disposed.txt');",
+            "  context.register({ id: 'cli.native-commands' }, 'example', async () => ({ kind: 'text', text: 'released' }));",
             "}",
             "export function deactivate() { writeFileSync(disposedFile, 'disposed\\n'); }",
             "",
         ].join("\n"),
     });
     const installed = await h.service.install(source);
-    const active = invokeCliRegistration(h.host, "example", "hold");
+    assert.deepEqual(
+        await invokeCliRegistration(h.host, "example", "before-remove"),
+        { kind: "text", text: "released" },
+    );
     await waitFor(async () => (await h.host.list())[0]?.state === "active");
-    await waitFor(async () => exists(join(h.paths.stateDirectory("example"), "entered.txt")));
-    await writeFile(
-        join(h.paths.stateDirectory("example"), "state.txt"),
-        "keep\n",
-        "utf8",
-    );
-
+    const disposedPath = join(h.paths.stateDirectory("example"), "disposed.txt");
+    // Installing validates a candidate and retires it before first activation.
+    // Its deactivate() writes this marker; only the active generation's
+    // subsequent retirement is relevant to the remove/drain contract.
+    await rm(disposedPath, { force: true });
+    // Hold the real host Registration Lease, not a blocked sandbox invocation:
+    // this exercises exactly the ownership that prevents generation disposal.
+    const { lease } = await h.host.acquireRegistration("cli.native-commands", "example");
     let removed = false;
-    const removal = h.service.remove("example").then((value) => {
-        removed = true;
-        return value;
-    });
-    await waitFor(async () => (await h.host.list())[0]?.state === "disabled");
-    assert.equal(removed, false);
-    assert.equal(
-        await exists(
-            h.paths.generationDirectory(
-                "example",
-                installed.selectedGeneration!,
+    let removal: ReturnType<typeof h.service.remove> | undefined;
+    try {
+        assert.equal(lease.retirementSignal.aborted, false);
+        await writeFile(
+            join(h.paths.stateDirectory("example"), "state.txt"),
+            "keep\n",
+            "utf8",
+        );
+        removal = h.service.remove("example").then((value) => {
+            removed = true;
+            return value;
+        });
+        await waitFor(async () => (await h.host.list())[0]?.state === "disabled");
+        assert.equal(removed, false);
+        assert.equal(lease.retirementSignal.aborted, true);
+        assert.equal(
+            await exists(
+                h.paths.generationDirectory(
+                    "example",
+                    installed.selectedGeneration!,
+                ),
             ),
-        ),
-        true,
-    );
-    await assert.rejects(
-        invokeCliRegistration(h.host, "example", "new-hold"),
-        /No Extension registration/u,
-    );
-
-    await writeFile(
-        join(h.paths.stateDirectory("example"), "release.txt"),
-        "release\n",
-        "utf8",
-    );
-    await active;
+            true,
+        );
+        await assert.rejects(
+            invokeCliRegistration(h.host, "example", "new-hold"),
+            /No Extension registration/u,
+        );
+        assert.equal(await exists(disposedPath), false);
+    } finally {
+        // Release before the harness's Host cleanup hook: an assertion failure
+        // must never turn the expected drain into a circular wait.
+        lease.release();
+    }
+    assert.ok(removal);
     assert.deepEqual(await removal, {
         id: "example",
         purged: false,
         removed: true,
     });
     assert.equal(
-        await readFile(
-            join(h.paths.stateDirectory("example"), "disposed.txt"),
-            "utf8",
-        ),
+        await readFile(disposedPath, "utf8"),
         "disposed\n",
     );
     assert.equal(await exists(join(h.paths.codeRoot, "example")), false);
