@@ -177,7 +177,9 @@ export function runCli(args, env, options = {}) {
             cwd: repoRoot,
             encoding: "utf8",
             env,
-            timeout: options.timeoutMs ?? 30_000,
+            // The Control's cold-start budget is 45s because it installs the
+            // builtin Extensions before readiness. Do not kill the CLI first.
+            timeout: options.timeoutMs ?? (args[0] === "start" ? 60_000 : 30_000),
             windowsHide: true,
         },
     );

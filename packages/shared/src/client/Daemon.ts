@@ -233,8 +233,11 @@ export class ControlLifecycleManager {
             options.startupLogPath ??
             controlStartupLogPath(options.homeDirectory);
         this.#waitTimeoutMs = options.waitTimeoutMs ?? 5_000;
+        // Cold startup installs the builtin Extensions before advertising
+        // readiness. Keep its deadline separate from the normal 5s RPC/stop
+        // budget; nine bundled Extensions can exceed 15s on CI runners.
         this.#startWaitTimeoutMs =
-            options.startWaitTimeoutMs ?? options.waitTimeoutMs ?? 15_000;
+            options.startWaitTimeoutMs ?? options.waitTimeoutMs ?? 45_000;
         this.#processIsRunning = options.processIsRunning ?? processIsRunning;
         this.#processIdentity =
             options.processIdentity ??

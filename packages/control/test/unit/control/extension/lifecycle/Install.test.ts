@@ -633,7 +633,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
     const h = await harness(t);
     const source = await h.source("drain", {
         body: [
-            "import { watch, writeFileSync } from 'node:fs';",
+            "import { existsSync, writeFileSync } from 'node:fs';",
             "import { join } from 'node:path';",
             "let disposedFile;",
             "export async function activate(context) {",
@@ -642,12 +642,13 @@ test("Extension remove disables routing, waits for the leased generation to drai
             "  disposedFile = join(stateDirectory, 'disposed.txt');",
             "  let releaseHold;",
             "  const hold = new Promise((resolve) => { releaseHold = resolve; });",
-            "  const watcher = watch(stateDirectory, (_event, file) => {",
-            "    if (file !== 'release.txt') return;",
-            "    watcher.close();",
+            "  const releaseCheck = setInterval(() => {",
+            "    if (!existsSync(releaseFile)) return;",
+            "    clearInterval(releaseCheck);",
             "    releaseHold();",
-            "  });",
+            "  }, 20);",
             "  context.register({ id: 'cli.native-commands' }, 'example', async () => {",
+            "    writeFileSync(join(stateDirectory, 'entered.txt'), 'entered\\n');",
             "    await hold;",
             "    return { kind: 'text', text: 'released' };",
             "  });",
@@ -659,6 +660,7 @@ test("Extension remove disables routing, waits for the leased generation to drai
     const installed = await h.service.install(source);
     const active = invokeCliRegistration(h.host, "example", "hold");
     await waitFor(async () => (await h.host.list())[0]?.state === "active");
+    await waitFor(async () => exists(join(h.paths.stateDirectory("example"), "entered.txt")));
     await writeFile(
         join(h.paths.stateDirectory("example"), "state.txt"),
         "keep\n",
