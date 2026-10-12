@@ -6,20 +6,26 @@ import {
 } from "@modelcontextprotocol/ext-apps/app-with-deps";
 import { useEffect, useRef, useState } from "react";
 import { readMcpAppSnapshot, watchMcpApp, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
-import { clearMcpAppSession, hasMcpAppPiPClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppPiPClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
+import { clearMcpAppSession, hasMcpAppFullscreenClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppFullscreenClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
+import { ToolCallCard, readToolCallResult, restoreToolCallResult, type ToolCallResult } from "./ToolCall.js";
+import { useToolCallDisplay } from "./Preferences.js";
+import { WorkspaceDashboard } from "./Workspace.js";
 
 declare const __MCPAPP_VERSION__: string;
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 type ConnectedApp = App & { onclose?: () => void; close(): Promise<void> };
-export type McpAppViewKind = "workspace" | "interaction";
+export type McpAppViewKind = "workspace" | "interaction" | "toolcall";
 
 export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) {
     const [status, setStatus] = useState<ConnectionStatus>("connecting");
     const [ctxId, setCtxId] = useState<string>();
     const [displayMode, setDisplayMode] = useState("inline");
-    const [piPAvailable, setPiPAvailable] = useState(false);
-    const pipAttempted = useRef(new Set<string>());
+    const [fullscreenAvailable, setFullscreenAvailable] = useState(false);
+    const fullscreenAttempted = useRef(new Set<string>());
+    const [toolCallEnabled, setToolCallEnabled] = useToolCallDisplay();
+    const [toolInput, setToolInput] = useState<unknown>();
+    const [toolResult, setToolResult] = useState<ToolCallResult | undefined>(restoreToolCallResult);
     const [session, setSession] = useState<McpAppSession | undefined>(() => restoreMcpAppSession());
     const sessionRef = useRef(session);
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
@@ -34,6 +40,10 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
         let active = true;
         const refreshGlobals = () => {
             if (!active) return;
+            if (view === "toolcall") {
+                const restored = restoreToolCallResult();
+                if (restored) setToolResult(restored);
+            }
             const found = restoreMcpAppSession();
             if (!found) return;
             if (sessionRef.current?.ctxId !== found.ctxId) setSnapshot(undefined);
@@ -68,7 +78,7 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
             setStatus("connecting");
             const app = new App(
                 { name: "portable-devshell-" + view, version: __MCPAPP_VERSION__ },
-                { availableDisplayModes: view === "workspace" ? ["inline", "pip"] : ["inline"] },
+                { availableDisplayModes: view === "workspace" ? ["fullscreen"] : ["inline"] },
                 { autoResize: true },
             ) as ConnectedApp;
             currentApp = app;
@@ -81,11 +91,12 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                 if (context.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
                 const hostContext = app.getHostContext();
                 setDisplayMode(hostContext?.displayMode ?? "inline");
-                setPiPAvailable(hostContext?.availableDisplayModes?.includes("pip") === true);
+                setFullscreenAvailable(hostContext?.availableDisplayModes?.includes("fullscreen") === true);
             };
             app.ontoolinput = (input) => {
                 if (!active || currentApp !== app) return;
                 const value = input.arguments as Record<string, unknown> | undefined;
+                if (view === "toolcall") setToolInput(value);
                 if (typeof value?.ctxId === "string") {
                     if (sessionRef.current && sessionRef.current.ctxId !== value.ctxId) {
                         sessionRef.current = undefined;
@@ -98,6 +109,10 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
             };
             app.ontoolresult = (result) => {
                 if (!active || currentApp !== app) return;
+                if (view === "toolcall") {
+                    const tool = readToolCallResult(result);
+                    if (tool) setToolResult(tool);
+                }
                 const nextSession = readMcpAppSession(result);
                 if (nextSession) {
                     sessionRef.current = nextSession;
@@ -123,13 +138,13 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                 if (!active || currentApp !== app) return;
                 const hostContext = app.getHostContext();
                 setDisplayMode(hostContext?.displayMode ?? "inline");
-                setPiPAvailable(hostContext?.availableDisplayModes?.includes("pip") === true);
+                setFullscreenAvailable(hostContext?.availableDisplayModes?.includes("fullscreen") === true);
                 refreshGlobals();
                 setStatus("connected");
                 stopSize = app.setupSizeChangedNotifications();
                 // Ask does not produce a Tool Result until answered. The inline
                 // iframe must obtain its own private capability via the Host.
-                if (view === "interaction" && sessionRef.current === undefined) {
+                if (view !== "workspace" && sessionRef.current === undefined) {
                     void app.callServerTool({ name: "mcpapp_open", arguments: {} }).then((result) => {
                         if (!active || currentApp !== app) return;
                         if (result.isError) throw new Error("MCP App Context is unavailable.");
@@ -160,23 +175,22 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
 
     useEffect(() => {
         if (view !== "workspace" || status !== "connected" || session === undefined ||
-            !piPAvailable || displayMode === "pip") return;
+            !fullscreenAvailable || displayMode === "fullscreen") return;
         const app = hostRef.current;
-        if (!app || pipAttempted.current.has(session.ctxId) ||
-            hasMcpAppPiPClaim(session.ctxId)) return;
-        pipAttempted.current.add(session.ctxId);
-        saveMcpAppPiPClaim(session.ctxId);
-        // A single guarded presentation claim per Context. Neither Host
-        // refusal nor user dismissal can initiate an automatic reopen loop.
+        if (!app || fullscreenAttempted.current.has(session.ctxId) ||
+            hasMcpAppFullscreenClaim(session.ctxId)) return;
+        fullscreenAttempted.current.add(session.ctxId);
+        saveMcpAppFullscreenClaim(session.ctxId);
+        // Only explicitly presented Workspaces may request fullscreen.
         let active = true;
-        void app.requestDisplayMode({ mode: "pip" }, { timeout: 12_000 }).then((result) => {
-            if (active && hostRef.current === app && result.mode === "pip")
-                setDisplayMode("pip");
+        void app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 }).then((result) => {
+            if (active && hostRef.current === app && result.mode === "fullscreen")
+                setDisplayMode("fullscreen");
         }).catch(() => {
-            // Inline remains a valid fallback when the Host refuses PiP.
+            // The Host may refuse fullscreen; no automatic reopen loop.
         });
         return () => { active = false; };
-    }, [view, session, status, piPAvailable, displayMode]);
+    }, [view, session, status, fullscreenAvailable, displayMode]);
 
     useEffect(() => {
         if (session === undefined || status !== "connected") return;
@@ -348,50 +362,81 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
         }
     };
 
+    const requestFullscreen = async () => {
+        const app = hostRef.current;
+        if (view !== "workspace" || !app || !fullscreenAvailable) return;
+        if (session) {
+            fullscreenAttempted.current.add(session.ctxId);
+            saveMcpAppFullscreenClaim(session.ctxId);
+        }
+        try {
+            const result = await app.requestDisplayMode({ mode: "fullscreen" }, { timeout: 12_000 });
+            if (hostRef.current === app && result?.mode === "fullscreen") setDisplayMode("fullscreen");
+        } catch {
+            // A Host may decline the requested presentation mode.
+        }
+    };
+
     return (
-        <main className="workspace" data-status={status} data-view={view}>
+        <main className="workspace" data-status={status} data-view={view} data-display-mode={displayMode}>
             <header className="workspace-head">
-                <span className="workspace-name">DevShell <span>{view === "workspace" ? "Workspace" : "Interaction"}</span></span>
-                <span className="workspace-status" role="status">
-                    <span className="workspace-indicator" aria-hidden="true" />
-                    {status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
+                <span className="workspace-name">DevShell <span>{view === "workspace" ? "Workspace" : view === "interaction" ? "Interaction" : "ToolCall"}</span></span>
+                <span className="workspace-toolbar">
+                    {view === "workspace" && <label className="workspace-setting">
+                        <input type="checkbox" checked={toolCallEnabled}
+                            onChange={(event) => setToolCallEnabled(event.target.checked)} />
+                        Inline ToolCall
+                    </label>}
+                    {view === "workspace" && status === "connected" && fullscreenAvailable &&
+                        displayMode !== "fullscreen" &&
+                        <button type="button" onClick={() => { void requestFullscreen(); }}>Open fullscreen</button>}
+                    <span className="workspace-status" role="status">
+                        <span className="workspace-indicator" aria-hidden="true" />
+                        {status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
+                    </span>
                 </span>
             </header>
             <section className="workspace-content">
-                <div className="workspace-emblem" aria-hidden="true">⌘</div>
-                {snapshot ? <>
-                    <h1>{view === "workspace"
-                        ? snapshot.agentBusy ? "Workspace active" : "Workspace ready"
-                        : snapshot.presentation.primary ? "Your input is needed" : "Waiting for completion"}</h1>
-                    <p>{snapshot.instance} · {snapshot.ctxId}</p>
-                    <div className="workspace-items">
+                {view === "toolcall" ? <>
+                    <ToolCallCard input={toolInput} result={toolResult}
+                        enabled={toolCallEnabled} onEnabledChange={setToolCallEnabled} />
+                    {actionError && <p role="alert">{actionError}</p>}
+                    {snapshot?.presentation.primary && <div className="inline-interactions">
+                        <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
+                            onAction={act} pendingAction={pendingAction} busyAction={busyAction}
+                            cancel={() => setPendingAction(undefined)} />
+                    </div>}
+                    {snapshot?.presentation.background.length ? <div className="inline-interactions">
+                        {snapshot.presentation.background.map((item) =>
+                            <WorkspaceItem key={item.id} item={item} kind="background" />)}
+                    </div> : null}
+                </> : view === "interaction" ? <>
+                    {snapshot ? <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
-                        {view === "interaction" ? <>
-                            {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
-                            {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
-                            {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
-                                <p>No pending approval, question or wait.</p>}
-                        </> : <>
-                            {snapshot.presentation.work.map((item) => <WorkspaceItem key={item.id} item={item} kind="work" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />)}
-                            {snapshot.presentation.primary?.title === "Approval required" &&
-                                <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
-                            {snapshot.presentation.primary && snapshot.presentation.primary.title !== "Approval required" &&
-                                <p>An interaction needs your attention in the conversation.</p>}
-                            {snapshot.presentation.background.length > 0 && <p>{snapshot.presentation.background.length} wait(s) being tracked in the conversation.</p>}
-                            {snapshot.presentation.work.length === 0 && !snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
-                                <p>Nothing needs attention right now.</p>}
-                        </>}
-                    </div>
-                </> : <>
+                        {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
+                            onAction={act} pendingAction={pendingAction} busyAction={busyAction}
+                            cancel={() => setPendingAction(undefined)} />}
+                        {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
+                        {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
+                            <p>No pending approval, question or wait.</p>}
+                    </div> : <p>{liveError ?? "Waiting for interaction state…"}</p>}
+                </> : snapshot ? <>
+                    {actionError && <p role="alert">{actionError}</p>}
+                    <WorkspaceDashboard snapshot={snapshot}
+                        renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
+                            onAction={kind === "background" ? undefined : act}
+                            pendingAction={pendingAction} busyAction={busyAction}
+                            cancel={() => setPendingAction(undefined)} />} />
+                </> : <div className="workspace-landing">
                     <h1>{ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>
-                    <p>{liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Connect a DevShell Context to view tasks, approvals, and background activity.")}</p>
+                    <p>{liveError ?? (ctxId || session ? "Waiting for authorized workspace state." : "Open an active DevShell Context to inspect its Tasks, Goals and background activity.")}</p>
                     {(ctxId || session?.ctxId) && <p className="workspace-context">Context · {ctxId ?? session?.ctxId}</p>}
-                </>}
+                </div>}
             </section>
-            <footer className="workspace-foot">
+            {view === "workspace" && <footer className="workspace-foot">
                 <span>portable-devshell</span>
                 <span>{displayMode}</span>
-            </footer>
+            </footer>}
         </main>
     );
 }

@@ -25,6 +25,7 @@ export interface McpAppSnapshot {
     cursor: number;
     questionRevision?: number;
     agentBusy: boolean;
+    activity?: Array<{ callId: string; name: string; state: string; at: string; exitCode?: number }>;
     presentation: { primary?: McpAppItem; work: McpAppItem[]; background: McpAppItem[] };
     reentry?: {
         pending?: boolean;

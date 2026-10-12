@@ -18,6 +18,7 @@ export interface McpExtensionPresentation {
     readonly bootstrap?: "environment";
     readonly resourceUri: string;
     readonly interactionResourceUri?: string;
+    readonly toolCallResourceUri?: string;
 }
 
 /**

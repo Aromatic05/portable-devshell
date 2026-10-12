@@ -30,21 +30,23 @@ export const mcpAppVersion = resolvePortableDevshellApplicationVersion();
 export const mcpAppResourceUri = `ui://portable-devshell/mcpapp-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
 export const mcpAppInteractionStableResourceUri = "ui://portable-devshell/mcpapp/interaction/v1.html";
 export const mcpAppInteractionResourceUri = `ui://portable-devshell/mcpapp-interaction-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
-export type McpAppView = "workspace" | "interaction";
-export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris, mcpAppInteractionResourceUri, mcpAppInteractionStableResourceUri] as const;
+export const mcpAppToolCallStableResourceUri = "ui://portable-devshell/mcpapp/toolcall/v1.html";
+export const mcpAppToolCallResourceUri = `ui://portable-devshell/mcpapp-toolcall-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
+export type McpAppView = "workspace" | "interaction" | "toolcall";
+export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris, mcpAppInteractionResourceUri, mcpAppInteractionStableResourceUri, mcpAppToolCallResourceUri, mcpAppToolCallStableResourceUri] as const;
 
 export const mcpAppResourceMeta = {
     ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: false },
     "openai/widgetCSP": { connect_domains: [], resource_domains: [] },
     "openai/widgetDescription": "Portable-devshell MCP App",
     "openai/widgetPrefersBorder": false,
-    "openai/ui": { availableDisplayModes: ["inline", "pip"] },
+    "openai/ui": { availableDisplayModes: ["fullscreen"] },
 } as const;
 
 export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string, view: McpAppView = "workspace") {
     const meta = {
         ...mcpAppResourceMeta,
-        "openai/ui": { availableDisplayModes: view === "workspace" ? ["inline", "pip"] : ["inline"] },
+        "openai/ui": { availableDisplayModes: view === "workspace" ? ["fullscreen"] : ["inline"] },
     };
     if (publicBaseUrl === undefined) return meta;
     const url = new URL(publicBaseUrl);

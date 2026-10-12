@@ -10,6 +10,7 @@ import {
     type InstanceEventRecord,
 } from "@portable-devshell/shared";
 import { mcpAppModelContext } from "./ModelContext.js";
+import { readMcpAppActivity } from "./Activity.js";
 import { projectMcpAppReentry } from "./ReentryView.js";
 import type { McpAppActionStore } from "./ActionStore.js";
 import type { McpAppQuestion, McpAppQuestionStore } from "./Question.js";
@@ -174,11 +175,23 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             task.getGoal(ctxId), task.getTodo(), approval.snapshot({ pendingOnly: true }), task.getWaits(ctxId),
             actions?.pendingDirectives(ctxId, instance) ?? Promise.resolve([]),
         ]);
-        return projectMcpAppSnapshot({
+        const projected = projectMcpAppSnapshot({
             approvals, ctxId, goal, instance, todo, waits, directives,
             questions: questions?.pending(instance, ctxId), questionRevision: questions?.revision,
             ...(workspace === undefined ? {} : { workspace }),
         });
+        // Activity is an optional read-only projection of Instance-owned audit
+        // events. An unavailable event ledger must not block Approval/Ask/Wait.
+        try {
+            projected.activity = await readMcpAppActivity(
+                createInstanceRuntimeTransport(endpoint, instance),
+                ctxId,
+                projected.cursor,
+            );
+        } catch {
+            projected.activity = [];
+        }
+        return projected;
     };
     const watch = async (
         instance: string, ctxId: string, workspace: string | undefined,

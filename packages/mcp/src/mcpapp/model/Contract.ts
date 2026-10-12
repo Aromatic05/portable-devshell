@@ -1,4 +1,5 @@
 import type { JsonValue } from "@portable-devshell/shared";
+import type { McpAppActivity } from "../Activity.js";
 
 export interface McpAppSnapshot {
     ctxId: string;
@@ -6,6 +7,7 @@ export interface McpAppSnapshot {
     cursor: number;
     questionRevision?: number;
     agentBusy: boolean;
+    activity?: McpAppActivity[];
     presentation: McpAppPresentation;
     modelContext: McpAppHostModelContext;
     reentry: McpAppReentryView;

@@ -63,17 +63,28 @@ export class McpAppCall {
 
     async present(toolName: string, result: McpEndpointResult,
         request: McpEndpointCallContext): Promise<McpEndpointResult> {
-        if ((toolName !== 'environ_info' && toolName !== 'mcpapp_open') || this.#bootstrap === undefined ||
-            (result instanceof McpNativeToolResult && result.isError)) return result;
-        const structured = result instanceof McpNativeToolResult ? result.structuredContent : result;
-        const capability = await this.#bootstrap(structured, request);
-        if (capability === undefined) return result;
-        return new McpNativeToolResult({
+        // Presentation metadata only; the audited ToolCall has already passed
+        // through the Instance pipeline. Never add a second execution path.
+        const presented = toolName.startsWith("mcpapp_") ? result : new McpNativeToolResult({
             ...(result instanceof McpNativeToolResult
                 ? { content: result.content, isError: result.isError } : { content: [] }),
             _meta: {
                 ...(result instanceof McpNativeToolResult ? result._meta : {}),
-                'portable-devshell/mcpapp': capability,
+                "portable-devshell/toolcall": { name: toolName },
+            },
+            structuredContent: result instanceof McpNativeToolResult ? result.structuredContent : result,
+        });
+        if ((toolName !== "environ_info" && toolName !== "mcpapp_open") || this.#bootstrap === undefined ||
+            (presented instanceof McpNativeToolResult && presented.isError)) return presented;
+        const structured = presented instanceof McpNativeToolResult ? presented.structuredContent : presented;
+        const capability = await this.#bootstrap(structured, request);
+        if (capability === undefined) return presented;
+        return new McpNativeToolResult({
+            ...(presented instanceof McpNativeToolResult
+                ? { content: presented.content, isError: presented.isError } : { content: [] }),
+            _meta: {
+                ...(presented instanceof McpNativeToolResult ? presented._meta : {}),
+                "portable-devshell/mcpapp": capability,
             },
             structuredContent: toolName === "mcpapp_open" ? { status: "ready" } : structured,
         });

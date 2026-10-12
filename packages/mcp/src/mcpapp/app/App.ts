@@ -6,6 +6,8 @@ export {
     mcpAppResourceUri,
     mcpAppInteractionResourceUri,
     mcpAppInteractionStableResourceUri,
+    mcpAppToolCallResourceUri,
+    mcpAppToolCallStableResourceUri,
     mcpAppResourceUris,
     mcpAppStableResourceUri,
     mcpAppVersion,

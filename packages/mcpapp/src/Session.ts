@@ -36,19 +36,18 @@ export function restoreMcpAppSession(): McpAppSession | undefined {
     } });
 }
 
-/** Retains the PiP attempt through Host iframe remounts.
- * An explicit new mcpapp_open creates a fresh widget with its own state.
- * Do not automatically reopen a PiP dismissed by the user.
+/** Prevents a Host iframe remount from reopening a dismissed fullscreen
+ * Workspace. An explicit mcpapp_open creates a fresh UI presentation.
  */
-export function hasMcpAppPiPClaim(ctxId: string): boolean {
+export function hasMcpAppFullscreenClaim(ctxId: string): boolean {
     if (typeof window === "undefined") return false;
     const openai = (window as Window & { openai?: {
         widgetState?: { privateContent?: unknown };
     } }).openai;
-    return record(openai?.widgetState?.privateContent)?.portableDevshellPiPClaim === ctxId;
+    return record(openai?.widgetState?.privateContent)?.portableDevshellFullscreenClaim === ctxId;
 }
 
-export function saveMcpAppPiPClaim(ctxId: string): void {
+export function saveMcpAppFullscreenClaim(ctxId: string): void {
     const openai = (window as Window & { openai?: {
         widgetState?: Record<string, unknown>;
         setWidgetState?: (state: unknown) => void;
@@ -58,7 +57,7 @@ export function saveMcpAppPiPClaim(ctxId: string): void {
     const privateContent = record(current.privateContent) ?? {};
     openai.setWidgetState({
         modelContent: current.modelContent ?? null,
-        privateContent: { ...privateContent, portableDevshellPiPClaim: ctxId },
+        privateContent: { ...privateContent, portableDevshellFullscreenClaim: ctxId },
         imageIds: Array.isArray(current.imageIds) ? current.imageIds : [],
     });
 }
@@ -85,8 +84,8 @@ export function clearMcpAppSession(): void {
     } }).openai;
     if (!openai?.setWidgetState) return;
     const current = openai.widgetState ?? {};
-    const { portableDevshellMcpApp: _capability, portableDevshellPiPClaim: _claim,
-        ...privateContent } = record(current.privateContent) ?? {};
+    const { portableDevshellMcpApp: _capability, portableDevshellFullscreenClaim: _claim,
+        portableDevshellPiPClaim: _legacyClaim, ...privateContent } = record(current.privateContent) ?? {};
     openai.setWidgetState({
         modelContent: current.modelContent ?? null,
         privateContent,

@@ -42,3 +42,79 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 .workspace[data-view="interaction"] .workspace-content { padding: 10px 0; }
 .workspace[data-view="interaction"] .workspace-emblem { display: none; }
 .workspace[data-view="interaction"] .workspace-foot { display: none; }
+
+.workspace-toolbar { display: flex; align-items: center; gap: 10px; }
+.workspace-toolbar > button, .workspace-fallback > button {
+    background: transparent; color: inherit; font: inherit; font-size: 11px;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    padding: 5px 8px; border-radius: 7px; cursor: pointer;
+}
+.workspace-fallback { display: grid; gap: 8px; width: 100%; }
+.workspace-fallback p { margin: 0; max-width: unset; }
+
+
+/* Fullscreen is an explicitly requested workspace, not an automatic tool result. */
+.workspace[data-view="workspace"] { min-height: 100dvh; height: 100dvh; overflow: auto; }
+.workspace[data-view="workspace"] .workspace-content { align-items: stretch; justify-content: flex-start; text-align: left; padding: 0; }
+.workspace[data-view="workspace"] .workspace-head { flex-shrink: 0; }
+.workspace-setting, .toolcall-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.workspace-setting input, .toolcall-switch input { accent-color: #16875d; }
+.workspace[data-view="interaction"], .workspace[data-view="toolcall"] { min-height: 0; gap: 8px; padding: 12px; }
+.workspace[data-view="interaction"] .workspace-content,
+.workspace[data-view="toolcall"] .workspace-content { align-items: stretch; justify-content: flex-start; padding: 0; text-align: left; }
+.workspace[data-view="toolcall"] .workspace-head { padding-bottom: 8px; }
+.workspace[data-view="toolcall"] .workspace-name { font-size: 12px; }
+.workspace[data-view="toolcall"] .workspace-foot { display: none; }
+.workspace[data-view="toolcall"] .inline-interactions { display: grid; gap: 7px; width: 100%; }
+.toolcall-card { width: 100%; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 10px; padding: 10px 12px; }
+.toolcall-head, .toolcall-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.toolcall-head { justify-content: space-between; }
+.toolcall-title strong { font-size: 12px; }
+.toolcall-title span { opacity: .64; font-size: 10px; }
+.toolcall-title span[data-kind="error"] { color: #c4514b; opacity: 1; }
+.toolcall-title span[data-kind="running"] { color: #ad8834; opacity: 1; }
+.toolcall-switch { font-size: 10px; opacity: .75; }
+.toolcall-target { color: inherit; font: 11px/1.5 ui-monospace, monospace; opacity: .75; white-space: pre-wrap; overflow-wrap: anywhere; max-width: unset; }
+.toolcall-details { margin-top: 8px; border-top: 1px solid color-mix(in srgb, currentColor 11%, transparent); padding-top: 7px; }
+.toolcall-details summary { cursor: pointer; font-size: 11px; opacity: .85; }
+.toolcall-details pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.55 ui-monospace, monospace; max-height: 380px; border-radius: 7px; padding: 10px; background: color-mix(in srgb, currentColor 4%, transparent); }
+.dashboard { display: grid; gap: 16px; width: 100%; max-width: 1060px; margin: 0 auto; }
+.dashboard-overview { display: flex; justify-content: space-between; align-items: start; gap: 20px; flex-wrap: wrap; padding-top: 15px; }
+.dashboard-title h1 { font-size: 20px; }
+.dashboard-title p { max-width: 440px; overflow-wrap: anywhere; opacity: .65; }
+.dashboard-metrics { display: flex; flex-wrap: wrap; gap: 9px; }
+.dashboard-metrics > div { min-width: 120px; display: grid; gap: 3px; border: 1px solid color-mix(in srgb,currentColor 12%,transparent); border-radius: 10px; padding: 11px 14px; }
+.dashboard-metrics strong { font-size: 21px; }
+.dashboard-metrics span { font-size: 10px; opacity: .63; }
+.dashboard-tabs { border-bottom: 1px solid color-mix(in srgb,currentColor 12%,transparent); display: flex; gap: 6px; }
+.dashboard-tabs button { color: inherit; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; padding: 10px 13px; font: inherit; font-size: 12px; opacity: .65; }
+.dashboard-tabs button[aria-current="page"] { opacity: 1; border-bottom-color: currentColor; font-weight: 650; }
+.dashboard-panel { display: grid; align-content: start; gap: 10px; padding-bottom: 22px; }
+.dashboard-panel h2 { font-size: 13px; margin: 6px 0 0; }
+.dashboard-items { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,300px),1fr)); gap: 8px; }
+.dashboard-empty, .dashboard-notice, .dashboard-help { margin: 0; max-width: unset; text-align: left; }
+.dashboard-notice { border: 1px solid color-mix(in srgb,#c89136 35%,transparent); border-radius: 8px; padding: 10px; }
+.dashboard-help { border-top: 1px solid color-mix(in srgb,currentColor 12%,transparent); padding-top: 12px; }
+.workspace-landing { display: grid; place-items: center; text-align: center; min-height: 200px; }
+.workspace-landing h1 { font-size: 16px; }
+@media (max-width: 660px) {
+    .workspace[data-view="workspace"] { padding: 12px; }
+    .dashboard-metrics { width: 100%; }
+    .dashboard-metrics > div { flex: 1; min-width: 80px; }
+    .dashboard-overview { gap: 8px; }
+    .workspace-toolbar { gap: 6px; }
+}
+
+.dashboard-timeline { padding: 0; margin: 0; display: grid; gap: 5px; list-style: none; }
+.dashboard-timeline li { display: flex; align-items: center; gap: 11px; border: 1px solid color-mix(in srgb,currentColor 10%,transparent); border-radius: 8px; padding: 10px 12px; }
+.dashboard-timeline .activity-dot { width: 8px; height: 8px; border-radius: 999px; background: #a1a1aa; flex-shrink: 0; }
+.dashboard-timeline li[data-state="completed"] .activity-dot { background: #16875d; }
+.dashboard-timeline li[data-state="failed"] .activity-dot, .dashboard-timeline li[data-state="denied"] .activity-dot { background: #b55e54; }
+.dashboard-timeline li[data-state="running"] .activity-dot, .dashboard-timeline li[data-state="queued"] .activity-dot { background: #b68a3b; }
+.dashboard-timeline .activity-entry { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.dashboard-timeline .activity-entry strong { font-size: 12px; overflow-wrap: anywhere; }
+.dashboard-timeline .activity-entry span, .dashboard-timeline time { font-size: 10px; opacity: .65; white-space: nowrap; }
+
+.toolcall-purpose { margin: 8px 0 4px; font-size: 11px; font-weight: 550; text-align: left; max-width: unset; }
+.toolcall-result-summary { margin: 5px 0 0; opacity: .58; font: 10px ui-monospace, monospace; max-width: unset; }
+.toolcall-output-preview { color: inherit; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.45 ui-monospace, monospace; opacity: .74; max-width: unset; }

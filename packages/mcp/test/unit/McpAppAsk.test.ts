@@ -87,18 +87,25 @@ test("mcpapp_open returns private capability in protocol result", async () => {
         (response._meta["portable-devshell/mcpapp"] as Record<string, unknown>).ctxId, f.ctxId);
 });
 
-test("MCP tool catalog routes workspace to PiP and ask to inline resources", async () => {
+test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary calls to inline", async () => {
     const { McpEndpointCatalog } = await import("../../src/protocol/tool/Catalog.ts");
     const { McpExtensionRegistry } = await import("../../src/protocol/extension/Registry.ts");
     const { createMcpAppMcpExtension } = await import("../../src/mcpapp/Extension.ts");
     const { mcpAppOpenDefinition, mcpAppAskDefinition } =
         await import("../../../core/src/instance/mcpapp/Definition.ts");
     const extensions = new McpExtensionRegistry([createMcpAppMcpExtension("https://example.test")]);
-    const definitions = [mcpAppOpenDefinition(), mcpAppAskDefinition()];
+    const definitions = [
+        mcpAppOpenDefinition(), mcpAppAskDefinition(),
+        { name: "environ_info", group: "environ", description: "Get environment",
+            requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+        { name: "file_read", group: "file", description: "Read file",
+            requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+    ];
     const catalog = new McpEndpointCatalog({
         instanceName: "alpha",
         bootstrapPresentationResourceUri: extensions.environmentPresentation()?.resourceUri,
         interactionPresentationResourceUri: extensions.environmentPresentation()?.interactionResourceUri,
+        toolCallPresentationResourceUri: extensions.environmentPresentation()?.toolCallResourceUri,
         source: {
             list: () => definitions.map((definition) => ({ scope: "*", definition })),
             get: (_instance, name) => {
@@ -107,23 +114,37 @@ test("MCP tool catalog routes workspace to PiP and ask to inline resources", asy
             },
         },
     });
-    const [workspace, interaction] = extensions.listResources();
-    assert.equal(workspace?.mimeType, "text/html;profile=mcp-app");
-    assert.equal(interaction?.mimeType, "text/html;profile=mcp-app");
+    const [workspace, interaction, toolCall] = extensions.listResources();
+    for (const resource of [workspace, interaction, toolCall])
+        assert.equal(resource?.mimeType, "text/html;profile=mcp-app");
     const tools = catalog.listTools();
-    assert.equal(tools.length, 2);
+    assert.equal(tools.length, 4);
     for (const tool of tools) {
-        const uri = tool.name === "mcpapp_ask" ? interaction?.uri : workspace?.uri;
+        const uri = tool.name === "mcpapp_open" ? workspace?.uri
+            : tool.name === "mcpapp_ask" ? interaction?.uri : toolCall?.uri;
         const meta = tool._meta as Record<string, unknown> | undefined;
         assert.equal(meta?.["openai/outputTemplate"], uri);
         assert.equal((meta?.ui as Record<string, unknown>)?.resourceUri, uri);
     }
     const workspaceContent = await extensions.readResource(workspace!.uri);
     const interactionContent = await extensions.readResource(interaction!.uri);
-    assert.deepEqual(workspaceContent?._meta?.["openai/ui"], { availableDisplayModes: ["inline", "pip"] });
+    const toolCallContent = await extensions.readResource(toolCall!.uri);
+    assert.deepEqual(workspaceContent?._meta?.["openai/ui"], { availableDisplayModes: ["fullscreen"] });
     assert.deepEqual(interactionContent?._meta?.["openai/ui"], { availableDisplayModes: ["inline"] });
+    assert.deepEqual(toolCallContent?._meta?.["openai/ui"], { availableDisplayModes: ["inline"] });
     assert.match(workspaceContent?.text ?? "", /data-mcpapp-view="workspace"/u);
     assert.match(interactionContent?.text ?? "", /data-mcpapp-view="interaction"/u);
-    assert.equal(workspaceContent?.text?.includes("private-valid-capability-01"), false);
-    assert.equal(interactionContent?.text?.includes("private-valid-capability-01"), false);
+    assert.match(toolCallContent?.text ?? "", /data-mcpapp-view="toolcall"/u);
+    for (const resource of [workspaceContent, interactionContent, toolCallContent])
+        assert.equal(resource?.text?.includes("private-valid-capability-01"), false);
+});
+
+test("MCP App tags ordinary ToolCall results for an inline card without altering execution", async () => {
+    const f = fixture();
+    const input = { command: "pwd", output: "ok" };
+    const presented = await f.endpoint.present("bash_run", input, f.request);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.deepEqual(presented.structuredContent, input);
+    assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "bash_run" });
+    assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
 });

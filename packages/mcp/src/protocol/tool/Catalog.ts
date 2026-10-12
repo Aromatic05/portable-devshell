@@ -38,6 +38,7 @@ export interface McpEndpointCatalogOptions {
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
     interactionPresentationResourceUri?: string;
+    toolCallPresentationResourceUri?: string;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
     source: McpToolSource;
@@ -52,6 +53,7 @@ export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
     readonly #bootstrapPresentationResourceUri?: string;
     readonly #interactionPresentationResourceUri?: string;
+    readonly #toolCallPresentationResourceUri?: string;
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
@@ -64,6 +66,7 @@ export class McpEndpointCatalog {
             options.bootstrapPresentationResourceUri;
         this.#interactionPresentationResourceUri =
             options.interactionPresentationResourceUri;
+        this.#toolCallPresentationResourceUri = options.toolCallPresentationResourceUri;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
@@ -103,6 +106,7 @@ export class McpEndpointCatalog {
             tool,
             this.#bootstrapPresentationResourceUri,
             this.#interactionPresentationResourceUri,
+            this.#toolCallPresentationResourceUri,
         );
         const provenanceTool =
             isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
@@ -179,15 +183,18 @@ function withBootstrapPresentation(
     tool: ToolDefinition,
     workspaceResourceUri: string | undefined,
     interactionResourceUri: string | undefined,
+    toolCallResourceUri: string | undefined,
 ): ToolDefinition {
-    const resourceUri = tool.name === "mcpapp_ask" && interactionResourceUri !== undefined
-        ? interactionResourceUri : workspaceResourceUri;
-    if (
-        resourceUri === undefined ||
-        tool.name !== `${bootstrapToolNamespace}_info` &&
-        tool.name !== "mcpapp_open" && tool.name !== "mcpapp_ask"
-    )
+    if (!isModelFacingTool(tool)) return tool;
+    const meta = asRecord(tool._meta);
+    const ui = asRecord(meta.ui);
+    // A tool's own MCP App binding always takes precedence.
+    if (typeof ui.resourceUri === "string" || typeof meta["openai/outputTemplate"] === "string")
         return tool;
+    const resourceUri = tool.name === "mcpapp_open" ? workspaceResourceUri
+        : tool.name === "mcpapp_ask" ? interactionResourceUri
+        : toolCallResourceUri ?? (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined);
+    if (resourceUri === undefined) return tool;
     return {
         ...tool,
         _meta: {
