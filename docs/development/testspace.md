@@ -31,7 +31,9 @@ pnpm testspace exec -- <command...>
 
 `update-smoke` 在隔离 Testspace 中验证 Control Web 监听器热替换、端口占用导致的更新拒绝、Instance 模型能力热更新与运行中 Worker 重建拒绝。每个阶段检查配置版本号及两台 Worker 状态，退出前恢复 Web/Instance 原配置；不修改主机实际 `~/.devshell`。它验证预检查失败的无副作用，不代表已经覆盖运行时提交后失败的回滚。
 
-`upgrade-smoke` 是另一套持久化升级验收：自动取官方 v0.7.7 Release 应用包/Worker（严格校验 SHA-256），在 Testspace 的临时隔离 HOME 中真实安装、启动旧 Control 与 Instance，然后使用当前源码构建的 1.0 候选包运行完整 Release 安装器。验证 Audit SQLite 2→3 记录保留、Extension Generation 替换、CLI/Instance/Control 恢复、升级后运行；同时独立测试不支持的数据库格式在停机前被拒绝，以及候选 Control 启动失败后的应用与持久数据库回滚。三种场景均使用独立临时运行目录，不触碰用户生产 HOME。
+`upgrade-smoke` 是正式的跨版本持久化升级验收：自动下载官方 v0.7.7 Release 应用包、Worker 和独立 Agent Extension .dsext（均校验 SHA-256），在专用 Testspace 命名空间和独立临时 HOME 中安装、启动旧 Control、Instance 及旧 Agent，然后使用当前源码构建的 1.0 应用包与 Agent .dsext 执行完整发行版升级。真实数据断言覆盖 Audit SQLite 2→3、Context Registry 1→2、Comment 的 `conversation.sqlite3` → Extension Host Database 及消息 Schema 1→2、Agent Provider JSON → Host Database；检查旧记录内容、身份环境、配置和应用/Worker/Extension/Instance 的运行状态。
+
+独立失败测试包括候选 Control 启动失败后的程序和持久化状态回滚、第二个 Audit 数据库迁移中途失败后将前一个数据库和 Context 一并恢复、过旧 Schema 在停机前被拒绝。另有恢复测试验证新 Host Message DB 已经包含较新评论时，旧版历史记录可以合并而不会覆盖新记录。五种场景都使用真正的发布安装器和隔离状态，退出后仅清理本次创建的环境，不修改用户生产 HOME。
 
 可传入 `--baseline-dir` 和 `--candidate-dir` 使用现成发行包目录，`--skip-build` 跳过重复构建；大体积 v0.7.7 官方资产缓存于 `var/agent-work/upgrade-testspace-assets/v0.7.7`。
 

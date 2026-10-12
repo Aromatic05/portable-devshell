@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
@@ -19,6 +19,7 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const target = `linux-${process.arch === "arm64" ? "arm64" : "x64"}`;
 const appName = `portable-devshell-app-${target}.tar.gz`;
 const workerName = `devshell-worker-${target}`;
+const agentName = "portable-devshell-agent.dsext";
 const baselineTag = "v0.7.7";
 const baselineCache = join(repo, "var", "agent-work", "upgrade-testspace-assets", baselineTag);
 
@@ -40,12 +41,14 @@ export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = basel
         await verifyRelease(legacy);
         await verifyRelease(current);
         const successful = await runCase("successful-upgrade", { current, legacy, testRoot });
+        const staleTarget = await runCase("existing-comment-target-recovery", { current, legacy, testRoot });
         const rollback = await runCase("failed-startup-rollback", { current, legacy, testRoot });
+        const partialRollback = await runCase("partial-audit-migration-rollback", { current, legacy, testRoot });
         const unsupported = await runCase("unsupported-schema-rejection", { current, legacy, testRoot });
         return {
             baseline: baselineTag,
             candidate: successful.version,
-            cases: [successful, rollback, unsupported],
+            cases: [successful, staleTarget, rollback, partialRollback, unsupported],
         };
     } finally {
         await rm(testRoot, { recursive: true, force: true });
@@ -53,7 +56,10 @@ export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = basel
 }
 
 async function acquireLegacyRelease(directory) {
-    const files = [appName, `${appName}.sha256`, workerName, `${workerName}.sha256`, "install-release.sh"];
+    const files = [
+        appName, `${appName}.sha256`, workerName, `${workerName}.sha256`,
+        agentName, `${agentName}.sha256`, "install-release.sh",
+    ];
     if (files.every(name => existsSync(join(directory, name)))) return;
     await mkdir(directory, { recursive: true });
     execute("gh", [
@@ -71,10 +77,13 @@ async function buildCandidateRelease(directory) {
     await copyFile(worker, join(directory, workerName));
     const hash = createHash("sha256").update(await readFile(worker)).digest("hex");
     await writeFile(join(directory, `${workerName}.sha256`), `${hash}\n`);
+    execute(process.execPath, [
+        join(repo, "scripts", "package-agent.mjs"), "--output-dir", directory,
+    ], process.env, { timeout: 180_000 });
 }
 
 async function verifyRelease(directory) {
-    for (const name of [appName, workerName]) {
+    for (const name of [appName, workerName, agentName]) {
         const expected = (await readFile(join(directory, `${name}.sha256`), "utf8")).trim().split(/\s+/u)[0];
         assert.match(expected, /^[0-9a-f]{64}$/iu);
         const actual = createHash("sha256").update(await readFile(join(directory, name))).digest("hex");
@@ -110,6 +119,13 @@ async function runCase(name, { current, legacy, testRoot }) {
             join(legacy, workerName),
     };
     const auditPath = join(devshellHome, TESTSPACE_INSTANCE, "control-worker", "audit.sqlite3");
+    const legacyMessagePath = join(devshellHome, TESTSPACE_INSTANCE, "control-worker", "conversation.sqlite3");
+    const newMessagePath = join(home, ".local", "share", "portable-devshell", "extension-data",
+        "comment", "instances", encodeURIComponent(TESTSPACE_INSTANCE), "message.sqlite3");
+    const legacyProvidersPath = join(devshellHome, "control", "extensions", "state", "agent", "providers.json");
+    const newProvidersPath = join(home, ".local", "share", "portable-devshell",
+        "extension-data", "agent", "providers.sqlite3");
+    const contextsPath = join(devshellHome, "control", "contexts.json");
     let started = false;
     try {
         await mkdir(home, { recursive: true });
@@ -137,6 +153,18 @@ async function runCase(name, { current, legacy, testRoot }) {
         assert.ok(existsSync(auditPath), "Real 0.7.7 Worker did not open its Audit database");
         const before = seedAndReadAudit(auditPath);
         assert.equal(before.version, 2);
+        const legacyMessage = await seedLegacyMessage(legacyMessagePath);
+        const legacyProviders = await seedLegacyProviders(legacyProvidersPath);
+        if (name === "existing-comment-target-recovery") {
+            await seedExistingMessageTarget(newMessagePath);
+        }
+        execute(cli, ["extension", "install", join(legacy, agentName)], baselineEnv);
+        assert.match(
+            execute(cli, ["agent", "provider", "default"], baselineEnv).stdout,
+            /"provider"\s*:\s*"pi"/u,
+            "v0.7.7 Agent must read the original providers.json",
+        );
+        const legacyContexts = await seedLegacyContexts(contextsPath, TESTSPACE_INSTANCE);
         const originalControlConfig = await readFile(controlConfig, "utf8");
         const originalInstanceConfig = await readFile(instanceConfig, "utf8");
         const baselineExtensions = execute(cli, ["extension", "list"], env).stdout;
@@ -150,9 +178,32 @@ async function runCase(name, { current, legacy, testRoot }) {
             assert.equal(queryVersion(cli, env), baselineVersion);
             assert.match(execute(cli, ["status"], env).stdout, /control: running/u);
             assert.equal(readAudit(auditPath).version, 1);
+            assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
+            assert.equal(await readFile(legacyProvidersPath, "utf8"), legacyProviders);
+            assert.equal(await readFile(contextsPath, "utf8"), legacyContexts);
+            assert.ok(!existsSync(newMessagePath));
+            assert.ok(!existsSync(newProvidersPath));
             assert.equal(await readFile(controlConfig, "utf8"), originalControlConfig);
             assert.equal(await readFile(instanceConfig, "utf8"), originalInstanceConfig);
             return { name, passed: true, version: baselineVersion, migration: "rejected" };
+        }
+
+        if (name === "partial-audit-migration-rollback") {
+            const secondDatabase = join(devshellHome, "zz-failure", "control-worker", "audit.sqlite3");
+            await seedConflictingAuditDatabase(secondDatabase);
+            const failed = install(candidateInstaller, current, env, true);
+            assert.notEqual(failed.status, 0, "second Audit database must fail after the first migration");
+            assert.equal(queryVersion(cli, env), baselineVersion);
+            assert.match(execute(cli, ["status"], env).stdout, /control: running/u);
+            assert.equal(readAudit(auditPath).version, 2, "first Audit database must be rolled back");
+            assert.equal(readAudit(auditPath).sentinel, before.sentinel);
+            assert.equal(readAudit(secondDatabase).version, 2);
+            assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
+            assert.equal(await readFile(legacyProvidersPath, "utf8"), legacyProviders);
+            assert.equal(await readFile(contextsPath, "utf8"), legacyContexts);
+            assert.ok(!existsSync(newMessagePath));
+            assert.ok(!existsSync(newProvidersPath));
+            return { name, passed: true, version: baselineVersion, migration: "two-database-rollback" };
         }
 
         const candidate = name === "failed-startup-rollback"
@@ -167,6 +218,11 @@ async function runCase(name, { current, legacy, testRoot }) {
             assert.equal(after.version, before.version);
             assert.equal(after.sentinel, before.sentinel);
             assert.equal(after.rows, before.rows);
+            assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
+            assert.equal(await readFile(legacyProvidersPath, "utf8"), legacyProviders);
+            assert.equal(await readFile(contextsPath, "utf8"), legacyContexts);
+            assert.ok(!existsSync(newMessagePath));
+            assert.ok(!existsSync(newProvidersPath));
             assert.equal(await readFile(controlConfig, "utf8"), originalControlConfig);
             assert.equal(await readFile(instanceConfig, "utf8"), originalInstanceConfig);
             return { name, passed: true, version: baselineVersion, migration: "rolled-back" };
@@ -181,6 +237,39 @@ async function runCase(name, { current, legacy, testRoot }) {
         assert.ok(after.rows >= before.rows);
         assert.equal(await readFile(controlConfig, "utf8"), originalControlConfig);
         assert.equal(await readFile(instanceConfig, "utf8"), originalInstanceConfig);
+        // Agent is an explicitly installed Extension, not a Core builtin.
+        const upgradedContexts = JSON.parse(await readFile(contextsPath, "utf8"));
+        const oldContext = JSON.parse(legacyContexts).contexts[0];
+        const upgradedContext = upgradedContexts.contexts.find((record) =>
+            record.ctxId === oldContext.ctxId
+        );
+        assert.equal(upgradedContexts.version, 2);
+        assert.ok(upgradedContext, "Legacy Context was lost during upgrade");
+        assert.deepEqual(upgradedContext.environments, oldContext.environments);
+        assert.equal(upgradedContext.principal, oldContext.principal);
+        assert.ok(!("instance" in upgradedContext) && !("workspace" in upgradedContext));
+        // Agent is an explicitly installed Extension, not a Core builtin.
+        // Replace the API 4 generation with the current API 5 artifact.
+        execute(cli, ["extension", "install", join(current, agentName)], env);
+        execute(cli, ["agent", "provider", "list"], env);
+        assert.deepEqual(readProviderDatabase(newProvidersPath), JSON.parse(legacyProviders));
+        assert.match(
+            execute(cli, ["agent", "provider", "default"], env).stdout,
+            /"provider"\s*:\s*"pi"/u,
+        );
+        await activateCommentHistory(runtime, TESTSPACE_INSTANCE);
+        const migratedMessage = readMessage(newMessagePath, "message_entries");
+        assert.deepEqual(migratedMessage.records, legacyMessage.records);
+        assert.equal(migratedMessage.total, legacyMessage.total +
+            (name === "existing-comment-target-recovery" ? 1 : 0));
+        if (name === "existing-comment-target-recovery") {
+            assert.equal(
+                readMessageRecord(newMessagePath, "message_entries", "newer-comment").text,
+                "Existing newer Comment preserved",
+            );
+        }
+        assert.equal(readSchemaVersion(newMessagePath), 2);
+        assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
         const extensions = execute(cli, ["extension", "list"], env).stdout;
         for (const id of ["access", "comment", "instance", "mcp"]) {
             assert.match(extensions, new RegExp(`^${id}\\s`, "mu"));
@@ -190,7 +279,7 @@ async function runCase(name, { current, legacy, testRoot }) {
         assert.match(overview, new RegExp(TESTSPACE_INSTANCE, "u"));
         const instance = execute(cli, ["instance", "list"], env).stdout;
         assert.match(instance, new RegExp(TESTSPACE_INSTANCE, "u"));
-        return { name, passed: true, version: candidateVersion, migration: "audit-2-to-3" };
+        return { name, passed: true, version: candidateVersion, migration: "audit-2-to-3,context-1-to-2,comment-1-to-2,agent-json-to-sqlite" };
     } finally {
         if (started && existsSync(cli)) execute(cli, ["stop"], env, { allowFailure: true });
         await stopLeftoverTestWorker(
@@ -247,6 +336,203 @@ function readAudit(file) {
                 "SELECT payload FROM audit_records WHERE json_extract(payload, '$.seq') = 927006",
             ).get()?.payload,
         };
+    } finally {
+        database.close();
+    }
+}
+
+async function seedLegacyMessage(file) {
+    await mkdir(dirname(file), { recursive: true });
+    const database = new DatabaseSync(file);
+    try {
+        database.exec(`
+            CREATE TABLE IF NOT EXISTS conversation_entries (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL CHECK(kind IN ('comment', 'report')),
+                id TEXT NOT NULL,
+                ctx_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT CHECK(status IS NULL OR status IN ('pending', 'sent', 'delivered', 'failed')),
+                call_id TEXT,
+                delivered_at TEXT,
+                failed_at TEXT,
+                error TEXT,
+                UNIQUE(kind, id)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS conversation_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            PRAGMA user_version = 1;
+        `);
+        database.prepare(
+            "INSERT OR REPLACE INTO conversation_entries (kind, id, ctx_id, created_at, text, status, delivered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).run(
+            "comment", "upgrade-comment-1729", "ctx-upgrade-1729",
+            "2026-09-25T09:00:00.000Z", "Legacy v0.7.7 Comment preserved",
+            "delivered", "2026-09-25T09:00:01.000Z",
+        );
+    } finally {
+        database.close();
+    }
+    assert.equal(readSchemaVersion(file), 1);
+    return readMessage(file, "conversation_entries");
+}
+
+function readSchemaVersion(file) {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+        return Number(db.prepare("PRAGMA user_version").get().user_version);
+    } finally {
+        db.close();
+    }
+}
+
+function readMessage(file, table) {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+        assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+        return {
+            records: db.prepare(
+                `SELECT kind, id, ctx_id, created_at, text, status, delivered_at FROM ${table} WHERE id = ? ORDER BY seq`,
+            ).all("upgrade-comment-1729"),
+            total: Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count),
+        };
+    } finally {
+        db.close();
+    }
+}
+
+function readMessageRecord(file, table, id) {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+        return db.prepare(`SELECT id, text FROM ${table} WHERE id = ?`).get(id);
+    } finally {
+        db.close();
+    }
+}
+
+async function seedExistingMessageTarget(file) {
+    await mkdir(dirname(file), { recursive: true });
+    const db = new DatabaseSync(file);
+    try {
+        db.exec(`
+            CREATE TABLE message_entries (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL CHECK(kind IN ('comment', 'report')),
+                id TEXT NOT NULL,
+                ctx_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT CHECK(status IS NULL OR status IN ('pending', 'sent', 'delivered', 'failed')),
+                call_id TEXT,
+                delivered_at TEXT,
+                failed_at TEXT,
+                error TEXT,
+                UNIQUE(kind, id)
+            ) STRICT;
+            CREATE TABLE message_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            PRAGMA user_version = 2;
+        `);
+        db.prepare(
+            "INSERT INTO message_entries (kind,id,ctx_id,created_at,text,status) VALUES ('comment',?, 'ctx-upgrade-1729',?,?,'delivered')",
+        ).run("newer-comment", "2026-10-10T09:00:00.000Z", "Existing newer Comment preserved");
+    } finally {
+        db.close();
+    }
+}
+
+async function seedLegacyProviders(file) {
+    await mkdir(dirname(file), { recursive: true });
+    const content = JSON.stringify({
+        defaultProvider: "pi",
+        providers: { pi: { enabled: false, installedVersion: "1.2.3" } },
+        schemaVersion: 2,
+    }, null, 2) + "\n";
+    await writeFile(file, content, { mode: 0o600 });
+    return content;
+}
+
+async function seedLegacyContexts(file, instance) {
+    await mkdir(dirname(file), { recursive: true });
+    const existing = existsSync(file) ? JSON.parse(await readFile(file, "utf8")) : {
+        contexts: [],
+        version: 1,
+    };
+    assert.equal(existing.version, 1, "v0.7.7 Context registry must be version 1");
+    const at = new Date().toISOString();
+    const record = {
+        createdAt: at,
+        ctxId: "ctx-upgrade-legacy-sentinel",
+        environments: [{ instance, workspace: "/" }],
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        instance,
+        lastAccessedAt: at,
+        principal: "upgrade-testspace",
+        status: "active",
+        workspace: "/",
+    };
+    const source = JSON.stringify({
+        contexts: [
+            ...existing.contexts.filter((item) => item.ctxId !== record.ctxId),
+            record,
+        ],
+        version: 1,
+    }, null, 2) + "\n";
+    await writeFile(file, source, { mode: 0o600 });
+    return source;
+}
+
+function readProviderDatabase(file) {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+        assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+        const row = db.prepare("SELECT snapshot FROM provider_registry WHERE id = 1").get();
+        assert.ok(row, "Agent Host Database did not import the old registry");
+        return JSON.parse(row.snapshot);
+    } finally {
+        db.close();
+    }
+}
+
+async function activateCommentHistory(runtimeDirectory, instance) {
+    const { createTuiDomainSession, TuiControlSession } =
+        await import("../../packages/tui/dist/testing.js");
+    const domains = createTuiDomainSession({ xdgRuntimeDir: runtimeDirectory });
+    const session = new TuiControlSession({ domains });
+    try {
+        await session.start();
+        await domains.messages.load([instance]);
+    } finally {
+        await session.stop();
+    }
+}
+
+async function seedConflictingAuditDatabase(file) {
+    await mkdir(dirname(file), { recursive: true });
+    const database = new DatabaseSync(file);
+    try {
+        database.exec(`
+            CREATE TABLE audit_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                occurred_at_ms INTEGER NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                payload TEXT NOT NULL,
+                body BLOB,
+                body_codec TEXT
+            ) STRICT;
+            CREATE TABLE audit_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE state_records (collision TEXT NOT NULL) STRICT;
+            PRAGMA user_version = 2;
+        `);
     } finally {
         database.close();
     }
