@@ -6,17 +6,20 @@ import {
 } from "@modelcontextprotocol/ext-apps/app-with-deps";
 import { useEffect, useRef, useState } from "react";
 import { readMcpAppSnapshot, watchMcpApp, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
-import { clearMcpAppSession, readMcpAppSession, restoreMcpAppSession, saveMcpAppSession, type McpAppSession } from "./Session.js";
+import { clearMcpAppSession, hasMcpAppPiPClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppPiPClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
 
 declare const __MCPAPP_VERSION__: string;
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 type ConnectedApp = App & { onclose?: () => void; close(): Promise<void> };
+export type McpAppViewKind = "workspace" | "interaction";
 
-export function AppView() {
+export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) {
     const [status, setStatus] = useState<ConnectionStatus>("connecting");
     const [ctxId, setCtxId] = useState<string>();
     const [displayMode, setDisplayMode] = useState("inline");
+    const [piPAvailable, setPiPAvailable] = useState(false);
+    const pipAttempted = useRef(new Set<string>());
     const [session, setSession] = useState<McpAppSession | undefined>(() => restoreMcpAppSession());
     const sessionRef = useRef(session);
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
@@ -64,8 +67,8 @@ export function AppView() {
             if (!active) return;
             setStatus("connecting");
             const app = new App(
-                { name: "portable-devshell-workspace", version: __MCPAPP_VERSION__ },
-                { availableDisplayModes: ["inline", "pip", "fullscreen"] },
+                { name: "portable-devshell-" + view, version: __MCPAPP_VERSION__ },
+                { availableDisplayModes: view === "workspace" ? ["inline", "pip"] : ["inline"] },
                 { autoResize: true },
             ) as ConnectedApp;
             currentApp = app;
@@ -76,7 +79,9 @@ export function AppView() {
                     applyDocumentTheme(context.theme);
                 if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
                 if (context.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
-                setDisplayMode(context.displayMode ?? "inline");
+                const hostContext = app.getHostContext();
+                setDisplayMode(hostContext?.displayMode ?? "inline");
+                setPiPAvailable(hostContext?.availableDisplayModes?.includes("pip") === true);
             };
             app.ontoolinput = (input) => {
                 if (!active || currentApp !== app) return;
@@ -116,10 +121,30 @@ export function AppView() {
             app.onteardown = async () => { if (currentApp === app) retry(); return {}; };
             void app.connect().then(() => {
                 if (!active || currentApp !== app) return;
-                setDisplayMode(app.getHostContext()?.displayMode ?? "inline");
+                const hostContext = app.getHostContext();
+                setDisplayMode(hostContext?.displayMode ?? "inline");
+                setPiPAvailable(hostContext?.availableDisplayModes?.includes("pip") === true);
                 refreshGlobals();
                 setStatus("connected");
                 stopSize = app.setupSizeChangedNotifications();
+                // Ask does not produce a Tool Result until answered. The inline
+                // iframe must obtain its own private capability via the Host.
+                if (view === "interaction" && sessionRef.current === undefined) {
+                    void app.callServerTool({ name: "mcpapp_open", arguments: {} }).then((result) => {
+                        if (!active || currentApp !== app) return;
+                        if (result.isError) throw new Error("MCP App Context is unavailable.");
+                        const capability = readMcpAppSession(result);
+                        if (capability === undefined)
+                            throw new Error("MCP App bootstrap returned no private Live capability.");
+                        sessionRef.current = capability;
+                        setCtxId(capability.ctxId);
+                        setSession(capability);
+                        saveMcpAppSession(capability);
+                    }).catch((error: unknown) => {
+                        if (active && currentApp === app)
+                            setLiveError(error instanceof Error ? error.message : "MCP App bootstrap failed.");
+                    });
+                }
             }).catch(() => { if (currentApp === app) retry(); });
         };
         connect();
@@ -131,7 +156,27 @@ export function AppView() {
             hostRef.current = undefined;
             void currentApp?.close();
         };
-    }, []);
+    }, [view]);
+
+    useEffect(() => {
+        if (view !== "workspace" || status !== "connected" || session === undefined ||
+            !piPAvailable || displayMode === "pip") return;
+        const app = hostRef.current;
+        if (!app || pipAttempted.current.has(session.ctxId) ||
+            hasMcpAppPiPClaim(session.ctxId)) return;
+        pipAttempted.current.add(session.ctxId);
+        saveMcpAppPiPClaim(session.ctxId);
+        // A single guarded presentation claim per Context. Neither Host
+        // refusal nor user dismissal can initiate an automatic reopen loop.
+        let active = true;
+        void app.requestDisplayMode({ mode: "pip" }, { timeout: 12_000 }).then((result) => {
+            if (active && hostRef.current === app && result.mode === "pip")
+                setDisplayMode("pip");
+        }).catch(() => {
+            // Inline remains a valid fallback when the Host refuses PiP.
+        });
+        return () => { active = false; };
+    }, [view, session, status, piPAvailable, displayMode]);
 
     useEffect(() => {
         if (session === undefined || status !== "connected") return;
@@ -188,7 +233,7 @@ export function AppView() {
     // The server chooses recovery eligibility and persists the claim. React
     // only hands that intent to the MCP Host; it does not run a local scheduler.
     useEffect(() => {
-        if (status !== "connected" || !snapshot || !session) return;
+        if (view !== "workspace" || status !== "connected" || !snapshot || !session) return;
         const directive = snapshot.reentry?.directives?.find((item) =>
             item.intent === "goal-resume" || item.intent === "goal-retry" || item.intent === "task-resume");
         const schedule = snapshot.reentry?.schedule;
@@ -253,7 +298,7 @@ export function AppView() {
                 }
             }
         })();
-    }, [snapshot, session, status]);
+    }, [snapshot, session, status, view]);
 
     const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number], input?: string) => {
         const app = hostRef.current;
@@ -304,9 +349,9 @@ export function AppView() {
     };
 
     return (
-        <main className="workspace" data-status={status}>
+        <main className="workspace" data-status={status} data-view={view}>
             <header className="workspace-head">
-                <span className="workspace-name">DevShell <span>Workspace</span></span>
+                <span className="workspace-name">DevShell <span>{view === "workspace" ? "Workspace" : "Interaction"}</span></span>
                 <span className="workspace-status" role="status">
                     <span className="workspace-indicator" aria-hidden="true" />
                     {status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
@@ -315,15 +360,27 @@ export function AppView() {
             <section className="workspace-content">
                 <div className="workspace-emblem" aria-hidden="true">⌘</div>
                 {snapshot ? <>
-                    <h1>{snapshot.agentBusy ? "Workspace active" : "Workspace ready"}</h1>
+                    <h1>{view === "workspace"
+                        ? snapshot.agentBusy ? "Workspace active" : "Workspace ready"
+                        : snapshot.presentation.primary ? "Your input is needed" : "Waiting for completion"}</h1>
                     <p>{snapshot.instance} · {snapshot.ctxId}</p>
                     <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
-                        {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
-                        {snapshot.presentation.work.map((item) => <WorkspaceItem key={item.id} item={item} kind="work" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />)}
-                        {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
-                        {!snapshot.presentation.primary && snapshot.presentation.work.length === 0 && snapshot.presentation.background.length === 0 &&
-                            <p>Nothing needs attention right now.</p>}
+                        {view === "interaction" ? <>
+                            {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
+                            {snapshot.presentation.background.map((item) => <WorkspaceItem key={item.id} item={item} kind="background" />)}
+                            {!snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
+                                <p>No pending approval, question or wait.</p>}
+                        </> : <>
+                            {snapshot.presentation.work.map((item) => <WorkspaceItem key={item.id} item={item} kind="work" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />)}
+                            {snapshot.presentation.primary?.title === "Approval required" &&
+                                <WorkspaceItem item={snapshot.presentation.primary} kind="decision" onAction={act} pendingAction={pendingAction} busyAction={busyAction} cancel={() => setPendingAction(undefined)} />}
+                            {snapshot.presentation.primary && snapshot.presentation.primary.title !== "Approval required" &&
+                                <p>An interaction needs your attention in the conversation.</p>}
+                            {snapshot.presentation.background.length > 0 && <p>{snapshot.presentation.background.length} wait(s) being tracked in the conversation.</p>}
+                            {snapshot.presentation.work.length === 0 && !snapshot.presentation.primary && snapshot.presentation.background.length === 0 &&
+                                <p>Nothing needs attention right now.</p>}
+                        </>}
                     </div>
                 </> : <>
                     <h1>{ctxId || session ? "Workspace connected" : "Waiting for workspace"}</h1>

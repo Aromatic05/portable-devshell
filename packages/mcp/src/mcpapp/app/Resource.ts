@@ -28,23 +28,31 @@ export const mcpAppLegacyResourceUris: readonly string[] = [
 
 export const mcpAppVersion = resolvePortableDevshellApplicationVersion();
 export const mcpAppResourceUri = `ui://portable-devshell/mcpapp-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
-export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris] as const;
+export const mcpAppInteractionStableResourceUri = "ui://portable-devshell/mcpapp/interaction/v1.html";
+export const mcpAppInteractionResourceUri = `ui://portable-devshell/mcpapp-interaction-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
+export type McpAppView = "workspace" | "interaction";
+export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris, mcpAppInteractionResourceUri, mcpAppInteractionStableResourceUri] as const;
 
 export const mcpAppResourceMeta = {
     ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: false },
     "openai/widgetCSP": { connect_domains: [], resource_domains: [] },
     "openai/widgetDescription": "Portable-devshell MCP App",
     "openai/widgetPrefersBorder": false,
+    "openai/ui": { availableDisplayModes: ["inline", "pip"] },
 } as const;
 
-export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string) {
-    if (publicBaseUrl === undefined) return mcpAppResourceMeta;
+export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string, view: McpAppView = "workspace") {
+    const meta = {
+        ...mcpAppResourceMeta,
+        "openai/ui": { availableDisplayModes: view === "workspace" ? ["inline", "pip"] : ["inline"] },
+    };
+    if (publicBaseUrl === undefined) return meta;
     const url = new URL(publicBaseUrl);
     if (url.hostname === "0.0.0.0" || url.hostname === "[::]")
-        return mcpAppResourceMeta;
+        return meta;
     const domain = url.origin;
     return {
-        ...mcpAppResourceMeta,
+        ...meta,
         ui: {
             ...mcpAppResourceMeta.ui,
             csp: { connectDomains: [domain], resourceDomains: [domain] },
@@ -55,7 +63,7 @@ export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string) {
     } as const;
 }
 
-export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string): string {
+export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string, view: McpAppView = "workspace"): string {
     const assetUrl = (file: string): string => {
         if (!file.startsWith("assets/") || file.includes(".."))
             throw new Error("The MCP App Vite manifest contains an invalid asset path.");
@@ -69,7 +77,7 @@ export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string): string {
     const styles = (entry.css ?? [])
         .map((file) => `<link rel="stylesheet" href="${escapeAttribute(assetUrl(file))}">`)
         .join("");
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Workspace</title>${styles}</head><body><div id="root"></div><script type="module" crossorigin src="${escapeAttribute(assetUrl(entry.file))}"></script></body></html>`;
+    return `<!doctype html><html lang="en" data-mcpapp-view="${view}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Workspace</title>${styles}</head><body><div id="root"></div><script type="module" crossorigin src="${escapeAttribute(assetUrl(entry.file))}"></script></body></html>`;
 }
 
 function escapeAttribute(value: string): string {

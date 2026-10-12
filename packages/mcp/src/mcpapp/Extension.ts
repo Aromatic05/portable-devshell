@@ -6,18 +6,22 @@ import {
     mcpAppLegacyResourceUris,
     mcpAppResourceMetaForPublicBaseUrl,
     mcpAppResourceUri,
+    mcpAppInteractionResourceUri,
+    mcpAppInteractionStableResourceUri,
     mcpAppStableResourceUri,
 } from "./app/App.js";
 
 export function createMcpAppMcpExtension(
     publicBaseUrl?: string,
 ): McpExtension {
-    const resourceMeta = mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl);
+    const workspaceMeta = mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl, "workspace");
+    const interactionMeta = mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl, "interaction");
     const extension: McpExtension = {
         id: "mcpapp",
         presentation: {
             bootstrap: "environment",
             resourceUri: mcpAppResourceUri,
+            interactionResourceUri: mcpAppInteractionResourceUri,
         },
         resources: [
             Object.freeze({
@@ -29,10 +33,21 @@ export function createMcpAppMcpExtension(
                 mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell MCP App",
                 read: () => ({
-                    _meta: resourceMeta,
-                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl),
+                    _meta: workspaceMeta,
+                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl, "workspace"),
                 }),
                 uri: mcpAppResourceUri,
+            }),
+            Object.freeze({
+                aliases: [mcpAppInteractionStableResourceUri],
+                app: true,
+                mimeType: RESOURCE_MIME_TYPE,
+                name: "portable-devshell MCP App Interaction",
+                read: () => ({
+                    _meta: interactionMeta,
+                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl, "interaction"),
+                }),
+                uri: mcpAppInteractionResourceUri,
             }),
         ],
     };

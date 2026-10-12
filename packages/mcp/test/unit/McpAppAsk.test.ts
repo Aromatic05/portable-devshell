@@ -87,7 +87,7 @@ test("mcpapp_open returns private capability in protocol result", async () => {
         (response._meta["portable-devshell/mcpapp"] as Record<string, unknown>).ctxId, f.ctxId);
 });
 
-test("MCP tool catalog advertises the versioned App resource on open and ask", async () => {
+test("MCP tool catalog routes workspace to PiP and ask to inline resources", async () => {
     const { McpEndpointCatalog } = await import("../../src/protocol/tool/Catalog.ts");
     const { McpExtensionRegistry } = await import("../../src/protocol/extension/Registry.ts");
     const { createMcpAppMcpExtension } = await import("../../src/mcpapp/Extension.ts");
@@ -98,6 +98,7 @@ test("MCP tool catalog advertises the versioned App resource on open and ask", a
     const catalog = new McpEndpointCatalog({
         instanceName: "alpha",
         bootstrapPresentationResourceUri: extensions.environmentPresentation()?.resourceUri,
+        interactionPresentationResourceUri: extensions.environmentPresentation()?.interactionResourceUri,
         source: {
             list: () => definitions.map((definition) => ({ scope: "*", definition })),
             get: (_instance, name) => {
@@ -106,10 +107,23 @@ test("MCP tool catalog advertises the versioned App resource on open and ask", a
             },
         },
     });
-    const resource = extensions.listResources()[0];
-    assert.equal(resource?.mimeType, "text/html;profile=mcp-app");
-    for (const tool of catalog.listTools()) {
-        assert.equal(tool._meta?.["openai/outputTemplate"], resource?.uri);
-        assert.equal((tool._meta?.ui as Record<string, unknown>)?.resourceUri, resource?.uri);
+    const [workspace, interaction] = extensions.listResources();
+    assert.equal(workspace?.mimeType, "text/html;profile=mcp-app");
+    assert.equal(interaction?.mimeType, "text/html;profile=mcp-app");
+    const tools = catalog.listTools();
+    assert.equal(tools.length, 2);
+    for (const tool of tools) {
+        const uri = tool.name === "mcpapp_ask" ? interaction?.uri : workspace?.uri;
+        const meta = tool._meta as Record<string, unknown> | undefined;
+        assert.equal(meta?.["openai/outputTemplate"], uri);
+        assert.equal((meta?.ui as Record<string, unknown>)?.resourceUri, uri);
     }
+    const workspaceContent = await extensions.readResource(workspace!.uri);
+    const interactionContent = await extensions.readResource(interaction!.uri);
+    assert.deepEqual(workspaceContent?._meta?.["openai/ui"], { availableDisplayModes: ["inline", "pip"] });
+    assert.deepEqual(interactionContent?._meta?.["openai/ui"], { availableDisplayModes: ["inline"] });
+    assert.match(workspaceContent?.text ?? "", /data-mcpapp-view="workspace"/u);
+    assert.match(interactionContent?.text ?? "", /data-mcpapp-view="interaction"/u);
+    assert.equal(workspaceContent?.text?.includes("private-valid-capability-01"), false);
+    assert.equal(interactionContent?.text?.includes("private-valid-capability-01"), false);
 });

@@ -10,10 +10,17 @@ const host = vi.hoisted(() => ({
     modelContexts: [] as unknown[],
     failModelContext: false,
     failSend: false,
+    bootstrapCapability: undefined as undefined | Record<string, unknown>,
+    bootstrapCalls: 0,
+    availableDisplayModes: ["inline"] as string[],
+    displayMode: "inline",
+    piPAccepted: true,
+    modeRequests: [] as string[],
     clients: [] as Array<{
         ontoolinput?: (input: { arguments?: Record<string, unknown> }) => void;
         ontoolresult?: (result: unknown) => void;
         onclose?: () => void;
+        onhostcontextchanged?: (context: { displayMode?: string }) => void;
     }>,
 }));
 
@@ -24,9 +31,20 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         onclose?: () => void;
         constructor() { host.clients.push(this); }
         async connect() {}
-        getHostContext() { return { displayMode: "inline" }; }
+        getHostContext() { return { displayMode: host.displayMode, availableDisplayModes: host.availableDisplayModes }; }
+        async requestDisplayMode(params: { mode: "inline" | "pip" | "fullscreen" }) {
+            host.modeRequests.push(params.mode);
+            if (host.piPAccepted) host.displayMode = params.mode;
+            return { mode: host.displayMode };
+        }
         setupSizeChangedNotifications() { return () => undefined; }
         async callServerTool(params: { name: string; arguments: Record<string, unknown> }) {
+            if (params.name === "mcpapp_open") {
+                host.bootstrapCalls++;
+                return { isError: host.bootstrapCapability === undefined, content: [],
+                    structuredContent: { status: "ready" },
+                    _meta: { "portable-devshell/mcpapp": host.bootstrapCapability } };
+            }
             host.actions.push(params);
             if (params.name === "mcpapp_reentry" && host.recovery)
                 return { isError: false, content: [], structuredContent: host.recovery(params.arguments) };
@@ -70,6 +88,12 @@ afterEach(async () => {
     host.modelContexts.length = 0;
     host.failModelContext = false;
     host.failSend = false;
+    host.bootstrapCapability = undefined;
+    host.bootstrapCalls = 0;
+    host.availableDisplayModes = ["inline"];
+    host.displayMode = "inline";
+    host.piPAccepted = true;
+    host.modeRequests.length = 0;
     globalThis.fetch = originalFetch;
 });
 
@@ -127,9 +151,10 @@ test("reads live workspace state from private MCP metadata without displaying be
         await Promise.resolve();
     });
     await vi.waitFor(() => {
-        expect(container!.textContent).toContain("Approval required");
         expect(container!.textContent).toContain("Build portable devshell");
+        expect(container!.textContent).toContain("Approval required");
     });
+    expect(container!.textContent).toContain("Approval required");
     expect(container!.textContent).not.toContain("private-authorization-token");
     expect(calls[0]?.url).toContain("/snapshot?ctxId=ctx-live");
     expect(calls[0]?.authorization).toBe("Bearer private-authorization-token");
@@ -221,17 +246,11 @@ test("MCPApp user controls use callServerTool with Context, revision and confirm
         requestId: expect.any(String),
     } });
     expect(reads).toBeGreaterThan(1);
-    await act(async () => { button("Deny").click(); });
-    expect(host.actions).toHaveLength(1);
-    await act(async () => { button("Back").click(); });
-    expect(host.actions).toHaveLength(1);
-    await act(async () => { button("Deny").click(); });
-    await act(async () => { button("Confirm Deny").click(); });
-    await vi.waitFor(() => expect(host.actions).toHaveLength(2));
-    expect(host.actions[1]?.arguments).toEqual({
-        ctxId: "ctx-human", itemId: "approval-one", actionId: "deny", requestId: expect.any(String),
-    });
-    expect(host.actions[0]?.arguments.requestId).not.toBe(host.actions[1]?.arguments.requestId);
+    // A blocked ordinary ToolCall cannot summon a new inline Resource.
+    // Until that Host pathway is available, the persistent workspace retains
+    // an actionable fallback rather than deadlocking approval.
+    expect(button("Deny")).toBeDefined();
+    expect(container!.textContent).toContain("Approval required");
 });
 
 test("server Goal recovery intent delivers model context and one Host message after claim", async () => {
@@ -415,7 +434,7 @@ test("reads complete ChatGPT toolResponseMetadata before the SDK emits a tool-re
         container = document.createElement("div");
         document.body.append(container);
         root = createRoot(container);
-        await act(async () => { root?.render(<AppView />); });
+        await act(async () => { root?.render(<AppView view="interaction" />); });
         await vi.waitFor(() => expect(container!.textContent).toContain("Which release?"));
         expect(calls[0]).toContain("snapshot?ctxId=ctx-globals");
         expect(calls.some((url) => url.includes("watch?cursor=12&qrev=3&ctxId=ctx-globals"))).toBe(true);
@@ -445,7 +464,7 @@ test("question card sends selected choice and free text through authenticated MC
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => { root?.render(<AppView />); });
+    await act(async () => { root?.render(<AppView view="interaction" />); });
     await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
         "portable-devshell/mcpapp": capability,
     } }); });
@@ -472,4 +491,149 @@ test("question card sends selected choice and free text through authenticated MC
     expect(host.actions[1]?.arguments).toEqual(expect.objectContaining({
         ctxId: capability.ctxId, itemId: "question-1", actionId: "question-answer-text", input: "Keep compatible",
     }));
+});
+
+test("Workspace requests PiP only once per Context and respects Host dismissal", async () => {
+    host.availableDisplayModes = ["inline", "pip"];
+    const capability = { ctxId: "ctx-pip", token: "valid-pip-test-private-token",
+        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+            ctxId: capability.ctxId, instance: "demo", cursor: 9, agentBusy: true,
+            presentation: {
+                primary: { id: "approval-x", title: "Approval required" },
+                work: [{ id: "goal-x", title: "Build release" }], background: [],
+            },
+        }), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView view="workspace" />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({
+        _meta: { "portable-devshell/mcpapp": capability },
+    }); });
+    await vi.waitFor(() => expect(host.modeRequests).toEqual(["pip"]));
+    expect(container!.textContent).toContain("Build release");
+    expect(container!.textContent).toContain("Approval required");
+    expect(host.displayMode).toBe("pip");
+    host.displayMode = "inline";
+    await act(async () => { host.clients[0]?.onhostcontextchanged?.({ displayMode: "inline" }); });
+    expect(host.modeRequests).toEqual(["pip"]);
+    await act(async () => { host.clients[0]?.onhostcontextchanged?.({ displayMode: "inline" }); });
+    expect(host.modeRequests).toEqual(["pip"]);
+});
+
+test("Workspace remains inline if Host rejects PiP without retrying", async () => {
+    host.availableDisplayModes = ["inline", "pip"];
+    host.piPAccepted = false;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+            ctxId: "ctx-denied", instance: "demo", cursor: 1, agentBusy: false,
+            presentation: { work: [], background: [] },
+        }), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
+        "portable-devshell/mcpapp": { ctxId: "ctx-denied", token: "valid-denied-test-private-token",
+            liveBaseUrl: "https://devshell.example/api/live/demo/workspace" },
+    } }); });
+    await vi.waitFor(() => expect(host.modeRequests).toEqual(["pip"]));
+    expect(container!.textContent).toContain("inline");
+    await act(async () => { host.clients[0]?.onhostcontextchanged?.({ displayMode: "inline" }); });
+    expect(host.modeRequests).toEqual(["pip"]);
+});
+
+test("Inline bootstraps private capability before tool result, handles approvals and waits without PiP", async () => {
+    host.availableDisplayModes = ["inline", "pip"];
+    host.bootstrapCapability = { ctxId: "ctx-inline", token: "private-inline-test-token",
+        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    const state = {
+        ctxId: "ctx-inline", instance: "demo", cursor: 7, agentBusy: true,
+        presentation: {
+            primary: { id: "approval-inline", title: "Approval required", actions: [
+                { id: "approve", label: "Approve" },
+                { id: "deny", label: "Deny", confirmation: { message: "Reject?" } },
+            ] },
+            work: [{ id: "goal-inline", title: "Long-running Goal" }],
+            background: [{ id: "wait-inline", title: "tmux_run", badge: "Wait · pending" }],
+        },
+    };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify(state), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView view="interaction" />); });
+    await vi.waitFor(() => expect(container!.textContent).toContain("Approval required"));
+    expect(host.bootstrapCalls).toBe(1);
+    expect(host.modeRequests).toHaveLength(0);
+    expect(container!.textContent).toContain("Wait · pending");
+    expect(container!.textContent).not.toContain("Long-running Goal");
+    expect(container!.textContent).not.toContain("private-inline-test-token");
+    const button = (name: string) => Array.from(container!.querySelectorAll("button"))
+        .find((entry) => entry.textContent === name)!;
+    await act(async () => { button("Deny").click(); });
+    expect(host.actions).toHaveLength(0);
+    await act(async () => { button("Back").click(); });
+    await act(async () => { button("Deny").click(); });
+    await act(async () => { button("Confirm Deny").click(); });
+    await vi.waitFor(() => expect(host.actions).toHaveLength(1));
+    expect(host.actions[0]).toEqual({ name: "mcpapp_action", arguments: {
+        ctxId: "ctx-inline", itemId: "approval-inline", actionId: "deny", requestId: expect.any(String),
+    } });
+});
+
+test("Host PiP iframe remount does not reopen a dismissed Context", async () => {
+    const previousOpenai = (window as Window & { openai?: unknown }).openai;
+    let widgetState: Record<string, unknown> = {};
+    Object.assign(window, { openai: {
+        get widgetState() { return widgetState; },
+        setWidgetState(state: unknown) { widgetState = state as Record<string, unknown>; },
+    } });
+    host.availableDisplayModes = ["inline", "pip"];
+    const capability = { ctxId: "ctx-mount-guard", token: "private-test-remount-token",
+        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+            ctxId: capability.ctxId, instance: "demo", cursor: 1, agentBusy: false,
+            presentation: { work: [], background: [] },
+        }), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    try {
+        container = document.createElement("div");
+        document.body.append(container);
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView />); });
+        await act(async () => { host.clients.at(-1)?.ontoolresult?.({
+            _meta: { "portable-devshell/mcpapp": capability },
+        }); });
+        await vi.waitFor(() => expect(host.modeRequests).toEqual(["pip"]));
+        expect((widgetState.privateContent as Record<string, unknown>)?.portableDevshellPiPClaim)
+            .toBe("ctx-mount-guard");
+        await act(async () => { root?.unmount(); root = undefined; });
+        host.displayMode = "inline";
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView />); });
+        await vi.waitFor(() => expect(container!.textContent).toContain("ctx-mount-guard"));
+        expect(host.modeRequests).toEqual(["pip"]);
+    } finally {
+        Object.assign(window, { openai: previousOpenai });
+    }
 });

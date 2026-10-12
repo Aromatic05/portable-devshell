@@ -4,4 +4,4 @@ import "./Style.css";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("MCP App root is missing.");
-createRoot(root).render(<AppView />);
+createRoot(root).render(<AppView view={document.documentElement.dataset.mcpappView === "interaction" ? "interaction" : "workspace"} />);

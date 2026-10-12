@@ -36,6 +36,33 @@ export function restoreMcpAppSession(): McpAppSession | undefined {
     } });
 }
 
+/** Retains the PiP attempt through Host iframe remounts.
+ * An explicit new mcpapp_open creates a fresh widget with its own state.
+ * Do not automatically reopen a PiP dismissed by the user.
+ */
+export function hasMcpAppPiPClaim(ctxId: string): boolean {
+    if (typeof window === "undefined") return false;
+    const openai = (window as Window & { openai?: {
+        widgetState?: { privateContent?: unknown };
+    } }).openai;
+    return record(openai?.widgetState?.privateContent)?.portableDevshellPiPClaim === ctxId;
+}
+
+export function saveMcpAppPiPClaim(ctxId: string): void {
+    const openai = (window as Window & { openai?: {
+        widgetState?: Record<string, unknown>;
+        setWidgetState?: (state: unknown) => void;
+    } }).openai;
+    if (!openai?.setWidgetState) return;
+    const current = openai.widgetState ?? {};
+    const privateContent = record(current.privateContent) ?? {};
+    openai.setWidgetState({
+        modelContent: current.modelContent ?? null,
+        privateContent: { ...privateContent, portableDevshellPiPClaim: ctxId },
+        imageIds: Array.isArray(current.imageIds) ? current.imageIds : [],
+    });
+}
+
 export function saveMcpAppSession(session: McpAppSession): void {
     const openai = (window as Window & { openai?: {
         widgetState?: Record<string, unknown>;
@@ -58,7 +85,8 @@ export function clearMcpAppSession(): void {
     } }).openai;
     if (!openai?.setWidgetState) return;
     const current = openai.widgetState ?? {};
-    const { portableDevshellMcpApp: _capability, ...privateContent } = record(current.privateContent) ?? {};
+    const { portableDevshellMcpApp: _capability, portableDevshellPiPClaim: _claim,
+        ...privateContent } = record(current.privateContent) ?? {};
     openai.setWidgetState({
         modelContent: current.modelContent ?? null,
         privateContent,

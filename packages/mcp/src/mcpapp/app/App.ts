@@ -4,6 +4,8 @@ export {
     mcpAppResourceMeta,
     mcpAppResourceMetaForPublicBaseUrl,
     mcpAppResourceUri,
+    mcpAppInteractionResourceUri,
+    mcpAppInteractionStableResourceUri,
     mcpAppResourceUris,
     mcpAppStableResourceUri,
     mcpAppVersion,

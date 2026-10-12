@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
     Client,
@@ -75,12 +76,60 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(typeof snapshot.modelContext?.structuredContent, "object");
         assert.equal(typeof snapshot.reentry?.pending, "boolean");
 
+        // The two UI resources must be discoverable by the actual MCP client.
+        const inlineResource = listed.resources.find((item) =>
+            item.name === "portable-devshell MCP App Interaction");
+        assert.ok(inlineResource, "Inline interaction resource is missing.");
+        const inline = await client.readResource({ uri: inlineResource.uri });
+        assert.deepEqual(inline.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline"]);
+        assert.deepEqual(resource.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline", "pip"]);
+        assert.match(inline.contents[0]?.text ?? "", /data-mcpapp-view="interaction"/u);
+        assert.match(html, /data-mcpapp-view="workspace"/u);
+        const tools = (await client.listTools()).tools;
+        const template = (name) => tools.find((tool) => tool.name === name)?._meta?.["openai/outputTemplate"];
+        assert.equal(template("environ_info"), workspaceResource.uri);
+        assert.equal(template("mcpapp_open"), workspaceResource.uri);
+        assert.equal(template("mcpapp_ask"), inlineResource.uri);
+
+        // A new inline ask must be able to show a pending question before the
+        // blocked tool finishes; answer it using the real MCP App action.
+        const opened = await client.callTool({ name: "mcpapp_open", arguments: { ctxId } });
+        assert.equal(opened.isError, false);
+        assert.equal(opened.structuredContent?.status, "ready");
+        assert.equal(opened._meta?.["portable-devshell/mcpapp"]?.ctxId, ctxId);
+        const pendingAsk = client.callTool({
+            name: "mcpapp_ask",
+            arguments: { ctxId, question: "Testspace inline question?", choices: ["Yes", "No"], allowText: false },
+        }, { timeout: 20_000, maxTotalTimeout: 20_000 });
+        let question;
+        for (let i = 0; i < 60; i++) {
+            const response = await fetch(snapshotUrl, { headers: { authorization: "Bearer " + token } });
+            assert.equal(response.status, 200);
+            const current = await response.json();
+            if (current.presentation?.primary?.title === "Question for you") {
+                question = current.presentation.primary;
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.ok(question, "Question did not appear in the live inline snapshot.");
+        assert.equal(question.detail, "Testspace inline question?");
+        const answered = await client.callTool({ name: "mcpapp_action", arguments: {
+            ctxId, itemId: question.id, actionId: "question-answer-choice",
+            requestId: randomUUID(), input: "Yes",
+        } });
+        assert.equal(answered.isError, false);
+        assert.equal(answered.structuredContent?.status, "applied");
+        const completed = await pendingAsk;
+        assert.equal(completed.isError, false);
+        assert.deepEqual(completed.structuredContent, {
+            status: "answered", questionId: question.id, answer: "Yes",
+        });
         return {
-            ctxId,
-            cursor: snapshot.cursor,
-            instance: snapshot.instance,
-            liveBaseUrl,
+            ctxId, cursor: snapshot.cursor, instance: snapshot.instance,
             resourceUri: workspaceResource.uri,
+            interactionResourceUri: inlineResource.uri,
+            pipAdvertised: true, inlineAskAnswered: true,
         };
     } finally {
         await client.close().catch(() => undefined);

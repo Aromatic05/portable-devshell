@@ -37,6 +37,7 @@ export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
+    interactionPresentationResourceUri?: string;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
     source: McpToolSource;
@@ -50,6 +51,7 @@ export interface McpEndpointCatalogSnapshot {
 export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
     readonly #bootstrapPresentationResourceUri?: string;
+    readonly #interactionPresentationResourceUri?: string;
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
@@ -60,6 +62,8 @@ export class McpEndpointCatalog {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
         this.#bootstrapPresentationResourceUri =
             options.bootstrapPresentationResourceUri;
+        this.#interactionPresentationResourceUri =
+            options.interactionPresentationResourceUri;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
@@ -98,6 +102,7 @@ export class McpEndpointCatalog {
         const modelTool = withBootstrapPresentation(
             tool,
             this.#bootstrapPresentationResourceUri,
+            this.#interactionPresentationResourceUri,
         );
         const provenanceTool =
             isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
@@ -172,8 +177,11 @@ function isBootstrapTool(name: string): boolean {
 
 function withBootstrapPresentation(
     tool: ToolDefinition,
-    resourceUri: string | undefined,
+    workspaceResourceUri: string | undefined,
+    interactionResourceUri: string | undefined,
 ): ToolDefinition {
+    const resourceUri = tool.name === "mcpapp_ask" && interactionResourceUri !== undefined
+        ? interactionResourceUri : workspaceResourceUri;
     if (
         resourceUri === undefined ||
         tool.name !== `${bootstrapToolNamespace}_info` &&

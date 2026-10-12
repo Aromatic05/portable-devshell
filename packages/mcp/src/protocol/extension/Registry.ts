@@ -42,6 +42,12 @@ export class McpExtensionRegistry {
                             extension.id +
                             " environment presentation must reference one of its resources.",
                     );
+                if (extension.presentation.interactionResourceUri !== undefined &&
+                    !ownedResourceUris.has(extension.presentation.interactionResourceUri))
+                    throw new TypeError(
+                        "MCP Extension " + extension.id +
+                            " interaction presentation must reference one of its resources.",
+                    );
                 if (presentation !== undefined)
                     throw new TypeError(
                         "MCP environment presentation is registered more than once.",

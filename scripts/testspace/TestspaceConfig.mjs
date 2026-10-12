@@ -7,6 +7,7 @@ const USER_TESTSPACE_COMMANDS = new Set([
     "mailing-smoke",
     "exec",
     "long-smoke",
+    "mcpapp-smoke",
     "smoke",
     "status",
     "stop",

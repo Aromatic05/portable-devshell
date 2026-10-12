@@ -146,6 +146,9 @@ switch (command) {
     case "approval-smoke":
         await approvalSmoke();
         break;
+    case "mcpapp-smoke":
+        await mcpAppSmoke();
+        break;
     case "exec":
         await execInTestspace(args);
         break;
@@ -482,6 +485,16 @@ async function workflowSmoke() {
         workspace: paths.workspace,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function mcpAppSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceWorkspaceSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        instance: TESTSPACE_INSTANCE,
+        workspace: paths.workspace,
+    });
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
 async function approvalSmoke() {
@@ -1115,6 +1128,7 @@ function printCommands(state) {
             "Open Web:     pnpm testspace web",
             "Smoke Web:    pnpm testspace web-smoke",
             "Smoke Comment: pnpm testspace comment-smoke",
+            "Smoke MCP App: pnpm testspace mcpapp-smoke",
             "Long wait:     pnpm testspace long-smoke",
             "Status:       pnpm testspace status",
             "Protocol probes: pnpm testspace smoke",

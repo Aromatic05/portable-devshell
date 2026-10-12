@@ -27,6 +27,8 @@ import {
     mcpAppLegacyResourceUris,
     mcpAppResourceMeta,
     mcpAppResourceUri,
+    mcpAppInteractionResourceUri,
+    mcpAppInteractionStableResourceUri,
     mcpAppStableResourceUri,
 } from "@portable-devshell/mcp/testing";
 import {
@@ -395,9 +397,24 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
                     mimeType: "text/html;profile=mcp-app",
                     uri: mcpAppResourceUri,
                 },
+                {
+                    mimeType: "text/html;profile=mcp-app",
+                    uri: mcpAppInteractionResourceUri,
+                },
             ],
         );
         assert.notEqual(mcpAppResourceUri, mcpAppStableResourceUri);
+        assert.notEqual(mcpAppInteractionResourceUri, mcpAppResourceUri);
+        const inline = await postJson(
+            server.url,
+            { id: "req-interaction-resource", jsonrpc: "2.0",
+                method: "resources/read", params: { uri: mcpAppInteractionStableResourceUri } },
+            session.headers,
+        );
+        assert.equal(inline.status, 200);
+        assert.deepEqual(inline.body.result?.contents?.[0]?._meta?.["openai/ui"],
+            { availableDisplayModes: ["inline"] });
+        assert.match(inline.body.result?.contents?.[0]?.text ?? "", /data-mcpapp-view="interaction"/u);
 
         const read = await postJson(
             server.url,
@@ -422,7 +439,7 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
             read.body.result?.contents?.[0]?._meta,
             mcpAppResourceMeta,
         );
-        assert.equal(mcpAppLegacyResourceUris.length, 5);
+        assert.equal(mcpAppLegacyResourceUris.length, 6);
         for (const [index, uri] of mcpAppLegacyResourceUris.entries()) {
             const legacy = await postJson(
                 server.url,

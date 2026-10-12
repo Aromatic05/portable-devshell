@@ -37,3 +37,8 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 
 .workspace-actions form { display:flex; flex:1; gap:6px; min-width:200px; }
 .workspace-actions input { flex:1; min-width:0; padding:6px; border-radius:7px; border:1px solid color-mix(in srgb,currentColor 20%,transparent); background:transparent; color:inherit; }
+
+.workspace[data-view="interaction"] { min-height: 140px; gap: 10px; }
+.workspace[data-view="interaction"] .workspace-content { padding: 10px 0; }
+.workspace[data-view="interaction"] .workspace-emblem { display: none; }
+.workspace[data-view="interaction"] .workspace-foot { display: none; }
