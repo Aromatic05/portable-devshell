@@ -80,6 +80,7 @@ test("static HTTP respects MIME, encoded paths, allowed methods, and HEAD", asyn
     const lease = http.acquire({ listenHost: "127.0.0.1", listenPort: 0 });
     try {
         await mkdir(join(root, "sub"), { recursive: true });
+        await writeFile(join(root, "index.html"), '<script src="./assets/app.js"></script>', "utf8");
         await writeFile(join(root, "manifest.webmanifest"), "{}", "utf8");
         await writeFile(join(root, "file with space.txt"), "encoded", "utf8");
         await writeFile(join(root, "sub", "index.html"), "<title>sub</title>", "utf8");
@@ -88,6 +89,19 @@ test("static HTTP respects MIME, encoded paths, allowed methods, and HEAD", asyn
         const address = lease.address;
         assert.ok(address && typeof address !== "string");
         const base = `http://127.0.0.1:${address.port}/web`;
+        const canonical = await fetch(`${base}?view=home&refresh=1`, { redirect: "manual" });
+        assert.equal(canonical.status, 308);
+        assert.equal(canonical.headers.get("location"), "/web/?view=home&refresh=1");
+        assert.equal(canonical.headers.get("cache-control"), "no-cache");
+        const canonicalHead = await fetch(base, { method: "HEAD", redirect: "manual" });
+        assert.equal(canonicalHead.status, 308);
+        assert.equal(canonicalHead.headers.get("location"), "/web/");
+        assert.equal(await canonicalHead.text(), "");
+        assert.equal(
+            await (await fetch(base)).text(),
+            '<script src="./assets/app.js"></script>',
+        );
+        assert.equal(new URL("./assets/app.js", `${base}/`).pathname, "/web/assets/app.js");
         const manifest = await fetch(`${base}/manifest.webmanifest`);
         assert.equal(manifest.status, 200);
         assert.match(manifest.headers.get("content-type") ?? "", /^application\/manifest\+json/u);

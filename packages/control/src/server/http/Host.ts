@@ -223,6 +223,17 @@ export class Host {
             res.end();
             return;
         }
+        if (route.path !== "/" && requestPath === route.path) {
+            // Relative Vite assets resolve against the document URL. Serving
+            // index.html at /web rather than /web/ makes ./assets point to
+            // /assets and leaves the page blank.
+            const search = new URL(req.url ?? "/", "http://localhost").search;
+            res.statusCode = 308;
+            res.setHeader("location", `${route.path}/${search}`);
+            res.setHeader("cache-control", "no-cache");
+            res.end();
+            return;
+        }
         const encoded = requestPath.slice(route.path === "/" ? 0 : route.path.length).replace(/^\/+/, "");
         let relative: string;
         try {
