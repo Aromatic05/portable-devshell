@@ -12,6 +12,7 @@ import { ExtensionHostModuleResolver } from "../extension/discovery/ModuleResolv
 import { ExtensionPathLayout } from "../extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../extension/state/Store.js";
 import { inspectAuditMigration, migrateAuditState } from "./Audit.js";
+import { inspectContextMigration, migrateContextState } from "./Context.js";
 
 export interface ControlMigrationResult {
     changed: boolean;
@@ -64,17 +65,23 @@ export async function migrateControlState(
     options: ControlMigrationOptions = {},
 ): Promise<ControlMigrationResult> {
     await inspectAuditMigration(options.homeDirectory, options.environment);
+    await inspectContextMigration(options.homeDirectory, options.environment);
     const config = await new ControlConfigStore().migrate(
         options.homeDirectory,
+    );
+    const contextChanged = await migrateContextState(
+        options.homeDirectory,
+        options.environment,
     );
     const auditChanged = await migrateAuditState(
         options.homeDirectory,
         options.environment,
     );
     return {
-        changed: config.changed || auditChanged,
+        changed: config.changed || contextChanged || auditChanged,
         domains: [
             ...(config.changed ? ["config"] : []),
+            ...(contextChanged ? ["context"] : []),
             ...(auditChanged ? ["audit"] : []),
         ],
     };
@@ -87,6 +94,10 @@ export async function preflightControlUpdate(
         options.homeDirectory,
     );
     const audit = await inspectAuditMigration(
+        options.homeDirectory,
+        options.environment,
+    );
+    const context = await inspectContextMigration(
         options.homeDirectory,
         options.environment,
     );
@@ -149,9 +160,10 @@ export async function preflightControlUpdate(
     } finally {
         resolver.dispose();
     }
-    const required = config.changed || audit.required;
+    const required = config.changed || context.required || audit.required;
     const domains = [
         ...(config.changed ? ["config"] : []),
+        ...(context.required ? ["context"] : []),
         ...(audit.required ? ["audit"] : []),
     ];
     const rollbackBlockers: ControlUpdateRollbackBlocker[] = required
