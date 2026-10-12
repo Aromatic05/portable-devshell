@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type { ExtensionInstanceObserveCapability } from "@portable-devshell/extension/instance";
 import type {
     CliModelCommandInvocationContext,
@@ -193,4 +194,89 @@ test("Instance model logs follow streams through public CLI I/O and Instance wat
         },
     );
     assert.deepEqual(output, ["[3] stdout hello\n", "[4] stderr next\n"]);
+});
+
+test("Instance model create forwards different provider drafts to the existing manage capability", async () => {
+    const created: ExtensionJsonValue[] = [];
+    const manage = {
+        async create(draft: ExtensionJsonValue) {
+            created.push(draft);
+            return { name: (draft as { name: string }).name, enabled: false };
+        },
+    };
+    const drafts = [
+        { name: "local-new", provider: "local", enabled: false },
+        { name: "ssh-new", provider: "ssh", enabled: false, ssh: { command: "ssh example.invalid" } },
+        { name: "reverse-new", provider: "reverse", enabled: false },
+        { name: "docker-new", provider: "docker", enabled: false, container: { mode: "existingImage", image: "alpine:latest" } },
+        { name: "podman-new", provider: "podman", enabled: false, container: { mode: "existingImage", image: "alpine:latest" } },
+    ];
+    for (const draft of drafts) {
+        assert.deepEqual(
+            await executeInstanceCommand(fakeCapability(), ["create", JSON.stringify(draft)], invocation(), manage),
+            { kind: "json", value: { name: draft.name, enabled: false } },
+        );
+    }
+    assert.deepEqual(created, drafts);
+});
+
+test("Instance model create rejects invalid arguments before invoking management", async () => {
+    let calls = 0;
+    const manage = {
+        async create() {
+            calls++;
+            return { name: "unexpected", enabled: false };
+        },
+    };
+    for (const argv of [
+        ["create"],
+        ["create", "{}", "extra"],
+        ["create", "{"],
+        ["create", "null"],
+        ["create", "42"],
+        ["create", "true"],
+        ["create", "[]"],
+    ]) {
+        await assert.rejects(
+            executeInstanceCommand(fakeCapability(), argv, invocation(), manage),
+            /instance create/u,
+        );
+    }
+    assert.equal(calls, 0);
+    await assert.rejects(
+        executeInstanceCommand(fakeCapability(), ["create", "{}"], invocation()),
+        /instance\.manage/u,
+    );
+    const help = await executeInstanceCommand(fakeCapability(), ["help"], invocation());
+    assert.equal(help.kind, "text");
+    assert.match(help.text ?? "", /devshell instance create/u);
+});
+
+test("Instance model create propagates management errors and rejects aborted calls", async () => {
+    const failure = new Error("Host refused duplicate Instance");
+    let calls = 0;
+    const manage = {
+        async create() {
+            calls++;
+            throw failure;
+        },
+    };
+    const draft = JSON.stringify({ name: "duplicate", provider: "local" });
+    await assert.rejects(
+        executeInstanceCommand(fakeCapability(), ["create", draft], invocation(), manage),
+        (error) => error === failure,
+    );
+    assert.equal(calls, 1);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+        executeInstanceCommand(
+            fakeCapability(),
+            ["create", draft],
+            { ...invocation(), signal: controller.signal },
+            manage,
+        ),
+        (error) => error === controller.signal.reason,
+    );
+    assert.equal(calls, 1);
 });

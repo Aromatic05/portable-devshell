@@ -35,6 +35,7 @@ import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mj
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
 import { runTestspaceApprovalSmoke } from "./testspace/TestspaceApprovalSmoke.mjs";
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
+import { runTestspaceInstanceCreateSmoke } from "./testspace/TestspaceInstanceCreateSmoke.mjs";
 import { runTestspaceLongWaitSmoke } from "./testspace/TestspaceLongWaitSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import { runTestspaceUpdateSmoke } from "./testspace/TestspaceUpdateSmoke.mjs";
@@ -578,6 +579,11 @@ async function smoke() {
         remoteWorkspace: paths.reverseWorkspace,
         workspace: paths.workspace,
     });
+    const instanceCreate = await runTestspaceInstanceCreateSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        runtimeDirectory,
+        workspace: paths.workspace,
+    });
     const workspace = await runTestspaceWorkspaceSmoke({
         endpoint: testspaceUrls(state).mcp,
         instance: TESTSPACE_INSTANCE,
@@ -585,7 +591,7 @@ async function smoke() {
     });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
     process.stdout.write(
-        `${JSON.stringify({ comment, modelDevshell, reverse, terminals, web, workspace }, null, 2)}\n`,
+        `${JSON.stringify({ comment, instanceCreate, modelDevshell, reverse, terminals, web, workspace }, null, 2)}\n`,
     );
 }
 
