@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { databaseConnection } from "../helpers/Database.ts";
 
 import { join } from "node:path";
 import test from "node:test";
@@ -22,6 +23,8 @@ function createCommentService(
         instanceName: "alpha",
         store: new MessageStore({
             filePath: join(root, "message.sqlite3"),
+            openDatabase: () =>
+                databaseConnection(join(root, "message.sqlite3")),
             instanceName: "alpha",
         }),
     });
@@ -285,15 +288,17 @@ test("CommentService retirement permanently fences stale service references", as
 
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
     });
     assert.deepEqual(
-        store
-            .listComments({ ctxId: "ctx-a" })
-            .map((comment) => [comment.text, comment.status]),
+        (await store.listComments({ ctxId: "ctx-a" })).map((comment) => [
+            comment.text,
+            comment.status,
+        ]),
         [["Pending before retirement", "failed"]],
     );
-    store.close();
+    await store.close();
 });
 
 test("CommentService delivery event failure never blocks or requeues a completed call", async () => {

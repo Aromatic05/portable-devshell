@@ -1,3 +1,4 @@
+import type { ExtensionDatabaseCapability } from "@portable-devshell/extension/database";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -132,10 +133,7 @@ export interface CommentPort {
 }
 
 export interface MessageHistoryPort {
-    list(
-        instance: string,
-        input?: MessageListInput,
-    ): Promise<MessageEntry[]>;
+    list(instance: string, input?: MessageListInput): Promise<MessageEntry[]>;
     recordReport(
         instance: string,
         input: {
@@ -167,6 +165,8 @@ export class CommentExtension {
     readonly comment: CommentPort;
     readonly messageHistory: MessageHistoryPort;
     readonly routes: CommentRoutePort;
+    readonly #database: ExtensionDatabaseCapability;
+    readonly #preferences: MessagePreferenceStore;
     readonly #instances = new Map<string, CommentExtensionInstanceState>();
     readonly #retirements = new Set<Promise<void>>();
     readonly #source: CommentInstanceSource;
@@ -175,9 +175,15 @@ export class CommentExtension {
     constructor(options: {
         instances: CommentInstanceSource;
         preferencesFile: string;
+        database: ExtensionDatabaseCapability;
     }) {
         this.#source = options.instances;
-        const preferences = new MessagePreferenceStore(options.preferencesFile);
+        this.#database = options.database;
+        const preferences = new MessagePreferenceStore(
+            options.preferencesFile,
+            options.database,
+        );
+        this.#preferences = preferences;
         const comment: CommentPort = {
             beforeTodoToolCall: async (instance, ctxId, toolName) =>
                 await this.#require(instance).report.beforeTodoToolCall(
@@ -216,13 +222,13 @@ export class CommentExtension {
             list: async (instance, input = {}) =>
                 await this.#require(instance).messageHistory.list(input),
             recordReport: async (instance, input) =>
-                await this.#require(instance).messageHistory.recordReport(input),
+                await this.#require(instance).messageHistory.recordReport(
+                    input,
+                ),
         };
         this.messageHistory = Object.freeze(messageHistory);
         const routes: CommentRoutePort = {
-            control: () => [
-                createMessagePreferenceRouteModule(preferences),
-            ],
+            control: () => [createMessagePreferenceRouteModule(preferences)],
             instance: (instance) => {
                 const state = this.#instances.get(instance);
                 if (state === undefined || !state.enabled) return [];
@@ -234,7 +240,9 @@ export class CommentExtension {
                 });
                 const history = createMessageHistoryRouteModule({
                     list: async (input) =>
-                        await this.#require(instance).messageHistory.list(input),
+                        await this.#require(instance).messageHistory.list(
+                            input,
+                        ),
                 });
                 return [
                     {
@@ -267,7 +275,10 @@ export class CommentExtension {
         for (const state of states) state.enabled = false;
         this.#instances.clear();
         for (const state of states) this.#retireState(state);
-        const settled = await Promise.allSettled([...this.#retirements]);
+        const settled = await Promise.allSettled([
+            ...this.#retirements,
+            this.#preferences.close(),
+        ]);
         const failures = settled
             .filter(
                 (result): result is PromiseRejectedResult =>
@@ -297,6 +308,12 @@ export class CommentExtension {
             }
             const store = new MessageStore({
                 filePath: instance.messageDatabaseFile,
+                openDatabase: () =>
+                    this.#database.open(
+                        "instances/" +
+                            encodeURIComponent(instance.name) +
+                            "/message",
+                    ),
                 instanceName: instance.name,
             });
             const commentService = new CommentService({
@@ -363,7 +380,7 @@ export class CommentExtension {
                 )
                 .map((result) => result.reason);
             try {
-                state.messageHistory.close();
+                await state.messageHistory.close();
             } catch (error) {
                 failures.push(error);
             }
@@ -394,6 +411,10 @@ let builtinRuntime: BuiltinCommentRuntime | undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
     if (builtinRuntime !== undefined)
         throw new Error("Comment Extension is already active.");
+    const database = context.capabilities.database;
+    if (database === undefined) {
+        throw new Error("Comment Extension requires the database capability.");
+    }
     const instanceObserve = context.capabilities.instanceObserve;
     if (instanceObserve === undefined) {
         throw new Error(
@@ -414,6 +435,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await source.refresh();
     const comment = new CommentExtension({
         instances: source,
+        database,
         preferencesFile: join(
             context.paths.stateDirectory,
             "message-preferences.json",
@@ -663,7 +685,12 @@ function registerCommentRoutes(
         context.register(
             controlRoutes,
             route.id,
-            createCommentRouteBinding(source, comment, context.capabilities.instanceObserve!, route),
+            createCommentRouteBinding(
+                source,
+                comment,
+                context.capabilities.instanceObserve!,
+                route,
+            ),
         );
     }
 }
@@ -705,7 +732,8 @@ function createCommentRouteBinding(
         // Capture the Instance event cursor before the database read. Events
         // committed during the read will be replayed by subscribers from
         // lastSeq + 1, so ViewModels cannot miss delivered Comments.
-        const listOperation = route.operation === "listContextMessages" ||
+        const listOperation =
+            route.operation === "listContextMessages" ||
             route.operation === "listMessageEntries";
         const lastSeq = listOperation
             ? (await observe.snapshot(invocation.destination)).lastSeq
@@ -867,10 +895,7 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
         for (const name of [...this.#keys.keys()]) {
             if (!nextNames.has(name)) this.#keys.delete(name);
         }
-        if (
-            renewInstance !== undefined &&
-            nextNames.has(renewInstance)
-        ) {
+        if (renewInstance !== undefined && nextNames.has(renewInstance)) {
             this.#keys.set(renewInstance, {});
         }
         for (const record of next) this.#requireKey(record.name);

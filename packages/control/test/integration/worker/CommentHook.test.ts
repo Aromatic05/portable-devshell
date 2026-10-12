@@ -21,6 +21,7 @@ import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { modernRpcHeaders, modernRpcRequest } from "../../../../mcp/test/integration/ModernProtocol.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { databaseCapability } from "../../../../../extensions/comment/test/helpers/Database.ts";
 
 const instanceName = asInstanceName("comment-boundary");
 const bashTool: ToolDefinition = {
@@ -58,6 +59,11 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             onChange: () => () => undefined,
         },
         preferencesFile: join(root, "message-preferences.json"),
+        database: databaseCapability((name) =>
+            name === "message-preferences"
+                ? join(root, "message-preferences.sqlite3")
+                : join(root, "message.sqlite3"),
+        ),
     });
     const binding = new ToolCallExtensionBinding(
         commentReviewRegistrationHost(comment.comment),

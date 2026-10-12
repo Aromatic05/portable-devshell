@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
 
 import type {
     ContextMessageRecord,
@@ -21,11 +21,38 @@ export interface MessageRow {
     text: string;
 }
 
-export function listMessageRows(
-    database: DatabaseSync,
+// Keep each SQL response within the 16 MiB Sandbox message budget.
+const PAGE_ROWS = 128;
+
+async function selectRows(
+    database: ExtensionDatabaseConnection,
+    sql: string,
+    parameters: readonly (number | string)[],
+    limit?: number,
+): Promise<MessageRow[]> {
+    const rows: MessageRow[] = [];
+    for (;;) {
+        const remaining =
+            limit === undefined
+                ? PAGE_ROWS
+                : Math.min(PAGE_ROWS, limit - rows.length);
+        if (remaining <= 0) break;
+        const page = (await database.all(`${sql} LIMIT ? OFFSET ?`, [
+            ...parameters,
+            remaining,
+            rows.length,
+        ])) as unknown as MessageRow[];
+        rows.push(...page);
+        if (page.length < remaining) break;
+    }
+    return rows;
+}
+
+export async function listMessageRows(
+    database: ExtensionDatabaseConnection,
     input: Pick<MessageListInput, "before" | "ctxId" | "limit">,
     kind: MessageEntryKind | undefined,
-): MessageRow[] {
+): Promise<MessageRow[]> {
     const predicates: string[] = [];
     const parameters: Array<number | string> = [];
     if (kind !== undefined) {
@@ -37,17 +64,16 @@ export function listMessageRows(
         parameters.push(input.ctxId);
     }
     if (input.before !== undefined) {
-        const boundary = database
-            .prepare(
-                `
+        const boundary = (await database.get(
+            `
                 SELECT created_at AS createdAt, id, kind, seq
                 FROM message_entries
                 WHERE id = ? ${kind === undefined ? "" : "AND kind = ?"}
                 ORDER BY created_at ASC, seq ASC
                 LIMIT 1
             `,
-            )
-            .get(input.before, ...(kind === undefined ? [] : [kind])) as
+            [input.before, ...(kind === undefined ? [] : [kind])],
+        )) as
             | {
                   createdAt: string;
                   id: string;
@@ -68,9 +94,9 @@ export function listMessageRows(
         input.limit === undefined
             ? undefined
             : Math.max(1, Math.trunc(input.limit));
-    const rows = database
-        .prepare(
-            `
+    const rows = await selectRows(
+        database,
+        `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -86,23 +112,21 @@ export function listMessageRows(
             FROM message_entries
             ${predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`}
             ORDER BY created_at DESC, seq DESC
-            ${limit === undefined ? "" : "LIMIT ?"}
         `,
-        )
-        .all(
-            ...(limit === undefined ? parameters : [...parameters, limit]),
-        ) as unknown as MessageRow[];
+        parameters,
+        limit,
+    );
     return rows.reverse();
 }
 
-export function pendingCommentRecords(
-    database: DatabaseSync,
+export async function pendingCommentRecords(
+    database: ExtensionDatabaseConnection,
     instance: string,
     ctxId?: string,
-): ContextMessageRecord[] {
-    const rows = database
-        .prepare(
-            `
+): Promise<ContextMessageRecord[]> {
+    const rows = await selectRows(
+        database,
+        `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -121,10 +145,8 @@ export function pendingCommentRecords(
               ${ctxId === undefined ? "" : "AND ctx_id = ?"}
             ORDER BY created_at ASC, seq ASC
         `,
-        )
-        .all(
-            ...(ctxId === undefined ? [] : [ctxId]),
-        ) as unknown as MessageRow[];
+        [...(ctxId === undefined ? [] : [ctxId])],
+    );
     return rows.map((row) => toCommentRecord(row, instance));
 }
 
@@ -182,32 +204,32 @@ export function applyByteBudget<T>(
     return accepted;
 }
 
-export function readMessagePayloadBytes(database: DatabaseSync): number {
-    const row = database
-        .prepare(
-            `
+export async function readMessagePayloadBytes(
+    database: ExtensionDatabaseConnection,
+): Promise<number> {
+    const row = (await database.get(
+        `
             SELECT COALESCE(SUM(${messagePayloadBytesSql()}), 0) AS payloadBytes
             FROM message_entries
         `,
-        )
-        .get() as { payloadBytes: number };
+        [],
+    )) as { payloadBytes: number };
     return row.payloadBytes;
 }
 
-export function readMessageEntryPayloadBytes(
-    database: DatabaseSync,
+export async function readMessageEntryPayloadBytes(
+    database: ExtensionDatabaseConnection,
     kind: MessageEntryKind,
     id: string,
-): number {
-    const row = database
-        .prepare(
-            `
+): Promise<number> {
+    const row = (await database.get(
+        `
             SELECT ${messagePayloadBytesSql()} AS payloadBytes
             FROM message_entries
             WHERE kind = ? AND id = ?
         `,
-        )
-        .get(kind, id) as { payloadBytes: number } | undefined;
+        [kind, id],
+    )) as { payloadBytes: number } | undefined;
     return row?.payloadBytes ?? 0;
 }
 

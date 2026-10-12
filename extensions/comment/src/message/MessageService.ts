@@ -20,10 +20,10 @@ export class MessageService {
         this.#store = options.store;
     }
 
-    async list(
-        input: MessageListInput = {},
-    ): Promise<MessageEntry[]> {
-        return await this.#runExclusive(async () => this.#store.list(input));
+    async list(input: MessageListInput = {}): Promise<MessageEntry[]> {
+        return await this.#runExclusive(
+            async () => await this.#store.list(input),
+        );
     }
 
     async recordReport(input: {
@@ -35,7 +35,7 @@ export class MessageService {
         text: string;
     }): Promise<void> {
         await this.#runExclusive(async () => {
-            this.#store.appendReport({
+            await this.#store.appendReport({
                 callId: input.callId,
                 createdAt: input.createdAt ?? new Date().toISOString(),
                 ctxId: input.ctxId,
@@ -55,8 +55,8 @@ export class MessageService {
         return this.#retirement;
     }
 
-    close(): void {
-        this.#store.close();
+    async close(): Promise<void> {
+        await this.#store.close();
     }
 
     async #runExclusive<T>(

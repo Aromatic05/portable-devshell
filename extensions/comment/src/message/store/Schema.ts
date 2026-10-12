@@ -1,7 +1,4 @@
-import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
 
 export const MESSAGE_DATABASE_SCHEMA_VERSION = 2;
 export const defaultMessageStorageLimits = {
@@ -9,30 +6,29 @@ export const defaultMessageStorageLimits = {
     retentionDays: 90,
 } as const;
 
-export function openMessageDatabase(filePath: string): DatabaseSync {
-    mkdirSync(dirname(filePath), { recursive: true });
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } =
-        require("node:sqlite") as typeof import("node:sqlite");
-    const database = new DatabaseSync(filePath, { timeout: 5_000 });
+export async function openMessageDatabase(
+    open: () => Promise<ExtensionDatabaseConnection>,
+    filePath: string,
+): Promise<ExtensionDatabaseConnection> {
+    const database = await open();
     try {
-        initializeMessageSchema(database, filePath);
-        database.exec("PRAGMA journal_mode = WAL");
-        database.exec("PRAGMA synchronous = NORMAL");
+        await initializeMessageSchema(database, filePath);
+        await database.exec("PRAGMA journal_mode = WAL");
+        await database.exec("PRAGMA synchronous = NORMAL");
         return database;
     } catch (error) {
-        database.close();
+        await database.close();
         throw error;
     }
 }
 
-function initializeMessageSchema(
-    database: DatabaseSync,
+async function initializeMessageSchema(
+    database: ExtensionDatabaseConnection,
     filePath: string,
-): void {
-    const userVersion = readMessageSchemaVersion(database, filePath);
+): Promise<void> {
+    const userVersion = await readMessageSchemaVersion(database, filePath);
     if (userVersion === MESSAGE_DATABASE_SCHEMA_VERSION) {
-        if (!tableExists(database, "message_entries")) {
+        if (!(await tableExists(database, "message_entries"))) {
             throw new Error(
                 `Message database schema version ${MESSAGE_DATABASE_SCHEMA_VERSION} is inconsistent: ` +
                     "message_entries is missing. Refusing to modify the database.",
@@ -41,20 +37,19 @@ function initializeMessageSchema(
         return;
     }
 
-    database.exec("BEGIN IMMEDIATE");
-    try {
-        if (userVersion === 1) migrateVersionOne(database);
-        else createCurrentSchema(database);
-        database.exec(`PRAGMA user_version = ${MESSAGE_DATABASE_SCHEMA_VERSION}`);
-        database.exec("COMMIT");
-    } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-    }
+    await database.transaction(async (database) => {
+        if (userVersion === 1) await migrateVersionOne(database);
+        else await createCurrentSchema(database);
+        await database.exec(
+            `PRAGMA user_version = ${MESSAGE_DATABASE_SCHEMA_VERSION}`,
+        );
+    });
 }
 
-function createCurrentSchema(database: DatabaseSync): void {
-    database.exec(`
+async function createCurrentSchema(
+    database: ExtensionDatabaseConnection,
+): Promise<void> {
+    await database.exec(`
         CREATE TABLE IF NOT EXISTS message_entries (
             seq INTEGER PRIMARY KEY AUTOINCREMENT,
             kind TEXT NOT NULL CHECK(kind IN ('comment', 'report')),
@@ -81,26 +76,32 @@ function createCurrentSchema(database: DatabaseSync): void {
     `);
 }
 
-function migrateVersionOne(database: DatabaseSync): void {
+async function migrateVersionOne(
+    database: ExtensionDatabaseConnection,
+): Promise<void> {
     // @compat comment-message-storage-v1
     // v1 used the old domain noun in table names. Rename in place once.
-    if (!tableExists(database, "conversation_entries")) {
+    if (!(await tableExists(database, "conversation_entries"))) {
         throw new Error(
             "Message database schema version 1 is inconsistent: the legacy entries table is missing.",
         );
     }
-    database.exec("ALTER TABLE conversation_entries RENAME TO message_entries");
-    if (tableExists(database, "conversation_metadata")) {
-        database.exec("ALTER TABLE conversation_metadata RENAME TO message_metadata");
+    await database.exec(
+        "ALTER TABLE conversation_entries RENAME TO message_entries",
+    );
+    if (await tableExists(database, "conversation_metadata")) {
+        await database.exec(
+            "ALTER TABLE conversation_metadata RENAME TO message_metadata",
+        );
     } else {
-        database.exec(`
+        await database.exec(`
             CREATE TABLE message_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             ) STRICT;
         `);
     }
-    database.exec(`
+    await database.exec(`
         DROP INDEX IF EXISTS conversation_entries_context_time;
         DROP INDEX IF EXISTS conversation_entries_call;
         CREATE INDEX IF NOT EXISTS message_entries_context_time
@@ -111,11 +112,11 @@ function migrateVersionOne(database: DatabaseSync): void {
     `);
 }
 
-function readMessageSchemaVersion(
-    database: DatabaseSync,
+async function readMessageSchemaVersion(
+    database: ExtensionDatabaseConnection,
     filePath: string,
-): number {
-    const row = database.prepare("PRAGMA user_version").get() as Record<
+): Promise<number> {
+    const row = (await database.get("PRAGMA user_version", [])) as Record<
         string,
         number
     >;
@@ -129,12 +130,14 @@ function readMessageSchemaVersion(
     return version;
 }
 
-function tableExists(database: DatabaseSync, name: string): boolean {
+async function tableExists(
+    database: ExtensionDatabaseConnection,
+    name: string,
+): Promise<boolean> {
     return (
-        database
-            .prepare(
-                "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?",
-            )
-            .get(name) !== undefined
+        (await database.get(
+            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [name],
+        )) !== undefined
     );
 }

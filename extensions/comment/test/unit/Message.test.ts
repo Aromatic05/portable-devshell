@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { databaseConnection } from "../helpers/Database.ts";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,23 +19,32 @@ test("MessageStore migrates v1 conversation table names once", async () => {
 
     const store = new MessageStore({
         filePath: databaseFile,
+        openDatabase: () => databaseConnection(databaseFile),
         instanceName: "alpha",
     });
     assert.deepEqual(
-        store.listComments().map(({ ctxId, id, text }) => ({ ctxId, id, text })),
+        (await store.listComments()).map(({ ctxId, id, text }) => ({
+            ctxId,
+            id,
+            text,
+        })),
         [{ ctxId: "ctx-legacy", id: "legacy-comment", text: "Legacy message" }],
     );
-    assert.equal(readUserVersion(databaseFile), MESSAGE_DATABASE_SCHEMA_VERSION);
-    store.close();
+    assert.equal(
+        readUserVersion(databaseFile),
+        MESSAGE_DATABASE_SCHEMA_VERSION,
+    );
+    await store.close();
 });
 
 test("MessageStore clears only the #push snapshot acknowledged by a report", async () => {
     const root = await createTestTempDirectory("message-report-push-cas");
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
     });
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-09-20T08:15:17.222Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-09-20T08:15:17.233Z",
@@ -43,11 +53,11 @@ test("MessageStore clears only the #push snapshot acknowledged by a report", asy
         status: "delivered",
         text: "#push 报告进度",
     });
-    const observed = store.readControlState("ctx-a");
+    const observed = await store.readControlState("ctx-a");
     assert.equal(observed.pendingPushCommentId, "push-1");
     assert.equal(observed.pushMessage, "#push 报告进度");
 
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-09-20T08:15:18.222Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-09-20T08:15:18.233Z",
@@ -56,7 +66,7 @@ test("MessageStore clears only the #push snapshot acknowledged by a report", asy
         status: "delivered",
         text: "还要说明阻塞点",
     });
-    store.appendReport({
+    await store.appendReport({
         callId: "report-old",
         createdAt: "2026-09-20T08:15:19.000Z",
         ctxId: "ctx-a",
@@ -66,15 +76,15 @@ test("MessageStore clears only the #push snapshot acknowledged by a report", asy
         },
         text: "旧 snapshot 的报告",
     });
-    assert.deepEqual(store.readControlState("ctx-a"), {
+    assert.deepEqual(await store.readControlState("ctx-a"), {
         pendingPushCommentId: "push-1",
         pendingReplyCommentId: "follow-up-1",
         pushMessage: "#push 报告进度\n\n还要说明阻塞点",
         pushToolCallsRemaining: 4,
     });
 
-    const current = store.readControlState("ctx-a");
-    store.appendReport({
+    const current = await store.readControlState("ctx-a");
+    await store.appendReport({
         callId: "report-current",
         createdAt: "2026-09-20T08:15:20.000Z",
         ctxId: "ctx-a",
@@ -85,24 +95,22 @@ test("MessageStore clears only the #push snapshot acknowledged by a report", asy
         replyCommentId: current.pendingReplyCommentId,
         text: "当前 snapshot 的报告",
     });
-    assert.deepEqual(store.readControlState("ctx-a"), {});
-    store.close();
+    assert.deepEqual(await store.readControlState("ctx-a"), {});
+    await store.close();
 });
 
 test("MessageStore rejects a newer schema without modifying it", async () => {
     const root = await createTestTempDirectory("message-future-schema");
     const databaseFile = join(root, "message.sqlite3");
-    createFutureDatabase(
-        databaseFile,
-        MESSAGE_DATABASE_SCHEMA_VERSION + 1,
-    );
+    createFutureDatabase(databaseFile, MESSAGE_DATABASE_SCHEMA_VERSION + 1);
     const before = readFutureDatabase(databaseFile);
     const store = new MessageStore({
         filePath: databaseFile,
+        openDatabase: () => databaseConnection(databaseFile),
         instanceName: "alpha",
     });
 
-    assert.throws(
+    await assert.rejects(
         () => store.list(),
         (error: unknown) => {
             const message = String((error as Error).message);
@@ -122,21 +130,55 @@ test("MessageStore defaults to a 512 MiB fuse and 90 day retention", () => {
     });
 });
 
+test("MessageStore reads ordered history and pending Comments across multiple SQL result batches", async () => {
+    const root = await createTestTempDirectory("message-batched-sql");
+    const filePath = join(root, "message.sqlite3");
+    const store = new MessageStore({
+        filePath,
+        openDatabase: () => databaseConnection(filePath),
+        instanceName: "alpha",
+    });
+    const now = Date.now();
+    for (let index = 0; index < 145; index += 1) {
+        await store.insertComment({
+            createdAt: new Date(now + index).toISOString(),
+            ctxId: "ctx-batch",
+            id: `message-${String(index).padStart(3, "0")}`,
+            instance: "alpha",
+            status: "sent",
+            text: "batched message",
+        });
+    }
+    const history = await store.list({ limit: 145 });
+    const pending = await store.pendingComments("ctx-batch");
+    assert.equal(history.length, 145);
+    assert.equal(pending.length, 145);
+    assert.equal(history[0]?.id, "message-000");
+    assert.equal(history.at(-1)?.id, "message-144");
+    assert.equal(pending.at(-1)?.id, "message-144");
+    const before = await store.list({ before: "message-140", limit: 20 });
+    assert.equal(before.length, 20);
+    assert.equal(before.at(-1)?.id, "message-139");
+    assert.equal(before[0]?.id, "message-120");
+    await store.close();
+});
+
 test("MessageStore retention removes old terminal history but never old pending or sent Comments", async () => {
     const root = await createTestTempDirectory("message-retention");
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
         retentionDays: 30,
     });
-    store.appendReport({
+    await store.appendReport({
         callId: "old-report",
         createdAt: "2026-07-01T00:00:00.000Z",
         ctxId: "ctx-a",
         text: "expired report",
     });
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-07-01T00:00:00.000Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-07-01T00:01:00.000Z",
@@ -145,7 +187,7 @@ test("MessageStore retention removes old terminal history but never old pending 
         status: "delivered",
         text: "expired delivered comment",
     });
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-07-01T00:00:00.000Z",
         ctxId: "ctx-a",
         id: "old-sent",
@@ -153,7 +195,7 @@ test("MessageStore retention removes old terminal history but never old pending 
         status: "sent",
         text: "must survive until delivered or failed",
     });
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-07-01T00:00:00.000Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-09-10T00:00:00.000Z",
@@ -162,7 +204,7 @@ test("MessageStore retention removes old terminal history but never old pending 
         status: "delivered",
         text: "retention starts from terminal time",
     });
-    store.appendReport({
+    await store.appendReport({
         callId: "recent-report",
         createdAt: "2026-09-10T00:00:00.000Z",
         ctxId: "ctx-a",
@@ -170,11 +212,11 @@ test("MessageStore retention removes old terminal history but never old pending 
     });
 
     assert.deepEqual(
-        store.list().map((entry) => entry.id),
+        (await store.list()).map((entry) => entry.id),
         ["old-sent", "recently-delivered", "recent-report"],
     );
-    assert.equal(store.stats().protectedComments, 1);
-    store.close();
+    assert.equal((await store.stats()).protectedComments, 1);
+    await store.close();
 });
 
 test("MessageStore preserves a delivered Comment while control state still needs it as the reply target", async () => {
@@ -183,12 +225,13 @@ test("MessageStore preserves a delivered Comment while control state still needs
     );
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
         maxBytes: 1_024,
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
         retentionDays: 30,
     });
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-07-01T00:00:00.000Z",
         ctxId: "ctx-a",
         id: "reply-target",
@@ -197,21 +240,25 @@ test("MessageStore preserves a delivered Comment while control state still needs
         text: "question ".repeat(1_000),
     });
 
-    store.deliverComments("ctx-a", "delivery-call", "2026-07-01T00:01:00.000Z");
+    await store.deliverComments(
+        "ctx-a",
+        "delivery-call",
+        "2026-07-01T00:01:00.000Z",
+    );
 
     assert.equal(
-        store
-            .listComments({ ctxId: "ctx-a" })
-            .find((comment) => comment.id === "reply-target")?.status,
+        (await store.listComments({ ctxId: "ctx-a" })).find(
+            (comment) => comment.id === "reply-target",
+        )?.status,
         "delivered",
     );
     assert.equal(
-        store.readControlState("ctx-a").pendingReplyCommentId,
+        (await store.readControlState("ctx-a")).pendingReplyCommentId,
         "reply-target",
     );
-    const stats = store.stats();
+    const stats = await store.stats();
     assert.equal(stats.payloadBytes > 1_024, true);
-    store.close();
+    await store.close();
 });
 
 test("MessageStore capacity evicts oldest terminal history before protected Comments", async () => {
@@ -219,29 +266,30 @@ test("MessageStore capacity evicts oldest terminal history before protected Comm
     const maxBytes = 12_000;
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
         maxBytes,
         now: () => Date.parse("2026-09-11T00:00:00.000Z"),
         retentionDays: 365,
     });
-    store.appendReport({
+    await store.appendReport({
         callId: "report-old",
         createdAt: "2026-09-09T00:00:00.000Z",
         ctxId: "ctx-a",
         text: "a".repeat(8_000),
     });
-    store.appendReport({
+    await store.appendReport({
         callId: "report-new",
         createdAt: "2026-09-10T00:00:00.000Z",
         ctxId: "ctx-a",
         text: "b".repeat(8_000),
     });
     assert.deepEqual(
-        store.list().map((entry) => entry.id),
+        (await store.list()).map((entry) => entry.id),
         ["report-new"],
     );
 
-    store.insertComment({
+    await store.insertComment({
         createdAt: "2026-09-11T00:00:00.000Z",
         ctxId: "ctx-a",
         id: "protected-comment",
@@ -250,21 +298,22 @@ test("MessageStore capacity evicts oldest terminal history before protected Comm
         text: "c".repeat(20_000),
     });
     assert.deepEqual(
-        store.list().map((entry) => entry.id),
+        (await store.list()).map((entry) => entry.id),
         ["protected-comment"],
     );
-    const stats = store.stats();
+    const stats = await store.stats();
     assert.equal(stats.entries, 1);
     assert.equal(stats.protectedComments, 1);
     assert.equal(stats.maxBytes, maxBytes);
     assert.equal(stats.payloadBytes > maxBytes, true);
-    store.close();
+    await store.close();
 });
 
 test("MessageService fences new work after retirement", async () => {
     const root = await createTestTempDirectory("message-retirement");
     const store = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
     });
     const service = new MessageService({ instanceName: "alpha", store });
@@ -284,17 +333,18 @@ test("MessageService fences new work after retirement", async () => {
         /not found or is disabled/u,
     );
     await assert.rejects(service.list(), /not found or is disabled/u);
-    service.close();
+    await service.close();
 
     const reopened = new MessageStore({
         filePath: join(root, "message.sqlite3"),
+        openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
         instanceName: "alpha",
     });
     assert.deepEqual(
-        reopened.list().map((entry) => entry.text),
+        (await reopened.list()).map((entry) => entry.text),
         ["Before retirement"],
     );
-    reopened.close();
+    await reopened.close();
 });
 
 function createFutureDatabase(filePath: string, version: number): void {

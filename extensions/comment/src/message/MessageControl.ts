@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
 
 import type { ContextMessageRecord } from "@portable-devshell/shared";
 
@@ -27,65 +27,69 @@ export interface MessageControlState {
     stoppedByCommentId?: string;
 }
 
-export function readMessageControlState(
-    database: DatabaseSync,
+export async function readMessageControlState(
+    database: ExtensionDatabaseConnection,
     ctxId: string,
-): MessageControlState {
-    const row = database
-        .prepare("SELECT value FROM message_metadata WHERE key = ?")
-        .get(controlStateMetadataKey(ctxId)) as { value: string } | undefined;
+): Promise<MessageControlState> {
+    const row = (await database.get(
+        "SELECT value FROM message_metadata WHERE key = ?",
+        [controlStateMetadataKey(ctxId)],
+    )) as { value: string } | undefined;
     if (row === undefined) return {};
     return normalizeMessageControlState(JSON.parse(row.value) as unknown);
 }
 
-export function writeMessageControlState(
-    database: DatabaseSync,
+export async function writeMessageControlState(
+    database: ExtensionDatabaseConnection,
     ctxId: string,
     state: MessageControlState,
-): void {
+): Promise<void> {
     const normalized = normalizeMessageControlState(state);
     const key = controlStateMetadataKey(ctxId);
     if (Object.keys(normalized).length === 0) {
-        database
-            .prepare("DELETE FROM message_metadata WHERE key = ?")
-            .run(key);
+        await database.run("DELETE FROM message_metadata WHERE key = ?", [key]);
         return;
     }
-    database
-        .prepare(
-            `
+    await database.run(
+        `
             INSERT INTO message_metadata(key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `,
-        )
-        .run(key, JSON.stringify(normalized));
+        [key, JSON.stringify(normalized)],
+    );
 }
 
-export function clearMessageControlStates(database: DatabaseSync): void {
-    database
-        .prepare("DELETE FROM message_metadata WHERE key LIKE ?")
-        .run(`${CONTROL_STATE_METADATA_PREFIX}%`);
+export async function clearMessageControlStates(
+    database: ExtensionDatabaseConnection,
+): Promise<void> {
+    await database.run("DELETE FROM message_metadata WHERE key LIKE ?", [
+        `${CONTROL_STATE_METADATA_PREFIX}%`,
+    ]);
 }
 
-export function readMessageControlCommentIds(
-    database: DatabaseSync,
-): ReadonlySet<string> {
-    const rows = database
-        .prepare("SELECT value FROM message_metadata WHERE key LIKE ?")
-        .all(`${CONTROL_STATE_METADATA_PREFIX}%`) as Array<{ value: string }>;
+export async function readMessageControlCommentIds(
+    database: ExtensionDatabaseConnection,
+): Promise<ReadonlySet<string>> {
     const ids = new Set<string>();
-    for (const row of rows) {
-        const state = normalizeMessageControlState(
-            JSON.parse(row.value) as unknown,
-        );
-        for (const id of [
-            state.pendingPushCommentId,
-            state.pendingReplyCommentId,
-            state.pendingResumeCommentId,
-            state.stoppedByCommentId,
-        ]) {
-            if (id !== undefined) ids.add(id);
+    for (let offset = 0; ; offset += 128) {
+        const rows = (await database.all(
+            "SELECT value FROM message_metadata WHERE key LIKE ? ORDER BY key LIMIT 128 OFFSET ?",
+            [`${CONTROL_STATE_METADATA_PREFIX}%`, offset],
+        )) as Array<{ value: string }>;
+        for (const row of rows) {
+            const state = normalizeMessageControlState(
+                JSON.parse(row.value) as unknown,
+            );
+            for (const id of [
+                state.pendingPushCommentId,
+                state.pendingReplyCommentId,
+                state.pendingResumeCommentId,
+                state.stoppedByCommentId,
+            ]) {
+                if (id !== undefined) ids.add(id);
+            }
         }
+        if (rows.length < 128) break;
     }
     return ids;
 }

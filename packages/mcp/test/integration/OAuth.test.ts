@@ -15,6 +15,7 @@ import {
     startLoopbackHttpProxy,
 } from "../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { databaseCapability } from "../../../../extensions/comment/test/helpers/Database.ts";
 import {
     readRelativeMarkerCommand,
     realWorkerTestOptions,
@@ -239,6 +240,11 @@ test(
                 onChange: () => () => undefined,
             },
             preferencesFile: join(contextRoot, "message-preferences.json"),
+            database: databaseCapability((name) =>
+                name === "message-preferences"
+                    ? join(contextRoot, "message-preferences.sqlite3")
+                    : join(contextRoot, "message.sqlite3"),
+            ),
         });
         let reviewHooks: ToolCallReviewHook[] = [];
         let rewriteHooks: ToolCallRewriteHook[] = [];
@@ -442,7 +448,7 @@ test(
             );
             await client.close();
         } finally {
-            comment.close();
+            await comment.close();
             await teardownFrozenWorker(host, instance, cleanupDirs);
         }
     },

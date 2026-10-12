@@ -50,10 +50,10 @@ export class CommentService {
                 this.#instanceName,
                 input,
             ).record;
-            const previousControlState = this.#store.readControlState(
+            const previousControlState = await this.#store.readControlState(
                 record.ctxId,
             );
-            this.#store.insertComment(record);
+            await this.#store.insertComment(record);
             try {
                 await this.#appendEvent(
                     "context.message.queued",
@@ -62,7 +62,7 @@ export class CommentService {
                 return record;
             } catch (error) {
                 await this.#markFailed([record], error);
-                this.#store.writeControlState(
+                await this.#store.writeControlState(
                     record.ctxId,
                     previousControlState,
                 );
@@ -76,7 +76,7 @@ export class CommentService {
     ): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
             const query = typeof input === "string" ? { ctxId: input } : input;
-            return this.#store.listComments(query);
+            return await this.#store.listComments(query);
         });
     }
 
@@ -96,18 +96,18 @@ export class CommentService {
         | { comment?: string; commentId: string; kind: "stop" }
     > {
         return await this.#runExclusive(async () => {
-            let state = this.#store.readControlState(ctxId);
+            let state = await this.#store.readControlState(ctxId);
             if (state.stoppedByCommentId !== undefined) {
                 const stoppedByCommentId = state.stoppedByCommentId;
-                const pending = this.#store.pendingComments(ctxId);
+                const pending = await this.#store.pendingComments(ctxId);
                 if (pending.length > 0) {
-                    const delivered = this.#store.deliverComments(
+                    const delivered = await this.#store.deliverComments(
                         ctxId,
                         requestId ?? `control-message-${randomUUID()}`,
                         new Date().toISOString(),
                     );
                     await this.#recordDelivered(delivered);
-                    state = this.#store.readControlState(ctxId);
+                    state = await this.#store.readControlState(ctxId);
                     const comment = delivered
                         .map((record) => record.text)
                         .join("\n\n");
@@ -161,7 +161,7 @@ export class CommentService {
                 };
             }
             state.pushToolCallsRemaining = remaining - 1;
-            this.#store.writeControlState(ctxId, state);
+            await this.#store.writeControlState(ctxId, state);
             return { kind: "allow" };
         });
     }
@@ -171,7 +171,7 @@ export class CommentService {
         replyCommentId?: string;
     }> {
         return await this.#runExclusive(async () => {
-            const state = this.#store.readControlState(ctxId);
+            const state = await this.#store.readControlState(ctxId);
             const hasPushId = state.pendingPushCommentId !== undefined;
             const hasPushMessage = state.pushMessage !== undefined;
             if (hasPushId !== hasPushMessage) {
@@ -214,14 +214,14 @@ export class CommentService {
         reason: string,
     ): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
-            const records = this.#store.pendingComments(ctxId);
+            const records = await this.#store.pendingComments(ctxId);
             if (records.length > 0) await this.#markFailed(records, reason);
-            this.#store.writeControlState(ctxId, {});
+            await this.#store.writeControlState(ctxId, {});
             if (records.length === 0) return [];
             const ids = new Set(records.map((record) => record.id));
-            return this.#store
-                .listComments({ ctxId })
-                .filter((message) => ids.has(message.id));
+            return (await this.#store.listComments({ ctxId })).filter(
+                (message) => ids.has(message.id),
+            );
         });
     }
 
@@ -230,8 +230,9 @@ export class CommentService {
         callId: string,
     ): Promise<ContextMessageReadResult> {
         const delivered = await this.#runExclusive(async () => {
-            if (this.#store.pendingComments(ctxId).length === 0) return [];
-            return this.#store.deliverComments(
+            if ((await this.#store.pendingComments(ctxId)).length === 0)
+                return [];
+            return await this.#store.deliverComments(
                 ctxId,
                 callId,
                 new Date().toISOString(),
@@ -281,7 +282,7 @@ export class CommentService {
     ): Promise<void> {
         const message = error instanceof Error ? error.message : String(error);
         const ids = new Set(records.map((record) => record.id));
-        this.#store.failComments(ids, message, new Date().toISOString());
+        await this.#store.failComments(ids, message, new Date().toISOString());
         for (const record of records) {
             await this.#appendEvent("context.message.failed", {
                 ...eventData(record),
@@ -292,14 +293,14 @@ export class CommentService {
     }
 
     async #failAllPending(reason: string): Promise<ContextMessageRecord[]> {
-        const records = this.#store.pendingComments();
+        const records = await this.#store.pendingComments();
         if (records.length > 0) await this.#markFailed(records, reason);
-        this.#store.clearAllControlStates();
+        await this.#store.clearAllControlStates();
         if (records.length === 0) return [];
         const ids = new Set(records.map((record) => record.id));
-        return this.#store
-            .listComments()
-            .filter((message) => ids.has(message.id));
+        return (await this.#store.listComments()).filter((message) =>
+            ids.has(message.id),
+        );
     }
 
     async #runExclusive<T>(

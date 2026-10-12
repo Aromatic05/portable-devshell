@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { databaseConnection, databaseCapability } from "../helpers/Database.ts";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -66,7 +67,15 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
             name: "alpha",
         },
     ]);
-    const extension = new CommentExtension({ instances, preferencesFile });
+    const extension = new CommentExtension({
+        instances,
+        preferencesFile,
+        database: databaseCapability((name) =>
+            name === "message-preferences"
+                ? join(root, "message-preferences.sqlite3")
+                : messageDatabaseFile,
+        ),
+    });
 
     assert.deepEqual(
         extension.routes.instance("alpha").map((route) => route.name),
@@ -182,6 +191,11 @@ test("CommentExtension preserves state across a transient disable until committe
     const extension = new CommentExtension({
         instances,
         preferencesFile: join(root, "message-preferences.json"),
+        database: databaseCapability((name) =>
+            name === "message-preferences"
+                ? join(root, "message-preferences.sqlite3")
+                : messageDatabaseFile,
+        ),
     });
 
     const message = extension.routes
@@ -251,6 +265,11 @@ test("CommentExtension fences a captured route before committed retirement drain
     const extension = new CommentExtension({
         instances,
         preferencesFile: join(root, "message-preferences.json"),
+        database: databaseCapability((name) =>
+            name === "message-preferences"
+                ? join(root, "message-preferences.sqlite3")
+                : messageDatabaseFile,
+        ),
     });
     const message = extension.routes
         .instance("alpha")
@@ -301,15 +320,16 @@ test("CommentExtension fences a captured route before committed retirement drain
 
     const store = new MessageStore({
         filePath: messageDatabaseFile,
+        openDatabase: () => databaseConnection(messageDatabaseFile),
         instanceName: "alpha",
     });
     assert.deepEqual(
-        store.listComments({ ctxId: "ctx-alpha" }).map((comment) => ({
+        (await store.listComments({ ctxId: "ctx-alpha" })).map((comment) => ({
             status: comment.status,
             text: comment.text,
         })),
         [{ status: "failed", text: "Already admitted" }],
     );
-    store.close();
+    await store.close();
     await extension.close();
 });

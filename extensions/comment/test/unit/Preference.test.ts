@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import { databaseCapability } from "../helpers/Database.ts";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -8,7 +10,10 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 test("MessagePreferenceStore persists titles and ordering across reopen", async () => {
     const root = await createTestTempDirectory("message-preferences");
     const filePath = join(root, "message-preferences.json");
-    const first = new MessagePreferenceStore(filePath);
+    const first = new MessagePreferenceStore(
+        filePath,
+        databaseCapability(() => join(root, "message-preferences.sqlite3")),
+    );
 
     assert.deepEqual(await first.read(), {
         hiddenContexts: {},
@@ -30,7 +35,10 @@ test("MessagePreferenceStore persists titles and ordering across reopen", async 
         workspaceOrder: ["/work/portable-devshell", "/work/efilinux"],
     });
 
-    const reopened = new MessagePreferenceStore(filePath);
+    const reopened = new MessagePreferenceStore(
+        filePath,
+        databaseCapability(() => join(root, "message-preferences.sqlite3")),
+    );
     assert.deepEqual(await reopened.read(), {
         hiddenContexts: {
             "ctx-hidden": true,
@@ -47,11 +55,10 @@ test("MessagePreferenceStore persists titles and ordering across reopen", async 
 });
 
 test("MessagePreferenceStore applies incremental patches without clobbering unrelated browser changes", async () => {
-    const root = await createTestTempDirectory(
-        "message-preferences-merge",
-    );
+    const root = await createTestTempDirectory("message-preferences-merge");
     const store = new MessagePreferenceStore(
         join(root, "message-preferences.json"),
+        databaseCapability(() => join(root, "message-preferences.sqlite3")),
     );
 
     await store.update({
@@ -92,6 +99,7 @@ test("MessagePreferenceStore imports only preference fields that are still missi
     );
     const store = new MessagePreferenceStore(
         join(root, "message-preferences.json"),
+        databaseCapability(() => join(root, "message-preferences.sqlite3")),
     );
     await store.update({
         orderByWorkspace: { "/work/a": ["alpha\u0000ctx-server"] },
@@ -120,4 +128,35 @@ test("MessagePreferenceStore imports only preference fields that are still missi
     });
     assert.equal(retained.titles["alpha\u0000ctx-a"], "Imported");
     assert.equal(retained.titles["alpha\u0000ctx-b"], "Another imported title");
+});
+
+test("MessagePreferenceStore migrates legacy JSON once without destroying the original", async () => {
+    const root = await createTestTempDirectory("message-preferences-legacy");
+    const legacy = join(root, "message-preferences.json");
+    const fixture = databaseCapability(() =>
+        join(root, "message-preferences.sqlite3"),
+    );
+    const snapshot = {
+        hiddenContexts: { "ctx-legacy": true as const },
+        orderByWorkspace: { "/workspace": ["alpha\u0000ctx-legacy"] },
+        titles: { "alpha\u0000ctx-legacy": "Legacy title" },
+        version: 1 as const,
+        workspaceOrder: ["/workspace"],
+    };
+    const source = JSON.stringify(snapshot);
+    await writeFile(legacy, source, "utf8");
+    const first = new MessagePreferenceStore(legacy, fixture);
+    assert.deepEqual(await first.read(), snapshot);
+    await first.update({
+        titles: { "alpha\u0000ctx-legacy": "Updated title" },
+    });
+    await first.close();
+    assert.equal(await readFile(legacy, "utf8"), source);
+    await assert.rejects(first.read(), /closed/u);
+    const second = new MessagePreferenceStore(legacy, fixture);
+    assert.equal(
+        (await second.read()).titles["alpha\u0000ctx-legacy"],
+        "Updated title",
+    );
+    await second.close();
 });

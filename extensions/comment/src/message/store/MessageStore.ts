@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import type { DatabaseSync } from "node:sqlite";
+import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
 
 import type {
     ContextMessageListInput,
@@ -27,10 +27,7 @@ import {
     toCommentRecord,
     toMessageEntry,
 } from "./Query.js";
-import {
-    defaultMessageStorageLimits,
-    openMessageDatabase,
-} from "./Schema.js";
+import { defaultMessageStorageLimits, openMessageDatabase } from "./Schema.js";
 
 export { defaultMessageStorageLimits } from "./Schema.js";
 export type { MessageControlState } from "../MessageControl.js";
@@ -51,17 +48,20 @@ export interface MessageStoreStats {
 
 export class MessageStore {
     readonly #filePath: string;
+    readonly #openDatabase: () => Promise<ExtensionDatabaseConnection>;
+    #operation = Promise.resolve();
     readonly #instanceName: string;
     readonly #maxBytes: number;
     readonly #now: () => number;
     readonly #retentionDays: number;
     readonly #retentionMs: number;
-    #database?: DatabaseSync;
+    #database?: ExtensionDatabaseConnection;
     #lastRetentionCleanupAt = Number.NEGATIVE_INFINITY;
     #payloadBytes?: number;
 
     constructor(options: {
         filePath: string;
+        openDatabase: () => Promise<ExtensionDatabaseConnection>;
         instanceName: string;
         maxBytes?: number;
         now?: () => number;
@@ -70,8 +70,7 @@ export class MessageStore {
         const maxBytes =
             options.maxBytes ?? defaultMessageStorageLimits.maxBytes;
         const retentionDays =
-            options.retentionDays ??
-            defaultMessageStorageLimits.retentionDays;
+            options.retentionDays ?? defaultMessageStorageLimits.retentionDays;
         if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
             throw new TypeError(
                 "Message maxBytes must be a positive safe integer.",
@@ -83,6 +82,7 @@ export class MessageStore {
             );
         }
         this.#filePath = options.filePath;
+        this.#openDatabase = options.openDatabase;
         this.#instanceName = options.instanceName;
         this.#maxBytes = maxBytes;
         this.#now = options.now ?? Date.now;
@@ -90,304 +90,293 @@ export class MessageStore {
         this.#retentionMs = retentionDays * DAY_MS;
     }
 
-    close(): void {
-        this.#database?.close();
-        this.#database = undefined;
-        this.#lastRetentionCleanupAt = Number.NEGATIVE_INFINITY;
-        this.#payloadBytes = undefined;
+    async close(): Promise<void> {
+        return await this.#exclusive(async () => {
+            await this.#database?.close();
+            this.#database = undefined;
+            this.#lastRetentionCleanupAt = Number.NEGATIVE_INFINITY;
+            this.#payloadBytes = undefined;
+        });
     }
 
-    list(input: MessageListInput = {}): MessageEntry[] {
-        const database = this.#open();
-        this.#cleanup(database);
-        return applyByteBudget(
-            listMessageRows(database, input, undefined).map(
-                toMessageEntry,
-            ),
-            input.maxBytes,
-        );
+    async list(input: MessageListInput = {}): Promise<MessageEntry[]> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            await this.#cleanup(database);
+            return applyByteBudget(
+                (await listMessageRows(database, input, undefined)).map(
+                    toMessageEntry,
+                ),
+                input.maxBytes,
+            );
+        });
     }
 
-    listComments(input: ContextMessageListInput = {}): ContextMessageRecord[] {
-        const database = this.#open();
-        this.#cleanup(database);
-        return applyByteBudget(
-            listMessageRows(database, input, "comment").map((row) =>
-                toCommentRecord(row, this.#instanceName),
-            ),
-            input.maxBytes,
-        );
+    async listComments(
+        input: ContextMessageListInput = {},
+    ): Promise<ContextMessageRecord[]> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            await this.#cleanup(database);
+            return applyByteBudget(
+                (await listMessageRows(database, input, "comment")).map((row) =>
+                    toCommentRecord(row, this.#instanceName),
+                ),
+                input.maxBytes,
+            );
+        });
     }
 
-    pendingComments(ctxId?: string): ContextMessageRecord[] {
-        return pendingCommentRecords(this.#open(), this.#instanceName, ctxId);
+    async pendingComments(ctxId?: string): Promise<ContextMessageRecord[]> {
+        return await this.#exclusive(async () => {
+            return await pendingCommentRecords(
+                await this.#open(),
+                this.#instanceName,
+                ctxId,
+            );
+        });
     }
 
-    insertComment(record: ContextMessageRecord): void {
-        const database = this.#open();
-        database.exec("BEGIN IMMEDIATE");
-        try {
-            database
-                .prepare(
+    async insertComment(record: ContextMessageRecord): Promise<void> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            await database.transaction(async (database) => {
+                await database.run(
                     `
                 INSERT INTO message_entries(
                     kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
                 ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-                )
-                .run(
-                    record.id,
-                    record.ctxId,
-                    record.createdAt,
-                    record.text,
-                    record.status,
-                    record.callId ?? null,
-                    record.deliveredAt ?? null,
-                    record.failedAt ?? null,
-                    record.error ?? null,
-                );
-            const state = readMessageControlState(database, record.ctxId);
-            if (record.status === "delivered") {
-                applyQueuedControl(state, record);
-                applyDeliveredControls(state, [record]);
-            } else if (
-                record.status === "pending" ||
-                record.status === "sent"
-            ) {
-                applyQueuedControl(state, record);
-            }
-            writeMessageControlState(database, record.ctxId, state);
-            database.exec("COMMIT");
-        } catch (error) {
-            database.exec("ROLLBACK");
-            throw error;
-        }
-        this.#payloadBytes =
-            this.#trackedPayloadBytes() +
-            readMessageEntryPayloadBytes(database, "comment", record.id);
-        this.#cleanup(
-            database,
-            record.status === "delivered" || record.status === "failed",
-        );
-    }
-
-    readControlState(ctxId: string): MessageControlState {
-        return readMessageControlState(this.#open(), ctxId);
-    }
-
-    writeControlState(ctxId: string, state: MessageControlState): void {
-        const database = this.#open();
-        database.exec("BEGIN IMMEDIATE");
-        try {
-            writeMessageControlState(database, ctxId, state);
-            database.exec("COMMIT");
-        } catch (error) {
-            database.exec("ROLLBACK");
-            throw error;
-        }
-    }
-
-    clearAllControlStates(): void {
-        clearMessageControlStates(this.#open());
-    }
-
-    deliverComments(
-        ctxId: string,
-        callId: string,
-        deliveredAt: string,
-    ): ContextMessageRecord[] {
-        const database = this.#open();
-        let pending: ContextMessageRecord[] = [];
-        let beforePayloadBytes = 0;
-        database.exec("BEGIN IMMEDIATE");
-        try {
-            pending = this.pendingComments(ctxId);
-            if (pending.length === 0) {
-                database.exec("COMMIT");
-                return [];
-            }
-            beforePayloadBytes = pending.reduce(
-                (total, record) =>
-                    total +
-                    readMessageEntryPayloadBytes(
-                        database,
-                        "comment",
+                    [
                         record.id,
-                    ),
-                0,
-            );
-            const update = database.prepare(`
-                UPDATE message_entries
-                SET status = 'delivered', call_id = ?, delivered_at = ?, failed_at = NULL, error = NULL
-                WHERE kind = 'comment' AND id = ?
-            `);
-            for (const record of pending)
-                update.run(callId, deliveredAt, record.id);
-            const state = readMessageControlState(database, ctxId);
-            applyDeliveredControls(state, pending);
-            writeMessageControlState(database, ctxId, state);
-            database.exec("COMMIT");
-        } catch (error) {
-            database.exec("ROLLBACK");
-            throw error;
-        }
-        const afterPayloadBytes = pending.reduce(
-            (total, record) =>
-                total +
-                readMessageEntryPayloadBytes(
+                        record.ctxId,
+                        record.createdAt,
+                        record.text,
+                        record.status,
+                        record.callId ?? null,
+                        record.deliveredAt ?? null,
+                        record.failedAt ?? null,
+                        record.error ?? null,
+                    ],
+                );
+                const state = await readMessageControlState(
+                    database,
+                    record.ctxId,
+                );
+                if (record.status === "delivered") {
+                    applyQueuedControl(state, record);
+                    applyDeliveredControls(state, [record]);
+                } else if (
+                    record.status === "pending" ||
+                    record.status === "sent"
+                ) {
+                    applyQueuedControl(state, record);
+                }
+                await writeMessageControlState(database, record.ctxId, state);
+            });
+            this.#payloadBytes =
+                this.#trackedPayloadBytes() +
+                (await readMessageEntryPayloadBytes(
                     database,
                     "comment",
                     record.id,
-                ),
-            0,
-        );
-        this.#payloadBytes =
-            this.#trackedPayloadBytes() +
-            afterPayloadBytes -
-            beforePayloadBytes;
-        this.#cleanup(database, true);
-        return pending.map((record) => ({
-            ...record,
-            callId,
-            deliveredAt,
-            error: undefined,
-            failedAt: undefined,
-            status: "delivered" as const,
-        }));
+                ));
+            await this.#cleanup(
+                database,
+                record.status === "delivered" || record.status === "failed",
+            );
+        });
     }
 
-    failComments(
+    async readControlState(ctxId: string): Promise<MessageControlState> {
+        return await this.#exclusive(async () => {
+            return await readMessageControlState(await this.#open(), ctxId);
+        });
+    }
+
+    async writeControlState(
+        ctxId: string,
+        state: MessageControlState,
+    ): Promise<void> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            await database.transaction(async (database) => {
+                await writeMessageControlState(database, ctxId, state);
+            });
+        });
+    }
+
+    async clearAllControlStates(): Promise<void> {
+        return await this.#exclusive(async () => {
+            await clearMessageControlStates(await this.#open());
+        });
+    }
+
+    async deliverComments(
+        ctxId: string,
+        callId: string,
+        deliveredAt: string,
+    ): Promise<ContextMessageRecord[]> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            let pending: ContextMessageRecord[] = [];
+            await database.transaction(async (database) => {
+                pending = await pendingCommentRecords(
+                    database,
+                    this.#instanceName,
+                    ctxId,
+                );
+                if (pending.length === 0) {
+                    return;
+                }
+                const update = `
+                UPDATE message_entries
+                SET status = 'delivered', call_id = ?, delivered_at = ?, failed_at = NULL, error = NULL
+                WHERE kind = 'comment' AND id = ?
+            `;
+                for (const record of pending)
+                    await database.run(update, [
+                        callId,
+                        deliveredAt,
+                        record.id,
+                    ]);
+                const state = await readMessageControlState(database, ctxId);
+                applyDeliveredControls(state, pending);
+                await writeMessageControlState(database, ctxId, state);
+            });
+            this.#payloadBytes = await readMessagePayloadBytes(database);
+            await this.#cleanup(database, true);
+            return pending.map((record) => ({
+                ...record,
+                callId,
+                deliveredAt,
+                error: undefined,
+                failedAt: undefined,
+                status: "delivered" as const,
+            }));
+        });
+    }
+
+    async failComments(
         ids: ReadonlySet<string>,
         error: string,
         failedAt: string,
-    ): void {
-        if (ids.size === 0) return;
-        const database = this.#open();
-        const failedRecords = this.listComments().filter((record) =>
-            ids.has(record.id),
-        );
-        const beforePayloadBytes = [...ids].reduce(
-            (total, id) =>
-                total +
-                readMessageEntryPayloadBytes(database, "comment", id),
-            0,
-        );
-        database.exec("BEGIN IMMEDIATE");
-        try {
-            const update = database.prepare(`
+    ): Promise<void> {
+        return await this.#exclusive(async () => {
+            if (ids.size === 0) return;
+            const database = await this.#open();
+            const failedRecords = (
+                await listMessageRows(database, {}, "comment")
+            )
+                .map((row) => toCommentRecord(row, this.#instanceName))
+                .filter((record) => ids.has(record.id));
+            await database.transaction(async (database) => {
+                const update = `
                 UPDATE message_entries
                 SET status = 'failed', delivered_at = NULL, failed_at = ?, error = ?
                 WHERE kind = 'comment' AND id = ?
-            `);
-            for (const id of ids) update.run(failedAt, error, id);
-            for (const ctxId of new Set(
-                failedRecords.map((record) => record.ctxId),
-            )) {
-                const state = readMessageControlState(database, ctxId);
-                if (
-                    state.stoppedByCommentId !== undefined &&
-                    ids.has(state.stoppedByCommentId)
-                ) {
-                    state.stoppedByCommentId = undefined;
+            `;
+                for (const id of ids)
+                    await database.run(update, [failedAt, error, id]);
+                for (const ctxId of new Set(
+                    failedRecords.map((record) => record.ctxId),
+                )) {
+                    const state = await readMessageControlState(
+                        database,
+                        ctxId,
+                    );
+                    if (
+                        state.stoppedByCommentId !== undefined &&
+                        ids.has(state.stoppedByCommentId)
+                    ) {
+                        state.stoppedByCommentId = undefined;
+                    }
+                    if (
+                        state.pendingResumeCommentId !== undefined &&
+                        ids.has(state.pendingResumeCommentId)
+                    ) {
+                        state.pendingResumeCommentId = undefined;
+                    }
+                    await writeMessageControlState(database, ctxId, state);
                 }
-                if (
-                    state.pendingResumeCommentId !== undefined &&
-                    ids.has(state.pendingResumeCommentId)
-                ) {
-                    state.pendingResumeCommentId = undefined;
-                }
-                writeMessageControlState(database, ctxId, state);
-            }
-            database.exec("COMMIT");
-        } catch (cause) {
-            database.exec("ROLLBACK");
-            throw cause;
-        }
-        const afterPayloadBytes = [...ids].reduce(
-            (total, id) =>
-                total +
-                readMessageEntryPayloadBytes(database, "comment", id),
-            0,
-        );
-        this.#payloadBytes =
-            this.#trackedPayloadBytes() +
-            afterPayloadBytes -
-            beforePayloadBytes;
-        this.#cleanup(database, true);
+            });
+            this.#payloadBytes = await readMessagePayloadBytes(database);
+            await this.#cleanup(database, true);
+        });
     }
 
-    appendReport(input: {
+    async appendReport(input: {
         callId: string;
         createdAt: string;
         ctxId: string;
         push?: { commentId: string; message: string };
         replyCommentId?: string;
         text: string;
-    }): void {
-        const database = this.#open();
-        database.exec("BEGIN IMMEDIATE");
-        let changes = 0;
-        try {
-            const result = database
-                .prepare(
+    }): Promise<void> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            let changes = 0;
+            await database.transaction(async (database) => {
+                const result = await database.run(
                     `
                 INSERT INTO message_entries(kind, id, ctx_id, created_at, text, call_id)
                 VALUES ('report', ?, ?, ?, ?, ?)
                 ON CONFLICT(kind, id) DO NOTHING
             `,
-                )
-                .run(
-                    input.callId,
-                    input.ctxId,
-                    input.createdAt,
-                    input.text,
-                    input.callId,
+                    [
+                        input.callId,
+                        input.ctxId,
+                        input.createdAt,
+                        input.text,
+                        input.callId,
+                    ],
                 );
-            changes = Number(result.changes);
+                changes = result;
+                if (changes > 0) {
+                    const state = await readMessageControlState(
+                        database,
+                        input.ctxId,
+                    );
+                    if (
+                        input.replyCommentId !== undefined &&
+                        state.pendingReplyCommentId === input.replyCommentId
+                    ) {
+                        state.pendingReplyCommentId = undefined;
+                    }
+                    if (
+                        input.push !== undefined &&
+                        state.pendingPushCommentId === input.push.commentId &&
+                        state.pushMessage === input.push.message
+                    ) {
+                        state.pendingPushCommentId = undefined;
+                        state.pushMessage = undefined;
+                        state.pushToolCallsRemaining = undefined;
+                    }
+                    await writeMessageControlState(
+                        database,
+                        input.ctxId,
+                        state,
+                    );
+                }
+            });
             if (changes > 0) {
-                const state = readMessageControlState(
-                    database,
-                    input.ctxId,
-                );
-                if (
-                    input.replyCommentId !== undefined &&
-                    state.pendingReplyCommentId === input.replyCommentId
-                ) {
-                    state.pendingReplyCommentId = undefined;
-                }
-                if (
-                    input.push !== undefined &&
-                    state.pendingPushCommentId === input.push.commentId &&
-                    state.pushMessage === input.push.message
-                ) {
-                    state.pendingPushCommentId = undefined;
-                    state.pushMessage = undefined;
-                    state.pushToolCallsRemaining = undefined;
-                }
-                writeMessageControlState(database, input.ctxId, state);
+                this.#payloadBytes =
+                    this.#trackedPayloadBytes() +
+                    (await readMessageEntryPayloadBytes(
+                        database,
+                        "report",
+                        input.callId,
+                    ));
             }
-            database.exec("COMMIT");
-        } catch (error) {
-            database.exec("ROLLBACK");
-            throw error;
-        }
-        if (changes > 0) {
-            this.#payloadBytes =
-                this.#trackedPayloadBytes() +
-                readMessageEntryPayloadBytes(
-                    database,
-                    "report",
-                    input.callId,
-                );
-        }
-        this.#cleanup(database, true);
+            await this.#cleanup(database, true);
+        });
     }
 
-    stats(): MessageStoreStats {
-        const database = this.#open();
-        this.#cleanup(database);
-        const row = database
-            .prepare(
+    async stats(): Promise<MessageStoreStats> {
+        return await this.#exclusive(async () => {
+            const database = await this.#open();
+            await this.#cleanup(database);
+            const row = (await database.get(
                 `
             SELECT
                 COUNT(*) AS entries,
@@ -396,46 +385,54 @@ export class MessageStore {
                 COALESCE(SUM(CASE WHEN kind = 'comment' AND status IN ('pending', 'sent') THEN 1 ELSE 0 END), 0) AS protectedComments
             FROM message_entries
         `,
-            )
-            .get() as {
-            comments: number;
-            entries: number;
-            protectedComments: number;
-            reports: number;
-        };
-        return {
-            comments: row.comments,
-            entries: row.entries,
-            fileBytes:
-                fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`),
-            maxBytes: this.#maxBytes,
-            payloadBytes: this.#trackedPayloadBytes(),
-            protectedComments: row.protectedComments,
-            reports: row.reports,
-            retentionDays: this.#retentionDays,
-        };
+                [],
+            )) as {
+                comments: number;
+                entries: number;
+                protectedComments: number;
+                reports: number;
+            };
+            return {
+                comments: row.comments,
+                entries: row.entries,
+                fileBytes:
+                    fileSize(this.#filePath) +
+                    fileSize(`${this.#filePath}-wal`),
+                maxBytes: this.#maxBytes,
+                payloadBytes: this.#trackedPayloadBytes(),
+                protectedComments: row.protectedComments,
+                reports: row.reports,
+                retentionDays: this.#retentionDays,
+            };
+        });
     }
 
-    #open(): DatabaseSync {
+    async #open(): Promise<ExtensionDatabaseConnection> {
         if (this.#database !== undefined) return this.#database;
-        const database = openMessageDatabase(this.#filePath);
+        const database = await openMessageDatabase(
+            this.#openDatabase,
+            this.#filePath,
+        );
         try {
             this.#database = database;
-            this.#payloadBytes = readMessagePayloadBytes(database);
-            this.#cleanup(database, true);
+            this.#payloadBytes = await readMessagePayloadBytes(database);
+            await this.#cleanup(database, true);
             return database;
         } catch (error) {
             this.#database = undefined;
-            database.close();
+            await database.close();
             throw error;
         }
     }
 
-    #cleanup(database: DatabaseSync, forceRetention = false): void {
+    async #cleanup(
+        database: ExtensionDatabaseConnection,
+        forceRetention = false,
+    ): Promise<void> {
         const now = this.#now();
         let removed = false;
         const protectedCommentIds = [
-            ...readMessageControlCommentIds(database),
+            ...(await readMessageControlCommentIds(database)),
         ];
         const protectedCommentClause =
             protectedCommentIds.length === 0
@@ -446,9 +443,8 @@ export class MessageStore {
             now - this.#lastRetentionCleanupAt >= RETENTION_CLEANUP_INTERVAL_MS
         ) {
             const cutoff = new Date(now - this.#retentionMs).toISOString();
-            const expired = database
-                .prepare(
-                    `
+            const expired = (await database.get(
+                `
                 SELECT COUNT(*) AS entries, COALESCE(SUM(${messagePayloadBytesSql()}), 0) AS payloadBytes
                 FROM message_entries
                 WHERE
@@ -460,15 +456,14 @@ export class MessageStore {
                         ${protectedCommentClause}
                     )
             `,
-                )
-                .get(cutoff, cutoff, ...protectedCommentIds) as {
+                [cutoff, cutoff, ...protectedCommentIds],
+            )) as {
                 entries: number;
                 payloadBytes: number;
             };
             if (expired.entries > 0) {
-                database
-                    .prepare(
-                        `
+                await database.run(
+                    `
                     DELETE FROM message_entries
                     WHERE
                         (kind = 'report' AND created_at < ?)
@@ -479,8 +474,8 @@ export class MessageStore {
                             ${protectedCommentClause}
                         )
                 `,
-                    )
-                    .run(cutoff, cutoff, ...protectedCommentIds);
+                    [cutoff, cutoff, ...protectedCommentIds],
+                );
                 this.#payloadBytes = Math.max(
                     0,
                     this.#trackedPayloadBytes() - expired.payloadBytes,
@@ -491,9 +486,8 @@ export class MessageStore {
         }
 
         while (this.#trackedPayloadBytes() > this.#maxBytes) {
-            const candidates = database
-                .prepare(
-                    `
+            const candidates = (await database.all(
+                `
                 SELECT seq, ${messagePayloadBytesSql()} AS payloadBytes
                 FROM message_entries
                 WHERE kind = 'report' OR (
@@ -509,29 +503,22 @@ export class MessageStore {
                     seq ASC
                 LIMIT 256
             `,
-                )
-                .all(...protectedCommentIds) as Array<{
+                [...protectedCommentIds],
+            )) as Array<{
                 payloadBytes: number;
                 seq: number;
             }>;
             if (candidates.length === 0) break;
-            const remove = database.prepare(
-                "DELETE FROM message_entries WHERE seq = ?",
-            );
+            const remove = "DELETE FROM message_entries WHERE seq = ?";
             let payloadBytes = this.#trackedPayloadBytes();
-            database.exec("BEGIN IMMEDIATE");
-            try {
+            await database.transaction(async (database) => {
                 for (const candidate of candidates) {
                     if (payloadBytes <= this.#maxBytes) break;
-                    remove.run(candidate.seq);
+                    await database.run(remove, [candidate.seq]);
                     payloadBytes -= candidate.payloadBytes;
                     removed = true;
                 }
-                database.exec("COMMIT");
-            } catch (error) {
-                database.exec("ROLLBACK");
-                throw error;
-            }
+            });
             this.#payloadBytes = Math.max(0, payloadBytes);
         }
 
@@ -539,18 +526,25 @@ export class MessageStore {
             const fileBytes =
                 fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
             if (fileBytes > this.#maxBytes) {
-                database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+                await database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
                 if (fileSize(this.#filePath) > this.#maxBytes)
-                    database.exec("VACUUM");
+                    await database.exec("VACUUM");
             }
         }
     }
 
+    async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const next = this.#operation.then(operation);
+        this.#operation = next.then(
+            () => undefined,
+            () => undefined,
+        );
+        return await next;
+    }
+
     #trackedPayloadBytes(): number {
         if (this.#payloadBytes === undefined) {
-            throw new Error(
-                "Message payload accounting is not initialized.",
-            );
+            throw new Error("Message payload accounting is not initialized.");
         }
         return this.#payloadBytes;
     }

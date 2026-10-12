@@ -31,6 +31,7 @@ import type { OperationalOverviewApi } from "../../../../src/overview/Api.ts";
 import { ConfigEditorCoordinator } from "../../../../src/config/editor/index.ts";
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { CommentExtension } from "@portable-devshell/comment-extension";
+import { databaseCapability } from "../../../../../../extensions/comment/test/helpers/Database.ts";
 import { ControlConfigStore } from "../../../../src/config/store/index.ts";
 import { DebugPatchManager } from "../../../../src/debug/Patch.ts";
 import { InstanceRegistry } from "../../../../src/instance/Registry.ts";
@@ -440,6 +441,9 @@ test("ControlSocketServer exposes server-backed Message preferences through the 
             onChange: () => () => undefined,
         },
         preferencesFile: join(directory, "message-preferences.json"),
+        database: databaseCapability(() =>
+            join(directory, "message-preferences.sqlite3"),
+        ),
     });
     const routes = new ControlRouteRegistry({
         extensionRoutes: {

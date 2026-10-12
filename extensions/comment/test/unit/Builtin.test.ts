@@ -13,10 +13,7 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
             "utf8",
         ),
     ) as {
-        extensions?: Record<
-            string,
-            Array<{ hook?: string; id?: string }>
-        >;
+        extensions?: Record<string, Array<{ hook?: string; id?: string }>>;
     };
 
     assert.deepEqual(manifest.extensions?.["toolcall.review"], [
@@ -31,10 +28,19 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
 });
 
 test("Comment Extension activates from observe and event-publish capabilities without a Comment host interface", async (t) => {
-    const registrations: Array<{ id: string; pointId: string; binding: unknown }> = [];
+    const registrations: Array<{
+        id: string;
+        pointId: string;
+        binding: unknown;
+    }> = [];
     let lists = 0;
     const context = {
         capabilities: {
+            database: {
+                async open() {
+                    throw new Error("unused database");
+                },
+            },
             instanceObserve: {
                 async list() {
                     lists += 1;
@@ -117,7 +123,9 @@ test("Comment Extension activates from observe and event-publish capabilities wi
             {
                 signal: new AbortController().signal,
                 async requestInterface() {
-                    throw new Error("Comment review must not request a host interface");
+                    throw new Error(
+                        "Comment review must not request a host interface",
+                    );
                 },
             },
         ),

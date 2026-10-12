@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import type {
+    ExtensionDatabaseCapability,
+    ExtensionDatabaseConnection,
+} from "@portable-devshell/extension/database";
 
 import type {
     MessagePreferencesPatch,
@@ -18,10 +20,14 @@ import {
 
 export class MessagePreferenceStore {
     readonly #filePath: string;
+    readonly #database: ExtensionDatabaseCapability;
+    #connection?: ExtensionDatabaseConnection;
     #operationQueue = Promise.resolve();
+    #closed = false;
 
-    constructor(filePath: string) {
+    constructor(filePath: string, database: ExtensionDatabaseCapability) {
         this.#filePath = filePath;
+        this.#database = database;
     }
 
     async read(): Promise<MessagePreferencesSnapshot> {
@@ -33,59 +39,92 @@ export class MessagePreferenceStore {
     ): Promise<MessagePreferencesSnapshot> {
         const normalized = parseMessagePreferencesPatch(patch);
         return await this.#exclusive(async () => {
-            const current = await this.#read();
-            const next = applyPatch(current, normalized);
-            if (samePreferences(current, next)) return current;
-            await this.#write(next);
-            return clonePreferences(next);
+            const database = await this.#open();
+            return await database.transaction(async (connection) => {
+                const row = await connection.get<{ value: string }>(
+                    "SELECT value FROM message_preferences WHERE key = 'snapshot'",
+                );
+                if (row === undefined)
+                    throw new Error("Message preference snapshot is missing.");
+                const current = parseMessagePreferencesSnapshot(
+                    JSON.parse(row.value) as unknown,
+                );
+                const next = applyPatch(current, normalized);
+                if (samePreferences(current, next)) return current;
+                await connection.run(
+                    "UPDATE message_preferences SET value = ? WHERE key = 'snapshot'",
+                    [JSON.stringify(next)],
+                );
+                return clonePreferences(next);
+            });
         });
     }
 
-    async #read(): Promise<MessagePreferencesSnapshot> {
-        const source = await readFile(this.#filePath, "utf8").catch(
-            (error: unknown) => {
-                if (isMissing(error)) return undefined;
-                throw error;
-            },
-        );
-        if (source === undefined) return createEmptyMessagePreferences();
-        return parseMessagePreferencesSnapshot(
-            JSON.parse(source) as unknown,
-        );
+    async close(): Promise<void> {
+        await this.#exclusive(async () => {
+            this.#closed = true;
+            await this.#connection?.close();
+            this.#connection = undefined;
+        });
     }
 
-    async #write(snapshot: MessagePreferencesSnapshot): Promise<void> {
-        const validated = parseMessagePreferencesSnapshot(snapshot);
-        const directory = dirname(this.#filePath);
-        await mkdir(directory, { mode: 0o700, recursive: true });
-        const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
-        const handle = await open(temporary, "wx", 0o600);
+    async #open(): Promise<ExtensionDatabaseConnection> {
+        if (this.#closed)
+            throw new Error("Message preference store is closed.");
+        if (this.#connection !== undefined) return this.#connection;
+        const database = await this.#database.open("message-preferences");
         try {
-            await handle.writeFile(
-                `${JSON.stringify(validated, null, 2)}\n`,
-                "utf8",
-            );
-            await handle.sync();
-        } catch (error) {
-            await handle.close().catch(() => undefined);
-            await unlink(temporary).catch(() => undefined);
-            throw error;
-        }
-        await handle.close();
-        try {
-            await rename(temporary, this.#filePath);
-            if (process.platform !== "win32") {
-                const directoryHandle = await open(directory, "r");
-                try {
-                    await directoryHandle.sync();
-                } finally {
-                    await directoryHandle.close();
+            await database.transaction(async (connection) => {
+                await connection.exec(`
+                    CREATE TABLE IF NOT EXISTS message_preferences (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    ) STRICT;
+                `);
+                const current = await connection.get<{ value: string }>(
+                    "SELECT value FROM message_preferences WHERE key = 'snapshot'",
+                );
+                if (current !== undefined) {
+                    parseMessagePreferencesSnapshot(
+                        JSON.parse(current.value) as unknown,
+                    );
+                    return;
                 }
-            }
+                const source = await readFile(this.#filePath, "utf8").catch(
+                    (error: unknown) => {
+                        if (isMissing(error)) return undefined;
+                        throw error;
+                    },
+                );
+                const snapshot =
+                    source === undefined
+                        ? createEmptyMessagePreferences()
+                        : parseMessagePreferencesSnapshot(
+                              JSON.parse(source) as unknown,
+                          );
+                await connection.run(
+                    "INSERT INTO message_preferences(key, value) VALUES ('snapshot', ?)",
+                    [JSON.stringify(snapshot)],
+                );
+            });
+            this.#connection = database;
+            return database;
         } catch (error) {
-            await unlink(temporary).catch(() => undefined);
+            await database.close();
             throw error;
         }
+    }
+
+    async #read(): Promise<MessagePreferencesSnapshot> {
+        const database = await this.#open();
+        const row = await database.get<{ value: string }>(
+            "SELECT value FROM message_preferences WHERE key = 'snapshot'",
+        );
+        if (row === undefined)
+            throw new Error("Message preference snapshot is missing.");
+        return parseMessagePreferencesSnapshot(
+            JSON.parse(row.value) as unknown,
+        );
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
