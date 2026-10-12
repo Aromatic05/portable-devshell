@@ -36,6 +36,7 @@ import type {
     CliCommandResult,
 } from "@portable-devshell/extension/cli";
 import { toRemoteErrorBody } from "@portable-devshell/shared";
+import { ExtensionDatabaseCapabilityControl } from "../../../../../src/extension/api/cap/database/index.ts";
 
 import {
     createCliModelSandboxBinding,
@@ -43,7 +44,10 @@ import {
 } from "../../../../../src/extension/api/point/cli/Sandbox.ts";
 import { createTuiPageSandboxBinding } from "../../../../../src/extension/api/point/tui/Sandbox.ts";
 import { controlStreamsExtensionPointDefinition } from "../../../../../src/extension/api/point/control/Stream.ts";
-import type { ControlStreamBinding, ControlStreamMessage } from "@portable-devshell/extension/control";
+import type {
+    ControlStreamBinding,
+    ControlStreamMessage,
+} from "@portable-devshell/extension/control";
 import { createToolCallRewriteSandboxBinding } from "../../../../../src/extension/api/point/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
@@ -152,13 +156,72 @@ export function activate(context) {
     ]);
 });
 
+test("Extension sandbox uses Host-owned SQLite and rolls back failed transactions under --permission", async (t) => {
+    const root = await createTestTempDirectory("extension-sandbox-sqlite");
+    const dataDirectory = join(root, "data");
+    await mkdir(dataDirectory);
+    const database = new ExtensionDatabaseCapabilityControl({
+        allowed: true,
+        dataDirectory,
+        extensionId: "example",
+    });
+    t.after(async () => {
+        database.closeAll();
+        await rm(root, { force: true, recursive: true });
+    });
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-database",
+        `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const connection = await context.capabilities.database.open("instances/test/messages");
+        await connection.exec("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, body TEXT)");
+        await connection.transaction(async (tx) => {
+            await tx.run("INSERT INTO messages(body) VALUES (?)", ["committed"]);
+        });
+        try {
+            await connection.transaction(async (tx) => {
+                await tx.run("INSERT INTO messages(body) VALUES (?)", ["rolled back"]);
+                throw new Error("expected rollback");
+            });
+        } catch (error) {
+            if (error.message !== "expected rollback") throw error;
+        }
+        const rows = await connection.all("SELECT body FROM messages ORDER BY id");
+        await connection.close();
+        return { kind: "json", value: { rows } };
+    });
+}
+`,
+        { capabilities: ["database"], database },
+    );
+    await sandbox.start();
+    assert.deepEqual(await cliJson(sandbox, [], "database"), {
+        rows: [{ body: "committed" }],
+    });
+    const connection = await database.open("instances/test/messages");
+    assert.deepEqual(
+        await connection.get("SELECT COUNT(*) AS count FROM messages"),
+        {
+            count: 1,
+        },
+    );
+    await connection.close();
+});
+
 test("Extension sandbox message stream preserves observation seed and cancels its watch", async (t) => {
     const controller = new AbortController();
     let markDelivered!: () => void;
-    const delivered = new Promise<void>((resolve) => { markDelivered = resolve; });
+    const delivered = new Promise<void>((resolve) => {
+        markDelivered = resolve;
+    });
     let watched = false;
     let cancelled = false;
-    const sandbox = await setupSandbox(t, "extension-sandbox-message-stream", `
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-message-stream",
+        `
 export function activate(context) {
     context.register({ id: "control.streams" }, "messages", async (stream, request, invocation) => {
         await context.capabilities.instanceObserve.watchEvents(invocation.destination, {
@@ -169,40 +232,110 @@ export function activate(context) {
         });
     });
 }
-`, {
-        capabilities: ["instance.observe"],
-        instanceObserve: {
-            ...fakeInstanceObserve([]),
-            async watchEvents(name, watch) {
-                assert.equal(name, "dev");
-                assert.equal(watch.fromSeq, 1);
-                assert.equal(typeof watch.onSeed, "function");
-                watched = true;
-                const cancellation = new Promise<void>((resolve) => watch.signal.addEventListener("abort", () => { cancelled = true; resolve(); }, { once: true }));
-                await watch.onSeed!({ events: [{ at: "now", instanceName: "dev", seq: 1, type: "context.message.queued" }], lastSeq: 1 });
-                await watch.onEvent({ at: "now", instanceName: "dev", seq: 2, type: "context.message.delivered" });
-                await cancellation;
+`,
+        {
+            capabilities: ["instance.observe"],
+            instanceObserve: {
+                ...fakeInstanceObserve([]),
+                async watchEvents(name, watch) {
+                    assert.equal(name, "dev");
+                    assert.equal(watch.fromSeq, 1);
+                    assert.equal(typeof watch.onSeed, "function");
+                    watched = true;
+                    const cancellation = new Promise<void>((resolve) =>
+                        watch.signal.addEventListener(
+                            "abort",
+                            () => {
+                                cancelled = true;
+                                resolve();
+                            },
+                            { once: true },
+                        ),
+                    );
+                    await watch.onSeed!({
+                        events: [
+                            {
+                                at: "now",
+                                instanceName: "dev",
+                                seq: 1,
+                                type: "context.message.queued",
+                            },
+                        ],
+                        lastSeq: 1,
+                    });
+                    await watch.onEvent({
+                        at: "now",
+                        instanceName: "dev",
+                        seq: 2,
+                        type: "context.message.delivered",
+                    });
+                    await cancellation;
+                },
             },
         },
-    });
-    const registration = await sandboxRegistration(sandbox, "control.streams", "messages");
-    const binding = controlStreamsExtensionPointDefinition.createSandboxBinding!(
-        registration.descriptor, sandboxPointContext("messages"), sandbox,
-    ) as ControlStreamBinding;
+    );
+    const registration = await sandboxRegistration(
+        sandbox,
+        "control.streams",
+        "messages",
+    );
+    const binding =
+        controlStreamsExtensionPointDefinition.createSandboxBinding!(
+            registration.descriptor,
+            sandboxPointContext("messages"),
+            sandbox,
+        ) as ControlStreamBinding;
     const messages: ControlStreamMessage[] = [];
-    const invocation = binding({
-        send: async (message) => { messages.push(message); if (message.name === "event") markDelivered(); },
-        close: async () => {},
-    }, { payload: { fromSeq: 1 } }, { destination: "dev", peer: "cli", requestId: "messages", signal: controller.signal });
-    const stopped = assert.rejects(async () => await invocation, /stream stopped/u);
+    const invocation = binding(
+        {
+            send: async (message) => {
+                messages.push(message);
+                if (message.name === "event") markDelivered();
+            },
+            close: async () => {},
+        },
+        { payload: { fromSeq: 1 } },
+        {
+            destination: "dev",
+            peer: "cli",
+            requestId: "messages",
+            signal: controller.signal,
+        },
+    );
+    const stopped = assert.rejects(
+        async () => await invocation,
+        /stream stopped/u,
+    );
     await delivered;
     controller.abort(new Error("stream stopped"));
     await stopped;
     assert.equal(watched, true);
     assert.equal(cancelled, true);
     assert.deepEqual(messages, [
-        { name: "seed", payload: { events: [{ at: "now", instanceName: "dev", seq: 1, type: "context.message.queued" }], lastSeq: 1 } },
-        { name: "event", payload: { at: "now", instanceName: "dev", seq: 2, type: "context.message.delivered" }, seq: 2 },
+        {
+            name: "seed",
+            payload: {
+                events: [
+                    {
+                        at: "now",
+                        instanceName: "dev",
+                        seq: 1,
+                        type: "context.message.queued",
+                    },
+                ],
+                lastSeq: 1,
+            },
+        },
+        {
+            name: "event",
+            payload: {
+                at: "now",
+                instanceName: "dev",
+                seq: 2,
+                type: "context.message.delivered",
+            },
+            seq: 2,
+        },
     ]);
 });
 
@@ -1635,6 +1768,7 @@ function createSandbox(options: {
     codeDirectory: string;
     config?: ExtensionConfig;
     configCore?: ExtensionCoreConfigCapability;
+    database?: ExtensionDatabaseCapabilityControl;
     contextObserve?: ExtensionContextObserveCapability;
     entryPath: string;
     externalMemoryLimitMb?: number;
@@ -1661,6 +1795,9 @@ function createSandbox(options: {
         ...(options.configCore === undefined
             ? {}
             : { configCore: options.configCore }),
+        ...(options.database === undefined
+            ? {}
+            : { database: options.database }),
         context: {
             config: options.config !== undefined,
             generation: "g1",

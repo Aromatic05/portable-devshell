@@ -3,6 +3,7 @@ import { rm, rmdir } from "node:fs/promises";
 import type { ExtensionModule } from "@portable-devshell/extension";
 
 import type {
+    ExtensionDatabaseRuntime,
     ExtensionProcessRuntime,
     ExtensionWorkerRuntime,
 } from "../api/cap/index.js";
@@ -14,6 +15,7 @@ export async function throwInProcessActivationFailure(
     error: unknown,
     input: {
         config?: ExtensionConfigRuntime;
+        database: ExtensionDatabaseRuntime;
         extensionId: string;
         module?: ExtensionModule;
         processes: ExtensionProcessRuntime;
@@ -28,6 +30,11 @@ export async function throwInProcessActivationFailure(
     await Promise.resolve(input.module?.deactivate?.()).catch(
         (cleanupError: unknown) => cleanupFailures.push(cleanupError),
     );
+    try {
+        input.database.closeAll();
+    } catch (cleanupError) {
+        cleanupFailures.push(cleanupError);
+    }
     await input.processes
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -42,9 +49,10 @@ export async function throwInProcessActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
-    await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory).catch(
-        (cleanupError) => cleanupFailures.push(cleanupError),
-    );
+    await cleanupRuntimeDirectory(
+        input.runtimeRoot,
+        input.runtimeDirectory,
+    ).catch((cleanupError) => cleanupFailures.push(cleanupError));
     try {
         input.releaseHostModules();
     } catch (cleanupError) {
@@ -59,6 +67,7 @@ export async function throwInProcessActivationFailure(
 
 export async function disposeInProcessGeneration(input: {
     config?: ExtensionConfigRuntime;
+    database: ExtensionDatabaseRuntime;
     module: ExtensionModule;
     processes: ExtensionProcessRuntime;
     releaseHostModules: () => void;
@@ -72,16 +81,24 @@ export async function disposeInProcessGeneration(input: {
         failures.push(error),
     );
     try {
+        input.database.closeAll();
+    } catch (error) {
+        failures.push(error);
+    }
+    try {
         input.config?.close();
     } catch (error) {
         failures.push(error);
     }
     await input.processes.closeAll().catch((error) => failures.push(error));
-    await input.workerDelegate.closeAll().catch((error) => failures.push(error));
+    await input.workerDelegate
+        .closeAll()
+        .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory).catch(
-        (error) => failures.push(error),
-    );
+    await cleanupRuntimeDirectory(
+        input.runtimeRoot,
+        input.runtimeDirectory,
+    ).catch((error) => failures.push(error));
     try {
         input.releaseHostModules();
     } catch (error) {
@@ -99,6 +116,7 @@ export async function throwSandboxActivationFailure(
     error: unknown,
     input: {
         config?: ExtensionConfigRuntime;
+        database: ExtensionDatabaseRuntime;
         extensionId: string;
         processes: ExtensionProcessRuntime;
         runtimeDirectory: string;
@@ -112,6 +130,11 @@ export async function throwSandboxActivationFailure(
     await input.sandbox
         .dispose()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
+    try {
+        input.database.closeAll();
+    } catch (cleanupError) {
+        cleanupFailures.push(cleanupError);
+    }
     await input.processes
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -126,9 +149,10 @@ export async function throwSandboxActivationFailure(
     await input.workerExecute
         .closeAll()
         .catch((cleanupError) => cleanupFailures.push(cleanupError));
-    await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory).catch(
-        (cleanupError) => cleanupFailures.push(cleanupError),
-    );
+    await cleanupRuntimeDirectory(
+        input.runtimeRoot,
+        input.runtimeDirectory,
+    ).catch((cleanupError) => cleanupFailures.push(cleanupError));
     if (cleanupFailures.length === 0) throw error;
     throw new AggregateError(
         [error, ...cleanupFailures],
@@ -138,6 +162,7 @@ export async function throwSandboxActivationFailure(
 
 export async function disposeSandboxGeneration(input: {
     config?: ExtensionConfigRuntime;
+    database: ExtensionDatabaseRuntime;
     processes: ExtensionProcessRuntime;
     runtimeDirectory: string;
     runtimeRoot: string;
@@ -148,16 +173,24 @@ export async function disposeSandboxGeneration(input: {
     const failures: unknown[] = [];
     await input.sandbox.dispose().catch((error) => failures.push(error));
     try {
+        input.database.closeAll();
+    } catch (error) {
+        failures.push(error);
+    }
+    try {
         input.config?.close();
     } catch (error) {
         failures.push(error);
     }
     await input.processes.closeAll().catch((error) => failures.push(error));
-    await input.workerDelegate.closeAll().catch((error) => failures.push(error));
+    await input.workerDelegate
+        .closeAll()
+        .catch((error) => failures.push(error));
     await input.workerExecute.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory).catch(
-        (error) => failures.push(error),
-    );
+    await cleanupRuntimeDirectory(
+        input.runtimeRoot,
+        input.runtimeDirectory,
+    ).catch((error) => failures.push(error));
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1)
         throw new AggregateError(

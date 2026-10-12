@@ -30,6 +30,10 @@
             "types": "./dist/domain/config.d.ts",
             "default": "./dist/domain/config.js"
         },
+        "./database": {
+            "types": "./dist/domain/database.d.ts",
+            "default": "./dist/domain/database.js"
+        },
         "./instance": {
             "types": "./dist/domain/instance.d.ts",
             "default": "./dist/domain/instance.js"

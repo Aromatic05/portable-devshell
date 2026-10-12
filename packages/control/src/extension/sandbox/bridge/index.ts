@@ -14,6 +14,7 @@ import type {
     ExtensionLogger,
 } from "@portable-devshell/extension";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type { ExtensionSqlCommand } from "@portable-devshell/extension/database";
 import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
@@ -65,6 +66,7 @@ import {
 } from "./Protocol.js";
 import { ExtensionSandboxProcessBridge } from "./ProcessBridge.js";
 import { ExtensionSandboxWorkerSessions } from "./WorkerSessions.js";
+import { ExtensionDatabaseCapabilityControl } from "../../api/cap/database/index.js";
 import {
     DEFAULT_EXTENSION_SANDBOX_EXTERNAL_MEMORY_LIMIT_MB,
     DEFAULT_EXTENSION_SANDBOX_RESOURCE_LIMITS,
@@ -86,7 +88,6 @@ interface PendingInvocation {
     resolve(value: unknown): void;
 }
 
-
 export interface ExtensionSandboxHostOptions {
     artifacts: ExtensionArtifactCapability;
     assets: ExtensionAssetCapability;
@@ -94,6 +95,7 @@ export interface ExtensionSandboxHostOptions {
     codeDirectory: string;
     config?: ExtensionConfig;
     configCore?: ExtensionCoreConfigCapability;
+    database?: ExtensionDatabaseCapabilityControl;
     context: ExtensionSandboxContextData;
     contextObserve: ExtensionContextObserveCapability;
     entryUrl: string;
@@ -138,6 +140,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #config?: ExtensionConfig;
     readonly #configCore?: ExtensionCoreConfigCapability;
     readonly #contextObserveCapability: ExtensionContextObserveCapability;
+    readonly #database?: ExtensionDatabaseCapabilityControl;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
     readonly #healthCheckTimeoutMs: number;
@@ -183,6 +186,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#assets = options.assets;
         this.#config = options.config;
         this.#configCore = options.configCore;
+        this.#database = options.database;
         this.#contextObserveCapability = options.contextObserve;
         this.#externalMemoryLimitBytes =
             positiveMegabytes(
@@ -632,6 +636,47 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 return await this.#contextObserveCapability.list(
                     input as SandboxContextObserveListInput | undefined,
                 );
+            case "database.open":
+                return await this.#requireDatabase().openHandle(
+                    readStringField(input, "name"),
+                );
+            case "database.execute": {
+                const value = input as ExtensionSqlCommand & {
+                    id: string;
+                    transaction?: string;
+                };
+                return this.#requireDatabase().execute(
+                    readStringField(value, "id"),
+                    value,
+                    value.transaction,
+                );
+            }
+            case "database.begin":
+                return this.#requireDatabase().begin(
+                    readStringField(input, "id"),
+                );
+            case "database.end": {
+                const value = input as {
+                    id: string;
+                    transaction: string;
+                    commit: boolean;
+                };
+                if (typeof value.commit !== "boolean")
+                    throw new TypeError(
+                        "Database commit flag must be boolean.",
+                    );
+                this.#requireDatabase().end(
+                    readStringField(value, "id"),
+                    readStringField(value, "transaction"),
+                    value.commit,
+                );
+                return undefined;
+            }
+            case "database.close":
+                this.#requireDatabase().closeHandle(
+                    readStringField(input, "id"),
+                );
+                return undefined;
             case "instanceManage.create":
                 return await this.#instanceManageCapability.create(
                     (input as SandboxInstanceCreateInput).draft,
@@ -686,14 +731,27 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                         ? {}
                         : { eventTypes: [...value.eventTypes] }),
                     fromSeq: value.fromSeq,
-                    ...(value.seed === true ? {
-                        onSeed: async (seed: { events: readonly ExtensionInstanceEvent[]; lastSeq: number }) =>
-                            this.#send({
-                                id,
-                                type: "capabilityProgress",
-                                value: { kind: "seed", seed: { events: seed.events.map((event) => ({ ...event })), lastSeq: seed.lastSeq } } as ExtensionJsonValue,
-                            }),
-                    } : {}),
+                    ...(value.seed === true
+                        ? {
+                              onSeed: async (seed: {
+                                  events: readonly ExtensionInstanceEvent[];
+                                  lastSeq: number;
+                              }) =>
+                                  this.#send({
+                                      id,
+                                      type: "capabilityProgress",
+                                      value: {
+                                          kind: "seed",
+                                          seed: {
+                                              events: seed.events.map(
+                                                  (event) => ({ ...event }),
+                                              ),
+                                              lastSeq: seed.lastSeq,
+                                          },
+                                      } as ExtensionJsonValue,
+                                  }),
+                          }
+                        : {}),
                     onEvent: async (event) =>
                         this.#send({
                             id,
@@ -856,6 +914,14 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     #requireConfig(): ExtensionConfig {
         if (this.#config !== undefined) return this.#config;
         throw new Error("Extension sandbox Config is unavailable.");
+    }
+
+    #requireDatabase(): ExtensionDatabaseCapabilityControl {
+        if (this.#database === undefined)
+            throw new Error(
+                "Extension sandbox Database capability is unavailable.",
+            );
+        return this.#database;
     }
 
     #requireCoreConfig(): ExtensionCoreConfigCapability {

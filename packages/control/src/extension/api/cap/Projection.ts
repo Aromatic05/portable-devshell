@@ -21,6 +21,7 @@ export const EXTENSION_CAPABILITY_CONTEXT_KEYS = Object.freeze({
     assets: "assets",
     "config.core": "configCore",
     "context.observe": "contextObserve",
+    database: "database",
     "instance.events.publish": "instanceEventPublish",
     "instance.manage": "instanceManage",
     "instance.observe": "instanceObserve",

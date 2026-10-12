@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parentPort, workerData, type MessagePort } from "node:worker_threads";
+import { createSandboxDatabaseCapability } from "./Database.js";
 
 import type {
     ExtensionCapabilities,
@@ -377,6 +378,7 @@ function createContext(): ExtensionContext {
             assets: createAssets,
             configCore: createCoreConfigCapability,
             contextObserve: createContextObserveCapability,
+            database: () => createSandboxDatabaseCapability(requestCapability),
             instanceEventPublish: createInstanceEventPublishCapability,
             instanceManage: createInstanceManageCapability,
             instanceObserve: createInstanceObserveCapability,
@@ -901,8 +903,16 @@ async function deliverInstanceWatchProgress(
         );
     if (progress.kind === "seed") {
         const seed = progress.seed;
-        if (!isRecord(seed) || !Array.isArray(seed.events) || typeof seed.lastSeq !== "number" || !Number.isSafeInteger(seed.lastSeq) || seed.lastSeq < 0)
-            throw new TypeError("Extension sandbox Instance watch seed is invalid.");
+        if (
+            !isRecord(seed) ||
+            !Array.isArray(seed.events) ||
+            typeof seed.lastSeq !== "number" ||
+            !Number.isSafeInteger(seed.lastSeq) ||
+            seed.lastSeq < 0
+        )
+            throw new TypeError(
+                "Extension sandbox Instance watch seed is invalid.",
+            );
         await watch.onSeed?.({
             events: seed.events.map(readInstanceWatchEvent),
             lastSeq: seed.lastSeq,
@@ -1035,10 +1045,21 @@ async function requestInterface(
     );
 }
 
-function readInstanceWatchEvent(value: ExtensionJsonValue | undefined): ExtensionInstanceEvent {
-    if (!isRecord(value) || typeof value.at !== "string" || typeof value.instanceName !== "string" ||
-        typeof value.seq !== "number" || !Number.isSafeInteger(value.seq) || value.seq < 0 || typeof value.type !== "string") {
-        throw new TypeError("Extension sandbox Instance watch event is invalid.");
+function readInstanceWatchEvent(
+    value: ExtensionJsonValue | undefined,
+): ExtensionInstanceEvent {
+    if (
+        !isRecord(value) ||
+        typeof value.at !== "string" ||
+        typeof value.instanceName !== "string" ||
+        typeof value.seq !== "number" ||
+        !Number.isSafeInteger(value.seq) ||
+        value.seq < 0 ||
+        typeof value.type !== "string"
+    ) {
+        throw new TypeError(
+            "Extension sandbox Instance watch event is invalid.",
+        );
     }
     return {
         at: value.at,

@@ -39,6 +39,7 @@
 - [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
 - [Version 与 Compatibility Lifecycle](development/compatibility.md)：产品版本、Protocol、Extension API、persistent schema、update 与 migrate 的独立版本和兼容边界。
 - [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
+- [Extension Database Capability](development/extension-database.md)：由 Host 持有的 SQLite 连接、事务租约、数据库路径隔离与 Generation 退役。
 - [Transport 通信协议](development/transport-protocol.md)：当前 Provider → Carrier → Channel → Frame → Service → Protocol 分层、Frame v1 wire contract、流控、Service 与 Reverse 边界。
 
 ## 文档约定

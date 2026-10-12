@@ -3,6 +3,7 @@ export const EXTENSION_CAPABILITY_IDS = [
     "assets",
     "config.core",
     "context.observe",
+    "database",
     "instance.events.publish",
     "instance.manage",
     "instance.observe",

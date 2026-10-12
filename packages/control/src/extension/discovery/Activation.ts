@@ -103,6 +103,7 @@ export class ExtensionGenerationActivator {
                 dispose: async () =>
                     await disposeInProcessGeneration({
                         config: input.capabilities.config,
+                        database: input.capabilities.database,
                         module: module!,
                         processes: input.capabilities.processes,
                         releaseHostModules: hostModules.release,
@@ -122,14 +123,19 @@ export class ExtensionGenerationActivator {
                 },
                 retireInstanceHostResources: async (instance) => {
                     await Promise.all([
-                        input.capabilities.workerDelegate.retireInstance(instance),
-                        input.capabilities.workerExecute.retireInstance(instance),
+                        input.capabilities.workerDelegate.retireInstance(
+                            instance,
+                        ),
+                        input.capabilities.workerExecute.retireInstance(
+                            instance,
+                        ),
                     ]);
                 },
             });
         } catch (error) {
             return await throwInProcessActivationFailure(error, {
                 config: input.capabilities.config,
+                database: input.capabilities.database,
                 extensionId: input.id,
                 module,
                 processes: input.capabilities.processes,
@@ -153,6 +159,7 @@ export class ExtensionGenerationActivator {
             codeDirectory: input.codeDirectory,
             config: input.capabilities.config?.owned,
             configCore: input.capabilities.config?.core,
+            database: input.capabilities.database,
             context: {
                 config: input.capabilities.config?.owned !== undefined,
                 generation: input.generation,
@@ -170,7 +177,22 @@ export class ExtensionGenerationActivator {
             onFault: (error) => {
                 candidate?.fault(error);
                 input.capabilities.config?.close();
-                void input.capabilities.processes.closeAll().catch(() => undefined);
+                try {
+                    input.capabilities.database.closeAll();
+                } catch (cleanupError) {
+                    input.logger.error(
+                        "Extension database cleanup failed after sandbox fault.",
+                        {
+                            message:
+                                cleanupError instanceof Error
+                                    ? cleanupError.message
+                                    : String(cleanupError),
+                        },
+                    );
+                }
+                void input.capabilities.processes
+                    .closeAll()
+                    .catch(() => undefined);
                 void input.capabilities.workerDelegate
                     .closeAll()
                     .catch(() => undefined);
@@ -199,6 +221,7 @@ export class ExtensionGenerationActivator {
                 dispose: async () =>
                     await disposeSandboxGeneration({
                         config: input.capabilities.config,
+                        database: input.capabilities.database,
                         processes: input.capabilities.processes,
                         runtimeDirectory: input.runtimeDirectory,
                         runtimeRoot: input.runtimeRoot,
@@ -217,8 +240,12 @@ export class ExtensionGenerationActivator {
                 },
                 retireInstanceHostResources: async (instance) => {
                     await Promise.all([
-                        input.capabilities.workerDelegate.retireInstance(instance),
-                        input.capabilities.workerExecute.retireInstance(instance),
+                        input.capabilities.workerDelegate.retireInstance(
+                            instance,
+                        ),
+                        input.capabilities.workerExecute.retireInstance(
+                            instance,
+                        ),
                     ]);
                 },
             });
@@ -227,6 +254,7 @@ export class ExtensionGenerationActivator {
         } catch (error) {
             return await throwSandboxActivationFailure(error, {
                 config: input.capabilities.config,
+                database: input.capabilities.database,
                 extensionId: input.id,
                 processes: input.capabilities.processes,
                 runtimeDirectory: input.runtimeDirectory,

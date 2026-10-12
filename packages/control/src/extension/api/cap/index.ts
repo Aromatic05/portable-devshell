@@ -5,6 +5,7 @@ import type {
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type { ExtensionDatabaseCapability } from "@portable-devshell/extension/database";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceEventPublishCapability,
@@ -15,10 +16,15 @@ import type { ExtensionProcessCapability } from "@portable-devshell/extension/pr
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { InstanceRegistry } from "../../../instance/Api.js";
-import type { InstanceRuntimeTransport, ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    InstanceRuntimeTransport,
+    ToolCallQuery,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
 import type { ExtensionConfigRuntime } from "./config/index.js";
 import { ExtensionAssetCapabilityControl } from "./asset/index.js";
+import { ExtensionDatabaseCapabilityControl } from "./database/index.js";
 import { ExtensionInstanceEventPublishCapabilityControl } from "./instance/index.js";
 import { ExtensionProcessCapabilityControl } from "./process/index.js";
 import { projectExtensionCapabilities } from "./Projection.js";
@@ -34,6 +40,10 @@ export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
 
 export interface ExtensionProcessRuntime extends ExtensionProcessCapability {
     closeAll(): Promise<void>;
+}
+
+export interface ExtensionDatabaseRuntime extends ExtensionDatabaseCapability {
+    closeAll(): void;
 }
 
 export interface ExtensionCapabilityAssemblerOptions {
@@ -70,7 +80,10 @@ export interface ExtensionCapabilityAssemblerOptions {
     };
     instanceRuntime(instance: string): InstanceRuntimeTransport;
     instances: InstanceRegistry;
-    readToolCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
+    readToolCalls(
+        instance: string,
+        query?: ToolCallQuery,
+    ): Promise<ToolCallRecord[]>;
     toolCallDecorator?: ExtensionToolCallDecorator;
     workerDelegateFactory?: (input: {
         allowed: boolean;
@@ -90,6 +103,7 @@ export interface ExtensionCapabilitySet {
     config?: ExtensionConfigRuntime;
     contextCapabilities: ExtensionContext["capabilities"];
     contextObserve: ExtensionContextObserveCapability;
+    database: ExtensionDatabaseCapabilityControl;
     instanceEventPublish: ExtensionInstanceEventPublishCapability;
     instanceManage: ExtensionInstanceManageCapability;
     instanceObserve: ExtensionInstanceObserveCapability;
@@ -129,6 +143,11 @@ export class ExtensionCapabilityAssembler {
             );
         }
         await config?.validate();
+        const database = new ExtensionDatabaseCapabilityControl({
+            allowed: manifest.capabilities.includes("database"),
+            dataDirectory: input.dataDirectory,
+            extensionId,
+        });
 
         const assets =
             this.#options.assetsFactory?.({
@@ -205,6 +224,7 @@ export class ExtensionCapabilityAssembler {
                 assets: () => assets,
                 configCore: () => requireCoreConfig(config, extensionId),
                 contextObserve: () => contextObserve,
+                database: () => database,
                 instanceEventPublish: () => instanceEventPublish,
                 instanceManage: () => instanceCapabilities.manage,
                 instanceObserve: () => instanceCapabilities.observe,
@@ -220,6 +240,7 @@ export class ExtensionCapabilityAssembler {
             config,
             contextCapabilities,
             contextObserve,
+            database,
             instanceEventPublish,
             instanceManage: instanceCapabilities.manage,
             instanceObserve: instanceCapabilities.observe,

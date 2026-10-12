@@ -5,6 +5,7 @@ import type {
 } from "./ExtensionCore.js";
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
 import type { ExtensionAssetCapability } from "./domain/asset.js";
+import type { ExtensionDatabaseCapability } from "./domain/database.js";
 import type {
     ExtensionConfigChange as ExtensionConfigChangeContract,
     ExtensionConfigStore,
@@ -76,6 +77,7 @@ export interface ExtensionLogger {
 export interface ExtensionCapabilities {
     readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
+    readonly database?: ExtensionDatabaseCapability;
     readonly configCore?: ExtensionCoreConfigCapability;
     readonly contextObserve?: ExtensionContextObserveCapability;
     readonly instanceEventPublish?: ExtensionInstanceEventPublishCapability;
