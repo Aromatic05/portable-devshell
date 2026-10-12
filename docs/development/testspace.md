@@ -21,6 +21,7 @@ pnpm testspace stop
 pnpm testspace web-smoke
 pnpm testspace comment-smoke
 pnpm testspace update-smoke
+pnpm testspace upgrade-smoke
 pnpm testspace workflow-smoke
 pnpm testspace approval-smoke
 pnpm testspace exec -- <command...>
@@ -29,6 +30,10 @@ pnpm testspace exec -- <command...>
 `pnpm testspace` 等价于 start。默认会先执行项目 build 和 `test:prepare`；开发者已经明确准备好构建产物时可以使用 `--skip-build`。
 
 `update-smoke` 在隔离 Testspace 中验证 Control Web 监听器热替换、端口占用导致的更新拒绝、Instance 模型能力热更新与运行中 Worker 重建拒绝。每个阶段检查配置版本号及两台 Worker 状态，退出前恢复 Web/Instance 原配置；不修改主机实际 `~/.devshell`。它验证预检查失败的无副作用，不代表已经覆盖运行时提交后失败的回滚。
+
+`upgrade-smoke` 是另一套持久化升级验收：自动取官方 v0.7.7 Release 应用包/Worker（严格校验 SHA-256），在 Testspace 的临时隔离 HOME 中真实安装、启动旧 Control 与 Instance，然后使用当前源码构建的 1.0 候选包运行完整 Release 安装器。验证 Audit SQLite 2→3 记录保留、Extension Generation 替换、CLI/Instance/Control 恢复、升级后运行；同时独立测试不支持的数据库格式在停机前被拒绝，以及候选 Control 启动失败后的应用与持久数据库回滚。三种场景均使用独立临时运行目录，不触碰用户生产 HOME。
+
+可传入 `--baseline-dir` 和 `--candidate-dir` 使用现成发行包目录，`--skip-build` 跳过重复构建；大体积 v0.7.7 官方资产缓存于 `var/agent-work/upgrade-testspace-assets/v0.7.7`。
 
 `workflow-smoke` 通过真实 MCP Client → Instance ToolCall → Todo/Bash → MCPApp Action/Reentry 运行一条 Context 级工作流，检查任务的暂停/恢复、Action 重试去重、持久化恢复收据和审计。脚本使用管理端 Task Transport 清理自身创建的测试任务。它没有真实 ChatGPT Host，恢复消息被明确报告为 `simulated-rejected`；不能将其作为 Host `sendMessage` 成功或 Agent 真正续跑的证据。
 

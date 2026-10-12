@@ -81,6 +81,11 @@ test("testspace launcher prepares build artifacts before entering the isolated r
         prepare: false,
         runtimeArgv: ["status"],
     });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["upgrade-smoke", "--skip-build"]), {
+        command: "upgrade-smoke",
+        prepare: false,
+        runtimeArgv: ["upgrade-smoke", "--skip-build"],
+    });
 });
 
 test("testspace instance fixtures use v4 model ACL without retired MCP policy", () => {
@@ -172,6 +177,7 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("web"), "web");
     assert.equal(resolveTestspaceCommand("web-smoke"), "web-smoke");
     assert.equal(resolveTestspaceCommand("update-smoke"), "update-smoke");
+    assert.equal(resolveTestspaceCommand("upgrade-smoke"), "upgrade-smoke");
     assert.equal(resolveTestspaceCommand("workflow-smoke"), "workflow-smoke");
     assert.equal(resolveTestspaceCommand("approval-smoke"), "approval-smoke");
     assert.equal(resolveTestspaceCommand("comment-smoke"), "comment-smoke");

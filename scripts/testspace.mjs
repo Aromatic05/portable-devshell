@@ -39,6 +39,7 @@ import { runTestspaceInstanceCreateSmoke } from "./testspace/TestspaceInstanceCr
 import { runTestspaceLongWaitSmoke } from "./testspace/TestspaceLongWaitSmoke.mjs";
 import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import { runTestspaceUpdateSmoke } from "./testspace/TestspaceUpdateSmoke.mjs";
+import { runTestspaceUpgradeSmoke } from "./testspace/TestspaceUpgradeSmoke.mjs";
 import { runTestspaceWorkflowSmoke } from "./testspace/TestspaceWorkflowSmoke.mjs";
 import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
@@ -128,6 +129,9 @@ switch (command) {
         break;
     case "update-smoke":
         await updateSmoke();
+        break;
+    case "upgrade-smoke":
+        await upgradeSmoke(args);
         break;
     case "workflow-smoke":
         await workflowSmoke();
@@ -445,6 +449,23 @@ async function webSmoke() {
 async function updateSmoke() {
     const state = await requireRunningState();
     const result = await runTestspaceUpdateSmoke(stateRuntimeDirectory(state));
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function upgradeSmoke(args) {
+    const readValue = (name) => {
+        const index = args.indexOf(name);
+        if (index === -1) return undefined;
+        if (args[index + 1] === undefined) throw new Error(`${name} requires a directory`);
+        return args[index + 1];
+    };
+    const result = await runTestspaceUpgradeSmoke({
+        root,
+        ...(readValue("--baseline-dir") === undefined
+            ? {} : { baselineDirectory: readValue("--baseline-dir") }),
+        ...(readValue("--candidate-dir") === undefined
+            ? {} : { candidateDirectory: readValue("--candidate-dir") }),
+    });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

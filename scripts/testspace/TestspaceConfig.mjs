@@ -11,6 +11,7 @@ const USER_TESTSPACE_COMMANDS = new Set([
     "stop",
     "tui",
     "update-smoke",
+    "upgrade-smoke",
     "web",
     "web-smoke",
     "workflow-smoke",
@@ -36,7 +37,8 @@ export function resolveTestspaceInvocation(argv) {
 export function resolveTestspaceLaunchPlan(argv) {
     const { command } = resolveTestspaceInvocation(argv);
     const prepare =
-        command === DEFAULT_TESTSPACE_COMMAND && !argv.includes("--skip-build");
+        (command === DEFAULT_TESTSPACE_COMMAND || command === "upgrade-smoke") &&
+        !argv.includes("--skip-build");
     return {
         command,
         prepare,
