@@ -1,6 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+
+import type { ExtensionContext } from "@portable-devshell/extension";
+
+type DatabaseCapability = NonNullable<
+    ExtensionContext["capabilities"]["database"]
+>;
+type DatabaseConnection = Awaited<ReturnType<DatabaseCapability["open"]>>;
 
 export interface AgentProviderRegistryEntry {
     enabled: boolean;
@@ -14,58 +19,101 @@ export interface AgentProviderRegistrySnapshot {
 }
 
 export class AgentProviderRegistryStore {
-    readonly #path: string;
+    readonly #database: DatabaseCapability;
+    readonly #legacyPath: string;
+    #connection: DatabaseConnection | undefined;
+    #operation: Promise<void> = Promise.resolve();
+    #closed = false;
 
-    constructor(path: string) {
-        this.#path = path;
+    constructor(database: DatabaseCapability, legacyPath: string) {
+        this.#database = database;
+        this.#legacyPath = legacyPath;
     }
 
     async read(): Promise<AgentProviderRegistrySnapshot> {
-        const source = await readFile(this.#path, "utf8").catch(
-            (error: unknown) => {
-                if (isMissing(error)) return undefined;
-                throw error;
-            },
-        );
-        if (source === undefined) return emptyAgentProviderRegistry();
-        return parseAgentProviderRegistry(JSON.parse(source) as unknown);
+        return await this.#exclusive(async () => {
+            const connection = await this.#open();
+            const row = await connection.get<{ snapshot: string }>(
+                "SELECT snapshot FROM provider_registry WHERE id = 1",
+            );
+            if (row === undefined) {
+                throw new Error("Agent provider registry snapshot is missing.");
+            }
+            return parseAgentProviderRegistry(
+                JSON.parse(row.snapshot) as unknown,
+            );
+        });
     }
 
     async write(snapshot: AgentProviderRegistrySnapshot): Promise<void> {
         const validated = parseAgentProviderRegistry(
             cloneAgentProviderRegistry(snapshot),
         );
-        const directory = dirname(this.#path);
-        await mkdir(directory, { mode: 0o700, recursive: true });
-        const temporary =
-            this.#path + "." + process.pid + "." + randomUUID() + ".tmp";
-        const handle = await open(temporary, "wx", 0o600);
+        await this.#exclusive(async () => {
+            const connection = await this.#open();
+            await connection.transaction(async (transaction) => {
+                await transaction.run(
+                    "UPDATE provider_registry SET snapshot = ? WHERE id = 1",
+                    [JSON.stringify(validated)],
+                );
+            });
+        });
+    }
+
+    async close(): Promise<void> {
+        await this.#exclusive(async () => {
+            this.#closed = true;
+            await this.#connection?.close();
+            this.#connection = undefined;
+        });
+    }
+
+    async #open(): Promise<DatabaseConnection> {
+        if (this.#closed)
+            throw new Error("Agent provider registry store is closed.");
+        if (this.#connection !== undefined) return this.#connection;
+        const connection = await this.#database.open("providers");
         try {
-            await handle.writeFile(
-                JSON.stringify(validated, null, 2) + "\n",
-                "utf8",
-            );
-            await handle.sync();
+            await connection.transaction(async (transaction) => {
+                await transaction.exec(
+                    "CREATE TABLE IF NOT EXISTS provider_registry (id INTEGER PRIMARY KEY CHECK (id = 1), snapshot TEXT NOT NULL)",
+                );
+                const existing = await transaction.get<{ snapshot: string }>(
+                    "SELECT snapshot FROM provider_registry WHERE id = 1",
+                );
+                if (existing !== undefined) return;
+                const source = await readFile(this.#legacyPath, "utf8").catch(
+                    (error: unknown) => {
+                        if (isMissing(error)) return undefined;
+                        throw error;
+                    },
+                );
+                const snapshot =
+                    source === undefined
+                        ? emptyAgentProviderRegistry()
+                        : parseAgentProviderRegistry(
+                              JSON.parse(source) as unknown,
+                          );
+                await transaction.run(
+                    "INSERT INTO provider_registry (id, snapshot) VALUES (1, ?)",
+                    [JSON.stringify(snapshot)],
+                );
+            });
         } catch (error) {
-            await handle.close().catch(() => undefined);
-            await unlink(temporary).catch(() => undefined);
+            await connection.close();
             throw error;
         }
-        await handle.close();
-        try {
-            await rename(temporary, this.#path);
-            if (process.platform !== "win32") {
-                const directoryHandle = await open(directory, "r");
-                try {
-                    await directoryHandle.sync();
-                } finally {
-                    await directoryHandle.close();
-                }
-            }
-        } catch (error) {
-            await unlink(temporary).catch(() => undefined);
-            throw error;
-        }
+        this.#connection = connection;
+        return connection;
+    }
+
+    async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const result = this.#operation.then(operation);
+        this.#operation = result.then(
+            () => undefined,
+            () => undefined,
+        );
+        return await result;
     }
 }
 

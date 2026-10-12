@@ -47,19 +47,25 @@ import {
 import { OPENCODE_PROVIDER_RUNTIME_DEPENDENCIES } from "../provider/opencode/OpenCodeProviderInstaller.js";
 
 let activeRuntime: AgentExtensionRuntime | undefined;
+let activeProviderManager: AgentProviderManager | undefined;
 
 export async function activate(context: ExtensionContext): Promise<void> {
     if (activeRuntime !== undefined)
         throw new Error(
             "Agent Extension is already active in this generation.",
         );
-    const providerStore = new AgentProviderRegistryStore(
-        join(context.paths.stateDirectory, "providers.json"),
-    );
     const processes = context.capabilities.processes;
     if (processes === undefined) {
         throw new Error("Agent Extension requires the processes capability.");
     }
+    const database = context.capabilities.database;
+    if (database === undefined) {
+        throw new Error("Agent Extension requires the database capability.");
+    }
+    const providerStore = new AgentProviderRegistryStore(
+        database,
+        join(context.paths.stateDirectory, "providers.json"),
+    );
     const packageInstaller = new AgentProviderPackageInstaller(processes);
     const definitions = createProviderDefinitions(context, packageInstaller);
     const providerRegistry = new AgentProviderRegistry();
@@ -75,45 +81,59 @@ export async function activate(context: ExtensionContext): Promise<void> {
         resolveProvider: async (requested) =>
             await providerManager.resolveProvider(requested),
     });
-    await providerManager.initialize();
-    if (providerRegistry.get(PI_PROVIDER_ID) !== undefined) {
-        await publishPiCommand(context);
-    }
-    activeRuntime = runtime;
-    context.register(
-        nativeCommands,
-        "agent",
-        async (argv, invocation) =>
-            await executeAgentCommand(
-                runtime,
-                providerManager,
-                argv,
-                invocation,
-            ),
-    );
-    context.register(
-        modelCommands,
-        "agent",
-        async (argv, invocation) =>
-            await executeAgentModelCommand(
-                runtime,
-                providerManager,
-                argv,
-                invocation,
-            ),
-    );
-    context.register(
-        applications,
-        "agent",
-        Object.freeze({
-            source: Object.freeze({
-                kind: "endpoint" as const,
-                resolve: async () => await runtime.webUpstream(),
+    try {
+        await providerManager.initialize();
+        if (providerRegistry.get(PI_PROVIDER_ID) !== undefined) {
+            await publishPiCommand(context);
+        }
+        context.register(
+            nativeCommands,
+            "agent",
+            async (argv, invocation) =>
+                await executeAgentCommand(
+                    runtime,
+                    providerManager,
+                    argv,
+                    invocation,
+                ),
+        );
+        context.register(
+            modelCommands,
+            "agent",
+            async (argv, invocation) =>
+                await executeAgentModelCommand(
+                    runtime,
+                    providerManager,
+                    argv,
+                    invocation,
+                ),
+        );
+        context.register(
+            applications,
+            "agent",
+            Object.freeze({
+                source: Object.freeze({
+                    kind: "endpoint" as const,
+                    resolve: async () => await runtime.webUpstream(),
+                }),
             }),
-        }),
-    );
-    context.register(webPages, "agent", createAgentWebPage(providerManager));
-    context.register(tuiPages, "agent", createAgentTuiPage(providerManager));
+        );
+        context.register(
+            webPages,
+            "agent",
+            createAgentWebPage(providerManager),
+        );
+        context.register(
+            tuiPages,
+            "agent",
+            createAgentTuiPage(providerManager),
+        );
+        activeRuntime = runtime;
+        activeProviderManager = providerManager;
+    } catch (error) {
+        await providerManager.dispose();
+        throw error;
+    }
 }
 
 function createProviderDefinitions(
@@ -307,7 +327,9 @@ function agentTuiProviderItem(
             ...(record.installedVersion === undefined
                 ? []
                 : [{ text: `installed ${record.installedVersion}` }]),
-            ...(isDefault ? [{ text: "default yes", tone: "success" as const }] : []),
+            ...(isDefault
+                ? [{ text: "default yes", tone: "success" as const }]
+                : []),
             ...(record.error === undefined
                 ? []
                 : [{ text: `error ${record.error}`, tone: "danger" as const }]),
@@ -346,6 +368,12 @@ async function applyAgentProviderAction(
 
 export async function deactivate(): Promise<void> {
     const runtime = activeRuntime;
+    const providerManager = activeProviderManager;
     activeRuntime = undefined;
-    await runtime?.dispose();
+    activeProviderManager = undefined;
+    try {
+        await runtime?.dispose();
+    } finally {
+        await providerManager?.dispose();
+    }
 }

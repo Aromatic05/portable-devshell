@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { databaseFixture } from "../helpers/Database.ts";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -36,7 +37,11 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     assert.equal(manifest.entry, "dist/builtin/index.js");
     assert.equal(manifest.apiVersion, "5.0.0");
     assert.equal(manifest.activation, "lazy");
-    assert.deepEqual(manifest.capabilities, ["worker.delegate", "processes"]);
+    assert.deepEqual(manifest.capabilities, [
+        "worker.delegate",
+        "processes",
+        "database",
+    ]);
     assert.deepEqual(manifest.extensions, {
         "cli.native-commands": [
             {
@@ -494,6 +499,7 @@ function extensionContext(options: {
     };
     return {
         capabilities: {
+            database: databaseFixture().capability,
             assets,
             processes: {
                 async start() {

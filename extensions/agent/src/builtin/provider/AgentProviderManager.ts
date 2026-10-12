@@ -9,10 +9,7 @@ import {
 import { AgentProviderRuntimePaths } from "./AgentProviderRuntimePaths.js";
 
 export type AgentProviderManagementState =
-    | "disabled"
-    | "invalid"
-    | "ready"
-    | "uninstalled";
+    "disabled" | "invalid" | "ready" | "uninstalled";
 
 export interface AgentProviderManagementRecord {
     enabled: boolean;
@@ -81,6 +78,10 @@ export class AgentProviderManager {
                 this.#registry.replace(definition.create());
             }
         });
+    }
+
+    async dispose(): Promise<void> {
+        await this.#exclusive(async () => await this.#store.close());
     }
 
     availableProviders(): readonly string[] {
@@ -335,8 +336,7 @@ export class AgentProviderManager {
             return {
                 enabled: entry?.enabled ?? false,
                 id,
-                installedVersion:
-                    entry?.installedVersion ?? definition.version,
+                installedVersion: entry?.installedVersion ?? definition.version,
                 name: definition.name,
                 state: entry?.enabled === true ? "ready" : "disabled",
                 version: definition.version,
@@ -398,7 +398,10 @@ function assertProviderMatchesDefinition(
     provider: AgentProvider,
     definition: AgentProviderDefinition,
 ): void {
-    if (provider.id !== definition.id || provider.version !== definition.version) {
+    if (
+        provider.id !== definition.id ||
+        provider.version !== definition.version
+    ) {
         throw new Error(
             "Agent provider definition " +
                 definition.id +

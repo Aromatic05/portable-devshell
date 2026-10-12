@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { databaseFixture } from "../helpers/Database.ts";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -100,13 +101,35 @@ test("Provider installation failure never publishes a runtime or registry entry"
     assert.equal((await h.store.read()).providers.pi, undefined);
 });
 
+test("Provider mutation restores the live runtime when SQLite persistence rolls back", async (t) => {
+    const h = await harness(t);
+    await h.manager.install("pi");
+    const before = await h.store.read();
+    const runtime = h.registry.require("pi");
+    h.database.failNextCommit();
+
+    await assert.rejects(h.manager.disable("pi"), /injected commit failure/u);
+    assert.equal(h.registry.require("pi"), runtime);
+    assert.deepEqual(await h.store.read(), before);
+    await h.manager.disable("pi");
+    assert.equal(h.registry.get("pi"), undefined);
+    assert.equal((await h.store.read()).providers.pi?.enabled, false);
+});
+
 async function harness(t: test.TestContext) {
     const root = await createTestTempDirectory("agent-provider-manager");
-    t.after(async () => await rm(root, { force: true, recursive: true }));
     const stateDirectory = join(root, "state");
     await mkdir(stateDirectory, { recursive: true });
     const registryPath = join(stateDirectory, "providers.json");
-    const store = new AgentProviderRegistryStore(registryPath);
+    const database = databaseFixture(join(root, "providers.sqlite3"));
+    const store = new AgentProviderRegistryStore(
+        database.capability,
+        registryPath,
+    );
+    t.after(async () => {
+        await store.close();
+        await rm(root, { force: true, recursive: true });
+    });
     const registry = new AgentProviderRegistry();
     const installed = new Set<string>();
     const installFailures = new Set<string>();
@@ -126,6 +149,7 @@ async function harness(t: test.TestContext) {
         store,
     });
     return {
+        database,
         failInstall(id: string) {
             installFailures.add(id);
         },
