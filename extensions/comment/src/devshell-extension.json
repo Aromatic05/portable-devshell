@@ -9,7 +9,9 @@
     "capabilities": [
         "database",
         "instance.observe",
-        "instance.events.publish"
+        "instance.events.publish",
+        "context.observe",
+        "worker.execute"
     ],
     "extensions": {
         "control.streams": [
@@ -113,6 +115,26 @@
             {
                 "hook": "510-comment-delivery",
                 "id": "comment-delivery"
+            },
+            {
+                "hook": "520-mailing-trigger",
+                "id": "mailing-trigger"
+            }
+        ],
+        "cli.native-commands": [
+            {
+                "id": "mail",
+                "title": "Mail",
+                "summary": "Manage workspace Mailing and claims",
+                "usage": "mail <command>"
+            }
+        ],
+        "cli.model-commands": [
+            {
+                "id": "mail",
+                "title": "Mail",
+                "summary": "Claim an Agent Work mailbox for the current Context",
+                "usage": "mail claim|release|status"
             }
         ]
     }

@@ -101,6 +101,7 @@ export const cliModelCommandsSandboxCodec: ExtensionSandboxPointCodec =
                 argv,
                 Object.freeze({
                     context: createCliSandboxModelContext(context),
+                    ...(invocation.ctxId === undefined ? {} : { ctxId: readString(invocation.ctxId, "ctxId") }),
                     instance: readString(invocation.instance, "instance"),
                     ...(invocation.io === true
                         ? { io: createCliSandboxIo(context) }
@@ -162,6 +163,7 @@ export function createCliModelSandboxBinding(
             {
                 argv: [...argv],
                 context: {
+                    ...(invocation.ctxId === undefined ? {} : { ctxId: invocation.ctxId }),
                     instance: invocation.instance,
                     io: invocation.io !== undefined,
                     requestId: invocation.requestId,

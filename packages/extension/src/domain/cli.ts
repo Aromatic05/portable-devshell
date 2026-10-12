@@ -52,6 +52,8 @@ export interface CliNativeCommandInvocationContext {
 
 /** Invocation state for a model-facing command. Builtin CLI authority is intentionally absent. */
 export interface CliModelCommandInvocationContext {
+    /** Authenticated Context id resolved by the host ModelCommandBroker. Never supplied by model arguments. */
+    readonly ctxId?: string;
     /** Operations scoped to the authoritative MCP Context without exposing its internal id. */
     readonly context: CliModelCommandContext;
     /** Authoritative managed instance resolved by the model command broker. */

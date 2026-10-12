@@ -177,7 +177,7 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     ],
     defaultEnabled: true,
     defaultMcpEnabled: true,
-    defaultModelExtensions: ["artifact", "instance", "mcp", "secret", "skill"],
+    defaultModelExtensions: ["artifact", "comment", "instance", "mcp", "secret", "skill"],
     defaultSecurityMode: "disabled",
 };
 export const MASKED_CONFIG_TOKEN = "********";

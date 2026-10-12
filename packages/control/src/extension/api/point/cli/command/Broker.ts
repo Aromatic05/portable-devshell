@@ -153,6 +153,7 @@ export class ModelCommandBroker {
             writeStdout: async (text) => await output("stdout", text),
         };
         const invocation: CliModelCommandInvocationContext = {
+            ctxId: request.ctxId,
             context: {
                 instanceReference: (target) =>
                     this.#contexts.registry.referenceInstance(request.ctxId, target),

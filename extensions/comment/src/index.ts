@@ -1,4 +1,5 @@
 import type { ExtensionDatabaseCapability } from "@portable-devshell/extension/database";
+import { nativeCommands, modelCommands } from "@portable-devshell/extension/cli";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,6 +59,9 @@ import { createMessageSubscriptionBinding } from "./message/Route.js";
 import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
+import { MailingService } from "./mailing/Service.js";
+import { createMailingHook } from "./mailing/Hook.js";
+import { executeMailModelCommand, executeMailNativeCommand } from "./mailing/Command.js";
 
 export type CommentControlDecision =
     | { readonly kind: "allow" }
@@ -95,6 +99,7 @@ export interface CommentInstanceSource {
 }
 
 export interface CommentPort {
+    queue(instance: string, ctxId: string, text: string): Promise<void>;
     beforeTodoToolCall(
         instance: string,
         ctxId: string,
@@ -185,6 +190,9 @@ export class CommentExtension {
         );
         this.#preferences = preferences;
         const comment: CommentPort = {
+            queue: async (instance, ctxId, text) => {
+                await this.#require(instance).comment.queue({ ctxId, text });
+            },
             beforeTodoToolCall: async (instance, ctxId, toolName) =>
                 await this.#require(instance).report.beforeTodoToolCall(
                     ctxId,
@@ -403,6 +411,7 @@ export class CommentExtension {
 
 interface BuiltinCommentRuntime {
     readonly comment: CommentExtension;
+    readonly mailing: MailingService;
     readonly source: BuiltinCommentInstanceSource;
 }
 
@@ -441,6 +450,20 @@ export async function activate(context: ExtensionContext): Promise<void> {
             "message-preferences.json",
         ),
     });
+    const worker = context.capabilities.workerExecute;
+    const contexts = context.capabilities.contextObserve;
+    if (worker === undefined || contexts === undefined)
+        throw new Error("Comment Mailing requires worker.execute and context.observe capabilities");
+    const mailing = new MailingService({
+        worker,
+        contexts,
+        comment: {
+            queue: async (instance, ctxId, text) => await comment.comment.queue(instance, ctxId, text),
+        },
+        onError: (error) => context.logger.error("Mailing reconciliation failed", {
+            message: error instanceof Error ? error.message : String(error),
+        }),
+    });
     const gate = createCommentToolCallGate(comment.comment);
     const todoAccess = createCommentTodoAccess(comment.comment);
     const delivery = createCommentDelivery(comment.comment);
@@ -466,13 +489,22 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await source.refresh();
         return await todoInvalid(input, invocation);
     });
+    context.register(rewrite, "mailing-trigger", createMailingHook(mailing, (error) =>
+        context.logger.warn("Mailing trigger failed", { message: String(error) }),
+    ));
+    context.register(modelCommands, "mail", async (argv, invocation) =>
+        await executeMailModelCommand(mailing, argv, invocation),
+    );
+    context.register(nativeCommands, "mail", async (argv, invocation) =>
+        await executeMailNativeCommand(mailing, argv, invocation),
+    );
     registerCommentRoutes(context, source, comment);
     context.register(
         mcpTools,
         "todo_report",
         createTodoReportTool(source, comment.comment),
     );
-    builtinRuntime = { comment, source };
+    builtinRuntime = { comment, mailing, source };
 }
 
 export async function instanceGenerationRetired(
@@ -480,6 +512,7 @@ export async function instanceGenerationRetired(
 ): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
+    await runtime.mailing.retireInstance(event.instance);
     await runtime.comment.retireInstance(
         event.instance,
         `Instance ${event.instance} runtime generation was retired before Comment delivery.`,
@@ -492,6 +525,7 @@ export async function contextEnvironmentRetired(
 ): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
+    await runtime.mailing.retireContext(input.ctxId);
     await runtime.source.refresh();
     if (!runtime.source.has(input.instance)) return;
     await runtime.comment.comment.failPending(
@@ -508,6 +542,7 @@ export async function contextEnvironmentRetired(
 export async function deactivate(): Promise<void> {
     const runtime = builtinRuntime;
     builtinRuntime = undefined;
+    await runtime?.mailing.close();
     await runtime?.comment.close();
 }
 
