@@ -1,4 +1,6 @@
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
+    ExtensionInstanceManageCapability,
     ExtensionInstanceObserveCapability,
     ExtensionInstanceRecord,
     ExtensionInstanceSnapshot,
@@ -14,12 +16,14 @@ export const INSTANCE_USAGE = [
     "  devshell instance list",
     "  devshell instance status <instance>",
     "  devshell instance logs <instance> [-f]",
+    "  devshell instance create '<draft-json>'",
 ].join("\n");
 
 export async function executeInstanceCommand(
     instances: ExtensionInstanceObserveCapability,
     argv: readonly string[],
     invocation: CliModelCommandInvocationContext,
+    manage?: Pick<ExtensionInstanceManageCapability, "create">,
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     const [command, ...args] = argv;
@@ -40,6 +44,23 @@ export async function executeInstanceCommand(
             );
         case "logs":
             return await logs(instances, args, invocation);
+        case "create": {
+            const source = one(args, "instance create '<draft-json>'");
+            let draft: unknown;
+            try {
+                draft = JSON.parse(source);
+            } catch {
+                throw usage("instance create requires a valid JSON draft.");
+            }
+            if (typeof draft !== "object" || draft === null || Array.isArray(draft))
+                throw usage("instance create requires a JSON object draft.");
+            if (manage === undefined)
+                throw new Error("Instance Extension requires instance.manage to create.");
+            return {
+                kind: "json",
+                value: (await manage.create(draft as ExtensionJsonValue)) as unknown as ExtensionJsonValue,
+            };
+        }
         case undefined:
             throw usage(INSTANCE_USAGE);
         default:

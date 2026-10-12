@@ -6,14 +6,14 @@
     "name": "portable-devshell Instance",
     "version": "0.1.1",
     "entry": "index.ts",
-    "capabilities": ["instance.observe"],
+    "capabilities": ["instance.observe", "instance.manage"],
     "extensions": {
         "cli.model-commands": [
             {
                 "id": "instance",
                 "title": "Instance",
-                "summary": "Inspect portable-devshell instances and obtain Context-scoped remote handles",
-                "usage": "instance <list|status|logs>"
+                "summary": "Inspect and create portable-devshell instances and obtain Context-scoped remote handles",
+                "usage": "instance <list|status|logs|create>"
             }
         ]
     }
