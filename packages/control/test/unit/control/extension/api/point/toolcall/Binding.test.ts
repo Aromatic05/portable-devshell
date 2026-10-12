@@ -306,7 +306,7 @@ test("ToolCall Sandbox rewrites preserve Host-owned OAuth and OpenAI session aut
                     hook: "100-sandbox",
                     id: "sandbox",
                     binding: async (input) => {
-                        const exposed = input.value.context as Record<string, unknown>;
+                        const exposed = input.value.context as unknown as Record<string, unknown>;
                         for (const key of Object.keys(authority)) {
                             assert.equal(Object.hasOwn(exposed, key), false);
                         }
@@ -341,7 +341,7 @@ test("ToolCall Sandbox rewrites preserve Host-owned OAuth and OpenAI session aut
         "instance-a",
         "environ_info",
         { workspace: "/workspace" },
-        { instance: "instance-a", source: "mcp", ...authority },
+        { source: "mcp", ...authority },
     );
     assert.deepEqual(result, { workspace: "/workspace" });
     uninstall();
