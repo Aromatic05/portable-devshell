@@ -2,6 +2,7 @@ import type { ContextRecord, ContextTransport, ControlMcpContextMode, JsonValue,
 import { createMcpContextSelector } from '../protocol/Public.js';
 import type { McpEndpointCallContext } from '../protocol/Api.js';
 import { McpAppActionStore } from './ActionStore.js';
+import { McpAppQuestionStore } from './Question.js';
 import { McpAppLeaseStore } from './app/Lease.js';
 import { McpAppPresenceStore } from './app/Presence.js';
 import { createMcpAppViewModel } from './ViewModel.js';
@@ -12,6 +13,7 @@ import type { McpHttpRoute } from '../server/Api.js';
 export class McpAppRuntime {
     readonly leases: McpAppLeaseStore;
     readonly actions: McpAppActionStore;
+    readonly questions: McpAppQuestionStore;
     readonly presence = new McpAppPresenceStore();
     readonly view?: ReturnType<typeof createMcpAppViewModel>;
     readonly #routes = new Map<McpHttpRoute, McpAppRoute>();
@@ -27,7 +29,8 @@ export class McpAppRuntime {
         this.actions = new McpAppActionStore({
             filePath: options.filePath === undefined ? undefined : `${options.filePath}.actions`,
         });
-        this.view = options.endpoint === undefined ? undefined : createMcpAppViewModel(options.endpoint, this.actions);
+        this.questions = new McpAppQuestionStore(options.filePath === undefined ? undefined : `${options.filePath}.questions`);
+        this.view = options.endpoint === undefined ? undefined : createMcpAppViewModel(options.endpoint, this.actions, this.questions);
     }
 
     /** One App Domain owns the Live Route for every attached HTTP host generation. */
@@ -116,7 +119,7 @@ export class McpAppRuntime {
 
     async initialize(): Promise<void> {
         if (this.#initializePromise !== undefined) return await this.#initializePromise;
-        const pending = Promise.all([this.leases.initialize(), this.actions.initialize()]).then(() => undefined);
+        const pending = Promise.all([this.leases.initialize(), this.actions.initialize(), this.questions.initialize()]).then(() => undefined);
         this.#initializePromise = pending;
         try { await pending; }
         catch (error) {
@@ -130,7 +133,7 @@ export class McpAppRuntime {
         await this.initialize();
         const retained = new Set(records.filter((record) => record.status !== "disabled")
             .map((record) => record.ctxId));
-        const ids = new Set([...await this.leases.contextIds(), ...await this.actions.contextIds()]);
+        const ids = new Set([...await this.leases.contextIds(), ...await this.actions.contextIds(), ...this.questions.contextIds()]);
         for (const ctxId of ids) if (!retained.has(ctxId)) {
             await this.revokeContext(ctxId);
             this.#pendingContextCleanup.delete(ctxId);
@@ -177,6 +180,7 @@ export class McpAppRuntime {
         this.presence.revokeContext(ctxId);
         await this.leases.revokeContext(ctxId);
         await this.actions.revokeContext(ctxId);
+        await this.questions.revokeContext(ctxId);
     }
 
     async revokeInstance(instance: string): Promise<void> {
@@ -184,5 +188,6 @@ export class McpAppRuntime {
         this.presence.revokeInstance(instance);
         await this.leases.revokeInstance(instance);
         await this.actions.revokeInstance(instance);
+        await this.questions.revokeInstance(instance);
     }
 }

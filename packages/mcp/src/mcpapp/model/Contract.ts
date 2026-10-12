@@ -4,6 +4,7 @@ export interface McpAppSnapshot {
     ctxId: string;
     instance: string;
     cursor: number;
+    questionRevision?: number;
     agentBusy: boolean;
     presentation: McpAppPresentation;
     modelContext: McpAppHostModelContext;
@@ -110,7 +111,8 @@ export interface McpAppReentryView {
 export type McpAppActionOperation =
     | "task-pause" | "task-resume" | "task-cancel"
     | "approval-approve" | "approval-deny"
-    | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop";
+    | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop"
+    | "question-answer-text" | "question-answer-choice";
 
 export interface McpAppResolvedAction {
     itemId: string;

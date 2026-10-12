@@ -28,6 +28,12 @@ export function installMcpAppAction(
                 decision: action.actionId === "approve" ? "approve" : "deny",
                 decidedBy: "web",
             });
+        } else if (action.actionId.startsWith("question-answer-")) {
+            // Questions are MCP App-owned; the enclosing MCP endpoint commits
+            // their answer only after this reviewed and audited Execute.
+            signal?.throwIfAborted();
+            return { status: "applied", itemId: action.itemId,
+                actionId: action.actionId, input: action.input } as JsonValue;
         } else if (action.actionId.startsWith("goal-")) {
             if (action.expectedRevision === undefined) throw denied("Goal revision is required.");
             const goal = await api.task.goal.read(ctxId);
@@ -63,19 +69,22 @@ export function installMcpAppAction(
     });
 }
 
-function readAction(value: JsonValue): { itemId: string; actionId: string; expectedRevision?: number } {
+function readAction(value: JsonValue): { itemId: string; actionId: string; expectedRevision?: number; input?: string } {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         throw denied("MCP App action input is invalid.");
-    const { itemId, actionId, expectedRevision, requestId } = value;
+    const { itemId, actionId, expectedRevision, requestId, input } = value;
     if (typeof itemId !== "string" || itemId.length === 0 || itemId.length > 256 ||
         typeof requestId !== "string" || requestId.length < 16 || requestId.length > 128 ||
         typeof actionId !== "string" || ![
             "approve", "deny", "task-pause", "task-resume", "task-cancel",
             "goal-pause", "goal-resume", "goal-retry", "goal-stop",
+            "question-answer-text", "question-answer-choice",
         ].includes(actionId) ||
-        (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0)))
+        (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0)) ||
+        (actionId.startsWith("question-answer-") && (typeof input !== "string" || !input.trim() || input.length > 4000)))
         throw denied("MCP App action input is invalid.");
-    return { itemId, actionId, ...(expectedRevision === undefined ? {} : { expectedRevision: Number(expectedRevision) }) };
+    return { itemId, actionId, ...(expectedRevision === undefined ? {} : { expectedRevision: Number(expectedRevision) }),
+        ...(typeof input === "string" ? { input } : {}) };
 }
 
 function denied(message: string) {

@@ -29,6 +29,19 @@ export function AppView() {
 
     useEffect(() => {
         let active = true;
+        const refreshGlobals = () => {
+            if (!active) return;
+            const found = restoreMcpAppSession();
+            if (!found) return;
+            if (sessionRef.current?.ctxId !== found.ctxId) setSnapshot(undefined);
+            sessionRef.current = found;
+            setCtxId(found.ctxId);
+            setSession((previous) => previous?.ctxId === found.ctxId &&
+                previous.token === found.token && previous.liveBaseUrl === found.liveBaseUrl
+                ? previous : found);
+        };
+        window.addEventListener("openai:set_globals", refreshGlobals);
+        refreshGlobals();
         let stopSize: (() => void) | undefined;
         let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
         let currentApp: ConnectedApp | undefined;
@@ -104,6 +117,7 @@ export function AppView() {
             void app.connect().then(() => {
                 if (!active || currentApp !== app) return;
                 setDisplayMode(app.getHostContext()?.displayMode ?? "inline");
+                refreshGlobals();
                 setStatus("connected");
                 stopSize = app.setupSizeChangedNotifications();
             }).catch(() => { if (currentApp === app) retry(); });
@@ -111,6 +125,7 @@ export function AppView() {
         connect();
         return () => {
             active = false;
+            window.removeEventListener("openai:set_globals", refreshGlobals);
             if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
             stopSize?.();
             hostRef.current = undefined;
@@ -126,6 +141,7 @@ export function AppView() {
         setLiveError(undefined);
         void (async () => {
             let cursor = 0;
+            let questionRevision = 0;
             let retries = 0;
             while (!controller.signal.aborted && current) {
                 try {
@@ -133,11 +149,13 @@ export function AppView() {
                         const first = await readMcpAppSnapshot(session, controller.signal);
                         if (!current) return;
                         cursor = first.cursor;
+                        questionRevision = first.questionRevision ?? 0;
                         setSnapshot(first);
                         setLiveError(undefined);
                     }
-                    const update = await watchMcpApp(session, cursor, controller.signal);
+                    const update = await watchMcpApp(session, cursor, controller.signal, questionRevision);
                     if (!current) return;
+                    if (update.snapshot) questionRevision = update.snapshot.questionRevision ?? 0;
                     if (update.snapshot) setSnapshot((previous) =>
                         previous === undefined || update.snapshot!.cursor >= previous.cursor
                             ? update.snapshot : previous,
@@ -237,7 +255,7 @@ export function AppView() {
         })();
     }, [snapshot, session, status]);
 
-    const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => {
+    const act = async (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number], input?: string) => {
         const app = hostRef.current;
         const current = sessionRef.current;
         if (!app || !current || busyAction) return;
@@ -257,11 +275,19 @@ export function AppView() {
                     itemId: item.id,
                     actionId: action.id,
                     requestId: crypto.randomUUID(),
+                    ...(input === undefined ? {} : { input }),
                     ...(action.expectedRevision === undefined ? {} : { expectedRevision: action.expectedRevision }),
                 },
             });
             if (result.isError) throw new Error("Workspace action was rejected.");
-            const value = result.structuredContent as { status?: string } | undefined;
+            const value = result.structuredContent as {
+                status?: string; detached?: boolean; question?: string; answer?: string;
+            } | undefined;
+            if (value?.detached && typeof value.question === "string" && typeof value.answer === "string") {
+                const sent = await app.sendMessage({ role: "user", content: [{ type: "text",
+                    text: `Answer to the pending DevShell question ${item.id}: ${value.question}\n${value.answer}` }] });
+                if (sent?.isError) throw new Error("The answer was recorded, but ChatGPT could not resume the conversation.");
+            }
             if (sessionRef.current?.ctxId !== current.ctxId) return;
             const updated = await readMcpAppSnapshot(current, new AbortController().signal);
             if (sessionRef.current?.ctxId === current.ctxId) {
@@ -316,11 +342,12 @@ export function AppView() {
 function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel }: {
     item: McpAppItem;
     kind: string;
-    onAction?: (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number]) => void;
+    onAction?: (item: McpAppItem, action: NonNullable<McpAppItem["actions"]>[number], input?: string) => void;
     pendingAction?: string;
     busyAction?: string;
     cancel?: () => void;
 }) {
+    const [reply, setReply] = useState("");
     return <section className="workspace-item" data-kind={kind}>
         <div className="workspace-item-head"><strong>{item.title}</strong>{item.badge && <span>{item.badge}</span>}</div>
         {item.summary && <p>{item.summary}</p>}
@@ -331,6 +358,19 @@ function WorkspaceItem({ item, kind, onAction, pendingAction, busyAction, cancel
         {item.actions && item.actions.length > 0 && onAction && <div className="workspace-actions">
             {item.actions.map((action) => {
                 const key = `${item.id}:${action.id}`;
+                if (action.input?.kind === "choice") return <span key={key}>
+                    {action.input.choices.map((choice) => <button key={choice.id} type="button"
+                        disabled={busyAction !== undefined} onClick={() => onAction(item, action, choice.id)}>
+                        {choice.label}
+                    </button>)}
+                </span>;
+                if (action.input?.kind === "text") return <form key={key}
+                    onSubmit={(event) => { event.preventDefault(); if (reply.trim()) onAction(item, action, reply.trim()); }}>
+                    <input aria-label="Answer" value={reply} maxLength={4000}
+                        placeholder={action.input.placeholder ?? ""}
+                        onChange={(event) => setReply(event.target.value)} />
+                    <button type="submit" disabled={busyAction !== undefined || !reply.trim()}>{action.label}</button>
+                </form>;
                 return <span key={key}>
                     <button type="button" disabled={busyAction !== undefined} onClick={() => onAction(item, action)}>
                         {pendingAction === key ? `Confirm ${action.label}` : busyAction === key ? "Applying…" : action.label}

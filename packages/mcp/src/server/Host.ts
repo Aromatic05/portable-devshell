@@ -162,6 +162,8 @@ export class McpHost {
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
                             actions: this.#runtimeState.app.actions,
+                            questions: this.#runtimeState.app.questions,
+                            presence: this.#runtimeState.app.presence,
                             context: this.#contexts,
                             dispatch,
                             instance: instance.name,

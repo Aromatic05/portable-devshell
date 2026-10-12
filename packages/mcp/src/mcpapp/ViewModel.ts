@@ -12,11 +12,14 @@ import {
 import { mcpAppModelContext } from "./ModelContext.js";
 import { projectMcpAppReentry } from "./ReentryView.js";
 import type { McpAppActionStore } from "./ActionStore.js";
+import type { McpAppQuestion, McpAppQuestionStore } from "./Question.js";
 import type { McpAppReentryDirective, McpAppSnapshot, McpAppWorkItem } from "./model/Contract.js";
 
 /** Present authoritative Instance snapshots without retaining another domain state. */
 export function projectMcpAppSnapshot(input: {
     approvals: { approvals: ApprovalRequest[]; lastSeq: number };
+    questions?: McpAppQuestion[];
+    questionRevision?: number;
     ctxId: string;
     goal: { goal: GoalSnapshot | null; lastSeq: number };
     instance: string;
@@ -84,9 +87,12 @@ export function projectMcpAppSnapshot(input: {
         // Each authority captured a cursor before its read. Starting at their
         // minimum means changes racing with any read cannot be missed.
         cursor: Math.min(input.approvals.lastSeq, input.goal.lastSeq, input.todo.lastSeq, input.waits?.lastSeq ?? Number.MAX_SAFE_INTEGER),
+        questionRevision: input.questionRevision ?? 0,
         agentBusy: work.some((item) => item.state === "running"),
         presentation: {
-            ...(approvals[0] === undefined ? {} : {
+            ...((input.questions ?? []).length > 0 ? {
+                primary: questionItem(input.questions![0]!),
+            } : approvals[0] === undefined ? {} : {
                 primary: {
                     kind: "decision",
                     id: approvals[0].approvalId,
@@ -129,6 +135,26 @@ export function projectMcpAppSnapshot(input: {
     return snapshot;
 }
 
+function questionItem(question: McpAppQuestion) {
+    return {
+        kind: "decision" as const,
+        id: question.id,
+        title: "Question for you",
+        detail: question.question,
+        actions: [
+            ...(question.choices.length === 0 ? [] : [{
+                id: "question-answer-choice", label: "Choose", tone: "primary" as const,
+                input: { kind: "choice" as const,
+                    choices: question.choices.map((choice) => ({ id: choice, label: choice })) },
+            }]),
+            ...(question.allowText ? [{
+                id: "question-answer-text", label: "Send reply",
+                input: { kind: "text" as const, placeholder: "Your answer" },
+            }] : []),
+        ],
+    };
+}
+
 /** Reads existing Instance authorities; holds no independent workspace state. */
 export function mcpAppEventAffectsContext(event: InstanceEventRecord, ctxId: string): boolean {
     // These event families are emitted with their owning Context ID. Unknown
@@ -140,7 +166,7 @@ export function mcpAppEventAffectsContext(event: InstanceEventRecord, ctxId: str
     return typeof data.ctxId !== "string" || data.ctxId === ctxId;
 }
 
-export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppActionStore) {
+export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppActionStore, questions?: McpAppQuestionStore) {
     const snapshot = async (instance: string, ctxId: string, workspace?: string) => {
         const task = createTaskTransport(endpoint, instance);
         const approval = createApprovalTransport(endpoint, instance);
@@ -150,18 +176,22 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
         ]);
         return projectMcpAppSnapshot({
             approvals, ctxId, goal, instance, todo, waits, directives,
+            questions: questions?.pending(instance, ctxId), questionRevision: questions?.revision,
             ...(workspace === undefined ? {} : { workspace }),
         });
     };
     const watch = async (
         instance: string, ctxId: string, workspace: string | undefined,
-        cursor: number, signal?: AbortSignal,
+        cursor: number, questionRevision = 0, signal?: AbortSignal,
     ): Promise<{ changed: boolean; cursor: number; snapshot?: McpAppSnapshot }> => {
         if (!Number.isSafeInteger(cursor) || cursor < 0)
             throw new TypeError("MCP App watch cursor must be a non-negative integer.");
         if (signal?.aborted) return { changed: false, cursor };
+        const watcher = new AbortController();
         const stream = await createInstanceRuntimeTransport(endpoint, instance)
             .subscribeEvents(cursor + 1);
+        const questionChanged = questions?.changedSince(questionRevision, watcher.signal)
+            .then((changed) => changed ? "question-changed" as const : "aborted" as const);
         let timer: ReturnType<typeof setTimeout> | undefined;
         let cancel: (() => void) | undefined;
         const interrupted = new Promise<"timeout" | "aborted">((resolve) => {
@@ -170,8 +200,13 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             signal?.addEventListener("abort", cancel, { once: true });
         });
         try {
-            const result = await Promise.race([stream.next(), interrupted]);
+            const result = await Promise.race([stream.next(), interrupted, ...(questionChanged === undefined ? [] : [questionChanged])]);
             if (result === "aborted") return { changed: false, cursor };
+            if (result === "question-changed") {
+                const updated = await snapshot(instance, ctxId, workspace);
+                updated.cursor = Math.max(updated.cursor, cursor);
+                return { changed: true, cursor: updated.cursor, snapshot: updated };
+            }
             if (result === "timeout") {
                 // Time alone can make an Instance Goal due, without an event.
                 // React receives the server's decision, not a local timer.
@@ -194,6 +229,7 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
         } finally {
             if (timer !== undefined) clearTimeout(timer);
             if (cancel !== undefined) signal?.removeEventListener("abort", cancel);
+            watcher.abort();
             stream.close();
         }
     };

@@ -18,9 +18,22 @@ export function readMcpAppSession(result: unknown): McpAppSession | undefined {
     return { ctxId: capability.ctxId, token: capability.token, liveBaseUrl: url.href.replace(/\/+$/u, "") };
 }
 
+/** ChatGPT exposes the full tool result through widget-only metadata. */
 export function restoreMcpAppSession(): McpAppSession | undefined {
-    const openai = (window as Window & { openai?: { widgetState?: { privateContent?: unknown } } }).openai;
-    return readMcpAppSession({ _meta: { "portable-devshell/mcpapp": record(openai?.widgetState?.privateContent)?.portableDevshellMcpApp } });
+    if (typeof window === "undefined") return undefined;
+    const openai = (window as Window & { openai?: {
+        toolResponseMetadata?: unknown;
+        widgetState?: { privateContent?: unknown };
+    } }).openai;
+    const metadata = record(openai?.toolResponseMetadata);
+    const envelope = record(metadata?.mcp_tool_result) ?? record(metadata?.call_tool_result);
+    const fromTool = readMcpAppSession(envelope) ?? readMcpAppSession({
+        _meta: { "portable-devshell/mcpapp": metadata?.["portable-devshell/mcpapp"] },
+    });
+    if (fromTool) return fromTool;
+    return readMcpAppSession({ _meta: {
+        "portable-devshell/mcpapp": record(openai?.widgetState?.privateContent)?.portableDevshellMcpApp,
+    } });
 }
 
 export function saveMcpAppSession(session: McpAppSession): void {

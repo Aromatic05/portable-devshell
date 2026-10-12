@@ -34,3 +34,6 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 .workspace-actions button { background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; font: inherit; font-size: 11px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 7px; padding: 5px 9px; cursor: pointer; }
 .workspace-actions button:disabled { opacity: .4; cursor: default; }
 @media (min-width: 600px) { .workspace { min-height: 280px; padding: 20px 24px; } }
+
+.workspace-actions form { display:flex; flex:1; gap:6px; min-width:200px; }
+.workspace-actions input { flex:1; min-width:0; padding:6px; border-radius:7px; border:1px solid color-mix(in srgb,currentColor 20%,transparent); background:transparent; color:inherit; }

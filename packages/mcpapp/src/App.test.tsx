@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 const host = vi.hoisted(() => ({
     actions: [] as Array<{ name: string; arguments: Record<string, unknown> }>,
     recovery: undefined as undefined | ((request: Record<string, unknown>) => Record<string, unknown>),
+    actionResult: undefined as undefined | Record<string, unknown>,
     sent: [] as unknown[],
     modelContexts: [] as unknown[],
     failModelContext: false,
@@ -29,7 +30,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
             host.actions.push(params);
             if (params.name === "mcpapp_reentry" && host.recovery)
                 return { isError: false, content: [], structuredContent: host.recovery(params.arguments) };
-            return { isError: false, content: [], structuredContent: { status: "applied" } };
+            return { isError: false, content: [], structuredContent: host.actionResult ?? { status: "applied" } };
         }
         async updateModelContext(value: unknown) {
             host.modelContexts.push(value);
@@ -64,6 +65,7 @@ afterEach(async () => {
     host.clients.length = 0;
     host.actions.length = 0;
     host.recovery = undefined;
+    host.actionResult = undefined;
     host.sent.length = 0;
     host.modelContexts.length = 0;
     host.failModelContext = false;
@@ -132,7 +134,7 @@ test("reads live workspace state from private MCP metadata without displaying be
     expect(calls[0]?.url).toContain("/snapshot?ctxId=ctx-live");
     expect(calls[0]?.authorization).toBe("Bearer private-authorization-token");
     expect(calls[0]?.credentials).toBe("omit");
-    expect(calls.some((call) => call.url.includes("/watch?cursor=6&ctxId=ctx-live"))).toBe(true);
+    expect(calls.some((call) => call.url.includes("/watch?cursor=6&qrev=0&ctxId=ctx-live"))).toBe(true);
     await act(async () => { host.clients[0]?.ontoolinput?.({ arguments: { ctxId: "ctx-new" } }); });
     expect(container!.textContent).not.toContain("Approval required");
     expect(container!.textContent).not.toContain("Build portable devshell");
@@ -386,4 +388,88 @@ test("React MCP App reports uncertain Host delivery without replaying a Reentry"
     await act(async () => { await Promise.resolve(); });
     expect(host.actions.filter((call) => call.arguments.action === "claim")).toHaveLength(1);
     expect(host.sent).toHaveLength(1);
+});
+
+
+test("reads complete ChatGPT toolResponseMetadata before the SDK emits a tool-result event", async () => {
+    const previousOpenai = (window as Window & { openai?: unknown }).openai;
+    const token = "private-token-via-global-metadata";
+    const capability = { ctxId: "ctx-globals", token,
+        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    Object.assign(window, { openai: { toolResponseMetadata: {
+        mcp_tool_result: { _meta: { "portable-devshell/mcpapp": capability } },
+    } } });
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+        calls.push(String(url));
+        if (String(url).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+            ctxId: capability.ctxId, instance: "demo", cursor: 12, questionRevision: 3,
+            agentBusy: false, presentation: { primary: { id: "q1", title: "Question for you",
+                detail: "Which release?" }, work: [], background: [] },
+        }), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    try {
+        container = document.createElement("div");
+        document.body.append(container);
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView />); });
+        await vi.waitFor(() => expect(container!.textContent).toContain("Which release?"));
+        expect(calls[0]).toContain("snapshot?ctxId=ctx-globals");
+        expect(calls.some((url) => url.includes("watch?cursor=12&qrev=3&ctxId=ctx-globals"))).toBe(true);
+        expect(container!.textContent).not.toContain(token);
+    } finally { Object.assign(window, { openai: previousOpenai }); }
+});
+
+test("question card sends selected choice and free text through authenticated MCP App action", async () => {
+    const capability = { ctxId: "ctx-question", token: "private-question-test-token",
+        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    let choice = true;
+    globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+            ctxId: capability.ctxId, instance: "demo", cursor: 14, questionRevision: 7,
+            agentBusy: true, presentation: {
+                primary: { id: "question-1", title: "Question for you", detail: "Proceed?",
+                    actions: [{ id: choice ? "question-answer-choice" : "question-answer-text",
+                        label: "Answer", input: choice ? { kind: "choice", choices: [{ id: "Yes", label: "Yes" }] }
+                            : { kind: "text", placeholder: "Your answer" } }] },
+                work: [], background: [],
+            },
+        }), { status: 200 }));
+        return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+    }) as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
+        "portable-devshell/mcpapp": capability,
+    } }); });
+    await vi.waitFor(() => expect(container!.textContent).toContain("Proceed?"));
+    const yes = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Yes")!;
+    await act(async () => { yes.click(); });
+    await vi.waitFor(() => expect(host.actions).toHaveLength(1));
+    expect(host.actions[0]).toEqual({ name: "mcpapp_action", arguments: expect.objectContaining({
+        ctxId: capability.ctxId, itemId: "question-1", actionId: "question-answer-choice", input: "Yes",
+    }) });
+    choice = false;
+    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
+        "portable-devshell/mcpapp": { ...capability, token: "private-question-test-token-new" },
+    } }); });
+    await vi.waitFor(() => expect(container!.querySelector('input[aria-label="Answer"]')).not.toBeNull());
+    const input = container!.querySelector<HTMLInputElement>('input[aria-label="Answer"]')!;
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Keep compatible");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const form = input.closest("form")!;
+    await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    await vi.waitFor(() => expect(host.actions).toHaveLength(2));
+    expect(host.actions[1]?.arguments).toEqual(expect.objectContaining({
+        ctxId: capability.ctxId, itemId: "question-1", actionId: "question-answer-text", input: "Keep compatible",
+    }));
 });

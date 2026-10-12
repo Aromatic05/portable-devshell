@@ -18,6 +18,7 @@ const entry: { file: string; css?: string[] } = candidate;
 export const mcpAppAssetDirectory = join(assetRoot, "assets");
 export const mcpAppStableResourceUri = "ui://portable-devshell/mcpapp/v1.html";
 export const mcpAppLegacyResourceUris: readonly string[] = [
+    "ui://portable-devshell/mcpapp-4c76f732a1682c7b.html",
     "ui://portable-devshell/workspace-651c9d0f1042c493.html",
     "ui://portable-devshell/workspace-98410baf51f694b0.html",
     "ui://portable-devshell/workspace-03c4911b6d185e3c.html",

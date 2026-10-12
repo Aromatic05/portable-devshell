@@ -176,7 +176,8 @@ function withBootstrapPresentation(
 ): ToolDefinition {
     if (
         resourceUri === undefined ||
-        tool.name !== `${bootstrapToolNamespace}_info`
+        tool.name !== `${bootstrapToolNamespace}_info` &&
+        tool.name !== "mcpapp_open" && tool.name !== "mcpapp_ask"
     )
         return tool;
     return {

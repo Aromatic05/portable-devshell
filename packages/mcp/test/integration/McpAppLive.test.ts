@@ -237,7 +237,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
         } },
         view: {
             async snapshot() { throw new Error("Unexpected snapshot"); },
-            async watch(_instance, _ctxId, _workspace, cursor, signal) {
+            async watch(_instance, _ctxId, _workspace, cursor, _questionRevision, signal) {
                 entered();
                 return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
                     complete = () => resolve({ changed: true, cursor: cursor + 1 });
@@ -285,7 +285,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
         } },
         view: {
             async snapshot() { throw new Error('Unexpected snapshot'); },
-            async watch(_instance, ctxId, _workspace, cursor, signal) {
+            async watch(_instance, ctxId, _workspace, cursor, _questionRevision, signal) {
                 if (++count === 2) enter();
                 return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
                     signal?.addEventListener('abort', () => {
