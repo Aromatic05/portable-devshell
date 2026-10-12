@@ -33,6 +33,7 @@ import {
 } from "./testspace/TestspaceReverse.mjs";
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
+import { runTestspaceMailingSmoke } from "./testspace/TestspaceMailingSmoke.mjs";
 import { runTestspaceApprovalSmoke } from "./testspace/TestspaceApprovalSmoke.mjs";
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
 import { runTestspaceInstanceCreateSmoke } from "./testspace/TestspaceInstanceCreateSmoke.mjs";
@@ -138,6 +139,9 @@ switch (command) {
         break;
     case "comment-smoke":
         await commentSmoke();
+        break;
+    case "mailing-smoke":
+        await mailingSmoke();
         break;
     case "approval-smoke":
         await approvalSmoke();
@@ -489,6 +493,19 @@ async function approvalSmoke() {
         workspace: paths.workspace,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function mailingSmoke() {
+    const state = await requireRunningState();
+    const local = await runTestspaceMailingSmoke({
+        endpoint: testspaceUrls(state).mcp,
+        workspace: paths.workspace,
+    });
+    const reverse = await runTestspaceMailingSmoke({
+        endpoint: testspaceUrls(state).reverseMcp,
+        workspace: paths.reverseWorkspace,
+    });
+    process.stdout.write(JSON.stringify({ local, reverse }, null, 2) + "\n");
 }
 
 async function commentSmoke() {

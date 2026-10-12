@@ -101,6 +101,7 @@ test("valid global and instance documents are assembled into canonical config", 
         assert.equal(instance?.mcp.path, "/demo-local/mcp");
         assert.deepEqual(instance?.extensions.model, [
             "artifact",
+            "comment",
             "instance",
             "mcp",
             "secret",

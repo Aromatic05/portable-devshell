@@ -98,7 +98,7 @@ test("testspace instance fixtures use v4 model ACL without retired MCP policy", 
         assert.match(config, /^\[extensions\]$/mu);
         assert.match(
             config,
-            /^model = \["artifact", "instance", "mcp", "secret", "skill"\]$/mu,
+            /^model = \["artifact", "comment", "instance", "mcp", "secret", "skill"\]$/mu,
         );
         assert.doesNotMatch(config, /^\[mcp\.tools\]$/mu);
         assert.doesNotMatch(config, /^groups =/mu);

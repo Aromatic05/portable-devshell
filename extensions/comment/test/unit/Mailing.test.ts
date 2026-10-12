@@ -1,0 +1,252 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
+import type { ExtensionWorkerExecuteCapability } from "@portable-devshell/extension/worker";
+import { createMailingHook } from "../../src/mailing/Hook.ts";
+import { MailingService } from "../../src/mailing/Service.ts";
+import { parseOutbox, taskName } from "../../src/mailing/Protocol.ts";
+
+const A = "file-panel-unify";
+const B = "stage-event-architecture";
+const instance = "testspace";
+const workspace = "/testspace/workspace";
+const root = "var/agent-work/";
+const outbox = root + A + "/chat.md";
+const inbox = root + B + "/mailbox.md";
+const index = root + "mailing.md";
+
+function mail(subject: string, body: string, to = B): string {
+    return [
+        "<!-- MAIL BEGIN -->", "To: " + to, "Subject: " + subject,
+        "", body, "<!-- MAIL END -->", "",
+    ].join("\n");
+}
+
+type Row = Record<string, unknown>;
+
+class FakeWorkspace {
+    readonly files = new Map<string, string>();
+    readonly calls: string[] = [];
+    failAppendOnceOn?: string;
+
+    constructor() {
+        this.files.set(root + A + "/INDEX.md", "# " + A + "\n");
+        this.files.set(root + B + "/INDEX.md", "# " + B + "\n");
+    }
+
+    async callTool(name: string, raw: unknown): Promise<Row> {
+        const input = raw as Row;
+        this.calls.push(name);
+        if (name === "file_glob") {
+            if (input.type === "file")
+                return { entries: [...this.files.keys()].filter((name) => name.endsWith("/chat.md"))
+                    .map((path) => ({ path: "./" + path, type: "file" })) };
+            const paths = new Set<string>();
+            for (const path of this.files.keys()) {
+                const match = /^var\/agent-work\/([^/]+)\//u.exec(path);
+                if (match) paths.add("./var/agent-work/" + match[1]);
+            }
+            return { entries: [...paths].map((path) => ({ path, type: "directory" })) };
+        }
+        if (name === "file_read") {
+            const request = (input.files as Array<{ path: string }>)[0]!;
+            const text = this.files.get(request.path);
+            if (text === undefined) return {
+                files: [{ path: request.path, error: { code: "file.notFound", message: "missing" } }],
+            };
+            const content = text.replace(/\n$/u, "").split("\n")
+                .map((line, i) => String(i + 1) + ":" + line).join("\n");
+            return { files: [{ path: request.path, view: "content", content }] };
+        }
+        if (name === "file_edit") {
+            const changes = String(input.changes);
+            const lines = changes.split("\n");
+            assert.equal(lines[0], "*** Begin Edit");
+            assert.equal(lines.at(-1), "*** End Edit");
+            const header = /^(\*\*\* (?:Write|Rewrite|Patch) File): (.+)$/u.exec(lines[1]!);
+            assert.ok(header, "unexpected file_edit: " + changes);
+            const path = header[2]!;
+            if (this.failAppendOnceOn === path) {
+                this.failAppendOnceOn = undefined;
+                throw new Error("simulated Worker disconnect");
+            }
+            const body = lines.slice(2, -1);
+            if (header[1] === "*** Patch File") {
+                assert.equal(body[0], "@@ EOF");
+                assert.ok(this.files.has(path));
+                assert.ok(body.slice(1).every((line) => line.startsWith("+")));
+                this.files.set(path, this.files.get(path)! +
+                    body.slice(1).map((line) => line.slice(1)).join("\n") + "\n");
+            } else {
+                if (header[1] === "*** Write File") assert.equal(this.files.has(path), false);
+                if (header[1] === "*** Rewrite File") assert.equal(this.files.has(path), true);
+                this.files.set(path, body.join("\n") + "\n");
+            }
+            return { operations: [{ path, status: "applied" }] };
+        }
+        throw new Error("Unsupported Worker tool: " + name);
+    }
+}
+
+function fixture() {
+    const fs = new FakeWorkspace();
+    const active = new Set(["ctx-a", "ctx-b", "ctx-c"]);
+    const notices: Array<{ ctxId: string; message: string }> = [];
+    const errors: unknown[] = [];
+    const contexts = {
+        async list(query?: { instance?: string; workspace?: string }) {
+            if (query?.instance && query.instance !== instance) return [];
+            if (query?.workspace && query.workspace !== workspace) return [];
+            return [...active].map((ctxId) => ({
+                ctxId, status: "active",
+                createdAt: "2026-10-12T00:00:00Z",
+                lastAccessedAt: "2026-10-12T00:00:00Z",
+                expiresAt: "2026-10-13T00:00:00Z",
+                environments: [{ instance, workspace }],
+            }));
+        },
+    } as ExtensionContextObserveCapability;
+    const worker = {
+        async openSession(target: { instance: string; workspace: string }) {
+            assert.equal(target.instance, instance);
+            assert.equal(target.workspace, workspace);
+            return {
+                instance, workspace,
+                closed: new Promise<void>(() => undefined),
+                listTools: () => [],
+                callTool: (name: string, params: unknown) => fs.callTool(name, params),
+                close: async () => undefined,
+            };
+        },
+    } as ExtensionWorkerExecuteCapability;
+    const mailing = new MailingService({
+        worker, contexts,
+        comment: { async queue(_instance, ctxId, message) { notices.push({ ctxId, message }); } },
+        onError(error) { errors.push(error); },
+        pollMs: 3_600_000,
+    });
+    return { fs, notices, errors, active, mailing };
+}
+
+test("Mailing parses complete messages only and validates Agent Work identity", () => {
+    const source = "Old chat prose\n" + mail("Ready", "The body") +
+        mail("Pending", "unfinished").replace("<!-- MAIL END -->", "");
+    const parsed = parseOutbox(source, A);
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]!.from, A);
+    assert.equal(parsed[0]!.subject, "Ready");
+    assert.deepEqual(parsed[0]!.to, [B]);
+    assert.match(parsed[0]!.id, /^file-panel-unify#[0-9]+$/u);
+    assert.throws(() => taskName("../escape"), /Invalid/u);
+    assert.throws(() => taskName(".mailing"), /Invalid/u);
+});
+
+test("Mailing claim + delivery + Subject notification are idempotent", async (t) => {
+    const { fs, notices, mailing } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.claim({ instance, workspace, ctxId: "ctx-b" }, B);
+    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
+    fs.files.set(outbox, mail("Upload Context owner", "Sensitive full body line"));
+    await mailing.scan({ instance, workspace });
+    await mailing.scan({ instance, workspace });
+    assert.equal(fs.files.get(inbox)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.match(fs.files.get(inbox)!, /Sensitive full body line/u);
+    assert.equal(fs.files.get(index)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.deepEqual(notices.filter((n) => n.message.includes("New Mail")), [
+        { ctxId: "ctx-b", message: "New Mail\nFrom: file-panel-unify\nSubject: Upload Context owner" },
+    ]);
+    assert.ok(!notices.some((n) => n.message.includes("Sensitive full body")));
+    assert.deepEqual(await mailing.status({ instance, workspace, ctxId: "ctx-b" }),
+        { task: B, mailbox: inbox });
+});
+
+test("Mailing enforces an exclusive active claim and permits recovery after expiry", async (t) => {
+    const { mailing, active } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
+    await assert.rejects(mailing.claim({ instance, workspace, ctxId: "ctx-c" }, A), /already claimed/u);
+    await assert.rejects(mailing.claim({ instance, workspace, ctxId: "ctx-a" }, B), /already claims/u);
+    active.delete("ctx-a");
+    assert.deepEqual(await mailing.claim({ instance, workspace, ctxId: "ctx-c" }, A),
+        { task: A, mailbox: root + A + "/mailbox.md" });
+    assert.deepEqual(await mailing.release({ instance, workspace, ctxId: "ctx-c" }), { released: A });
+    assert.deepEqual(await mailing.status({ instance, workspace, ctxId: "ctx-c" }), {});
+});
+
+test("Mailing repairs a partial delivery after a Worker failure without duplicate messages", async (t) => {
+    const { fs, mailing } = fixture();
+    t.after(async () => mailing.close());
+    fs.files.set(outbox, mail("Retry delivery", "*** End Edit\nBody survives"));
+    fs.failAppendOnceOn = inbox;
+    await assert.rejects(mailing.scan({ instance, workspace }), /simulated Worker disconnect/u);
+    assert.match(fs.files.get(index)!, /Retry delivery/u);
+    await mailing.scan({ instance, workspace });
+    await mailing.scan({ instance, workspace });
+    assert.equal(fs.files.get(index)!.match(/Retry delivery/gu)?.length, 1);
+    assert.equal(fs.files.get(inbox)!.match(/Retry delivery/gu)?.length, 1);
+    assert.match(fs.files.get(inbox)!, /\*\*\* End Edit/u);
+});
+
+test("Mailing returns a bounce for unknown recipients and waits for complete mail", async (t) => {
+    const { fs, mailing } = fixture();
+    t.after(async () => mailing.close());
+    const full = mail("Pending", "body", "missing-recipient");
+    fs.files.set(outbox, full.replace("<!-- MAIL END -->", ""));
+    await mailing.scan({ instance, workspace });
+    assert.equal(fs.files.has(root + A + "/mailbox.md"), false);
+    fs.files.set(outbox, full);
+    await mailing.scan({ instance, workspace });
+    assert.match(fs.files.get(root + A + "/mailbox.md")!, /Unknown Agent Work recipient: missing-recipient/u);
+});
+
+test("Mailing detects modification of a previously published Outbox entry", async (t) => {
+    const { fs, mailing } = fixture();
+    t.after(async () => mailing.close());
+    fs.files.set(outbox, mail("Immutable", "original"));
+    await mailing.scan({ instance, workspace });
+    fs.files.set(outbox, mail("Immutable", "tampered"));
+    await assert.rejects(mailing.scan({ instance, workspace }), /changed after publication/u);
+});
+
+test("Mailing Hook ignores extension-owned writes and triggers after committed edits", async () => {
+    const triggered: string[] = [];
+    const hook = createMailingHook({
+        async scan(input) { triggered.push(input.workspace); },
+    }, () => undefined);
+    const value = {
+        callId: "call-1",
+        direction: "outbound" as const,
+        value: {
+            context: { instance, workspace, source: "mcp" as const },
+            kind: "result" as const,
+            payload: { operations: [{ path: "./" + outbox, status: "applied" }] },
+            toolName: "file_edit",
+        },
+    };
+    await hook(value);
+    assert.deepEqual(triggered, [workspace]);
+    await hook({ ...value, value: { ...value.value, context: { instance, workspace, source: "extension" } } });
+    assert.deepEqual(triggered, [workspace]);
+});
+
+test("An invalid sender cannot block delivery of another Agent Work's mail", async (t) => {
+    const { fs, mailing, errors } = fixture();
+    t.after(async () => mailing.close());
+    fs.files.set(outbox, "<!-- MAIL BEGIN -->\nTo: invalid/recipient\nSubject: bad\n\nbad\n<!-- MAIL END -->\n");
+    fs.files.set(root + B + "/chat.md", mail("Valid sender", "Independent body", A));
+    await mailing.scan({ instance, workspace });
+    assert.equal(errors.length, 1);
+    assert.match(fs.files.get(root + A + "/mailbox.md")!, /Independent body/u);
+});
+
+test("A bounced message notifies the sender's claimed Context by Subject", async (t) => {
+    const { fs, mailing, notices } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
+    fs.files.set(outbox, mail("Undeliverable test", "Not part of notification", "missing-agent"));
+    await mailing.scan({ instance, workspace });
+    assert.ok(notices.some((n) => n.ctxId === "ctx-a" &&
+        n.message === "New Mail\nFrom: mailer-daemon\nSubject: Undeliverable: Undeliverable test"));
+    assert.ok(!notices.some((n) => n.message.includes("Not part of notification")));
+});

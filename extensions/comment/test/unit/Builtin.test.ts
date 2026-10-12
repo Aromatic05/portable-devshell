@@ -24,6 +24,7 @@ test("Comment Extension declares stable ToolCall hook priorities", () => {
         { hook: "501-todo-invalid", id: "todo-invalid" },
         { hook: "502-tool-advice", id: "tool-advice" },
         { hook: "510-comment-delivery", id: "comment-delivery" },
+        { hook: "520-mailing-trigger", id: "mailing-trigger" },
     ]);
 });
 
@@ -60,6 +61,12 @@ test("Comment Extension activates from observe and event-publish capabilities wi
             instanceEventPublish: {
                 async appendEvent() {},
             },
+            contextObserve: {
+                async list() { return []; },
+            },
+            workerExecute: {
+                async openSession() { throw new Error("unused Worker"); },
+            },
         },
         paths: {
             codeDirectory: "/comment/code",
@@ -67,6 +74,7 @@ test("Comment Extension activates from observe and event-publish capabilities wi
             runtimeDirectory: "/comment/runtime",
             stateDirectory: "/tmp/comment-control/extensions/state/comment",
         },
+        logger: { error() {}, warn() {}, info() {}, debug() {} },
         register(point: { id: string }, id: string, binding: unknown) {
             registrations.push({ binding, id, pointId: point.id });
         },
@@ -74,7 +82,7 @@ test("Comment Extension activates from observe and event-publish capabilities wi
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 12);
+    assert.equal(registrations.length, 15);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
@@ -83,6 +91,9 @@ test("Comment Extension activates from observe and event-publish capabilities wi
             { id: "comment-delivery", pointId: "toolcall.rewrite" },
             { id: "tool-advice", pointId: "toolcall.rewrite" },
             { id: "todo-invalid", pointId: "toolcall.rewrite" },
+            { id: "mailing-trigger", pointId: "toolcall.rewrite" },
+            { id: "mail", pointId: "cli.model-commands" },
+            { id: "mail", pointId: "cli.native-commands" },
             { id: "message-subscribe", pointId: "control.streams" },
             { id: "context-message-list", pointId: "control.routes" },
             { id: "context-message-queue", pointId: "control.routes" },

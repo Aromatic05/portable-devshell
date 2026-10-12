@@ -351,6 +351,7 @@ test("model Extension allowlist defaults to the installed builtin model surfaces
     });
     assert.deepEqual(normalized.extensions.model, [
         "artifact",
+        "comment",
         "instance",
         "mcp",
         "secret",
