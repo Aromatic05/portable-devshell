@@ -724,8 +724,10 @@ if [ "$runtime_restore_control" -eq 1 ]; then
     runtime_was_stopped=1
 fi
 
-if [ "$migration_required" -eq 1 ]; then
-    detail "生成旧持久状态快照，用于数据库迁移和候选启动失败后的回滚"
+if [ -n "$current_cli" ] || [ "$migration_required" -eq 1 ]; then
+    # New Extension generations can update their Host Databases on startup
+    # even when the Control/Audit schema is already current.
+    detail "生成旧持久状态快照，用于候选扩展迁移或启动失败后的完整回滚"
     if ! snapshot_persistent_state; then
         echo "持久状态快照不完整；取消升级。" >&2
         exit 1
@@ -790,6 +792,11 @@ if [ "$migration_required" -eq 1 ]; then
     fi
     migration_committed=1
     detail "Persistent migration 已完成；旧数据快照保留至 Control/Instance 验收结束"
+fi
+if [ "$persistent_backup_ready" -eq 1 ]; then
+    # The candidate may now mutate Extension state without an explicit
+    # central schema migration. Treat those writes as requiring data rollback.
+    migration_committed=1
 fi
 if [ "$runtime_restore_control" -eq 1 ]; then
     candidate_control_restore_attempted=1

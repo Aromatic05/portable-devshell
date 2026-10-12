@@ -1116,7 +1116,7 @@ test(
 );
 
 test(
-    "Unix release installer never downgrades after candidate instances may access persistent state",
+    "Unix release installer restores the previous version on instance failure with no explicit schema migration",
     {
         skip: process.platform === "win32",
     },
@@ -1163,6 +1163,8 @@ test(
                 resolve(installRoot, "versions", "9.8.7-instance-old"),
                 devshellHome,
             );
+            const persistentMarker = resolve(devshellHome, "data-before-upgrade.txt");
+            await writeFile(persistentMarker, "original-state\n");
             await writeTransactionalReleaseFixture({
                 app,
                 failInstanceRestore: true,
@@ -1182,28 +1184,30 @@ test(
                 0,
                 `${failed.stdout}${failed.stderr}`,
             );
-            assert.match(failed.stderr, /禁止自动降级/u);
+            assert.match(failed.stderr, /恢复旧程序及持久状态/u);
             const current = JSON.parse(
                 await readFile(
                     resolve(installRoot, "current", "package.json"),
                     "utf8",
                 ),
             );
-            assert.equal(current.version, "9.8.8-instance-new");
-            assert.deepEqual(
-                (await readFile(runtimeLog, "utf8")).trim().split("\n"),
-                [
-                    "stop",
-                    "start",
-                    "instance:ready-local",
-                    "instance:starting-ssh",
-                    "instance:stale-local",
-                ],
-            );
+            assert.equal(current.version, "9.8.7-instance-old");
+            assert.equal(await readFile(persistentMarker, "utf8"), "original-state\n");
+            const runtimeEvents = (await readFile(runtimeLog, "utf8"))
+                .trim().split("\n");
+            assert.deepEqual(runtimeEvents.slice(0, 5), [
+                "stop",
+                "start",
+                "instance:ready-local",
+                "instance:starting-ssh",
+                "instance:stale-local",
+            ]);
+            assert.ok(runtimeEvents.slice(5).includes("stop"));
+            assert.ok(runtimeEvents.slice(5).includes("start"));
             const workerBackups = (await readdir(devshellHome)).filter((name) =>
                 name.startsWith(".install-worker-backup-"),
             );
-            assert.equal(workerBackups.length, 1);
+            assert.equal(workerBackups.length, 0);
         } finally {
             oldControl?.kill("SIGKILL");
             await rm(root, { force: true, recursive: true });
@@ -1400,7 +1404,7 @@ async function writeTransactionalReleaseFixture({
                 : ["else if (command === 'start') record('start');"]),
             ...(failInstanceRestore
                 ? [
-                      "else if (command === 'instance' && process.argv[3] === 'start') { record(`instance:${process.argv[4]}`); if (process.argv[4] === 'ready-local') { process.stderr.write('instance restore failure\\n'); process.exit(1); } }",
+                      "else if (command === 'instance' && process.argv[3] === 'start') { record(`instance:${process.argv[4]}`); if (process.argv[4] === 'ready-local') { if (process.env.PORTABLE_DEVSHELL_TEST_LIVE_HOME) appendFileSync(`${process.env.PORTABLE_DEVSHELL_TEST_LIVE_HOME}/data-before-upgrade.txt`, 'candidate-write\\n'); process.stderr.write('instance restore failure\\n'); process.exit(1); } }",
                   ]
                 : [
                       "else if (command === 'instance' && process.argv[3] === 'start') record(`instance:${process.argv[4]}`);",
