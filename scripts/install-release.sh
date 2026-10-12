@@ -563,6 +563,9 @@ current_link="$install_root/current"
 command_link="$bin_directory/devshell"
 worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
+persistent_backup_directory="$install_root/.persistent-backup-$version-$$"
+extension_data_directory="$data_home/portable-devshell/extension-data"
+persistent_backup_ready=0
 application_transaction_active=0
 worker_transaction_active=0
 migration_committed=0
@@ -576,6 +579,36 @@ if [ -e "$version_directory" ] || [ -L "$version_directory" ]; then
     previous_version_present=1
 fi
 
+snapshot_persistent_state() {
+    case "$devshell_home" in ''|/|"$home") echo "Unsafe persistent state root." >&2; return 1 ;; esac
+    case "$extension_data_directory" in ''|/|"$home") echo "Unsafe Extension data directory." >&2; return 1 ;; esac
+    mkdir -m 700 "$persistent_backup_directory" || return 1
+    if [ -d "$devshell_home" ]; then
+        cp -pR "$devshell_home" "$persistent_backup_directory/devshell" || return 1
+        : > "$persistent_backup_directory/had-devshell"
+    fi
+    if [ -d "$extension_data_directory" ]; then
+        cp -pR "$extension_data_directory" "$persistent_backup_directory/extension-data" || return 1
+        : > "$persistent_backup_directory/had-extension-data"
+    fi
+    persistent_backup_ready=1
+}
+
+restore_persistent_state() {
+    if [ "$persistent_backup_ready" -ne 1 ]; then
+        echo "No complete persistent state snapshot; cannot restore." >&2
+        return 1
+    fi
+    rm -rf "$devshell_home" || return 1
+    if [ -f "$persistent_backup_directory/had-devshell" ]; then
+        cp -pR "$persistent_backup_directory/devshell" "$devshell_home" || return 1
+    fi
+    rm -rf "$extension_data_directory" || return 1
+    if [ -f "$persistent_backup_directory/had-extension-data" ]; then
+        cp -pR "$persistent_backup_directory/extension-data" "$extension_data_directory" || return 1
+    fi
+}
+
 cleanup_installation() {
     status=$?
     trap - EXIT HUP INT TERM
@@ -587,18 +620,34 @@ cleanup_installation() {
             status=1
         fi
     fi
-    if [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; then
+    if [ "$rollback_blocked" -eq 0 ] && { [ "$application_transaction_active" -eq 1 ] || [ "$worker_transaction_active" -eq 1 ]; }; then
         if [ "$rollback_blocked" -eq 0 ] && ! rollback_installation; then
             echo "安装回滚未完整完成；备份目录已保留以便人工恢复。" >&2
             status=1
+            rollback_blocked=1
         fi
     fi
-    if [ "$status" -ne 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ] && [ "$application_transaction_active" -eq 0 ] && [ "$worker_transaction_active" -eq 0 ]; then
+    if [ "$status" -ne 0 ] && [ "$migration_committed" -eq 1 ] && [ "$rollback_blocked" -eq 0 ]; then
+        if restore_persistent_state; then
+            migration_committed=0
+            detail "持久化数据、数据库 Schema 已恢复为旧版本"
+        else
+            echo "持久状态回滚失败；快照保留：$persistent_backup_directory" >&2
+            rollback_blocked=1
+            status=1
+        fi
+    fi
+    if [ "$status" -ne 0 ] && [ "$rollback_blocked" -eq 0 ] && [ "${runtime_was_stopped:-0}" -eq 1 ] && [ "${runtime_restore_control:-0}" -eq 1 ] && [ "$application_transaction_active" -eq 0 ] && [ "$worker_transaction_active" -eq 0 ]; then
         if ! restore_installed_runtime "$current_cli"; then
             echo "安装失败后未能恢复原 control/instance 运行态。" >&2
             status=1
         fi
         runtime_was_stopped=0
+    fi
+    if [ "$rollback_blocked" -eq 0 ]; then
+        rm -rf "$persistent_backup_directory"
+    elif [ -d "$persistent_backup_directory" ]; then
+        echo "持久状态快照已保留：$persistent_backup_directory" >&2
     fi
     rm -rf "$temporary"
     exit "$status"
@@ -641,7 +690,7 @@ if [ "$candidate_preflight" -eq 1 ]; then
         detail "候选版本需要 persistent migration"
     fi
     if [ "$rollback_feasible" -eq 0 ]; then
-        detail "Compatibility preflight：提交 persistent migration 后不可自动降级"
+        detail "Compatibility preflight：升级前需要创建状态快照以支持回滚"
     fi
 fi
 
@@ -673,6 +722,14 @@ if ! stop_installed_control "$current_cli"; then
 fi
 if [ "$runtime_restore_control" -eq 1 ]; then
     runtime_was_stopped=1
+fi
+
+if [ "$migration_required" -eq 1 ]; then
+    detail "生成旧持久状态快照，用于数据库迁移和候选启动失败后的回滚"
+    if ! snapshot_persistent_state; then
+        echo "持久状态快照不完整；取消升级。" >&2
+        exit 1
+    fi
 fi
 
 backup_worker_aliases
@@ -726,40 +783,37 @@ if [ "$migration_required" -eq 1 ]; then
     detail "执行候选版本 persistent migration"
     if ! node "$command_link" migrate >/dev/null; then
         echo "候选版本 migration 失败，正在恢复原安装。" >&2
-        rollback_installation
+        # One instance may have migrated before another failed. Restore the
+        # whole pre-upgrade snapshot, not just the application symlink.
+        migration_committed=1
         exit 1
     fi
     migration_committed=1
-    application_transaction_active=0
-    worker_transaction_active=0
-    runtime_was_stopped=0
-    detail "Persistent migration 已提交；后续失败将禁止自动降级"
+    detail "Persistent migration 已完成；旧数据快照保留至 Control/Instance 验收结束"
 fi
 if [ "$runtime_restore_control" -eq 1 ]; then
     candidate_control_restore_attempted=1
 fi
 if ! restore_installed_control "$command_link"; then
-    if [ "$migration_committed" -eq 1 ]; then
-        stop_installed_control "$command_link" >/dev/null 2>&1 || true
-        echo "候选 Control 无法恢复真实运行态；persistent migration 已提交，禁止自动降级。" >&2
-        echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
+    echo "候选 Control 无法恢复真实运行态，正在回滚旧程序及持久状态。" >&2
+    exit 1
+fi
+detail "已安装命令可以正常启动"
+if ! restore_installed_instances "$command_link"; then
+    echo "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复。" >&2
+    if [ "$persistent_backup_ready" -eq 1 ]; then
+        echo "尝试安全停止候选并恢复旧程序及持久状态。" >&2
     else
-        echo "候选 Control 无法恢复真实运行态，正在恢复原安装。" >&2
+        echo "候选实例可能已访问持久状态且没有一致快照；禁止自动降级。" >&2
+        application_transaction_active=0
+        worker_transaction_active=0
+        runtime_was_stopped=0
     fi
     exit 1
 fi
-if [ "$migration_committed" -eq 0 ]; then
-    application_transaction_active=0
-    worker_transaction_active=0
-fi
-detail "已安装命令可以正常启动"
+application_transaction_active=0
+worker_transaction_active=0
 runtime_was_stopped=0
-if ! restore_installed_instances "$command_link"; then
-    echo "新 Control 已恢复，但一个或多个安装前运行的实例无法恢复。" >&2
-    echo "候选实例可能已访问持久状态，禁止自动降级。" >&2
-    echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
-    exit 1
-fi
 rm -rf "$backup_directory" "$worker_backup_directory"
 if [ "$runtime_restore_control" -eq 1 ]; then
     restored_instance_count=$(grep -c . "$runtime_restore_instances" || true)
