@@ -113,6 +113,7 @@ function fixture() {
             assert.equal(target.workspace, workspace);
             return {
                 instance, workspace,
+                environment: { homeDirectory: "/testspace", platform: { arch: "x64", os: "linux" } },
                 closed: new Promise<void>(() => undefined),
                 listTools: () => [],
                 callTool: (name: string, params: unknown) => fs.callTool(name, params),
@@ -224,9 +225,13 @@ test("Mailing Hook ignores extension-owned writes and triggers after committed e
             toolName: "file_edit",
         },
     };
-    await hook(value);
+    const invocation = {
+        signal: new AbortController().signal,
+        requestInterface: async () => undefined,
+    };
+    await hook(value, invocation);
     assert.deepEqual(triggered, [workspace]);
-    await hook({ ...value, value: { ...value.value, context: { instance, workspace, source: "extension" } } });
+    await hook({ ...value, value: { ...value.value, context: { instance, workspace, source: "extension" } } }, invocation);
     assert.deepEqual(triggered, [workspace]);
 });
 

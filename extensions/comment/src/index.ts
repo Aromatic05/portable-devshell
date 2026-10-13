@@ -1,5 +1,4 @@
 import type { ExtensionDatabaseCapability } from "@portable-devshell/extension/database";
-import { nativeCommands, modelCommands } from "@portable-devshell/extension/cli";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,14 +53,12 @@ import {
 import { createMessagePreferenceRouteModule } from "./message/preference/Route.js";
 import { MessagePreferenceStore } from "./message/preference/Store.js";
 import { MessageStore } from "./message/store/MessageStore.js";
-import { migrateMessageDatabase } from "./message/store/MessageStorage.js";
+import { migrateMessageDatabase } from "./message/migration/index.js";
 import { createMessageSubscriptionBinding } from "./message/Route.js";
 import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
-import { MailingService } from "./mailing/Service.js";
-import { createMailingHook } from "./mailing/Hook.js";
-import { executeMailModelCommand, executeMailNativeCommand } from "./mailing/Command.js";
+import { createMailingService, registerMailing, type MailingRuntime } from "./mailing/index.js";
 
 export type CommentControlDecision =
     | { readonly kind: "allow" }
@@ -411,7 +408,7 @@ export class CommentExtension {
 
 interface BuiltinCommentRuntime {
     readonly comment: CommentExtension;
-    readonly mailing: MailingService;
+    readonly mailing: MailingRuntime;
     readonly source: BuiltinCommentInstanceSource;
 }
 
@@ -450,19 +447,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
             "message-preferences.json",
         ),
     });
-    const worker = context.capabilities.workerExecute;
-    const contexts = context.capabilities.contextObserve;
-    if (worker === undefined || contexts === undefined)
-        throw new Error("Comment Mailing requires worker.execute and context.observe capabilities");
-    const mailing = new MailingService({
-        worker,
-        contexts,
-        comment: {
-            queue: async (instance, ctxId, text) => await comment.comment.queue(instance, ctxId, text),
-        },
-        onError: (error) => context.logger.error("Mailing reconciliation failed", {
-            message: error instanceof Error ? error.message : String(error),
-        }),
+    const mailing = createMailingService(context, {
+        queue: async (instance, ctxId, text) => await comment.comment.queue(instance, ctxId, text),
     });
     const gate = createCommentToolCallGate(comment.comment);
     const todoAccess = createCommentTodoAccess(comment.comment);
@@ -489,15 +475,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await source.refresh();
         return await todoInvalid(input, invocation);
     });
-    context.register(rewrite, "mailing-trigger", createMailingHook(mailing, (error) =>
-        context.logger.warn("Mailing trigger failed", { message: String(error) }),
-    ));
-    context.register(modelCommands, "mail", async (argv, invocation) =>
-        await executeMailModelCommand(mailing, argv, invocation),
-    );
-    context.register(nativeCommands, "mail", async (argv, invocation) =>
-        await executeMailNativeCommand(mailing, argv, invocation),
-    );
+    registerMailing(context, mailing);
     registerCommentRoutes(context, source, comment);
     context.register(
         mcpTools,

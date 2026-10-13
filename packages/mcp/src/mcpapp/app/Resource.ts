@@ -33,20 +33,45 @@ export const mcpAppInteractionStableResourceUri = "ui://portable-devshell/mcpapp
 export const mcpAppInteractionResourceUri = `ui://portable-devshell/mcpapp-interaction-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
 export const mcpAppToolCallStableResourceUri = "ui://portable-devshell/mcpapp/toolcall/v1.html";
 export const mcpAppToolCallResourceUri = `ui://portable-devshell/mcpapp-toolcall-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
+// Historical cards may request a content-hashed resource after a server upgrade.
+const hashedWorkspaceUri = /^ui:\/\/portable-devshell\/mcpapp-[0-9a-f]{16}\.html$/u;
+const hashedInteractionUri = /^ui:\/\/portable-devshell\/mcpapp-interaction-[0-9a-f]{16}\.html$/u;
+const hashedToolCallUri = /^ui:\/\/portable-devshell\/mcpapp-toolcall-[0-9a-f]{16}\.html$/u;
+const toolNamePattern = /^[a-zA-Z0-9_.:-]{1,128}$/u;
+
+export const mcpAppIsHashedWorkspaceResourceUri = (uri: string): boolean =>
+    hashedWorkspaceUri.test(uri);
+export const mcpAppIsHashedInteractionResourceUri = (uri: string): boolean =>
+    hashedInteractionUri.test(uri);
+
 /** Distinct URI per tool, served by one immutable JS/CSS bundle. */
 export function mcpAppToolCallResourceUriForTool(toolName: string): string {
-    if (!/^[a-zA-Z0-9_.:-]{1,128}$/u.test(toolName)) return mcpAppToolCallResourceUri;
+    if (!toolNamePattern.test(toolName)) return mcpAppToolCallResourceUri;
     return mcpAppToolCallResourceUri + "?widgetRevision=1&toolName=" + encodeURIComponent(toolName);
 }
 
 /** Resolve only canonical resource variants, never arbitrary query strings. */
 export function mcpAppToolCallToolNameFromUri(uri: string): string | undefined {
-    if (!uri.startsWith(mcpAppToolCallResourceUri + "?")) return undefined;
+    const baseUri = uri.split("?", 1)[0]!;
+    if (!isToolCallBaseUri(baseUri) || !uri.startsWith(baseUri + "?")) return undefined;
     try {
         const name = new URL(uri).searchParams.get("toolName");
-        if (name && mcpAppToolCallResourceUriForTool(name) === uri) return name;
+        if (name && toolNamePattern.test(name) &&
+            uri === baseUri + "?widgetRevision=1&toolName=" + encodeURIComponent(name))
+            return name;
     } catch { /* Unknown resource. */ }
     return undefined;
+}
+
+/** Historical generic cards and per-tool cards share the current presentation bundle. */
+export function mcpAppIsToolCallResourceUri(uri: string): boolean {
+    const baseUri = uri.split("?", 1)[0]!;
+    return isToolCallBaseUri(baseUri) &&
+        (uri === baseUri || mcpAppToolCallToolNameFromUri(uri) !== undefined);
+}
+
+function isToolCallBaseUri(uri: string): boolean {
+    return uri === mcpAppToolCallStableResourceUri || hashedToolCallUri.test(uri);
 }
 export type McpAppView = "workspace" | "interaction" | "toolcall";
 export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris, mcpAppInteractionResourceUri, mcpAppInteractionStableResourceUri, mcpAppToolCallResourceUri, mcpAppToolCallStableResourceUri] as const;

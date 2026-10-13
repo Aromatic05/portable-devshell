@@ -180,7 +180,7 @@ test("update preflight validates current Control Worker and Frame protocol range
     });
 });
 
-test("update preflight rejects a current protocol generation outside the candidate range", async (t) => {
+test("update preflight reports a protocol generation mismatch without blocking an offline replacement", async (t) => {
     const root = await createTestTempDirectory("protocol-update-reject");
     const homeDirectory = join(root, "home");
     const currentApplicationDirectory = join(root, "current");
@@ -191,12 +191,18 @@ test("update preflight rejects a current protocol generation outside the candida
         worker: "1.0.0",
     });
 
-    await assert.rejects(() =>
-        preflightControlUpdate({
-            currentApplicationDirectory,
-            homeDirectory,
-        }),
-    );
+    const result = await preflightControlUpdate({
+        currentApplicationDirectory,
+        homeDirectory,
+    });
+    assert.deepEqual(result.protocols.control, {
+        candidate: CONTROL_PROTOCOL_RANGE,
+        compatible: false,
+        current: { max: "2.0.0", min: "2.0.0" },
+    });
+    assert.equal(result.protocols.frame.compatible, true);
+    assert.equal(result.protocols.worker.compatible, true);
+    assert.deepEqual(result.rollback, { blockers: [], feasible: true });
 });
 
 test("update preflight rejects unsafe semantic protocol components", async (t) => {

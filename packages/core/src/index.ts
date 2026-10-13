@@ -1,4 +1,5 @@
 import { createInstance } from "./instance/index.js";
+import { inspectAuditDatabase, migrateAuditDatabase } from "./audit/Public.js";
 import {
     Instance,
     ReverseConnections,
@@ -10,6 +11,8 @@ import type {
 
 export {
     createInstance,
+    inspectAuditDatabase,
+    migrateAuditDatabase,
     Instance,
     ReverseConnections,
     type ReverseConnectionIdentity,

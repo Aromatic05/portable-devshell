@@ -13,6 +13,9 @@ import {
     mcpAppToolCallResourceUriForTool,
     mcpAppToolCallToolNameFromUri,
     mcpAppToolCallStableResourceUri,
+    mcpAppIsToolCallResourceUri,
+    mcpAppIsHashedWorkspaceResourceUri,
+    mcpAppIsHashedInteractionResourceUri,
 } from "./app/App.js";
 
 export function createMcpAppMcpExtension(
@@ -37,6 +40,7 @@ export function createMcpAppMcpExtension(
                     ...mcpAppLegacyResourceUris,
                 ],
                 app: true,
+                matchesUri: mcpAppIsHashedWorkspaceResourceUri,
                 mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell MCP App",
                 read: () => ({
@@ -48,6 +52,7 @@ export function createMcpAppMcpExtension(
             Object.freeze({
                 aliases: [mcpAppInteractionStableResourceUri],
                 app: true,
+                matchesUri: mcpAppIsHashedInteractionResourceUri,
                 mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell MCP App Interaction",
                 read: () => ({
@@ -59,7 +64,7 @@ export function createMcpAppMcpExtension(
             Object.freeze({
                 aliases: [mcpAppToolCallStableResourceUri],
                 app: true,
-                matchesUri: (uri: string) => mcpAppToolCallToolNameFromUri(uri) !== undefined,
+                matchesUri: mcpAppIsToolCallResourceUri,
                 mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell ToolCall Inline",
                 read: (uri: string) => ({

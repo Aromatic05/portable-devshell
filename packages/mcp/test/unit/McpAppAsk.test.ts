@@ -157,11 +157,28 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
         assert.match(content?.text ?? "", new RegExp('data-tool-name="' + name + '"', "u"));
         assert.match(content?.text ?? "", /<script type="module"/u);
     }
+    const oldWorkspace = "ui://portable-devshell/mcpapp-aaaaaaaaaaaaaaaa.html";
+    const oldInteraction = "ui://portable-devshell/mcpapp-interaction-bbbbbbbbbbbbbbbb.html";
+    const oldToolCall = "ui://portable-devshell/mcpapp-toolcall-cccccccccccccccc.html";
+    for (const [uri, view] of [
+        [oldWorkspace, "workspace"],
+        [oldInteraction, "interaction"],
+        [oldToolCall, "toolcall"],
+    ]) {
+        const content = await extensions.readResource(uri);
+        assert.equal(content?.uri, uri);
+        assert.match(content?.text ?? "", new RegExp('data-mcpapp-view="' + view + '"', "u"));
+    }
+    const oldToolVariant = oldToolCall + "?widgetRevision=1&toolName=file_read";
+    assert.match((await extensions.readResource(oldToolVariant))?.text ?? "", /data-tool-name="file_read"/u);
     for (const bad of [
         toolCall?.uri + "?toolName=file_read",
         toolCall?.uri + "?widgetRevision=2&toolName=file_read",
         toolCall?.uri + "?widgetRevision=1&toolName=file_read&token=secret",
         toolCall?.uri + "?widgetRevision=1&toolName=%3Cscript%3E",
+        oldToolCall + "?widgetRevision=1&toolName=file_read&token=secret",
+        "ui://portable-devshell/mcpapp-toolcall-invalid.html?widgetRevision=1&toolName=file_read",
+        oldWorkspace + "?untrusted=1",
     ]) assert.equal(await extensions.readResource(bad), undefined);
     assert.match(workspaceContent?.text ?? "", /<link rel="stylesheet"/u);
     assert.match(toolCallContent?.text ?? "", /<link rel="stylesheet"/u);
@@ -190,7 +207,7 @@ test("tmux_read does not issue a Live capability for a background transcript pol
     const presented = await f.endpoint.present("tmux_read", { task: { id: "task-1" } }, f.request);
     assert.ok(presented instanceof McpNativeToolResult);
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
-    assert.equal(presented._meta?.["portable-devshell/toolcall"]?.name, "tmux_read");
+    assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "tmux_read" });
     assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
     assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
 });

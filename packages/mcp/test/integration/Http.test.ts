@@ -18,7 +18,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
 import { TestMcpHost as McpHost, type TestMcpHostInstanceConfig } from "../ContextRuntime.ts";
-import { mcpAppResourceUri, mcpAppInteractionResourceUri } from "@portable-devshell/mcp/testing";
+import { mcpAppResourceUri, mcpAppInteractionResourceUri, mcpAppToolCallResourceUri } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig } from "@portable-devshell/mcp";
 
 import {
@@ -124,13 +124,18 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         const listed = await request("resources/list");
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppInteractionResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
+        assert.ok(listed.result?.resources?.some((entry) => entry.uri === mcpAppToolCallResourceUri && entry.mimeType === "text/html;profile=mcp-app"));
         const read = await request("resources/read", { uri: mcpAppResourceUri });
         assert.equal(read.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
-        assert.deepEqual(read.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline", "pip"]);
+        assert.deepEqual(read.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["fullscreen"]);
         const readInline = await request("resources/read", { uri: mcpAppInteractionResourceUri });
         assert.equal(readInline.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
         assert.deepEqual(readInline.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline"]);
         assert.match(readInline.result?.contents?.[0]?.text ?? "", /data-mcpapp-view="interaction"/u);
+        const readToolCall = await request("resources/read", { uri: mcpAppToolCallResourceUri });
+        assert.equal(readToolCall.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
+        assert.deepEqual(readToolCall.result?.contents?.[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline"]);
+        assert.match(readToolCall.result?.contents?.[0]?.text ?? "", /data-mcpapp-view="toolcall"/u);
         const html = read.result?.contents?.[0]?.text ?? "";
         assert.match(html, /<html\b/u);
         assert.equal(html.includes("<script>"), false);
@@ -145,7 +150,8 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         }
         const tools = await request("tools/list");
         const bootstrap = tools.result?.tools?.find((tool) => tool.name === "environ_info");
-        assert.equal(bootstrap?._meta?.ui?.resourceUri, mcpAppResourceUri);
+        assert.equal(bootstrap?._meta?.ui?.resourceUri,
+            mcpAppToolCallResourceUri + "?widgetRevision=1&toolName=environ_info");
         // This minimal HTTP host only registers environ_info. The full MCP
         // catalog's model-facing open/ask bindings are verified separately.
         assert.equal(tools.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);

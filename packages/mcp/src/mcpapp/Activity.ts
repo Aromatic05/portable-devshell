@@ -1,4 +1,5 @@
 import { resolveToolOutput, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
+import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentationText } from "./Presentation.js";
 
 const ACTIVITY_OUTPUT_PAGE_BYTES = 256 * 1024;
 const ACTIVITY_OUTPUT_PAGE_ENTRIES = 32;
@@ -9,7 +10,6 @@ export interface McpAppActivityOutput {
     stderr: string;
     nextSeq?: number;
 }
-
 export interface McpAppActivity {
     callId: string;
     name: string;
@@ -26,15 +26,8 @@ export interface McpAppActivity {
     output?: unknown;
 }
 
-const privateKey = /password|secret|token|credential|authorization|api.?key|private.?key|cookie/iu;
-const privateValue = /((?:password|secret|token|credential|authorization|api[_-]?key|private[_-]?key|cookie)\s*[=:]\s*)([^\s,;"']+|"[^"]*"|'[^']*')/giu;
-const bearer = /(Bearer\s+)[A-Za-z0-9._~+/-]+/giu;
-
 function protect(text: string, limit: number): string {
-    const masked = text
-        .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/giu, "[redacted private key]")
-        .replace(bearer, "$1[redacted]")
-        .replace(privateValue, "$1[redacted]");
+    const masked = redactPresentationText(text);
     return masked.length > limit ? `${masked.slice(0, limit)}\n… [truncated]` : masked;
 }
 
@@ -51,7 +44,9 @@ function safeValue(value: unknown, depth = 0): unknown {
     const data = object(value);
     if (!data) return value;
     return Object.fromEntries(Object.entries(data).slice(0, 24).map(([key, entry]) =>
-        [key, privateKey.test(key) ? "[redacted]" : safeValue(entry, depth + 1)]));
+        [key, isPresentationSecretKey(key) ? "[redacted]" :
+            isPresentationBinaryPayload(key, entry) ? "[binary payload omitted]" :
+                safeValue(entry, depth + 1)]));
 }
 
 function presentationValue(value: unknown, maximum: number): unknown {
@@ -72,9 +67,9 @@ function presentationValue(value: unknown, maximum: number): unknown {
         if (!data) return entry;
         return Object.fromEntries(Object.entries(data).slice(0, 36).map(([key, item]) => {
             remaining -= key.length;
-            if (privateKey.test(key)) return [key, "[redacted]"];
+            if (isPresentationSecretKey(key)) return [key, "[redacted]"];
             // Native image payloads never cross the Live audit boundary.
-            if (key === "data" && typeof item === "string" && item.length > 1_024)
+            if (isPresentationBinaryPayload(key, item))
                 return [key, "[binary payload omitted]"];
             return [key, visit(item, depth + 1)];
         }));

@@ -29,6 +29,7 @@ import {
     mcpAppResourceUri,
     mcpAppInteractionResourceUri,
     mcpAppInteractionStableResourceUri,
+    mcpAppToolCallResourceUri,
     mcpAppStableResourceUri,
 } from "@portable-devshell/mcp/testing";
 import {
@@ -400,6 +401,10 @@ test("Workspace MCP App renders from a versioned URI while keeping the stable re
                 {
                     mimeType: "text/html;profile=mcp-app",
                     uri: mcpAppInteractionResourceUri,
+                },
+                {
+                    mimeType: "text/html;profile=mcp-app",
+                    uri: mcpAppToolCallResourceUri,
                 },
             ],
         );

@@ -40,7 +40,7 @@ test("MCP App constructor undoes CORS middleware if static mounting fails", () =
 });
 
 test("each Live registration stage rolls back prior routes and keeps other instances intact", () => {
-    for (const failAt of [3, 4, 5, 6]) {
+    for (const failAt of [3, 4, 5, 6, 7, 8]) {
         const port = faultingHost(failAt);
         const route = new McpAppRoute(port.http, runtime(), contexts, "https://example.test/prefix");
         const initial = port.routes();
@@ -58,9 +58,10 @@ test("MCP App closes all installed assets and Live routes and remains idempotent
     const route = new McpAppRoute(port.http, runtime(), contexts, "https://example.test/prefix/");
     route.register("first");
     route.register("second");
-    assert.equal(port.routes().length, 10);
+    assert.equal(port.routes().length, 14);
+    assert.equal(port.routes().filter((name) => name.includes("/activity")).length, 4);
     route.unregister("first");
-    assert.equal(port.routes().length, 6);
+    assert.equal(port.routes().length, 8);
     route.close();
     route.close();
     assert.deepEqual(port.routes(), []);

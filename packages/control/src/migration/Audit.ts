@@ -1,10 +1,7 @@
 import { lstat, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import {
-    inspectAuditDatabase,
-    migrateAuditDatabase,
-} from "@portable-devshell/core/audit";
+import { inspectAuditDatabase, migrateAuditDatabase } from "@portable-devshell/core";
 import { ControlPathHome } from "@portable-devshell/shared";
 
 /**
@@ -18,8 +15,7 @@ export async function inspectAuditMigration(
     files: readonly string[];
     required: boolean;
 }> {
-    const root = environment.PORTABLE_DEVSHELL_HOME ||
-        dirname(new ControlPathHome(homeDirectory).controlHomeDir);
+    const root = dirname(new ControlPathHome(homeDirectory, environment).controlHomeDir);
     const files: string[] = [];
     for (const entry of await readdir(root, { withFileTypes: true }).catch(
         (error: NodeJS.ErrnoException) => {
@@ -28,13 +24,14 @@ export async function inspectAuditMigration(
         },
     )) {
         if (!entry.isDirectory() || entry.name === "control") continue;
-        const filePath = join(root, entry.name, "control-worker", "audit.sqlite3");
-        const stats = await lstat(filePath).catch(
-            (error: NodeJS.ErrnoException) => {
-                if (error.code === "ENOENT") return undefined;
-                throw error;
-            },
-        );
+        const workerDirectory = join(root, entry.name, "control-worker");
+        const workerStats = await lstatIfExists(workerDirectory);
+        if (workerStats === undefined) continue;
+        if (!workerStats.isDirectory()) {
+            throw new Error(`Audit directory is not a plain directory: ${workerDirectory}.`);
+        }
+        const filePath = join(workerDirectory, "audit.sqlite3");
+        const stats = await lstatIfExists(filePath);
         if (stats === undefined) continue;
         if (!stats.isFile()) {
             throw new Error(`Audit database is not a plain file: ${filePath}.`);
@@ -59,4 +56,11 @@ export async function migrateAuditState(
         changed = migrateAuditDatabase(file) || changed;
     }
     return changed;
+}
+
+async function lstatIfExists(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+    return await lstat(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+    });
 }

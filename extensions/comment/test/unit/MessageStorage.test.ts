@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { migrateMessageDatabase } from "../../src/message/store/MessageStorage.ts";
+import { migrateMessageDatabase } from "../../src/message/migration/index.ts";
 
 const entries = `
     seq INTEGER PRIMARY KEY AUTOINCREMENT,

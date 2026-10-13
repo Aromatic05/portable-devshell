@@ -16,6 +16,7 @@ import {
 } from "@portable-devshell/shared";
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
 import { MessageStore } from "../../../../../extensions/comment/src/message/store/MessageStore.ts";
+import { databaseConnection, databaseCapability } from "../../../../../extensions/comment/test/helpers/Database.ts";
 import { MessagePreferenceStore } from "../../../../../extensions/comment/src/message/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/transport/endpoint/Socket.ts";
 import { createTuiDomainSession } from "../../../src/app/control/Client.ts";
@@ -563,6 +564,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         const socketPath = createTestIpcPath("tui-context-rpc", root);
         const commentStore = new MessageStore({
             filePath: join(root, "message.sqlite3"),
+            openDatabase: () => databaseConnection(join(root, "message.sqlite3")),
             instanceName: "alpha",
         });
         const messages = new CommentService({
@@ -581,7 +583,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 typeof call.input.message !== "string"
             )
                 continue;
-            commentStore.appendReport({
+            await commentStore.appendReport({
                 callId: call.callId,
                 createdAt: call.completedAt ?? call.startedAt,
                 ctxId: call.ctxId,
@@ -590,6 +592,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         }
         const preferences = new MessagePreferenceStore(
             join(root, "message-preferences.json"),
+            databaseCapability(() => join(root, "message-preferences.sqlite3")),
         );
         const routeCalls = { contextQueue: 0 };
         const server = new ControlSocketServer({
@@ -658,7 +661,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 if (running !== undefined) await running;
                 domains.close();
                 await server.stop();
-                commentStore.close();
+                await commentStore.close();
+                await preferences.close();
                 await rm(root, { force: true, recursive: true });
             },
         };
@@ -923,9 +927,9 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         operations: [
                             {
                                 name: "listMessageEntries",
-                                handle: (request) =>
+                                handle: async (request) =>
                                     ({
-                                        entries: messageStore.list(
+                                        entries: await messageStore.list(
                                             (request.payload ?? {}) as never,
                                         ),
                                         lastSeq: 1,

@@ -45,6 +45,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
                 "artifacts",
                 "assets",
                 "context.observe",
+                "database",
                 "instance.events.publish",
                 "instance.manage",
                 "instance.observe",

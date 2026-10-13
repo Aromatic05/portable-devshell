@@ -1,11 +1,9 @@
 import type { JsonValue } from "@portable-devshell/shared";
+import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentationText } from "./Presentation.js";
 
 export const mcpAppWidgetPayloadKey = "portable-devshell/widgetPayload";
 export const mcpAppWidgetPayloadSchema = "portable-devshell.toolcall.v1";
 
-const secretKey = /password|secret|token|credential|authorization|api.?key|private.?key|cookie|^_meta$/iu;
-const assignment = /((?:password|secret|token|credential|authorization|api[_-]?key|private[_-]?key|cookie)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu;
-const bearer = /(Bearer\s+)[A-Za-z0-9._~+/-]+/giu;
 
 /** A bounded presentation snapshot, independent of Live Context leases.
  * It must never copy native image blobs or credentials into result metadata. */
@@ -14,10 +12,7 @@ function widgetPreview(value: JsonValue, limit: number): JsonValue {
     const read = (entry: JsonValue, depth: number): JsonValue => {
         if (remaining <= 0) return "[truncated]";
         if (typeof entry === "string") {
-            const masked = entry
-                .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/giu, "[redacted private key]")
-                .replace(bearer, "$1[redacted]")
-                .replace(assignment, "$1[redacted]");
+            const masked = redactPresentationText(entry);
             const maximum = Math.min(remaining, 16_000);
             const truncated = masked.length > maximum;
             const text = masked.slice(0, maximum);
@@ -32,9 +27,9 @@ function widgetPreview(value: JsonValue, limit: number): JsonValue {
         for (const [key, item] of Object.entries(entry).slice(0, 50)) {
             if (remaining <= 0) break;
             remaining -= key.length;
-            result[key] = secretKey.test(key) ? "[redacted]" :
-                ((key === "data" || key === "base64") && typeof item === "string" && item.length > 1_024)
-                    ? "[binary payload omitted]" : read(item, depth + 1);
+            result[key] = isPresentationSecretKey(key) ? "[redacted]" :
+                isPresentationBinaryPayload(key, item) ? "[binary payload omitted]" :
+                    read(item, depth + 1);
         }
         return result;
     };
