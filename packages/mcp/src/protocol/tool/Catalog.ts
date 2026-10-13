@@ -39,6 +39,7 @@ export interface McpEndpointCatalogOptions {
     bootstrapPresentationResourceUri?: string;
     interactionPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
+    toolCallPresentationResourceUriForTool?: (toolName: string) => string;
     instanceName: string;
     instanceRoutingEnabled?: boolean;
     source: McpToolSource;
@@ -54,6 +55,7 @@ export class McpEndpointCatalog {
     readonly #bootstrapPresentationResourceUri?: string;
     readonly #interactionPresentationResourceUri?: string;
     readonly #toolCallPresentationResourceUri?: string;
+    readonly #toolCallPresentationResourceUriForTool?: (toolName: string) => string;
     readonly #contextSelector: McpContextSelector;
     readonly #instanceName: string;
     readonly #instanceRoutingEnabled: boolean;
@@ -67,6 +69,7 @@ export class McpEndpointCatalog {
         this.#interactionPresentationResourceUri =
             options.interactionPresentationResourceUri;
         this.#toolCallPresentationResourceUri = options.toolCallPresentationResourceUri;
+        this.#toolCallPresentationResourceUriForTool = options.toolCallPresentationResourceUriForTool;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#instanceName = options.instanceName;
@@ -107,6 +110,7 @@ export class McpEndpointCatalog {
             this.#bootstrapPresentationResourceUri,
             this.#interactionPresentationResourceUri,
             this.#toolCallPresentationResourceUri,
+            this.#toolCallPresentationResourceUriForTool,
         );
         const provenanceTool =
             isBootstrapTool(modelTool.name) || !isModelFacingTool(modelTool)
@@ -184,6 +188,7 @@ function withBootstrapPresentation(
     workspaceResourceUri: string | undefined,
     interactionResourceUri: string | undefined,
     toolCallResourceUri: string | undefined,
+    toolCallResourceUriForTool: ((toolName: string) => string) | undefined,
 ): ToolDefinition {
     if (!isModelFacingTool(tool)) return tool;
     // tmux_read is a background transcript poll. Its output belongs to the
@@ -197,7 +202,8 @@ function withBootstrapPresentation(
         return tool;
     const resourceUri = tool.name === "mcpapp_open" ? workspaceResourceUri
         : tool.name === "mcpapp_ask" ? interactionResourceUri
-        : toolCallResourceUri ?? (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined);
+        : toolCallResourceUriForTool?.(tool.name) ?? toolCallResourceUri ??
+            (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined);
     if (resourceUri === undefined) return tool;
     return {
         ...tool,
@@ -210,7 +216,8 @@ function withBootstrapPresentation(
             },
             "ui/resourceUri": resourceUri,
             "openai/outputTemplate": resourceUri,
-            "openai/widgetAccessible": true,
+            ...(tool.name === "mcpapp_open" || tool.name === "mcpapp_ask"
+                ? { "openai/widgetAccessible": true } : {}),
         },
     };
 }

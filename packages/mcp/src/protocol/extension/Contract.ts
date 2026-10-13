@@ -6,6 +6,8 @@ export interface McpExtensionResourceContent {
 export interface McpExtensionResource {
     readonly aliases?: readonly string[];
     readonly app?: boolean;
+    /** Resolve versioned query variants of this declared resource. */
+    readonly matchesUri?: (requestedUri: string) => boolean;
     readonly mimeType: string;
     readonly name: string;
     readonly uri: string;
@@ -19,6 +21,7 @@ export interface McpExtensionPresentation {
     readonly resourceUri: string;
     readonly interactionResourceUri?: string;
     readonly toolCallResourceUri?: string;
+    readonly toolCallResourceUriForTool?: (toolName: string) => string;
 }
 
 /**

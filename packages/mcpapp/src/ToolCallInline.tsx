@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { useToolCallDisplay } from "./Preferences.js";
-import { ToolCallCard, readToolCallResult, restoreToolCallResult, type ToolCallResult } from "./ToolCall.js";
+import { ToolCallCard, readToolCallResult, readToolCallWidgetPayload,
+    restoreToolCallInput, restoreToolCallResult, type ToolCallResult } from "./ToolCall.js";
 
 declare const __MCPAPP_VERSION__: string;
 
 /** A tool result is immutable. It must not subscribe to the Context's live
  * Workspace or render unrelated approvals, waits or task output. */
 export function ToolCallInline() {
-    const [input, setInput] = useState<unknown>(() => restoreToolInput());
+    const initialName = document.documentElement.getAttribute("data-tool-name") ?? undefined;
+    const [input, setInput] = useState<unknown>(() => restoreToolCallInput());
     const [result, setResult] = useState<ToolCallResult | undefined>(restoreToolCallResult);
     const [enabled, setEnabled] = useToolCallDisplay();
 
@@ -15,14 +17,21 @@ export function ToolCallInline() {
         let active = true;
         let closeSdk: (() => void) | undefined;
         let stopSize: (() => void) | undefined;
-        const refresh = () => {
+        const refresh = (globals?: unknown) => {
             if (!active) return;
-            const restored = restoreToolCallResult();
-            if (restored) setResult(restored);
-            const restoredInput = restoreToolInput();
+            const restored = restoreToolCallResult(globals);
+            if (restored && (!initialName || !restored.name || restored.name === initialName))
+                setResult(restored);
+            const restoredInput = restoreToolCallInput(globals);
             if (restoredInput !== undefined) setInput(restoredInput);
         };
-        window.addEventListener("openai:set_globals", refresh);
+        const onGlobals = (event: Event) => {
+            // ChatGPT can publish new globals on the event before window.openai
+            // is updated. Use the event data itself (as CatDesk does).
+            const detail = record((event as CustomEvent).detail);
+            refresh(detail?.globals);
+        };
+        window.addEventListener("openai:set_globals", onGlobals);
         // ChatGPT exposes the immutable Tool Result as Widget globals. No
         // MCP SDK, Context bearer or Live HTTP stream is needed to show it.
         const fromHost = (event: MessageEvent) => {
@@ -32,9 +41,12 @@ export function ToolCallInline() {
             if (message?.method === "ui/notifications/tool-input" && params)
                 setInput(params.arguments);
             if (message?.method === "ui/notifications/tool-result" && params) {
-                const next = readToolCallResult(params);
-                if (next) setResult(next);
                 refresh();
+                const globalMeta = record(record((window as Window & { openai?: unknown }).openai)?.toolResponseMetadata);
+                if (!readToolCallWidgetPayload(globalMeta)) {
+                    const next = readToolCallResult(params);
+                    if (next) setResult(next);
+                }
             }
         };
         window.addEventListener("message", fromHost);
@@ -62,6 +74,8 @@ export function ToolCallInline() {
                 app.ontoolinput = (value) => { if (active) setInput(value.arguments); };
                 app.ontoolresult = (value) => {
                     if (!active) return;
+                    const input = readToolCallWidgetPayload(record(value._meta))?.input;
+                    if (input !== undefined) setInput(input);
                     const next = readToolCallResult(value);
                     if (next) setResult(next);
                 };
@@ -75,19 +89,14 @@ export function ToolCallInline() {
         return () => {
             active = false;
             stopSize?.();
-            window.removeEventListener("openai:set_globals", refresh);
+            window.removeEventListener("openai:set_globals", onGlobals);
             window.removeEventListener("message", fromHost);
             closeSdk?.();
         };
     }, []);
 
-    return <ToolCallCard input={input} result={result}
+    return <ToolCallCard name={initialName} input={input} result={result}
         enabled={enabled} onEnabledChange={setEnabled} />;
-}
-
-function restoreToolInput(): unknown {
-    const openai = (window as Window & { openai?: { toolInput?: unknown } }).openai;
-    return openai?.toolInput;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

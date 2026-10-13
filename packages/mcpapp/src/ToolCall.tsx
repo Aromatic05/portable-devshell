@@ -7,13 +7,30 @@ import { ToolCallDetails } from "./ToolCallRenderers.js";
 
 export type { ToolCallResult } from "./ToolCallModel.js";
 
+const widgetPayloadKey = "portable-devshell/widgetPayload";
+const widgetPayloadSchema = "portable-devshell.toolcall.v1";
+
+export function readToolCallWidgetPayload(metadata: unknown): {
+    input?: unknown; result: ToolCallResult;
+} | undefined {
+    const payload = record(record(metadata)?.[widgetPayloadKey]);
+    if (payload?.schema !== widgetPayloadSchema ||
+        typeof payload.toolName !== "string" ||
+        !/^[a-zA-Z0-9_.:-]{1,128}$/u.test(payload.toolName)) return undefined;
+    return {
+        ...("input" in payload ? { input: payload.input } : {}),
+        result: { name: payload.toolName, isError: payload.isError === true, output: payload.output },
+    };
+}
+
 /** Native Tool Result is the only source of data for an ordinary Inline card. */
 export function readToolCallResult(raw: unknown): ToolCallResult | undefined {
     const value = record(raw);
     if (!value) return undefined;
     const meta = record(value._meta);
     const identity = record(meta?.["portable-devshell/toolcall"]);
-    if (!("structuredContent" in value) && !("content" in value) && !identity) return undefined;
+    const widget = readToolCallWidgetPayload(meta)?.result;
+    if (!("structuredContent" in value) && !("content" in value) && !identity && !widget) return undefined;
     const contents = Array.isArray(value.content) ? value.content : [];
     const image = contents.map(record).find((part) =>
         part?.type === "image" && typeof part.data === "string" &&
@@ -21,9 +38,10 @@ export function readToolCallResult(raw: unknown): ToolCallResult | undefined {
         /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/u.test(part.mediaType) &&
         /^[A-Za-z0-9+/=\s]+$/u.test(part.data) && part.data.length <= 14_000_000);
     return {
-        ...(typeof identity?.name === "string" ? { name: identity.name } : {}),
-        isError: value.isError === true,
-        ...("structuredContent" in value ? { output: value.structuredContent } :
+        ...(widget?.name ? { name: widget.name } :
+            typeof identity?.name === "string" ? { name: identity.name } : {}),
+        isError: widget?.isError ?? (value.isError === true),
+        ...(widget ? { output: widget.output } : "structuredContent" in value ? { output: value.structuredContent } :
             "content" in value ? { output: value.content } : {}),
         ...(image ? { image: { src: "data:" + image.mediaType + ";base64," +
             (image.data as string).replace(/\s/gu, ""), mediaType: image.mediaType as string } } : {}),
@@ -31,9 +49,11 @@ export function readToolCallResult(raw: unknown): ToolCallResult | undefined {
 }
 
 /** Host globals are read on mount and remount; no persistent Widget state. */
-export function restoreToolCallResult(): ToolCallResult | undefined {
-    const openai = record((window as Window & { openai?: unknown }).openai);
+export function restoreToolCallResult(globals?: unknown): ToolCallResult | undefined {
+    const openai = record(globals ?? (window as Window & { openai?: unknown }).openai);
     const metadata = record(openai?.toolResponseMetadata);
+    const widget = readToolCallWidgetPayload(metadata);
+    if (widget) return widget.result;
     const nested = record(metadata?.mcp_tool_result) ?? record(metadata?.call_tool_result);
     if (nested) return readToolCallResult({
         ...nested,
@@ -45,6 +65,11 @@ export function restoreToolCallResult(): ToolCallResult | undefined {
             ...(openai && "toolOutput" in openai ? { structuredContent: openai.toolOutput } : {}),
         });
     return undefined;
+}
+
+export function restoreToolCallInput(globals?: unknown): unknown {
+    const openai = record(globals ?? (window as Window & { openai?: unknown }).openai);
+    return readToolCallWidgetPayload(openai?.toolResponseMetadata)?.input ?? openai?.toolInput;
 }
 
 export function ToolCallCard({

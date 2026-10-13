@@ -33,6 +33,21 @@ export const mcpAppInteractionStableResourceUri = "ui://portable-devshell/mcpapp
 export const mcpAppInteractionResourceUri = `ui://portable-devshell/mcpapp-interaction-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
 export const mcpAppToolCallStableResourceUri = "ui://portable-devshell/mcpapp/toolcall/v1.html";
 export const mcpAppToolCallResourceUri = `ui://portable-devshell/mcpapp-toolcall-${createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16)}.html`;
+/** Distinct URI per tool, served by one immutable JS/CSS bundle. */
+export function mcpAppToolCallResourceUriForTool(toolName: string): string {
+    if (!/^[a-zA-Z0-9_.:-]{1,128}$/u.test(toolName)) return mcpAppToolCallResourceUri;
+    return mcpAppToolCallResourceUri + "?widgetRevision=1&toolName=" + encodeURIComponent(toolName);
+}
+
+/** Resolve only canonical resource variants, never arbitrary query strings. */
+export function mcpAppToolCallToolNameFromUri(uri: string): string | undefined {
+    if (!uri.startsWith(mcpAppToolCallResourceUri + "?")) return undefined;
+    try {
+        const name = new URL(uri).searchParams.get("toolName");
+        if (name && mcpAppToolCallResourceUriForTool(name) === uri) return name;
+    } catch { /* Unknown resource. */ }
+    return undefined;
+}
 export type McpAppView = "workspace" | "interaction" | "toolcall";
 export const mcpAppResourceUris = [mcpAppResourceUri, mcpAppStableResourceUri, ...mcpAppLegacyResourceUris, mcpAppInteractionResourceUri, mcpAppInteractionStableResourceUri, mcpAppToolCallResourceUri, mcpAppToolCallStableResourceUri] as const;
 
@@ -66,7 +81,9 @@ export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string, view:
     } as const;
 }
 
-export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string, view: McpAppView = "workspace"): string {
+export function mcpAppHtmlForPublicBaseUrl(
+    publicBaseUrl?: string, view: McpAppView = "workspace", toolName?: string,
+): string {
     const entryName = view === "toolcall" ? "toolcall.html" : "index.html";
     const entry = view === "toolcall" ? toolCallEntry : workspaceEntry;
     const assetUrl = (file: string): string => {
@@ -82,7 +99,10 @@ export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string, view: McpAppV
     const styles = entryStyles(entryName)
         .map((file) => `<link rel="stylesheet" href="${escapeAttribute(assetUrl(file))}">`)
         .join("");
-    return `<!doctype html><html lang="en" data-mcpapp-view="${view}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Workspace</title>${styles}</head><body><div id="root"></div><script type="module" crossorigin src="${escapeAttribute(assetUrl(entry.file))}"></script></body></html>`;
+    const toolAttribute = view === "toolcall" && toolName
+        ? " data-tool-name=" + JSON.stringify(escapeAttribute(toolName))
+        : "";
+    return `<!doctype html><html lang="en" data-mcpapp-view="${view}"${toolAttribute}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Workspace</title>${styles}</head><body><div id="root"></div><script type="module" crossorigin src="${escapeAttribute(assetUrl(entry.file))}"></script></body></html>`;
 }
 
 /** Vite may attach CSS to a shared static chunk rather than its HTML entry. */

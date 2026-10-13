@@ -782,6 +782,54 @@ test("ChatGPT static ToolCall restores from response metadata after an iframe re
     }
 });
 
+test("per-tool CatDesk-style metadata restores and updates without Host toolOutput or SDK", async () => {
+    const previousOpenai = (window as Window & { openai?: unknown }).openai;
+    const previousName = document.documentElement.getAttribute("data-tool-name");
+    const payload = (content: string) => ({
+        "portable-devshell/widgetPayload": {
+            schema: "portable-devshell.toolcall.v1",
+            toolName: "file_read", isError: false,
+            input: { files: [{ path: "src/widget.ts" }], purpose: "Read widget code" },
+            output: { files: [{ path: "src/widget.ts", content }] },
+        },
+    });
+    const oldGlobals = { toolResponseMetadata: payload("1:const oldState = true;"),
+        toolOutput: { files: [{ path: "wrong.ts", content: "stale toolOutput" }] } };
+    const newGlobals = { toolResponseMetadata: payload("1:const newState = true;") };
+    document.documentElement.setAttribute("data-tool-name", "file_read");
+    Object.assign(window, { openai: oldGlobals });
+    globalThis.fetch = vi.fn(() => { throw new Error("Static widget must not fetch"); }) as typeof fetch;
+    try {
+        container = document.createElement("div");
+        document.body.append(container);
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView view="toolcall" />); });
+        expect(container.querySelector(".toolcall-description")?.textContent).toContain("src/widget.ts");
+        expect(container.querySelectorAll(".toolcall-compact > *")).toHaveLength(2);
+        expect(host.clients).toHaveLength(0);
+        await act(async () => { container?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click(); });
+        expect(container.querySelector(".tc-code")?.textContent).toContain("oldState");
+        expect(container.textContent).not.toContain("stale toolOutput");
+        await act(async () => { window.dispatchEvent(new CustomEvent("openai:set_globals", {
+            detail: { globals: newGlobals },
+        })); });
+        expect(container.querySelector(".tc-code")?.textContent).toContain("newState");
+        expect(container.querySelector(".tc-code")?.textContent).not.toContain("oldState");
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+        Object.assign(window, { openai: newGlobals });
+        await act(async () => { root?.unmount(); root = undefined; });
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView view="toolcall" />); });
+        expect(container.querySelector(".toolcall-description")?.textContent).toContain("src/widget.ts");
+        expect(container.querySelector(".toolcall-compact")?.getAttribute("aria-expanded")).toBe("false");
+        expect(host.clients).toHaveLength(0);
+    } finally {
+        Object.assign(window, { openai: previousOpenai });
+        if (previousName === null) document.documentElement.removeAttribute("data-tool-name");
+        else document.documentElement.setAttribute("data-tool-name", previousName);
+    }
+});
+
 test("Workspace toggle updates ToolCall presentation preference without changing tool execution", async () => {
     container = document.createElement("div");
     document.body.append(container);

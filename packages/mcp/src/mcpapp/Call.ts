@@ -9,6 +9,7 @@ import { deliverMcpAppReentry } from './Reentry.js';
 import type { McpAppActionOperation } from './model/Contract.js';
 import type { McpAppActionReceipt, McpAppActionStore } from './ActionStore.js';
 import type { createMcpAppViewModel } from './ViewModel.js';
+import { mcpAppToolCallWidgetPayload, mcpAppWidgetPayloadKey } from './WidgetPayload.js';
 
 /** Owns one Instance's MCP App action receipts, reentry and result presentation. */
 export class McpAppCall {
@@ -20,6 +21,7 @@ export class McpAppCall {
     readonly #dispatch: Pick<McpEndpointDispatch, 'callTool'>;
     readonly #view?: ReturnType<typeof createMcpAppViewModel>;
     readonly #ownsPresentation?: (toolName: string) => boolean;
+    readonly #toolCallResourceUriForTool?: (toolName: string) => string;
     readonly #bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
         ctxId: string; token: string; liveBaseUrl?: string;
     } | undefined>;
@@ -34,6 +36,7 @@ export class McpAppCall {
         instance: string;
         view?: ReturnType<typeof createMcpAppViewModel>;
         ownsPresentation?: (toolName: string) => boolean;
+        toolCallResourceUriForTool?: (toolName: string) => string;
         bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
             ctxId: string; token: string; liveBaseUrl?: string;
         } | undefined>;
@@ -46,6 +49,7 @@ export class McpAppCall {
         this.#instance = options.instance;
         this.#view = options.view;
         this.#ownsPresentation = options.ownsPresentation;
+        this.#toolCallResourceUriForTool = options.toolCallResourceUriForTool;
         this.#bootstrap = options.bootstrap;
     }
 
@@ -65,17 +69,29 @@ export class McpAppCall {
     }
 
     async present(toolName: string, result: McpEndpointResult,
-        request: McpEndpointCallContext, _input?: JsonValue): Promise<McpEndpointResult> {
+        request: McpEndpointCallContext, input?: JsonValue): Promise<McpEndpointResult> {
         // Presentation metadata only; the audited ToolCall has already passed
         // through the Instance pipeline. Never add a second execution path.
+        const native = result instanceof McpNativeToolResult;
+        const owned = this.#ownsPresentation?.(toolName) !== false;
+        const output = native ? result.structuredContent : result;
+        const widget = owned && toolName !== "tmux_read" && !toolName.startsWith("mcpapp_");
         const presented = toolName.startsWith("mcpapp_") ? result : new McpNativeToolResult({
-            ...(result instanceof McpNativeToolResult
+            ...(native
                 ? { content: result.content, isError: result.isError } : { content: [] }),
             _meta: {
-                ...(result instanceof McpNativeToolResult ? result._meta : {}),
+                ...(native ? result._meta : {}),
                 "portable-devshell/toolcall": { name: toolName },
+                ...(widget ? {
+                    [mcpAppWidgetPayloadKey]: mcpAppToolCallWidgetPayload(
+                        toolName, input, output, native && result.isError,
+                    ),
+                    ...(this.#toolCallResourceUriForTool === undefined ? {} : {
+                        "openai/outputTemplate": this.#toolCallResourceUriForTool(toolName),
+                    }),
+                } : {}),
             },
-            structuredContent: result instanceof McpNativeToolResult ? result.structuredContent : result,
+            structuredContent: output,
         });
         // Ordinary results are immutable, self-contained Inline widgets. Only
         // explicit Workspace bootstrap tools need an authenticated Live Lease.

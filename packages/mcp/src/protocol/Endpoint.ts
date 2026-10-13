@@ -55,6 +55,8 @@ export class McpEndpoint {
                 this.#extensions.environmentPresentation()?.interactionResourceUri,
             toolCallPresentationResourceUri:
                 this.#extensions.environmentPresentation()?.toolCallResourceUri,
+            toolCallPresentationResourceUriForTool:
+                this.#extensions.environmentPresentation()?.toolCallResourceUriForTool,
             contextSelector,
             instanceName: options.instanceName,
             source: options.toolSource,

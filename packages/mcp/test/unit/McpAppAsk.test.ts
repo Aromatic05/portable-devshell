@@ -14,6 +14,7 @@ function fixture(ownsPresentation?: (toolName: string) => boolean) {
     const instance = "alpha";
     const ctxId = "ctx-one";
     const endpoint = new McpAppCall({ actions, questions, presence, instance,
+        toolCallResourceUriForTool: (name) => "ui://widget/toolcall.html?widgetRevision=1&toolName=" + name,
         ...(ownsPresentation === undefined ? {} : { ownsPresentation }),
         bootstrap: async () => ({ ctxId, token: "private-valid-capability-01", liveBaseUrl: "https://example.test/api/live" }),
         context: { resolve: async () => ({ status: "active", ctxId,
@@ -109,6 +110,8 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
         bootstrapPresentationResourceUri: extensions.environmentPresentation()?.resourceUri,
         interactionPresentationResourceUri: extensions.environmentPresentation()?.interactionResourceUri,
         toolCallPresentationResourceUri: extensions.environmentPresentation()?.toolCallResourceUri,
+        toolCallPresentationResourceUriForTool:
+            extensions.environmentPresentation()?.toolCallResourceUriForTool,
         source: {
             list: () => definitions.map((definition) => ({ scope: "*", definition })),
             get: (_instance, name) => {
@@ -129,10 +132,13 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
             continue;
         }
         const uri = tool.name === "mcpapp_open" ? workspace?.uri
-            : tool.name === "mcpapp_ask" ? interaction?.uri : toolCall?.uri;
+            : tool.name === "mcpapp_ask" ? interaction?.uri
+                : toolCall?.uri + "?widgetRevision=1&toolName=" + tool.name;
         const meta = tool._meta as Record<string, unknown> | undefined;
         assert.equal(meta?.["openai/outputTemplate"], uri);
         assert.equal((meta?.ui as Record<string, unknown>)?.resourceUri, uri);
+        if (tool.name !== "mcpapp_ask" && tool.name !== "mcpapp_open")
+            assert.equal(meta?.["openai/widgetAccessible"], undefined);
     }
     const workspaceContent = await extensions.readResource(workspace!.uri);
     const interactionContent = await extensions.readResource(interaction!.uri);
@@ -143,6 +149,20 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
     assert.match(workspaceContent?.text ?? "", /data-mcpapp-view="workspace"/u);
     assert.match(interactionContent?.text ?? "", /data-mcpapp-view="interaction"/u);
     assert.match(toolCallContent?.text ?? "", /data-mcpapp-view="toolcall"/u);
+    assert.equal(extensions.listResources().length, 3);
+    for (const name of ["bash_run", "file_read", "file_edit", "todo_report"]) {
+        const uri = toolCall?.uri + "?widgetRevision=1&toolName=" + name;
+        const content = await extensions.readResource(uri);
+        assert.equal(content?.uri, uri);
+        assert.match(content?.text ?? "", new RegExp('data-tool-name="' + name + '"', "u"));
+        assert.match(content?.text ?? "", /<script type="module"/u);
+    }
+    for (const bad of [
+        toolCall?.uri + "?toolName=file_read",
+        toolCall?.uri + "?widgetRevision=2&toolName=file_read",
+        toolCall?.uri + "?widgetRevision=1&toolName=file_read&token=secret",
+        toolCall?.uri + "?widgetRevision=1&toolName=%3Cscript%3E",
+    ]) assert.equal(await extensions.readResource(bad), undefined);
     assert.match(workspaceContent?.text ?? "", /<link rel="stylesheet"/u);
     assert.match(toolCallContent?.text ?? "", /<link rel="stylesheet"/u);
     for (const resource of [workspaceContent, interactionContent, toolCallContent])
@@ -156,6 +176,11 @@ test("MCP App tags ordinary ToolCall results for an inline card without altering
     assert.ok(presented instanceof McpNativeToolResult);
     assert.deepEqual(presented.structuredContent, input);
     assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "bash_run" });
+    assert.equal(presented._meta?.["openai/outputTemplate"],
+        "ui://widget/toolcall.html?widgetRevision=1&toolName=bash_run");
+    assert.deepEqual(presented._meta?.["portable-devshell/widgetPayload"], {
+        schema: "portable-devshell.toolcall.v1", toolName: "bash_run", isError: false, output: input,
+    });
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
     assert.equal(JSON.stringify(presented.structuredContent).includes("private-valid-capability-01"), false);
 });
@@ -166,6 +191,8 @@ test("tmux_read does not issue a Live capability for a background transcript pol
     assert.ok(presented instanceof McpNativeToolResult);
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
     assert.equal(presented._meta?.["portable-devshell/toolcall"]?.name, "tmux_read");
+    assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
+    assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
 });
 
 test("A foreign MCP App resource cannot receive the DevShell Live bearer capability", async () => {
@@ -174,4 +201,24 @@ test("A foreign MCP App resource cannot receive the DevShell Live bearer capabil
     assert.ok(presented instanceof McpNativeToolResult);
     assert.deepEqual(presented.structuredContent, { ok: true });
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
+    assert.equal(presented._meta?.["portable-devshell/widgetPayload"], undefined);
+    assert.equal(presented._meta?.["openai/outputTemplate"], undefined);
+});
+
+test("per-tool Widget metadata is self-contained and bounded without changing the original result", async () => {
+    const f = fixture();
+    const input = { command: "printf ready", purpose: "Check output", apiKey: "private-input-key" };
+    const output = { stdout: "ready\n" + "x".repeat(80_000), exitCode: 0,
+        nested: { token: "private-output-token" } };
+    const presented = await f.endpoint.present("bash_run", output, f.request, input);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.deepEqual(presented.structuredContent, output);
+    const payload = presented._meta?.["portable-devshell/widgetPayload"] as Record<string, unknown>;
+    assert.equal(payload.toolName, "bash_run");
+    assert.equal((payload.input as Record<string, unknown>).command, "printf ready");
+    assert.ok(JSON.stringify(payload).length < 37_000);
+    assert.doesNotMatch(JSON.stringify(payload), /private-input-key|private-output-token/u);
+    assert.match(JSON.stringify(payload), /\[redacted\]/u);
+    assert.equal(presented._meta?.["openai/outputTemplate"],
+        "ui://widget/toolcall.html?widgetRevision=1&toolName=bash_run");
 });

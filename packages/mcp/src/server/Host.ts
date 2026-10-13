@@ -150,6 +150,7 @@ export class McpHost {
         if (mountOAuth) this.#oauthUninstall = this.#oauth!.attach(this.#httpServer);
         const mountApp = this.#appRoute !== undefined && !this.#appRoute.has(instance.name);
         const path = instance.path ?? `/${instance.name}/mcp`;
+        const mcpAppExtension = createMcpAppMcpExtension(this.#config.publicBaseUrl);
         try {
             if (mountApp) this.#appRoute?.register(instance.name);
             this.#protocol.registerInstance(
@@ -157,7 +158,7 @@ export class McpHost {
                     auth: instance.auth,
                     context: this.#contexts,
                     contextMode: instance.contextMode ?? "explicit",
-                    extensions: [createMcpAppMcpExtension(this.#config.publicBaseUrl)],
+                    extensions: [mcpAppExtension],
                     instanceName: instance.name,
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
@@ -179,6 +180,7 @@ export class McpHost {
                                     !(typeof ui === "object" && ui !== null && !Array.isArray(ui) &&
                                         typeof ui.resourceUri === "string");
                             },
+                            toolCallResourceUriForTool: mcpAppExtension.presentation!.toolCallResourceUriForTool,
                             ...(this.#runtimeState.app.view === undefined
                                 ? {}
                                 : { view: this.#runtimeState.app.view }),

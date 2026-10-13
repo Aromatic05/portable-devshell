@@ -10,6 +10,8 @@ import {
     mcpAppInteractionStableResourceUri,
     mcpAppStableResourceUri,
     mcpAppToolCallResourceUri,
+    mcpAppToolCallResourceUriForTool,
+    mcpAppToolCallToolNameFromUri,
     mcpAppToolCallStableResourceUri,
 } from "./app/App.js";
 
@@ -26,6 +28,7 @@ export function createMcpAppMcpExtension(
             resourceUri: mcpAppResourceUri,
             interactionResourceUri: mcpAppInteractionResourceUri,
             toolCallResourceUri: mcpAppToolCallResourceUri,
+            toolCallResourceUriForTool: mcpAppToolCallResourceUriForTool,
         },
         resources: [
             Object.freeze({
@@ -56,11 +59,13 @@ export function createMcpAppMcpExtension(
             Object.freeze({
                 aliases: [mcpAppToolCallStableResourceUri],
                 app: true,
+                matchesUri: (uri: string) => mcpAppToolCallToolNameFromUri(uri) !== undefined,
                 mimeType: RESOURCE_MIME_TYPE,
                 name: "portable-devshell ToolCall Inline",
-                read: () => ({
+                read: (uri: string) => ({
                     _meta: toolCallMeta,
-                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl, "toolcall"),
+                    text: mcpAppHtmlForPublicBaseUrl(publicBaseUrl, "toolcall",
+                        mcpAppToolCallToolNameFromUri(uri)),
                 }),
                 uri: mcpAppToolCallResourceUri,
             }),

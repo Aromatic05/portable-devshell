@@ -15,6 +15,7 @@ export class McpExtensionRegistry {
     readonly #extensions: readonly McpExtension[];
     readonly #presentation?: McpExtensionPresentation;
     readonly #resources = new Map<string, ResourceRegistration>();
+    readonly #variants: ResourceRegistration[] = [];
 
     constructor(extensions: readonly McpExtension[] = []) {
         const ids = new Set<string>();
@@ -34,6 +35,7 @@ export class McpExtensionRegistry {
                     extension.id,
                     resource,
                 );
+                if (resource.matchesUri) this.#variants.push({ extensionId: extension.id, resource });
             }
             if (extension.presentation?.bootstrap === "environment") {
                 if (!ownedResourceUris.has(extension.presentation.resourceUri))
@@ -88,7 +90,15 @@ export class McpExtensionRegistry {
     async readResource(
         uri: string,
     ): Promise<McpExtensionResourceReadResult | undefined> {
-        const registration = this.#resources.get(uri);
+        let registration = this.#resources.get(uri);
+        if (!registration) {
+            for (const candidate of this.#variants) {
+                if (!candidate.resource.matchesUri?.(uri)) continue;
+                if (registration !== undefined)
+                    throw new TypeError("MCP resource variant " + uri + " is ambiguous.");
+                registration = candidate;
+            }
+        }
         if (registration === undefined) return undefined;
         const content = await registration.resource.read(uri);
         if (

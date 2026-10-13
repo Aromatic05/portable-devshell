@@ -93,10 +93,18 @@ export async function runTestspaceWorkspaceSmoke({
         assert.match(toolCallView.contents[0]?.text ?? "", /data-mcpapp-view="toolcall"/u);
         const tools = (await client.listTools()).tools;
         const template = (name) => tools.find((tool) => tool.name === name)?._meta?.["openai/outputTemplate"];
-        assert.equal(template("environ_info"), toolCallResource.uri);
+        const widgetFor = (name) => toolCallResource.uri + "?widgetRevision=1&toolName=" + name;
+        assert.equal(template("environ_info"), widgetFor("environ_info"));
         assert.equal(template("mcpapp_open"), workspaceResource.uri);
         assert.equal(template("mcpapp_ask"), inlineResource.uri);
-        assert.equal(template("bash_run"), toolCallResource.uri);
+        assert.equal(template("bash_run"), widgetFor("bash_run"));
+        assert.notEqual(template("bash_run"), template("file_read"));
+        for (const name of ["bash_run", "file_read", "file_glob", "file_edit", "todo_report"]) {
+            assert.equal(template(name), widgetFor(name));
+            const variant = await client.readResource({ uri: widgetFor(name) });
+            assert.match(variant.contents[0]?.text ?? "", new RegExp('data-tool-name="' + name + '"', "u"));
+            assert.equal(variant.contents[0]?.uri, widgetFor(name));
+        }
 
         // Ordinary ToolCalls are static Widgets with no Live Lease. The
         // explicit Workspace still shows their audited target and status.
@@ -109,6 +117,13 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(shell.structuredContent?.exitCode, 0);
         assert.equal(shell._meta?.["portable-devshell/toolcall"]?.name, "bash_run");
         assert.equal(shell._meta?.["portable-devshell/mcpapp"], undefined);
+        assert.equal(shell._meta?.["openai/outputTemplate"], template("bash_run"));
+        const shellWidget = shell._meta?.["portable-devshell/widgetPayload"];
+        assert.equal(shellWidget?.schema, "portable-devshell.toolcall.v1");
+        assert.equal(shellWidget?.toolName, "bash_run");
+        assert.match(shellWidget?.output?.stdout ?? "", /mcpapp-smoke-ok/u);
+        assert.match(shellWidget?.input?.command ?? "", /mcpapp-smoke-ok/u);
+        assert.equal(JSON.stringify(shellWidget).includes(token), false);
         const audited = await fetch(snapshotUrl, { headers: { authorization: `Bearer ${token}` } });
         assert.equal(audited.status, 200);
         const history = (await audited.json()).activity;
@@ -142,6 +157,9 @@ export async function runTestspaceWorkspaceSmoke({
         } });
         assert.equal(read.isError, false);
         assert.match(read.structuredContent?.files?.[0]?.content ?? "", /1:widget-marker/u);
+        assert.equal(read._meta?.["openai/outputTemplate"], template("file_read"));
+        assert.match(read._meta?.["portable-devshell/widgetPayload"]?.output?.files?.[0]?.content ?? "",
+            /1:widget-marker/u);
         const searched = await client.callTool({ name: "file_grep", arguments: {
             ctxId, paths: [sample], pattern: "widget-marker", syntax: "literal",
         } });
@@ -206,6 +224,7 @@ export async function runTestspaceWorkspaceSmoke({
             interactionResourceUri: inlineResource.uri,
             toolCallResourceUri: toolCallResource.uri,
             fullscreenAdvertised: true, auditedToolCall: true, semanticToolsAudited: true,
+            selfContainedToolWidgets: true,
             inlineAskAnswered: true,
         };
     } finally {
