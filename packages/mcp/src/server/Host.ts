@@ -167,6 +167,18 @@ export class McpHost {
                             context: this.#contexts,
                             dispatch,
                             instance: instance.name,
+                            ownsPresentation: (toolName) => {
+                                const definition = this.#config.toolSource.get(instance.name, toolName)?.definition;
+                                const meta = definition?._meta;
+                                if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return true;
+                                const ui = meta.ui;
+                                // The Catalog respects extensions' own MCP App
+                                // resources; those apps must not receive the
+                                // DevShell Context's private Live capability.
+                                return typeof meta["openai/outputTemplate"] !== "string" &&
+                                    !(typeof ui === "object" && ui !== null && !Array.isArray(ui) &&
+                                        typeof ui.resourceUri === "string");
+                            },
                             ...(this.#runtimeState.app.view === undefined
                                 ? {}
                                 : { view: this.#runtimeState.app.view }),

@@ -81,6 +81,32 @@ function preview(value: unknown): string {
     }
 }
 
+/** Format known DevShell results as text, with a bounded generic fallback. */
+function formattedOutput(name: string, value: unknown): string {
+    const output = asRecord(value);
+    if (!output) return typeof value === "string" ? String(safePreview(value)) : preview(value);
+    if ((name === "file_read" || name === "file_grep") && Array.isArray(output.files)) {
+        const files = output.files.slice(0, 10).map((entry) => {
+            const file = asRecord(entry);
+            if (!file) return "";
+            const path = typeof file.path === "string" ? hideCredentials(file.path) : "File";
+            const body = typeof file.content === "string" ? String(safePreview(file.content)) : preview(file);
+            return `${path}\n${body}`;
+        }).filter(Boolean);
+        if (files.length) return files.join("\n\n").slice(0, 8_000);
+    }
+    const textKeys = ["stdout", "stderr", "diff", "patch", "content", "message", "text", "error"]
+        .filter((key) => typeof output[key] === "string" && output[key] !== "");
+    if (textKeys.length) {
+        const fields = textKeys.map((key) => `${key}:\n${String(safePreview(output[key]))}`);
+        const other = Object.fromEntries(Object.entries(output)
+            .filter(([key]) => !textKeys.includes(key)));
+        if (Object.keys(other).length) fields.push(`Other fields:\n${preview(other)}`);
+        return fields.join("\n\n").slice(0, 8_000);
+    }
+    return preview(value);
+}
+
 function argumentSummary(input: unknown): string {
     const args = asRecord(input);
     if (!args) return "";
@@ -118,10 +144,19 @@ function callSummary(result: ToolCallResult | undefined): string {
 function outputExcerpt(result: ToolCallResult | undefined): string {
     if (!result) return "";
     const output = asRecord(result.output);
-    if (!output || result.name !== "bash_run") return "";
-    const text = typeof output.stdout === "string" && output.stdout
-        ? output.stdout : typeof output.stderr === "string" ? output.stderr : "";
-    return hideCredentials(text).trim().slice(0, 180);
+    if (!output) return "";
+    if (Array.isArray(output.files) && output.files.length) {
+        const file = asRecord(output.files[0]);
+        const content = file?.content;
+        const path = typeof file?.path === "string" ? file.path : "";
+        if (typeof content === "string") return hideCredentials(`${path}\n${content}`).trim().slice(0, 300);
+        return `${output.files.length} file${output.files.length === 1 ? "" : "s"}`;
+    }
+    for (const key of ["stdout", "stderr", "diff", "patch", "content", "message", "text", "error"]) {
+        if (typeof output[key] === "string" && output[key])
+            return hideCredentials(output[key]).trim().slice(0, 300);
+    }
+    return typeof output.status === "string" ? output.status : "";
 }
 
 export function ToolCallCard({ input, result, enabled, onEnabledChange }: {
@@ -155,7 +190,7 @@ export function ToolCallCard({ input, result, enabled, onEnabledChange }: {
             {excerpt && <p className="toolcall-output-preview">{excerpt}</p>}
             {result && <details className="toolcall-details">
                 <summary>{result.isError ? "Error details" : "Result details"}</summary>
-                <pre>{preview(result.output)}</pre>
+                <pre>{formattedOutput(name, result.output)}</pre>
             </details>}
         </>}
     </section>;

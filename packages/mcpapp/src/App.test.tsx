@@ -12,6 +12,7 @@ const host = vi.hoisted(() => ({
     failSend: false,
     bootstrapCapability: undefined as undefined | Record<string, unknown>,
     bootstrapCalls: 0,
+    teardownRequests: 0,
     availableDisplayModes: ["inline"] as string[],
     displayMode: "inline",
     modeAccepted: true,
@@ -37,6 +38,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
             if (host.modeAccepted) host.displayMode = params.mode;
             return { mode: host.displayMode };
         }
+        async requestTeardown() { host.teardownRequests++; }
         setupSizeChangedNotifications() { return () => undefined; }
         async callServerTool(params: { name: string; arguments: Record<string, unknown> }) {
             if (params.name === "mcpapp_open") {
@@ -92,6 +94,7 @@ afterEach(async () => {
     host.failSend = false;
     host.bootstrapCapability = undefined;
     host.bootstrapCalls = 0;
+    host.teardownRequests = 0;
     host.availableDisplayModes = ["inline"];
     host.displayMode = "inline";
     host.modeAccepted = true;
@@ -685,10 +688,9 @@ test("Blocking question remains answerable from explicit fullscreen fallback whe
     expect(JSON.stringify(host.sent[0])).toContain("Yes");
 });
 
-test("ToolCall inline renders bounded output, redacts credentials and preserves Approval/Wait with display off", async () => {
+test("ToolCall inline uses its result capability without opening another tool, and preserves Approval/Wait", async () => {
     const capability = { ctxId: "ctx-toolcall", token: "private-toolcall-test-token",
         liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
-    host.bootstrapCapability = capability;
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
             ctxId: capability.ctxId, instance: "demo", cursor: 3, agentBusy: true,
@@ -708,8 +710,11 @@ test("ToolCall inline renders bounded output, redacts credentials and preserves 
     document.body.append(container);
     root = createRoot(container);
     await act(async () => { root?.render(<AppView view="toolcall" />); });
+    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
+        "portable-devshell/mcpapp": capability,
+    } }); });
     await vi.waitFor(() => expect(container!.textContent).toContain("Approval required"));
-    expect(host.bootstrapCalls).toBe(1);
+    expect(host.bootstrapCalls).toBe(0);
     expect(host.modeRequests).toHaveLength(0);
 
     await act(async () => {
@@ -765,7 +770,8 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
             ctxId: capability.ctxId, instance: "demo", cursor: 19, agentBusy: false,
             presentation: { work: [], background: [] },
             activity: [{ callId: "call-1", name: "bash_run", state: "completed",
-                exitCode: 0, at: "2026-10-12T16:00:00Z" }],
+                exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
+                target: "git status --short", detail: "stdout:\nmain\n" }],
         }), { status: 200 }));
         return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -784,7 +790,49 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     expect(container!.textContent).toContain("Recent ToolCalls");
     expect(container!.textContent).toContain("bash_run");
     expect(container!.textContent).toContain("exit 0");
+    expect(container!.textContent).toContain("Check workspace state");
+    expect(container!.textContent).toContain("git status --short");
+    expect(container!.querySelector(".dashboard-timeline pre")?.textContent).toContain("main");
+    const history = container!.querySelector<HTMLInputElement>(".dashboard-activity-head input");
+    await act(async () => { history?.click(); });
+    expect(container!.querySelector(".dashboard-timeline")).toBeNull();
+    await act(async () => { history?.click(); });
+    expect(container!.textContent).toContain("git status --short");
     expect(container!.textContent).not.toContain("private-activity-test-token");
+});
+
+test("Workspace Close requests Host teardown without reopening the dismissed app", async () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<AppView view="workspace" />); });
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="Close workspace"]');
+    expect(close).not.toBeNull();
+    await act(async () => { close?.click(); });
+    expect(host.teardownRequests).toBe(1);
+    expect(close?.textContent).toContain("Closing");
+    await act(async () => { host.clients[0]?.onclose?.(); });
+    expect(container.textContent).toContain("Disconnected");
+    expect(host.clients).toHaveLength(1);
+});
+
+test("File and custom tool results have readable multiline details and generic fallback", async () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<ToolCallCard enabled onEnabledChange={() => undefined}
+        result={{ name: "file_read", isError: false, output: {
+            files: [{ path: "/etc/os-release", content: "1:NAME=Arch Linux\n2:ID=arch" }],
+        } }} />); });
+    const text = container.querySelector(".toolcall-details pre")?.textContent ?? "";
+    expect(text).toContain("/etc/os-release\n1:NAME=Arch Linux\n2:ID=arch");
+    expect(text).not.toContain('"content":');
+    await act(async () => { root?.render(<ToolCallCard enabled onEnabledChange={() => undefined}
+        result={{ name: "custom_plugin", isError: false, output: {
+            operation: "inspect", nested: { token: "must-stay-private", passed: true },
+        } }} />); });
+    expect(container.querySelector(".toolcall-details pre")?.textContent).toContain("inspect");
+    expect(container.textContent).not.toContain("must-stay-private");
 });
 
 test("ToolCall summary understands DevShell file arrays, shell exit status and protected credentials", async () => {

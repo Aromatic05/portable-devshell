@@ -9,6 +9,7 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
 }) {
     const [tab, setTab] = useState<Tab>("overview");
     const [fallback, setFallback] = useState(false);
+    const [showHistory, setShowHistory] = useState(true);
     const { primary, work, background } = snapshot.presentation;
     const isQuestion = primary?.title === "Question for you";
     const pendingCount = primary ? 1 : 0;
@@ -58,20 +59,36 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
                 </div> : <p className="dashboard-empty">No active tracked wait.</p>}
             </>}
             {tab === "activity" && <>
-                <h2>Recent ToolCalls</h2>
-                {snapshot.activity?.length ? <ol className="dashboard-timeline">
+                <div className="dashboard-activity-head">
+                    <h2>Recent ToolCalls</h2>
+                    <label className="workspace-setting">
+                        <input type="checkbox" checked={showHistory}
+                            onChange={(event) => setShowHistory(event.target.checked)} />
+                        Show history
+                    </label>
+                </div>
+                {!showHistory ? <p className="dashboard-empty">ToolCall history is hidden.</p> : snapshot.activity?.length ? <ol className="dashboard-timeline">
                     {snapshot.activity.map((item) =>
                         <li key={item.callId} data-state={item.state}>
-                            <span className="activity-dot" aria-hidden="true" />
-                            <div className="activity-entry">
-                                <strong>{item.name}</strong>
-                                <span>{item.state}{item.exitCode === undefined ? "" : ` · exit ${item.exitCode}`}</span>
+                            <div className="activity-card-head">
+                                <span className="activity-dot" aria-hidden="true" />
+                                <div className="activity-entry">
+                                    <strong>{item.name}</strong>
+                                    <span>{item.state}{item.exitCode === undefined ? "" : ` · exit ${item.exitCode}`}</span>
+                                </div>
+                                <time dateTime={item.at}>{Number.isNaN(Date.parse(item.at))
+                                    ? item.at : new Date(item.at).toLocaleTimeString()}</time>
                             </div>
-                            <time dateTime={item.at}>{Number.isNaN(Date.parse(item.at))
-                                ? item.at : new Date(item.at).toLocaleTimeString()}</time>
+                            {item.purpose && <p className="activity-purpose">{item.purpose}</p>}
+                            {item.target && <code className="activity-target">{item.target}</code>}
+                            {item.summary && <p className="activity-summary">{item.summary}</p>}
+                            {item.detail && <details className="toolcall-details">
+                                <summary>View result</summary>
+                                <pre>{item.detail}</pre>
+                            </details>}
                         </li>)}
                 </ol> : <p className="dashboard-empty">No recent audited ToolCalls for this Context.</p>}
-                <p className="dashboard-help">Detailed tool results remain in their inline cards. Audit history is owned by the Instance.</p>
+                <p className="dashboard-help">History is read from this Context's Instance audit. Inline cards are not required to remain mounted.</p>
             </>}
         </section>
     </div>;

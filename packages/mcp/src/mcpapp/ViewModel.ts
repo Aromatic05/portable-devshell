@@ -2,6 +2,7 @@ import {
     createApprovalTransport,
     createInstanceRuntimeTransport,
     createTaskTransport,
+    createToolTransport,
     type Endpoint,
     type ApprovalRequest,
     type GoalSnapshot,
@@ -180,13 +181,13 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             questions: questions?.pending(instance, ctxId), questionRevision: questions?.revision,
             ...(workspace === undefined ? {} : { workspace }),
         });
-        // Activity is an optional read-only projection of Instance-owned audit
-        // events. An unavailable event ledger must not block Approval/Ask/Wait.
+        // Activity is a read-only projection of Instance-owned ToolCall audit.
+        // It can be rebuilt after an iframe remount or a retained-event gap.
+        // Audit failure must not block Approval/Ask/Wait.
         try {
             projected.activity = await readMcpAppActivity(
-                createInstanceRuntimeTransport(endpoint, instance),
+                createToolTransport(endpoint, instance),
                 ctxId,
-                projected.cursor,
             );
         } catch {
             projected.activity = [];

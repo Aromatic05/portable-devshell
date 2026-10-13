@@ -29,7 +29,7 @@ export interface McpEndpointOptions {
         call(name: string, input: JsonValue, request: McpEndpointCallContext,
             signal?: AbortSignal): Promise<McpEndpointResult | undefined>;
         present(name: string, result: McpEndpointResult,
-            request: McpEndpointCallContext): Promise<McpEndpointResult>;
+            request: McpEndpointCallContext, input?: JsonValue): Promise<McpEndpointResult>;
     };
     toolProvenance?: McpToolProvenanceRecorder;
     toolSource: McpToolSource;
@@ -103,7 +103,7 @@ export class McpEndpoint {
         const intercepted = await this.#toolAdapter?.call(toolName, input, requestContext, signal);
         if (intercepted !== undefined) return intercepted;
         const result = await this.#dispatch.callTool(toolName, input, requestContext, signal);
-        return this.#toolAdapter?.present(toolName, result, requestContext) ?? result;
+        return this.#toolAdapter?.present(toolName, result, requestContext, input) ?? result;
     }
 
     catalogSnapshot() {

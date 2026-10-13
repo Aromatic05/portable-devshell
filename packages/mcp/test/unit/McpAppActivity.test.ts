@@ -1,46 +1,55 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
 import { projectMcpAppActivity, readMcpAppActivity } from "../../src/mcpapp/Activity.ts";
-import type { InstanceEventRecord, JsonValue } from "@portable-devshell/shared";
 
-function event(seq: number, type: string, data: Record<string, JsonValue>): InstanceEventRecord {
-    return { seq, type, at: new Date(seq * 1000).toISOString(),
-        instanceName: "demo" as InstanceEventRecord["instanceName"], data };
+function call(id: string, ctxId: string, toolName: string, index: number,
+    fields: Partial<ToolCallRecord> = {}): ToolCallRecord {
+    return {
+        callId: id, ctxId, toolName, status: "completed", source: "mcp",
+        instance: asInstanceName("demo"), inputSummary: "", startedAt: new Date(index * 1_000).toISOString(),
+        ...fields,
+    };
 }
 
-test("Activity projects only audited ToolCalls for the selected Context", () => {
-    const events = [
-        event(1, "toolCall.queued", { ctxId: "ctx-target", callId: "a", toolName: "bash_run", inputSummary: "hidden command" }),
-        event(2, "toolCall.completed", { ctxId: "ctx-other", callId: "b", toolName: "file_read" }),
-        event(3, "toolCall.completed", { ctxId: "ctx-target", callId: "a", toolName: "bash_run", exitCode: 0 }),
-        event(4, "toolCall.failed", { ctxId: "ctx-target", callId: "c", toolName: "file_edit", inputSummary: "secret" }),
-        event(5, "goal.updated", { ctxId: "ctx-target" }),
-        event(6, "toolCall.running", { callId: "unscoped", toolName: "bash_run" }),
+test("Workspace history projects useful cards for every audited tool, isolating the Context and secrets", () => {
+    const items = [
+        call("a", "ctx-target", "bash_run", 1, { input: { command: "printf ok" }, purpose: "Check shell",
+            exitCode: 0, output: { exitCode: 0, stdout: "ok\n" } }),
+        call("b", "ctx-other", "file_read", 2, { output: { files: [{ content: "not yours" }] } }),
+        call("c", "ctx-target", "file_read", 3, { input: { files: [{ path: "/etc/os-release" }] },
+            output: { files: [{ path: "/etc/os-release", content: "1:NAME=Arch Linux\n2:ID=arch" }] } }),
+        call("d", "ctx-target", "custom_plugin", 4, { input: { target: "remote-machine" },
+            output: { result: { private_key: "must-not-display", ok: true } } }),
+        call("e", "ctx-target", "tmux_run", 5, { status: "running", input: { command: "pnpm build" } }),
     ];
-    const projected = projectMcpAppActivity(events, "ctx-target");
-    assert.deepEqual(projected.map((item) => [item.callId, item.name, item.state]), [
-        ["c", "file_edit", "failed"], ["a", "bash_run", "completed"],
-    ]);
-    assert.equal(projected[1]?.exitCode, 0);
-    assert.equal(JSON.stringify(projected).includes("hidden command"), false);
-    assert.equal(JSON.stringify(projected).includes("secret"), false);
+    const cards = projectMcpAppActivity(items, "ctx-target");
+    assert.deepEqual(cards.map((item) => item.name), ["tmux_run", "custom_plugin", "file_read", "bash_run"]);
+    assert.equal(cards[0]?.state, "running");
+    assert.equal(cards[0]?.target, "pnpm build");
+    assert.match(cards[2]?.detail ?? "", /1:NAME=Arch Linux\n2:ID=arch/u);
+    assert.equal(cards[3]?.purpose, "Check shell");
+    assert.equal(cards[3]?.summary, "exit 0");
+    assert.match(cards[1]?.detail ?? "", /\[redacted\]/u);
+    assert.equal(JSON.stringify(cards).includes("not yours"), false);
+    assert.equal(JSON.stringify(cards).includes("must-not-display"), false);
 });
 
-test("Activity reads Instance ledger tail and recovers after a retained-event gap", async () => {
-    const requested: number[] = [];
-    const projected = await readMcpAppActivity({
-        readEvents: async (fromSeq) => {
-            requested.push(fromSeq);
-            if (requested.length === 1) return {
-                kind: "gap", code: "stream.gap", fromSeq, nextSeq: 500, lastSeq: 501,
-            };
-            return { kind: "events", lastSeq: 501, events: [
-                event(500, "toolCall.running", { ctxId: "ctx-target", callId: "next", toolName: "bash_run" }),
-                event(501, "toolCall.denied", { ctxId: "ctx-other", callId: "other", toolName: "bash_run" }),
-            ] };
+test("Workspace history queries audited active and completed calls, with bounded-output fallback", async () => {
+    const requested: Array<Record<string, unknown>> = [];
+    const cards = await readMcpAppActivity({
+        listCalls: async (query) => {
+            requested.push(query ?? {});
+            if (query?.includeOutput) throw new Error("Oversized audit response");
+            return [call("a", "ctx-target", "file_edit", 1, { status: "failed", error: "Invalid patch" }),
+                call("b", "ctx-other", "secret_read", 2)];
         },
-    }, "ctx-target", 501);
-    assert.deepEqual(requested, [251, 500]);
-    assert.equal(projected.length, 1);
-    assert.equal(projected[0]?.name, "bash_run");
+    }, "ctx-target");
+    assert.equal(requested.length, 2);
+    assert.equal(requested[0]?.ctxId, "ctx-target");
+    assert.equal(requested[0]?.includeOutput, true);
+    assert.equal(requested[1]?.includeOutput, false);
+    assert.deepEqual(cards.map((item) => item.name), ["file_edit"]);
+    assert.equal(cards[0]?.state, "failed");
+    assert.match(cards[0]?.summary ?? "", /Invalid patch/u);
 });

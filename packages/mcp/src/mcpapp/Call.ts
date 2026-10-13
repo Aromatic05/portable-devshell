@@ -19,6 +19,7 @@ export class McpAppCall {
     readonly #instance: string;
     readonly #dispatch: Pick<McpEndpointDispatch, 'callTool'>;
     readonly #view?: ReturnType<typeof createMcpAppViewModel>;
+    readonly #ownsPresentation?: (toolName: string) => boolean;
     readonly #bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
         ctxId: string; token: string; liveBaseUrl?: string;
     } | undefined>;
@@ -32,6 +33,7 @@ export class McpAppCall {
         dispatch: Pick<McpEndpointDispatch, 'callTool'>;
         instance: string;
         view?: ReturnType<typeof createMcpAppViewModel>;
+        ownsPresentation?: (toolName: string) => boolean;
         bootstrap?: (result: JsonValue, request: McpEndpointCallContext) => Promise<{
             ctxId: string; token: string; liveBaseUrl?: string;
         } | undefined>;
@@ -43,6 +45,7 @@ export class McpAppCall {
         this.#dispatch = options.dispatch;
         this.#instance = options.instance;
         this.#view = options.view;
+        this.#ownsPresentation = options.ownsPresentation;
         this.#bootstrap = options.bootstrap;
     }
 
@@ -62,7 +65,7 @@ export class McpAppCall {
     }
 
     async present(toolName: string, result: McpEndpointResult,
-        request: McpEndpointCallContext): Promise<McpEndpointResult> {
+        request: McpEndpointCallContext, input?: JsonValue): Promise<McpEndpointResult> {
         // Presentation metadata only; the audited ToolCall has already passed
         // through the Instance pipeline. Never add a second execution path.
         const presented = toolName.startsWith("mcpapp_") ? result : new McpNativeToolResult({
@@ -74,10 +77,18 @@ export class McpAppCall {
             },
             structuredContent: result instanceof McpNativeToolResult ? result.structuredContent : result,
         });
-        if ((toolName !== "environ_info" && toolName !== "mcpapp_open") || this.#bootstrap === undefined ||
+        // Deliver the existing Context capability with each tool result.
+        // Inline widgets must not execute a second audited mcpapp_open just
+        // to read the state of the ToolCall that already completed.
+        if (this.#bootstrap === undefined || this.#ownsPresentation?.(toolName) === false ||
             (presented instanceof McpNativeToolResult && presented.isError)) return presented;
         const structured = presented instanceof McpNativeToolResult ? presented.structuredContent : presented;
-        const capability = await this.#bootstrap(structured, request);
+        // Arbitrary tool output must not select the authenticated Context.
+        const explicitCtxId = typeof input === "object" && input !== null && !Array.isArray(input) &&
+            typeof input.ctxId === "string" ? input.ctxId : undefined;
+        const bootstrapInput = toolName === "environ_info" || toolName === "mcpapp_open"
+            ? structured : explicitCtxId === undefined ? {} : { ctxId: explicitCtxId };
+        const capability = await this.#bootstrap(bootstrapInput, request);
         if (capability === undefined) return presented;
         return new McpNativeToolResult({
             ...(presented instanceof McpNativeToolResult

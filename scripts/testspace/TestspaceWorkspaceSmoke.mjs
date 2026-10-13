@@ -76,20 +76,47 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(typeof snapshot.modelContext?.structuredContent, "object");
         assert.equal(typeof snapshot.reentry?.pending, "boolean");
 
-        // The two UI resources must be discoverable by the actual MCP client.
+        // Workspace, interaction, and ToolCall are distinct MCP App resources.
         const inlineResource = listed.resources.find((item) =>
             item.name === "portable-devshell MCP App Interaction");
+        const toolCallResource = listed.resources.find((item) =>
+            item.name === "portable-devshell ToolCall Inline");
         assert.ok(inlineResource, "Inline interaction resource is missing.");
+        assert.ok(toolCallResource, "Inline ToolCall resource is missing.");
         const inline = await client.readResource({ uri: inlineResource.uri });
+        const toolCallView = await client.readResource({ uri: toolCallResource.uri });
         assert.deepEqual(inline.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline"]);
-        assert.deepEqual(resource.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline", "pip"]);
+        assert.deepEqual(resource.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["fullscreen"]);
+        assert.deepEqual(toolCallView.contents[0]?._meta?.["openai/ui"]?.availableDisplayModes, ["inline"]);
         assert.match(inline.contents[0]?.text ?? "", /data-mcpapp-view="interaction"/u);
         assert.match(html, /data-mcpapp-view="workspace"/u);
+        assert.match(toolCallView.contents[0]?.text ?? "", /data-mcpapp-view="toolcall"/u);
         const tools = (await client.listTools()).tools;
         const template = (name) => tools.find((tool) => tool.name === name)?._meta?.["openai/outputTemplate"];
-        assert.equal(template("environ_info"), workspaceResource.uri);
+        assert.equal(template("environ_info"), toolCallResource.uri);
         assert.equal(template("mcpapp_open"), workspaceResource.uri);
         assert.equal(template("mcpapp_ask"), inlineResource.uri);
+        assert.equal(template("bash_run"), toolCallResource.uri);
+
+        // Ordinary ToolCalls provide the live capability without executing
+        // mcpapp_open again. The persistent Workspace shows their audit card
+        // after completion, including target and status.
+        const command = "printf 'mcpapp-smoke-ok\\n'";
+        const shell = await client.callTool({ name: "bash_run", arguments: {
+            ctxId, command, cwd: "./", timeoutMs: 10_000,
+            purpose: "Verify ToolCall history in Workspace",
+        } });
+        assert.equal(shell.isError, false);
+        assert.equal(shell.structuredContent?.exitCode, 0);
+        assert.equal(shell._meta?.["portable-devshell/toolcall"]?.name, "bash_run");
+        assert.equal(shell._meta?.["portable-devshell/mcpapp"]?.ctxId, ctxId);
+        const audited = await fetch(snapshotUrl, { headers: { authorization: `Bearer ${token}` } });
+        assert.equal(audited.status, 200);
+        const history = (await audited.json()).activity;
+        const shellCard = history?.find((item) => item.name === "bash_run" && item.target?.includes("mcpapp-smoke-ok"));
+        assert.ok(shellCard, "Completed tool does not appear in the Workspace audit history.");
+        assert.equal(shellCard.state, "completed");
+        assert.match(shellCard.summary, /exit 0/u);
 
         // A new inline ask must be able to show a pending question before the
         // blocked tool finishes; answer it using the real MCP App action.
@@ -129,7 +156,8 @@ export async function runTestspaceWorkspaceSmoke({
             ctxId, cursor: snapshot.cursor, instance: snapshot.instance,
             resourceUri: workspaceResource.uri,
             interactionResourceUri: inlineResource.uri,
-            pipAdvertised: true, inlineAskAnswered: true,
+            toolCallResourceUri: toolCallResource.uri,
+            fullscreenAdvertised: true, auditedToolCall: true, inlineAskAnswered: true,
         };
     } finally {
         await client.close().catch(() => undefined);

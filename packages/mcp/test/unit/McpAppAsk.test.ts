@@ -6,7 +6,7 @@ import { McpAppActionStore } from "../../src/mcpapp/ActionStore.ts";
 import { McpAppPresenceStore } from "../../src/mcpapp/app/Presence.ts";
 import { McpNativeToolResult } from "../../src/protocol/Public.ts";
 
-function fixture() {
+function fixture(ownsPresentation?: (toolName: string) => boolean) {
     const questions = new McpAppQuestionStore();
     const presence = new McpAppPresenceStore();
     const actions = new McpAppActionStore();
@@ -14,6 +14,7 @@ function fixture() {
     const instance = "alpha";
     const ctxId = "ctx-one";
     const endpoint = new McpAppCall({ actions, questions, presence, instance,
+        ...(ownsPresentation === undefined ? {} : { ownsPresentation }),
         bootstrap: async () => ({ ctxId, token: "private-valid-capability-01", liveBaseUrl: "https://example.test/api/live" }),
         context: { resolve: async () => ({ status: "active", ctxId,
             environments: [{ instance, workspace: "/demo" }] }) } as never,
@@ -146,5 +147,14 @@ test("MCP App tags ordinary ToolCall results for an inline card without altering
     assert.ok(presented instanceof McpNativeToolResult);
     assert.deepEqual(presented.structuredContent, input);
     assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "bash_run" });
+    assert.equal((presented._meta?.["portable-devshell/mcpapp"] as Record<string, unknown>)?.ctxId, f.ctxId);
+    assert.equal(JSON.stringify(presented.structuredContent).includes("private-valid-capability-01"), false);
+});
+
+test("A foreign MCP App resource cannot receive the DevShell Live bearer capability", async () => {
+    const f = fixture(() => false);
+    const presented = await f.endpoint.present("custom_widget", { ok: true }, f.request);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.deepEqual(presented.structuredContent, { ok: true });
     assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
 });

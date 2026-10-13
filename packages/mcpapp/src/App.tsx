@@ -33,6 +33,7 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
     const [actionError, setActionError] = useState<string>();
     const [pendingAction, setPendingAction] = useState<string>();
     const [busyAction, setBusyAction] = useState<string>();
+    const [closeRequested, setCloseRequested] = useState(false);
     const hostRef = useRef<ConnectedApp>();
     const deliveredRecovery = useRef(new Set<string>());
 
@@ -132,8 +133,12 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                     setCtxId(content.ctxId);
                 }
             };
-            app.onclose = () => { if (currentApp === app) retry(); };
-            app.onteardown = async () => { if (currentApp === app) retry(); return {}; };
+            // Host teardown is final for this view, not a connection error.
+            app.onclose = () => { if (currentApp === app) setStatus("disconnected"); };
+            app.onteardown = async () => {
+                if (currentApp === app) setStatus("disconnected");
+                return {};
+            };
             void app.connect().then(() => {
                 if (!active || currentApp !== app) return;
                 const hostContext = app.getHostContext();
@@ -142,9 +147,10 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                 refreshGlobals();
                 setStatus("connected");
                 stopSize = app.setupSizeChangedNotifications();
-                // Ask does not produce a Tool Result until answered. The inline
-                // iframe must obtain its own private capability via the Host.
-                if (view !== "workspace" && sessionRef.current === undefined) {
+                // Ask has no result until answered. Only that interactive
+                // view may need Host-assisted bootstrap; ordinary ToolCall
+                // cards receive their capability in the original tool result.
+                if (view === "interaction" && sessionRef.current === undefined) {
                     void app.callServerTool({ name: "mcpapp_open", arguments: {} }).then((result) => {
                         if (!active || currentApp !== app) return;
                         if (result.isError) throw new Error("MCP App Context is unavailable.");
@@ -377,6 +383,21 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
         }
     };
 
+    const closeWorkspace = async () => {
+        const app = hostRef.current;
+        if (view !== "workspace" || !app || closeRequested) return;
+        if (session) saveMcpAppFullscreenClaim(session.ctxId);
+        setCloseRequested(true);
+        setActionError(undefined);
+        try {
+            // App.close() only closes the transport. The Host owns the window.
+            await app.requestTeardown();
+        } catch (error) {
+            setCloseRequested(false);
+            setActionError(error instanceof Error ? error.message : "Could not close Workspace.");
+        }
+    };
+
     return (
         <main className="workspace" data-status={status} data-view={view} data-display-mode={displayMode}>
             <header className="workspace-head">
@@ -390,6 +411,10 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                     {view === "workspace" && status === "connected" && fullscreenAvailable &&
                         displayMode !== "fullscreen" &&
                         <button type="button" onClick={() => { void requestFullscreen(); }}>Open fullscreen</button>}
+                    {view === "workspace" && <button type="button" aria-label="Close workspace"
+                        disabled={closeRequested} onClick={() => { void closeWorkspace(); }}>
+                        {closeRequested ? "Closing…" : "Close"}
+                    </button>}
                     <span className="workspace-status" role="status">
                         <span className="workspace-indicator" aria-hidden="true" />
                         {status === "connected" ? "Connected" : status === "connecting" ? "Connecting" : "Disconnected"}
