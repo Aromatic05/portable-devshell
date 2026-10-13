@@ -112,3 +112,45 @@ test("WorkerInstanceToolLog keeps bounded reads below one MiB of decoded stream 
         await rm(root, { force: true, recursive: true });
     }
 });
+
+test("SQLite ToolCall log lookup restores compressed streams with Context isolation and paging", async () => {
+    const root = await createTestTempDirectory("activity-call-logs-");
+    const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+        maxBytes: 32 * 1024 * 1024,
+        retentionDays: 7,
+    });
+    try {
+        const store = new LogStoreInstance(
+            asInstanceName("demo"),
+            database.store<InstanceLogEntry>("logs", {
+                sequence: (entry) => entry.seq,
+                timestamp: (entry) => entry.at,
+            }),
+            (query) => database.readCallLogRecords(query),
+        );
+        const at = new Date().toISOString();
+        const metadata = { source: "mcp" as const, toolName: "bash_run" };
+        await store.append("stdout", "A".repeat(16 * 1024), at,
+            { ...metadata, callId: "call-one", ctxId: "ctx-one" });
+        await store.append("stdout", "foreign", at,
+            { ...metadata, callId: "call-one", ctxId: "ctx-two" });
+        await store.append("stderr", "warning", at,
+            { ...metadata, callId: "call-one", ctxId: "ctx-one" });
+        await store.append("stdout", "other call", at,
+            { ...metadata, callId: "call-two", ctxId: "ctx-one" });
+
+        const first = await store.read({ callId: "call-one", ctxId: "ctx-one", limit: 1 });
+        assert.equal(first.length, 1);
+        assert.equal(first[0]?.message, "A".repeat(16 * 1024));
+        const second = await store.read({
+            callId: "call-one", ctxId: "ctx-one", fromSeq: first[0]!.seq + 1, limit: 10,
+        });
+        assert.deepEqual(second.map((entry) => entry.message), ["warning"]);
+        const foreign = await store.read({ callId: "call-one", ctxId: "ctx-two" });
+        assert.deepEqual(foreign.map((entry) => entry.message), ["foreign"]);
+        await assert.rejects(store.read({ callId: "call-one" }), /Context/u);
+    } finally {
+        await database.close();
+        await rm(root, { force: true, recursive: true });
+    }
+});

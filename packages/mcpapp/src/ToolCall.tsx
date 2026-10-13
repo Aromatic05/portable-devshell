@@ -74,7 +74,7 @@ export function restoreToolCallInput(globals?: unknown): unknown {
 
 export function ToolCallCard({
     input, result, enabled = true, onEnabledChange, name: assignedName,
-    purpose, summary, state, detail,
+    purpose, summary, state, detail, onExpandedChange, expandedFooter,
 }: {
     input?: unknown;
     result?: ToolCallResult;
@@ -85,6 +85,8 @@ export function ToolCallCard({
     summary?: string;
     state?: string;
     detail?: string;
+    onExpandedChange?: (expanded: boolean) => void;
+    expandedFooter?: ReactNode;
 }): ReactNode {
     const [expanded, setExpanded] = useState(false);
     const name = result?.name ?? assignedName ?? "ToolCall";
@@ -106,7 +108,11 @@ export function ToolCallCard({
     </div>;
     return <section className="toolcall-card" aria-label="ToolCall result" data-expanded={expanded}>
         <button type="button" className="toolcall-compact" aria-expanded={expanded}
-            onClick={() => setExpanded((previous) => !previous)}>
+            onClick={() => {
+                const next = !expanded;
+                setExpanded(next);
+                onExpandedChange?.(next);
+            }}>
             <span className="toolcall-line">
                 <strong>{titleFor(name)}</strong>
                 <span className="tc-tool-id">{name}</span>
@@ -119,6 +125,7 @@ export function ToolCallCard({
         </button>
         {expanded && <div className="toolcall-expanded">
             <ToolCallDetails {...view} />
+            {expandedFooter}
             {summary && <div className="tc-summary">{summary}</div>}
         </div>}
     </section>;

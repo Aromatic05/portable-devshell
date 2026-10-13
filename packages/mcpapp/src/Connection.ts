@@ -47,6 +47,27 @@ export interface McpAppSnapshot {
     };
 }
 
+export interface McpAppActivityOutput {
+    callId: string;
+    stdout: string;
+    stderr: string;
+    nextSeq?: number;
+}
+
+export async function readMcpAppActivityOutput(
+    session: McpAppSession, callId: string, fromSeq: number, signal: AbortSignal,
+): Promise<McpAppActivityOutput> {
+    const result = record(await request(session,
+        `/activity?callId=${encodeURIComponent(callId)}&fromSeq=${fromSeq}`, signal));
+    if (result?.callId !== callId || typeof result.stdout !== "string" ||
+        typeof result.stderr !== "string" ||
+        (result.nextSeq !== undefined &&
+            (typeof result.nextSeq !== "number" || !Number.isSafeInteger(result.nextSeq) ||
+                result.nextSeq <= fromSeq)))
+        throw new Error("Invalid MCP App Activity output");
+    return result as unknown as McpAppActivityOutput;
+}
+
 export async function readMcpAppSnapshot(session: McpAppSession, signal: AbortSignal): Promise<McpAppSnapshot> {
     const result = await request(session, "/snapshot", signal);
     if (!isSnapshot(result) || result.ctxId !== session.ctxId) throw new Error("Invalid MCP App snapshot");

@@ -107,8 +107,10 @@ function ansiSegments(text: string): ReactNode {
     return segments;
 }
 
-export function Terminal({ text, title = "Terminal" }: { text: string; title?: string }): ReactNode {
-    const body = text.slice(-24_000);
+export function Terminal({ text, title = "Terminal", maxChars = 24_000 }: {
+    text: string; title?: string; maxChars?: number;
+}): ReactNode {
+    const body = text.slice(-maxChars);
     return <div className="tc-terminal" role="region" aria-label={title}>
         <div className="tc-terminal-heading"><span className="tc-terminal-dot" />{title}</div>
         <pre>{ansiSegments(body)}</pre>

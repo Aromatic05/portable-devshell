@@ -7,6 +7,7 @@ import type { InstanceLogEntry, LogQuery } from "../Api.js";
 export class LogStoreInstance {
     readonly #instanceName: InstanceName;
     readonly #store: AuditSequenceStore<InstanceLogEntry>;
+    readonly #readForCall?: (query: LogQuery & { callId: string; ctxId: string }) => InstanceLogEntry[];
     #appendTail: Promise<void> = Promise.resolve();
     #initialized = false;
     #closing = false;
@@ -15,9 +16,11 @@ export class LogStoreInstance {
     constructor(
         instanceName: InstanceName,
         store: AuditSequenceStore<InstanceLogEntry>,
+        readForCall?: (query: LogQuery & { callId: string; ctxId: string }) => InstanceLogEntry[],
     ) {
         this.#instanceName = instanceName;
         this.#store = store;
+        this.#readForCall = readForCall;
     }
 
     async append(
@@ -66,6 +69,11 @@ export class LogStoreInstance {
     }
 
     async read(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
+        if (query.callId !== undefined || query.ctxId !== undefined) {
+            if (!query.callId || !query.ctxId || this.#readForCall === undefined)
+                throw new TypeError("A Context and supported ToolCall lookup are required.");
+            return this.#readForCall({ ...query, callId: query.callId, ctxId: query.ctxId });
+        }
         const records = query.fromSeq === undefined && query.limit !== undefined
             ? this.#store.readTail(query.limit, query.maxDecodedBytes)
             : this.#store.readFromSeq(query.fromSeq ?? 1, query.limit, query.maxDecodedBytes);

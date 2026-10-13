@@ -1,4 +1,14 @@
-import type { ToolCallRecord, ToolTransport } from "@portable-devshell/shared";
+import { resolveToolOutput, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
+
+const ACTIVITY_OUTPUT_PAGE_BYTES = 256 * 1024;
+const ACTIVITY_OUTPUT_PAGE_ENTRIES = 32;
+
+export interface McpAppActivityOutput {
+    callId: string;
+    stdout: string;
+    stderr: string;
+    nextSeq?: number;
+}
 
 export interface McpAppActivity {
     callId: string;
@@ -158,7 +168,13 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
             ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
             ...(summary(record) === undefined ? {} : { summary: summary(record) }),
             ...(record.input === undefined ? {} : { input: presentationValue(record.input, 2_000) }),
-            ...(record.output === undefined ? {} : { output: presentationValue(record.output, 8_000) }),
+            ...(record.toolName === "bash_run" ? {
+                output: presentationValue({
+                    ...(object(record.output) ?? {}),
+                    ...(record.stdoutBytes === undefined ? {} : { stdoutBytes: record.stdoutBytes }),
+                    ...(record.stderrBytes === undefined ? {} : { stderrBytes: record.stderrBytes }),
+                }, 8_000),
+            } : record.output === undefined ? {} : { output: presentationValue(record.output, 8_000) }),
             ...(detail(record.toolName, record.output) === undefined ? {}
                 : { detail: detail(record.toolName, record.output) }),
         }));
@@ -175,4 +191,40 @@ export async function readMcpAppActivity(transport: Pick<ToolTransport, "listCal
             ctxId, limit: 50, includeInput: false, includeOutput: false,
         }), ctxId);
     }
+}
+
+/** Loads terminal output only for a ToolCall owned by the requesting Context.
+ * The ToolCall audit never stores a second copy of the streams.
+ */
+export async function readMcpAppActivityOutput(
+    tools: Pick<ToolTransport, "listCalls">,
+    process: Pick<ProcessTransport, "readLogs">,
+    ctxId: string,
+    callId: string,
+    fromSeq = 1,
+): Promise<McpAppActivityOutput | undefined> {
+    const records = await tools.listCalls({
+        ctxId, callIds: [callId], limit: 1, includeInput: false,
+        includeOutput: true, maxBytes: 64 * 1024,
+    });
+    const audited = records.find((entry) =>
+        entry.callId === callId && entry.ctxId === ctxId && entry.toolName === "bash_run");
+    if (audited === undefined) return undefined;
+    const entries = await process.readLogs({
+        callId, ctxId, fromSeq, limit: ACTIVITY_OUTPUT_PAGE_ENTRIES,
+        maxDecodedBytes: ACTIVITY_OUTPUT_PAGE_BYTES,
+    }).then((logs) => logs.filter((entry) => entry.callId === callId && entry.ctxId === ctxId));
+    const restored = object(resolveToolOutput(undefined, callId, entries));
+    const bytes = entries.reduce((size, entry) => size + Buffer.byteLength(entry.message, "utf8"), 0);
+    const last = entries.at(-1);
+    const hasMore = last !== undefined &&
+        (entries.length >= ACTIVITY_OUTPUT_PAGE_ENTRIES || bytes >= ACTIVITY_OUTPUT_PAGE_BYTES);
+    return {
+        callId,
+        stdout: typeof restored?.stdout === "string"
+            ? protect(restored.stdout, ACTIVITY_OUTPUT_PAGE_BYTES + 1024) : "",
+        stderr: typeof restored?.stderr === "string"
+            ? protect(restored.stderr, ACTIVITY_OUTPUT_PAGE_BYTES + 1024) : "",
+        ...(hasMore ? { nextSeq: last.seq + 1 } : {}),
+    };
 }

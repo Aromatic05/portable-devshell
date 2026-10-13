@@ -36,6 +36,7 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
     let contextActive = true;
     let unavailable = false;
     let requestedCursor = -1;
+    let requestedOutput: [string, string, string, number] | undefined;
     const stop = installMcpAppLive({
         host, instance: "demo", leases, presence,
         contexts: {
@@ -46,6 +47,10 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
             },
         },
         view: {
+            async activityOutput(instance, ctxId, callId, fromSeq) {
+                requestedOutput = [instance, ctxId, callId, fromSeq ?? 1];
+                return callId === "call-a" ? { callId, stdout: "retained output\n", stderr: "" } : undefined;
+            },
             async snapshot(instance, ctxId, workspace) {
                 if (unavailable) throw new Error("private backend file /secret/path");
                 assert.equal(instance, "demo");
@@ -87,6 +92,17 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
         assert.equal(requestedCursor, 3);
         assert.equal((await fetch(`${base}/watch?ctxId=ctx-a&cursor=invalid`, { headers })).status, 400);
 
+        const outputUrl = `${base}/activity?ctxId=ctx-a&callId=call-a&fromSeq=1`;
+        assert.equal((await fetch(outputUrl)).status, 401);
+        assert.equal((await fetch(`${base}/activity?ctxId=ctx-b&callId=call-a`, { headers })).status, 401);
+        assert.equal((await fetch(`${base}/activity?ctxId=ctx-a&callId=call-a&fromSeq=0`, { headers })).status, 400);
+        assert.equal((await fetch(`${base}/activity?ctxId=ctx-a&callId=foreign`, { headers })).status, 404);
+        const activity = await fetch(outputUrl, { headers });
+        assert.equal(activity.status, 200);
+        assert.deepEqual(await activity.json(), { callId: "call-a", stdout: "retained output\n", stderr: "" });
+        assert.deepEqual(requestedOutput, ["demo", "ctx-a", "call-a", 1]);
+        assert.equal(activity.headers.get("cache-control"), "no-store");
+
         unavailable = true;
         const unavailableResponse = await fetch(url, { headers });
         assert.equal(unavailableResponse.status, 503);
@@ -95,9 +111,11 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
 
         contextActive = false;
         assert.equal((await fetch(url, { headers })).status, 403);
+        assert.equal((await fetch(outputUrl, { headers })).status, 403);
         contextActive = true;
         await leases.revokeInstance("demo");
         assert.equal((await fetch(url, { headers })).status, 401);
+        assert.equal((await fetch(outputUrl, { headers })).status, 401);
 
         stop();
         assert.equal((await fetch(url, { headers })).status, 404);
@@ -236,6 +254,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
             return testContextRecord(ctxId, instance);
         } },
         view: {
+            async activityOutput() { return undefined; },
             async snapshot() { throw new Error("Unexpected snapshot"); },
             async watch(_instance, _ctxId, _workspace, cursor, _questionRevision, signal) {
                 entered();
@@ -284,6 +303,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
             return testContextRecord(ctxId, instance);
         } },
         view: {
+            async activityOutput() { return undefined; },
             async snapshot() { throw new Error('Unexpected snapshot'); },
             async watch(_instance, ctxId, _workspace, cursor, _questionRevision, signal) {
                 if (++count === 2) enter();

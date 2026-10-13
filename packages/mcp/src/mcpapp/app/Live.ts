@@ -26,7 +26,9 @@ export function installMcpAppLive(options: {
         } catch { return 403; }
         return 200;
     };
-    const read = async (request: IncomingMessage, response: ServerResponse, watch: boolean) => {
+    const read = async (request: IncomingMessage, response: ServerResponse,
+        operation: "snapshot" | "watch" | "activity") => {
+        const watch = operation === "watch";
         setHeaders(response);
         const url = new URL(request.url ?? "/", "http://localhost");
         const ctxId = url.searchParams.get("ctxId") ?? "";
@@ -60,6 +62,25 @@ export function installMcpAppLive(options: {
             return;
         }
         options.presence.touch(options.instance, ctxId);
+        if (operation === "activity") {
+            const callId = url.searchParams.get("callId") ?? "";
+            const rawFromSeq = url.searchParams.get("fromSeq") ?? "1";
+            const fromSeq = Number(rawFromSeq);
+            if (!callId || callId.length > 256 || !/^[1-9]\d*$/u.test(rawFromSeq) ||
+                !Number.isSafeInteger(fromSeq)) {
+                reply(response, 400, { error: "Invalid ToolCall output query" });
+                return;
+            }
+            const output = await options.view.activityOutput(options.instance, ctxId, callId, fromSeq);
+            const access = await revalidate(ctxId, token, workspace);
+            if (access !== 200) {
+                reply(response, access, { error: "MCP App authorization expired" });
+                return;
+            }
+            if (output === undefined) reply(response, 404, { error: "ToolCall unavailable" });
+            else reply(response, 200, output);
+            return;
+        }
         if (!watch) {
             const snapshot = await options.view.snapshot(options.instance, ctxId, workspace);
             const access = await revalidate(ctxId, token, workspace);
@@ -88,12 +109,13 @@ export function installMcpAppLive(options: {
             options.presence.endWatch(options.instance, ctxId);
         }
     };
-    const safe = async (request: IncomingMessage, response: ServerResponse, watch: boolean) => {
-        try { await read(request, response, watch); }
+    const safe = async (request: IncomingMessage, response: ServerResponse,
+        operation: "snapshot" | "watch" | "activity") => {
+        try { await read(request, response, operation); }
         catch (error) {
             // Never return internal RPC failures or bearer tokens to callers,
             // but retain the reason in the server log for integration triage.
-            console.warn(`MCP App ${watch ? "watch" : "snapshot"} failed for ${options.instance}:`, error);
+            console.warn(`MCP App ${operation} failed for ${options.instance}:`, error);
             if (response.destroyed || response.writableEnded) return;
             if (response.headersSent) response.end();
             else reply(response, 503, { error: "Workspace temporarily unavailable" });
@@ -108,10 +130,12 @@ export function installMcpAppLive(options: {
         if (failures.length > 0) throw new AggregateError(failures, 'MCP App Live route cleanup failed');
     };
     try {
-        releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, false)));
-        releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, true)));
+        releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, "snapshot")));
+        releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, "watch")));
+        releases.push(options.host.registerRawRoute("get", `${base}/activity`, (req, res) => safe(req, res, "activity")));
         releases.push(options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
+        releases.push(options.host.registerRawRoute("options", `${base}/activity`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
     } catch (error) {
         try { releaseRoutes(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'MCP App Live route registration rollback failed'); }

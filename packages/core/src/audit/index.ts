@@ -34,6 +34,7 @@ class AuditRuntimeInstance implements AuditRuntime {
                 sequence: (record) => record.seq,
                 timestamp: (record) => record.at,
             }),
+            (query) => this.#database.readCallLogRecords(query),
         );
         this.#toolCallStore = new AuditToolCallStore(this.#database);
         this.api = {

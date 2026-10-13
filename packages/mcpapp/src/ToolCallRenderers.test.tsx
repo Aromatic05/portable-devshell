@@ -42,6 +42,20 @@ test("bash_run expands as a real terminal with exit code, ANSI colors and distin
     expect(view.querySelector(".toolcall-result-text")).toBeNull();
 });
 
+test("Activity displays every loaded terminal character while ordinary Inline remains compact", async () => {
+    const fullOutput = "BEGIN\n" + "x".repeat(25_000) + "\nEND";
+    let view = await display({ name: "bash_run", isError: false,
+        output: { stdout: fullOutput, activityRetained: true } });
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toBe(fullOutput);
+    expect(view.textContent).not.toContain("Showing recent output only");
+    await act(async () => { root?.unmount(); root = undefined; });
+    container?.remove();
+    view = await display({ name: "bash_run", isError: false, output: { stdout: fullOutput } });
+    expect(view.querySelector(".tc-terminal pre")?.textContent).not.toContain("BEGIN");
+    expect(view.querySelector(".tc-terminal pre")?.textContent).toContain("END");
+    expect(view.textContent).toContain("Showing recent output only");
+});
+
 test("file_read displays numbered code, supports metadata, and does not JSON-escape content", async () => {
     const view = await display({ name: "file_read", isError: false, output: {
         files: [{ path: "./src/App.ts", view: "content", content: "9:const state = true;\n10:export default state;" },

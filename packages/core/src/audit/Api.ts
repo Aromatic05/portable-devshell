@@ -20,6 +20,8 @@ export interface InstanceLogEntry {
 }
 
 export interface LogQuery {
+    callId?: string;
+    ctxId?: string;
     fromSeq?: number;
     limit?: number;
     maxDecodedBytes?: number;

@@ -10,7 +10,7 @@ import {
 } from "node:zlib";
 
 import type { ToolCallQuery, ToolCallRecord } from "@portable-devshell/shared";
-import type { AuditToolCallFailureSummary, StateStore } from "../Api.js";
+import type { AuditToolCallFailureSummary, InstanceLogEntry, LogQuery, StateStore } from "../Api.js";
 
 import {
     startAuditPayloadBackfill,
@@ -351,6 +351,38 @@ export class AuditDatabase {
         return records;
     }
 
+    /** Bounded log lookup, indexed by ToolCall instead of scanning Instance history. */
+    readCallLogRecords(query: LogQuery & { callId: string; ctxId: string }): InstanceLogEntry[] {
+        this.#assertOpen();
+        const fromSeq = query.fromSeq ?? 1;
+        const limit = query.limit ?? 32;
+        const maxDecodedBytes = query.maxDecodedBytes ?? 256 * 1024;
+        if (!query.callId || query.callId.length > 256 || !query.ctxId || query.ctxId.length > 256 ||
+            !Number.isSafeInteger(fromSeq) || fromSeq < 1 ||
+            !Number.isSafeInteger(limit) || limit < 1 || limit > 128 ||
+            !Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 1 ||
+            maxDecodedBytes > 1024 * 1024)
+            throw new TypeError("Invalid ToolCall log query.");
+        const statement = this.#database.prepare(
+            `SELECT payload, body, body_codec AS bodyCodec FROM audit_records
+             WHERE collection = 'logs' AND occurred_at_ms >= ?
+               AND json_extract(payload, '$.callId') = ?
+               AND json_extract(payload, '$.ctxId') = ?
+               AND json_extract(payload, '$.seq') >= ?
+             ORDER BY id ASC LIMIT ?`,
+        );
+        const records: InstanceLogEntry[] = [];
+        let decodedBytes = 0;
+        for (const row of statement.iterate(this.#retentionCutoff(), query.callId,
+            query.ctxId, fromSeq, limit)) {
+            const record = decodeStoredRecord<InstanceLogEntry>("logs", row as unknown as AuditStoredRow);
+            records.push(record);
+            decodedBytes += Buffer.byteLength(record.message, "utf8");
+            if (decodedBytes >= maxDecodedBytes) break;
+        }
+        return records;
+    }
+
     readToolCallRecords(query: ToolCallQuery): ToolCallRecord[] {
         this.#assertOpen();
         if (
@@ -549,6 +581,9 @@ export class AuditDatabase {
                 WHERE collection = 'toolCalls';
             CREATE INDEX IF NOT EXISTS audit_records_log_sequence
                 ON audit_records(json_extract(payload, '$.seq'), id)
+                WHERE collection = 'logs';
+            CREATE INDEX IF NOT EXISTS audit_records_log_call_id
+                ON audit_records(json_extract(payload, '$.callId'), json_extract(payload, '$.seq'), id)
                 WHERE collection = 'logs';
             CREATE INDEX IF NOT EXISTS audit_records_event_sequence
                 ON audit_records(json_extract(payload, '$.seq'), id)

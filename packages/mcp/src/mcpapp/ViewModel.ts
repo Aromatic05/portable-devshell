@@ -1,6 +1,7 @@
 import {
     createApprovalTransport,
     createInstanceRuntimeTransport,
+    createProcessTransport,
     createTaskTransport,
     createToolTransport,
     type Endpoint,
@@ -11,7 +12,7 @@ import {
     type InstanceEventRecord,
 } from "@portable-devshell/shared";
 import { mcpAppModelContext } from "./ModelContext.js";
-import { readMcpAppActivity } from "./Activity.js";
+import { readMcpAppActivity, readMcpAppActivityOutput } from "./Activity.js";
 import { projectMcpAppReentry } from "./ReentryView.js";
 import type { McpAppActionStore } from "./ActionStore.js";
 import type { McpAppQuestion, McpAppQuestionStore } from "./Question.js";
@@ -247,5 +248,8 @@ export function createMcpAppViewModel(endpoint: Endpoint, actions?: McpAppAction
             stream.close();
         }
     };
-    return { snapshot, watch };
+    const activityOutput = (instance: string, ctxId: string, callId: string, fromSeq = 1) =>
+        readMcpAppActivityOutput(createToolTransport(endpoint, instance),
+            createProcessTransport(endpoint, instance), ctxId, callId, fromSeq);
+    return { snapshot, watch, activityOutput };
 }

@@ -47,6 +47,9 @@ export interface InstanceLogEntry {
 }
 
 export interface InstanceLogQuery {
+    /** Optional indexed lookup for a single ToolCall in one Context. */
+    callId?: string;
+    ctxId?: string;
     fromSeq?: number;
     limit?: number;
     maxDecodedBytes?: number;

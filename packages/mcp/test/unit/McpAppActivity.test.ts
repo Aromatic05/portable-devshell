@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asInstanceName, type ToolCallRecord } from "@portable-devshell/shared";
-import { projectMcpAppActivity, readMcpAppActivity } from "../../src/mcpapp/Activity.ts";
+import { asInstanceName, type ToolCallQuery, type ToolCallRecord } from "@portable-devshell/shared";
+import { projectMcpAppActivity, readMcpAppActivity, readMcpAppActivityOutput } from "../../src/mcpapp/Activity.ts";
 
 function call(id: string, ctxId: string, toolName: string, index: number,
     fields: Partial<ToolCallRecord> = {}): ToolCallRecord {
@@ -36,7 +36,7 @@ test("Workspace history projects useful cards for every audited tool, isolating 
 });
 
 test("Workspace history queries audited active and completed calls, with bounded-output fallback", async () => {
-    const requested: Array<Record<string, unknown>> = [];
+    const requested: ToolCallQuery[] = [];
     const cards = await readMcpAppActivity({
         listCalls: async (query) => {
             requested.push(query ?? {});
@@ -118,4 +118,65 @@ test("Workspace audit projection preserves semantic operations within bounds and
         call("long", "ctx-a", "bash_run", 8, { output: { stdout: "s".repeat(50_000) } }),
     ], "ctx-a");
     assert.ok(JSON.stringify(longResult[0]?.output).length <= 8_200);
+});
+
+test("Activity restores retained stdout/stderr for only the owning Context and masks secrets", async () => {
+    const tool = call("call-shell", "ctx-own", "bash_run", 1, {
+        output: { exitCode: 0, stdoutBytes: 32, stderrBytes: 5 },
+    });
+    const queries: unknown[] = [];
+    const output = await readMcpAppActivityOutput({
+        listCalls: async (query) => {
+            queries.push(query);
+            return [tool];
+        },
+    }, {
+        readLogs: async (query) => {
+            queries.push(query);
+            return [
+                { at: "", seq: 1, instanceName: "demo", callId: "call-shell", ctxId: "ctx-own",
+                    message: "ready\ntoken=example-credential\n", stream: "stdout" },
+                { at: "", seq: 2, instanceName: "demo", callId: "call-shell", ctxId: "ctx-other",
+                    message: "foreign log", stream: "stdout" },
+                { at: "", seq: 3, instanceName: "demo", callId: "call-shell", ctxId: "ctx-own",
+                    message: "warning\n", stream: "stderr" },
+            ];
+        },
+    }, "ctx-own", "call-shell");
+    assert.equal(output?.stdout, "ready\ntoken=[redacted]\n");
+    assert.equal(output?.stderr, "warning\n");
+    assert.equal(JSON.stringify(output).includes("foreign log"), false);
+    assert.equal(JSON.stringify(output).includes("example-credential"), false);
+    assert.deepEqual(queries[0], {
+        ctxId: "ctx-own", callIds: ["call-shell"], limit: 1,
+        includeInput: false, includeOutput: true, maxBytes: 64 * 1024,
+    });
+    assert.deepEqual(queries[1], {
+        callId: "call-shell", ctxId: "ctx-own", fromSeq: 1,
+        limit: 32, maxDecodedBytes: 256 * 1024,
+    });
+});
+
+test("Activity refuses calls from other Contexts before reading any logs", async () => {
+    let logsRead = 0;
+    const output = await readMcpAppActivityOutput({
+        listCalls: async () => [call("foreign", "ctx-other", "bash_run", 1)],
+    }, {
+        readLogs: async () => { logsRead++; return []; },
+    }, "ctx-own", "foreign");
+    assert.equal(output, undefined);
+    assert.equal(logsRead, 0);
+});
+
+test("Activity paginates long stdout without loading more than a bounded page", async () => {
+    const output = await readMcpAppActivityOutput({
+        listCalls: async () => [call("paged", "ctx-own", "bash_run", 1)],
+    }, {
+        readLogs: async () => Array.from({ length: 32 }, (_, index) => ({
+            at: "", seq: index + 1, instanceName: "demo", callId: "paged", ctxId: "ctx-own",
+            message: "line\n", stream: "stdout" as const,
+        })),
+    }, "ctx-own", "paged");
+    assert.equal(output?.stdout, "line\n".repeat(32));
+    assert.equal(output?.nextSeq, 33);
 });

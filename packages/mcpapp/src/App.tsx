@@ -427,7 +427,7 @@ function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
                     </div> : <p>{liveError ?? "Waiting for interaction state…"}</p>}
                 </> : snapshot ? <>
                     {actionError && <p role="alert">{actionError}</p>}
-                    <WorkspaceDashboard snapshot={snapshot}
+                    <WorkspaceDashboard snapshot={snapshot} session={session}
                         renderItem={(item, kind) => <WorkspaceItem item={item} kind={kind}
                             onAction={kind === "background" ? undefined : act}
                             pendingAction={pendingAction} busyAction={busyAction}

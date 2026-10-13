@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
-import type { McpAppItem, McpAppSnapshot } from "./Connection.js";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { readMcpAppActivityOutput, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
+import type { McpAppSession } from "./Session.js";
 import { ToolCallCard } from "./ToolCall.js";
 import { record } from "./ToolCallModel.js";
 
@@ -21,9 +22,73 @@ function taskTranscript(item: Activity, reads: readonly Activity[]): unknown {
     return { ...base, output: lines, task: record(latest?.task) ?? base.task };
 }
 
-export function WorkspaceDashboard({ snapshot, renderItem }: {
+/** Context-scoped terminal streams are loaded only when this audit card is opened. */
+function ActivityCard({ item, reads, session }: {
+    item: Activity; reads: readonly Activity[]; session?: McpAppSession;
+}) {
+    const [terminal, setTerminal] = useState<{
+        stdout: string; stderr: string; nextSeq?: number;
+        loaded: boolean; loading: boolean; error?: string;
+    }>({ stdout: "", stderr: "", loaded: false, loading: false });
+    const controller = useRef<AbortController>();
+    useEffect(() => () => { controller.current?.abort(); }, [session, item.callId]);
+    const load = (fromSeq: number) => {
+        if (!session || terminal.loading) return;
+        controller.current?.abort();
+        const pending = new AbortController();
+        controller.current = pending;
+        setTerminal((previous) => ({ ...previous, loading: true, error: undefined }));
+        void readMcpAppActivityOutput(session, item.callId, fromSeq, pending.signal).then((page) => {
+            if (pending.signal.aborted) return;
+            setTerminal((previous) => ({
+                stdout: previous.stdout + page.stdout,
+                stderr: previous.stderr + page.stderr,
+                loaded: true,
+                loading: false,
+                nextSeq: page.nextSeq,
+            }));
+        }).catch((error: unknown) => {
+            if (pending.signal.aborted) return;
+            setTerminal((previous) => ({
+                ...previous, loading: false,
+                error: error instanceof Error ? error.message : "Unable to read retained output",
+            }));
+        });
+    };
+    const isShell = item.name === "bash_run";
+    const failed = item.state === "failed" || item.state === "denied";
+    const summary = [item.summary ?? (item.exitCode === undefined
+        ? undefined : "exit " + item.exitCode), item.name === "tmux_run" && reads.length
+        ? reads.length + " transcript reads" : undefined].filter(Boolean).join(" · ");
+    const output = isShell && session ? {
+        ...record(item.output),
+        activityRetained: true,
+        ...(terminal.loaded ? { stdout: terminal.stdout, stderr: terminal.stderr } : {}),
+        ...(terminal.loading ? { activityStatus: "loading" } : {}),
+        ...(terminal.error ? { activityError: terminal.error } : {}),
+    } : taskTranscript(item, reads);
+    return <ToolCallCard name={item.name}
+        input={item.input ?? (isShell || item.name === "tmux_run"
+            ? { command: item.target } : { path: item.target })}
+        purpose={item.purpose} summary={summary}
+        detail={item.detail} state={item.state}
+        result={{ name: item.name, isError: failed, output }}
+        onExpandedChange={(open) => {
+            if (open && isShell && session && !terminal.loading && !terminal.loaded) load(1);
+        }}
+        expandedFooter={isShell && session && (terminal.nextSeq !== undefined || terminal.error)
+            ? <div className="tc-activity-actions">
+                <button type="button" disabled={terminal.loading}
+                    onClick={() => load(terminal.nextSeq ?? 1)}>
+                    {terminal.loading ? "Loading…" : terminal.error ? "Retry output" : "Load more output"}
+                </button>
+            </div> : undefined} />;
+}
+
+export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     snapshot: McpAppSnapshot;
     renderItem: (item: McpAppItem, kind: string) => ReactNode;
+    session?: McpAppSession;
 }) {
     const [tab, setTab] = useState<Tab>("overview");
     const [fallback, setFallback] = useState(false);
@@ -111,22 +176,11 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
                     visibleActivity?.length ? <ol className="dashboard-timeline">
                         {visibleActivity.map((item) => {
                             const reads = item.taskId ? pollsByTask.get(item.taskId) ?? [] : [];
-                            const failed = item.state === "failed" || item.state === "denied";
-                            const summary = [item.summary ?? (item.exitCode === undefined ?
-                                undefined : "exit " + item.exitCode), item.name === "tmux_run" &&
-                                reads.length ? reads.length + " transcript reads" : undefined]
-                                .filter(Boolean).join(" · ");
-                            return <li key={item.callId} data-state={item.state}>
+                            return <li key={snapshot.ctxId + ":" + item.callId} data-state={item.state}>
                                 <time className="tc-activity-time" dateTime={item.at}>
                                     {Number.isNaN(Date.parse(item.at)) ? item.at :
                                         new Date(item.at).toLocaleTimeString()}</time>
-                                <ToolCallCard name={item.name}
-                                    input={item.input ?? (item.name === "bash_run" || item.name === "tmux_run"
-                                        ? { command: item.target } : { path: item.target })}
-                                    purpose={item.purpose} summary={summary}
-                                    detail={item.detail} state={item.state}
-                                    result={{ name: item.name, isError: failed,
-                                        output: taskTranscript(item, reads) }} />
+                                <ActivityCard item={item} reads={reads} session={session} />
                             </li>;
                         })}
                     </ol> : <p className="dashboard-empty">No recent audited ToolCalls for this Context.</p>}

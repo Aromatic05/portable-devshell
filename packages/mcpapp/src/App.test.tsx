@@ -848,13 +848,25 @@ test("Workspace toggle updates ToolCall presentation preference without changing
 test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", async () => {
     const capability = { ctxId: "ctx-activity", token: "private-activity-test-token",
         liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
+    const activityRequests: Array<{ url: string; auth: string | null }> = [];
     globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
+        const url = String(input);
+        if (url.includes("/activity?")) {
+            activityRequests.push({ url, auth: new Headers(init?.headers).get("Authorization") });
+            const first = url.includes("fromSeq=1");
+            return Promise.resolve(new Response(JSON.stringify({
+                callId: "call-1",
+                stdout: first ? "main\n" : "latest\n",
+                stderr: first ? "" : "warning\n",
+                ...(first ? { nextSeq: 4 } : {}),
+            }), { status: 200 }));
+        }
+        if (url.includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
             ctxId: capability.ctxId, instance: "demo", cursor: 19, agentBusy: false,
             presentation: { work: [], background: [] },
             activity: [{ callId: "call-1", name: "bash_run", state: "completed",
                 exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
-                target: "git status --short", detail: "stdout:\nmain\n" },
+                target: "git status --short", output: { exitCode: 0, stdoutBytes: 12, stderrBytes: 8 } },
                 { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
                     taskId: "task-1", target: "pnpm build", summary: "exit 0",
                     output: { task: { id: "task-1", status: "running" }, output: ["Starting build"] } },
@@ -883,13 +895,21 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     expect(container!.textContent).toContain("Check workspace state");
     expect(container!.textContent).toContain("git status --short");
     expect(container!.querySelector(".dashboard-timeline .tc-terminal")).toBeNull();
+    expect(activityRequests).toHaveLength(0);
     await act(async () => { container!.querySelector<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")?.click(); });
+    await vi.waitFor(() => expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("main"));
     expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("main");
+    expect(activityRequests[0]?.url).toContain("/activity?callId=call-1&fromSeq=1&ctxId=ctx-activity");
+    expect(activityRequests[0]?.auth).toBe("Bearer private-activity-test-token");
+    await act(async () => { container!.querySelector<HTMLButtonElement>(".tc-activity-actions button")?.click(); });
+    await vi.waitFor(() => expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("latest"));
+    expect(activityRequests[1]?.url).toContain("fromSeq=4");
+    expect(container!.textContent).toContain("warning");
     expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(2);
     expect(container!.textContent).not.toContain("1 transcript reads");
     await act(async () => { container!.querySelectorAll<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")[1]?.click(); });
     expect(container!.textContent).toContain("1 transcript reads");
-    expect(container!.querySelectorAll(".dashboard-timeline .tc-terminal pre")[1]?.textContent).toContain("Build complete");
+    expect(container!.querySelectorAll(".dashboard-timeline li")[1]?.querySelector(".tc-terminal pre")?.textContent).toContain("Build complete");
     const internal = Array.from(container!.querySelectorAll(".workspace-setting"))
         .find((item) => item.textContent?.includes("Include polling"))?.querySelector("input");
     await act(async () => { internal?.click(); });

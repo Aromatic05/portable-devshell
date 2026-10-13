@@ -36,13 +36,17 @@ function ShellView({ input, result }: ToolCallPresentation): ReactNode {
             <code>{string(args?.command)}</code></div>}
         {string(args?.cwd) && <InfoStrip>Directory: {string(args?.cwd)}</InfoStrip>}
         <KeySummary output={output} />
-        {stdout && <Terminal text={stdout} title="stdout" />}
-        {stderr && <Terminal text={stderr} title="stderr" />}
-        {!stdout && !stderr && ((number(output?.stdoutBytes) ?? 0) > 0 ||
-            (number(output?.stderrBytes) ?? 0) > 0 ?
-            <Notice>Terminal output is omitted from the persistent audit. Open the original
-                Inline card or execution log to inspect the stream.</Notice> :
-            <Notice>Command produced no terminal output.</Notice>)}
+        {stdout && <Terminal text={stdout} title="stdout"
+            maxChars={output?.activityRetained === true ? stdout.length : undefined} />}
+        {stderr && <Terminal text={stderr} title="stderr"
+            maxChars={output?.activityRetained === true ? stderr.length : undefined} />}
+        {!stdout && !stderr && (output?.activityStatus === "loading"
+            ? <Notice>Loading retained terminal output…</Notice>
+            : string(output?.activityError)
+                ? <Notice tone="warning">{string(output?.activityError)}</Notice>
+                : (number(output?.stdoutBytes) ?? 0) > 0 || (number(output?.stderrBytes) ?? 0) > 0
+                    ? <Notice>Retained terminal output is unavailable or has expired.</Notice>
+                    : <Notice>Command produced no terminal output.</Notice>)}
         {output?.stdoutTruncated === true || output?.stderrTruncated === true
             ? <Notice tone="warning">Output was truncated by the tool.</Notice> : null}
         {string(output?.termination) && <InfoStrip>Termination: {string(output?.termination)}</InfoStrip>}
