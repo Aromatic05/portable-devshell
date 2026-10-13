@@ -116,6 +116,55 @@ export async function runTestspaceWorkspaceSmoke({
         assert.ok(shellCard, "Completed tool does not appear in the Workspace audit history.");
         assert.equal(shellCard.state, "completed");
         assert.match(shellCard.summary, /exit 0/u);
+        // Core deliberately stores byte counts but omits command streams in
+        // durable ToolCall audit. The Inline result itself still has stdout.
+        assert.match(shell.structuredContent?.stdout ?? "", /mcpapp-smoke-ok/u);
+        assert.match(shellCard.summary, /stdout bytes/u);
+        assert.equal(shellCard.output?.stdout, undefined);
+        assert.match(shellCard.input?.command ?? "", /mcpapp-smoke-ok/u);
+
+        // Real tool outputs must reach the Workspace as typed presentation
+        // data. These operations touch only the disposable testspace workspace.
+        const sample = "./mcpapp-semantic-smoke.txt";
+        const prepare = await client.callTool({ name: "bash_run", arguments: {
+            ctxId, cwd: "./", command: "printf 'widget-marker\\n' > ./mcpapp-semantic-smoke.txt",
+            timeoutMs: 10_000, purpose: "Prepare isolated renderer sample",
+        } });
+        assert.equal(prepare.isError, false);
+        assert.equal(prepare.structuredContent?.exitCode, 0);
+        const found = await client.callTool({ name: "file_glob", arguments: {
+            ctxId, patterns: [sample],
+        } });
+        assert.equal(found.isError, false);
+        assert.equal(found.structuredContent?.entries?.[0]?.path, sample);
+        const read = await client.callTool({ name: "file_read", arguments: {
+            ctxId, files: [{ path: sample }],
+        } });
+        assert.equal(read.isError, false);
+        assert.match(read.structuredContent?.files?.[0]?.content ?? "", /1:widget-marker/u);
+        const searched = await client.callTool({ name: "file_grep", arguments: {
+            ctxId, paths: [sample], pattern: "widget-marker", syntax: "literal",
+        } });
+        assert.equal(searched.isError, false);
+        assert.match(searched.structuredContent?.files?.[0]?.content ?? "", /widget-marker/u);
+        const edit = await client.callTool({ name: "file_edit", arguments: {
+            ctxId,
+            changes: "*** Begin Edit\n*** Patch File: ./mcpapp-semantic-smoke.txt\n@@\n-widget-marker\n+widget-marker-edited\n*** End Edit",
+            resultDetail: "diff",
+        } });
+        assert.equal(edit.isError, false);
+        assert.equal(edit.structuredContent?.operations?.[0]?.status, "applied");
+        assert.equal(typeof edit.structuredContent?.operations?.[0]?.diff, "string");
+        const presentation = await fetch(snapshotUrl, { headers: { authorization: `Bearer ${token}` } });
+        assert.equal(presentation.status, 200);
+        const displayed = (await presentation.json()).activity;
+        for (const name of ["file_glob", "file_read", "file_grep", "file_edit"]) {
+            assert.ok(displayed?.some((item) => item.name === name && item.output),
+                `${name} was not projected as typed Workspace history`);
+        }
+        const diffCard = displayed.find((item) => item.name === "file_edit");
+        assert.equal(diffCard.output?.operations?.[0]?.status, "applied");
+        assert.equal(typeof diffCard.output?.operations?.[0]?.diff, "string");
 
         // A new inline ask must be able to show a pending question before the
         // blocked tool finishes; answer it using the real MCP App action.
@@ -156,7 +205,8 @@ export async function runTestspaceWorkspaceSmoke({
             resourceUri: workspaceResource.uri,
             interactionResourceUri: inlineResource.uri,
             toolCallResourceUri: toolCallResource.uri,
-            fullscreenAdvertised: true, auditedToolCall: true, inlineAskAnswered: true,
+            fullscreenAdvertised: true, auditedToolCall: true, semanticToolsAudited: true,
+            inlineAskAnswered: true,
         };
     } finally {
         await client.close().catch(() => undefined);

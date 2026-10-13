@@ -36,6 +36,8 @@ export interface McpAppSnapshot {
         taskId?: string;
         summary?: string;
         detail?: string;
+        input?: unknown;
+        output?: unknown;
     }>;
     presentation: { primary?: McpAppItem; work: McpAppItem[]; background: McpAppItem[] };
     reentry?: {

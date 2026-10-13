@@ -11,6 +11,9 @@ export interface McpAppActivity {
     taskId?: string;
     summary?: string;
     detail?: string;
+    /** Bounded, redacted presentation fields; never raw audit records. */
+    input?: unknown;
+    output?: unknown;
 }
 
 const privateKey = /password|secret|token|credential|authorization|api.?key|private.?key|cookie/iu;
@@ -41,6 +44,34 @@ function safeValue(value: unknown, depth = 0): unknown {
         [key, privateKey.test(key) ? "[redacted]" : safeValue(entry, depth + 1)]));
 }
 
+function presentationValue(value: unknown, maximum: number): unknown {
+    let remaining = maximum;
+    const visit = (entry: unknown, depth: number): unknown => {
+        if (remaining <= 0) return "[presentation limit reached]";
+        if (typeof entry === "string") {
+            const text = protect(entry, Math.min(remaining, 4_000));
+            remaining -= text.length;
+            return text;
+        }
+        if (depth >= 6) return "[nested value]";
+        if (Array.isArray(entry)) {
+            return [...entry.slice(0, 32).map((item) => visit(item, depth + 1)),
+                ...(entry.length > 32 ? [`${entry.length - 32} more entries`] : [])];
+        }
+        const data = object(entry);
+        if (!data) return entry;
+        return Object.fromEntries(Object.entries(data).slice(0, 36).map(([key, item]) => {
+            remaining -= key.length;
+            if (privateKey.test(key)) return [key, "[redacted]"];
+            // Native image payloads never cross the Live audit boundary.
+            if (key === "data" && typeof item === "string" && item.length > 1_024)
+                return [key, "[binary payload omitted]"];
+            return [key, visit(item, depth + 1)];
+        }));
+    };
+    return visit(value, 0);
+}
+
 function target(record: ToolCallRecord): string | undefined {
     const input = object(record.input);
     if (input) {
@@ -61,6 +92,10 @@ function target(record: ToolCallRecord): string | undefined {
 }
 
 function taskId(record: ToolCallRecord): string | undefined {
+    if (record.toolName === "todo_read" || record.toolName === "todo_write") {
+        const id = object(record.output)?.taskId ?? object(record.input)?.taskId;
+        return typeof id === "string" ? protect(id, 160) : undefined;
+    }
     if (!record.toolName.startsWith("tmux_")) return undefined;
     const requested = object(record.input)?.task;
     if (typeof requested === "string") return protect(requested, 160);
@@ -122,6 +157,8 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
             ...(target(record) === undefined ? {} : { target: target(record) }),
             ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
             ...(summary(record) === undefined ? {} : { summary: summary(record) }),
+            ...(record.input === undefined ? {} : { input: presentationValue(record.input, 2_000) }),
+            ...(record.output === undefined ? {} : { output: presentationValue(record.output, 8_000) }),
             ...(detail(record.toolName, record.output) === undefined ? {}
                 : { detail: detail(record.toolName, record.output) }),
         }));

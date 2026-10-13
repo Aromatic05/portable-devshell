@@ -714,7 +714,8 @@ test("ToolCall inline is two lines and never loads Context Snapshot, Wait or App
         host.clients[0]?.ontoolinput?.({ arguments: { files: [{ path: "src/widget.ts" }], purpose: "Read source" } });
         host.clients[0]?.ontoolresult?.({
             _meta: { "portable-devshell/toolcall": { name: "file_read" } },
-            structuredContent: { path: "src/widget.ts", content: "Safe result", nested: { api_token: "hidden-token" } },
+            structuredContent: { files: [{ path: "src/widget.ts",
+                content: "1:Safe result\n2:password=hidden-token" }] },
         });
     });
     expect(container!.textContent).toContain("file_read");
@@ -729,7 +730,7 @@ test("ToolCall inline is two lines and never loads Context Snapshot, Wait or App
     expect(container!.textContent).not.toContain("Approval required");
     await act(async () => { expand?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click(); });
     expect(expand?.querySelector(".toolcall-compact")?.getAttribute("aria-expanded")).toBe("true");
-    expect(container!.textContent).toContain("Safe result");
+    expect(container!.querySelector(".tc-code")?.textContent).toContain("Safe result");
     expect(container!.textContent).not.toContain("hidden-token");
     expect(container!.textContent).toContain("[redacted]");
     expect(container!.textContent).not.toContain("private-toolcall-test-token");
@@ -807,9 +808,11 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
                 exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
                 target: "git status --short", detail: "stdout:\nmain\n" },
                 { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
-                    taskId: "task-1", target: "pnpm build", summary: "exit 0" },
+                    taskId: "task-1", target: "pnpm build", summary: "exit 0",
+                    output: { task: { id: "task-1", status: "running" }, output: ["Starting build"] } },
                 { callId: "call-3", name: "tmux_read", state: "completed", at: "2026-10-12T16:02:00Z",
-                    taskId: "task-1", target: "task-1" },
+                    taskId: "task-1", target: "task-1",
+                    output: { task: { id: "task-1", status: "0" }, output: ["Build complete"] } },
                 { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
         }), { status: 200 }));
         return new Promise<Response>((_resolve, reject) => {
@@ -831,9 +834,14 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     expect(container!.textContent).toContain("exit 0");
     expect(container!.textContent).toContain("Check workspace state");
     expect(container!.textContent).toContain("git status --short");
-    expect(container!.querySelector(".dashboard-timeline pre")?.textContent).toContain("main");
+    expect(container!.querySelector(".dashboard-timeline .tc-terminal")).toBeNull();
+    await act(async () => { container!.querySelector<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")?.click(); });
+    expect(container!.querySelector(".dashboard-timeline .tc-terminal pre")?.textContent).toContain("main");
     expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(2);
+    expect(container!.textContent).not.toContain("1 transcript reads");
+    await act(async () => { container!.querySelectorAll<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")[1]?.click(); });
     expect(container!.textContent).toContain("1 transcript reads");
+    expect(container!.querySelectorAll(".dashboard-timeline .tc-terminal pre")[1]?.textContent).toContain("Build complete");
     const internal = Array.from(container!.querySelectorAll(".workspace-setting"))
         .find((item) => item.textContent?.includes("Include polling"))?.querySelector("input");
     await act(async () => { internal?.click(); });
@@ -871,16 +879,18 @@ test("File and custom tool results have readable multiline details and generic f
         result={{ name: "file_read", isError: false, output: {
             files: [{ path: "/etc/os-release", content: "1:NAME=Arch Linux\n2:ID=arch" }],
         } }} />); });
-    expect(container.querySelector(".toolcall-result-text")).toBeNull();
+    expect(container.querySelector(".tc-code")).toBeNull();
     await act(async () => { container?.querySelector(".toolcall-compact")?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    const text = container.querySelector(".toolcall-result-text")?.textContent ?? "";
-    expect(text).toContain("/etc/os-release\n1:NAME=Arch Linux\n2:ID=arch");
-    expect(text).not.toContain('"content":');
+    expect(container.querySelector(".tc-file-header")?.textContent).toContain("/etc/os-release");
+    expect(container.querySelectorAll(".tc-code-line")).toHaveLength(2);
+    expect(container.querySelector(".tc-code-line code")?.textContent).toBe("NAME=Arch Linux");
+    expect(container.querySelector(".tc-gutter")?.textContent).toBe("1");
+    expect(container.querySelector(".tc-code")?.textContent).not.toContain('"content":');
     await act(async () => { root?.render(<ToolCallCard enabled onEnabledChange={() => undefined}
         result={{ name: "custom_plugin", isError: false, output: {
             operation: "inspect", nested: { token: "must-stay-private", passed: true },
         } }} />); });
-    expect(container.querySelector(".toolcall-result-text")?.textContent).toContain("inspect");
+    expect(container.querySelector(".tc-fields")?.textContent).toContain("inspect");
     expect(container.textContent).not.toContain("must-stay-private");
 });
 
@@ -896,9 +906,9 @@ test("ToolCall summary understands DevShell file arrays, shell exit status and p
             output: { exitCode: 0, durationMs: 18, stdout: "Probe succeeded" } }} />); });
     expect(container!.textContent).toContain("Verify read-only network access");
     expect(container!.textContent).toContain("18ms");
-    expect(container!.querySelector(".toolcall-result-text")).toBeNull();
+    expect(container!.querySelector(".tc-terminal")).toBeNull();
     await act(async () => { container!.querySelector(".toolcall-compact")?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    expect(container!.textContent).toContain("exit 0");
-    expect(container!.textContent).toContain("Probe succeeded");
+    expect(container!.querySelector(".tc-stats")?.textContent).toContain("Exit0");
+    expect(container!.querySelector(".tc-terminal pre")?.textContent).toContain("Probe succeeded");
     expect(container!.textContent).not.toContain("my-secret-token");
 });

@@ -69,3 +69,53 @@ test("Tmux transcript polls share Task ID with the original command and stay aud
     assert.deepEqual(cards.map((item) => item.taskId), ["task-42", "task-42"]);
     assert.equal(cards[0]?.name, "tmux_read");
 });
+
+test("Todo audit cards retain their stable taskId for Workspace plan aggregation", () => {
+    const cards = projectMcpAppActivity([
+        call("write", "ctx", "todo_write", 1, {
+            input: { title: "Build UI", revision: 1, taskId: "plan-1" },
+            output: { taskId: "plan-1", items: [{ status: "in_progress", content: "Build" }] },
+        }),
+        call("read", "ctx", "todo_read", 2, {
+            input: { taskId: "plan-1" },
+            output: { taskId: "plan-1", items: [{ status: "completed", content: "Build" }] },
+        }),
+    ], "ctx");
+    assert.deepEqual(cards.map((item) => item.taskId), ["plan-1", "plan-1"]);
+});
+
+test("Workspace audit projection preserves semantic operations within bounds and never exposes credentials", () => {
+    const records = [
+        call("edit", "ctx-a", "file_edit", 4, {
+            input: { changes: "*** Begin Edit\n*** Patch File: ./src/index.ts\n" },
+            output: { operations: [{
+                path: "./src/index.ts", action: "patch", status: "applied", addedLines: 3,
+                removedLines: 1, diff: "@@\n-old\n+new",
+            }] },
+        }),
+        call("todo", "ctx-a", "todo_write", 5, {
+            input: { title: "UI", token: "never-expose", nested: { password: "hidden" } },
+            output: { title: "UI", items: [{ content: "Render", status: "completed" }],
+                credential: "not-for-widget" },
+        }),
+        call("bash", "ctx-a", "bash_run", 6, {
+            input: { command: "printf ok", purpose: "Check status" },
+            output: { stdout: "ok", stderr: "", exitCode: 0 },
+        }),
+        call("other", "ctx-b", "file_read", 7, { output: { files: [{ content: "foreign" }] } }),
+    ];
+    const activity = projectMcpAppActivity(records, "ctx-a");
+    assert.equal(activity.length, 3);
+    const diff = activity.find((item) => item.name === "file_edit");
+    const editOutput = diff?.output as { operations: Array<{ diff: string }> };
+    assert.equal(editOutput.operations[0]?.diff, "@@\n-old\n+new");
+    const todo = activity.find((item) => item.name === "todo_write");
+    assert.equal((todo?.output as { items: Array<{ status: string }> }).items[0]?.status, "completed");
+    const text = JSON.stringify(activity);
+    assert.doesNotMatch(text, /never-expose|hidden|not-for-widget|foreign/u);
+    assert.match(text, /\[redacted\]/u);
+    const longResult = projectMcpAppActivity([
+        call("long", "ctx-a", "bash_run", 8, { output: { stdout: "s".repeat(50_000) } }),
+    ], "ctx-a");
+    assert.ok(JSON.stringify(longResult[0]?.output).length <= 8_200);
+});
