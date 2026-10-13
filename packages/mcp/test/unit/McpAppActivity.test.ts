@@ -53,3 +53,19 @@ test("Workspace history queries audited active and completed calls, with bounded
     assert.equal(cards[0]?.state, "failed");
     assert.match(cards[0]?.summary ?? "", /Invalid patch/u);
 });
+
+test("Tmux transcript polls share Task ID with the original command and stay audited", () => {
+    const cards = projectMcpAppActivity([
+        call("run", "ctx", "tmux_run", 1, {
+            input: { command: "pnpm build" },
+            output: { task: { id: "task-42", status: "running" } },
+        }),
+        call("poll", "ctx", "tmux_read", 2, {
+            input: { task: "task-42", line: -30 },
+            output: { task: { id: "task-42", status: "running" }, output: ["building..."] },
+        }),
+    ], "ctx");
+    assert.equal(cards.length, 2);
+    assert.deepEqual(cards.map((item) => item.taskId), ["task-42", "task-42"]);
+    assert.equal(cards[0]?.name, "tmux_read");
+});

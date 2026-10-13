@@ -13,6 +13,7 @@ const host = vi.hoisted(() => ({
     bootstrapCapability: undefined as undefined | Record<string, unknown>,
     bootstrapCalls: 0,
     teardownRequests: 0,
+    resizeSubscriptions: 0,
     availableDisplayModes: ["inline"] as string[],
     displayMode: "inline",
     modeAccepted: true,
@@ -30,8 +31,12 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
         ontoolinput?: (input: { arguments?: Record<string, unknown> }) => void;
         ontoolresult?: (result: unknown) => void;
         onclose?: () => void;
-        constructor() { host.clients.push(this); }
-        async connect() {}
+        readonly options: { autoResize?: boolean };
+        constructor(_info: unknown, _capabilities: unknown, options: { autoResize?: boolean } = {}) {
+            this.options = options;
+            host.clients.push(this);
+        }
+        async connect() { if (this.options.autoResize) this.setupSizeChangedNotifications(); }
         getHostContext() { return { displayMode: host.displayMode, availableDisplayModes: host.availableDisplayModes }; }
         async requestDisplayMode(params: { mode: "inline" | "fullscreen" }) {
             host.modeRequests.push(params.mode);
@@ -39,7 +44,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-with-deps", () => ({
             return { mode: host.displayMode };
         }
         async requestTeardown() { host.teardownRequests++; }
-        setupSizeChangedNotifications() { return () => undefined; }
+        setupSizeChangedNotifications() { host.resizeSubscriptions++; return () => undefined; }
         async callServerTool(params: { name: string; arguments: Record<string, unknown> }) {
             if (params.name === "mcpapp_open") {
                 host.bootstrapCalls++;
@@ -95,6 +100,7 @@ afterEach(async () => {
     host.bootstrapCapability = undefined;
     host.bootstrapCalls = 0;
     host.teardownRequests = 0;
+    host.resizeSubscriptions = 0;
     host.availableDisplayModes = ["inline"];
     host.displayMode = "inline";
     host.modeAccepted = true;
@@ -688,24 +694,10 @@ test("Blocking question remains answerable from explicit fullscreen fallback whe
     expect(JSON.stringify(host.sent[0])).toContain("Yes");
 });
 
-test("ToolCall inline uses its result capability without opening another tool, and preserves Approval/Wait", async () => {
+test("ToolCall inline is two lines and never loads Context Snapshot, Wait or Approval", async () => {
     const capability = { ctxId: "ctx-toolcall", token: "private-toolcall-test-token",
         liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
-    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
-            ctxId: capability.ctxId, instance: "demo", cursor: 3, agentBusy: true,
-            presentation: {
-                primary: { id: "approve-inline", title: "Approval required", actions: [
-                    { id: "approve", label: "Approve" }, { id: "deny", label: "Deny" },
-                ] },
-                work: [{ id: "goal-private", title: "Not for inline" }],
-                background: [{ id: "wait-toolcall", title: "tmux_run", badge: "Wait · active" }],
-            },
-        }), { status: 200 }));
-        return new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-        });
-    }) as typeof fetch;
+    globalThis.fetch = vi.fn(() => { throw new Error("Inline must never request Context Live data"); }) as typeof fetch;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -713,12 +705,13 @@ test("ToolCall inline uses its result capability without opening another tool, a
     await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
         "portable-devshell/mcpapp": capability,
     } }); });
-    await vi.waitFor(() => expect(container!.textContent).toContain("Approval required"));
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(host.bootstrapCalls).toBe(0);
     expect(host.modeRequests).toHaveLength(0);
+    expect(host.resizeSubscriptions).toBe(1);
 
     await act(async () => {
-        host.clients[0]?.ontoolinput?.({ arguments: { files: [{ path: "src/widget.ts" }] } });
+        host.clients[0]?.ontoolinput?.({ arguments: { files: [{ path: "src/widget.ts" }], purpose: "Read source" } });
         host.clients[0]?.ontoolresult?.({
             _meta: { "portable-devshell/toolcall": { name: "file_read" } },
             structuredContent: { path: "src/widget.ts", content: "Safe result", nested: { api_token: "hidden-token" } },
@@ -727,24 +720,65 @@ test("ToolCall inline uses its result capability without opening another tool, a
     expect(container!.textContent).toContain("file_read");
     expect(container!.textContent).toContain("Completed");
     expect(container!.textContent).toContain("src/widget.ts");
-    const expand = container!.querySelector<HTMLDetailsElement>(".toolcall-details");
+    const expand = container!.querySelector<HTMLElement>(".toolcall-card");
     expect(expand).not.toBeNull();
-    await act(async () => { expand?.querySelector("summary")?.click(); });
+    expect(expand?.querySelector(".toolcall-compact")?.getAttribute("aria-expanded")).toBe("false");
+    expect(expand?.querySelectorAll(".toolcall-compact > *")).toHaveLength(2);
+    expect(container!.querySelector(".toolcall-result-text")).toBeNull();
+    expect(container!.textContent).not.toContain("Wait · active");
+    expect(container!.textContent).not.toContain("Approval required");
+    await act(async () => { expand?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click(); });
+    expect(expand?.querySelector(".toolcall-compact")?.getAttribute("aria-expanded")).toBe("true");
     expect(container!.textContent).toContain("Safe result");
     expect(container!.textContent).not.toContain("hidden-token");
     expect(container!.textContent).toContain("[redacted]");
     expect(container!.textContent).not.toContain("private-toolcall-test-token");
 
-    const checkbox = container!.querySelector<HTMLInputElement>(".toolcall-switch input");
-    expect(checkbox?.checked).toBe(true);
-    await act(async () => { checkbox?.click(); });
-    expect(checkbox?.checked).toBe(false);
-    expect(container!.querySelector(".toolcall-details")).toBeNull();
-    expect(container!.textContent).toContain("Approval required");
-    expect(container!.textContent).toContain("Wait · active");
-    expect(container!.textContent).not.toContain("Not for inline");
-    await act(async () => { checkbox?.click(); });
-    expect(container!.querySelector(".toolcall-details")).not.toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await act(async () => { expand?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click(); });
+    expect(container!.querySelector(".toolcall-result-text")).toBeNull();
+});
+
+test("ChatGPT static ToolCall restores from response metadata after an iframe remount", async () => {
+    const previousOpenai = (window as Window & { openai?: unknown }).openai;
+    const globals = {
+        toolInput: { purpose: "Inspect repo", command: "git status --short" },
+        toolOutput: { exitCode: 0, durationMs: 11, stdout: " M src/App.tsx\n" },
+        toolResponseMetadata: {
+            "portable-devshell/toolcall": { name: "bash_run" },
+            "portable-devshell/mcpapp": {
+                ctxId: "ctx-static", token: "private-static-test-token",
+                liveBaseUrl: "https://devshell.example/api/live/test/workspace",
+            },
+        },
+    };
+    Object.assign(window, { openai: globals });
+    globalThis.fetch = vi.fn(() => { throw new Error("Static Widget cannot fetch"); }) as typeof fetch;
+    try {
+        container = document.createElement("div");
+        document.body.append(container);
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView view="toolcall" />); });
+        expect(container.textContent).toContain("Inspect repo");
+        expect(container.textContent).toContain("bash_run");
+        expect(container.querySelectorAll(".toolcall-compact > *")).toHaveLength(2);
+        expect(container.querySelector(".toolcall-result-text")).toBeNull();
+        expect(host.clients).toHaveLength(0);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+        await act(async () => { container?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click(); });
+        expect(container.textContent).toContain("M src/App.tsx");
+        expect(container.textContent).not.toContain("private-static-test-token");
+
+        await act(async () => { root?.unmount(); root = undefined; });
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView view="toolcall" />); });
+        expect(container.textContent).toContain("Inspect repo");
+        expect(container.querySelector(".toolcall-result-text")).toBeNull();
+        expect(host.clients).toHaveLength(0);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+        Object.assign(window, { openai: previousOpenai });
+    }
 });
 
 test("Workspace toggle updates ToolCall presentation preference without changing tool execution", async () => {
@@ -771,7 +805,12 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
             presentation: { work: [], background: [] },
             activity: [{ callId: "call-1", name: "bash_run", state: "completed",
                 exitCode: 0, at: "2026-10-12T16:00:00Z", purpose: "Check workspace state",
-                target: "git status --short", detail: "stdout:\nmain\n" }],
+                target: "git status --short", detail: "stdout:\nmain\n" },
+                { callId: "call-2", name: "tmux_run", state: "completed", at: "2026-10-12T16:01:00Z",
+                    taskId: "task-1", target: "pnpm build", summary: "exit 0" },
+                { callId: "call-3", name: "tmux_read", state: "completed", at: "2026-10-12T16:02:00Z",
+                    taskId: "task-1", target: "task-1" },
+                { callId: "call-4", name: "mcpapp_open", state: "completed", at: "2026-10-12T16:03:00Z" }],
         }), { status: 200 }));
         return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -793,6 +832,14 @@ test("Fullscreen Activity displays audited Context-scoped ToolCall timeline", as
     expect(container!.textContent).toContain("Check workspace state");
     expect(container!.textContent).toContain("git status --short");
     expect(container!.querySelector(".dashboard-timeline pre")?.textContent).toContain("main");
+    expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(2);
+    expect(container!.textContent).toContain("1 transcript reads");
+    const internal = Array.from(container!.querySelectorAll(".workspace-setting"))
+        .find((item) => item.textContent?.includes("Include polling"))?.querySelector("input");
+    await act(async () => { internal?.click(); });
+    expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(4);
+    await act(async () => { internal?.click(); });
+    expect(container!.querySelectorAll(".dashboard-timeline li")).toHaveLength(2);
     const history = container!.querySelector<HTMLInputElement>(".dashboard-activity-head input");
     await act(async () => { history?.click(); });
     expect(container!.querySelector(".dashboard-timeline")).toBeNull();
@@ -824,14 +871,16 @@ test("File and custom tool results have readable multiline details and generic f
         result={{ name: "file_read", isError: false, output: {
             files: [{ path: "/etc/os-release", content: "1:NAME=Arch Linux\n2:ID=arch" }],
         } }} />); });
-    const text = container.querySelector(".toolcall-details pre")?.textContent ?? "";
+    expect(container.querySelector(".toolcall-result-text")).toBeNull();
+    await act(async () => { container?.querySelector(".toolcall-compact")?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    const text = container.querySelector(".toolcall-result-text")?.textContent ?? "";
     expect(text).toContain("/etc/os-release\n1:NAME=Arch Linux\n2:ID=arch");
     expect(text).not.toContain('"content":');
     await act(async () => { root?.render(<ToolCallCard enabled onEnabledChange={() => undefined}
         result={{ name: "custom_plugin", isError: false, output: {
             operation: "inspect", nested: { token: "must-stay-private", passed: true },
         } }} />); });
-    expect(container.querySelector(".toolcall-details pre")?.textContent).toContain("inspect");
+    expect(container.querySelector(".toolcall-result-text")?.textContent).toContain("inspect");
     expect(container.textContent).not.toContain("must-stay-private");
 });
 
@@ -846,8 +895,10 @@ test("ToolCall summary understands DevShell file arrays, shell exit status and p
         result={{ name: "bash_run", isError: false,
             output: { exitCode: 0, durationMs: 18, stdout: "Probe succeeded" } }} />); });
     expect(container!.textContent).toContain("Verify read-only network access");
+    expect(container!.textContent).toContain("18ms");
+    expect(container!.querySelector(".toolcall-result-text")).toBeNull();
+    await act(async () => { container!.querySelector(".toolcall-compact")?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     expect(container!.textContent).toContain("exit 0");
-    expect(container!.textContent).toContain("18 ms");
     expect(container!.textContent).toContain("Probe succeeded");
     expect(container!.textContent).not.toContain("my-secret-token");
 });

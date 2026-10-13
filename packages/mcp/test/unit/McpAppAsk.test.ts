@@ -101,6 +101,8 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
         { name: "file_read", group: "file", description: "Read file",
             requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+        { name: "tmux_read", group: "tmux", description: "Read a task transcript",
+            requiredCapabilities: [], inputSchema: { type: "object" }, outputSchema: { type: "object" } },
     ];
     const catalog = new McpEndpointCatalog({
         instanceName: "alpha",
@@ -119,8 +121,13 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
     for (const resource of [workspace, interaction, toolCall])
         assert.equal(resource?.mimeType, "text/html;profile=mcp-app");
     const tools = catalog.listTools();
-    assert.equal(tools.length, 4);
+    assert.equal(tools.length, 5);
     for (const tool of tools) {
+        if (tool.name === "tmux_read") {
+            const meta = tool._meta as Record<string, unknown> | undefined;
+            assert.equal(meta?.["openai/outputTemplate"], undefined);
+            continue;
+        }
         const uri = tool.name === "mcpapp_open" ? workspace?.uri
             : tool.name === "mcpapp_ask" ? interaction?.uri : toolCall?.uri;
         const meta = tool._meta as Record<string, unknown> | undefined;
@@ -136,6 +143,8 @@ test("MCP tool catalog routes explicit Workspace to fullscreen and ordinary call
     assert.match(workspaceContent?.text ?? "", /data-mcpapp-view="workspace"/u);
     assert.match(interactionContent?.text ?? "", /data-mcpapp-view="interaction"/u);
     assert.match(toolCallContent?.text ?? "", /data-mcpapp-view="toolcall"/u);
+    assert.match(workspaceContent?.text ?? "", /<link rel="stylesheet"/u);
+    assert.match(toolCallContent?.text ?? "", /<link rel="stylesheet"/u);
     for (const resource of [workspaceContent, interactionContent, toolCallContent])
         assert.equal(resource?.text?.includes("private-valid-capability-01"), false);
 });
@@ -147,8 +156,16 @@ test("MCP App tags ordinary ToolCall results for an inline card without altering
     assert.ok(presented instanceof McpNativeToolResult);
     assert.deepEqual(presented.structuredContent, input);
     assert.deepEqual(presented._meta?.["portable-devshell/toolcall"], { name: "bash_run" });
-    assert.equal((presented._meta?.["portable-devshell/mcpapp"] as Record<string, unknown>)?.ctxId, f.ctxId);
+    assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
     assert.equal(JSON.stringify(presented.structuredContent).includes("private-valid-capability-01"), false);
+});
+
+test("tmux_read does not issue a Live capability for a background transcript poll", async () => {
+    const f = fixture();
+    const presented = await f.endpoint.present("tmux_read", { task: { id: "task-1" } }, f.request);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
+    assert.equal(presented._meta?.["portable-devshell/toolcall"]?.name, "tmux_read");
 });
 
 test("A foreign MCP App resource cannot receive the DevShell Live bearer capability", async () => {

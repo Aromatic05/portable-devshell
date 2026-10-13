@@ -57,27 +57,29 @@ p { max-width: 360px; margin: 7px 0 0; font-size: 12px; line-height: 1.6; opacit
 .workspace[data-view="workspace"] { min-height: 100dvh; height: 100dvh; overflow: auto; }
 .workspace[data-view="workspace"] .workspace-content { align-items: stretch; justify-content: flex-start; text-align: left; padding: 0; }
 .workspace[data-view="workspace"] .workspace-head { flex-shrink: 0; }
-.workspace-setting, .toolcall-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; white-space: nowrap; }
-.workspace-setting input, .toolcall-switch input { accent-color: #16875d; }
-.workspace[data-view="interaction"], .workspace[data-view="toolcall"] { min-height: 0; gap: 8px; padding: 12px; }
-.workspace[data-view="interaction"] .workspace-content,
-.workspace[data-view="toolcall"] .workspace-content { align-items: stretch; justify-content: flex-start; padding: 0; text-align: left; }
-.workspace[data-view="toolcall"] .workspace-head { padding-bottom: 8px; }
-.workspace[data-view="toolcall"] .workspace-name { font-size: 12px; }
-.workspace[data-view="toolcall"] .workspace-foot { display: none; }
-.workspace[data-view="toolcall"] .inline-interactions { display: grid; gap: 7px; width: 100%; }
-.toolcall-card { width: 100%; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 10px; padding: 10px 12px; }
-.toolcall-head, .toolcall-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.toolcall-head { justify-content: space-between; }
-.toolcall-title strong { font-size: 12px; }
-.toolcall-title span { opacity: .64; font-size: 10px; }
-.toolcall-title span[data-kind="error"] { color: #c4514b; opacity: 1; }
-.toolcall-title span[data-kind="running"] { color: #ad8834; opacity: 1; }
-.toolcall-switch { font-size: 10px; opacity: .75; }
+.workspace-setting { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.workspace-setting input { accent-color: #16875d; }
+.workspace[data-view="interaction"] { min-height: 0; gap: 8px; padding: 12px; }
+.workspace[data-view="interaction"] .workspace-content { align-items: stretch; justify-content: flex-start; padding: 0; text-align: left; }
+
+/* Inline is strictly two lines until expanded. It owns no Workspace content. */
+.toolcall-card { display: block; width: 100%; min-width: 0; border: 1px solid color-mix(in srgb,currentColor 13%,transparent); border-radius: 9px; background: var(--color-background-primary,#f8fafc); }
+.toolcall-compact { display: grid; gap: 2px; width: 100%; min-width: 0; padding: 7px 10px; cursor: pointer; background: transparent; border: 0; color: inherit; text-align: left; font: inherit; }
+.toolcall-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; line-height: 16px; }
+.toolcall-line strong { font-size: 12px; white-space: nowrap; }
+.toolcall-line > span:not(.toolcall-chevron) { color: var(--color-text-secondary,#5d6470); white-space: nowrap; }
+.toolcall-line > span[data-kind="error"] { color: #c4514b; }
+.toolcall-line > span[data-kind="running"] { color: #ad8834; }
+.toolcall-duration { margin-left: auto; font-variant-numeric: tabular-nums; }
+.toolcall-chevron { margin-left: auto; opacity: .6; transition: transform .15s ease; }
+.toolcall-duration + .toolcall-chevron { margin-left: 0; }
+.toolcall-card[data-expanded="true"] .toolcall-chevron { transform: rotate(180deg); }
+.toolcall-description { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 11px/16px ui-monospace,monospace; opacity: .72; }
+.toolcall-expanded { min-width: 0; padding: 0 10px 10px; border-top: 1px solid color-mix(in srgb,currentColor 9%,transparent); }
 .toolcall-target { color: inherit; font: 11px/1.5 ui-monospace, monospace; opacity: .75; white-space: pre-wrap; overflow-wrap: anywhere; max-width: unset; }
-.toolcall-details { margin-top: 8px; border-top: 1px solid color-mix(in srgb, currentColor 11%, transparent); padding-top: 7px; }
-.toolcall-details summary { cursor: pointer; font-size: 11px; opacity: .85; }
-.toolcall-details pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.55 ui-monospace, monospace; max-height: 380px; border-radius: 7px; padding: 10px; background: color-mix(in srgb, currentColor 4%, transparent); }
+.toolcall-result-text { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 ui-monospace,monospace; max-height: 420px; border-radius: 7px; padding: 10px; background: color-mix(in srgb,currentColor 4%,transparent); }
+.toolcall-hidden { display: flex; justify-content: space-between; padding: 5px 10px; font-size: 11px; opacity: .65; }
+.toolcall-hidden button { border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; }
 .dashboard { display: grid; gap: 16px; width: 100%; max-width: 1060px; margin: 0 auto; }
 .dashboard-overview { display: flex; justify-content: space-between; align-items: start; gap: 20px; flex-wrap: wrap; padding-top: 15px; }
 .dashboard-title h1 { font-size: 20px; }

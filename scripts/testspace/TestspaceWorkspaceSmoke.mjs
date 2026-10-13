@@ -98,9 +98,8 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(template("mcpapp_ask"), inlineResource.uri);
         assert.equal(template("bash_run"), toolCallResource.uri);
 
-        // Ordinary ToolCalls provide the live capability without executing
-        // mcpapp_open again. The persistent Workspace shows their audit card
-        // after completion, including target and status.
+        // Ordinary ToolCalls are static Widgets with no Live Lease. The
+        // explicit Workspace still shows their audited target and status.
         const command = "printf 'mcpapp-smoke-ok\\n'";
         const shell = await client.callTool({ name: "bash_run", arguments: {
             ctxId, command, cwd: "./", timeoutMs: 10_000,
@@ -109,7 +108,7 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(shell.isError, false);
         assert.equal(shell.structuredContent?.exitCode, 0);
         assert.equal(shell._meta?.["portable-devshell/toolcall"]?.name, "bash_run");
-        assert.equal(shell._meta?.["portable-devshell/mcpapp"]?.ctxId, ctxId);
+        assert.equal(shell._meta?.["portable-devshell/mcpapp"], undefined);
         const audited = await fetch(snapshotUrl, { headers: { authorization: `Bearer ${token}` } });
         assert.equal(audited.status, 200);
         const history = (await audited.json()).activity;

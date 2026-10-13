@@ -9,11 +9,12 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const assetRoot = join(packageRoot, "dist/mcpapp");
 const manifest = JSON.parse(
     readFileSync(join(assetRoot, ".vite/manifest.json"), "utf8"),
-) as Record<string, { file: string; css?: string[]; isEntry?: boolean }>;
-const candidate = Object.values(manifest).find((item) => item.isEntry);
-if (candidate === undefined || !candidate.file.startsWith("assets/"))
-    throw new Error("The MCP App Vite manifest has no valid entrypoint.");
-const entry: { file: string; css?: string[] } = candidate;
+) as Record<string, { file: string; css?: string[]; imports?: string[]; isEntry?: boolean }>;
+const workspaceEntry = manifest["index.html"];
+const toolCallEntry = manifest["toolcall.html"];
+if (!workspaceEntry?.isEntry || !workspaceEntry.file.startsWith("assets/") ||
+    !toolCallEntry?.isEntry || !toolCallEntry.file.startsWith("assets/"))
+    throw new Error("The MCP App Vite manifest is missing a Workspace or ToolCall entrypoint.");
 
 export const mcpAppAssetDirectory = join(assetRoot, "assets");
 export const mcpAppStableResourceUri = "ui://portable-devshell/mcpapp/v1.html";
@@ -66,6 +67,8 @@ export function mcpAppResourceMetaForPublicBaseUrl(publicBaseUrl?: string, view:
 }
 
 export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string, view: McpAppView = "workspace"): string {
+    const entryName = view === "toolcall" ? "toolcall.html" : "index.html";
+    const entry = view === "toolcall" ? toolCallEntry : workspaceEntry;
     const assetUrl = (file: string): string => {
         if (!file.startsWith("assets/") || file.includes(".."))
             throw new Error("The MCP App Vite manifest contains an invalid asset path.");
@@ -76,10 +79,26 @@ export function mcpAppHtmlForPublicBaseUrl(publicBaseUrl?: string, view: McpAppV
         url.hash = "";
         return url.href;
     };
-    const styles = (entry.css ?? [])
+    const styles = entryStyles(entryName)
         .map((file) => `<link rel="stylesheet" href="${escapeAttribute(assetUrl(file))}">`)
         .join("");
     return `<!doctype html><html lang="en" data-mcpapp-view="${view}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevShell Workspace</title>${styles}</head><body><div id="root"></div><script type="module" crossorigin src="${escapeAttribute(assetUrl(entry.file))}"></script></body></html>`;
+}
+
+/** Vite may attach CSS to a shared static chunk rather than its HTML entry. */
+function entryStyles(entryName: string): string[] {
+    const visited = new Set<string>();
+    const css = new Set<string>();
+    const visit = (name: string) => {
+        if (visited.has(name)) return;
+        visited.add(name);
+        const entry = manifest[name];
+        if (!entry) throw new Error(`Missing MCP App Vite manifest dependency ${name}`);
+        for (const file of entry.css ?? []) css.add(file);
+        for (const dependency of entry.imports ?? []) visit(dependency);
+    };
+    visit(entryName);
+    return [...css];
 }
 
 function escapeAttribute(value: string): string {

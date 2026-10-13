@@ -33,6 +33,7 @@ export interface McpAppSnapshot {
         exitCode?: number;
         purpose?: string;
         target?: string;
+        taskId?: string;
         summary?: string;
         detail?: string;
     }>;

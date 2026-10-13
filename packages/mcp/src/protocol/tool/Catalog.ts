@@ -186,6 +186,10 @@ function withBootstrapPresentation(
     toolCallResourceUri: string | undefined,
 ): ToolDefinition {
     if (!isModelFacingTool(tool)) return tool;
+    // tmux_read is a background transcript poll. Its output belongs to the
+    // tmux_run task terminal, not an additional Inline widget on every poll.
+    // The ToolCall itself remains fully audited and available in Workspace.
+    if (tool.name === "tmux_read") return tool;
     const meta = asRecord(tool._meta);
     const ui = asRecord(meta.ui);
     // A tool's own MCP App binding always takes precedence.

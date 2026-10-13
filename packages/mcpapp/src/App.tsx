@@ -7,7 +7,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { readMcpAppSnapshot, watchMcpApp, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
 import { clearMcpAppSession, hasMcpAppFullscreenClaim, readMcpAppSession, restoreMcpAppSession, saveMcpAppFullscreenClaim, saveMcpAppSession, type McpAppSession } from "./Session.js";
-import { ToolCallCard, readToolCallResult, restoreToolCallResult, type ToolCallResult } from "./ToolCall.js";
+import { ToolCallInline } from "./ToolCallInline.js";
 import { useToolCallDisplay } from "./Preferences.js";
 import { WorkspaceDashboard } from "./Workspace.js";
 
@@ -18,14 +18,16 @@ type ConnectedApp = App & { onclose?: () => void; close(): Promise<void> };
 export type McpAppViewKind = "workspace" | "interaction" | "toolcall";
 
 export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) {
+    return view === "toolcall" ? <ToolCallInline /> : <LiveAppView view={view} />;
+}
+
+function LiveAppView({ view }: { view: "workspace" | "interaction" }) {
     const [status, setStatus] = useState<ConnectionStatus>("connecting");
     const [ctxId, setCtxId] = useState<string>();
     const [displayMode, setDisplayMode] = useState("inline");
     const [fullscreenAvailable, setFullscreenAvailable] = useState(false);
     const fullscreenAttempted = useRef(new Set<string>());
     const [toolCallEnabled, setToolCallEnabled] = useToolCallDisplay();
-    const [toolInput, setToolInput] = useState<unknown>();
-    const [toolResult, setToolResult] = useState<ToolCallResult | undefined>(restoreToolCallResult);
     const [session, setSession] = useState<McpAppSession | undefined>(() => restoreMcpAppSession());
     const sessionRef = useRef(session);
     const [snapshot, setSnapshot] = useState<McpAppSnapshot>();
@@ -41,10 +43,6 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
         let active = true;
         const refreshGlobals = () => {
             if (!active) return;
-            if (view === "toolcall") {
-                const restored = restoreToolCallResult();
-                if (restored) setToolResult(restored);
-            }
             const found = restoreMcpAppSession();
             if (!found) return;
             if (sessionRef.current?.ctxId !== found.ctxId) setSnapshot(undefined);
@@ -80,7 +78,7 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
             const app = new App(
                 { name: "portable-devshell-" + view, version: __MCPAPP_VERSION__ },
                 { availableDisplayModes: view === "workspace" ? ["fullscreen"] : ["inline"] },
-                { autoResize: true },
+                { autoResize: false },
             ) as ConnectedApp;
             currentApp = app;
             hostRef.current = app;
@@ -97,7 +95,6 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
             app.ontoolinput = (input) => {
                 if (!active || currentApp !== app) return;
                 const value = input.arguments as Record<string, unknown> | undefined;
-                if (view === "toolcall") setToolInput(value);
                 if (typeof value?.ctxId === "string") {
                     if (sessionRef.current && sessionRef.current.ctxId !== value.ctxId) {
                         sessionRef.current = undefined;
@@ -110,10 +107,6 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
             };
             app.ontoolresult = (result) => {
                 if (!active || currentApp !== app) return;
-                if (view === "toolcall") {
-                    const tool = readToolCallResult(result);
-                    if (tool) setToolResult(tool);
-                }
                 const nextSession = readMcpAppSession(result);
                 if (nextSession) {
                     sessionRef.current = nextSession;
@@ -422,20 +415,7 @@ export function AppView({ view = "workspace" }: { view?: McpAppViewKind } = {}) 
                 </span>
             </header>
             <section className="workspace-content">
-                {view === "toolcall" ? <>
-                    <ToolCallCard input={toolInput} result={toolResult}
-                        enabled={toolCallEnabled} onEnabledChange={setToolCallEnabled} />
-                    {actionError && <p role="alert">{actionError}</p>}
-                    {snapshot?.presentation.primary && <div className="inline-interactions">
-                        <WorkspaceItem item={snapshot.presentation.primary} kind="decision"
-                            onAction={act} pendingAction={pendingAction} busyAction={busyAction}
-                            cancel={() => setPendingAction(undefined)} />
-                    </div>}
-                    {snapshot?.presentation.background.length ? <div className="inline-interactions">
-                        {snapshot.presentation.background.map((item) =>
-                            <WorkspaceItem key={item.id} item={item} kind="background" />)}
-                    </div> : null}
-                </> : view === "interaction" ? <>
+                {view === "interaction" ? <>
                     {snapshot ? <div className="workspace-items">
                         {actionError && <p role="alert">{actionError}</p>}
                         {snapshot.presentation.primary && <WorkspaceItem item={snapshot.presentation.primary} kind="decision"

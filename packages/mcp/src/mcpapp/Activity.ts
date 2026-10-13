@@ -8,6 +8,7 @@ export interface McpAppActivity {
     exitCode?: number;
     purpose?: string;
     target?: string;
+    taskId?: string;
     summary?: string;
     detail?: string;
 }
@@ -57,6 +58,14 @@ function target(record: ToolCallRecord): string | undefined {
         }
     }
     return record.inputSummary ? protect(record.inputSummary, 400) : undefined;
+}
+
+function taskId(record: ToolCallRecord): string | undefined {
+    if (!record.toolName.startsWith("tmux_")) return undefined;
+    const requested = object(record.input)?.task;
+    if (typeof requested === "string") return protect(requested, 160);
+    const task = object(object(record.output)?.task);
+    return typeof task?.id === "string" ? protect(task.id, 160) : undefined;
 }
 
 function detail(name: string, output: unknown): string | undefined {
@@ -111,6 +120,7 @@ export function projectMcpAppActivity(records: readonly ToolCallRecord[], ctxId:
             ...(typeof record.exitCode === "number" ? { exitCode: record.exitCode } : {}),
             ...(record.purpose ? { purpose: protect(record.purpose, 200) } : {}),
             ...(target(record) === undefined ? {} : { target: target(record) }),
+            ...(taskId(record) === undefined ? {} : { taskId: taskId(record) }),
             ...(summary(record) === undefined ? {} : { summary: summary(record) }),
             ...(detail(record.toolName, record.output) === undefined ? {}
                 : { detail: detail(record.toolName, record.output) }),

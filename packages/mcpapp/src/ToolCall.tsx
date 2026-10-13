@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 export interface ToolCallResult {
     name?: string;
@@ -165,33 +165,39 @@ export function ToolCallCard({ input, result, enabled, onEnabledChange }: {
     enabled: boolean;
     onEnabledChange: (enabled: boolean) => void;
 }): ReactNode {
+    const [expanded, setExpanded] = useState(false);
     const name = result?.name ?? "ToolCall";
     const argument = argumentSummary(input);
     const purpose = asRecord(input)?.purpose;
     const summary = callSummary(result);
-    const excerpt = outputExcerpt(result);
-    return <section className="toolcall-card" aria-label="ToolCall result">
-        <header className="toolcall-head">
-            <div className="toolcall-title">
+    const excerpt = expanded ? outputExcerpt(result) : "";
+    const label = typeof purpose === "string" && purpose ? hideCredentials(purpose).slice(0, 150) : "";
+    const headline = [label, argument].filter(Boolean).join(" · ") ||
+        (result ? outputExcerpt(result).replace(/\s+/gu, " ") : "Waiting for tool result") || name;
+    if (!enabled) return <div className="toolcall-hidden">
+        <span>ToolCall hidden</span>
+        <button type="button" onClick={() => onEnabledChange(true)}>Show</button>
+    </div>;
+    return <section className="toolcall-card" aria-label="ToolCall result" data-expanded={expanded}>
+        <button type="button" className="toolcall-compact" aria-expanded={expanded}
+            onClick={() => setExpanded((previous) => !previous)}>
+            <span className="toolcall-line">
                 <strong>{name}</strong>
                 <span data-kind={result?.isError ? "error" : result ? "done" : "running"}>
                     {result?.isError ? "Failed" : result ? "Completed" : "Running"}
                 </span>
-            </div>
-            <label className="toolcall-switch">
-                <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
-                Show tool calls
-            </label>
-        </header>
-        {enabled && <>
-            {typeof purpose === "string" && purpose && <p className="toolcall-purpose">{hideCredentials(purpose).slice(0, 150)}</p>}
+                {typeof asRecord(result?.output)?.durationMs === "number" &&
+                    <span className="toolcall-duration">{Math.round(asRecord(result?.output)!.durationMs as number)}ms</span>}
+                <span className="toolcall-chevron" aria-hidden="true">⌄</span>
+            </span>
+            <span className="toolcall-description" title={headline}>{headline}</span>
+        </button>
+        {expanded && <div className="toolcall-expanded">
+            {label && <p className="toolcall-purpose">{label}</p>}
             {argument && <p className="toolcall-target">{argument}</p>}
             {summary && <p className="toolcall-result-summary">{summary}</p>}
             {excerpt && <p className="toolcall-output-preview">{excerpt}</p>}
-            {result && <details className="toolcall-details">
-                <summary>{result.isError ? "Error details" : "Result details"}</summary>
-                <pre>{formattedOutput(name, result.output)}</pre>
-            </details>}
-        </>}
+            {result && <pre className="toolcall-result-text">{formattedOutput(name, result.output)}</pre>}
+        </div>}
     </section>;
 }

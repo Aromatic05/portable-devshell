@@ -10,9 +10,17 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
     const [tab, setTab] = useState<Tab>("overview");
     const [fallback, setFallback] = useState(false);
     const [showHistory, setShowHistory] = useState(true);
+    const [showInternalCalls, setShowInternalCalls] = useState(false);
     const { primary, work, background } = snapshot.presentation;
     const isQuestion = primary?.title === "Question for you";
     const pendingCount = primary ? 1 : 0;
+    const visibleActivity = showInternalCalls ? snapshot.activity : snapshot.activity?.filter((item) =>
+        item.name !== "tmux_read" && item.name !== "mcpapp_open");
+    const pollsByTask = new Map<string, number>();
+    for (const item of snapshot.activity ?? []) {
+        if (item.name !== "tmux_read" || !item.taskId) continue;
+        pollsByTask.set(item.taskId, (pollsByTask.get(item.taskId) ?? 0) + 1);
+    }
     return <div className="dashboard">
         <div className="dashboard-overview">
             <div className="dashboard-title">
@@ -67,8 +75,13 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
                         Show history
                     </label>
                 </div>
-                {!showHistory ? <p className="dashboard-empty">ToolCall history is hidden.</p> : snapshot.activity?.length ? <ol className="dashboard-timeline">
-                    {snapshot.activity.map((item) =>
+                {showHistory && <label className="workspace-setting">
+                    <input type="checkbox" checked={showInternalCalls}
+                        onChange={(event) => setShowInternalCalls(event.target.checked)} />
+                    Include polling and workspace events
+                </label>}
+                {!showHistory ? <p className="dashboard-empty">ToolCall history is hidden.</p> : visibleActivity?.length ? <ol className="dashboard-timeline">
+                    {visibleActivity.map((item) =>
                         <li key={item.callId} data-state={item.state}>
                             <div className="activity-card-head">
                                 <span className="activity-dot" aria-hidden="true" />
@@ -81,7 +94,12 @@ export function WorkspaceDashboard({ snapshot, renderItem }: {
                             </div>
                             {item.purpose && <p className="activity-purpose">{item.purpose}</p>}
                             {item.target && <code className="activity-target">{item.target}</code>}
-                            {item.summary && <p className="activity-summary">{item.summary}</p>}
+                            {(item.summary || (item.name === "tmux_run" && item.taskId && pollsByTask.has(item.taskId))) &&
+                                <p className="activity-summary">{[
+                                    item.summary,
+                                    item.name === "tmux_run" && item.taskId && pollsByTask.has(item.taskId)
+                                        ? `${pollsByTask.get(item.taskId)} transcript reads` : undefined,
+                                ].filter(Boolean).join(" · ")}</p>}
                             {item.detail && <details className="toolcall-details">
                                 <summary>View result</summary>
                                 <pre>{item.detail}</pre>
