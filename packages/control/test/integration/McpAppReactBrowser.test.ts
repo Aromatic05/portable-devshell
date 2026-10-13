@@ -51,6 +51,7 @@ async function createBrowserFixture(): Promise<BrowserFixture> {
                 res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
                 res.end(`<!doctype html><html><body>
                     <iframe id="workspace" src="/widget" style="width:900px;height:620px;border:0"></iframe>
+                    <iframe id="interaction" src="/interaction" style="width:900px;height:240px;border:0"></iframe>
                     <script>${HOST_BRIDGE}</script>
                 </body></html>`);
                 return;
@@ -58,6 +59,11 @@ async function createBrowserFixture(): Promise<BrowserFixture> {
             if (url.pathname === "/widget") {
                 res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
                 res.end(mcpAppHtmlForPublicBaseUrl(origin));
+                return;
+            }
+            if (url.pathname === "/interaction") {
+                res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+                res.end(mcpAppHtmlForPublicBaseUrl(origin, "interaction"));
                 return;
             }
             const prefix = "/mcpapp/assets/";
@@ -191,7 +197,10 @@ function notifyContext(source, ctxId) {
     }, "*");
 }
 window.__sendContext = function(ctxId) {
-    notifyContext(document.querySelector("#workspace").contentWindow, ctxId);
+    window.__currentCtx = ctxId;
+    for (var id of ["workspace", "interaction"]) {
+        notifyContext(document.querySelector("#" + id).contentWindow, ctxId);
+    }
 };
 window.addEventListener("message", function(event) {
     if (event.source === window || !event.data || event.data.jsonrpc !== "2.0") return;
@@ -228,6 +237,19 @@ window.addEventListener("message", function(event) {
     }
     var call = message.params || {};
     window.__hostCalls.push(call);
+    if (call.name === "mcpapp_open") {
+        reply({ structuredContent: { ctxId: window.__currentCtx, instance: "demo" },
+            _meta: { "portable-devshell/mcpapp": {
+                ctxId: window.__currentCtx,
+                token: ({
+                    "ctx-browser": "browser-private-capability-00001",
+                    "ctx-next": "browser-private-capability-00002",
+                    "ctx-reentry": "browser-private-capability-00003"
+                })[window.__currentCtx],
+                liveBaseUrl: location.origin + "/api/live/demo/workspace"
+            } } });
+        return;
+    }
     if (call.name === "mcpapp_action") {
         fetch("/__action", { method: "POST", body: JSON.stringify(call.arguments) })
             .then(function () { reply({ structuredContent: {
@@ -260,16 +282,21 @@ test("production React MCP App uses private Live HTTP state and dispatches appro
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(fixture.origin);
     const app = page.frameLocator("#workspace");
-    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("window.__initialized"), 1);
+    const interaction = page.frameLocator("#interaction");
+    await interaction.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
+    await app.getByText("An approval is pending in the conversation.", { exact: true })
+        .waitFor({ state: "visible" });
+    assert.equal(await page.evaluate("window.__initialized"), 2);
+    assert.equal(await app.getByRole("button", { name: "Approve", exact: true }).count(), 0);
     assert.equal(fixture.requests.some((request) =>
         request.path.includes("/snapshot?ctxId=ctx-browser") &&
         request.authorization === "Bearer browser-private-capability-00001" &&
         request.credentials === undefined), true);
     assert.doesNotMatch(await app.locator("body").innerText(), /browser-private-capability/u);
+    assert.doesNotMatch(await interaction.locator("body").innerText(), /browser-private-capability/u);
 
-    await app.getByRole("button", { name: "Approve", exact: true }).click();
-    await app.getByText("Approval required", { exact: true }).waitFor({ state: "hidden" });
+    await interaction.getByRole("button", { name: "Approve", exact: true }).click();
+    await interaction.getByText("Approval required", { exact: true }).waitFor({ state: "hidden" });
     const action = await page.evaluate("window.__hostCalls.find(call => call.name === 'mcpapp_action')") as {
         arguments: { ctxId: string; itemId: string; actionId: string; requestId: string };
     } | undefined;
@@ -315,10 +342,14 @@ test("production React MCP App rejects revoked Live capabilities", browserOption
     const page = await browser.newPage();
     await page.goto(fixture.origin);
     const app = page.frameLocator("#workspace");
-    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
+    const interaction = page.frameLocator("#interaction");
+    await interaction.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
     await page.evaluate(() => fetch("/__revoke", { method: "POST" }));
     await page.evaluate("window.__sendContext('ctx-next')");
     await app.getByText("MCP App authorization expired", { exact: false }).waitFor({ state: "visible" });
+    await interaction.getByText("MCP App authorization expired", { exact: false })
+        .waitFor({ state: "visible" });
     assert.doesNotMatch(await app.locator("body").innerText(), /browser-private-capability/u);
+    assert.doesNotMatch(await interaction.locator("body").innerText(), /browser-private-capability/u);
     assert.equal(fixture.requests.some((request) => request.path.includes("ctxId=ctx-next")), true);
 });
