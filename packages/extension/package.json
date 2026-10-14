@@ -69,6 +69,10 @@
         "./secret": {
             "types": "./dist/domain/secret.d.ts",
             "default": "./dist/domain/secret.js"
+        },
+        "./execution": {
+            "types": "./dist/domain/execution.d.ts",
+            "default": "./dist/domain/execution.js"
         }
     },
     "files": [

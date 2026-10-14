@@ -138,3 +138,20 @@ test("Control domain point definitions own declaration schema validation", () =>
         /non-empty trimmed string/u,
     );
 });
+
+test("execution provider declarations and descriptors validate and cross the sandbox codec as JSON", async () => {
+    const points = createControlExtensionPointRegistry();
+    const codecs = createControlExtensionSandboxPointRegistry();
+    for (const pointId of ["execution.environment", "execution.sandbox"]) {
+        assert.deepEqual(points.parseDeclaration(pointId, { id: "direnv" }, "direnv"), { id: "direnv" });
+        assert.throws(() => points.parseDeclaration(pointId, { id: "direnv", priority: 1 }, "direnv"), /unknown field/u);
+        const context = { codeDirectory: "/tmp/direnv", extensionId: "direnv", id: "direnv" };
+        const binding = { name: "direnv", version: 1, executable: "direnv", args: ["export", "json"] };
+        points.validateBinding(pointId, binding, context);
+        assert.throws(() => points.validateBinding(pointId, { ...binding, name: "other" }, context), /name matches/u);
+        const descriptor = codecs.describeBinding(pointId, binding, context);
+        assert.deepEqual(descriptor, binding);
+        const recreated = points.createSandboxBinding(pointId, descriptor, context, { invokeBinding: async () => undefined });
+        assert.deepEqual(recreated, binding);
+    }
+});
