@@ -56,7 +56,11 @@ export class McpAppRuntime {
             try { this.detachHost(host); } catch (error) { failures.push(error); }
         }
         this.presence.close();
-        await this.flushContextCleanup().catch((error) => failures.push(error));
+        await this.flushContextCleanup().catch((error) => {
+            // Context revocation can be retried from durable credentials on
+            // next startup; do not reject the shutdown of the whole Control.
+            console.warn("MCP App shutdown cleanup deferred:", error);
+        });
         if (failures.length > 0) throw new AggregateError(failures, 'MCP App shutdown cleanup failed');
     }
 

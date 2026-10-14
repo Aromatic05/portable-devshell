@@ -261,7 +261,9 @@ export class McpControlModule {
         this.#unsubscribeContexts?.();
         this.#unsubscribeContexts = undefined;
         const failures: unknown[] = [];
-        await this.#runtimeState.app.flushContextCleanup().catch((error) => failures.push(error));
+        await this.#runtimeState.app.flushContextCleanup().catch((error) => {
+            console.warn("MCP App shutdown Context cleanup deferred:", error);
+        });
         if (this.#host !== undefined) {
             if (this.#host instanceof McpHost) {
                 this.#host.retire();

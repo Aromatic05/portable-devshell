@@ -37,6 +37,18 @@ test("MCP App retries failed historical Context revocation", async () => {
     }
 });
 
+test("MCP App can shut down with historical Context cleanup debt", async (t) => {
+    const app = new McpAppRuntime({});
+    await app.initialize();
+    const token = await app.leases.issue("alpha", "ctx-old");
+    app.revokeContext = async () => { throw new Error("remote cleanup is unavailable"); };
+    const warning = t.mock.method(console, "warn", () => undefined);
+    app.onContextTerminated("ctx-old");
+    await app.close();
+    assert.equal(warning.mock.callCount() >= 1, true);
+    assert.equal(await app.leases.verify("alpha", "ctx-old", token), true);
+});
+
 {
     test("McpAppLeaseStore persists only token hashes and verifies capabilities after restart", async () => {
         const root = await createTestTempDirectory("workspace-app-lease");
