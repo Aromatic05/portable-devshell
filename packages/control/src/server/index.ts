@@ -82,6 +82,7 @@ export class ControlServer {
     readonly #web: ControlWebRuntime;
     #webPrepared = false;
     #ready = false;
+    readonly #startupFailures = new Set<string>();
 
     constructor(options: ControlServerOptions) {
         this.#artifact = options.artifact;
@@ -105,6 +106,14 @@ export class ControlServer {
                 : { configuredInstances: () => options.config!().instances }),
             controlPorts: [createContextRouteModule(options.contexts.api)],
             controlReady: () => this.#ready,
+            controlDegradedServices: () => {
+                const issues = [...this.#startupFailures];
+                const mcp = options.mcp.status();
+                if (mcp !== null && typeof mcp === "object" && !Array.isArray(mcp) &&
+                    mcp.running === true && mcp.appReady === false)
+                    issues.push("mcpapp");
+                return issues;
+            },
             debug: options.debug,
             extension: options.extensions.control,
             extensionRoutes: this.#extensionRoutes,
@@ -165,10 +174,12 @@ export class ControlServer {
             await this.#web.prepare();
         } catch (error) {
             this.#webPrepared = false;
+            this.#startupFailures.add("web");
             console.warn("Web Host preparation failed; Control will continue:", error);
             return;
         }
         this.#webPrepared = true;
+        this.#startupFailures.delete("web");
     }
 
     async startTransport(): Promise<void> {
@@ -177,13 +188,28 @@ export class ControlServer {
     }
 
     async startHosts(): Promise<void> {
-        await this.#mcp.start().catch((error) =>
-            console.warn("MCP Host unavailable; Control will continue:", error));
-        await this.#replaceHttpRoutes(this.#readConfig()).catch((error) =>
-            console.warn("Artifact/Reverse HTTP routes unavailable:", error));
+        await this.#mcp.start().then(
+            () => this.#startupFailures.delete("mcp"),
+            (error) => {
+                this.#startupFailures.add("mcp");
+                console.warn("MCP Host unavailable; Control will continue:", error);
+            },
+        );
+        await this.#replaceHttpRoutes(this.#readConfig()).then(
+            () => this.#startupFailures.delete("http"),
+            (error) => {
+                this.#startupFailures.add("http");
+                console.warn("Artifact/Reverse HTTP routes unavailable:", error);
+            },
+        );
         if (this.#webPrepared)
-            await this.#web.startHost().catch((error) =>
-                console.warn("Web Host unavailable; Control will continue:", error));
+            await this.#web.startHost().then(
+                () => this.#startupFailures.delete("web"),
+                (error) => {
+                    this.#startupFailures.add("web");
+                    console.warn("Web Host unavailable; Control will continue:", error);
+                },
+            );
     }
 
     /** Control owns the Artifact and Reverse routes, independently of MCP generations. */

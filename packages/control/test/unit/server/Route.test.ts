@@ -12,6 +12,23 @@ import { InstanceRegistry } from "../../../src/instance/Registry.ts";
 import type { OperationalOverviewApi } from "../../../src/overview/Api.ts";
 import { ControlRouteRegistry } from "../../../src/server/Route.ts";
 
+test("core status reports degraded Hosts separately from Control readiness", async () => {
+    const routes = new ControlRouteRegistry({
+        controlReady: () => true,
+        controlDegradedServices: () => ["mcpapp", "web"],
+        instances: new InstanceRegistry([]),
+        overview: createTestOverview(),
+        shutdown() {},
+    });
+    const control = routes.hosts().find((host) => host.host === "@control")!;
+    const status = control.ports.find((port) => port.name === "server")!
+        .operations.find((entry) => entry.name === "status")!.handle;
+    const result = await status({ id: "status", name: "status", payload: {} }, createContext("@control"));
+    assert.equal((result as { ready: boolean }).ready, true);
+    assert.equal((result as { degraded: boolean }).degraded, true);
+    assert.deepEqual((result as { degradedServices: string[] }).degradedServices, ["mcpapp", "web"]);
+});
+
 test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
     const artifactService = {
