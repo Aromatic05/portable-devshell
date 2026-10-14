@@ -23,11 +23,23 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
 
     async reconcile(ctxId?: string): Promise<void> {
         if (ctxId === undefined) {
-            for (const terminal of await this.#registry.listCleanupPending())
-                await this.terminate(terminal);
+            // Startup reconciliation is maintenance, not a prerequisite for
+            // using live Contexts. Preserve debt and continue on ledger errors.
+            try {
+                for (const terminal of await this.#registry.listCleanupPending())
+                    await this.terminate(terminal).catch((error) => {
+                        console.warn(`Deferred Context ${terminal.ctxId} cleanup:`, error);
+                    });
+            } catch (error) {
+                console.warn("Deferred Context cleanup ledger inspection:", error);
+            }
+            await this.#reconcile(undefined, undefined, false, undefined, true)
+                .catch((error) => {
+                    console.warn("Deferred Context cleanup ledger reconciliation:", error);
+                });
+            return;
         }
-        // Startup must not depend on remote Instances being available.
-        await this.#reconcile(ctxId, undefined, false, undefined, ctxId === undefined);
+        await this.#reconcile(ctxId);
     }
 
     async reconcileInstance(
@@ -141,7 +153,14 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 }
             };
             if (serialized) await operation();
-            else await this.#run(id, operation);
+            else {
+                try {
+                    await this.#run(id, operation);
+                } catch (error) {
+                    if (!deferRemoteFailures) throw error;
+                    failures.push(error);
+                }
+            }
         }
         if (failures.length > 0) {
             const error = new AggregateError(

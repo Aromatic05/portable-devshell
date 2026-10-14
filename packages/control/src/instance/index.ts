@@ -39,7 +39,11 @@ export class ControlInstances {
     }
 
     async reconcile(): Promise<void> {
-        await this.#editor?.reconcileCleanupDebt();
+        // Damaged historical cleanup debt must not prevent healthy Instances
+        // from starting. Explicit lifecycle operations still validate debt.
+        await this.#editor?.reconcileCleanupDebt().catch((error) => {
+            console.warn("Instance cleanup debt reconciliation deferred:", error);
+        });
     }
 
     connectionClosed(connectionId: string): void {

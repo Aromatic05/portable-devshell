@@ -256,19 +256,27 @@ export class InstanceCleanupDebt {
         for (const record of await this.#cleanupDebts.list()) {
             if (instance !== undefined && record.instance.name !== instance)
                 continue;
-            const failures =
-                record.operation === "rebuild"
-                    ? await this.#reconcileRebuildCleanup(record)
-                    : await this.#reconcileCleanupRecord(record);
-            if (failures.length === 0) {
-                await this.#cleanupDebts.clear(record.instance.name);
-                continue;
+            try {
+                const failures =
+                    record.operation === "rebuild"
+                        ? await this.#reconcileRebuildCleanup(record)
+                        : await this.#reconcileCleanupRecord(record);
+                if (failures.length === 0) {
+                    await this.#cleanupDebts.clear(record.instance.name);
+                    continue;
+                }
+                warnCommittedCleanupFailures(
+                    record.instance.name,
+                    record.operation === "delete" ? "delete" : "update",
+                    failures,
+                );
+            } catch (error) {
+                warnCommittedCleanupFailures(
+                    record.instance.name,
+                    record.operation === "delete" ? "delete" : "update",
+                    [error],
+                );
             }
-            warnCommittedCleanupFailures(
-                record.instance.name,
-                record.operation === "delete" ? "delete" : "update",
-                failures,
-            );
         }
     }
 

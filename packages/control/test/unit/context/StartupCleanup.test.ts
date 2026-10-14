@@ -74,7 +74,7 @@ test("startup does not hide non-cleanup storage errors", async () => {
     await assert.rejects(service.reconcile(), (error) => error === failure);
 });
 
-test("Context cleanup does not hide a failed ledger read as remote debt", async () => {
+test("Context startup defers a failed cleanup ledger read but scoped reconciliation reports it", async () => {
     const error = new Error("ledger read failed");
     const cleanup = new ContextCleanupService({
         contextRegistry: {
@@ -90,5 +90,14 @@ test("Context cleanup does not hide a failed ledger read as remote debt", async 
         environment: () => ({}) as never,
         runtime: () => ({}) as never,
     });
-    await assert.rejects(cleanup.reconcile(), (thrown) => thrown === error);
+    const warning = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+        await cleanup.reconcile();
+        assert.equal(warnings.length, 1);
+        await assert.rejects(cleanup.reconcile("ctx-broken-ledger"), (thrown) => thrown === error);
+    } finally {
+        console.warn = warning;
+    }
 });
