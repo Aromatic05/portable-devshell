@@ -28,22 +28,31 @@ export async function inspectAuditMigration(
         const workerStats = await lstatIfExists(workerDirectory);
         if (workerStats === undefined) continue;
         if (!workerStats.isDirectory()) {
-            throw new Error(`Audit directory is not a plain directory: ${workerDirectory}.`);
+            console.warn(`Skipping non-directory Instance audit path: ${workerDirectory}`);
+            continue;
         }
         const filePath = join(workerDirectory, "audit.sqlite3");
         const stats = await lstatIfExists(filePath);
         if (stats === undefined) continue;
         if (!stats.isFile()) {
-            throw new Error(`Audit database is not a plain file: ${filePath}.`);
+            console.warn(`Skipping non-file Instance audit path: ${filePath}`);
+            continue;
         }
         files.push(filePath);
     }
     files.sort();
     let required = false;
+    const readable: string[] = [];
     for (const file of files) {
-        required = inspectAuditDatabase(file).changed || required;
+        try {
+            required = inspectAuditDatabase(file).changed || required;
+            readable.push(file);
+        } catch (error) {
+            // Leave unsupported/damaged Instance audits untouched for recovery.
+            console.warn(`Deferring unavailable Instance audit database ${file}:`, error);
+        }
     }
-    return { files, required };
+    return { files: readable, required };
 }
 
 export async function migrateAuditState(
@@ -53,7 +62,11 @@ export async function migrateAuditState(
     const inspection = await inspectAuditMigration(homeDirectory, environment);
     let changed = false;
     for (const file of inspection.files) {
-        changed = migrateAuditDatabase(file) || changed;
+        try {
+            changed = migrateAuditDatabase(file) || changed;
+        } catch (error) {
+            console.warn(`Deferring failed Instance audit migration ${file}:`, error);
+        }
     }
     return changed;
 }
