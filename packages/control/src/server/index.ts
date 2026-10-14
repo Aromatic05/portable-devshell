@@ -106,12 +106,22 @@ export class ControlServer {
                 : { configuredInstances: () => options.config!().instances }),
             controlPorts: [createContextRouteModule(options.contexts.api)],
             controlReady: () => this.#ready,
-            controlDegradedServices: () => {
+            controlDegradedServices: async () => {
                 const issues = [...this.#startupFailures];
                 const mcp = options.mcp.status();
                 if (mcp !== null && typeof mcp === "object" && !Array.isArray(mcp) &&
                     mcp.running === true && mcp.appReady === false)
                     issues.push("mcpapp");
+                // Comment is a required builtin but not a prerequisite for
+                // the Control IPC and other independent services to run.
+                try {
+                    const extensions = await options.extensions.control.list();
+                    const comment = extensions.find((entry) => entry.id === "comment");
+                    if (comment?.state !== "active" || !comment.enabled)
+                        issues.push("extension:comment");
+                } catch {
+                    issues.push("extensions");
+                }
                 return issues;
             },
             debug: options.debug,

@@ -43,7 +43,7 @@ import {
 } from "./web/extension/application/Route.js";
 
 export interface ServerRouteModuleOptions {
-    degradedServices?: () => readonly string[];
+    degradedServices?: () => readonly string[] | Promise<readonly string[]>;
     instanceCount(): number;
     ready(): boolean;
     restart?: () => Promise<void> | void;
@@ -60,14 +60,17 @@ export function createServerRouteModule(
                 context.peer,
             ) as unknown as JsonValue,
         ping: () => ({ pong: true }),
-        status: () => ({
-            degraded: (options.degradedServices?.().length ?? 0) > 0,
-            degradedServices: [...(options.degradedServices?.() ?? [])],
-            instanceCount: options.instanceCount(),
-            ok: true,
-            pid: process.pid,
-            ready: options.ready(),
-        }),
+        status: async () => {
+            const degradedServices = [...(await options.degradedServices?.() ?? [])];
+            return {
+                degraded: degradedServices.length > 0,
+                degradedServices,
+                instanceCount: options.instanceCount(),
+                ok: true,
+                pid: process.pid,
+                ready: options.ready(),
+            };
+        },
         shutdown: (_request, context) => {
             context.afterReply(options.shutdown);
             return { accepted: true };
@@ -97,7 +100,7 @@ export interface ControlRouteRegistryOptions {
      * supplies its own lifecycle flag.
      */
     controlReady?: () => boolean;
-    controlDegradedServices?: () => readonly string[];
+    controlDegradedServices?: () => readonly string[] | Promise<readonly string[]>;
     debug?: DebugApi;
     extension?: ExtensionControlPort;
     extensionRoutes?: ControlRouteExtensionPort;

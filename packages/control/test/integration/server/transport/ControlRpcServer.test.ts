@@ -67,6 +67,8 @@ test("ControlSocketServer routes canonical control and instance operations over 
         (await request(harness.socketPath, "@control", "server.status"))
             .payload,
         {
+            degraded: false,
+            degradedServices: [],
             instanceCount: 1,
             ok: true,
             pid: process.pid,

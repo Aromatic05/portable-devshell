@@ -15,7 +15,7 @@ import { ControlRouteRegistry } from "../../../src/server/Route.ts";
 test("core status reports degraded Hosts separately from Control readiness", async () => {
     const routes = new ControlRouteRegistry({
         controlReady: () => true,
-        controlDegradedServices: () => ["mcpapp", "web"],
+        controlDegradedServices: async () => ["mcpapp", "web", "extension:comment"],
         instances: new InstanceRegistry([]),
         overview: createTestOverview(),
         shutdown() {},
@@ -26,7 +26,7 @@ test("core status reports degraded Hosts separately from Control readiness", asy
     const result = await status({ id: "status", name: "status", payload: {} }, createContext("@control"));
     assert.equal((result as { ready: boolean }).ready, true);
     assert.equal((result as { degraded: boolean }).degraded, true);
-    assert.deepEqual((result as { degradedServices: string[] }).degradedServices, ["mcpapp", "web"]);
+    assert.deepEqual((result as { degradedServices: string[] }).degradedServices, ["mcpapp", "web", "extension:comment"]);
 });
 
 test("artifact.startTransfer accepts an explicit source instance", async () => {
