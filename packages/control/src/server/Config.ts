@@ -69,7 +69,6 @@ export class ControlServerConfig {
         const retired = await this.#mcp.replaceMcpHost(previous, next);
         try {
             await this.#replaceHttpRoutes(next);
-            if (retired !== undefined) await this.#mcp.stopHost(retired);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             await this.#mcp
@@ -85,6 +84,11 @@ export class ControlServerConfig {
             }
             throw error;
         }
+        // Runtime already points at the new generation. Retiring the old Host
+        // is cleanup, not a reason to undo the committed configuration.
+        if (retired !== undefined)
+            await this.#mcp.stopHost(retired).catch((error) =>
+                console.warn("Retired MCP Host stop failed:", error));
         if (retired !== undefined && retired !== this.#mcp.host && "dispose" in retired &&
             typeof retired.dispose === "function")
             await retired.dispose().catch((error: unknown) => {

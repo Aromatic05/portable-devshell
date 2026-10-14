@@ -494,6 +494,31 @@ test("retired MCP cleanup failure does not reject an already committed replaceme
     assert.equal(warning.mock.callCount(), 1);
 });
 
+test("retired MCP stop failure never rolls back the active replacement", async (t) => {
+    const previous = createConfig(17888, 17889);
+    previous.web.enabled = false;
+    const next = structuredClone(previous);
+    next.mcp.publicBaseUrl = "https://replacement.example";
+    const events: string[] = [];
+    const retired = { async dispose() { events.push("old.dispose"); } };
+    const mcp = {
+        host: {},
+        async replaceMcpHost() { events.push("replace"); return retired; },
+        async stopHost() { events.push("old.stop"); throw new Error("old stop failed"); },
+        async restoreMcpHost() { events.push("restore"); },
+    };
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const config = new ControlServerConfig({
+        mcp: mcp as never,
+        replaceHttpRoutes: async () => { events.push("routes"); },
+        transport: {} as never,
+        web: {} as never,
+    });
+    assert.equal(await config.apply(previous, next, { instanceAuth: false, mcp: true, web: false }), true);
+    assert.deepEqual(events, ["replace", "routes", "old.stop", "old.dispose"]);
+    assert.equal(warning.mock.callCount(), 1);
+});
+
 test("MCP restore attempts every host transition and reports rollback failures", async (t) => {
     const homeDirectory = await createTestTempDirectory(
         "runtime-mcp-restore-failure",
