@@ -35,11 +35,13 @@ test("Audit migration uses the same configured home as Context migration", async
         writeV2AuditDatabase(file);
         const environment = { PORTABLE_DEVSHELL_HOME: join(home, "ignored-home") };
         assert.deepEqual(await inspectAuditMigration(home, environment), {
+            deferredFiles: [],
             files: [file],
             required: true,
         });
         assert.equal(await migrateAuditState(home, environment), true);
         assert.deepEqual(await inspectAuditMigration(home, environment), {
+            deferredFiles: [],
             files: [file],
             required: false,
         });
@@ -59,7 +61,7 @@ test("a damaged historical Audit database does not block migration of another In
     writeV2AuditDatabase(good);
     await writeFile(bad, "not a SQLite database");
     const warning = t.mock.method(console, "warn", () => undefined);
-    assert.deepEqual(await inspectAuditMigration(home), { files: [good], required: true });
+    assert.deepEqual(await inspectAuditMigration(home), { deferredFiles: [bad], files: [good], required: true });
     assert.equal(await migrateAuditState(home), true);
     const migrated = new DatabaseSync(good, { readOnly: true });
     try {
@@ -79,7 +81,9 @@ test("Audit migration skips symlinked worker directories without following them"
         await mkdir(instance, { recursive: true });
         await mkdir(outside);
         await symlink(outside, join(instance, "control-worker"), "dir");
-        assert.deepEqual(await inspectAuditMigration(home), { files: [], required: false });
+        assert.deepEqual(await inspectAuditMigration(home), {
+            deferredFiles: [join(instance, "control-worker")], files: [], required: false,
+        });
         assert.equal(await migrateAuditState(home), false);
     } finally {
         await rm(home, { recursive: true, force: true });
@@ -92,7 +96,9 @@ test("Audit migration skips symlinked database files without opening them", asyn
         const directory = join(home, ".devshell", "old-instance", "control-worker");
         await mkdir(directory, { recursive: true });
         await symlink(join(home, "unrelated.sqlite3"), join(directory, "audit.sqlite3"), "file");
-        assert.deepEqual(await inspectAuditMigration(home), { files: [], required: false });
+        assert.deepEqual(await inspectAuditMigration(home), {
+            deferredFiles: [join(directory, "audit.sqlite3")], files: [], required: false,
+        });
     } finally {
         await rm(home, { recursive: true, force: true });
     }

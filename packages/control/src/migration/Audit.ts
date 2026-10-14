@@ -12,11 +12,13 @@ export async function inspectAuditMigration(
     homeDirectory?: string,
     environment: NodeJS.ProcessEnv = process.env,
 ): Promise<{
+    deferredFiles: readonly string[];
     files: readonly string[];
     required: boolean;
 }> {
     const root = dirname(new ControlPathHome(homeDirectory, environment).controlHomeDir);
     const files: string[] = [];
+    const deferredFiles: string[] = [];
     for (const entry of await readdir(root, { withFileTypes: true }).catch(
         (error: NodeJS.ErrnoException) => {
             if (error.code === "ENOENT") return [];
@@ -28,6 +30,7 @@ export async function inspectAuditMigration(
         const workerStats = await lstatIfExists(workerDirectory);
         if (workerStats === undefined) continue;
         if (!workerStats.isDirectory()) {
+            deferredFiles.push(workerDirectory);
             console.warn(`Skipping non-directory Instance audit path: ${workerDirectory}`);
             continue;
         }
@@ -35,6 +38,7 @@ export async function inspectAuditMigration(
         const stats = await lstatIfExists(filePath);
         if (stats === undefined) continue;
         if (!stats.isFile()) {
+            deferredFiles.push(filePath);
             console.warn(`Skipping non-file Instance audit path: ${filePath}`);
             continue;
         }
@@ -49,10 +53,12 @@ export async function inspectAuditMigration(
             readable.push(file);
         } catch (error) {
             // Leave unsupported/damaged Instance audits untouched for recovery.
+            deferredFiles.push(file);
             console.warn(`Deferring unavailable Instance audit database ${file}:`, error);
         }
     }
-    return { files: readable, required };
+    deferredFiles.sort();
+    return { deferredFiles, files: readable, required };
 }
 
 export async function migrateAuditState(

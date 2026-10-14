@@ -47,6 +47,7 @@ export interface ControlUpdatePreflightResult {
         checkedGenerations: number;
     };
     migration: {
+        deferredAuditFiles: readonly string[];
         domains: readonly string[];
         required: boolean;
     };
@@ -172,6 +173,7 @@ export async function preflightControlUpdate(
     return {
         extensions: { checkedGenerations },
         migration: {
+            deferredAuditFiles: audit.deferredFiles,
             domains,
             required,
         },
