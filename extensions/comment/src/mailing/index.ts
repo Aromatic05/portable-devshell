@@ -2,11 +2,11 @@ import type { ExtensionContext } from "@portable-devshell/extension";
 import { modelCommands, nativeCommands } from "@portable-devshell/extension/cli";
 import { rewrite } from "@portable-devshell/extension/toolcall";
 
-import { executeMailModelCommand, executeMailNativeCommand } from "./Command.js";
+import { executeMemoryModelCommand, executeMemoryNativeCommand } from "./Command.js";
 import { createMailingHook } from "./Hook.js";
 import { MailingService, type MailingPort } from "./Service.js";
 
-/** Mailing owns its service and bindings; the parent Comment Extension owns retirement. */
+/** Memory bindings and their derived Mailing are owned by the Comment Extension. */
 export type MailingRuntime = MailingService;
 
 export function createMailingService(
@@ -31,10 +31,10 @@ export function registerMailing(context: ExtensionContext, mailing: MailingRunti
     context.register(rewrite, "mailing-trigger", createMailingHook(mailing, (error) =>
         context.logger.warn("Mailing trigger failed", { message: String(error) }),
     ));
-    context.register(modelCommands, "mail", async (argv, invocation) =>
-        await executeMailModelCommand(mailing, argv, invocation),
+    context.register(modelCommands, "memory", async (argv, invocation) =>
+        await executeMemoryModelCommand(mailing, argv, invocation),
     );
-    context.register(nativeCommands, "mail", async (argv, invocation) =>
-        await executeMailNativeCommand(mailing, argv, invocation),
+    context.register(nativeCommands, "memory", async (argv, invocation) =>
+        await executeMemoryNativeCommand(mailing, argv, invocation),
     );
 }

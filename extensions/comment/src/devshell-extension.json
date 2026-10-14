@@ -123,18 +123,18 @@
         ],
         "cli.native-commands": [
             {
-                "id": "mail",
-                "title": "Mail",
-                "summary": "Manage workspace Mailing and claims",
-                "usage": "mail <command>"
+                "id": "memory",
+                "title": "Memory",
+                "summary": "Bind a Context to a persistent Memory and its mailbox",
+                "usage": "memory init|inherit|status|list|release"
             }
         ],
         "cli.model-commands": [
             {
-                "id": "mail",
-                "title": "Mail",
-                "summary": "Claim an Agent Work mailbox for the current Context",
-                "usage": "mail claim|release|status"
+                "id": "memory",
+                "title": "Memory",
+                "summary": "Initialize or inherit a persistent Agent Work Memory",
+                "usage": "memory init|inherit|status|list|release"
             }
         ]
     }

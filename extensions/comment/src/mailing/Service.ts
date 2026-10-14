@@ -4,8 +4,8 @@ import { mailMarker, parseOutbox, renderBounce, renderInbox, renderIndex, taskNa
 import { WorkerMailingFiles, type MailingFiles } from "./Store.js";
 
 interface MailingState {
-    version: 1;
-    claims: Record<string, string>;
+    version: 2;
+    bindings: Record<string, string>;
     accepted: Record<string, string>;
 }
 
@@ -14,8 +14,14 @@ export interface MailingTarget {
     workspace: string;
 }
 
-export interface MailingClaim extends MailingTarget {
+export interface MemoryContext extends MailingTarget {
     ctxId: string;
+}
+
+export interface MemorySelection {
+    name: string;
+    directory: string;
+    mailbox: string;
 }
 
 export interface MailingPort {
@@ -28,14 +34,19 @@ const INDEX_FILE = `${ROOT}/mailing.md`;
 const POLL_MS = 30_000;
 
 function parseState(input: string | undefined): MailingState {
-    if (input === undefined) return { version: 1, claims: {}, accepted: {} };
+    if (input === undefined) return { version: 2, bindings: {}, accepted: {} };
     const parsed: unknown = JSON.parse(input);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
         throw new Error("Invalid Mailing state");
     const state = parsed as Record<string, unknown>;
-    if (state.version !== 1 || !isStringMap(state.claims) || !isStringMap(state.accepted))
-        throw new Error("Unsupported or corrupt Mailing state");
-    return { version: 1, claims: { ...state.claims }, accepted: { ...state.accepted } };
+    if (!isStringMap(state.accepted)) throw new Error("Unsupported or corrupt Mailing state");
+    // The original Mailing claims were already the persisted Context -> directory
+    // relation. Reuse them as Memory bindings without losing accepted mail IDs.
+    if (state.version === 1 && isStringMap(state.claims))
+        return { version: 2, bindings: { ...state.claims }, accepted: { ...state.accepted } };
+    if (state.version === 2 && isStringMap(state.bindings))
+        return { version: 2, bindings: { ...state.bindings }, accepted: { ...state.accepted } };
+    throw new Error("Unsupported or corrupt Mailing state");
 }
 
 function isStringMap(value: unknown): value is Record<string, string> {
@@ -94,58 +105,84 @@ export class MailingService {
 
     async poll(): Promise<void> {
         if (this.#closed) return;
-        // Only workspaces with a Mailing claim or an Outbox edit are monitored;
+        // Only workspaces with a Memory binding or an Outbox edit are monitored;
         // unrelated active Contexts incur no background Worker traffic.
         await Promise.all([...this.#scopes.values()].map(async (scope) => {
             try { await this.scan(scope); } catch (error) { this.#onError(error); }
         }));
     }
 
-    async claim(input: MailingClaim, name: string): Promise<{ task: string; mailbox: string }> {
-        const task = taskName(name);
-        this.#remember(input);
+    async init(input: MemoryContext, name: string): Promise<MemorySelection> {
+        return await this.#bind(input, taskName(name), "init");
+    }
+
+    async inherit(input: MemoryContext, name: string): Promise<MemorySelection> {
+        return await this.#bind(input, taskName(name), "inherit");
+    }
+
+    async #bind(input: MemoryContext, name: string, mode: "init" | "inherit"): Promise<MemorySelection> {
         return await this.#exclusive(input, async (files) => {
             const active = await this.#activeContexts(input);
-            if (!active.has(input.ctxId)) throw new Error("Claim requires an active Context bound to this Instance and Workspace");
+            if (!active.has(input.ctxId))
+                throw new Error("Memory binding requires an active Context in this Instance and Workspace");
+            const exists = (await files.listTasks()).includes(name);
             const state = parseState(await files.read(STATE_FILE));
-            for (const [otherTask, owner] of Object.entries(state.claims)) {
-                if (otherTask !== task && owner === input.ctxId)
-                    throw new Error(`Context already claims ${otherTask}; release it before switching`);
+            if (mode === "init" && exists && state.bindings[name] !== input.ctxId)
+                throw new Error(`Memory ${name} already exists; use devshell memory inherit ${name}`);
+            if (mode === "inherit" && !exists)
+                throw new Error(`Memory ${name} does not exist; use devshell memory init ${name}`);
+            if (!exists) await files.create(`${ROOT}/${name}/INDEX.md`, `# ${name}\n`);
+            // A Context holds one Memory; inherit transfers the identity, even
+            // when a prior Context is still active. No directory is copied.
+            for (const [other, owner] of Object.entries(state.bindings)) {
+                if (owner === input.ctxId) delete state.bindings[other];
             }
-            const owner = state.claims[task];
-            if (owner !== undefined && owner !== input.ctxId && active.has(owner))
-                throw new Error(`Agent Work ${task} is already claimed by another active Context`);
-            if (!(await files.listTasks()).includes(task))
-                await files.create(`${ROOT}/${task}/INDEX.md`, `# ${task}\n`);
-            state.claims[task] = input.ctxId;
+            state.bindings[name] = input.ctxId;
             await this.#save(files, state);
-            // Recover messages written before the receiving Context came online.
+            this.#remember(input);
             await this.#dispatch(files, input, state, active);
-            const mailbox = `${ROOT}/${task}/mailbox.md`;
-            const oldMail = await files.read(mailbox);
+            const selected = this.#selection(input, name);
+            const oldMail = await files.read(`${ROOT}/${name}/mailbox.md`);
             if (oldMail !== undefined && oldMail.trim().length > 0)
-                await this.#notice(input, task, `Mailbox ready: ${mailbox}`);
-            return { task, mailbox };
+                await this.#notice(input, name, `Mailbox ready: ${selected.mailbox}`);
+            return selected;
         });
     }
 
-    async release(input: MailingClaim): Promise<{ released?: string }> {
+    async release(input: MemoryContext): Promise<{ released?: string }> {
         return await this.#exclusive(input, async (files) => {
             const state = parseState(await files.read(STATE_FILE));
-            const task = Object.keys(state.claims).find((key) => state.claims[key] === input.ctxId);
+            const task = Object.keys(state.bindings).find((key) => state.bindings[key] === input.ctxId);
             if (task === undefined) return {};
-            delete state.claims[task];
+            delete state.bindings[task];
             await this.#save(files, state);
             return { released: task };
         });
     }
 
-    async status(input: MailingClaim): Promise<{ task?: string; mailbox?: string }> {
+    async status(input: MemoryContext): Promise<MemorySelection | Record<string, never>> {
         return await this.#exclusive(input, async (files) => {
             const state = parseState(await files.read(STATE_FILE));
-            const task = Object.keys(state.claims).find((key) => state.claims[key] === input.ctxId);
-            return task === undefined ? {} : { task, mailbox: `${ROOT}/${task}/mailbox.md` };
+            const name = Object.keys(state.bindings).find((key) => state.bindings[key] === input.ctxId);
+            if (name === undefined) return {};
+            // A status lookup after Control restart also resumes mail polling.
+            this.#remember(input);
+            return this.#selection(input, name);
         });
+    }
+
+    async list(input: MailingTarget): Promise<{ memories: string[] }> {
+        return await this.#exclusive(input, async (files) => ({
+            memories: await files.listTasks(),
+        }));
+    }
+
+    #selection(input: MailingTarget, name: string): MemorySelection {
+        return {
+            name,
+            directory: `${input.workspace}/${ROOT}/${name}`,
+            mailbox: `${input.workspace}/${ROOT}/${name}/mailbox.md`,
+        };
     }
 
     async scan(scope: MailingTarget): Promise<void> {
@@ -234,7 +271,7 @@ export class MailingService {
                 state.accepted[mail.id] = mail.fingerprint;
                 dirty = true;
                 await this.#save(files, state);
-                const senderCtx = state.claims[task];
+                const senderCtx = state.bindings[task];
                 if (senderCtx !== undefined && active.has(senderCtx)) {
                     for (const recipient of recipients.filter((name) => !known.has(name))) {
                         await this.#notice({ ...scope, ctxId: senderCtx },
@@ -244,7 +281,7 @@ export class MailingService {
                 }
                 for (const recipient of recipients) {
                     if (!known.has(recipient)) continue;
-                    const ctxId = state.claims[recipient];
+                    const ctxId = state.bindings[recipient];
                     if (ctxId === undefined || !active.has(ctxId)) continue;
                     await this.#notice({ ...scope, ctxId }, mail.id,
                         `New Mail\nFrom: ${mail.from}\nSubject: ${mail.subject}`);
@@ -254,7 +291,7 @@ export class MailingService {
         if (dirty) await this.#save(files, state);
     }
 
-    async #notice(input: MailingClaim, id: string, message: string): Promise<void> {
+    async #notice(input: MemoryContext, id: string, message: string): Promise<void> {
         const marker = `${input.ctxId}\0${id}`;
         if (this.#notified.has(marker)) return;
         this.#notified.add(marker);

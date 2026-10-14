@@ -22,10 +22,10 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         const ctxB = await context(b, workspace);
         assert.notEqual(ctxA, ctxB, "Independent agents need independent Contexts");
 
-        const claimedA = await bash(a, ctxA, "devshell mail claim " + first);
-        const claimedB = await bash(b, ctxB, "devshell mail claim " + second);
-        assertExit(claimedA, 0, "claim A");
-        assertExit(claimedB, 0, "claim B");
+        const claimedA = await bash(a, ctxA, "devshell memory init " + first);
+        const claimedB = await bash(b, ctxB, "devshell memory init " + second);
+        assertExit(claimedA, 0, "memory init A");
+        assertExit(claimedB, 0, "memory init B");
         assert.match(claimedA.stdout, new RegExp(first, "u"));
         assert.match(claimedB.stdout, new RegExp(second, "u"));
 
@@ -75,14 +75,19 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         assert.ok(String(index.structuredContent?.files?.[0]?.content).includes(subject),
             "Mailing global index was not populated");
 
-        const status = await bash(b, ctxB, "devshell mail status");
+        const status = await bash(b, ctxB, "devshell memory");
         assertExit(status, 0, "status");
         assert.match(status.stdout, new RegExp(second, "u"));
 
-        const stolen = await bash(b, ctxB, "devshell mail claim " + first);
-        assert.notEqual(stolen.exitCode, 0, "Claiming a second Agent Work must fail");
+        const inherited = await bash(b, ctxB, "devshell memory inherit " + first);
+        assertExit(inherited, 0, "memory inherit");
+        const previous = await bash(a, ctxA, "devshell memory");
+        assertExit(previous, 0, "prior owner memory");
+        assert.ok(!previous.stdout.includes(first), "The prior Context must lose ownership");
+        const recovered = await bash(b, ctxB, "devshell memory");
+        assert.match(recovered.stdout, new RegExp(first, "u"));
 
-        const released = await bash(b, ctxB, "devshell mail release");
+        const released = await bash(b, ctxB, "devshell memory release");
         assertExit(released, 0, "release");
 
         const names = (await a.listTools()).tools.map((tool) => tool.name);
@@ -90,7 +95,7 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
             "Mailing must not add MCP tools");
 
         return { first, second, subject, delivered: true, notified: true,
-            claimConflictRejected: true, noNewMcpTool: true };
+            memoryTransferVerified: true, noNewMcpTool: true };
     } finally {
         await Promise.allSettled(clients.map(async (client) => client.close()));
     }

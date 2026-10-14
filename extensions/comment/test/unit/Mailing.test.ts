@@ -3,7 +3,9 @@ import test from "node:test";
 
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type { ExtensionWorkerExecuteCapability } from "@portable-devshell/extension/worker";
+import type { CliModelCommandInvocationContext, CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
 import { createMailingHook } from "../../src/mailing/Hook.ts";
+import { executeMemoryModelCommand, executeMemoryNativeCommand } from "../../src/mailing/Command.ts";
 import { MailingService } from "../../src/mailing/Service.ts";
 import { parseOutbox, taskName } from "../../src/mailing/Protocol.ts";
 
@@ -143,11 +145,11 @@ test("Mailing parses complete messages only and validates Agent Work identity", 
     assert.throws(() => taskName(".mailing"), /Invalid/u);
 });
 
-test("Mailing claim + delivery + Subject notification are idempotent", async (t) => {
+test("Memory bindings derive Mailing identities and Subject notifications are idempotent", async (t) => {
     const { fs, notices, mailing } = fixture();
     t.after(async () => mailing.close());
-    await mailing.claim({ instance, workspace, ctxId: "ctx-b" }, B);
-    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-a" }, A);
     fs.files.set(outbox, mail("Upload Context owner", "Sensitive full body line"));
     await mailing.scan({ instance, workspace });
     await mailing.scan({ instance, workspace });
@@ -159,20 +161,73 @@ test("Mailing claim + delivery + Subject notification are idempotent", async (t)
     ]);
     assert.ok(!notices.some((n) => n.message.includes("Sensitive full body")));
     assert.deepEqual(await mailing.status({ instance, workspace, ctxId: "ctx-b" }),
-        { task: B, mailbox: inbox });
+        { name: B, directory: workspace + "/" + root + B,
+            mailbox: workspace + "/" + inbox });
 });
 
-test("Mailing enforces an exclusive active claim and permits recovery after expiry", async (t) => {
-    const { mailing, active } = fixture();
+test("Memory init creates only when explicit, while inherit transfers the same directory and mailbox", async (t) => {
+    const { mailing, fs } = fixture();
     t.after(async () => mailing.close());
-    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
-    await assert.rejects(mailing.claim({ instance, workspace, ctxId: "ctx-c" }, A), /already claimed/u);
-    await assert.rejects(mailing.claim({ instance, workspace, ctxId: "ctx-a" }, B), /already claims/u);
-    active.delete("ctx-a");
-    assert.deepEqual(await mailing.claim({ instance, workspace, ctxId: "ctx-c" }, A),
-        { task: A, mailbox: root + A + "/mailbox.md" });
-    assert.deepEqual(await mailing.release({ instance, workspace, ctxId: "ctx-c" }), { released: A });
-    assert.deepEqual(await mailing.status({ instance, workspace, ctxId: "ctx-c" }), {});
+    const a = { instance, workspace, ctxId: "ctx-a" };
+    const b = { instance, workspace, ctxId: "ctx-b" };
+    const name = "new-memory";
+    assert.deepEqual(await mailing.status(a), {});
+    assert.equal(fs.files.has(root + name + "/INDEX.md"), false);
+    await assert.rejects(mailing.inherit(a, name), /does not exist/u);
+    await assert.rejects(mailing.init(a, B), /already exists/u);
+    assert.equal(fs.files.has(root + name + "/INDEX.md"), false);
+    assert.deepEqual(await mailing.init(a, name), {
+        name, directory: workspace + "/" + root + name,
+        mailbox: workspace + "/" + root + name + "/mailbox.md",
+    });
+    assert.equal(fs.files.get(root + name + "/INDEX.md"), "# new-memory\n");
+    assert.deepEqual(await mailing.list(a), { memories: [B, A, name].sort() });
+    assert.deepEqual(await mailing.inherit(b, name), await mailing.status(b));
+    assert.deepEqual(await mailing.status(a), {});
+    assert.equal(fs.files.get(root + name + "/INDEX.md"), "# new-memory\n");
+    assert.deepEqual(await mailing.release(b), { released: name });
+    assert.deepEqual(await mailing.status(b), {});
+    assert.equal(fs.files.has(root + name + "/INDEX.md"), true);
+});
+
+test("Memory inherits legacy Mailing claims without losing accepted message state", async (t) => {
+    const { mailing, fs } = fixture();
+    t.after(async () => mailing.close());
+    fs.files.set(root + ".mailing/state.json", JSON.stringify({
+        version: 1, claims: { [A]: "ctx-a" }, accepted: { "historic#1": "fingerprint" },
+    }));
+    assert.equal((await mailing.status({ instance, workspace, ctxId: "ctx-a" }) as { name: string }).name, A);
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, A);
+    const stored = JSON.parse(fs.files.get(root + ".mailing/state.json")!) as {
+        version: number; bindings: Record<string, string>; accepted: Record<string, string>;
+    };
+    assert.equal(stored.version, 2);
+    assert.deepEqual(stored.bindings, { [A]: "ctx-b" });
+    assert.deepEqual(stored.accepted, { "historic#1": "fingerprint" });
+});
+
+test("Memory CLI uses the caller Context for model operations and explicit target for native operations", async (t) => {
+    const { mailing, fs } = fixture();
+    t.after(async () => mailing.close());
+    const caller = { ctxId: "ctx-a", instance, workspace } as CliModelCommandInvocationContext;
+    assert.deepEqual(await executeMemoryModelCommand(mailing, [], caller), { kind: "json", value: {} });
+    const initialized = await executeMemoryModelCommand(mailing, ["init", "cli-owned"], caller);
+    assert.equal(initialized.kind, "json");
+    assert.equal((initialized as { value: { name: string } }).value.name, "cli-owned");
+    assert.equal(fs.files.get(root + "cli-owned/INDEX.md"), "# cli-owned\n");
+    const inherited = await executeMemoryModelCommand(mailing, ["inherit", A], caller);
+    assert.equal((inherited as { value: { name: string } }).value.name, A);
+    const native = { localOwner: true } as CliNativeCommandInvocationContext;
+    const list = await executeMemoryNativeCommand(mailing, ["list", instance, workspace], native);
+    assert.deepEqual((list as { value: { memories: string[] } }).value.memories, [B, A, "cli-owned"].sort());
+    const result = await executeMemoryNativeCommand(mailing, ["inherit", instance, workspace, "ctx-b", A], native);
+    assert.equal((result as { value: { name: string } }).value.name, A);
+    assert.deepEqual(await executeMemoryModelCommand(mailing, ["status"], caller), { kind: "json", value: {} });
+    assert.equal(fs.files.get(root + "cli-owned/INDEX.md"), "# cli-owned\n");
+    await assert.rejects(executeMemoryModelCommand(mailing, ["init"], caller), /Usage/u);
+    await assert.rejects(executeMemoryNativeCommand(mailing, ["list", instance, workspace], {
+        localOwner: false,
+    } as CliNativeCommandInvocationContext), /local Control owner/u);
 });
 
 test("Mailing repairs a partial delivery after a Worker failure without duplicate messages", async (t) => {
@@ -248,7 +303,7 @@ test("An invalid sender cannot block delivery of another Agent Work's mail", asy
 test("A bounced message notifies the sender's claimed Context by Subject", async (t) => {
     const { fs, mailing, notices } = fixture();
     t.after(async () => mailing.close());
-    await mailing.claim({ instance, workspace, ctxId: "ctx-a" }, A);
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-a" }, A);
     fs.files.set(outbox, mail("Undeliverable test", "Not part of notification", "missing-agent"));
     await mailing.scan({ instance, workspace });
     assert.ok(notices.some((n) => n.ctxId === "ctx-a" &&
