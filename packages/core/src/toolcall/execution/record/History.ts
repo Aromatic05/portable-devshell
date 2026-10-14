@@ -143,6 +143,11 @@ export class ToolCallHistory {
         return this.#activeCalls.has(callId);
     }
 
+    abandon(callId: string): void {
+        // An audit write failure must not leave a completed execution active.
+        this.#activeCalls.delete(callId);
+    }
+
     hasActiveForContext(ctxId: string, excludeCallId?: string): boolean {
         for (const call of this.#activeCalls.values()) {
             if (call.ctxId === ctxId && call.callId !== excludeCallId)

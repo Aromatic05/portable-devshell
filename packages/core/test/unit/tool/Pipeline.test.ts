@@ -51,6 +51,7 @@ function createHarness(
     instance: string,
     options: {
         assertReady?: () => void;
+        failCompletedAudit?: boolean;
         resolveTarget?: ToolCallTargetResolver;
         reviews?: readonly ToolCallReview[];
         rewrites?: readonly ToolCallRewrite[];
@@ -97,6 +98,10 @@ function createHarness(
             },
             async completed() {
                 audit.push("completed");
+                if (options.failCompletedAudit) throw new Error("audit storage unavailable");
+            },
+            abandon() {
+                audit.push("abandon");
             },
             async failed() {
                 audit.push("failed");
@@ -167,6 +172,24 @@ function createHarness(
     }));
     return { audit, invoked, runtime, target, scheduled, released };
 }
+
+test("a successfully executed tool returns its result when completion audit fails", async () => {
+    const harness = createHarness("instance-a", { failCompletedAudit: true });
+    const warning = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+        const result = await harness.runtime.api.call(
+            asInstanceName("instance-a"), "file_edit", { changes: "test" }, context,
+        );
+        assert.deepEqual(result, { ok: true });
+        assert.equal(harness.invoked.length, 1, "execution must never be repeated");
+        assert.deepEqual(harness.audit, ["requested", "queued", "running", "completed", "abandon"]);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = warning;
+    }
+});
 
 test("ToolCallPipeline audits review rejection in Instance without rewrite or execution", async () => {
     const calls: string[] = [];

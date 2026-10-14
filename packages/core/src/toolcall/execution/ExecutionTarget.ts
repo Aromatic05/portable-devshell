@@ -273,7 +273,12 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                             await this.#log.append(bashResult, runningContext);
                         }
                     },
-                );
+                ).catch((error: unknown) => {
+                    // Execution and outbound review already succeeded. Do not
+                    // tell the client to retry a command that may have effects.
+                    this.#audit.abandon(callId);
+                    console.warn("ToolCall completed, but audit persistence failed:", error);
+                });
             }
             return result;
         } catch (error) {

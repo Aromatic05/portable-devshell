@@ -55,6 +55,10 @@ export class WorkerInstanceToolAudit {
         return scope.eventContext;
     }
 
+    abandon(callId: string): void {
+        this.#toolCallHistory.abandon(callId);
+    }
+
     async requested(scope: ToolCallScope): Promise<void> {
         await this.#toolCallHistory.started(
             scope.callId,
@@ -90,7 +94,9 @@ export class WorkerInstanceToolAudit {
                 startedAt: scope.startedAt,
                 status: "queued",
             }),
-        );
+        ).catch((error: unknown) => {
+            console.warn("ToolCall queue event could not be recorded:", error);
+        });
     }
 
     async running(
@@ -105,7 +111,9 @@ export class WorkerInstanceToolAudit {
                 startedAt: scope.startedAt,
                 status: "running",
             }),
-        );
+        ).catch((error: unknown) => {
+            console.warn("ToolCall running event could not be recorded:", error);
+        });
     }
 
     async completed(
