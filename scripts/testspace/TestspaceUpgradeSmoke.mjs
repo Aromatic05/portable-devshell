@@ -24,7 +24,7 @@ const baselineTag = "v0.7.7";
 const baselineCache = join(repo, "var", "agent-work", "upgrade-testspace-assets", baselineTag);
 
 /** Reproducible real release-upgrade acceptance; no mocked CLI or Control. */
-export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = baselineCache, candidateDirectory }) {
+export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = baselineCache, candidateDirectory, caseName, diagnosticsOnly = false }) {
     assertTestspaceExecutionContext(root, process.env);
     assert.equal(process.env.HOME, join(root, "home"));
     assert.equal(process.env.PORTABLE_DEVSHELL_HOME, join(root, "home", ".devshell"));
@@ -40,15 +40,31 @@ export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = basel
         if (candidateDirectory === undefined) await buildCandidateRelease(current);
         await verifyRelease(legacy);
         await verifyRelease(current);
-        const successful = await runCase("successful-upgrade", { current, legacy, testRoot });
-        const staleTarget = await runCase("existing-comment-target-recovery", { current, legacy, testRoot });
-        const rollback = await runCase("failed-startup-rollback", { current, legacy, testRoot });
-        const partialRollback = await runCase("partial-audit-migration-rollback", { current, legacy, testRoot });
-        const unsupported = await runCase("unsupported-schema-rejection", { current, legacy, testRoot });
+        const standardCases = [
+            "successful-upgrade",
+            "existing-comment-target-recovery",
+            "failed-startup-rollback",
+            "partial-audit-migration-rollback",
+            "unsupported-schema-rejection",
+            "incident-expired-contexts",
+            "incident-missing-instance",
+            "incident-disconnected-control",
+        ];
+        if (caseName !== undefined && !standardCases.includes(caseName)) {
+            throw new Error(`Unknown upgrade Testspace case: ${caseName}`);
+        }
+        const cases = [];
+        for (const name of caseName === undefined ? standardCases : [caseName]) {
+            const result = await runCase(name, { current, legacy, testRoot });
+            if (name.startsWith("incident-") && !diagnosticsOnly)
+                assert.ok(result.passed,
+                    `Context upgrade regression: ${name}: ${JSON.stringify(result)}`);
+            cases.push(result);
+        }
         return {
             baseline: baselineTag,
-            candidate: successful.version,
-            cases: [successful, staleTarget, rollback, partialRollback, unsupported],
+            candidate: cases.find((entry) => entry.name === "successful-upgrade")?.version ?? "release-assets",
+            cases,
         };
     } finally {
         await rm(testRoot, { recursive: true, force: true });
@@ -100,7 +116,9 @@ async function runCase(name, { current, legacy, testRoot }) {
     const devshellHome = join(home, ".devshell");
     const cli = join(bin, "devshell");
     const baselineInstaller = join(legacy, "install-release.sh");
-    const candidateInstaller = join(repo, "scripts", "install-release.sh");
+    const candidateInstaller = existsSync(join(current, "install-release.sh"))
+        ? join(current, "install-release.sh")
+        : join(repo, "scripts", "install-release.sh");
     const env = {
         ...createTestspaceProcessEnvironment(home, runtime),
         PORTABLE_DEVSHELL_HOME: devshellHome,
@@ -164,12 +182,18 @@ async function runCase(name, { current, legacy, testRoot }) {
             /"provider"\s*:\s*"pi"/u,
             "v0.7.7 Agent must read the original providers.json",
         );
-        const legacyContexts = await seedLegacyContexts(contextsPath, TESTSPACE_INSTANCE);
+        const legacyContexts = await seedLegacyContexts(
+            contextsPath, TESTSPACE_INSTANCE, name.startsWith("incident-"),
+            name === "incident-missing-instance",
+        );
         const originalControlConfig = await readFile(controlConfig, "utf8");
         const originalInstanceConfig = await readFile(instanceConfig, "utf8");
         const baselineExtensions = execute(cli, ["extension", "list"], env).stdout;
         assert.match(baselineExtensions, /comment/u);
         assert.match(baselineExtensions, /mcp/u);
+        const contextsImmediatelyBeforeInstall = name.startsWith("incident-")
+            ? JSON.parse(await readFile(contextsPath, "utf8")).contexts
+            : undefined;
 
         if (name === "unsupported-schema-rejection") {
             setAuditVersion(auditPath, 1);
@@ -208,8 +232,77 @@ async function runCase(name, { current, legacy, testRoot }) {
 
         const candidate = name === "failed-startup-rollback"
             ? await makeFailingCandidate(current, root)
-            : current;
+            : name === "incident-disconnected-control"
+                ? await makeDisconnectedCandidate(current, root)
+                : current;
         const attempted = install(candidateInstaller, candidate, env, name !== "successful-upgrade");
+        if (name.startsWith("incident-")) {
+            const output = `${attempted.stdout ?? ""}\n${attempted.stderr ?? ""}`;
+            const handshakeFailure = output.includes("server.hello must be the first request");
+            const routeFailure = output.includes("No route for testspace-removed");
+            const errorSignatures = [...new Set(output.split("\n")
+                .map((line) => line.trim())
+                .filter((line) => /No route for|server\.hello must|Context environment cleanup was incomplete|Control startup failed|File exists|持久状态回滚失败/u.test(line))
+                .map((line) => line.slice(0, 220)))].slice(0, 12);
+            const status = execute(cli, ["status"], env, { allowFailure: true });
+            const restoredVersion = queryVersion(cli, env);
+            const restoredContexts = await readFile(contextsPath, "utf8");
+            const restoredAudit = readAudit(auditPath);
+            const originalContextRecords = JSON.parse(legacyContexts).contexts;
+            const restoredContextRecords = JSON.parse(restoredContexts).contexts;
+            const restoredIds = new Set(restoredContextRecords.map((entry) => entry.ctxId));
+            const removedRecords = originalContextRecords.filter((entry) => !restoredIds.has(entry.ctxId));
+            const sentinel = originalContextRecords.find((entry) => entry.ctxId === "ctx-upgrade-legacy-sentinel");
+            const restoredSentinel = restoredContextRecords.find((entry) => entry.ctxId === "ctx-upgrade-legacy-sentinel");
+            const unresolvedInstanceDebt = restoredContextRecords.some((entry) =>
+                entry.pendingEnvironmentCleanup?.some((cleanup) => cleanup.instance === "testspace-removed"),
+            );
+            const healthy = attempted.status === 0 &&
+                restoredVersion.startsWith("1.0.0") &&
+                (status.stdout ?? "").includes("control: running") &&
+                restoredAudit.version === 3 &&
+                restoredSentinel?.ctxId === sentinel?.ctxId &&
+                (name !== "incident-missing-instance" || unresolvedInstanceDebt);
+            return {
+                name,
+                passed: healthy,
+                diagnosticCompleted: true,
+                candidateFailed: attempted.status !== 0,
+                reproduced: attempted.status !== 0 &&
+                    (name === "incident-disconnected-control"
+                        ? handshakeFailure
+                        : name === "incident-missing-instance"
+                            ? handshakeFailure
+                            : true),
+                installerExitCode: attempted.status,
+                failure: {
+                    contextCleanup: output.includes("Context environment cleanup was incomplete"),
+                    handshake: handshakeFailure,
+                    missingInstanceRoute: routeFailure,
+                    rollback: /File exists|持久状态回滚失败/u.test(output),
+                },
+                errorSignatures,
+                postInstallVersion: restoredVersion,
+                unresolvedInstanceDebt,
+                rollbackStatePreserved: attempted.status !== 0 ? {
+                    version: restoredVersion === baselineVersion,
+                    contextsRaw: restoredContexts === legacyContexts,
+                    contextsSentinel: JSON.stringify(sentinel) === JSON.stringify(restoredSentinel),
+                    contextsOriginalCount: originalContextRecords.length,
+                    contextsBeforeInstallerCount: contextsImmediatelyBeforeInstall?.length,
+                    contextsRestoredCount: restoredContextRecords.length,
+                    compactedTerminalContexts: removedRecords.filter((entry) => entry.status !== "active").length,
+                    compactedPendingContexts: removedRecords.filter((entry) => entry.cleanupPending === true).length,
+                    removedActiveContexts: removedRecords.filter((entry) => entry.status === "active").length,
+                    audit: restoredAudit.version === before.version &&
+                        restoredAudit.sentinel === before.sentinel,
+                } : undefined,
+                status: (status.stdout ?? "").split("\n").filter((line) =>
+                    line.startsWith("control:") || line.startsWith("devshell ")
+                ),
+                diagnostics: output.slice(-6000),
+            };
+        }
         if (name === "failed-startup-rollback") {
             assert.notEqual(attempted.status, 0, "fault-injected candidate must fail");
             assert.equal(queryVersion(cli, env), baselineVersion);
@@ -457,7 +550,7 @@ async function seedLegacyProviders(file) {
     return content;
 }
 
-async function seedLegacyContexts(file, instance) {
+async function seedLegacyContexts(file, instance, incident = false, missingInstance = false) {
     await mkdir(dirname(file), { recursive: true });
     const existing = existsSync(file) ? JSON.parse(await readFile(file, "utf8")) : {
         contexts: [],
@@ -476,9 +569,36 @@ async function seedLegacyContexts(file, instance) {
         status: "active",
         workspace: "/",
     };
+    const historicalContexts = incident ? Array.from({ length: 503 }, (_, index) => {
+        const disabled = index >= 465 && index < 483;
+        const needsCleanup = index < 209 || disabled;
+        const deletedInstance = missingInstance && index === 0;
+        const cleanupInstance = deletedInstance ? "testspace-removed" : instance;
+        return {
+            ...record,
+            // Match the observed 227 cleanup debts and 256 retained terminal records.
+            // Older disabled records must be included in the first 227 compaction entries.
+            createdAt: disabled ? "2026-08-31T00:00:00.000Z" : "2026-09-01T00:00:00.000Z",
+            ctxId: `ctx-testspace-incident-${String(index).padStart(4, "0")}`,
+            ...(deletedInstance ? {
+                environments: [{ instance: cleanupInstance, workspace: "/" }],
+                instance: cleanupInstance,
+            } : {}),
+            expiresAt: index < 483 ? "2026-09-02T00:00:00.000Z" : record.expiresAt,
+            lastAccessedAt: "2026-09-01T00:00:00.000Z",
+            status: index < 465 ? "expired" : index < 483 ? "disabled" : "active",
+            ...(needsCleanup ? {
+                cleanupPending: true,
+                pendingEnvironmentCleanup: deletedInstance
+                    ? [{ kind: "instance_reference", instance: cleanupInstance }]
+                    : [{ kind: "alerts", instance, workspace: "/" }],
+            } : {}),
+        };
+    }) : [];
     const source = JSON.stringify({
         contexts: [
             ...existing.contexts.filter((item) => item.ctxId !== record.ctxId),
+            ...historicalContexts,
             record,
         ],
         version: 1,
@@ -560,6 +680,27 @@ async function makeFailingCandidate(current, root) {
         await copyFile(join(current, name), join(bad, name));
     }
     return bad;
+}
+
+async function makeDisconnectedCandidate(current, root) {
+    const candidate = join(root, "disconnected-candidate");
+    const app = join(root, "disconnected-app");
+    await mkdir(candidate, { recursive: true });
+    await mkdir(app, { recursive: true });
+    execute("tar", ["--no-same-owner", "-xzf", join(current, appName), "-C", app], process.env);
+    const server = join(app, "node_modules/@portable-devshell/control/dist/server/index.js");
+    const original = await readFile(server, "utf8");
+    const marker = "        await this.#web.startHost();";
+    assert.equal(original.split(marker).length, 2, "Expected one Control startHosts marker");
+    await writeFile(server, original.replace(marker,
+        `${marker}\n        this.#internalControlEndpoint.disconnect();`));
+    execute("tar", ["-czf", join(candidate, appName), "-C", app, "."], process.env);
+    const hash = createHash("sha256").update(await readFile(join(candidate, appName))).digest("hex");
+    await writeFile(join(candidate, `${appName}.sha256`), `${hash}  ${appName}\n`);
+    for (const name of [workerName, `${workerName}.sha256`]) {
+        await copyFile(join(current, name), join(candidate, name));
+    }
+    return candidate;
 }
 
 function install(installer, directory, env, allowFailure = false) {

@@ -472,6 +472,9 @@ async function upgradeSmoke(args) {
             ? {} : { baselineDirectory: readValue("--baseline-dir") }),
         ...(readValue("--candidate-dir") === undefined
             ? {} : { candidateDirectory: readValue("--candidate-dir") }),
+        ...(readValue("--case") === undefined
+            ? {} : { caseName: readValue("--case") }),
+        diagnosticsOnly: args.includes("--diagnostics-only"),
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
