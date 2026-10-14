@@ -31,7 +31,16 @@ export class ContextService {
     }
 
     async reconcile(): Promise<void> {
-        await this.cleanup.reconcile();
+        try {
+            await this.cleanup.reconcile();
+        } catch (error) {
+            if (!(error instanceof AggregateError) ||
+                error.message !== "Context environment cleanup was incomplete.")
+                throw error;
+            // Failed remote cleanup remains in the persisted ledger and can be
+            // retried when its Instance is available. It must not block Control startup.
+            console.warn("Context startup cleanup deferred; pending debt retained.", error);
+        }
     }
 
     async reconcileInstance(instance: string): Promise<void> {
