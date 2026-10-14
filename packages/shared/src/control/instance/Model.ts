@@ -6,6 +6,7 @@ import type { ApprovalPolicy } from "../config/Policy.js";
 import type {
     ControlInstanceAlertsConfig,
     ControlInstanceConfigBase,
+    ControlExecutionConfig,
     ControlInstanceLogsConfig,
     ControlInstanceToolsConfig,
     ControlMcpAuthMode,
@@ -61,6 +62,7 @@ export interface InstanceCreateDraft {
     dockerBinary?: string;
     enabled?: boolean;
     env?: Record<string, string>;
+    execution?: ControlExecutionConfig;
     extensions?: {
         model?: string[];
     };

@@ -134,6 +134,9 @@ export function summarizeInstanceCreate(
         ...(instance.env === undefined
             ? {}
             : { env: redactSecretRecord(instance.env) }),
+        ...(instance.execution === undefined
+            ? {}
+            : { execution: redactExecution(instance.execution) }),
         extensions: { model: [...instance.extensions.model] },
         ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
         ...(instance.podmanBinary === undefined
@@ -168,6 +171,29 @@ function redactContainerSecrets(
     if ("env" in copy && copy.env !== undefined)
         copy.env = redactSecretRecord(copy.env);
     return copy;
+}
+
+function redactExecution(
+    execution: NonNullable<ControlInstanceConfig["execution"]>,
+): NonNullable<ControlInstanceConfig["execution"]> {
+    return {
+        ...(execution.environment === undefined
+            ? {}
+            : {
+                  environment: execution.environment.map((entry) => ({
+                      ...entry,
+                      content: "********",
+                  })),
+              }),
+        ...(execution.sandbox === undefined
+            ? {}
+            : {
+                  sandbox: {
+                      ...execution.sandbox,
+                      content: "********",
+                  },
+              }),
+    };
 }
 
 function redactSecretRecord(

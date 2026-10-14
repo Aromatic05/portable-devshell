@@ -54,6 +54,19 @@ export interface ControlInstanceWorkspaceConfig {
 export interface ControlInstanceSecurityConfig {
     mode: ControlSecurityMode;
 }
+export interface ControlExecutionConfig {
+    environment?: {
+        order: number;
+        name: string;
+        content: JsonValue;
+        phase?: "daemon" | "process";
+    }[];
+    sandbox?: {
+        name: string;
+        content: JsonValue;
+        phase?: "daemon" | "process";
+    };
+}
 export interface ControlInstanceSshConfig {
     command: string;
 }
@@ -62,6 +75,7 @@ export interface ControlInstanceConfigBase {
     approvalPolicy?: ApprovalPolicy;
     enabled: boolean;
     env?: Record<string, string>;
+    execution?: ControlExecutionConfig;
     extensions: ControlInstanceExtensionsConfig;
     logs?: ControlInstanceLogsConfig;
     mcp: ControlInstanceMcpConfig;
@@ -316,6 +330,7 @@ export interface ConfigInstanceDraft {
     dockerBinary?: string;
     enabled?: boolean;
     env?: Record<string, string>;
+    execution?: ControlExecutionConfig;
     extensions?: {
         model?: string[];
     };
@@ -390,6 +405,7 @@ export interface ConfigInstancePatch {
     dockerBinary?: ConfigNullable<string>;
     enabled?: boolean;
     env?: ConfigNullable<Record<string, string>>;
+    execution?: ConfigNullable<ControlExecutionConfig>;
     extensions?: {
         model?: string[];
     };
@@ -462,6 +478,7 @@ const configInstanceRestartPaths = [
     "podmanBinary",
     "logs",
     "tools",
+    "execution",
 ] as const;
 
 export function configInstanceRequiresRestart(

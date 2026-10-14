@@ -5,6 +5,7 @@ import {
     runtimeErrorCodes,
     type ControlHostDefinition,
     type ControlInstanceConfig,
+    type ControlExecutionConfig,
     type ControlPortDefinition,
     type ToolCallHooks,
     type ToolCallApi,
@@ -38,7 +39,9 @@ import type { InstanceToolCatalog } from "./Tools.js";
 import { createInstanceHost } from "../Route.js";
 
 interface InstanceFields {
+    commandClient?: WorkerCommandClient;
     config: InstanceConfig;
+    executionConfig?: ControlExecutionConfig;
     eventLog: InstanceEventLog;
     state: InstanceState;
     subscriptions: ProcessSubscriptionManager;
@@ -46,6 +49,7 @@ interface InstanceFields {
 }
 
 export class Instance {
+    readonly #commandClient?: WorkerCommandClient;
     readonly #eventLog: InstanceEventLog;
     readonly #subscriptions: ProcessSubscriptionManager;
     readonly #worker: WorkerInstance;
@@ -53,6 +57,7 @@ export class Instance {
     readonly #lifecycle: InstanceLifecycle;
     #closePromise?: Promise<void>;
     #config: InstanceConfig;
+    #executionConfig?: ControlExecutionConfig;
     #retirePromise?: Promise<void>;
 
     static create(config: ControlInstanceConfig): Instance {
@@ -67,7 +72,7 @@ export class Instance {
         });
         const eventLog = createInstanceEventLog(audit, instanceName);
         const subscriptions = new ProcessSubscriptionManager();
-        const { protocolClient, worker } = createWorkerInstance(
+        const { commandClient, protocolClient, worker } = createWorkerInstance(
             toWorkerConfig(config, reverse, paths.homeDirectory),
             eventLog.port,
             {
@@ -105,7 +110,9 @@ export class Instance {
             terminal: worker.execution.terminal,
         });
         const instance: Instance = new Instance({
+            commandClient,
             config: toInstanceConfig(config),
+            executionConfig: config.execution,
             eventLog,
             state,
             subscriptions,
@@ -115,11 +122,13 @@ export class Instance {
     }
 
     constructor(fields: InstanceFields) {
+        this.#commandClient = fields.commandClient;
         this.#eventLog = fields.eventLog;
         this.#subscriptions = fields.subscriptions;
         this.#worker = fields.worker;
         this.#state = fields.state;
         this.#config = fields.config;
+        this.#executionConfig = fields.executionConfig;
         this.#lifecycle = new InstanceLifecycle(this);
     }
 
@@ -212,7 +221,18 @@ export class Instance {
 
     update(instance: ControlInstanceConfig): void {
         this.#config = toInstanceConfig(instance);
+        this.#executionConfig = instance.execution;
         this.#state.approval.setPolicy(instance.approvalPolicy);
+    }
+
+    /** Compile enabled Extension drivers immediately before managed Worker start. */
+    setExecutionConfigResolver(
+        resolver: (config: ControlExecutionConfig) => Promise<ControlExecutionConfig>,
+    ): void {
+        this.#commandClient?.setExecutionConfigResolver(async () => {
+            if (this.#executionConfig === undefined) return undefined;
+            return JSON.stringify(await resolver(structuredClone(this.#executionConfig)));
+        });
     }
 
     host(extensionPorts: readonly ControlPortDefinition[] = []): ControlHostDefinition {
@@ -351,7 +371,7 @@ function createWorkerInstance(
         enabled(): boolean;
     },
     onReadyChanged: (ready: boolean) => Promise<void>,
-): { protocolClient: WorkerProtocolClient; worker: WorkerInstance } {
+): { commandClient?: WorkerCommandClient; protocolClient: WorkerProtocolClient; worker: WorkerInstance } {
     const resolved = resolveWorkerInstanceConfig(config);
     const transportConnection = resolved.transportConnection;
     const workerHost = `${resolved.name}-worker`;
@@ -361,16 +381,12 @@ function createWorkerInstance(
         workerHost,
     );
     const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
+    const commandClient = resolved.runtime === undefined
+        ? undefined
+        : new WorkerCommandClient(resolved.runtime, resolved.name, resolved.env);
     const worker = new WorkerRuntime({
         admission,
-        commandClient:
-            resolved.runtime === undefined
-                ? undefined
-                : new WorkerCommandClient(
-                      resolved.runtime,
-                      resolved.name,
-                      resolved.env,
-                  ),
+        commandClient,
         config: resolved,
         events,
         endpoint,
@@ -379,20 +395,28 @@ function createWorkerInstance(
         stateMachine: new InstanceStateMachine(resolved.name),
         transportConnection,
     });
-    return { protocolClient, worker };
+    return { commandClient, protocolClient, worker };
 }
 
-function toWorkerConfig(
+export function toWorkerConfig(
     instance: ControlInstanceConfig,
     reverse: ReverseProvision | undefined,
     homeDirectory: string,
 ): WorkerInstanceConfig {
     const effectiveSecurityMode: "disabled" | "workspace" =
         instance.security?.mode === "workspace" ? "workspace" : "disabled";
+    const userEnv = Object.fromEntries(
+        Object.entries(instance.env ?? {}).filter(
+            ([key]) => key !== "DEVSHELL_WORKER_EXECUTION_CONFIG",
+        ),
+    );
     const common = {
         alerts: instance.alerts,
         env: {
-            ...instance.env,
+            ...userEnv,
+            ...(instance.execution === undefined || instance.provider === "reverse" ? {} : {
+                DEVSHELL_WORKER_EXECUTION_CONFIG: JSON.stringify(instance.execution),
+            }),
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
             DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
         },

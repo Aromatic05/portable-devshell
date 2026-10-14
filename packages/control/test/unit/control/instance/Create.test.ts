@@ -56,6 +56,22 @@ test("instance create defaults MCP authentication to oauth2", () => {
     });
 });
 
+test("instance create summary redacts execution payloads", () => {
+    const summary = createService("linux").validateDraft({
+        execution: {
+            environment: [{ order: 1, name: "shell", content: "export TOKEN=secret" }],
+            sandbox: { name: "policy", content: { private: "value" } },
+        },
+        name: "execution-local",
+        provider: "local",
+    });
+
+    assert.deepEqual(summary.execution, {
+        environment: [{ order: 1, name: "shell", content: "********" }],
+        sandbox: { name: "policy", content: "********" },
+    });
+});
+
 test("instance create validates existing stopped container drafts with adoptLifecycle", () => {
     const service = createService("linux");
 

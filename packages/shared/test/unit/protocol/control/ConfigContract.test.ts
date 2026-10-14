@@ -368,6 +368,56 @@ test("explicit empty model Extension allowlist disables all model commands", () 
     assert.deepEqual(normalized.extensions.model, []);
 });
 
+test("execution config parses, clones, and sorts environment entries by order", () => {
+    const parsed = parseConfigInstancePatch({ execution: {
+        environment: [
+            { order: 9, name: "late", content: { value: [1, true] }, phase: "process" },
+            { order: 2, name: "early", content: "export PATH=/bin" },
+        ],
+        sandbox: { name: "policy", content: { enabled: true } },
+    } });
+    const normalized = normalizeConfigInstanceDraft({
+        name: "execution-config",
+        provider: "local",
+        execution: parsed.execution ?? undefined,
+    });
+    assert.deepEqual(normalized.execution?.environment?.map(({ order }) => order), [2, 9]);
+    assert.deepEqual(normalized.execution?.sandbox, { name: "policy", content: { enabled: true } });
+    assert.equal(configInstanceRequiresRestart({}, { execution: normalized.execution as never }), true);
+    assert.deepEqual(
+        normalizeConfigInstanceDraft(applyConfigInstancePatch(normalized, { execution: null })).execution,
+        undefined,
+    );
+});
+
+test("execution accepts empty JSON content for parameterless providers", () => {
+    const instance = normalizeConfigInstanceDraft({
+        name: "parameterless-direnv",
+        provider: "local",
+        execution: {
+            environment: [{ order: 100, name: "direnv", content: {} }],
+            sandbox: { name: "custom-sandbox", content: {} },
+        },
+    });
+    assert.deepEqual(instance.execution?.environment?.[0]?.content, {});
+    assert.deepEqual(instance.execution?.sandbox?.content, {});
+});
+
+test("execution config rejects invalid order, duplicate order, and invalid names", () => {
+    for (const environment of [
+        [{ order: 0, name: "good", content: "x" }],
+        [{ order: 1, name: "good", content: "x" }, { order: 1, name: "also-good", content: "y" }],
+        [{ order: 1, name: "Bad_Name", content: "x" }],
+        [{ order: 1, name: "good", content: "" }],
+    ]) {
+        assert.throws(() => normalizeConfigInstanceDraft({
+            name: "invalid-execution",
+            provider: "local",
+            execution: { environment },
+        }), ConfigInputError);
+    }
+});
+
 test("instance config rejects the retired mcp.tools policy field", () => {
     assert.throws(
         () =>

@@ -113,6 +113,9 @@ export function normalizeConfigInstanceDraft(
         alerts: cloneAlerts(draft.alerts),
         enabled: draft.enabled ?? context.defaultEnabled,
         env: cloneNonEmptyRecord(draft.env),
+        ...(draft.execution === undefined
+            ? {}
+            : { execution: normalizeExecution(draft.execution) }),
         extensions: {
             model: deduplicate(
                 draft.extensions?.model ?? context.defaultModelExtensions,
@@ -245,6 +248,9 @@ export function applyConfigInstancePatch(
             : applyNullable(patch.dockerBinary, base.dockerBinary),
         enabled: patch.enabled ?? base.enabled,
         env: applyNullable(patch.env, base.env),
+        ...(patch.execution === undefined
+            ? {}
+            : { execution: applyNullable(patch.execution, base.execution) }),
         extensions:
             patch.extensions === undefined
                 ? base.extensions
@@ -424,6 +430,9 @@ export function toConfigInstanceDraft(
         dockerBinary: instance.dockerBinary,
         enabled: instance.enabled,
         env: cloneOptionalRecord(instance.env),
+        ...(instance.execution === undefined
+            ? {}
+            : { execution: normalizeExecution(instance.execution) }),
         extensions: { model: [...instance.extensions.model] },
         logs: cloneOptionalRecord(instance.logs),
         mcp: {
@@ -440,6 +449,34 @@ export function toConfigInstanceDraft(
         tools: cloneTools(instance.tools),
         workspace: { ...instance.workspace },
     };
+}
+
+function normalizeExecution(execution: ControlInstanceConfig["execution"] | ConfigInstanceDraft["execution"]): ControlInstanceConfig["execution"] {
+    if (execution === undefined) return undefined;
+    const environment = execution.environment?.map((entry, index) => {
+        if (!Number.isInteger(entry.order) || entry.order < 1 || entry.order > 999)
+            throw configInputError("normalize", ["execution", "environment", index, "order"], "config.execution.order", "must be an integer from 1 to 999");
+        if (!/^[a-z][a-z0-9-]*$/.test(entry.name))
+            throw configInputError("normalize", ["execution", "environment", index, "name"], "config.execution.name", "must match /^[a-z][a-z0-9-]*$/");
+        if (entry.content === undefined || entry.content === "")
+            throw configInputError("normalize", ["execution", "environment", index, "content"], "config.execution.content", "must be JSON content");
+        return structuredClone(entry);
+    });
+    if (environment !== undefined) {
+        const orders = new Set<number>();
+        for (const [index, entry] of environment.entries()) {
+            if (orders.has(entry.order)) throw configInputError("normalize", ["execution", "environment", index, "order"], "config.execution.orderDuplicate", "must be unique");
+            orders.add(entry.order);
+        }
+        environment.sort((left, right) => left.order - right.order);
+    }
+    const sandbox = execution.sandbox === undefined ? undefined : (() => {
+        if (!/^[a-z][a-z0-9-]*$/.test(execution.sandbox!.name)) throw configInputError("normalize", ["execution", "sandbox", "name"], "config.execution.name", "must match /^[a-z][a-z0-9-]*$/");
+        if (execution.sandbox!.content === undefined || execution.sandbox!.content === "")
+            throw configInputError("normalize", ["execution", "sandbox", "content"], "config.execution.content", "must be JSON content");
+        return structuredClone(execution.sandbox);
+    })();
+    return { ...(environment === undefined ? {} : { environment }), ...(sandbox === undefined ? {} : { sandbox }) };
 }
 
 function normalizeInstanceMcpAuth(

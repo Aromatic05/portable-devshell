@@ -52,6 +52,7 @@ export class WorkerCommandClient {
     readonly #runtime: WorkerRuntime;
     readonly #instanceName: string;
     readonly #env?: NodeJS.ProcessEnv;
+    #resolveExecutionConfig?: () => Promise<string | undefined>;
 
     constructor(
         runtime: WorkerRuntime,
@@ -63,8 +64,19 @@ export class WorkerCommandClient {
         this.#env = env;
     }
 
-    start(interactiveSession?: WorkerCommandInteractiveSession): Promise<WorkerCommandResult> {
-        return this.#runtime.runWorkerCommand("start", { instanceName: this.#instanceName, env: this.#env }, interactiveSession);
+    setExecutionConfigResolver(resolve: () => Promise<string | undefined>): void {
+        this.#resolveExecutionConfig = resolve;
+    }
+
+    async start(interactiveSession?: WorkerCommandInteractiveSession): Promise<WorkerCommandResult> {
+        const config = await this.#resolveExecutionConfig?.();
+        const env = config === undefined
+            ? this.#env
+            : { ...this.#env, DEVSHELL_WORKER_EXECUTION_CONFIG: config };
+        return await this.#runtime.runWorkerCommand("start", {
+            instanceName: this.#instanceName,
+            env,
+        }, interactiveSession);
     }
     status(): Promise<WorkerCommandResult> {
         return this.#runtime.runWorkerCommand("status", { instanceName: this.#instanceName, env: this.#env });

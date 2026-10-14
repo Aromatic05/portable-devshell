@@ -23,6 +23,7 @@ import type {
     ConfigWebOAuth2Draft,
     ConfigWebPatch,
 } from "./Model.js";
+import type { JsonValue } from "../../types/Json.js";
 import type {
     ControlInstanceAlertsConfig,
     ControlInstanceLogsConfig,
@@ -39,6 +40,7 @@ const instanceKeys = [
     "dockerBinary",
     "enabled",
     "env",
+    "execution",
     "extensions",
     "logs",
     "mcp",
@@ -129,6 +131,7 @@ export function parseConfigInstanceDraft(
         ]),
         enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
         env: readOptionalStringRecord(record.env, [...path, "env"]),
+        execution: record.execution === undefined ? undefined : parseExecution(record.execution, [...path, "execution"]),
         extensions:
             record.extensions === undefined
                 ? undefined
@@ -197,6 +200,7 @@ export function parseConfigInstancePatch(
         env: readNullable(record.env, (entry) =>
             readStringRecord(entry, [...path, "env"]),
         ),
+        ...(record.execution === undefined ? {} : { execution: readNullable(record.execution, (entry) => parseExecution(entry, [...path, "execution"])) }),
         extensions:
             record.extensions === undefined
                 ? undefined
@@ -1335,6 +1339,51 @@ function readRecord(
         );
     }
     return value as Record<string, unknown>;
+}
+
+function parseExecution(value: unknown, path: readonly ConfigPathSegment[]) {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["environment", "sandbox"], path);
+    const environment = record.environment === undefined
+        ? undefined
+        : readArray(record.environment, [...path, "environment"]).map((entry, index) => {
+              const itemPath = [...path, "environment", index];
+              const item = readRecord(entry, itemPath);
+              assertKnownKeys(item, ["order", "name", "content", "phase"], itemPath);
+              return {
+                  order: readRequiredInteger(item.order, [...itemPath, "order"]),
+                  name: readRequiredTrimmedString(item.name, [...itemPath, "name"]),
+                  content: readJsonValue(item.content, [...itemPath, "content"]),
+                  ...(item.phase === undefined ? {} : { phase: readEnum(item.phase, [...itemPath, "phase"], ["daemon", "process"]) }),
+              };
+          });
+    const sandbox = record.sandbox === undefined ? undefined : (() => {
+        const itemPath = [...path, "sandbox"];
+        const item = readRecord(record.sandbox, itemPath);
+        assertKnownKeys(item, ["name", "content", "phase"], itemPath);
+        return {
+            name: readRequiredTrimmedString(item.name, [...itemPath, "name"]),
+            content: readJsonValue(item.content, [...itemPath, "content"]),
+            ...(item.phase === undefined ? {} : { phase: readEnum(item.phase, [...itemPath, "phase"], ["daemon", "process"]) }),
+        };
+    })();
+    return { environment, sandbox };
+}
+
+function readJsonValue(value: unknown, path: readonly ConfigPathSegment[]): JsonValue {
+    if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (Array.isArray(value)) return value.map((entry, index) => readJsonValue(entry, [...path, index]));
+    if (typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, readJsonValue(entry, [...path, key])]));
+    }
+    throw configInputError("parse", path, "config.type.json", "must be JSON data");
+}
+
+function readRequiredInteger(value: unknown, path: readonly ConfigPathSegment[]): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) throw configInputError("parse", path, "config.type.integer", "must be an integer");
+    return value;
 }
 
 function readArray(

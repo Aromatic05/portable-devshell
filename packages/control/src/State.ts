@@ -15,6 +15,7 @@ import type { DebugRuntime } from "./debug/Api.js";
 import type { ExtensionRuntime } from "./extension/Api.js";
 import { CliExtensionCommandService } from "./extension/api/point/cli/command/index.js";
 import { McpExtensionService } from "./extension/api/point/mcp/index.js";
+import { resolveExecutionDrivers } from "./extension/api/point/execution/index.js";
 import { ToolCallExtensionBinding } from "./extension/api/point/toolcall/index.js";
 import { ToolCallSecretRewrite } from "./extension/api/interface/secret/index.js";
 import type { BuiltinExtensionSource } from "./extension/install/BuiltinSource.js";
@@ -106,6 +107,13 @@ export class ControlState {
                 instances: options.instances,
             }),
         ];
+        const attachExecution = (instance: ReturnType<InstanceRegistry["get"]>): (() => void) => {
+            instance?.setExecutionConfigResolver(async (selection) =>
+                await resolveExecutionDrivers(this.extensions, selection));
+            return () => undefined;
+        };
+        for (const instance of options.instances.list()) attachExecution(instance);
+        this.#toolCallHookUnregister.push(options.instances.onAdding(attachExecution));
     }
 
     async initialize(): Promise<void> {
