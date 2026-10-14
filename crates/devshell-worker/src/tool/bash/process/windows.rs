@@ -11,7 +11,11 @@ pub fn spawn_shell(
     command_text: &str,
     cwd: &ResolvedPath,
     env: &BTreeMap<String, Option<String>>,
+    execution: Option<&crate::capability::execution::ExecutionConfig>,
 ) -> Result<Child, ToolError> {
+    if crate::capability::execution::process_sandbox(execution).map_err(|e| ToolError::new("execution.sandboxFailed", e))?.is_some() {
+        return Err(ToolError::new("execution.sandboxFailed", "bubblewrap process sandbox is unavailable on Windows"));
+    }
     let mut command = Command::new(&shell.executable);
     command
         .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
@@ -33,6 +37,7 @@ pub fn spawn_shell(
     command
         .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
         .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove(crate::capability::execution::CONFIG_ENV)
         .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
     configure_child_process(&mut command);
     command.spawn().map_err(|error| {

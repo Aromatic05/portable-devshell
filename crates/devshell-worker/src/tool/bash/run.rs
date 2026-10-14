@@ -130,6 +130,14 @@ impl ToolHandler for BashRunTool {
             .check_capability(FilesystemCapability::ProcessExecute)
             .map_err(ToolError::from)?;
         let cwd = resolve_cwd(&call, params.cwd.as_deref())?;
+        let execution = crate::capability::execution::ExecutionConfig::from_env()
+            .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
+        if let Some(config) = execution.as_ref() {
+            let mut effective_env = config.environment(cwd.access_path())
+                .map_err(|error| ToolError::new("execution.providerFailed", error))?;
+            for (key, value) in std::mem::take(&mut params.env) { effective_env.insert(key, value); }
+            params.env = effective_env;
+        }
         let requested_path = match params.env.get("PATH") {
             Some(Some(value)) => Some(value.as_str()),
             Some(None) => Some(""),
@@ -139,7 +147,7 @@ impl ToolHandler for BashRunTool {
             environment.inject(&mut params.env);
         }
         let started = Instant::now();
-        let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env)?;
+        let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env, execution.as_ref())?;
         let pid = child.id() as i32;
         let process_guard = match call.process_registry.register(pid) {
             Ok(process_guard) => process_guard,

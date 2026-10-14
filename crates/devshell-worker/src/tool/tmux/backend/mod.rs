@@ -572,6 +572,8 @@ impl TmuxBackend {
         cwd: &Path,
         command: &str,
         model_environment: Option<&ModelDevshellEnvironment>,
+        execution_environment: Option<&std::collections::BTreeMap<String, Option<String>>>,
+        process_sandbox: Option<&(String, Vec<String>)>,
     ) -> Result<BackendPane, ToolError> {
         let pane = PaneRecord::new(task_id, Some(task_id.to_string()))?;
         #[cfg(unix)]
@@ -593,8 +595,22 @@ impl TmuxBackend {
         #[cfg(unix)]
         let launch = {
             atomic_write_bytes(&script_path, command.as_bytes())?;
-            let task_command = match model_environment {
-                Some(environment) => format!(
+            let task_command = match (model_environment, execution_environment) {
+                (_, Some(environment)) => {
+                    let mut assignments = Vec::new();
+                    for (name, value) in environment {
+                        if !valid_env_name(name) { return Err(ToolError::new("execution.invalidEnvironment", format!("invalid environment variable name `{name}`"))); }
+                        if name == "BASH_ENV" || name == "TMUX" || name == "TMUX_PANE" || name == "TMUX_TMPDIR"
+                            || name.starts_with("DEVSHELL_WORKER_INTERNAL_")
+                            || name == crate::capability::execution::CONFIG_ENV { continue; }
+                        if let Some(value) = value { assignments.push(format!("{}={}", name, shell_quote(value))); }
+                    }
+                    if let Some(model) = model_environment {
+                        for (name, value) in model.pairs() { assignments.push(format!("{}={}", name, shell_quote(value))); }
+                    }
+                    format!("/usr/bin/env -i -- {} /bin/bash --noprofile --norc {}", assignments.join(" "), shell_quote(&script_path.to_string_lossy()))
+                }
+                (Some(environment), None) => format!(
                     "/usr/bin/env {} /bin/bash --noprofile --norc {}",
                     environment
                         .pairs()
@@ -604,10 +620,17 @@ impl TmuxBackend {
                         .join(" "),
                     shell_quote(&script_path.to_string_lossy()),
                 ),
-                None => format!(
+                (None, None) => format!(
                     "/bin/bash --noprofile --norc {}",
                     shell_quote(&script_path.to_string_lossy())
                 ),
+            };
+            let task_command = match process_sandbox {
+                Some((driver, args)) => {
+                    let quoted_args = args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ");
+                    format!("{} {} -- {}", shell_quote(driver), quoted_args, task_command)
+                }
+                None => task_command,
             };
             let runner = format!(
                 "umask 077; while [ ! -e {} ]; do /bin/sleep 0.02; done; /bin/rm -f {}; {}; status=$?; printf '%s\\n' \"$status\" > {}; exit \"$status\"",
@@ -625,6 +648,7 @@ impl TmuxBackend {
 
         #[cfg(windows)]
         let launch = {
+            let _ = process_sandbox;
             let shell = ShellRuntime::detect()?;
             let mut script = String::new();
             for name in [
@@ -640,6 +664,27 @@ impl TmuxBackend {
                     "Remove-Item -LiteralPath {} -ErrorAction SilentlyContinue\n",
                     powershell_literal(&format!("Env:{name}"))
                 ));
+            }
+            if let Some(environment) = execution_environment {
+                for (name, value) in environment {
+                    if !valid_env_name(name) {
+                        return Err(ToolError::new("execution.invalidEnvironment", format!("invalid environment variable name `{name}`")));
+                    }
+                    if name.starts_with("DEVSHELL_WORKER_INTERNAL_")
+                        || name == crate::capability::execution::CONFIG_ENV {
+                        continue;
+                    }
+                    match value {
+                        Some(value) => script.push_str(&format!(
+                            "[Environment]::SetEnvironmentVariable({}, {}, 'Process')\n",
+                            powershell_literal(name), powershell_literal(value),
+                        )),
+                        None => script.push_str(&format!(
+                            "[Environment]::SetEnvironmentVariable({}, $null, 'Process')\n",
+                            powershell_literal(name),
+                        )),
+                    }
+                }
             }
             if let Some(environment) = model_environment {
                 for (name, value) in environment.pairs() {
@@ -1501,6 +1546,10 @@ fn new_pane_id() -> String {
 #[cfg(unix)]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn valid_env_name(value: &str) -> bool {
+    !value.is_empty() && !value.bytes().any(|byte| byte == b'=' || byte == 0)
 }
 
 #[cfg(windows)]

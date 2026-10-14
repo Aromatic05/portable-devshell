@@ -81,6 +81,7 @@ pub fn spawn(
     paths: &InstancePaths,
     runtime: &WorkerRuntimeContext,
 ) -> Result<SpawnedDaemon, String> {
+    let execution = crate::capability::execution::ExecutionConfig::from_env()?;
     #[cfg(unix)]
     {
         let log_file = OpenOptions::new()
@@ -93,7 +94,28 @@ pub fn spawn(
             .try_clone()
             .map_err(|error| format!("failed to clone {}: {error}", paths.log_file.display()))?;
 
-        let mut command = Command::new(std::env::current_exe().map_err(|error| error.to_string())?);
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let mut command = match crate::capability::execution::daemon_sandbox(execution.as_ref())? {
+            Some((driver, args)) => {
+                let mut wrapped = Command::new(driver);
+                wrapped.args(args).arg("--").arg(executable);
+                wrapped
+            }
+            None => Command::new(executable),
+        };
+        if let Some(config) = execution.as_ref() {
+            for (name, value) in config.environment_for(&paths.instance_root, "daemon")? {
+                match value {
+                    Some(value) => { command.env(name, value); }
+                    None => { command.env_remove(name); }
+                }
+            }
+            // The worker requires the same immutable provider selection when it
+            // subsequently prepares child executions.
+            if let Ok(value) = std::env::var(crate::capability::execution::CONFIG_ENV) {
+                command.env(crate::capability::execution::CONFIG_ENV, value);
+            }
+        }
         command
             .env(INTERNAL_INSTANCE_ENV, instance.as_str())
             .env(
@@ -118,6 +140,12 @@ pub fn spawn(
     }
     #[cfg(windows)]
     {
+        if execution.as_ref().is_some_and(|config| {
+            config.environment.iter().any(|provider| provider.phase == "daemon")
+                || config.sandbox.as_ref().is_some_and(|sandbox| sandbox.phase == "daemon")
+        }) {
+            return Err("daemon-phase execution providers require a supported Windows launcher".to_string());
+        }
         let _ = paths;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let security_mode = OsStr::new(match runtime.security_mode {

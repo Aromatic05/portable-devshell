@@ -162,6 +162,18 @@ impl TmuxState {
             ));
         }
         let cwd = resolve_cwd(call, params.cwd.as_deref())?;
+        let execution = crate::capability::execution::ExecutionConfig::from_env()
+            .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
+        let process_sandbox = crate::capability::execution::process_sandbox(execution.as_ref())
+            .map_err(|error| ToolError::new("execution.sandboxUnavailable", error))?;
+        #[cfg(windows)]
+        if process_sandbox.is_some() {
+            return Err(ToolError::new("execution.sandboxUnavailable", "process sandbox is unavailable for managed Windows tasks"));
+        }
+        let execution_environment = match execution.as_ref() {
+            Some(config) => Some(config.environment(&cwd.canonical).map_err(|error| ToolError::new("execution.providerFailed", error))?),
+            None => None,
+        };
         let wait = params.wait.unwrap_or(TmuxWaitMode::Nonblock);
         let time_ms = validate_time(
             params
@@ -195,6 +207,8 @@ impl TmuxState {
                 &cwd.canonical,
                 &params.command,
                 model_environment.as_ref(),
+                execution_environment.as_ref(),
+                process_sandbox.as_ref(),
             )?;
             if let Err(error) = verify_pane_cwd(&pane, &cwd) {
                 let _ = self.backend.close_pane(&pane);

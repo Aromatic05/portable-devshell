@@ -13,11 +13,18 @@ pub fn spawn_shell(
     command_text: &str,
     cwd: &ResolvedPath,
     env: &BTreeMap<String, Option<String>>,
+    execution: Option<&crate::capability::execution::ExecutionConfig>,
 ) -> Result<Child, ToolError> {
     let anchored_cwd = cwd
         .cloned_directory_file()
         .map_err(|error| ToolError::new("bash.invalidCwd", error.to_string()))?;
-    let mut command = Command::new(&shell.executable);
+    let sandbox = crate::capability::execution::process_sandbox(execution)
+        .map_err(|error| ToolError::new("execution.sandboxFailed", error))?;
+    let mut command = if let Some((wrapper, args)) = sandbox {
+        let mut command = Command::new(wrapper);
+        command.args(args).arg("--").arg(&shell.executable);
+        command
+    } else { Command::new(&shell.executable) };
     command
         .args(["--noprofile", "--norc", "-c"])
         .arg(command_text)
@@ -57,6 +64,7 @@ fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String
     command
         .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
         .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove(crate::capability::execution::CONFIG_ENV)
         .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
 }
 
@@ -90,6 +98,7 @@ mod tests {
             "cat marker.txt",
             &resolved,
             &BTreeMap::new(),
+            None,
         )
         .unwrap()
         .wait_with_output()
@@ -124,6 +133,7 @@ mod tests {
             "printf '%s' \"${DEVSHELL_WORKER_INTERNAL_INSTANCE-}${DEVSHELL_WORKER_INTERNAL_SECURITY_MODE-}${DEVSHELL_WORKER_INTERNAL_WORKSPACE-}\"",
             &resolved,
             &env,
+            None,
         )
         .unwrap()
         .wait_with_output()
