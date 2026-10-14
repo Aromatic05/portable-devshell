@@ -13,6 +13,7 @@
         "@portable-devshell/artifact-extension": "workspace:*",
         "@portable-devshell/comment-extension": "workspace:*",
         "@portable-devshell/control": "workspace:*",
+        "@portable-devshell/direnv-extension": "workspace:*",
         "@portable-devshell/instance-extension": "workspace:*",
         "@portable-devshell/recall-extension": "workspace:*",
         "@portable-devshell/shared": "workspace:*",

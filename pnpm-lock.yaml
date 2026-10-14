@@ -101,6 +101,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
 
+  extensions/direnv:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+
   extensions/instance:
     dependencies:
       '@portable-devshell/extension':
@@ -164,6 +170,9 @@ importers:
       '@portable-devshell/control':
         specifier: workspace:*
         version: file:packages/control(react@18.3.1)
+      '@portable-devshell/direnv-extension':
+        specifier: workspace:*
+        version: link:../../extensions/direnv
       '@portable-devshell/instance-extension':
         specifier: workspace:*
         version: link:../../extensions/instance

@@ -1,0 +1,11 @@
+{
+    "schemaVersion": "1.1.0",
+    "apiVersion": "5.0.0",
+    "activation": "lazy",
+    "id": "direnv",
+    "name": "portable-devshell direnv",
+    "version": "0.1.0",
+    "entry": "index.ts",
+    "capabilities": [],
+    "extensions": { "execution.environment": [{ "id": "direnv" }] }
+}
