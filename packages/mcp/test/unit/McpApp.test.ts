@@ -8,6 +8,34 @@ import {
     McpAppPresenceStore,
 } from "@portable-devshell/mcp/testing";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { McpAppRuntime } from "../../src/mcpapp/index.ts";
+
+test("MCP App retries failed historical Context revocation", async () => {
+    const app = new McpAppRuntime({});
+    await app.initialize();
+    const token = await app.leases.issue("alpha", "ctx-expired");
+    const revoke = app.revokeContext.bind(app);
+    let attempts = 0;
+    app.revokeContext = async (ctxId: string) => {
+        attempts++;
+        if (attempts === 1) throw new Error("transient cleanup failure");
+        await revoke(ctxId);
+    };
+    const warning = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+        await app.reconcileContexts([]);
+        assert.equal(await app.leases.verify("alpha", "ctx-expired", token), true);
+        assert.equal(warnings.length, 1);
+        await app.flushContextCleanup();
+        assert.equal(await app.leases.verify("alpha", "ctx-expired", token), false);
+        assert.equal(attempts, 2);
+    } finally {
+        console.warn = warning;
+        await app.close();
+    }
+});
 
 {
     test("McpAppLeaseStore persists only token hashes and verifies capabilities after restart", async () => {

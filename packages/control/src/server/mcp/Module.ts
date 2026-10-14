@@ -232,7 +232,10 @@ export class McpControlModule {
     async start(): Promise<void> {
         this.#subscribeContexts();
         await this.#runtimeState.app.initialize();
-        await this.#runtimeState.app.flushContextCleanup();
+        await this.#runtimeState.app.flushContextCleanup().catch((error) => {
+            // Failed cleanup is queued for retry by the MCP App runtime.
+            console.warn("MCP App startup Context cleanup deferred:", error);
+        });
         if (this.#contextRecords !== undefined)
             await this.#runtimeState.app.reconcileContexts(await this.#contextRecords());
         if (this.#host !== undefined) await this.#startHost(this.#host);

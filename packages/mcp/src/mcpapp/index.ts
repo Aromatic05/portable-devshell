@@ -135,9 +135,15 @@ export class McpAppRuntime {
             .map((record) => record.ctxId));
         const ids = new Set([...await this.leases.contextIds(), ...await this.actions.contextIds(), ...this.questions.contextIds()]);
         for (const ctxId of ids) if (!retained.has(ctxId)) {
-            await this.revokeContext(ctxId);
-            this.#pendingContextCleanup.delete(ctxId);
+            try {
+                await this.revokeContext(ctxId);
+                this.#pendingContextCleanup.delete(ctxId);
+            } catch (error) {
+                this.#pendingContextCleanup.add(ctxId);
+                console.warn("MCP App Context reconciliation deferred:", error);
+            }
         }
+        if (this.#pendingContextCleanup.size > 0) this.#scheduleCleanupRetry();
     }
 
     /** Issues an Instance-bound capability for an authenticated MCP bootstrap result. */

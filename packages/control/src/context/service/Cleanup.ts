@@ -26,7 +26,8 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
             for (const terminal of await this.#registry.listCleanupPending())
                 await this.terminate(terminal);
         }
-        await this.#reconcile(ctxId);
+        // Startup must not depend on remote Instances being available.
+        await this.#reconcile(ctxId, undefined, false, undefined, ctxId === undefined);
     }
 
     async reconcileInstance(
@@ -107,6 +108,7 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
         instance?: string,
         serialized = false,
         target?: ContextInstanceCleanupPort,
+        deferRemoteFailures = false,
     ): Promise<void> {
         const pending = await this.#registry.listEnvironmentCleanup(ctxId);
         const scoped =
@@ -125,33 +127,38 @@ export class ContextCleanupService implements ContextLifecycleCleanupPort {
                 } of await this.#registry.listEnvironmentCleanup(id)) {
                     if (instance !== undefined && cleanup.instance !== instance)
                         continue;
+                    // Ledger reads/writes are not remote cleanup failures.
+                    const contexts = await this.#registry.list();
+                    let cleaned: boolean;
                     try {
-                        if (await this.#cleanup(id, cleanup, target))
-                            await this.#registry.settleEnvironmentCleanup(
-                                id,
-                                cleanup,
-                            );
+                        cleaned = await this.#cleanup(id, cleanup, contexts, target);
                     } catch (error) {
                         failures.push(error);
+                        continue;
                     }
+                    if (cleaned)
+                        await this.#registry.settleEnvironmentCleanup(id, cleanup);
                 }
             };
             if (serialized) await operation();
             else await this.#run(id, operation);
         }
-        if (failures.length > 0)
-            throw new AggregateError(
+        if (failures.length > 0) {
+            const error = new AggregateError(
                 failures,
                 "Context environment cleanup was incomplete.",
             );
+            if (deferRemoteFailures) console.warn("Context cleanup deferred; debt retained:", error);
+            else throw error;
+        }
     }
 
     async #cleanup(
         ctxId: string,
         cleanup: ContextEnvironmentCleanup,
+        contexts: readonly ContextRecord[],
         target?: ContextInstanceCleanupPort,
     ): Promise<boolean> {
-        const contexts = await this.#registry.list();
         const now = Date.now();
         const active = (context: ContextRecord) =>
             context.status === "active" && Date.parse(context.expiresAt) > now;

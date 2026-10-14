@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createContextRuntime } from "../../../src/context/index.ts";
 import { ContextService } from "../../../src/context/service/index.ts";
+import { ContextCleanupService } from "../../../src/context/service/Cleanup.ts";
 
 test("startup retains cleanup debt and permits Control to start when an Instance is absent", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "devshell-context-cleanup-"));
@@ -71,4 +72,23 @@ test("startup does not hide non-cleanup storage errors", async () => {
         process: () => ({}) as never,
     });
     await assert.rejects(service.reconcile(), (error) => error === failure);
+});
+
+test("Context cleanup does not hide a failed ledger read as remote debt", async () => {
+    const error = new Error("ledger read failed");
+    const cleanup = new ContextCleanupService({
+        contextRegistry: {
+            async listCleanupPending() { return []; },
+            async listEnvironmentCleanup() {
+                return [{
+                    ctxId: "ctx-broken-ledger",
+                    cleanup: { kind: "instance_reference", instance: "remote" },
+                }];
+            },
+            async list() { throw error; },
+        } as never,
+        environment: () => ({}) as never,
+        runtime: () => ({}) as never,
+    });
+    await assert.rejects(cleanup.reconcile(), (thrown) => thrown === error);
 });
