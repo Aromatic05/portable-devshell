@@ -114,9 +114,18 @@ export class ControlState {
     }
 
     async start(): Promise<void> {
-        await this.extensions.start();
+        try {
+            await this.extensions.start();
+        } catch (error) {
+            console.warn("Extension runtime unavailable; Control will continue:", error);
+            return;
+        }
         for (const source of this.#builtinExtensionSources) {
-            await this.extensions.installBuiltin(source.id, source.path);
+            try {
+                await this.extensions.installBuiltin(source.id, source.path);
+            } catch (error) {
+                console.warn(`Builtin Extension ${source.id} unavailable:`, error);
+            }
         }
     }
 

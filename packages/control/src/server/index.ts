@@ -80,6 +80,7 @@ export class ControlServer {
     readonly #socketListener: ControlSocketListener;
     readonly #transport: ControlTransportServer;
     readonly #web: ControlWebRuntime;
+    #webPrepared = false;
     #ready = false;
 
     constructor(options: ControlServerOptions) {
@@ -160,7 +161,14 @@ export class ControlServer {
     }
 
     async prepare(): Promise<void> {
-        await this.#web.prepare();
+        try {
+            await this.#web.prepare();
+        } catch (error) {
+            this.#webPrepared = false;
+            console.warn("Web Host preparation failed; Control will continue:", error);
+            return;
+        }
+        this.#webPrepared = true;
     }
 
     async startTransport(): Promise<void> {
@@ -169,9 +177,13 @@ export class ControlServer {
     }
 
     async startHosts(): Promise<void> {
-        await this.#mcp.start();
-        await this.#replaceHttpRoutes(this.#readConfig());
-        await this.#web.startHost();
+        await this.#mcp.start().catch((error) =>
+            console.warn("MCP Host unavailable; Control will continue:", error));
+        await this.#replaceHttpRoutes(this.#readConfig()).catch((error) =>
+            console.warn("Artifact/Reverse HTTP routes unavailable:", error));
+        if (this.#webPrepared)
+            await this.#web.startHost().catch((error) =>
+                console.warn("Web Host unavailable; Control will continue:", error));
     }
 
     /** Control owns the Artifact and Reverse routes, independently of MCP generations. */
@@ -243,11 +255,12 @@ export class ControlServer {
             listenPort: endpoint.listenPort,
             ...(endpoint.publicBaseUrl === undefined ? {} : { publicBaseUrl: endpoint.publicBaseUrl }),
         };
-        oldUninstall?.();
+        try { oldUninstall?.(); }
+        catch (error) { console.warn("Retired Artifact route cleanup failed:", error); }
         const retired = await Promise.allSettled([oldArtifact?.dispose(), oldReverse?.dispose()]);
-        const failures = retired.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-        if (failures.length > 0)
-            throw new AggregateError(failures.map((result) => result.reason), "Retired Control HTTP leases failed to close.");
+        for (const result of retired)
+            if (result.status === "rejected")
+                console.warn("Retired Control HTTP lease cleanup failed:", result.reason);
     }
 
     /**
