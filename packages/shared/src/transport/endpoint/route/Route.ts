@@ -311,8 +311,45 @@ export class Route {
             );
             return;
         }
+        const message =
+            "No route for " + envelope.dest.host + ":" + envelope.dest.port + ".";
+        if (incoming !== undefined &&
+            typeof envelope.packet === "object" && envelope.packet !== null) {
+            const packet = envelope.packet as Record<string, unknown>;
+            if (typeof packet.id === "string" && packet.protocol === "rpc") {
+                if (packet.type === "request") {
+                    await incoming.send({
+                        source: envelope.dest,
+                        dest: envelope.source,
+                        packet: {
+                            protocol: "rpc",
+                            type: "error",
+                            id: packet.id,
+                            error: { code: "route_not_found", message, retryable: false },
+                        },
+                    });
+                }
+                return;
+            }
+            if (typeof packet.id === "string" && packet.protocol === "stream") {
+                if (packet.type === "open") {
+                    await incoming.send({
+                        source: envelope.dest,
+                        dest: envelope.source,
+                        packet: {
+                            protocol: "stream",
+                            type: "cancel",
+                            id: packet.id,
+                            error: { code: "route_not_found", message, retryable: false },
+                        },
+                    });
+                }
+                return;
+            }
+            if (packet.protocol === "event") return;
+        }
         throw new Error(
-            "No route for " + envelope.dest.host + ":" + envelope.dest.port + ".",
+            message,
         );
     }
 

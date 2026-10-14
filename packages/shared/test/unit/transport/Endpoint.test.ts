@@ -190,12 +190,16 @@ test("Rpc rejects when the remote route is unavailable", async (t) => {
         server.close();
     });
     const rpc = new Rpc(await client.connect("worker", "missing"));
-    t.after(() => rpc.close());
+    const serverRpc = new Rpc(server.bind("core"), { echo: (value) => value });
+    const healthyRpc = new Rpc(await client.connect("worker", "core"));
+    t.after(() => { rpc.close(); serverRpc.close(); healthyRpc.close(); });
 
     await assert.rejects(
         rpc.request("read"),
         /No route for worker:missing/u,
     );
+    assert.equal(client.connected, true, "Missing RPC route must not disconnect the shared link");
+    assert.deepEqual(await healthyRpc.request("echo", { ok: true }), { ok: true });
 });
 
 test("Rpc cancellation owns the cancel write during transport close", async (t) => {
@@ -249,6 +253,67 @@ test("Stream read rejects when the remote route is unavailable", async (t) => {
         stream.readMessage(),
         /No route for worker:missing/u,
     );
+    assert.equal(client.connected, true, "Missing Stream route must not disconnect the shared link");
+    const serverRpc = new Rpc(server.bind("core"), { ping: () => "pong" });
+    const healthyRpc = new Rpc(await client.connect("worker", "core"));
+    t.after(() => { serverRpc.close(); healthyRpc.close(); });
+    assert.equal(await healthyRpc.request("ping"), "pong");
+});
+
+test("Endpoint authenticates every new physical link before releasing concurrent callers", async (t) => {
+    const server = new Endpoint({ host: "worker" });
+    const accepts: Array<Promise<() => void>> = [];
+    let helloCount = 0;
+    let releaseSecondHello: (() => void) | undefined;
+    const serverAuth = new Rpc(server.bind("auth"), {
+        async hello() {
+            helloCount += 1;
+            if (helloCount === 2)
+                await new Promise<void>((resolve) => { releaseSecondHello = resolve; });
+            return { ready: true };
+        },
+    });
+    const serverData = new Rpc(server.bind("core"), { echo: (value) => value });
+    const client = new Endpoint({
+        host: "client",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(server.accept(right));
+            return left;
+        },
+        initializeConnection: async (connect) => {
+            const auth = new Rpc(connect("worker", "auth"));
+            try { await auth.request("hello"); }
+            finally { auth.close(); }
+        },
+    });
+    t.after(async () => {
+        client.close();
+        server.close();
+        serverAuth.close();
+        serverData.close();
+        await Promise.all(accepts);
+    });
+    const first = new Rpc(await client.connect("worker", "core"));
+    assert.equal(await first.request("echo", 1), 1);
+    assert.equal(helloCount, 1);
+    first.close();
+    client.disconnect();
+    const pending = client.connect("worker", "core");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(helloCount, 2);
+    let ready = false;
+    void pending.then(() => { ready = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(ready, false, "Ordinary connection must wait for the handshake");
+    releaseSecondHello?.();
+    const second = new Rpc(await pending);
+    assert.equal(await second.request("echo", 2), 2);
+    second.close();
+    assert.equal(helloCount, 2);
 });
 
 test("Event binds directly to a Connection and Port", async (t) => {

@@ -10,6 +10,8 @@ const ENVELOPE_SERVICE = "envelope";
 export interface EndpointOptions {
     readonly host?: Host;
     connectChannel?(signal?: AbortSignal): Promise<Channel>;
+    /** Authenticate a newly opened link before releasing regular RPC/stream requests. */
+    initializeConnection?(connect: (host: Host, port: PortName) => Connection): Promise<void>;
 }
 
 interface Link {
@@ -21,6 +23,7 @@ interface Link {
 export class Endpoint {
     readonly host: Host;
     readonly #connectChannel?: EndpointOptions["connectChannel"];
+    readonly #initializeConnection?: EndpointOptions["initializeConnection"];
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #openListeners = new Set<() => void>();
     readonly #ports = new Map<string, Port>();
@@ -32,6 +35,7 @@ export class Endpoint {
     constructor(options: EndpointOptions = {}) {
         this.host = options.host ?? createTransportId();
         this.#connectChannel = options.connectChannel;
+        this.#initializeConnection = options.initializeConnection;
     }
 
     get connected(): boolean {
@@ -101,8 +105,8 @@ export class Endpoint {
     }
 
     async #connect(signal?: AbortSignal): Promise<void> {
-        if (this.#gateway !== undefined) return;
         if (this.#connecting !== undefined) return await this.#connecting;
+        if (this.#gateway !== undefined) return;
         const connectChannel = this.#connectChannel;
         if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         const connecting = (async () => {
@@ -117,12 +121,22 @@ export class Endpoint {
             const link: Link = { codec, detach, frame };
             this.#links.add(link);
             this.#gateway = link;
-            for (const listener of this.#openListeners) listener();
             codec.onClose((error) => {
                 if (this.#gateway === link) this.#gateway = undefined;
                 this.#links.delete(link);
                 for (const listener of this.#closeListeners) listener(error);
             });
+            try {
+                await this.#initializeConnection?.((host, port) =>
+                    this.bind(port).connect(host, port),
+                );
+                if (this.#gateway !== link)
+                    throw new Error("Endpoint connection closed during initialization.");
+            } catch (error) {
+                this.#close(link);
+                throw error;
+            }
+            for (const listener of this.#openListeners) listener();
         })();
         this.#connecting = connecting;
         try {

@@ -3,14 +3,15 @@ import { join } from "node:path";
 
 import {
     ControlPathHome,
+    CONTROL_PROTOCOL_RANGE,
     Endpoint,
+    Rpc,
     connectControlChannel,
     controlErrorCodes,
     createEnvironmentTransport,
     createInstanceRuntimeTransport,
     createProcessTransport,
     createRemoteError,
-    createServerTransport,
     createToolTransport,
 } from "@portable-devshell/shared";
 import { ReverseConnections } from "@portable-devshell/core";
@@ -99,11 +100,19 @@ export class ControlFactory {
                         { socketPath: options.socketPath },
                         signal,
                     ),
+                initializeConnection: async (connect) => {
+                    const rpc = new Rpc(connect("@control", "server"));
+                    try {
+                        await rpc.request("hello", {
+                            clientKind: "cli",
+                            protocolRange: CONTROL_PROTOCOL_RANGE,
+                        });
+                    } finally {
+                        rpc.close();
+                    }
+                },
             });
             closeInternalEndpoint = () => internalEndpoint.close();
-            const serverTransport = createServerTransport(internalEndpoint, {
-                clientKind: "cli",
-            });
             const contexts = createContextRuntime({
                 contextFile: controlPaths.contextsFile,
                 environment: (name) =>
@@ -411,7 +420,6 @@ export class ControlFactory {
                     options.instances.connectionClosed(connectionId),
                 internalControl: {
                     endpoint: internalEndpoint,
-                    server: serverTransport,
                 },
                 mcp,
                 restart: options.restart,

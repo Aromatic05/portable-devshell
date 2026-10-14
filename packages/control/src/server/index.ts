@@ -1,7 +1,6 @@
 import type {
     ControlConfig,
     Endpoint,
-    ServerTransport,
 } from "@portable-devshell/shared";
 
 import type { ArtifactRuntime } from "../artifact/Api.js";
@@ -51,7 +50,6 @@ export interface ControlServerOptions {
     http: ControlHttpServer;
     internalControl: {
         endpoint: Endpoint;
-        server: ServerTransport;
     };
     mcp: McpControlModule;
     restart: () => Promise<void>;
@@ -70,7 +68,6 @@ export class ControlServer {
     readonly #readConfig: () => ControlConfig;
     readonly #extensionRoutes: ControlExtensionRouteService;
     readonly #internalControlEndpoint: Endpoint;
-    readonly #internalControlServer: ServerTransport;
     readonly #mcp: McpControlModule;
     readonly #http: ControlHttpServer;
     #artifactHttp?: ControlHttpLease;
@@ -89,7 +86,6 @@ export class ControlServer {
         this.#artifact = options.artifact;
         this.#readConfig = options.config;
         this.#internalControlEndpoint = options.internalControl.endpoint;
-        this.#internalControlServer = options.internalControl.server;
         this.#mcp = options.mcp;
         this.#http = options.http;
         this.#reverseCredentials = options.reverse.credentials;
@@ -169,7 +165,7 @@ export class ControlServer {
 
     async startTransport(): Promise<void> {
         await this.#transport.start();
-        await this.#internalControlServer.hello();
+        await this.#internalControlEndpoint.connect("@control", "server");
     }
 
     async startHosts(): Promise<void> {

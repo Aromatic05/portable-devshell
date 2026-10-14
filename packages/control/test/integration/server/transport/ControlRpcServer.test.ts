@@ -239,14 +239,13 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.equal(rejectedWeb.error?.code, "control.clientIdentityInvalid");
     assert.equal(harness.worker.lastToolCall?.source, "tui");
 
-    await assert.rejects(
-        request(
-            harness.socketPath,
-            asInstanceName("missing"),
-            "process.snapshot",
-        ),
-        /No route for missing:process/u,
+    const missingRoute = await request(
+        harness.socketPath,
+        asInstanceName("missing"),
+        "process.snapshot",
     );
+    assert.equal(missingRoute.error?.code, "route_not_found");
+    assert.match(missingRoute.error?.message ?? "", /No route for missing:process/u);
 
     const missingOperation = await request(
         harness.socketPath,
@@ -563,10 +562,13 @@ test("ControlSocketServer rebuilds route bindings after registry changes", async
         );
     });
 
-    await assert.rejects(
-        request(socketPath, asInstanceName("alpha"), "process.snapshot"),
-        /No route for alpha:process/u,
+    const missingRoute = await request(
+        socketPath,
+        asInstanceName("alpha"),
+        "process.snapshot",
     );
+    assert.equal(missingRoute.error?.code, "route_not_found");
+    assert.match(missingRoute.error?.message ?? "", /No route for alpha:process/u);
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
     instanceChanges.publish("registry");
