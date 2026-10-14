@@ -70,6 +70,9 @@ export function normalizeConfigGlobalDraft(
             enabled: draft.mcp?.enabled ?? false,
             listenHost: mcpListenHost,
             listenPort: mcpListenPort,
+            ...(draft.mcp?.modelOutput === undefined ? {} : {
+                modelOutput: structuredClone(draft.mcp.modelOutput),
+            }),
             oauth2: normalizeGlobalMcpOAuth2(draft.mcp?.oauth2),
             publicBaseUrl: normalizeMcpPublicBaseUrl(
                 draft.mcp?.publicBaseUrl,
@@ -310,6 +313,9 @@ export function applyConfigMcpPatch(
         enabled: patch.enabled ?? current.enabled,
         listenHost: patch.listenHost ?? current.listenHost,
         listenPort: patch.listenPort ?? current.listenPort,
+        modelOutput: patch.modelOutput === undefined
+            ? current.modelOutput
+            : patch.modelOutput ?? undefined,
         oauth2: toGlobalMcpOAuth2Draft(oauth2),
         publicBaseUrl:
             patch.publicBaseUrl === undefined

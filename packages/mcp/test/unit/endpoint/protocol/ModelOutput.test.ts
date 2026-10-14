@@ -1,0 +1,211 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { McpNativeToolResult } from "../../../../src/protocol/call/Boundary.ts";
+import {
+    projectMcpModelOutput,
+    validateMcpModelOutputBudget,
+} from "../../../../src/protocol/call/ModelOutput.ts";
+import type { JsonValue } from "@portable-devshell/shared";
+import {
+    applyConfigMcpPatch,
+    normalizeConfigGlobalDraft,
+    parseConfigMcpPatch,
+    validateConfigSemantics,
+} from "@portable-devshell/shared";
+
+function data(value: JsonValue | McpNativeToolResult): Record<string, JsonValue> {
+    return (value instanceof McpNativeToolResult
+        ? value.structuredContent : value) as Record<string, JsonValue>;
+}
+
+function size(value: JsonValue | McpNativeToolResult): number {
+    const structured = data(value);
+    const content = value instanceof McpNativeToolResult ? value.content : [];
+    return Buffer.byteLength(JSON.stringify(structured), "utf8") +
+        content.reduce((total, entry) => total +
+            (entry.type === "text" ? Buffer.byteLength(entry.text, "utf8") : 0), 0);
+}
+
+test("model projection keeps small native results and bypasses MCP App interactions", () => {
+    const result = new McpNativeToolResult({
+        content: [{ text: "ok", type: "text" }],
+        isError: false,
+        structuredContent: { ok: true },
+        _meta: { "openai/outputTemplate": "ui://test/app" },
+    });
+    assert.equal(projectMcpModelOutput("file_read", result), result);
+    assert.equal(projectMcpModelOutput("mcpapp_ask", result), result);
+});
+
+test("bash model output stays bounded and retains recovery paths and execution status", () => {
+    const original = {
+        stdout: "BEGIN\n" + "中".repeat(7_000) + "\nEND",
+        stderr: "WARNING\n" + "界".repeat(2_000),
+        stdoutBytes: 21_010,
+        stderrBytes: 6_008,
+        stdoutPath: "/.devshell/tool-results/one/stdout",
+        stderrPath: "/.devshell/tool-results/one/stderr",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        exitCode: 0,
+    };
+    const projected = projectMcpModelOutput("bash_run", original);
+    const output = data(projected);
+    assert.equal(size(projected) <= 4_000 * 3, true);
+    assert.equal(output.stdoutPath, original.stdoutPath);
+    assert.equal(output.stderrPath, original.stderrPath);
+    assert.equal(output.exitCode, 0);
+    assert.equal(output.stdoutTruncated, true);
+    assert.equal(output.stderrTruncated, true);
+    assert.equal((output.stdout as string).startsWith("BEGIN"), true);
+    assert.equal((output.stdout as string).endsWith("END"), true);
+    assert.equal((output.stdout as string).includes("�"), false);
+    assert.equal(original.stdout.includes("\nEND"), true);
+});
+
+test("file_read preserves file identity and resumes its original paged selector", () => {
+    const content = Array.from({ length: 200 }, (_, i) =>
+        `${i + 1}:${"x".repeat(140)}`).join("\n");
+    const value = { files: [{ path: "/project/src/a.ts", view: "content", content,
+        nextSelector: "201" }] };
+    const projected = projectMcpModelOutput("file_read", value);
+    const file = data(projected).files as Array<Record<string, JsonValue>>;
+    assert.equal(size(projected) <= 6_000 * 3, true);
+    assert.equal(file[0]?.path, "/project/src/a.ts");
+    assert.equal(file[0]?.truncated, true);
+    assert.match(file[0]?.nextSelector as string, /^\d+-200:raw;next=201$/u);
+    assert.equal((file[0]?.content as string).startsWith("1:"), true);
+});
+
+test("file_read outline previews never fabricate an invalid content selector", () => {
+    const original = { files: [{
+        path: "src/engine.ts", view: "outline", parseStatus: "complete",
+        content: "export function example()\n".repeat(2_000),
+    }] };
+    const projected = projectMcpModelOutput("file_read", original);
+    const file = (data(projected).files as Array<Record<string, JsonValue>>)[0]!;
+    assert.equal(size(projected) <= 6_000 * 3, true);
+    assert.equal(file.view, "outline");
+    assert.equal(file.truncated, true);
+    assert.equal(file.nextSelector, undefined);
+    assert.match(file.content as string, /^export function/u);
+});
+
+test("file_grep keeps exact-file continuation and individual hit identities", () => {
+    const content = Array.from({ length: 180 }, (_, i) =>
+        `*${i + 1}:${"a".repeat(95)}`).join("\n");
+    const projected = projectMcpModelOutput("file_grep", {
+        files: [{ path: "src/engine.ts", content, nextLine: 181 }],
+        nextCursor: "cursor-123",
+    });
+    const output = data(projected);
+    const file = (output.files as Array<Record<string, JsonValue>>)[0]!;
+    assert.equal(size(projected) <= 4_000 * 3, true);
+    assert.equal(file.path, "src/engine.ts");
+    assert.equal(file.truncated, true);
+    assert.equal(typeof file.nextLine, "number");
+    assert.equal((file.nextLine as number) <= 180, true);
+    assert.equal(output.nextCursor, "cursor-123");
+});
+
+test("file_edit explicitly accounts for omitted applied operations", () => {
+    const operations = Array.from({ length: 100 }, (_, i) => ({
+        action: "patch", path: `src/example-${i}.ts`, status: "applied",
+        addedLines: 1, removedLines: 0, diff: "x".repeat(1_000),
+    }));
+    const projected = projectMcpModelOutput("file_edit", { operations });
+    const output = data(projected);
+    assert.equal(size(projected) <= 2_000 * 3, true);
+    assert.equal((output.omittedOperations as number) > 0, true);
+    const shown = output.operations as Array<Record<string, JsonValue>>;
+    assert.equal(shown.length + (output.omittedOperations as number), 100);
+    assert.equal(shown.every((operation) => operation.status === "applied"), true);
+    assert.equal(shown.every((operation) => operation.diff === undefined), true);
+});
+
+test("todo_read model projection preserves continuation across Core pages", () => {
+    const tasks = Array.from({ length: 20 }, (_, i) => ({
+        taskId: `task-${i}`,
+        title: `Task ${i} ${"x".repeat(320)}`,
+        status: "pending",
+        completed: 0,
+        total: 2,
+        revision: 1,
+        updatedAt: "2026-10-13T00:00:00Z",
+    }));
+    const original = { items: [], revision: 0,
+        summary: { completed: 0, total: 0 }, tasks,
+        offset: 20, nextOffset: 40 };
+    const projected = projectMcpModelOutput("todo_read", original);
+    const output = data(projected);
+    const selected = output.tasks as Array<{ taskId: string }>;
+    assert.equal(size(projected) <= 2_000 * 3, true);
+    assert.equal(selected.length > 0 && selected.length < tasks.length, true);
+    assert.equal(selected[0]?.taskId, "task-0");
+    assert.equal(output.nextOffset, 20 + selected.length);
+    assert.equal(output.modelOutputTruncated, true);
+    assert.equal(original.tasks.length, 20);
+    assert.equal(original.nextOffset, 40);
+});
+
+test("todo_read can summarize one oversized item without losing its identity", () => {
+    const original = { revision: 1, summary: { completed: 0, total: 1 },
+        taskId: "task-only", title: "important", items: [{
+            id: "item-1", status: "in_progress",
+            content: "中".repeat(3_000), detail: "界".repeat(2_000),
+        }], checkpoint: { summary: "长".repeat(1_000) } };
+    const projected = projectMcpModelOutput("todo_read", original);
+    const output = data(projected);
+    assert.equal(size(projected) <= 2_000 * 3, true);
+    assert.equal(output.modelOutputTruncated, true);
+    const first = (output.items as Array<Record<string, JsonValue>>)[0]!;
+    assert.equal(first.id, "item-1");
+    assert.equal(first.status, "in_progress");
+    assert.equal((first.content as string).includes("�"), false);
+    assert.equal(original.items[0]?.content.length, 3_000);
+});
+
+test("cursor-consuming results are never silently replaced with a preview", () => {
+    const tmux = { task: { id: "task-1", status: "running" },
+        output: ["line".repeat(3_000)] };
+    const glob = { entries: Array.from({ length: 200 }, (_, i) => ({
+        path: `path/${i}`, type: "file",
+    })), nextCursor: "after-200" };
+    assert.equal(projectMcpModelOutput("tmux_read", tmux), tmux);
+    assert.equal(projectMcpModelOutput("file_glob", glob), glob);
+});
+
+test("model budget rejects unsafe overrides before publishing a Host", () => {
+    assert.doesNotThrow(() => validateMcpModelOutputBudget({
+        maxTokens: 12_000,
+        byTool: { bash_run: 4_000, file_read: 10_000 },
+    }));
+    assert.throws(() => validateMcpModelOutputBudget({ byTool: { tmux_read: 256 } }));
+    assert.throws(() => validateMcpModelOutputBudget({ maxTokens: 3_000 }));
+    assert.throws(() => validateMcpModelOutputBudget({ byTool: { file_glob: 512 } }));
+    assert.throws(() => validateMcpModelOutputBudget({ byTool: { file_read: 30_000 } }));
+});
+
+test("Control MCP modelOutput survives draft normalization and update patches", () => {
+    const base = normalizeConfigGlobalDraft({});
+    const parsed = parseConfigMcpPatch({
+        modelOutput: { defaultTokens: 8_000, maxTokens: 12_000,
+            byTool: { bash_run: 6_000, file_read: 10_000 } },
+    });
+    const next = normalizeConfigGlobalDraft({
+        mcp: applyConfigMcpPatch(base.mcp, parsed),
+    });
+    assert.equal(next.mcp.modelOutput?.byTool?.bash_run, 6_000);
+    assert.equal(next.mcp.modelOutput?.defaultTokens, 8_000);
+    assert.doesNotThrow(() => validateConfigSemantics({ ...next, instances: [] }));
+    assert.throws(() => validateConfigSemantics({
+        ...next,
+        instances: [],
+        mcp: { ...next.mcp, modelOutput: { byTool: { tmux_read: 2_000 } } },
+    }));
+    const cleared = normalizeConfigGlobalDraft({
+        mcp: applyConfigMcpPatch(next.mcp, parseConfigMcpPatch({ modelOutput: null })),
+    });
+    assert.equal(cleared.mcp.modelOutput, undefined);
+});

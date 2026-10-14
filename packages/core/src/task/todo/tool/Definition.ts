@@ -142,6 +142,9 @@ function outputSchema(): JsonValue {
             cancelledAt: { minLength: 1, type: "string" },
             checkpoint: checkpointOutputSchema,
             items: { items: todoItemSchema, type: "array" },
+            modelOutputTruncated: { type: "boolean" },
+            nextOffset: { minimum: 0, type: "integer" },
+            offset: { minimum: 0, type: "integer" },
             pausedAt: { minLength: 1, type: "string" },
             revision: { minimum: 0, type: "integer" },
             summary: todoSummarySchema,
@@ -150,6 +153,21 @@ function outputSchema(): JsonValue {
             title: { minLength: 1, type: "string" },
         },
         required: ["items", "revision", "summary"],
+        type: "object",
+    };
+}
+
+function writeOutputSchema(): JsonValue {
+    return {
+        additionalProperties: false,
+        properties: {
+            checkpoint: checkpointOutputSchema,
+            revision: { minimum: 0, type: "integer" },
+            summary: todoSummarySchema,
+            taskId: { minLength: 1, type: "string" },
+            title: { minLength: 1, type: "string" },
+        },
+        required: ["revision", "summary"],
         type: "object",
     };
 }
@@ -168,6 +186,7 @@ export class TodoToolDefinitions {
                         },
                         inputHints: {
                             taskId: "Stable task id; prefer once known.",
+                            offset: "Continue from nextOffset when present.",
                         },
                         title: "Read task plan",
                     },
@@ -175,11 +194,13 @@ export class TodoToolDefinitions {
             },
             requiredCapabilities: [],
             description:
-                "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId. Use todo tools only for multi-step tasks.",
+                "Read paged todo plans. Omit taskId to list live tasks; specify taskId to read one plan. Continue with offset=nextOffset when present; use limit to request fewer entries.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
+                    offset: { minimum: 0, type: "integer" },
+                    limit: { minimum: 1, maximum: 100, type: "integer" },
                     taskId: {
                         description:
                             "Stable task identifier returned by todo_read or todo_write. Prefer this selector once known.",
@@ -287,7 +308,7 @@ export class TodoToolDefinitions {
                 type: "object",
             },
             name: "todo_write",
-            outputSchema: outputSchema(),
+            outputSchema: writeOutputSchema(),
         },
     ];
 

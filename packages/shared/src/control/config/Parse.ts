@@ -11,6 +11,7 @@ import type {
     ConfigDraft,
     ConfigGlobalDraft,
     ConfigGlobalMcpOAuth2Draft,
+    ControlMcpModelOutputBudget,
     ConfigInstanceDraft,
     ConfigInstancePatch,
     ConfigInstanceTargetRequest,
@@ -245,7 +246,7 @@ export function parseConfigMcpPatch(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl"],
+        ["enabled", "listenHost", "listenPort", "modelOutput", "oauth2", "publicBaseUrl"],
         path,
     );
 
@@ -259,6 +260,9 @@ export function parseConfigMcpPatch(
             ...path,
             "listenPort",
         ]),
+        modelOutput: readNullable(record.modelOutput, (entry) =>
+            parseMcpModelOutput(entry, [...path, "modelOutput"]),
+        ),
         ...(record.oauth2 === undefined
             ? {}
             : {
@@ -511,7 +515,7 @@ function parseGlobalMcpDraft(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl"],
+        ["enabled", "listenHost", "listenPort", "modelOutput", "oauth2", "publicBaseUrl"],
         path,
     );
 
@@ -525,6 +529,8 @@ function parseGlobalMcpDraft(
             ...path,
             "listenPort",
         ]),
+        modelOutput: record.modelOutput === undefined ? undefined
+            : parseMcpModelOutput(record.modelOutput, [...path, "modelOutput"]),
         oauth2:
             record.oauth2 === undefined
                 ? undefined
@@ -532,6 +538,27 @@ function parseGlobalMcpDraft(
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"]),
         ),
+    };
+}
+
+function parseMcpModelOutput(
+    value: unknown,
+    path: readonly ConfigPathSegment[],
+): ControlMcpModelOutputBudget {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["defaultTokens", "maxTokens", "byTool"], path);
+    const byToolPath = [...path, "byTool"];
+    const byTool = record.byTool === undefined ? undefined
+        : Object.fromEntries(Object.entries(readRecord(record.byTool, byToolPath)).map(
+            ([name, tokens]) => [
+                name,
+                readOptionalInteger(tokens, [...byToolPath, name]),
+            ],
+        )) as Record<string, number>;
+    return {
+        defaultTokens: readOptionalInteger(record.defaultTokens, [...path, "defaultTokens"]),
+        maxTokens: readOptionalInteger(record.maxTokens, [...path, "maxTokens"]),
+        ...(byTool === undefined ? {} : { byTool }),
     };
 }
 

@@ -143,6 +143,19 @@ test("instance TOML preserves Workspace feature enablement", () => {
     );
 });
 
+test("global MCP model output budgets round-trip through TOML without a version migration", () => {
+    const modelOutput = {
+        defaultTokens: 8_000,
+        maxTokens: 12_000,
+        byTool: { bash_run: 4_000, file_read: 6_000 },
+    };
+    const global = normalizeConfigGlobalDraft({ mcp: { modelOutput } });
+    const encoded = toml.encode(globalDocument.encode(global));
+    assert.match(encoded, /\[mcp\.modelOutput\.byTool\]/u);
+    const restored = globalDocument.decode(toml.decode(encoded));
+    assert.deepEqual(restored.mcp?.modelOutput, modelOutput);
+});
+
 test("global v1 MCP auth cannot be loaded or silently upgraded", async () => {
     await assertRetiredConfigRejected({
         globalSource: [

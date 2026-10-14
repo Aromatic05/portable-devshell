@@ -1208,6 +1208,49 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
     }
 });
 
+test("tools/call applies the configured model output budget on the HTTP wire", async () => {
+    const original = {
+        exitCode: 0,
+        stderr: "",
+        stdout: "first\n" + "z".repeat(26_000) + "\nlast",
+        stdoutBytes: 26_011,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        stdoutPath: "/.devshell/tool-results/verified/stdout",
+    };
+    const harness = createWorkerHarness({ result: original });
+    const binding = createBinding(harness, {
+        modelOutput: { byTool: { bash_run: 2_000 } },
+    });
+    const server = await createBindingServer(binding);
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers,
+        );
+        assert.equal(response.status, 200);
+        assert.equal(response.body.result?.isError, false);
+        const projected = response.body.result?.structuredContent as {
+            stdout: string;
+            stdoutPath: string;
+            stdoutTruncated: boolean;
+        };
+        assert.equal(Buffer.byteLength(JSON.stringify(projected)) <= 6_000, true);
+        assert.equal(projected.stdoutPath, original.stdoutPath);
+        assert.equal(projected.stdoutTruncated, true);
+        assert.equal(projected.stdout.startsWith("first"), true);
+        assert.equal(projected.stdout.endsWith("last"), true);
+        assert.equal(original.stdout.length > 26_000, true);
+        assert.equal(harness.calls.length, 1);
+    } finally {
+        await server.close();
+    }
+});
+
 function createBinding(
     harness = createWorkerHarness(),
     options?: {
@@ -1215,6 +1258,7 @@ function createBinding(
         publicBaseUrl?: string;
         serverVersion?: string;
         mcpApp?: boolean;
+        modelOutput?: { byTool?: Record<string, number>; defaultTokens?: number; maxTokens?: number };
     },
 ): McpEndpointBinding {
     const extensions =
@@ -1233,6 +1277,7 @@ function createBinding(
             toolSource: harness.toolRegistry,
         }),
         options?.serverVersion,
+        options?.modelOutput,
     );
 }
 

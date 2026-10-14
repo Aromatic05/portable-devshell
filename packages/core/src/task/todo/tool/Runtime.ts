@@ -17,9 +17,22 @@ export function installTodoTools(
         "todo_read",
         async (_callId, input, value, signal) => {
             signal?.throwIfAborted();
-            const result = await task.todo.read(readTodoToolInput(input));
+            const selector = readTodoToolInput(input);
+            const result = await task.todo.read(selector?.taskId === undefined
+                ? undefined : { taskId: selector.taskId });
             signal?.throwIfAborted();
-            return result as unknown as JsonValue;
+            const offset = selector?.offset ?? 0;
+            const limit = selector?.limit ?? 20;
+            const items = result.tasks ?? result.items;
+            if (items.length <= limit && offset === 0) return result as unknown as JsonValue;
+            const page = items.slice(offset, offset + limit);
+            return {
+                ...result,
+                [result.tasks === undefined ? "items" : "tasks"]: page,
+                offset,
+                ...(offset + page.length >= items.length ? {}
+                    : { nextOffset: offset + page.length }),
+            } as unknown as JsonValue;
         },
     );
     const unregisterWrite = hooks.registerExecute(
@@ -32,7 +45,15 @@ export function installTodoTools(
                 ctxId,
             );
             signal?.throwIfAborted();
-            return written as unknown as JsonValue;
+            // Writing a complete plan does not require echoing every item.
+            // The authoritative state remains available through todo_read.
+            return {
+                ...(written.checkpoint === undefined ? {} : { checkpoint: written.checkpoint }),
+                revision: written.revision,
+                summary: written.summary,
+                ...(written.taskId === undefined ? {} : { taskId: written.taskId }),
+                ...(written.title === undefined ? {} : { title: written.title }),
+            } as unknown as JsonValue;
         },
     );
     return () => {

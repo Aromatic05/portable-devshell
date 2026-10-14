@@ -55,6 +55,7 @@ export class McpProtocolRoute {
                 extensions: new McpExtensionRegistry(options.extensions),
             }),
             serverVersion,
+            options.modelOutput,
         );
         this.register({
             auth: options.auth ?? { enabled: false, provider: "none" },

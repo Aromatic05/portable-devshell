@@ -23,16 +23,28 @@ import {
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
 import { McpEndpoint } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./call/Boundary.js";
+import {
+    projectMcpModelOutput,
+    validateMcpModelOutputBudget,
+    type McpModelOutputBudget,
+} from "./call/ModelOutput.js";
 
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;
     readonly #nodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #endpoint: McpEndpoint;
+    readonly #modelOutput: McpModelOutputBudget;
 
-    constructor(endpoint: McpEndpoint, serverVersion = "0.0.0") {
+    constructor(
+        endpoint: McpEndpoint,
+        serverVersion = "0.0.0",
+        modelOutput: McpModelOutputBudget = {},
+    ) {
+        validateMcpModelOutputBudget(modelOutput);
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
+        this.#modelOutput = modelOutput;
         this.#handler = createMcpHandler(() => this.#createServer(), {
             keepAliveMs: 15_000,
             legacy: "reject",
@@ -126,7 +138,11 @@ export class McpEndpointBinding {
                     context,
                     ctx.mcpReq.signal,
                 );
-                return toCallToolResult(result);
+                return toCallToolResult(projectMcpModelOutput(
+                    request.params.name,
+                    result,
+                    this.#modelOutput,
+                ));
             } catch (error) {
                 throw toMcpError(error);
             }

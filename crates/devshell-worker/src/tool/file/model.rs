@@ -233,6 +233,9 @@ pub struct FileChangeOperationOutput {
 #[serde(rename_all = "camelCase")]
 pub struct FileChangeSetOutput {
     pub operations: Vec<FileChangeOperationOutput>,
+    /// Operations omitted from the response after execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omitted_operations: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

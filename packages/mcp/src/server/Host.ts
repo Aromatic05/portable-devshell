@@ -10,11 +10,13 @@ import type { McpServer } from "./index.js";
 import { McpProtocolRoute } from "../protocol/Route.js";
 import { McpAppRoute } from "../mcpapp/Route.js";
 import { McpAppCall } from "../mcpapp/Call.js";
+import type { McpModelOutputBudget } from "../protocol/call/ModelOutput.js";
 
 export interface McpHostInstanceConfig {
     auth?: McpAuthConfig;
     contextMode?: ControlMcpContextMode;
     name: string;
+    modelOutput?: McpModelOutputBudget;
     path?: string;
 }
 
@@ -22,6 +24,7 @@ export interface McpHostConfig {
     instances: readonly McpHostInstanceConfig[];
     listenHost: string;
     listenPort: number;
+    modelOutput?: McpModelOutputBudget;
     oauthApproval?: McpOAuthApprovalConfig;
     publicBaseUrl?: string;
     serverVersion?: string;
@@ -160,6 +163,7 @@ export class McpHost {
                     contextMode: instance.contextMode ?? "explicit",
                     extensions: [mcpAppExtension],
                     instanceName: instance.name,
+                    modelOutput: instance.modelOutput ?? this.#config.modelOutput,
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
                             actions: this.#runtimeState.app.actions,

@@ -33,7 +33,9 @@ const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
 const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
 const INLINE_TRUNCATION_MARKER: &[u8] = b"\n... [output omitted] ...\n";
-const RECOVERY_OUTPUT_BYTES: usize = 24 * 1024;
+// Model-facing MCP projections are smaller than the Worker capture budget.
+// Retain the original streams before any protocol-side presentation trimming.
+const RECOVERY_OUTPUT_BYTES: usize = 4 * 1024;
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 

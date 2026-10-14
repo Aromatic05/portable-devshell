@@ -16,6 +16,7 @@ import type { McpToolProvenanceRecorder } from "./tool/Provenance.js";
 import { McpEndpointDispatch } from "./dispatch/Dispatch.js";
 import type { McpEndpointCallContext } from "./call/Port.js";
 import type { McpEndpointResult } from "./call/Boundary.js";
+import type { McpModelOutputBudget } from "./call/ModelOutput.js";
 
 export type { McpEndpointCallContext } from "./call/Port.js";
 
@@ -25,6 +26,7 @@ export interface McpEndpointOptions {
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     instanceName: string;
+    modelOutput?: McpModelOutputBudget;
     toolAdapter?: (dispatch: Pick<McpEndpointDispatch, 'callTool'>) => {
         call(name: string, input: JsonValue, request: McpEndpointCallContext,
             signal?: AbortSignal): Promise<McpEndpointResult | undefined>;

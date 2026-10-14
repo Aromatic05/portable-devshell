@@ -85,7 +85,7 @@ impl ToolHandler for FileEditTool {
                     operations.push(not_executed(index, operation));
                 }
             }
-            let mut output = FileChangeSetOutput { operations };
+            let mut output = FileChangeSetOutput { operations, omitted_operations: None };
             enforce_output_budget(&mut output)?;
             return crate::tool::contract::serialize(output);
         }
@@ -508,6 +508,7 @@ impl FileEditTool {
 
         FileChangeSetOutput {
             operations: outputs,
+            omitted_operations: None,
         }
     }
 
@@ -1871,6 +1872,16 @@ fn enforce_output_budget(output: &mut FileChangeSetOutput) -> Result<(), ToolErr
         if serialized_len(output)? <= MAX_SERIALIZED_OUTPUT_BYTES {
             return Ok(());
         }
+    }
+    let total = output.operations.len();
+    while serialized_len(output)? > MAX_SERIALIZED_OUTPUT_BYTES {
+        if output.operations.pop().is_none() {
+            return Err(ToolError::new(
+                "file.outputTooLarge",
+                "file_edit response metadata exceeds the serialized output budget",
+            ));
+        }
+        output.omitted_operations = Some(total - output.operations.len());
     }
     Ok(())
 }

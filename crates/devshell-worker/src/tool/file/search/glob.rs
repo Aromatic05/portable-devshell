@@ -8,6 +8,9 @@ use crate::tool::file::search::{DiscoveredEntry, DiscoveryCursor};
 use crate::tool::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const PAGE_SIZE: usize = 200;
+// A model-facing page must not force MCP to discard entries after the
+// continuation cursor has advanced past them.
+const PAGE_BYTES: usize = 5 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct GlobContinuation {
@@ -104,12 +107,22 @@ impl ToolHandler for FileGlobTool {
         };
 
         let mut entries = Vec::with_capacity(PAGE_SIZE);
+        let mut serialized_bytes = br#"{"entries":[],"nextCursor":"00000000-0000-0000-0000-000000000000"}"#.len();
         while entries.len() < PAGE_SIZE {
             call.check_cancelled()?;
             let Some(entry) = next_matching(&call, &mut continuation)? else {
                 break;
             };
-            entries.push(render_entry(entry));
+            let rendered = render_entry(entry.clone());
+            let item_bytes = serde_json::to_vec(&rendered)
+                .map_err(|error| ToolError::new("tool.internalError", error.to_string()))?
+                .len() + usize::from(!entries.is_empty());
+            if !entries.is_empty() && serialized_bytes.saturating_add(item_bytes) > PAGE_BYTES {
+                continuation.pending = Some(entry);
+                break;
+            }
+            serialized_bytes = serialized_bytes.saturating_add(item_bytes);
+            entries.push(rendered);
         }
 
         if entries.len() == PAGE_SIZE && continuation.pending.is_none() {

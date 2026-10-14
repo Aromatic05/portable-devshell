@@ -162,6 +162,32 @@ function validateGlobalMcp(config: ControlConfig): void {
     if (config.mcp.publicBaseUrl !== undefined) {
         parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
     }
+    const budget = config.mcp.modelOutput;
+    if (budget !== undefined) {
+        const maximum = budget.maxTokens ?? 24_000;
+        const check = (value: number, path: string[], minimum = 256) => {
+            if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+                throw configInputError("semantic", ["mcp", "modelOutput", ...path],
+                    "config.mcp.modelOutput",
+                    `must be an integer between ${minimum} and ${maximum}`);
+            }
+        };
+        if (!Number.isSafeInteger(maximum) || maximum < 4_000 || maximum > 24_000) {
+            throw configInputError("semantic", ["mcp", "modelOutput", "maxTokens"],
+                "config.mcp.modelOutput", "must be an integer between 4000 and 24000");
+        }
+        if (budget.defaultTokens !== undefined)
+            check(budget.defaultTokens, ["defaultTokens"]);
+        for (const [tool, value] of Object.entries(budget.byTool ?? {})) {
+            if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u.test(tool)) {
+                throw configInputError("semantic", ["mcp", "modelOutput", "byTool", tool],
+                    "config.mcp.modelOutput", "invalid tool name");
+            }
+            const minimum = tool.startsWith("tmux_") ? 4_000
+                : tool === "bash_run" || tool === "file_glob" ? 2_000 : 256;
+            check(value, ["byTool", tool], minimum);
+        }
+    }
     if (
         config.mcp.oauth2.approval === "token" &&
         config.mcp.oauth2.token !== undefined &&

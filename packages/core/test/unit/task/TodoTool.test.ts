@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName } from "@portable-devshell/shared";
+import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import { TodoToolDefinitions } from "../../../src/task/todo/tool/Definition.ts";
 import { readTodoToolInput } from "../../../src/task/todo/tool/Input.ts";
 import type {
@@ -17,7 +17,7 @@ test("task todo read selector accepts taskId and rejects title selectors", () =>
     assert.equal(readTodoToolInput({}), undefined);
     assert.throws(
         () => readTodoToolInput({ title: "Recover" }),
-        /optional taskId selector/u,
+        /accepts only taskId/u,
     );
 });
 
@@ -32,7 +32,7 @@ test("task todo read selector rejects ambiguous or malformed selectors", () => {
     );
     assert.throws(
         () => readTodoToolInput({ taskId: "task-1", title: "Recover" }),
-        /optional taskId selector/u,
+        /accepts only taskId/u,
     );
     assert.throws(
         () => readTodoToolInput({ taskId: "" }),
@@ -40,8 +40,22 @@ test("task todo read selector rejects ambiguous or malformed selectors", () => {
     );
     assert.throws(
         () => readTodoToolInput({ title: "   " }),
-        /optional taskId selector/u,
+        /accepts only taskId/u,
     );
+});
+
+test("todo_read validates paging without requiring a taskId", () => {
+    assert.deepEqual(readTodoToolInput({ offset: 20, limit: 5 }), {
+        offset: 20, limit: 5,
+    });
+    assert.deepEqual(readTodoToolInput({ taskId: "  task-3  ", offset: 10 }), {
+        taskId: "task-3", offset: 10,
+    });
+    const invalid: JsonValue[] = [
+        { offset: -1 }, { offset: 1.5 }, { limit: 0 },
+        { limit: 101 }, { limit: "10" },
+    ];
+    for (const input of invalid) assert.throws(() => readTodoToolInput(input));
 });
 
 test("task domain keeps todo as the operation namespace", () => {
@@ -90,7 +104,15 @@ test("Todo tools execute against the provided TaskApi", async () => {
                     items: [],
                     revision: 0,
                     summary: { completed: 0, total: 0 },
-                    tasks: [],
+                    tasks: Array.from({ length: 45 }, (_, i) => ({
+                        completed: 0,
+                        revision: 0,
+                        status: "pending",
+                        taskId: `task-${i}`,
+                        title: `Task ${i}`,
+                        total: 1,
+                        updatedAt: "2026-10-13T00:00:00Z",
+                    })),
                 };
             },
             async write(_input: unknown, ctxId: string) {
@@ -133,7 +155,19 @@ test("Todo tools execute against the provided TaskApi", async () => {
             (readResult as { revision?: number }).revision,
             0,
         );
-        await write(
+        const first = readResult as { tasks?: Array<{ taskId: string }>; nextOffset?: number };
+        assert.equal(first.tasks?.length, 20);
+        assert.equal(first.nextOffset, 20);
+        const second = await read("read-2", { offset: 20, limit: 15 }, {
+            context: { instance: instanceName, source: "mcp" },
+            kind: "call",
+            payload: { offset: 20, limit: 15 },
+            toolName: "todo_read",
+        }) as { tasks?: Array<{ taskId: string }>; nextOffset?: number };
+        assert.equal(second.tasks?.length, 15);
+        assert.equal(second.tasks?.[0]?.taskId, "task-20");
+        assert.equal(second.nextOffset, 35);
+        const written = await write(
             "write-1",
             { revision: 0, title: "Task", todos: [] },
             {
@@ -148,6 +182,12 @@ test("Todo tools execute against the provided TaskApi", async () => {
             },
         );
         assert.equal(writtenCtxId, "ctx-1");
+        assert.deepEqual(written, {
+            revision: 1,
+            summary: { completed: 1, total: 1 },
+            taskId: "task-1",
+            title: "Task",
+        });
     } finally {
         uninstall();
     }

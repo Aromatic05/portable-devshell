@@ -502,6 +502,53 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
 }
 
 #[test]
+fn file_glob_serialized_page_budget_preserves_every_continuation_entry() {
+    let env = TestEnv::new();
+    let instance = "aromatic-glob-page-budget";
+    let directory = env.workspace().join("budget-glob");
+    fs::create_dir_all(&directory).unwrap();
+    for index in 0..120 {
+        fs::write(
+            directory.join(format!("entry-{index:03}-{}.txt", "a".repeat(90))),
+            "present",
+        )
+        .unwrap();
+    }
+    env.command().current_dir(env.workspace())
+        .args(["start", "--instance", instance]).assert().success();
+
+    let mut cursor: Option<String> = None;
+    let mut received = std::collections::BTreeSet::new();
+    let mut pages = 0;
+    loop {
+        pages += 1;
+        assert!(pages <= 20, "pagination must eventually terminate");
+        let input = match cursor.as_deref() {
+            Some(next) => serde_json::json!({"cursor": next}),
+            None => serde_json::json!({"patterns": ["budget-glob/*.txt"]}),
+        };
+        let result = env.rpc(instance, "tool", &serde_json::json!({
+            "protocol": "rpc", "type": "request",
+            "id": format!("glob-{pages}"), "method": "file_glob",
+            "message": { "input": input, "context": { "workspace": env.workspace() } }
+        }));
+        assert_eq!(result["type"], "reply", "{result}");
+        let output = &result["message"];
+        assert!(serde_json::to_vec(output).unwrap().len() <= 6 * 1024,
+            "file_glob pagination exceeded the default MCP model budget");
+        for entry in output["entries"].as_array().unwrap() {
+            assert!(received.insert(entry["path"].as_str().unwrap().to_owned()),
+                "duplicate path over continued file_glob pages");
+        }
+        cursor = output["nextCursor"].as_str().map(str::to_owned);
+        if cursor.is_none() { break; }
+    }
+    assert!(pages > 1, "large directory must produce more than one page");
+    assert_eq!(received.len(), 120, "no file entries can be lost between pages");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn bash_run_accepts_bare_workspace_relative_cwd() {
     let env = TestEnv::new();
     let instance = "aromatic-bash-bare-cwd";
@@ -938,6 +985,43 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         recovered["message"]["files"][0]["content"],
         format!("1:{}", "x".repeat(2000))
     );
+
+    // The MCP model projection trims well below the older 24 KiB threshold.
+    // Medium-sized streams must already have a recovery artifact at the
+    // Worker boundary, even when the Worker itself did not truncate them.
+    #[cfg(unix)]
+    let medium_command = "awk 'BEGIN { for (i = 1; i <= 800; i++) print \"line-\" i }'";
+    #[cfg(windows)]
+    let medium_command =
+        "1..800 | ForEach-Object { [Console]::Out.WriteLine(('line-{0}' -f $_)) }";
+    let medium = env.rpc(
+        instance,
+        "tool",
+        &serde_json::json!({
+            "protocol": "rpc", "type": "request", "id": "6-medium",
+            "method": "bash_run",
+            "message": { "input": {
+                "command": medium_command, "timeoutMs": 30_000
+            }, "context": { "workspace": env.workspace() } }
+        }),
+    );
+    assert_eq!(medium["type"], "reply", "{medium}");
+    assert_eq!(medium["message"]["stdoutTruncated"], false);
+    let medium_path = medium["message"]["stdoutPath"]
+        .as_str()
+        .expect("model-sized stdout should have a recovery artifact");
+    let medium_recovered = env.rpc(
+        instance, "tool", &serde_json::json!({
+            "protocol": "rpc", "type": "request", "id": "6-medium-read",
+            "method": "file_read",
+            "message": { "input": { "files": [{
+                "path": medium_path, "view": "content",
+                "selector": "300-300:raw"
+            }] }, "context": { "workspace": env.workspace() } }
+        }),
+    );
+    assert_eq!(medium_recovered["type"], "reply", "{medium_recovered}");
+    assert_eq!(medium_recovered["message"]["files"][0]["content"], "300:line-300");
 
     #[cfg(unix)]
     let recovery_command = "awk 'BEGIN { for (i = 1; i <= 4000; i++) printf \"line-%04d\\n\", i }'";

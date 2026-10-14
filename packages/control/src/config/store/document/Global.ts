@@ -53,6 +53,7 @@ export class ControlGlobalTomlDocument {
                 enabled: config.mcp.enabled,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
+                modelOutput: config.mcp.modelOutput,
                 oauth2:
                     config.mcp.oauth2.approval === "token"
                         ? compact({

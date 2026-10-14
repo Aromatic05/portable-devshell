@@ -217,6 +217,9 @@ export interface TodoReadResult {
     cancelledAt?: string;
     checkpoint?: TodoCheckpoint;
     items: TodoItem[];
+    offset?: number;
+    nextOffset?: number;
+    modelOutputTruncated?: boolean;
     pausedAt?: string;
     revision: number;
     summary: TodoSummary;

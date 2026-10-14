@@ -66,6 +66,7 @@ export class McpRuntimeFactory {
                 instances: endpoints,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
+                modelOutput: config.mcp.modelOutput,
                 oauthApproval: toMcpOAuthApprovalConfig(config.mcp.oauth2),
                 publicBaseUrl: config.mcp.publicBaseUrl,
                 serverVersion:

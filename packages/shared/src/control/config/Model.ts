@@ -126,6 +126,11 @@ export type ControlWebOAuth2Config = ControlOAuth2Config;
 export type ControlMcpOAuth2ApprovalConfig =
     | { approval: "tui"; token?: undefined }
     | { approval: "token"; token?: string };
+export interface ControlMcpModelOutputBudget {
+    defaultTokens?: number;
+    maxTokens?: number;
+    byTool?: Record<string, number>;
+}
 export type ControlMcpAuthConfig =
     | { mode: "none"; oauth2?: undefined }
     | { mode: "token"; oauth2?: undefined; token: string }
@@ -143,6 +148,7 @@ export interface ControlGlobalConfig {
         enabled: boolean;
         listenHost: string;
         listenPort: number;
+        modelOutput?: ControlMcpModelOutputBudget;
         oauth2: ControlMcpOAuth2ApprovalConfig;
         publicBaseUrl?: string;
     };
@@ -356,6 +362,7 @@ export interface ConfigGlobalDraft {
         enabled?: boolean;
         listenHost?: string;
         listenPort?: number;
+        modelOutput?: ControlMcpModelOutputBudget;
         oauth2?: ConfigGlobalMcpOAuth2Draft;
         publicBaseUrl?: string | null;
     };
@@ -413,6 +420,7 @@ export interface ConfigMcpPatch {
     enabled?: boolean;
     listenHost?: string;
     listenPort?: number;
+    modelOutput?: ConfigNullable<ControlMcpModelOutputBudget>;
     oauth2?: ConfigGlobalMcpOAuth2Draft;
     publicBaseUrl?: ConfigNullable<string>;
 }

@@ -87,6 +87,47 @@ try {
     );
     assert.equal(output.includes(fixture.workspace), true);
 
+    // A real Worker retains the complete output while the model sees only
+    // the budgeted MCP projection. Recover the middle from the retained
+    // virtual artifact to prove the truncation is not destructive.
+    const largeCommand = process.platform === "win32"
+        ? "1..2400 | ForEach-Object { [Console]::WriteLine(('line-{0:D4}' -f $_)) }"
+        : "awk 'BEGIN { for (i = 1; i <= 2400; i++) printf \"line-%04d\\n\", i }'";
+    const large = await postJson(endpoint, {
+        jsonrpc: "2.0",
+        id: "req-tools-large-output",
+        method: "tools/call",
+        params: {
+            name: "bash_run",
+            arguments: { command: largeCommand, ctxId, timeoutMs: 30_000 },
+        },
+    });
+    const projected = large.body.result?.structuredContent;
+    assert.equal(projected?.exitCode, 0);
+    assert.equal(projected?.stdoutTruncated, true);
+    assert.equal(typeof projected?.stdoutPath, "string");
+    assert.equal(Buffer.byteLength(JSON.stringify(projected), "utf8") <= 12_000, true);
+    assert.match(projected?.stdout ?? "", /line-0001/u);
+    assert.match(projected?.stdout ?? "", /line-2400/u);
+    const recovered = await postJson(endpoint, {
+        jsonrpc: "2.0",
+        id: "req-tools-recover-output",
+        method: "tools/call",
+        params: {
+            name: "file_read",
+            arguments: {
+                ctxId,
+                files: [{
+                    path: projected.stdoutPath,
+                    view: "content",
+                    selector: "1200-1202:raw",
+                }],
+            },
+        },
+    });
+    assert.equal(recovered.body.result?.structuredContent?.files?.[0]?.content,
+        "1200:line-1200\n1201:line-1201\n1202:line-1202");
+
     process.stdout.write(
         JSON.stringify(
             {
@@ -94,6 +135,7 @@ try {
                 discover: discover.body,
                 toolsList: toolsList.body,
                 toolCall: toolCall.body,
+                largeOutputRecoveryVerified: true,
             },
             null,
             2,

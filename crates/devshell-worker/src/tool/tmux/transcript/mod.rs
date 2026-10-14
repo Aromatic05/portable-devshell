@@ -14,6 +14,9 @@ use crate::tool::tmux::model::TmuxWarning;
 pub const MAX_TRANSCRIPT_RING_BYTES: u64 = 4 * 1024 * 1024;
 pub const TRANSCRIPT_LOGGER_MODE: &str = "__tmux-transcript-logger";
 const MAX_RENDERED_RECORD_BYTES: usize = 4096;
+// Positive reads must leave excess records unread. MCP must not trim a
+// transcript after its consuming cursor was committed.
+const MAX_CONSUMED_RESULT_BYTES: usize = 9 * 1024;
 
 pub fn try_run_transcript_logger() -> Option<Result<(), String>> {
     let mut args = std::env::args_os();
@@ -137,7 +140,8 @@ impl TranscriptCursor {
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
         let mut output = Vec::new();
-        self.consume_records(pane_id, warnings, terminal, Some(limit), |record| {
+        self.consume_records(pane_id, warnings, terminal, Some(limit),
+            Some(MAX_CONSUMED_RESULT_BYTES), |record| {
             output.push(record);
         })?;
         Ok(output)
@@ -150,16 +154,25 @@ impl TranscriptCursor {
         warnings: &mut Vec<TmuxWarning>,
         terminal: bool,
     ) -> Result<Vec<String>, ToolError> {
-        let mut tail = VecDeque::with_capacity(limit);
+        let mut tail = VecDeque::<String>::with_capacity(limit);
         let mut skipped = false;
-        self.consume_records(pane_id, warnings, terminal, None, |record| {
+        let mut tail_bytes = 0usize;
+        self.consume_records(pane_id, warnings, terminal, None, None, |record| {
             if limit == 0 {
                 skipped = true;
-            } else if tail.len() == limit {
-                tail.pop_front();
-                skipped = true;
-                tail.push_back(record);
             } else {
+                while tail.len() == limit ||
+                    tail_bytes.saturating_add(record.len()) > MAX_CONSUMED_RESULT_BYTES
+                {
+                    let Some(removed) = tail.pop_front() else { break };
+                    tail_bytes = tail_bytes.saturating_sub(removed.len());
+                    skipped = true;
+                }
+                if record.len() > MAX_CONSUMED_RESULT_BYTES {
+                    skipped = true;
+                    return;
+                }
+                tail_bytes += record.len();
                 tail.push_back(record);
             }
         })?;
@@ -184,9 +197,11 @@ impl TranscriptCursor {
         warnings: &mut Vec<TmuxWarning>,
         terminal: bool,
         max_records: Option<usize>,
+        max_bytes: Option<usize>,
         mut consume: impl FnMut(String),
     ) -> Result<(), ToolError> {
         let mut records = 0_usize;
+        let mut rendered_bytes = 0_usize;
         if max_records.is_some_and(|limit| records >= limit) {
             return Ok(());
         }
@@ -212,12 +227,21 @@ impl TranscriptCursor {
                 None => return Ok(()),
             };
             let bytes = &remaining[..count];
+            let (record, truncated) = render_terminal_record(bytes);
+            if max_bytes.is_some_and(|maximum| rendered_bytes + record.len() > maximum) {
+                warnings.push(warning(
+                    Some(pane_id),
+                    "tmux.outputDeferred",
+                    "terminal output remains unread; continue with tmux_read",
+                ));
+                return Ok(());
+            }
             self.offset = segment.start + (position + count) as u64;
             position += count;
-            let (record, truncated) = render_terminal_record(bytes);
             if truncated {
                 warn_record_truncated(pane_id, warnings);
             }
+            rendered_bytes += record.len();
             consume(record);
             records += 1;
         }
@@ -424,6 +448,37 @@ mod tests {
                 .unwrap(),
             vec!["two continued"]
         );
+        remove(&ring_name).unwrap();
+    }
+
+    #[test]
+    fn transcript_byte_budget_defers_unread_records_without_advancing_past_them() {
+        let root = temp_dir();
+        let metadata_path = root.path().join("task.json");
+        let ring_name = test_ring_name();
+        let lines = (0..120)
+            .map(|index| format!("line-{index:03}-{}", "x".repeat(160)))
+            .collect::<Vec<_>>();
+        let mut ring = RingWriter::open(&ring_name, 64 * 1024, 0).unwrap();
+        let body = format!("{}\n", lines.join("\n"));
+        ring.append(0, body.as_bytes()).unwrap();
+
+        let mut cursor = TranscriptCursor::new(metadata_path, ring_name.clone());
+        let mut received = Vec::new();
+        let mut saw_deferred = false;
+        for _ in 0..8 {
+            let mut warnings = Vec::new();
+            let page = cursor.take_output("pane", &mut warnings, 400, true).unwrap();
+            assert!(page.iter().map(String::len).sum::<usize>()
+                <= super::MAX_CONSUMED_RESULT_BYTES);
+            saw_deferred |= warnings.iter().any(|warning| warning.code == "tmux.outputDeferred");
+            received.extend(page);
+            if !cursor.has_output(true).unwrap() {
+                break;
+            }
+        }
+        assert!(saw_deferred, "the first page should be byte-bounded");
+        assert_eq!(received, lines, "every consumed transcript line must be delivered");
         remove(&ring_name).unwrap();
     }
 
