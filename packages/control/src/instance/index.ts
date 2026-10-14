@@ -52,7 +52,11 @@ export class ControlInstances {
         try {
             for (const definition of config.instances) {
                 if (!definition.enabled) continue;
-                created.push(this.createRuntimeInstance(definition));
+                try {
+                    created.push(this.createRuntimeInstance(definition));
+                } catch (error) {
+                    console.warn(`Instance ${definition.name} is unavailable; others remain active:`, error);
+                }
             }
             this.#registry = new InstanceRegistry(created);
         } catch (error) {

@@ -50,6 +50,7 @@ export class ControlConfigStore {
     readonly #instanceDocument: ControlInstanceTomlDocument;
     readonly #tomlCodec: ControlConfigTomlCodec;
     readonly #validator: ControlConfigValidator;
+    readonly #unreadableInstanceFiles = new Set<string>();
 
     constructor(options: ControlConfigStoreOptions = {}) {
         this.#globalDocument =
@@ -152,6 +153,7 @@ export class ControlConfigStore {
     async #readInstances(
         paths: ControlPathHome,
     ): Promise<ControlInstanceConfig[]> {
+        this.#unreadableInstanceFiles.clear();
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, {
@@ -187,7 +189,10 @@ export class ControlConfigStore {
                 );
                 instances.push(normalizeConfigInstanceDraft(draft));
             } catch (error) {
-                throw attachConfigFile(error, filePath);
+                // A broken instance file cannot disable unrelated Instances.
+                // Preserve it on subsequent config writes for manual recovery.
+                this.#unreadableInstanceFiles.add(fileName);
+                console.warn("Instance configuration skipped:", attachConfigFile(error, filePath));
             }
         }
         return instances;
@@ -203,7 +208,8 @@ export class ControlConfigStore {
         })) {
             if (!entry.isFile() || !entry.name.endsWith(".toml")) continue;
             const filePath = join(paths.instancesDir, entry.name);
-            if (!activeFiles.has(filePath)) await rm(filePath, { force: true });
+            if (!activeFiles.has(filePath) && !this.#unreadableInstanceFiles.has(entry.name))
+                await rm(filePath, { force: true });
         }
     }
 }
