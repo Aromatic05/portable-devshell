@@ -100,7 +100,14 @@ export class McpAppCall {
             this.#ownsPresentation?.(toolName) === false ||
             (presented instanceof McpNativeToolResult && presented.isError)) return presented;
         const structured = presented instanceof McpNativeToolResult ? presented.structuredContent : presented;
-        const capability = await this.#bootstrap(structured, request);
+        let capability: { ctxId: string; token: string; liveBaseUrl?: string } | undefined;
+        try {
+            capability = await this.#bootstrap(structured, request);
+        } catch (error) {
+            // Do not fail a completed ToolCall because Live presentation failed.
+            console.warn("MCP App Live bootstrap unavailable:", error);
+            return presented;
+        }
         if (capability === undefined) return presented;
         return new McpNativeToolResult({
             ...(presented instanceof McpNativeToolResult

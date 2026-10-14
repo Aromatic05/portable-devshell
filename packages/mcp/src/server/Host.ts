@@ -43,6 +43,7 @@ export class McpHost {
     #appRoute?: McpAppRoute;
     readonly #runtimeState: McpServer;
     #started = false;
+    #appReady = false;
     #disposed = false;
     #oauthUninstall?: () => void;
 
@@ -81,15 +82,29 @@ export class McpHost {
             throw new Error(
                 "mcp.publicBaseUrl and storageDir are required when an instance uses oauth2 auth",
             );
-        await this.#runtimeState.initialize();
+        const appReady = await this.#runtimeState.initialize().then(
+            () => true,
+            (error: unknown) => {
+                console.warn("MCP App unavailable; mounting core MCP routes only:", error);
+                return false;
+            },
+        );
         await this.#oauth?.warmup();
         try {
             this.#protocol.start();
             if (this.#oauth !== undefined && this.#requiresOAuth())
                 this.#oauthUninstall = this.#oauth.attach(this.#httpServer);
-            const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts, this.#config.publicBaseUrl);
-            for (const entry of this.#protocol.list()) route.register(entry.binding.instanceName);
-            this.#appRoute = route;
+            if (appReady) {
+                try {
+                    const route = this.#runtimeState.app.attachHost(this.#httpServer, this.#contexts, this.#config.publicBaseUrl);
+                    for (const entry of this.#protocol.list()) route.register(entry.binding.instanceName);
+                    this.#appRoute = route;
+                    this.#appReady = true;
+                } catch (error) {
+                    this.#runtimeState.app.detachHost(this.#httpServer);
+                    console.warn("MCP App routes unavailable; core MCP will continue:", error);
+                }
+            }
             this.#started = true;
         } catch (error) {
             this.retire();
@@ -104,6 +119,7 @@ export class McpHost {
         this.#oauthUninstall?.();
         this.#oauthUninstall = undefined;
         this.#appRoute = undefined;
+        this.#appReady = false;
         this.#started = false;
     }
 
@@ -173,6 +189,7 @@ export class McpHost {
                             dispatch,
                             instance: instance.name,
                             ownsPresentation: (toolName) => {
+                                if (!this.#appReady) return false;
                                 const definition = this.#config.toolSource.get(instance.name, toolName)?.definition;
                                 const meta = definition?._meta;
                                 if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return true;
@@ -251,6 +268,7 @@ export class McpHost {
     }
 
     status(): {
+        appReady: boolean;
         authMode: "none" | "oauth2" | "token";
         listenAddress?: string;
         oauthReady: boolean;
@@ -276,6 +294,7 @@ export class McpHost {
               ? "token"
               : "none";
         return {
+            appReady: this.#appReady,
             authMode,
             ...(listenAddress === undefined ? {} : { listenAddress }),
             oauthReady: !authProviders.includes("oauth2") || this.#oauth !== undefined,

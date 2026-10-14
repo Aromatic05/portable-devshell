@@ -80,6 +80,23 @@ test("answer from a different Context is refused, cancelled question can be answ
     assert.equal((answer as Record<string, unknown>).answer, "main");
 });
 
+test("Live bootstrap failure does not discard the completed environ_info result", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const call = new McpAppCall({
+        actions: new McpAppActionStore(),
+        bootstrap: async () => { throw new Error("Live lease store unavailable"); },
+        context: { resolve: async () => ({}) } as never,
+        dispatch: { callTool: async () => ({ ok: true }) } as never,
+        instance: "alpha",
+    });
+    const result = { ctxId: "ctx-one", instance: "alpha", ok: true };
+    const presented = await call.present("environ_info", result, { principal: "account" } as never);
+    assert.ok(presented instanceof McpNativeToolResult);
+    assert.deepEqual(presented.structuredContent, result);
+    assert.equal(presented._meta?.["portable-devshell/mcpapp"], undefined);
+    assert.equal(warning.mock.callCount(), 1);
+});
+
 test("mcpapp_open returns private capability in protocol result", async () => {
     const f = fixture();
     const response = await f.endpoint.present("mcpapp_open", { status: "ready", ctxId: f.ctxId }, f.request);

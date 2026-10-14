@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -75,6 +75,30 @@ test("MCP startup does not parse provenance history before the listener is ready
     await runtime.start();
     const address = runtime.mcp.host?.server.address;
     assert.ok(typeof address === "object" && address !== null);
+});
+
+test("MCP listener stays available when historical MCP App lease storage is damaged", async (t) => {
+    const homeDirectory = await createTestTempDirectory("runtime-mcp-app-degraded");
+    const config = createConfig(0, 0);
+    config.web.enabled = false;
+    const paths = new ControlPathHome(homeDirectory);
+    await mkdir(dirname(paths.mcpAppLeasesFile), { recursive: true });
+    await writeFile(paths.mcpAppLeasesFile, "{invalid lease data", "utf8");
+    const runtime = await createRuntime(config, homeDirectory);
+    const warning = t.mock.method(console, "warn", () => undefined);
+    t.after(async () => await cleanupInOrder(
+        () => runtime.stop(),
+        () => rm(homeDirectory, { force: true, recursive: true }),
+    ));
+    await runtime.start();
+    const status = runtime.mcp.host?.status();
+    assert.equal(status?.running, true);
+    assert.equal(status?.appReady, false);
+    assert.ok(warning.mock.callCount() >= 1);
+    const address = runtime.mcp.host?.server.address;
+    assert.ok(typeof address === "object" && address !== null);
+    const response = await fetch(`http://127.0.0.1:${address.port}/missing/mcp`, { method: "POST" });
+    assert.equal(response.status, 404);
 });
 
 test("separate Web listener can stop without interrupting MCP", async (t) => {
