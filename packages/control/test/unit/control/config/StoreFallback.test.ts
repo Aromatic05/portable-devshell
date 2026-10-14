@@ -24,9 +24,28 @@ test("invalid Instance config is isolated and preserved by later config writes",
         const loaded = await store.readOrCreate(home);
         assert.deepEqual(loaded.instances.map((instance) => instance.name), ["good-local"]);
         assert.equal(warnings.length, 1);
-        await store.write(loaded, home);
+        await new ControlConfigStore().write(loaded, home);
+        assert.equal(warnings.length, 2);
         assert.equal(await readFile(badFile, "utf8"), badContent);
     } finally {
         console.warn = warn;
     }
+});
+
+test("creating a missing global config never deletes existing Instance files", async (t) => {
+    const home = await mkdtemp(join(tmpdir(), "devshell-config-recover-"));
+    t.after(async () => await rm(home, { force: true, recursive: true }));
+    const store = new ControlConfigStore();
+    const config = createDefaultControlConfig();
+    config.instances = [normalizeConfigInstanceDraft({ name: "old-local", provider: "local" })];
+    await store.write(config, home);
+    const paths = new ControlPathHome(home);
+    const oldFile = paths.instanceConfigFile("old-local");
+    const oldContent = await readFile(oldFile, "utf8");
+    await rm(paths.configFile);
+
+    await new ControlConfigStore().readOrCreate(home);
+    assert.equal(await readFile(oldFile, "utf8"), oldContent);
+    const recovered = await new ControlConfigStore().readOrCreate(home);
+    assert.deepEqual(recovered.instances.map((instance) => instance.name), ["old-local"]);
 });

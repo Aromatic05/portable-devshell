@@ -50,7 +50,6 @@ export class ControlConfigStore {
     readonly #instanceDocument: ControlInstanceTomlDocument;
     readonly #tomlCodec: ControlConfigTomlCodec;
     readonly #validator: ControlConfigValidator;
-    readonly #unreadableInstanceFiles = new Set<string>();
 
     constructor(options: ControlConfigStoreOptions = {}) {
         this.#globalDocument =
@@ -67,7 +66,9 @@ export class ControlConfigStore {
         if (config !== undefined) return config;
 
         const created = this.#validator.validate(createDefaultControlConfig());
-        await this.write(created, homeDirectory);
+        // Missing global configuration does not authorize deleting existing
+        // Instance files. They may be recoverable after restoring the global file.
+        await this.#write(created, homeDirectory, false);
         return created;
     }
 
@@ -108,6 +109,14 @@ export class ControlConfigStore {
     }
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
+        await this.#write(config, homeDirectory, true);
+    }
+
+    async #write(
+        config: ControlConfig,
+        homeDirectory: string | undefined,
+        pruneStale: boolean,
+    ): Promise<void> {
         const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
         const validated = this.#validator.validate(config);
@@ -132,10 +141,11 @@ export class ControlConfigStore {
             await atomicWriteFile(paths.configFile, globalSource);
             for (const entry of instanceSources)
                 await atomicWriteFile(entry.filePath, entry.source);
-            await this.#removeStaleInstances(
-                paths,
-                new Set(instanceSources.map((entry) => entry.filePath)),
-            );
+            if (pruneStale)
+                await this.#removeStaleInstances(
+                    paths,
+                    new Set(instanceSources.map((entry) => entry.filePath)),
+                );
             await commitConfigTransaction(transaction);
         } catch (error) {
             try {
@@ -153,7 +163,6 @@ export class ControlConfigStore {
     async #readInstances(
         paths: ControlPathHome,
     ): Promise<ControlInstanceConfig[]> {
-        this.#unreadableInstanceFiles.clear();
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
             entries = await readdir(paths.instancesDir, {
@@ -191,7 +200,6 @@ export class ControlConfigStore {
             } catch (error) {
                 // A broken instance file cannot disable unrelated Instances.
                 // Preserve it on subsequent config writes for manual recovery.
-                this.#unreadableInstanceFiles.add(fileName);
                 console.warn("Instance configuration skipped:", attachConfigFile(error, filePath));
             }
         }
@@ -208,8 +216,21 @@ export class ControlConfigStore {
         })) {
             if (!entry.isFile() || !entry.name.endsWith(".toml")) continue;
             const filePath = join(paths.instancesDir, entry.name);
-            if (!activeFiles.has(filePath) && !this.#unreadableInstanceFiles.has(entry.name))
-                await rm(filePath, { force: true });
+            if (activeFiles.has(filePath)) continue;
+            try {
+                const source = await readFile(filePath, "utf8");
+                const instance = normalizeConfigInstanceDraft(
+                    this.#instanceDocument.decode(this.#tomlCodec.decode(source)),
+                );
+                // Stale removal only applies to a known, valid Instance document
+                // at its canonical path; never delete unrecognized user files.
+                if (basename(paths.instanceConfigFile(instance.name)) !== entry.name)
+                    continue;
+            } catch (error) {
+                console.warn("Preserving unreadable Instance configuration:", attachConfigFile(error, filePath));
+                continue;
+            }
+            await rm(filePath, { force: true });
         }
     }
 }
