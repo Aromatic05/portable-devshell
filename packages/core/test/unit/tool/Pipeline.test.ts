@@ -52,6 +52,8 @@ function createHarness(
     options: {
         assertReady?: () => void;
         failCompletedAudit?: boolean;
+        failFailedAudit?: boolean;
+        failQueuedAudit?: boolean;
         resolveTarget?: ToolCallTargetResolver;
         reviews?: readonly ToolCallReview[];
         rewrites?: readonly ToolCallRewrite[];
@@ -89,6 +91,7 @@ function createHarness(
             },
             async queued() {
                 audit.push("queued");
+                if (options.failQueuedAudit) throw new Error("queued audit unavailable");
             },
             runningContext() {
                 return {};
@@ -105,6 +108,7 @@ function createHarness(
             },
             async failed() {
                 audit.push("failed");
+                if (options.failFailedAudit) throw new Error("failed audit unavailable");
             },
             async denied() {
                 audit.push("denied");
@@ -189,6 +193,49 @@ test("a successfully executed tool returns its result when completion audit fail
     } finally {
         console.warn = warning;
     }
+});
+
+test("queue audit errors cannot prevent a tool from executing", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const harness = createHarness("instance-a", { failQueuedAudit: true });
+    assert.deepEqual(await harness.runtime.api.call(
+        asInstanceName("instance-a"), "bash_run", { command: "echo ok" }, context,
+    ), { ok: true });
+    assert.equal(harness.invoked.length, 1);
+    assert.deepEqual(harness.audit, ["requested", "queued", "abandon", "running", "completed"]);
+    assert.equal(warning.mock.callCount(), 1);
+});
+
+test("failed tool retains its error even if failure audit cannot be persisted", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const harness = createHarness("instance-a", {
+        failFailedAudit: true,
+        invoke: async () => { throw new Error("tool execution failed"); },
+    });
+    await assert.rejects(harness.runtime.api.call(
+        asInstanceName("instance-a"), "file_edit", { changes: "test" }, context,
+    ), /tool execution failed/u);
+    assert.equal(harness.invoked.length, 1);
+    assert.ok(harness.audit.includes("abandon"));
+    assert.equal(warning.mock.callCount(), 1);
+});
+
+test("a post-execution outbound failure reports executionCompleted to the caller", async () => {
+    const harness = createHarness("instance-a", {
+        rewrites: [async (input) => {
+            if (input.direction === "outbound") throw new Error("outbound hook unavailable");
+            return input.value;
+        }],
+    });
+    await assert.rejects(harness.runtime.api.call(
+        asInstanceName("instance-a"), "file_edit", { changes: "test" }, context,
+    ), (error: unknown) => {
+        const details = (error as { details?: { executionCompleted?: boolean; failureStage?: string } }).details;
+        assert.equal(details?.executionCompleted, true);
+        assert.equal(details?.failureStage, "outboundHook");
+        return true;
+    });
+    assert.equal(harness.invoked.length, 1);
 });
 
 test("ToolCallPipeline audits review rejection in Instance without rewrite or execution", async () => {

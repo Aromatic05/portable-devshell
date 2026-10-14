@@ -257,7 +257,10 @@ export class WorkerInstanceToolAudit {
                 getErrorCode(error, runtimeErrorCodes.providerFailed),
                 new Date().toISOString(),
             )
-            .catch(() => undefined);
+            .catch((auditError: unknown) => {
+                this.#toolCallHistory.abandon(scope.callId);
+                console.warn("ToolCall failure could not be persisted:", auditError);
+            });
     }
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {

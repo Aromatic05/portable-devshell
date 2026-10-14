@@ -91,9 +91,18 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             executionContext(hookValue.context),
         );
 
-        if (hostRecorded) await this.#audit.requested(scope);
+        const recordAudit = async (record: () => Promise<void>): Promise<void> => {
+            try {
+                await record();
+            } catch (error) {
+                this.#audit.abandon(callId);
+                console.warn("ToolCall audit unavailable; preserving execution outcome:", error);
+            }
+        };
+
+        if (hostRecorded) await recordAudit(() => this.#audit.requested(scope));
         if (request.rejection !== undefined) {
-            if (hostRecorded) await this.#audit.denied(scope, request.rejection.code);
+            if (hostRecorded) await recordAudit(() => this.#audit.denied(scope, request.rejection!.code));
             throw createErrorFromBody(request.rejection);
         }
 
@@ -129,7 +138,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             if (hostRecorded) await this.#audit.failActive(scope, error);
             throw normalizeToolSchedulerError(error);
         }
-        if (hostRecorded) await this.#audit.queued(scope);
+        if (hostRecorded) await recordAudit(() => this.#audit.queued(scope));
 
         const runningContext = this.#audit.runningContext(scope);
         let toolExecutionSucceeded = false;
@@ -188,7 +197,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
         try {
             const executed = await reservation.run(async () => {
                 if (hostRecorded)
-                    await this.#audit.running(scope, runningContext);
+                    await recordAudit(() => this.#audit.running(scope, runningContext));
                 if (execute !== undefined)
                     return await execute(
                         callId,
@@ -263,7 +272,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     hookValue.toolName === "bash_run"
                         ? asBashToolResult(result)
                         : undefined;
-                await this.#audit.completed(
+                await recordAudit(() => this.#audit.completed(
                     scope,
                     runningContext,
                     result,
@@ -273,12 +282,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                             await this.#log.append(bashResult, runningContext);
                         }
                     },
-                ).catch((error: unknown) => {
-                    // Execution and outbound review already succeeded. Do not
-                    // tell the client to retry a command that may have effects.
-                    this.#audit.abandon(callId);
-                    console.warn("ToolCall completed, but audit persistence failed:", error);
-                });
+                ));
             }
             return result;
         } catch (error) {
@@ -290,15 +294,15 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     runtimeErrorCodes.providerFailed,
                 );
                 if (hostRecorded)
-                    await this.#audit.failed(
+                    await recordAudit(() => this.#audit.failed(
                         scope,
                         runningContext,
                         errorCode,
                         undefined,
                         async () => undefined,
                         { executionCompleted: true },
-                    );
-                throw finalizedTerminal.error;
+                    ));
+                throw withExecutionOutcome(finalizedTerminal.error, executionCompleted);
             }
 
             await progressTail;
@@ -324,7 +328,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 failureStage = "outboundHook";
                 const hookError = outboundHookFailure();
                 if (hostRecorded) {
-                    await this.#audit.failed(
+                    await recordAudit(() => this.#audit.failed(
                         scope,
                         runningContext,
                         getErrorCode(
@@ -334,16 +338,30 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         undefined,
                         async () => undefined,
                         auditFailure(),
-                    );
+                    ));
                 }
-                throw hookError;
+                throw withExecutionOutcome(hookError, executionCompleted, failureStage);
             }
 
-            await runOutboundReview(hooks, {
-                callId,
-                direction: "outbound",
-                value: outerFailure.value,
-            });
+            try {
+                await runOutboundReview(hooks, {
+                    callId,
+                    direction: "outbound",
+                    value: outerFailure.value,
+                });
+            } catch (error) {
+                failureStage = "outboundHook";
+                if (hostRecorded)
+                    await recordAudit(() => this.#audit.failed(
+                        scope,
+                        runningContext,
+                        getErrorCode(error, runtimeErrorCodes.providerFailed),
+                        undefined,
+                        async () => undefined,
+                        auditFailure(),
+                    ));
+                throw withExecutionOutcome(error, executionCompleted, failureStage);
+            }
 
             if (outerFailure.value.kind !== "error") {
                 const interpreted = await interpretTerminalValue(
@@ -352,13 +370,13 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 );
                 if (interpreted.error !== undefined) throw interpreted.error;
                 if (hostRecorded) {
-                    await this.#audit.completed(
+                    await recordAudit(() => this.#audit.completed(
                         scope,
                         runningContext,
                         interpreted.result!,
                         undefined,
                         async () => undefined,
-                    );
+                    ));
                 }
                 return interpreted.result!;
             }
@@ -375,12 +393,12 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
 
             if (nonRunningStatus !== undefined) {
                 if (hostRecorded) {
-                    await this.#audit.nonRunning(
+                    await recordAudit(() => this.#audit.nonRunning(
                         scope,
                         runningContext,
                         nonRunningStatus,
                         errorCode,
-                    );
+                    ));
                 }
                 const normalized = normalizeToolSchedulerError(
                     outerFailure.error,
@@ -394,7 +412,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             }
 
             if (hostRecorded) {
-                await this.#audit.failed(
+                await recordAudit(() => this.#audit.failed(
                     scope,
                     runningContext,
                     errorCode,
@@ -408,11 +426,33 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         }
                     },
                     auditFailure(),
-                );
+                ));
             }
-            throw outerFailure.error;
+            throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage);
         }
     }
+}
+
+function withExecutionOutcome(
+    error: unknown,
+    completed: boolean,
+    stage?: ToolCallFailureStage,
+): Error {
+    if (!completed) return error instanceof Error ? error : new Error(String(error));
+    const body = toRemoteErrorBody(error);
+    const details = body?.details;
+    return createRemoteError({
+        code: getErrorCode(error, runtimeErrorCodes.providerFailed),
+        cause: error,
+        details: {
+            ...(details !== null && typeof details === "object" && !Array.isArray(details)
+                ? details : {}),
+            executionCompleted: true,
+            ...(stage === undefined ? {} : { failureStage: stage }),
+        },
+        message: errorMessage(error),
+        retryable: body?.retryable === true,
+    });
 }
 
 function isPresentedToolCallResult(
