@@ -65,9 +65,17 @@ export class ControlConfigStore {
         const config = await this.#read(homeDirectory);
         if (config !== undefined) return config;
 
-        const created = this.#validator.validate(createDefaultControlConfig());
-        // Missing global configuration does not authorize deleting existing
-        // Instance files. They may be recoverable after restoring the global file.
+        // The global document may have been lost while Instance files survived.
+        // Recover usable Instances on the first load, without rewriting their
+        // original documents or pruning any files that we could not parse.
+        const defaults = createDefaultControlConfig();
+        const instances = await this.#readInstances(new ControlPathHome(homeDirectory), defaults, true);
+        defaults.instances = instances;
+        if (instances.some((instance) => instance.provider === "reverse")) {
+            defaults.mcp.enabled = true;
+            console.warn("Restoring reverse Instances with default MCP listener settings; review the public endpoint.");
+        }
+        const created = this.#validator.validate(defaults);
         await this.#write(created, homeDirectory, false);
         return created;
     }
@@ -104,7 +112,7 @@ export class ControlConfigStore {
 
         if (globalConfig === undefined) return undefined;
 
-        const instances = await this.#readInstances(paths);
+        const instances = await this.#readInstances(paths, globalConfig);
         return this.#validator.validate({ ...globalConfig, instances });
     }
 
@@ -139,12 +147,16 @@ export class ControlConfigStore {
         );
         try {
             await atomicWriteFile(paths.configFile, globalSource);
-            for (const entry of instanceSources)
-                await atomicWriteFile(entry.filePath, entry.source);
+            // On first global-config creation, recovered Instance documents
+            // are existing user data, not files to normalize or overwrite.
+            if (pruneStale)
+                for (const entry of instanceSources)
+                    await atomicWriteFile(entry.filePath, entry.source);
             if (pruneStale)
                 await this.#removeStaleInstances(
                     paths,
                     new Set(instanceSources.map((entry) => entry.filePath)),
+                    validated,
                 );
             await commitConfigTransaction(transaction);
         } catch (error) {
@@ -162,6 +174,8 @@ export class ControlConfigStore {
 
     async #readInstances(
         paths: ControlPathHome,
+        globalConfig: ControlGlobalConfig,
+        restoringGlobal = false,
     ): Promise<ControlInstanceConfig[]> {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
@@ -196,7 +210,14 @@ export class ControlConfigStore {
                 const draft = this.#instanceDocument.decode(
                     this.#tomlCodec.decode(source),
                 );
-                instances.push(normalizeConfigInstanceDraft(draft));
+                const instance = normalizeConfigInstanceDraft(draft);
+                const effectiveGlobal = restoringGlobal && instance.provider === "reverse"
+                    ? { ...globalConfig, mcp: { ...globalConfig.mcp, enabled: true } }
+                    : globalConfig;
+                this.#validator.validate({ ...effectiveGlobal, instances: [instance] });
+                if (instances.some((existing) => existing.name === instance.name))
+                    throw new Error("Duplicate Instance name " + instance.name + ".");
+                instances.push(instance);
             } catch (error) {
                 // A broken instance file cannot disable unrelated Instances.
                 // Preserve it on subsequent config writes for manual recovery.
@@ -209,6 +230,7 @@ export class ControlConfigStore {
     async #removeStaleInstances(
         paths: ControlPathHome,
         activeFiles: ReadonlySet<string>,
+        globalConfig: ControlGlobalConfig,
     ): Promise<void> {
         for (const entry of await readdir(paths.instancesDir, {
             encoding: "utf8",
@@ -222,6 +244,7 @@ export class ControlConfigStore {
                 const instance = normalizeConfigInstanceDraft(
                     this.#instanceDocument.decode(this.#tomlCodec.decode(source)),
                 );
+                this.#validator.validate({ ...globalConfig, instances: [instance] });
                 // Stale removal only applies to a known, valid Instance document
                 // at its canonical path; never delete unrecognized user files.
                 if (basename(paths.instanceConfigFile(instance.name)) !== entry.name)
