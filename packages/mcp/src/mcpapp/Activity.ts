@@ -1,4 +1,4 @@
-import { resolveToolOutput, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
+import { resolveToolOutput, type ArtifactImageContent, type ArtifactTransport, type ProcessTransport, type ToolCallRecord, type ToolTransport } from "@portable-devshell/shared";
 import { isPresentationBinaryPayload, isPresentationSecretKey, redactPresentationText } from "./Presentation.js";
 
 const ACTIVITY_OUTPUT_PAGE_BYTES = 256 * 1024;
@@ -186,6 +186,27 @@ export async function readMcpAppActivity(transport: Pick<ToolTransport, "listCal
             ctxId, limit: 50, includeInput: false, includeOutput: false,
         }), ctxId);
     }
+}
+
+/** Resolve an image through the authenticated Context's audited ToolCall.
+ * The browser supplies callId, never an arbitrary Control imageRef.
+ */
+export async function readMcpAppActivityImage(
+    tools: Pick<ToolTransport, "listCalls">,
+    artifacts: Pick<ArtifactTransport, "readImage">,
+    ctxId: string,
+    callId: string,
+): Promise<ArtifactImageContent | undefined> {
+    const records = await tools.listCalls({
+        ctxId, callIds: [callId], limit: 1, includeInput: false,
+        includeOutput: true, maxBytes: 64 * 1024,
+    });
+    const audited = records.find((entry) =>
+        entry.callId === callId && entry.ctxId === ctxId &&
+        entry.toolName === "artifact_viewImage" && entry.status === "completed");
+    const imageRef = object(audited?.output)?.imageRef;
+    if (typeof imageRef !== "string" || !imageRef) return undefined;
+    return await artifacts.readImage(imageRef);
 }
 
 /** Loads terminal output only for a ToolCall owned by the requesting Context.

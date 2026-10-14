@@ -830,6 +830,54 @@ test("per-tool CatDesk-style metadata restores and updates without Host toolOutp
     }
 });
 
+test("ToolCall Inline preserves a native image after metadata-only Host globals update", async () => {
+    const previousOpenai = (window as Window & { openai?: unknown }).openai;
+    const previousName = document.documentElement.getAttribute("data-tool-name");
+    const content = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+uCPEAAAAASUVORK5CYII=";
+    const output = { imageRef: "stored.png", name: "map.png",
+        mediaType: "image/png", bytes: 68 };
+    const metadata = { "portable-devshell/widgetPayload": {
+        schema: "portable-devshell.toolcall.v1", toolName: "artifact_viewImage",
+        isError: false, output,
+    } };
+    const globals = { toolResponseMetadata: metadata };
+    document.documentElement.setAttribute("data-tool-name", "artifact_viewImage");
+    Object.assign(window, { openai: globals });
+    globalThis.fetch = vi.fn(() => { throw new Error("Inline image must not fetch"); }) as typeof fetch;
+    try {
+        container = document.createElement("div");
+        document.body.append(container);
+        root = createRoot(container);
+        await act(async () => { root?.render(<AppView view="toolcall" />); });
+        expect(container.querySelector(".tc-image")).toBeNull();
+        await act(async () => { window.dispatchEvent(new MessageEvent("message", {
+            source: window.parent, data: {
+                method: "ui/notifications/tool-result",
+                params: { result: {
+                    _meta: { "portable-devshell/toolcall": { name: "artifact_viewImage" } },
+                    structuredContent: output,
+                    content: [{ type: "image", mimeType: "image/png", data: content }],
+                } },
+            },
+        })); });
+        await act(async () => {
+            container?.querySelector<HTMLButtonElement>(".toolcall-compact")?.click();
+        });
+        expect(container.querySelector<HTMLImageElement>(".tc-image img")?.src)
+            .toBe(`data:image/png;base64,${content}`);
+        await act(async () => { window.dispatchEvent(new CustomEvent("openai:set_globals", {
+            detail: { globals },
+        })); });
+        expect(container.querySelector<HTMLImageElement>(".tc-image img")?.src)
+            .toBe(`data:image/png;base64,${content}`);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+        Object.assign(window, { openai: previousOpenai });
+        if (previousName === null) document.documentElement.removeAttribute("data-tool-name");
+        else document.documentElement.setAttribute("data-tool-name", previousName);
+    }
+});
+
 test("Workspace toggle updates ToolCall presentation preference without changing tool execution", async () => {
     container = document.createElement("div");
     document.body.append(container);

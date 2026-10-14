@@ -27,7 +27,7 @@ export function installMcpAppLive(options: {
         return 200;
     };
     const read = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity") => {
+        operation: "snapshot" | "watch" | "activity" | "image") => {
         const watch = operation === "watch";
         setHeaders(response);
         const url = new URL(request.url ?? "/", "http://localhost");
@@ -81,6 +81,22 @@ export function installMcpAppLive(options: {
             else reply(response, 200, output);
             return;
         }
+        if (operation === "image") {
+            const callId = url.searchParams.get("callId") ?? "";
+            if (!callId || callId.length > 256) {
+                reply(response, 400, { error: "Invalid image ToolCall query" });
+                return;
+            }
+            const image = await options.view.activityImage(options.instance, ctxId, callId);
+            const access = await revalidate(ctxId, token, workspace);
+            if (access !== 200) {
+                reply(response, access, { error: "MCP App authorization expired" });
+                return;
+            }
+            if (image === undefined) reply(response, 404, { error: "Image ToolCall unavailable" });
+            else reply(response, 200, image);
+            return;
+        }
         if (!watch) {
             const snapshot = await options.view.snapshot(options.instance, ctxId, workspace);
             const access = await revalidate(ctxId, token, workspace);
@@ -110,7 +126,7 @@ export function installMcpAppLive(options: {
         }
     };
     const safe = async (request: IncomingMessage, response: ServerResponse,
-        operation: "snapshot" | "watch" | "activity") => {
+        operation: "snapshot" | "watch" | "activity" | "image") => {
         try { await read(request, response, operation); }
         catch (error) {
             // Never return internal RPC failures or bearer tokens to callers,
@@ -133,9 +149,11 @@ export function installMcpAppLive(options: {
         releases.push(options.host.registerRawRoute("get", `${base}/snapshot`, (req, res) => safe(req, res, "snapshot")));
         releases.push(options.host.registerRawRoute("get", `${base}/watch`, (req, res) => safe(req, res, "watch")));
         releases.push(options.host.registerRawRoute("get", `${base}/activity`, (req, res) => safe(req, res, "activity")));
+        releases.push(options.host.registerRawRoute("get", `${base}/image`, (req, res) => safe(req, res, "image")));
         releases.push(options.host.registerRawRoute("options", `${base}/snapshot`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/watch`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
         releases.push(options.host.registerRawRoute("options", `${base}/activity`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
+        releases.push(options.host.registerRawRoute("options", `${base}/image`, (_req, res) => { setHeaders(res); res.writeHead(204).end(); }));
     } catch (error) {
         try { releaseRoutes(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'MCP App Live route registration rollback failed'); }

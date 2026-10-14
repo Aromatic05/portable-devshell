@@ -34,17 +34,19 @@ export function readToolCallResult(raw: unknown): ToolCallResult | undefined {
     const contents = Array.isArray(value.content) ? value.content : [];
     const image = contents.map(record).find((part) =>
         part?.type === "image" && typeof part.data === "string" &&
-        typeof part.mediaType === "string" &&
-        /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/u.test(part.mediaType) &&
+        typeof (part.mimeType ?? part.mediaType) === "string" &&
+        /^(image\/png|image\/jpeg|image\/gif|image\/webp)$/u.test(
+            (part.mimeType ?? part.mediaType) as string) &&
         /^[A-Za-z0-9+/=\s]+$/u.test(part.data) && part.data.length <= 14_000_000);
+    const imageType = image?.mimeType ?? image?.mediaType;
     return {
         ...(widget?.name ? { name: widget.name } :
             typeof identity?.name === "string" ? { name: identity.name } : {}),
         isError: widget?.isError ?? (value.isError === true),
         ...(widget ? { output: widget.output } : "structuredContent" in value ? { output: value.structuredContent } :
             "content" in value ? { output: value.content } : {}),
-        ...(image ? { image: { src: "data:" + image.mediaType + ";base64," +
-            (image.data as string).replace(/\s/gu, ""), mediaType: image.mediaType as string } } : {}),
+        ...(image ? { image: { src: "data:" + imageType + ";base64," +
+            (image.data as string).replace(/\s/gu, ""), mediaType: imageType as string } } : {}),
     };
 }
 
@@ -53,8 +55,13 @@ export function restoreToolCallResult(globals?: unknown): ToolCallResult | undef
     const openai = record(globals ?? (window as Window & { openai?: unknown }).openai);
     const metadata = record(openai?.toolResponseMetadata);
     const widget = readToolCallWidgetPayload(metadata);
-    if (widget) return widget.result;
     const nested = record(metadata?.mcp_tool_result) ?? record(metadata?.call_tool_result);
+    if (widget) {
+        // Widget payload is authoritative for structured text; native MCP image
+        // bytes remain in the actual Tool Result, never duplicated in metadata.
+        const native = nested ? readToolCallResult(nested) : undefined;
+        return native?.image ? { ...widget.result, image: native.image } : widget.result;
+    }
     if (nested) return readToolCallResult({
         ...nested,
         ...(openai && "toolOutput" in openai ? { structuredContent: openai.toolOutput } : {}),

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { readMcpAppActivityOutput, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
+import { readMcpAppActivityImage, readMcpAppActivityOutput, type McpAppActivityImage, type McpAppItem, type McpAppSnapshot } from "./Connection.js";
 import type { McpAppSession } from "./Session.js";
 import { ToolCallCard } from "./ToolCall.js";
 import { record } from "./ToolCallModel.js";
@@ -30,8 +30,15 @@ function ActivityCard({ item, reads, session }: {
         stdout: string; stderr: string; nextSeq?: number;
         loaded: boolean; loading: boolean; error?: string;
     }>({ stdout: "", stderr: "", loaded: false, loading: false });
+    const [image, setImage] = useState<McpAppActivityImage>();
+    const [imageLoading, setImageLoading] = useState(false);
+    const [imageError, setImageError] = useState<string>();
     const controller = useRef<AbortController>();
-    useEffect(() => () => { controller.current?.abort(); }, [session, item.callId]);
+    const imageController = useRef<AbortController>();
+    useEffect(() => () => {
+        controller.current?.abort();
+        imageController.current?.abort();
+    }, [session, item.callId]);
     const load = (fromSeq: number) => {
         if (!session || terminal.loading) return;
         controller.current?.abort();
@@ -56,6 +63,24 @@ function ActivityCard({ item, reads, session }: {
         });
     };
     const isShell = item.name === "bash_run";
+    const isImage = item.name === "artifact_viewImage";
+    const loadImage = () => {
+        if (!session || imageLoading || image) return;
+        imageController.current?.abort();
+        const pending = new AbortController();
+        imageController.current = pending;
+        setImageError(undefined);
+        setImageLoading(true);
+        void readMcpAppActivityImage(session, item.callId, pending.signal).then((next) => {
+            if (pending.signal.aborted) return;
+            setImage(next);
+            setImageLoading(false);
+        }).catch((error: unknown) => {
+            if (pending.signal.aborted) return;
+            setImageError(error instanceof Error ? error.message : "Unable to load image preview");
+            setImageLoading(false);
+        });
+    };
     const failed = item.state === "failed" || item.state === "denied";
     const summary = [item.summary ?? (item.exitCode === undefined
         ? undefined : "exit " + item.exitCode), item.name === "tmux_run" && reads.length
@@ -66,17 +91,28 @@ function ActivityCard({ item, reads, session }: {
         ...(terminal.loaded ? { stdout: terminal.stdout, stderr: terminal.stderr } : {}),
         ...(terminal.loading ? { activityStatus: "loading" } : {}),
         ...(terminal.error ? { activityError: terminal.error } : {}),
+    } : isImage && session ? {
+        ...record(item.output),
+        ...(imageLoading ? { activityImageStatus: "loading" } : {}),
+        ...(imageError ? { activityImageError: imageError } : {}),
     } : taskTranscript(item, reads);
     return <ToolCallCard name={item.name}
         input={item.input ?? (isShell || item.name === "tmux_run"
             ? { command: item.target } : { path: item.target })}
         purpose={item.purpose} summary={summary}
         detail={item.detail} state={item.state}
-        result={{ name: item.name, isError: failed, output }}
+        result={{ name: item.name, isError: failed, output,
+            ...(image ? { image } : {}) }}
         onExpandedChange={(open) => {
             if (open && isShell && session && !terminal.loading && !terminal.loaded) load(1);
+            if (open && isImage && session && !imageLoading && !image) loadImage();
         }}
-        expandedFooter={isShell && session && (terminal.nextSeq !== undefined || terminal.error)
+        expandedFooter={isImage && session && imageError
+            ? <div className="tc-activity-actions">
+                <button type="button" disabled={imageLoading} onClick={loadImage}>
+                    {imageLoading ? "Loading…" : "Retry image"}
+                </button>
+            </div> : isShell && session && (terminal.nextSeq !== undefined || terminal.error)
             ? <div className="tc-activity-actions">
                 <button type="button" disabled={terminal.loading}
                     onClick={() => load(terminal.nextSeq ?? 1)}>

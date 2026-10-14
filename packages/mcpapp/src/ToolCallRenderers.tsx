@@ -258,8 +258,11 @@ function ImageView({ input, result }: ToolCallPresentation): ReactNode {
         {result?.image ? <figure className="tc-image">
             <img src={result.image.src} alt={string(output?.name) ?? "Tool output image"} />
             <figcaption>{string(output?.name) ?? "Image"}</figcaption>
-        </figure> : <Notice>The image is available in the native MCP tool result.
-            This audit view retains metadata, not the image bytes.</Notice>}
+        </figure> : output?.activityImageStatus === "loading"
+            ? <Notice>Loading stored image preview…</Notice>
+            : string(output?.activityImageError)
+                ? <Notice tone="warning">{string(output?.activityImageError)}</Notice>
+                : <Notice>Image preview is unavailable in this view.</Notice>}
         <div className="tc-stats">
             <Stat label="Type" value={string(output?.mediaType)} />
             <Stat label="Bytes" value={number(output?.bytes)} />

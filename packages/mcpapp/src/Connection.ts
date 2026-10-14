@@ -54,6 +54,31 @@ export interface McpAppActivityOutput {
     nextSeq?: number;
 }
 
+export interface McpAppActivityImage {
+    src: string;
+    mediaType: string;
+}
+
+/** Fetch a persisted image only when its audited Activity card is expanded. */
+export async function readMcpAppActivityImage(
+    session: McpAppSession, callId: string, signal: AbortSignal,
+): Promise<McpAppActivityImage> {
+    const image = record(await request(session,
+        `/image?callId=${encodeURIComponent(callId)}`, signal));
+    const mediaType = image?.mediaType;
+    const content = image?.content;
+    const bytes = image?.bytes;
+    if (typeof mediaType !== "string" ||
+        !/^(image\/png|image\/jpeg|image\/gif|image\/webp)$/u.test(mediaType) ||
+        image?.encoding !== "base64" || typeof content !== "string" ||
+        content.length === 0 || content.length > 14_000_000 ||
+        content.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(content) ||
+        typeof bytes !== "number" || !Number.isSafeInteger(bytes) ||
+        bytes < 1 || bytes > 10 * 1024 * 1024)
+        throw new Error("Invalid MCP App Activity image");
+    return { src: `data:${mediaType};base64,${content}`, mediaType };
+}
+
 export async function readMcpAppActivityOutput(
     session: McpAppSession, callId: string, fromSeq: number, signal: AbortSignal,
 ): Promise<McpAppActivityOutput> {

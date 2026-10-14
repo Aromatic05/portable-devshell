@@ -37,6 +37,7 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
     let unavailable = false;
     let requestedCursor = -1;
     let requestedOutput: [string, string, string, number] | undefined;
+    let requestedImage: [string, string, string] | undefined;
     const stop = installMcpAppLive({
         host, instance: "demo", leases, presence,
         contexts: {
@@ -47,6 +48,13 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
             },
         },
         view: {
+            async activityImage(instance, ctxId, callId) {
+                requestedImage = [instance, ctxId, callId];
+                return callId === "image-a"
+                    ? { imageRef: "stored.png", blake3: "hash", bytes: 68,
+                        content: "aGVsbG8=", encoding: "base64" as const, mediaType: "image/png" as const }
+                    : undefined;
+            },
             async activityOutput(instance, ctxId, callId, fromSeq) {
                 requestedOutput = [instance, ctxId, callId, fromSeq ?? 1];
                 return callId === "call-a" ? { callId, stdout: "retained output\n", stderr: "" } : undefined;
@@ -103,6 +111,17 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
         assert.deepEqual(requestedOutput, ["demo", "ctx-a", "call-a", 1]);
         assert.equal(activity.headers.get("cache-control"), "no-store");
 
+        const imageUrl = `${base}/image?ctxId=ctx-a&callId=image-a`;
+        assert.equal((await fetch(imageUrl)).status, 401);
+        assert.equal((await fetch(`${base}/image?ctxId=ctx-b&callId=image-a`, { headers })).status, 401);
+        assert.equal((await fetch(`${base}/image?ctxId=ctx-a`, { headers })).status, 400);
+        assert.equal((await fetch(`${base}/image?ctxId=ctx-a&callId=foreign`, { headers })).status, 404);
+        const preview = await fetch(imageUrl, { headers });
+        assert.equal(preview.status, 200);
+        assert.equal(preview.headers.get("cache-control"), "no-store");
+        assert.equal((await preview.json() as { content: string }).content, "aGVsbG8=");
+        assert.deepEqual(requestedImage, ["demo", "ctx-a", "image-a"]);
+
         unavailable = true;
         const unavailableResponse = await fetch(url, { headers });
         assert.equal(unavailableResponse.status, 503);
@@ -112,10 +131,12 @@ test("MCP App Live requires a valid Instance+Context Lease, validates Context an
         contextActive = false;
         assert.equal((await fetch(url, { headers })).status, 403);
         assert.equal((await fetch(outputUrl, { headers })).status, 403);
+        assert.equal((await fetch(imageUrl, { headers })).status, 403);
         contextActive = true;
         await leases.revokeInstance("demo");
         assert.equal((await fetch(url, { headers })).status, 401);
         assert.equal((await fetch(outputUrl, { headers })).status, 401);
+        assert.equal((await fetch(imageUrl, { headers })).status, 401);
 
         stop();
         assert.equal((await fetch(url, { headers })).status, 404);
@@ -255,6 +276,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
         } },
         view: {
             async activityOutput() { return undefined; },
+            async activityImage() { return undefined; },
             async snapshot() { throw new Error("Unexpected snapshot"); },
             async watch(_instance, _ctxId, _workspace, cursor, _questionRevision, signal) {
                 entered();
@@ -304,6 +326,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
         } },
         view: {
             async activityOutput() { return undefined; },
+            async activityImage() { return undefined; },
             async snapshot() { throw new Error('Unexpected snapshot'); },
             async watch(_instance, ctxId, _workspace, cursor, _questionRevision, signal) {
                 if (++count === 2) enter();

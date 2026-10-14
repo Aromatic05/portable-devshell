@@ -21,7 +21,15 @@ export function ToolCallInline() {
             if (!active) return;
             const restored = restoreToolCallResult(globals);
             if (restored && (!initialName || !restored.name || restored.name === initialName))
-                setResult(restored);
+                setResult((previous) => {
+                    // Host globals can update after a native tool-result event.
+                    // Keep the image only for the exact same content-addressed result.
+                    const imageRef = record(restored.output)?.imageRef;
+                    return !restored.image && previous?.image && typeof imageRef === "string" &&
+                        restored.name === previous.name &&
+                        imageRef === record(previous.output)?.imageRef
+                        ? { ...restored, image: previous.image } : restored;
+                });
             const restoredInput = restoreToolCallInput(globals);
             if (restoredInput !== undefined) setInput(restoredInput);
         };
@@ -43,10 +51,15 @@ export function ToolCallInline() {
             if (message?.method === "ui/notifications/tool-result" && params) {
                 refresh();
                 const globalMeta = record(record((window as Window & { openai?: unknown }).openai)?.toolResponseMetadata);
-                if (!readToolCallWidgetPayload(globalMeta)) {
-                    const next = readToolCallResult(params);
-                    if (next) setResult(next);
-                }
+                const widget = readToolCallWidgetPayload(globalMeta)?.result;
+                const next = readToolCallResult(record(params.result) ?? params);
+                if (next?.image && (!widget?.name || !next.name || widget.name === next.name)) {
+                    const nativeRef = record(next.output)?.imageRef;
+                    const widgetRef = record(widget?.output)?.imageRef;
+                    const current = widget && (nativeRef === undefined || nativeRef === widgetRef)
+                        ? widget : next;
+                    setResult({ ...current, image: next.image });
+                } else if (!widget && next) setResult(next);
             }
         };
         window.addEventListener("message", fromHost);

@@ -1,13 +1,14 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test } from "vitest";
-import { ToolCallCard, readToolCallResult } from "./ToolCall.js";
+import { afterEach, expect, test, vi } from "vitest";
+import { ToolCallCard, readToolCallResult, restoreToolCallResult } from "./ToolCall.js";
 import type { ToolCallResult } from "./ToolCallModel.js";
 import { WorkspaceDashboard } from "./Workspace.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
+const originalFetch = globalThis.fetch;
 
 async function display(result: ToolCallResult, input?: unknown) {
     container = document.createElement("div");
@@ -28,6 +29,7 @@ afterEach(async () => {
     container?.remove();
     root = undefined;
     container = undefined;
+    globalThis.fetch = originalFetch;
 });
 
 test("bash_run expands as a real terminal with exit code, ANSI colors and distinct stderr", async () => {
@@ -134,17 +136,65 @@ test("todo_write presents progress, actionable task states and Checkpoint", asyn
     expect(view.textContent).toContain("Core UI is built");
 });
 
-test("artifact_viewImage uses native MCP image content if supplied and metadata otherwise", async () => {
+test("artifact_viewImage renders the standard MCP mimeType image without copying it into widget metadata", async () => {
     const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+uCPEAAAAASUVORK5CYII=";
-    const result = readToolCallResult({
-        _meta: { "portable-devshell/toolcall": { name: "artifact_viewImage" } },
+    const widget = { schema: "portable-devshell.toolcall.v1", toolName: "artifact_viewImage",
+        isError: false, output: { name: "icon.png", mediaType: "image/png", bytes: 68 } };
+    const native = {
+        _meta: { "portable-devshell/toolcall": { name: "artifact_viewImage" },
+            "portable-devshell/widgetPayload": widget },
         structuredContent: { name: "icon.png", mediaType: "image/png", bytes: 68 },
-        content: [{ type: "image", mediaType: "image/png", data: imageData }],
-    });
+        content: [{ type: "image", mimeType: "image/png", data: imageData }],
+    };
+    const result = readToolCallResult(native);
     expect(result?.image?.src).toContain("data:image/png;base64,");
+    expect(restoreToolCallResult({ toolResponseMetadata: {
+        ...native._meta, mcp_tool_result: native,
+    } })?.image?.src).toContain(imageData);
     const view = await display(result!);
     expect(view.querySelector("img")?.getAttribute("src")).toContain(imageData);
     expect(view.querySelector("figcaption")?.textContent).toBe("icon.png");
+});
+
+test("Activity fetches an audited image only after expanding its card", async () => {
+    const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+uCPEAAAAASUVORK5CYII=";
+    const fetchImage = vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://devshell.example/api/live/demo/workspace/image?callId=image-a&ctxId=ctx-a");
+        expect(init.headers).toEqual({ Authorization: "Bearer private-image-lease" });
+        return { ok: true, json: async () => ({
+            imageRef: "stored.png", mediaType: "image/png", encoding: "base64",
+            bytes: 68, content: imageData,
+        }) } as Response;
+    });
+    globalThis.fetch = fetchImage as unknown as typeof fetch;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => { root?.render(<WorkspaceDashboard
+        renderItem={() => null}
+        session={{ ctxId: "ctx-a", token: "private-image-lease",
+            liveBaseUrl: "https://devshell.example/api/live/demo/workspace" }}
+        snapshot={{
+            ctxId: "ctx-a", instance: "demo", cursor: 1, agentBusy: false,
+            presentation: { work: [], background: [] },
+            activity: [{ callId: "image-a", name: "artifact_viewImage", state: "completed",
+                at: "2026-10-14T07:08:36Z",
+                output: { imageRef: "stored.png", name: "map-marker-pending.png",
+                    mediaType: "image/png", bytes: 68 } }],
+        }}
+    />); });
+    await act(async () => { Array.from(container!.querySelectorAll(".dashboard-tabs button"))
+        .find((entry) => entry.textContent === "Activity")?.dispatchEvent(
+            new MouseEvent("click", { bubbles: true })); });
+    expect(fetchImage).not.toHaveBeenCalled();
+    await act(async () => {
+        container!.querySelector<HTMLButtonElement>(".dashboard-timeline .toolcall-compact")?.click();
+        await Promise.resolve();
+    });
+    expect(fetchImage).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLImageElement>(".tc-image img")?.src)
+        .toBe(`data:image/png;base64,${imageData}`);
+    expect(container.textContent).not.toContain("This audit view retains metadata");
 });
 
 test("unknown tools show human-readable fields; the optional raw view also redacts secrets", async () => {

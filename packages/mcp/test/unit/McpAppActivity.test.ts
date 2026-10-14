@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { asInstanceName, type ToolCallQuery, type ToolCallRecord } from "@portable-devshell/shared";
-import { projectMcpAppActivity, readMcpAppActivity, readMcpAppActivityOutput } from "../../src/mcpapp/Activity.ts";
+import { projectMcpAppActivity, readMcpAppActivity, readMcpAppActivityImage, readMcpAppActivityOutput } from "../../src/mcpapp/Activity.ts";
 
 function call(id: string, ctxId: string, toolName: string, index: number,
     fields: Partial<ToolCallRecord> = {}): ToolCallRecord {
@@ -118,6 +118,44 @@ test("Workspace audit projection preserves semantic operations within bounds and
         call("long", "ctx-a", "bash_run", 8, { output: { stdout: "s".repeat(50_000) } }),
     ], "ctx-a");
     assert.ok(JSON.stringify(longResult[0]?.output).length <= 8_200);
+});
+
+test("Activity resolves stored images only from completed image ToolCalls in the owning Context", async () => {
+    const queries: unknown[] = [];
+    const imageRefs: string[] = [];
+    let audited = call("image-call", "ctx-own", "artifact_viewImage", 1, {
+        output: { imageRef: "stored.png", name: "map.png", bytes: 68 },
+    });
+    const tools = { listCalls: async (query: unknown) => {
+        queries.push(query);
+        return [audited];
+    } };
+    const artifacts = { readImage: async (imageRef: string) => {
+        imageRefs.push(imageRef);
+        return { imageRef, blake3: "hash", bytes: 68, mediaType: "image/png" as const,
+            content: "aGVsbG8=", encoding: "base64" as const };
+    } };
+    const image = await readMcpAppActivityImage(tools, artifacts, "ctx-own", "image-call");
+    assert.equal(image?.imageRef, "stored.png");
+    assert.deepEqual(queries, [{
+        ctxId: "ctx-own", callIds: ["image-call"], limit: 1,
+        includeInput: false, includeOutput: true, maxBytes: 64 * 1024,
+    }]);
+    assert.deepEqual(imageRefs, ["stored.png"]);
+    for (const foreign of [
+        call("image-call", "ctx-other", "artifact_viewImage", 1,
+            { output: { imageRef: "foreign.png" } }),
+        call("image-call", "ctx-own", "file_read", 1,
+            { output: { imageRef: "not-an-image.png" } }),
+        call("image-call", "ctx-own", "artifact_viewImage", 1,
+            { status: "running", output: { imageRef: "not-completed.png" } }),
+        call("different-call", "ctx-own", "artifact_viewImage", 1,
+            { output: { imageRef: "another-call.png" } }),
+    ]) {
+        audited = foreign;
+        assert.equal(await readMcpAppActivityImage(tools, artifacts, "ctx-own", "image-call"), undefined);
+    }
+    assert.deepEqual(imageRefs, ["stored.png"]);
 });
 
 test("Activity restores retained stdout/stderr for only the owning Context and masks secrets", async () => {
