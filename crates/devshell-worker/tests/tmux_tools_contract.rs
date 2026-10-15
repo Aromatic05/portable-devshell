@@ -35,6 +35,35 @@ fn transcript_shared_memory_name_fits_darwin_limit() {
     assert!(name.len() < 31, "shared-memory name is too long: {name}");
 }
 
+#[test]
+fn test_env_drop_closes_abandoned_tmux_server() {
+    if !tmux_available() {
+        return;
+    }
+    let env = TestEnv::new();
+    let instance = "fixture-retire";
+    std::fs::create_dir_all(env.instance_root(instance)).unwrap();
+    let socket = env.tmux_socket_file(instance);
+    std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    let created = Command::new("tmux")
+        .arg("-S")
+        .arg(&socket)
+        .args(["new-session", "-d", "-s", "devshell", "-c"])
+        .arg(env.workspace())
+        .arg("sleep 120")
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    drop(env);
+    let remaining = Command::new("tmux")
+        .arg("-S")
+        .arg(&socket)
+        .args(["has-session", "-t", "devshell"])
+        .output()
+        .unwrap();
+    assert!(!remaining.status.success());
+}
+
 fn shared_memory_exists(name: &str) -> bool {
     match shm_open(name, OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty()) {
         Ok(fd) => {

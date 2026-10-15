@@ -266,11 +266,37 @@ impl TestEnv {
             let _ = command.args(["stop", "--instance", &instance]).output();
         }
     }
+
+    #[cfg(unix)]
+    fn stop_remaining_tmux(&self) {
+        let Ok(entries) = fs::read_dir(&self.home_root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Some(instance) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+                continue;
+            };
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let socket = self.tmux_socket_file(&instance);
+            if !socket.exists() {
+                continue;
+            }
+            let _ = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&socket)
+                .arg("kill-server")
+                .output();
+        }
+    }
 }
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
         self.stop_remaining_workers();
+        #[cfg(unix)]
+        self.stop_remaining_tmux();
     }
 }
 

@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
+import { stopTestspaceTmux } from "../scripts/testspace/TestspaceRuntime.mjs";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 export const sourceLoader = resolve(
@@ -157,6 +158,12 @@ export async function createAcceptanceFixture() {
                 allowFailure: true,
             });
             runCli(["stop"], env, { allowFailure: true });
+            await stopTestspaceTmux({
+                devshellHome: join(home, ".devshell"),
+                instanceName: "aromatic-pc",
+                runtimeDirectory: runtime,
+                workspace,
+            });
             await rm(root, { force: true, recursive: true });
         },
     };
