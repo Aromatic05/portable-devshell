@@ -102,6 +102,68 @@ test("accepted Endpoint link retires when its Channel closes", async () => {
     server.close();
 });
 
+test("Endpoint retries transient channel establishment without replaying RPC", async (t) => {
+    const server = new Endpoint({ host: "worker" });
+    const accepts: Array<Promise<() => void>> = [];
+    let attempts = 0;
+    let executions = 0;
+    const client = new Endpoint({
+        host: "client",
+        connectChannel: async () => {
+            attempts++;
+            if (attempts < 3)
+                throw Object.assign(new Error("temporary network reset"), { code: "ECONNRESET" });
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(server.accept(right));
+            return left;
+        },
+    });
+    const handler = new Rpc(server.bind("core"), {
+        ping: () => { executions++; return "pong"; },
+    });
+    t.after(async () => {
+        client.close();
+        server.close();
+        handler.close();
+        for (const detach of await Promise.all(accepts)) detach();
+    });
+    const rpc = new Rpc(await client.connect("worker", "core"));
+    t.after(() => rpc.close());
+    assert.equal(await rpc.request("ping"), "pong");
+    assert.equal(attempts, 3);
+    assert.equal(executions, 1, "a recovered connection must not replay any RPC");
+});
+
+test("Endpoint does not retry non-transient errors or an aborted connection", async () => {
+    let attempts = 0;
+    const unrecoverable = new Endpoint({
+        connectChannel: async () => {
+            attempts++;
+            throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        },
+    });
+    await assert.rejects(unrecoverable.connect("worker", "core"), /permission denied/u);
+    assert.equal(attempts, 1);
+    unrecoverable.close();
+
+    attempts = 0;
+    const controller = new AbortController();
+    const interrupted = new Endpoint({
+        connectChannel: async () => {
+            attempts++;
+            controller.abort(new Error("user cancelled"));
+            throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+        },
+    });
+    await assert.rejects(interrupted.connect("worker", "core", controller.signal),
+        /connection reset/u);
+    assert.equal(attempts, 1, "caller cancellation prevents every reconnect attempt");
+    interrupted.close();
+});
+
 test("Endpoint routes Rpc across host:port and Envelope fragmentation", async (t) => {
     const { client, server } = await endpoints();
     t.after(() => {

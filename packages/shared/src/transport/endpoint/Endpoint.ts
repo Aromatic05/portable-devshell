@@ -6,6 +6,7 @@ import type { Channel } from "./channel/Channel.js";
 import { Connection, Port, Route } from "./route/Route.js";
 
 const ENVELOPE_SERVICE = "envelope";
+const CONNECT_RETRY_DELAY_MS = [100, 250] as const;
 
 export interface EndpointOptions {
     readonly host?: Host;
@@ -110,7 +111,8 @@ export class Endpoint {
         const connectChannel = this.#connectChannel;
         if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         const connecting = (async () => {
-            const channel = await connectChannel(signal);
+            // Retry only before a channel exists. Never replay RPC/tool execution.
+            const channel = await connectChannelWithRetry(connectChannel, signal);
             const frame = new FrameProtocol(channel, {
                 role: "opener",
             });
@@ -160,6 +162,50 @@ export class Endpoint {
         link.codec.close();
         link.frame.close();
     }
+}
+
+async function connectChannelWithRetry(
+    connect: NonNullable<EndpointOptions["connectChannel"]>,
+    signal?: AbortSignal,
+): Promise<Channel> {
+    for (let attempt = 0; ; attempt++) {
+        signal?.throwIfAborted();
+        try {
+            return await connect(signal);
+        } catch (error) {
+            if (signal?.aborted || attempt >= CONNECT_RETRY_DELAY_MS.length ||
+                !isTransientConnectionError(error)) throw error;
+            await waitBeforeReconnect(CONNECT_RETRY_DELAY_MS[attempt]!, signal);
+        }
+    }
+}
+
+function isTransientConnectionError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown };
+    if (candidate.retryable === true) return true;
+    if (typeof candidate.code === "string" &&
+        ["ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT", "ENETUNREACH", "EHOSTUNREACH", "control.notRunning"].includes(candidate.code))
+        return true;
+    return typeof candidate.message === "string" &&
+        /^(WebSocket connection failed or was rejected\.|WebSocket closed during connect: 1006\b)/u.test(candidate.message);
+}
+
+async function waitBeforeReconnect(delayMs: number, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            reject(signal?.reason ?? new Error("Connection cancelled."));
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, delayMs);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+    });
 }
 
 export { Connection, Port } from "./route/Route.js";
