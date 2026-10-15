@@ -154,9 +154,6 @@ class ContextToolRuntime {
                                   `Existing work index: ${prepared.projectMemoryAgentFile}. Consult it when looking for previous work; it is not the current Context's Memory binding.`,
                               ]
                             : []),
-                        ...(this.#modelCommands(context.instance).includes("memory")
-                            ? ["Use devshell memory to discover the current Memory directory; devshell memory init <name> explicitly creates a new Memory, while devshell memory inherit <name> reuses an existing one. Never create a new agent-work directory merely because a Context started."]
-                            : []),
                         `Use ${prepared.temporaryDirectory} only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.`,
                         `Put large working data and anything that must persist in ${prepared.workspace}/var/.`,
                         ...modelDevshellComments(
@@ -166,6 +163,7 @@ class ContextToolRuntime {
                     ],
                     expiresAt: record.expiresAt,
                     instance: context.instance,
+                    modelCommands: [...this.#modelCommands(context.instance)],
                     platform: {
                         arch: worker.platform.arch,
                         ...(worker.platform.distribution === undefined

@@ -10,7 +10,6 @@ import type {
 } from "@portable-devshell/extension/cli";
 
 import type { ContextApi } from "../../../../../context/Api.js";
-import { modelCommandAvailable } from "./Access.js";
 import type { CliExtensionCommandService } from "./index.js";
 
 /** Connect Worker-owned command sessions to authorized model CLI extensions. */
@@ -126,7 +125,7 @@ export class ModelCommandBroker {
         signal.throwIfAborted();
         const [commandId, ...argv] = request.argv;
         const allowed = this.#commands.list().filter((command) =>
-            modelCommandAvailable(command, instance.config.modelExtensions));
+            instance.config.modelExtensions.includes(command.extensionId));
         const sessions = instance.commandSessions;
         const output = async (stream: "stdout" | "stderr", data: string) => {
             for (const chunk of chunks(data)) {

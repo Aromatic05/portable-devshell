@@ -7,6 +7,23 @@ export function createMailingHook(
     onError: (error: unknown) => void,
 ): ToolCallRewriteBinding {
     return (input) => {
+        if (input.direction === "outbound" && input.value.kind === "result" &&
+            input.value.toolName === "environ_info" &&
+            typeof input.value.payload === "object" && input.value.payload !== null &&
+            !Array.isArray(input.value.payload)) {
+            const result = input.value.payload;
+            if (Array.isArray(result.modelCommands) && result.modelCommands.includes("memory")) {
+                const existing = Array.isArray(result.comment) ? result.comment : [];
+                return {
+                    ...input.value,
+                    payload: {
+                        ...result,
+                        comment: [...existing,
+                            "Use devshell memory to discover the current Memory directory; devshell memory init <name> explicitly creates a new Memory, while devshell memory inherit <name> reuses an existing one. Never create a new agent-work directory merely because a Context started."],
+                    },
+                };
+            }
+        }
         if (input.direction !== "outbound" || input.value.kind !== "result" ||
             input.value.toolName !== "file_edit" ||
             input.value.context.source === "extension" ||

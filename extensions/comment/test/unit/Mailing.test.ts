@@ -9,6 +9,26 @@ import { executeMemoryModelCommand, executeMemoryNativeCommand } from "../../src
 import { MailingService } from "../../src/mailing/Service.ts";
 import { parseOutbox, taskName } from "../../src/mailing/Protocol.ts";
 
+test("Memory usage advice is contributed only when Comment's model command is available", async () => {
+    const hook = createMailingHook({ scan: async () => {} }, () => {});
+    const input = (modelCommands: string[]) => ({
+        callId: "call-bootstrap",
+        direction: "outbound" as const,
+        value: {
+            context: { instance: "demo", source: "mcp" as const },
+            kind: "result" as const,
+            toolName: "environ_info",
+            payload: { modelCommands, comment: ["Context ready"] },
+        },
+    });
+    const available = await hook(input(["memory"]), {} as never);
+    const offered = available.payload as { comment: string[] };
+    assert.equal(offered.comment[0], "Context ready");
+    assert.match(offered.comment[1]!, /devshell memory inherit/u);
+    const unavailable = await hook(input([]), {} as never);
+    assert.deepEqual((unavailable.payload as { comment: string[] }).comment, ["Context ready"]);
+});
+
 const A = "file-panel-unify";
 const B = "stage-event-architecture";
 const instance = "testspace";
@@ -223,15 +243,15 @@ test("Memory CLI uses the caller Context for model operations and explicit targe
     assert.deepEqual(await executeMemoryModelCommand(mailing, [], caller), { kind: "json", value: {} });
     const initialized = await executeMemoryModelCommand(mailing, ["init", "cli-owned"], caller);
     assert.equal(initialized.kind, "json");
-    assert.equal((initialized as { value: { name: string } }).value.name, "cli-owned");
+    assert.equal((initialized as unknown as { value: { name: string } }).value.name, "cli-owned");
     assert.equal(fs.files.get(root + "cli-owned/INDEX.md"), "# cli-owned\n");
     const inherited = await executeMemoryModelCommand(mailing, ["inherit", A], caller);
-    assert.equal((inherited as { value: { name: string } }).value.name, A);
+    assert.equal((inherited as unknown as { value: { name: string } }).value.name, A);
     const native = { localOwner: true } as CliNativeCommandInvocationContext;
     const list = await executeMemoryNativeCommand(mailing, ["list", instance, workspace], native);
-    assert.deepEqual((list as { value: { memories: string[] } }).value.memories, [B, A, "cli-owned"].sort());
+    assert.deepEqual((list as unknown as { value: { memories: string[] } }).value.memories, [B, A, "cli-owned"].sort());
     const result = await executeMemoryNativeCommand(mailing, ["inherit", instance, workspace, "ctx-b", A], native);
-    assert.equal((result as { value: { name: string } }).value.name, A);
+    assert.equal((result as unknown as { value: { name: string } }).value.name, A);
     assert.deepEqual(await executeMemoryModelCommand(mailing, ["status"], caller), { kind: "json", value: {} });
     assert.equal(fs.files.get(root + "cli-owned/INDEX.md"), "# cli-owned\n");
     await assert.rejects(executeMemoryModelCommand(mailing, ["init"], caller), /Usage/u);

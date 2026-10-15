@@ -69,6 +69,11 @@ function environmentInfoDefinition(): ToolDefinition {
                     type: "array",
                 },
                 instance: { minLength: 1, type: "string" },
+                modelCommands: {
+                    description: "Model commands offered by the enabled Extensions for this Instance.",
+                    items: { minLength: 1, type: "string" },
+                    type: "array",
+                },
                 platform: {
                     additionalProperties: false,
                     properties: {
