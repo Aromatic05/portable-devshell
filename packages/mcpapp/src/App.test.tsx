@@ -171,7 +171,7 @@ test("reads live workspace state from private MCP metadata without displaying be
     expect(calls[0]?.url).toContain("/snapshot?ctxId=ctx-live");
     expect(calls[0]?.authorization).toBe("Bearer private-authorization-token");
     expect(calls[0]?.credentials).toBe("omit");
-    expect(calls.some((call) => call.url.includes("/watch?cursor=6&qrev=0&ctxId=ctx-live"))).toBe(true);
+    expect(calls.some((call) => call.url.includes("/watch?cursor=6&ctxId=ctx-live"))).toBe(true);
     await act(async () => { host.clients[0]?.ontoolinput?.({ arguments: { ctxId: "ctx-new" } }); });
     expect(container!.textContent).not.toContain("An approval is pending in the conversation.");
     expect(container!.textContent).not.toContain("Build portable devshell");
@@ -432,9 +432,9 @@ test("reads complete ChatGPT toolResponseMetadata before the SDK emits a tool-re
     globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
         calls.push(String(url));
         if (String(url).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
-            ctxId: capability.ctxId, instance: "demo", cursor: 12, questionRevision: 3,
-            agentBusy: false, presentation: { primary: { id: "q1", title: "Question for you",
-                detail: "Which release?" }, work: [], background: [] },
+            ctxId: capability.ctxId, instance: "demo", cursor: 12,
+            agentBusy: false, presentation: { primary: { id: "approval-1", title: "Approval required",
+                detail: "Review release" }, work: [], background: [] },
         }), { status: 200 }));
         return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -444,63 +444,12 @@ test("reads complete ChatGPT toolResponseMetadata before the SDK emits a tool-re
         container = document.createElement("div");
         document.body.append(container);
         root = createRoot(container);
-        await act(async () => { root?.render(<AppView view="interaction" />); });
-        await vi.waitFor(() => expect(container!.textContent).toContain("Which release?"));
+        await act(async () => { root?.render(<AppView />); });
+        await vi.waitFor(() => expect(container!.textContent).toContain("An approval is pending in the conversation."));
         expect(calls[0]).toContain("snapshot?ctxId=ctx-globals");
-        expect(calls.some((url) => url.includes("watch?cursor=12&qrev=3&ctxId=ctx-globals"))).toBe(true);
+        expect(calls.some((url) => url.includes("watch?cursor=12&ctxId=ctx-globals"))).toBe(true);
         expect(container!.textContent).not.toContain(token);
     } finally { Object.assign(window, { openai: previousOpenai }); }
-});
-
-test("question card sends selected choice and free text through authenticated MCP App action", async () => {
-    const capability = { ctxId: "ctx-question", token: "private-question-test-token",
-        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
-    let choice = true;
-    globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
-        if (String(url).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
-            ctxId: capability.ctxId, instance: "demo", cursor: 14, questionRevision: 7,
-            agentBusy: true, presentation: {
-                primary: { id: "question-1", title: "Question for you", detail: "Proceed?",
-                    actions: [{ id: choice ? "question-answer-choice" : "question-answer-text",
-                        label: "Answer", input: choice ? { kind: "choice", choices: [{ id: "Yes", label: "Yes" }] }
-                            : { kind: "text", placeholder: "Your answer" } }] },
-                work: [], background: [],
-            },
-        }), { status: 200 }));
-        return new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-        });
-    }) as typeof fetch;
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => { root?.render(<AppView view="interaction" />); });
-    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
-        "portable-devshell/mcpapp": capability,
-    } }); });
-    await vi.waitFor(() => expect(container!.textContent).toContain("Proceed?"));
-    const yes = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Yes")!;
-    await act(async () => { yes.click(); });
-    await vi.waitFor(() => expect(host.actions).toHaveLength(1));
-    expect(host.actions[0]).toEqual({ name: "mcpapp_action", arguments: expect.objectContaining({
-        ctxId: capability.ctxId, itemId: "question-1", actionId: "question-answer-choice", input: "Yes",
-    }) });
-    choice = false;
-    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
-        "portable-devshell/mcpapp": { ...capability, token: "private-question-test-token-new" },
-    } }); });
-    await vi.waitFor(() => expect(container!.querySelector('input[aria-label="Answer"]')).not.toBeNull());
-    const input = container!.querySelector<HTMLInputElement>('input[aria-label="Answer"]')!;
-    await act(async () => {
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Keep compatible");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const form = input.closest("form")!;
-    await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    await vi.waitFor(() => expect(host.actions).toHaveLength(2));
-    expect(host.actions[1]?.arguments).toEqual(expect.objectContaining({
-        ctxId: capability.ctxId, itemId: "question-1", actionId: "question-answer-text", input: "Keep compatible",
-    }));
 });
 
 test("Workspace requests fullscreen only once per Context and respects Host dismissal", async () => {
@@ -653,45 +602,6 @@ test("Host fullscreen iframe remount does not reopen a dismissed Context", async
     } finally {
         Object.assign(window, { openai: previousOpenai });
     }
-});
-
-test("Blocking question remains answerable from explicit fullscreen fallback when Host cannot mount inline", async () => {
-    const capability = { ctxId: "ctx-pending", token: "private-fallback-test-token",
-        liveBaseUrl: "https://devshell.example/api/live/demo/workspace" };
-    const question = {
-        id: "pending-question", title: "Question for you", detail: "Deploy now?",
-        actions: [{ id: "question-answer-choice", label: "Answer",
-            input: { kind: "choice", choices: [{ id: "Yes", label: "Yes" }] } }],
-    };
-    host.actionResult = { status: "applied", detached: true, question: "Deploy now?", answer: "Yes" };
-    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes("/snapshot")) return Promise.resolve(new Response(JSON.stringify({
-            ctxId: capability.ctxId, instance: "demo", cursor: 7, agentBusy: true,
-            presentation: { primary: question, work: [], background: [] },
-        }), { status: 200 }));
-        return new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-        });
-    }) as typeof fetch;
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => { root?.render(<AppView />); });
-    await act(async () => { host.clients[0]?.ontoolresult?.({ _meta: {
-        "portable-devshell/mcpapp": capability,
-    } }); });
-    await vi.waitFor(() => expect(container!.textContent).toContain("Answer here if Inline is unavailable"));
-    const button = (name: string) => Array.from(container!.querySelectorAll("button"))
-        .find((element) => element.textContent === name);
-    expect(button("Yes")).toBeUndefined();
-    await act(async () => { button("Answer here if Inline is unavailable")?.click(); });
-    expect(container!.textContent).toContain("Deploy now?");
-    await act(async () => { button("Yes")?.click(); });
-    await vi.waitFor(() => expect(host.actions).toHaveLength(1));
-    await vi.waitFor(() => expect(host.sent).toHaveLength(1));
-    expect(host.actions[0]?.name).toBe("mcpapp_action");
-    expect(JSON.stringify(host.sent[0])).toContain("Deploy now?");
-    expect(JSON.stringify(host.sent[0])).toContain("Yes");
 });
 
 test("ToolCall inline is two lines and never loads Context Snapshot, Wait or Approval", async () => {

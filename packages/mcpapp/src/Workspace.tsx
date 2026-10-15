@@ -127,11 +127,9 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
     session?: McpAppSession;
 }) {
     const [tab, setTab] = useState<Tab>("overview");
-    const [fallback, setFallback] = useState(false);
     const [showHistory, setShowHistory] = useState(true);
     const [showInternalCalls, setShowInternalCalls] = useState(false);
     const { primary, work, background } = snapshot.presentation;
-    const isQuestion = primary?.title === "Question for you";
     const pendingCount = primary ? 1 : 0;
     const shownPlans = new Set<string>();
     const visibleActivity = showInternalCalls ? snapshot.activity : snapshot.activity?.filter((item) => {
@@ -179,15 +177,8 @@ export function WorkspaceDashboard({ snapshot, renderItem, session }: {
                     <p className="dashboard-notice">
                         {primary.title === "Approval required"
                             ? "An approval is pending in the conversation."
-                            : isQuestion ? "A question is awaiting an answer in the conversation."
                             : "A decision is pending in the conversation."}
                     </p>
-                    {isQuestion && <div className="workspace-fallback">
-                        <button type="button" onClick={() => setFallback(!fallback)}>
-                            {fallback ? "Hide fallback" : "Answer here if Inline is unavailable"}
-                        </button>
-                        {fallback && renderItem(primary, "decision")}
-                    </div>}
                 </> : <p className="dashboard-empty">No pending human decision.</p>}
                 <h2>Background waits</h2>
                 {background.length ? <div className="dashboard-items">

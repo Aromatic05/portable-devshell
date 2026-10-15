@@ -276,11 +276,6 @@ function EnvironmentView({ input, result, name }: ToolCallPresentation): ReactNo
     const output = record(result?.output);
     const args = record(input);
     if (name === "mcpapp_open") return <Notice>Workspace was opened for this Context.</Notice>;
-    if (name === "mcpapp_ask") return <section className="tc-view">
-        {heading("Question")}
-        <p>{string(args?.question) ?? "Question submitted"}</p>
-        <ValueRows value={record(result?.output) ?? {}} />
-    </section>;
     return <div className="tc-view">
         <div className="tc-stats">
             <Stat label="Instance" value={string(output?.instance)} />
@@ -327,7 +322,6 @@ const renderers: Record<string, Renderer> = {
     environ_info: EnvironmentView,
     environ_remote: EnvironmentView,
     mcpapp_open: EnvironmentView,
-    mcpapp_ask: EnvironmentView,
 };
 
 /** Exactly one domain renderer serves both immutable Inline and audited Workspace. */

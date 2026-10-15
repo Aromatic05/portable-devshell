@@ -15,15 +15,12 @@ export interface McpAppItem {
         expectedRevision?: number;
         tone?: "default" | "primary" | "danger";
         confirmation?: { message: string };
-        input?: { kind: "none" } | { kind: "text"; placeholder?: string } |
-            { kind: "choice"; choices: Array<{ id: string; label: string }> };
     }>;
 }
 export interface McpAppSnapshot {
     ctxId: string;
     instance: string;
     cursor: number;
-    questionRevision?: number;
     agentBusy: boolean;
     activity?: Array<{
         callId: string;
@@ -100,9 +97,9 @@ export async function readMcpAppSnapshot(session: McpAppSession, signal: AbortSi
 }
 
 export async function watchMcpApp(
-    session: McpAppSession, cursor: number, signal: AbortSignal, questionRevision = 0,
+    session: McpAppSession, cursor: number, signal: AbortSignal,
 ): Promise<{ changed: boolean; cursor: number; snapshot?: McpAppSnapshot }> {
-    const result = await request(session, `/watch?cursor=${cursor}&qrev=${questionRevision}`, signal);
+    const result = await request(session, `/watch?cursor=${cursor}`, signal);
     const watch = record(result);
     if (typeof watch?.changed !== "boolean" || typeof watch.cursor !== "number" ||
         !Number.isSafeInteger(watch.cursor) || watch.cursor < 0) throw new Error("Invalid MCP App watch result");

@@ -5,7 +5,6 @@ export interface McpAppSnapshot {
     ctxId: string;
     instance: string;
     cursor: number;
-    questionRevision?: number;
     agentBusy: boolean;
     activity?: McpAppActivity[];
     presentation: McpAppPresentation;
@@ -61,25 +60,13 @@ export interface McpAppAction {
     expectedRevision?: number;
     tone?: "default" | "primary" | "danger";
     confirmation?: { message: string };
-    input?: McpAppActionInput;
 }
-
-export interface McpAppChoice {
-    id: string;
-    label: string;
-}
-
-export type McpAppActionInput =
-    | { kind: "none" }
-    | { kind: "text"; placeholder?: string }
-    | { kind: "choice"; choices: McpAppChoice[] };
 
 export interface McpAppActionRequest {
     itemId: string;
     actionId: string;
     expectedRevision?: number;
     requestId?: string;
-    input?: string;
 }
 
 export interface McpAppActionResult {
@@ -113,8 +100,7 @@ export interface McpAppReentryView {
 export type McpAppActionOperation =
     | "task-pause" | "task-resume" | "task-cancel"
     | "approval-approve" | "approval-deny"
-    | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop"
-    | "question-answer-text" | "question-answer-choice";
+    | "goal-pause" | "goal-resume" | "goal-retry" | "goal-stop";
 
 export interface McpAppResolvedAction {
     itemId: string;

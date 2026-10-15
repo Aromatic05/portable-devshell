@@ -203,7 +203,12 @@ test("successful MCP environ_info returns an Instance-bound private Lease, witho
         });
         ctxId = unauthorized.ctxId;
         const rejected = await call();
-        assert.ok(rejected.error);
+        // A Live bootstrap failure must not turn a completed ToolCall into an error.
+        assert.equal(rejected.error, undefined);
+        assert.deepEqual(rejected.result?.structuredContent, {
+            ctxId, instance: "demo", status: "active",
+        });
+        assert.equal(rejected.result?._meta?.["portable-devshell/mcpapp"], undefined);
         assert.equal(runtime.state.mcpAppPresence.has("demo", ctxId), false);
         assert.equal(await runtime.state.mcpAppLeases.verify("demo", ctxId, meta!.token), false);
     } finally {
@@ -278,7 +283,7 @@ test("MCP App Watch denies data after Lease revocation and ends on Instance reti
             async activityOutput() { return undefined; },
             async activityImage() { return undefined; },
             async snapshot() { throw new Error("Unexpected snapshot"); },
-            async watch(_instance, _ctxId, _workspace, cursor, _questionRevision, signal) {
+            async watch(_instance, _ctxId, _workspace, cursor, signal) {
                 entered();
                 return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
                     complete = () => resolve({ changed: true, cursor: cursor + 1 });
@@ -328,7 +333,7 @@ test('MCP App Live cancels only the terminated Context watcher', async () => {
             async activityOutput() { return undefined; },
             async activityImage() { return undefined; },
             async snapshot() { throw new Error('Unexpected snapshot'); },
-            async watch(_instance, ctxId, _workspace, cursor, _questionRevision, signal) {
+            async watch(_instance, ctxId, _workspace, cursor, signal) {
                 if (++count === 2) enter();
                 return await new Promise<{ changed: boolean; cursor: number }>((resolve) => {
                     signal?.addEventListener('abort', () => {

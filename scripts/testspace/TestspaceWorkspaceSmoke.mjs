@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 
 import {
     Client,
@@ -96,7 +95,6 @@ export async function runTestspaceWorkspaceSmoke({
         const widgetFor = (name) => toolCallResource.uri + "?widgetRevision=1&toolName=" + name;
         assert.equal(template("environ_info"), widgetFor("environ_info"));
         assert.equal(template("mcpapp_open"), workspaceResource.uri);
-        assert.equal(template("mcpapp_ask"), inlineResource.uri);
         assert.equal(template("bash_run"), widgetFor("bash_run"));
         assert.notEqual(template("bash_run"), template("file_read"));
         for (const name of ["bash_run", "file_read", "file_glob", "file_edit", "todo_report"]) {
@@ -184,40 +182,11 @@ export async function runTestspaceWorkspaceSmoke({
         assert.equal(diffCard.output?.operations?.[0]?.status, "applied");
         assert.equal(typeof diffCard.output?.operations?.[0]?.diff, "string");
 
-        // A new inline ask must be able to show a pending question before the
-        // blocked tool finishes; answer it using the real MCP App action.
+        // The explicit Workspace open still returns a live capability.
         const opened = await client.callTool({ name: "mcpapp_open", arguments: { ctxId } });
         assert.equal(opened.isError, false);
         assert.equal(opened.structuredContent?.status, "ready");
         assert.equal(opened._meta?.["portable-devshell/mcpapp"]?.ctxId, ctxId);
-        const pendingAsk = client.callTool({
-            name: "mcpapp_ask",
-            arguments: { ctxId, question: "Testspace inline question?", choices: ["Yes", "No"], allowText: false },
-        }, { timeout: 20_000, maxTotalTimeout: 20_000 });
-        let question;
-        for (let i = 0; i < 60; i++) {
-            const response = await fetch(snapshotUrl, { headers: { authorization: "Bearer " + token } });
-            assert.equal(response.status, 200);
-            const current = await response.json();
-            if (current.presentation?.primary?.title === "Question for you") {
-                question = current.presentation.primary;
-                break;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-        assert.ok(question, "Question did not appear in the live inline snapshot.");
-        assert.equal(question.detail, "Testspace inline question?");
-        const answered = await client.callTool({ name: "mcpapp_action", arguments: {
-            ctxId, itemId: question.id, actionId: "question-answer-choice",
-            requestId: randomUUID(), input: "Yes",
-        } });
-        assert.equal(answered.isError, false);
-        assert.equal(answered.structuredContent?.status, "applied");
-        const completed = await pendingAsk;
-        assert.equal(completed.isError, false);
-        assert.deepEqual(completed.structuredContent, {
-            status: "answered", questionId: question.id, answer: "Yes",
-        });
         return {
             ctxId, cursor: snapshot.cursor, instance: snapshot.instance,
             resourceUri: workspaceResource.uri,
@@ -225,7 +194,6 @@ export async function runTestspaceWorkspaceSmoke({
             toolCallResourceUri: toolCallResource.uri,
             fullscreenAdvertised: true, auditedToolCall: true, semanticToolsAudited: true,
             selfContainedToolWidgets: true,
-            inlineAskAnswered: true,
         };
     } finally {
         await client.close().catch(() => undefined);

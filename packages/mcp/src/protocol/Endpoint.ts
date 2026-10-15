@@ -53,8 +53,6 @@ export class McpEndpoint {
             auth: options.auth,
             bootstrapPresentationResourceUri:
                 this.#extensions.environmentPresentation()?.resourceUri,
-            interactionPresentationResourceUri:
-                this.#extensions.environmentPresentation()?.interactionResourceUri,
             toolCallPresentationResourceUri:
                 this.#extensions.environmentPresentation()?.toolCallResourceUri,
             toolCallPresentationResourceUriForTool:

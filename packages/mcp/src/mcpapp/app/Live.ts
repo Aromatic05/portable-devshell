@@ -54,13 +54,6 @@ export function installMcpAppLive(options: {
             reply(response, 400, { error: "Invalid cursor" });
             return;
         }
-        const rawQuestionRevision = url.searchParams.get("qrev") ?? "0";
-        const questionRevision = Number(rawQuestionRevision);
-        if (watch && (!/^(0|[1-9]\d*)$/u.test(rawQuestionRevision) ||
-            !Number.isSafeInteger(questionRevision))) {
-            reply(response, 400, { error: "Invalid question revision" });
-            return;
-        }
         options.presence.touch(options.instance, ctxId);
         if (operation === "activity") {
             const callId = url.searchParams.get("callId") ?? "";
@@ -113,7 +106,7 @@ export function installMcpAppLive(options: {
         const onClose = () => controller.abort();
         response.once("close", onClose);
         try {
-            const result = await options.view.watch(options.instance, ctxId, workspace, cursor, questionRevision, controller.signal);
+            const result = await options.view.watch(options.instance, ctxId, workspace, cursor, controller.signal);
             if (controller.signal.aborted || response.destroyed || response.writableEnded) return;
             const access = await revalidate(ctxId, token, workspace);
             if (controller.signal.aborted || response.destroyed || response.writableEnded) return;

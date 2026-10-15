@@ -37,7 +37,6 @@ export interface McpEndpointCatalogOptions {
     auth?: McpAuthConfig;
     contextSelector?: McpContextSelector;
     bootstrapPresentationResourceUri?: string;
-    interactionPresentationResourceUri?: string;
     toolCallPresentationResourceUri?: string;
     toolCallPresentationResourceUriForTool?: (toolName: string) => string;
     instanceName: string;
@@ -53,7 +52,6 @@ export interface McpEndpointCatalogSnapshot {
 export class McpEndpointCatalog {
     readonly #auth: McpAuthConfig;
     readonly #bootstrapPresentationResourceUri?: string;
-    readonly #interactionPresentationResourceUri?: string;
     readonly #toolCallPresentationResourceUri?: string;
     readonly #toolCallPresentationResourceUriForTool?: (toolName: string) => string;
     readonly #contextSelector: McpContextSelector;
@@ -66,8 +64,6 @@ export class McpEndpointCatalog {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
         this.#bootstrapPresentationResourceUri =
             options.bootstrapPresentationResourceUri;
-        this.#interactionPresentationResourceUri =
-            options.interactionPresentationResourceUri;
         this.#toolCallPresentationResourceUri = options.toolCallPresentationResourceUri;
         this.#toolCallPresentationResourceUriForTool = options.toolCallPresentationResourceUriForTool;
         this.#contextSelector =
@@ -108,7 +104,6 @@ export class McpEndpointCatalog {
         const modelTool = withBootstrapPresentation(
             tool,
             this.#bootstrapPresentationResourceUri,
-            this.#interactionPresentationResourceUri,
             this.#toolCallPresentationResourceUri,
             this.#toolCallPresentationResourceUriForTool,
         );
@@ -186,7 +181,6 @@ function isBootstrapTool(name: string): boolean {
 function withBootstrapPresentation(
     tool: ToolDefinition,
     workspaceResourceUri: string | undefined,
-    interactionResourceUri: string | undefined,
     toolCallResourceUri: string | undefined,
     toolCallResourceUriForTool: ((toolName: string) => string) | undefined,
 ): ToolDefinition {
@@ -201,7 +195,6 @@ function withBootstrapPresentation(
     if (typeof ui.resourceUri === "string" || typeof meta["openai/outputTemplate"] === "string")
         return tool;
     const resourceUri = tool.name === "mcpapp_open" ? workspaceResourceUri
-        : tool.name === "mcpapp_ask" ? interactionResourceUri
         : toolCallResourceUriForTool?.(tool.name) ?? toolCallResourceUri ??
             (tool.name === `${bootstrapToolNamespace}_info` ? workspaceResourceUri : undefined);
     if (resourceUri === undefined) return tool;
@@ -216,7 +209,7 @@ function withBootstrapPresentation(
             },
             "ui/resourceUri": resourceUri,
             "openai/outputTemplate": resourceUri,
-            ...(tool.name === "mcpapp_open" || tool.name === "mcpapp_ask"
+            ...(tool.name === "mcpapp_open"
                 ? { "openai/widgetAccessible": true } : {}),
         },
     };

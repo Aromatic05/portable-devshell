@@ -21,8 +21,8 @@ import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
 import { installTodoTools } from "../../task/todo/tool/Runtime.js";
 import { todoToolDefinitions } from "../../task/todo/tool/Definition.js";
-import { mcpAppActionDefinition, mcpAppReentryDefinition, mcpAppOpenDefinition, mcpAppAskDefinition } from "../mcpapp/Definition.js";
-import { installMcpAppAsk } from "../mcpapp/Ask.js";
+import { mcpAppActionDefinition, mcpAppReentryDefinition, mcpAppOpenDefinition } from "../mcpapp/Definition.js";
+import { installMcpAppOpen } from "../mcpapp/Open.js";
 import { installMcpAppAction } from "../mcpapp/index.js";
 import { installMcpAppReentry } from "../mcpapp/Reentry.js";
 import { installWaitToolCallRewrite } from "../../task/wait/Runtime.js";
@@ -108,7 +108,7 @@ export class InstanceState {
         this.terminal = createTerminalRuntime(dependencies.terminal);
         this.#workerToolRegistration = this.#toolDefinitions.register([]);
         this.#domainToolRegistration = this.#toolDefinitions.register(
-            [...todoToolDefinitions(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition(), mcpAppAskDefinition()],
+            [...todoToolDefinitions(), mcpAppActionDefinition(), mcpAppReentryDefinition(), mcpAppOpenDefinition()],
         );
         this.toolCalls = createToolCallRuntime({
             resolveTarget: (target) => {
@@ -139,7 +139,7 @@ export class InstanceState {
                 task: this.task.api,
             }),
             installMcpAppReentry(this.toolCalls.hooks, this.task.api),
-            installMcpAppAsk(this.toolCalls.hooks),
+            installMcpAppOpen(this.toolCalls.hooks),
             installWaitToolCallRewrite(
                 this.toolCalls.hooks,
                 this.task.api.wait,

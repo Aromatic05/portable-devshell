@@ -153,9 +153,8 @@ test("production MCP host advertises and reads its MCP App resource", async () =
         assert.equal(bootstrap?._meta?.ui?.resourceUri,
             mcpAppToolCallResourceUri + "?widgetRevision=1&toolName=environ_info");
         // This minimal HTTP host only registers environ_info. The full MCP
-        // catalog's model-facing open/ask bindings are verified separately.
+        // catalog's model-facing open binding is verified separately.
         assert.equal(tools.result?.tools?.some((tool) => tool.name === "mcpapp_open"), false);
-        assert.equal(tools.result?.tools?.some((tool) => tool.name === "mcpapp_ask"), false);
     } finally {
         await host.stop();
     }

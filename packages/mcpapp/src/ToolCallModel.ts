@@ -69,7 +69,6 @@ export const toolTitles: Record<string, string> = {
     environ_remote: "Remote environment",
     artifact_viewImage: "View image",
     mcpapp_open: "Open workspace",
-    mcpapp_ask: "Ask user",
 };
 
 export function titleFor(name: string): string {
@@ -116,7 +115,6 @@ export function headlineFor({ name, input, result, purpose, summary }: ToolCallP
         case "environ_info": return string(output?.workspace) ?? string(args?.workspace) ?? summary ?? "Context ready";
         case "environ_remote": return string(args?.command) ?? string(args?.target) ?? summary ?? "Remote operation";
         case "mcpapp_open": return summary ?? "Workspace opened";
-        case "mcpapp_ask": return string(args?.question) ?? summary ?? "Question";
         default:
             return string(args?.command) ?? string(args?.path) ?? string(args?.target) ??
                 summary ?? titleFor(name);
