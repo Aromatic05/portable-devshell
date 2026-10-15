@@ -238,6 +238,43 @@ test("a post-execution outbound failure reports executionCompleted to the caller
     assert.equal(harness.invoked.length, 1);
 });
 
+test("outbound error rewrite failure preserves original error identity in private diagnostics", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const harness = createHarness("instance-a", {
+        rewrites: [async (input) => {
+            if (input.direction === "outbound" && input.value.kind === "error")
+                throw new Error("hook-private-secret");
+            return input.value;
+        }],
+        invoke: async () => {
+            throw createRemoteError({
+                code: "tool.executionFailed",
+                message: "tool-private-secret",
+                retryable: false,
+            });
+        },
+    });
+    await assert.rejects(harness.runtime.api.call(
+        asInstanceName("instance-a"), "bash_run", { command: "tool-input-secret" }, context,
+    ), (error: unknown) => {
+        assert.equal((error as { code?: string }).code, runtimeErrorCodes.providerFailed);
+        const details = (error as { details?: { executionCompleted?: boolean; failureStage?: string } }).details;
+        assert.equal(details?.executionCompleted, false);
+        assert.equal(details?.failureStage, "outboundHook");
+        return true;
+    });
+    const diagnostics = warning.mock.calls.find((call) =>
+        call.arguments[0] === "ToolCall outbound hook failed");
+    assert.ok(diagnostics);
+    const data = diagnostics.arguments[1] as Record<string, unknown>;
+    assert.equal(data.phase, "error");
+    assert.equal(data.originalCode, "tool.executionFailed");
+    assert.equal(data.causeCode, "error.unknown");
+    assert.equal(data.toolName, "bash_run");
+    assert.ok(!JSON.stringify(data).includes("-secret"));
+    assert.equal(harness.invoked.length, 1);
+});
+
 test("ToolCallPipeline audits review rejection in Instance without rewrite or execution", async () => {
     const calls: string[] = [];
     const harness = createHarness("instance-a", {

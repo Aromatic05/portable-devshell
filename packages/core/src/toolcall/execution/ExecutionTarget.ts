@@ -100,6 +100,24 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             }
         };
 
+        const reportOutboundFailure = (
+            phase: "progress" | "result" | "error",
+            cause: unknown,
+            original?: unknown,
+        ): void => {
+            console.warn("ToolCall outbound hook failed", {
+                instance: this.#instanceName,
+                callId,
+                toolName: scope.toolName,
+                phase,
+                causeName: cause instanceof Error ? cause.name : typeof cause,
+                causeCode: getErrorCode(cause, "error.unknown"),
+                ...(original === undefined ? {} : {
+                    originalCode: getErrorCode(original, "error.unknown"),
+                }),
+            });
+        };
+
         if (hostRecorded) await recordAudit(() => this.#audit.requested(scope));
         if (request.rejection !== undefined) {
             if (hostRecorded) await recordAudit(() => this.#audit.denied(scope, request.rejection!.code));
@@ -183,8 +201,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                               } else {
                                   progressOverride = outerProgress;
                               }
-                          } catch {
+                          } catch (error) {
                               failureStage = "outboundHook";
+                              reportOutboundFailure("progress", error);
                               progressFailure = outboundHookFailure();
                           }
                       });
@@ -255,8 +274,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                             payload: adaptedResult,
                         },
                     }));
-            } catch {
+            } catch (error) {
                 failureStage = "outboundHook";
+                reportOutboundFailure("result", error);
                 throw outboundHookFailure();
             }
             const interpreted = await interpretTerminalValue(
@@ -324,8 +344,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     failure,
                     hookValue,
                 );
-            } catch {
+            } catch (error) {
                 failureStage = "outboundHook";
+                reportOutboundFailure("error", error, failure);
                 const hookError = outboundHookFailure();
                 if (hostRecorded) {
                     await recordAudit(() => this.#audit.failed(
@@ -438,7 +459,8 @@ function withExecutionOutcome(
     completed: boolean,
     stage?: ToolCallFailureStage,
 ): Error {
-    if (!completed) return error instanceof Error ? error : new Error(String(error));
+    if (!completed && stage === undefined)
+        return error instanceof Error ? error : new Error(String(error));
     const body = toRemoteErrorBody(error);
     const details = body?.details;
     return createRemoteError({
@@ -447,7 +469,7 @@ function withExecutionOutcome(
         details: {
             ...(details !== null && typeof details === "object" && !Array.isArray(details)
                 ? details : {}),
-            executionCompleted: true,
+            executionCompleted: completed,
             ...(stage === undefined ? {} : { failureStage: stage }),
         },
         message: errorMessage(error),
