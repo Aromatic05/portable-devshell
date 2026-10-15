@@ -14,7 +14,7 @@ export interface EnvironmentTransport {
     prepareExtensionResource(
         input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult>;
-    prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult>;
+    prepareWorkspace(workspace: string, temporaryDirectory?: string): Promise<WorkerWorkspacePrepareResult>;
     readAlerts(workspace: string): Promise<WorkerAlertsReadResult>;
     releaseAlerts(workspace: string): Promise<void>;
     touchAlerts(workspace: string): Promise<WorkerAlertsReadResult>;
@@ -32,9 +32,10 @@ export function createEnvironmentTransport(
                 "prepareExtensionResource",
                 input,
             ),
-        prepareWorkspace: (workspace) =>
+        prepareWorkspace: (workspace, temporaryDirectory) =>
             port.request<WorkerWorkspacePrepareResult>("prepareWorkspace", {
                 workspace,
+                ...(temporaryDirectory === undefined ? {} : { temporaryDirectory }),
             }),
         readAlerts: (workspace) =>
             port.request<WorkerAlertsReadResult>("readAlerts", { workspace }),

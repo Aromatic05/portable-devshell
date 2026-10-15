@@ -33,9 +33,10 @@ export class WorkerEnvironment implements WorkerEnvironmentApi {
 
     async prepareWorkspace(
         workspace: string,
+        temporaryDirectory?: string,
     ): Promise<WorkerWorkspacePrepareResult> {
         this.#assertReady();
-        return await this.#protocolClient.prepareWorkspace(workspace);
+        return await this.#protocolClient.prepareWorkspace(workspace, temporaryDirectory);
     }
 
     async readAlerts(workspace: string): Promise<WorkerAlertsReadResult> {

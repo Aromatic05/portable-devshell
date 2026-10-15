@@ -12,6 +12,7 @@ use crate::instance::workspace::prepare::{self, WorkspaceError};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkspacePrepareInput {
     workspace: String,
+    temporary_directory: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -33,7 +34,11 @@ struct WorkspacePrepareResult {
 pub fn prepare_handler() -> Arc<dyn ControlHandler> {
     control_handler(|request| {
         let input: WorkspacePrepareInput = parse_params(request)?;
-        let result = prepare::prepare(Path::new(&input.workspace)).map_err(rpc_error)?;
+        let result = prepare::prepare_with_temporary_directory(
+            Path::new(&input.workspace),
+            input.temporary_directory.as_deref().map(Path::new),
+        )
+        .map_err(rpc_error)?;
         serialize(WorkspacePrepareResult {
             project_memory_agent_file: protocol_path(&result.project_memory_agent_file),
             project_memory_directory: protocol_path(&result.project_memory_directory),

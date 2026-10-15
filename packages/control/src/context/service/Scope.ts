@@ -51,7 +51,12 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             let attached = false;
             let committed = false;
             try {
-                prepared = await environment.prepareWorkspace(workspace);
+                prepared = await environment.prepareWorkspace(
+                    workspace,
+                    previous?.workspace === workspace
+                        ? previous.temporaryDirectory
+                        : undefined,
+                );
                 await beforeCommit?.(prepared);
                 signal?.throwIfAborted();
                 await this.#registry.attachEnvironment(

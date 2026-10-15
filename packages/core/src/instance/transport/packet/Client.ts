@@ -87,9 +87,13 @@ export class WorkerProtocolClient {
 
     async prepareWorkspace(
         workspace: string,
+        temporaryDirectory?: string,
     ): Promise<WorkerWorkspacePrepareResult> {
         return asObjectResult<WorkerWorkspacePrepareResult>(
-            await this.#request("core", "workspace.prepare", { workspace }),
+            await this.#request("core", "workspace.prepare", {
+                workspace,
+                ...(temporaryDirectory === undefined ? {} : { temporaryDirectory }),
+            }),
         );
     }
 

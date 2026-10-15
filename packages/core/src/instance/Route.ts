@@ -176,6 +176,10 @@ function createEnvironmentRouteModule(instance: Instance): ControlPortDefinition
                     "workspace",
                     "environment.prepareWorkspace",
                 ),
+                typeof request.payload === "object" && request.payload !== null &&
+                    !Array.isArray(request.payload) &&
+                    typeof request.payload.temporaryDirectory === "string"
+                    ? request.payload.temporaryDirectory : undefined,
             )) as unknown as JsonValue,
         readAlerts: async (request) =>
             (await environment.readAlerts(

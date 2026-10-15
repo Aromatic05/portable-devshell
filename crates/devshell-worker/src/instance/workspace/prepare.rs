@@ -33,7 +33,15 @@ pub struct WorkspacePrepareResult {
 const CONTEXT_TEMP_ROOT: &str = "context-tmp";
 const CONTEXT_TEMP_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
+#[cfg(test)]
 pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceError> {
+    prepare_with_temporary_directory(workspace, None)
+}
+
+pub fn prepare_with_temporary_directory(
+    workspace: &Path,
+    previous_temporary_directory: Option<&Path>,
+) -> Result<WorkspacePrepareResult, WorkspaceError> {
     if !workspace.is_absolute() {
         return Err(WorkspaceError::new(
             "workspace.invalid",
@@ -76,14 +84,10 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
     ensure_dir(&workspace_temp_root, 0o700)
         .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error))?;
     touch_temporary_directory(&workspace_temp_root)?;
+    let temporary_directory =
+        reuse_or_create_temporary_directory(&workspace_temp_root, previous_temporary_directory)?;
     gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
     gc_stale_context_temp(&workspace_temp_root, CONTEXT_TEMP_TTL);
-
-    let temporary_directory = tempfile::Builder::new()
-        .prefix("context-")
-        .tempdir_in(&workspace_temp_root)
-        .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error.to_string()))?
-        .keep();
 
     Ok(WorkspacePrepareResult {
         project_memory_agent_file,
@@ -92,6 +96,51 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
         temporary_directory,
         workspace,
     })
+}
+
+fn reuse_or_create_temporary_directory(
+    workspace_temp_root: &Path,
+    previous: Option<&Path>,
+) -> Result<PathBuf, WorkspaceError> {
+    if let Some(previous) = previous {
+        if previous.parent() != Some(workspace_temp_root)
+            || !previous
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("context-"))
+        {
+            return Err(WorkspaceError::new(
+                "workspace.temporaryInvalid",
+                "previous Context temporary directory is outside its Workspace",
+            ));
+        }
+        match previous.canonicalize() {
+            Ok(path) => {
+                let canonical_root = workspace_temp_root.canonicalize().map_err(|error| {
+                    WorkspaceError::new("workspace.temporaryUnavailable", error.to_string())
+                })?;
+                if path.parent() != Some(canonical_root.as_path()) {
+                    return Err(WorkspaceError::new(
+                        "workspace.temporaryInvalid",
+                        "previous Context temporary directory belongs to another Workspace",
+                    ));
+                }
+                touch_context_temporary_directory(&path)?;
+                return Ok(previous.to_path_buf());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(WorkspaceError::new(
+                    "workspace.temporaryUnavailable",
+                    error.to_string(),
+                ));
+            }
+        }
+    }
+    tempfile::Builder::new()
+        .prefix("context-")
+        .tempdir_in(workspace_temp_root)
+        .map(|directory| directory.keep())
+        .map_err(|error| WorkspaceError::new("workspace.temporaryUnavailable", error.to_string()))
 }
 
 fn workspace_key(workspace: &Path) -> String {
@@ -404,7 +453,10 @@ fn temporary_prefix(workspace: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SystemTime, gc_stale_context_temp, prepare, touch_temporary_directory};
+    use super::{
+        SystemTime, gc_stale_context_temp, prepare, prepare_with_temporary_directory,
+        touch_temporary_directory,
+    };
 
     #[test]
     fn creates_stable_project_memory_and_unique_temporary_directories() {
@@ -431,6 +483,29 @@ mod tests {
         assert_eq!(third.project_memory_directory, memory);
         assert_eq!(third.project_memory_agent_file, memory.join("INDEX.md"));
         assert!(third.project_memory_present);
+    }
+
+    #[test]
+    fn reuses_context_temporary_directory_on_repeated_workspace_prepare() {
+        let workspace = crate::testing::temp_dir();
+        let first = prepare(workspace.path()).unwrap();
+        let repeated =
+            prepare_with_temporary_directory(workspace.path(), Some(&first.temporary_directory))
+                .unwrap();
+        assert_eq!(first.temporary_directory, repeated.temporary_directory);
+        assert!(repeated.temporary_directory.is_dir());
+
+        let another = crate::testing::temp_dir();
+        let invalid =
+            prepare_with_temporary_directory(another.path(), Some(&first.temporary_directory))
+                .unwrap_err();
+        assert_eq!(invalid.code, "workspace.temporaryInvalid");
+
+        std::fs::remove_dir(&first.temporary_directory).unwrap();
+        let recovered =
+            prepare_with_temporary_directory(workspace.path(), Some(&first.temporary_directory))
+                .unwrap();
+        assert_ne!(first.temporary_directory, recovered.temporary_directory);
     }
 
     #[test]

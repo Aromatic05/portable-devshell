@@ -35,7 +35,7 @@ export interface WorkerEnvironment {
     prepareExtensionResource(
         input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult>;
-    prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult>;
+    prepareWorkspace(workspace: string, temporaryDirectory?: string): Promise<WorkerWorkspacePrepareResult>;
     readAlerts(workspace: string): Promise<WorkerAlertsReadResult>;
     releaseAlerts(workspace: string): Promise<void>;
     touchAlerts(workspace: string): Promise<WorkerAlertsReadResult>;
