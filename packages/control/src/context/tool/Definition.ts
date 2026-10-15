@@ -69,6 +69,17 @@ function environmentInfoDefinition(): ToolDefinition {
                     type: "array",
                 },
                 instance: { minLength: 1, type: "string" },
+                memory: {
+                    additionalProperties: false,
+                    description: "Current Context Memory bound by devshell memory init/inherit; absent when unbound.",
+                    properties: {
+                        name: { minLength: 1, type: "string" },
+                        directory: { minLength: 1, type: "string" },
+                        mailbox: { minLength: 1, type: "string" },
+                    },
+                    required: ["name", "directory", "mailbox"],
+                    type: "object",
+                },
                 modelCommands: {
                     description: "Model commands offered by the enabled Extensions for this Instance.",
                     items: { minLength: 1, type: "string" },

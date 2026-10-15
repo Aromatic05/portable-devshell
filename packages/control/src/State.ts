@@ -91,6 +91,27 @@ export class ControlState {
                     if (descriptor === undefined) throw new Error(name);
                     return descriptor.lifecycle.acquireLease();
                 },
+                memory: async (ctxId, instance, workspace, signal) => {
+                    if (!modelCommands(instance).includes("memory")) return undefined;
+                    const result = await modelCliCommands.command("memory", ["status"], {
+                        ctxId,
+                        context: {
+                            instanceReference: (target) =>
+                                this.contexts.api.registry.referenceInstance(ctxId, target),
+                        },
+                        instance,
+                        requestId: "environ_info",
+                        signal: signal ?? new AbortController().signal,
+                        workspace,
+                    });
+                    if (result.kind !== "json" || result.value === null ||
+                        typeof result.value !== "object" || Array.isArray(result.value))
+                        return undefined;
+                    const { name, directory, mailbox } = result.value;
+                    return typeof name === "string" && typeof directory === "string" &&
+                        typeof mailbox === "string"
+                        ? { name, directory, mailbox } : undefined;
+                },
                 modelCommands,
                 process: (name) =>
                     createProcessTransport(options.internalEndpoint, name),

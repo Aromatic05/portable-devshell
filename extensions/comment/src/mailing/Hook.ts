@@ -12,6 +12,7 @@ export function createMailingHook(
             typeof input.value.payload === "object" && input.value.payload !== null &&
             !Array.isArray(input.value.payload)) {
             const result = input.value.payload;
+            if (result.memory !== undefined) return input.value;
             if (Array.isArray(result.modelCommands) && result.modelCommands.includes("memory")) {
                 const existing = Array.isArray(result.comment) ? result.comment : [];
                 return {

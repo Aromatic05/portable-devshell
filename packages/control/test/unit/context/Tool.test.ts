@@ -240,3 +240,77 @@ test("Context registers definitions and executes environ_info through ToolCall h
     }
     assert.equal(registry.get("local", "environ_info"), undefined);
 });
+
+test("repeated environ_info keeps the Context temporary directory and reports its claimed Memory", async () => {
+    const { registry, toolRuntime, unbind } = createBoundRegistry();
+    const contextFile = join(tmpdir(), `portable-devshell-memory-${randomUUID()}.jsonl`);
+    const allocations: Array<string | undefined> = [];
+    const testEnvironment: EnvironmentTransport = {
+        ...environmentTransport,
+        async prepareWorkspace(workspace, previous) {
+            allocations.push(previous);
+            return {
+                projectMemoryAgentFile: `${workspace}/var/agent-work/INDEX.md`,
+                projectMemoryDirectory: `${workspace}/var/agent-work`,
+                projectMemoryPresent: true,
+                temporaryDirectory: previous ?? `/tmp/context-${allocations.length}`,
+                workspace,
+            };
+        },
+    };
+    const runtime = createContextRuntime({
+        contextFile,
+        environment: () => testEnvironment,
+        leaseInstance: () => ({ release() {} }),
+        process: () => processTransport,
+        runtime: () => instanceRuntimeTransport,
+    });
+    let selectedMemory: { directory: string; mailbox: string; name: string } | undefined;
+    let firstCtxId: string | undefined;
+    await runtime.initialize();
+    const uninstall = installContextTools(runtime.api, registry, {
+        environment: () => testEnvironment,
+        leaseInstance: () => ({ release() {} }),
+        memory: async (ctxId) => {
+            firstCtxId ??= ctxId;
+            return ctxId === firstCtxId ? selectedMemory : undefined;
+        },
+        modelCommands: () => ["memory"],
+        process: () => processTransport,
+    });
+    const bootstrap = async (session: string) =>
+        await toolRuntime.api.call("local", "environ_info", { workspace: "/repo" }, {
+            contextMode: "openai-session",
+            externalBindings: [{ kind: "openai/session", value: session }],
+            principal: "alice",
+            source: "mcp",
+        }) as Record<string, JsonValue>;
+    try {
+        const before = await bootstrap("chat-1");
+        assert.equal(before.memory, undefined);
+        assert.equal(before.ctxId, undefined);
+        assert.equal(before.temporaryDirectory, "/tmp/context-1");
+
+        selectedMemory = {
+            name: "chosen-agent",
+            directory: "/repo/var/agent-work/chosen-agent",
+            mailbox: "/repo/var/agent-work/chosen-agent/mailbox.md",
+        };
+        const after = await bootstrap("chat-1");
+        assert.equal(after.temporaryDirectory, before.temporaryDirectory);
+        assert.deepEqual(after.memory, selectedMemory);
+        assert.equal(after.projectMemoryDirectory, selectedMemory.directory);
+        assert.equal(after.projectMemoryAgentFile, selectedMemory.directory + "/INDEX.md");
+        assert.match(JSON.stringify(after.comment), /Reuse this directory/u);
+        assert.deepEqual(allocations.slice(0, 2), [undefined, "/tmp/context-1"]);
+
+        const differentAgent = await bootstrap("chat-2");
+        assert.equal(differentAgent.temporaryDirectory, "/tmp/context-3");
+        assert.equal(differentAgent.memory, undefined);
+    } finally {
+        uninstall();
+        unbind();
+        runtime.close();
+        await rm(contextFile, { force: true });
+    }
+});

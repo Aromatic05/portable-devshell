@@ -27,6 +27,24 @@ test("Memory usage advice is contributed only when Comment's model command is av
     assert.match(offered.comment[1]!, /devshell memory inherit/u);
     const unavailable = await hook(input([]), {} as never);
     assert.deepEqual((unavailable.payload as { comment: string[] }).comment, ["Context ready"]);
+    const bound = await hook({
+        ...input(["memory"]),
+        value: {
+            ...input(["memory"]).value,
+            payload: {
+                comment: ["Current Memory: /repo/var/agent-work/chosen-agent"],
+                modelCommands: ["memory"],
+                memory: {
+                    name: "chosen-agent",
+                    directory: "/repo/var/agent-work/chosen-agent",
+                    mailbox: "/repo/var/agent-work/chosen-agent/mailbox.md",
+                },
+            },
+        },
+    }, {} as never);
+    assert.deepEqual((bound.payload as { comment: string[] }).comment, [
+        "Current Memory: /repo/var/agent-work/chosen-agent",
+    ]);
 });
 
 const A = "file-panel-unify";

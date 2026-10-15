@@ -18,9 +18,13 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         for (const client of clients)
             await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
         const [a, b] = clients;
-        const ctxA = await context(a, workspace);
-        const ctxB = await context(b, workspace);
+        const initialA = await context(a, workspace);
+        const initialB = await context(b, workspace);
+        const ctxA = initialA.ctxId;
+        const ctxB = initialB.ctxId;
         assert.notEqual(ctxA, ctxB, "Independent agents need independent Contexts");
+        assert.notEqual(initialA.temporaryDirectory, initialB.temporaryDirectory,
+            "Independent Contexts must not share temporary directories");
 
         const claimedA = await bash(a, ctxA, "devshell memory init " + first);
         const claimedB = await bash(b, ctxB, "devshell memory init " + second);
@@ -28,6 +32,17 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         assertExit(claimedB, 0, "memory init B");
         assert.match(claimedA.stdout, new RegExp(first, "u"));
         assert.match(claimedB.stdout, new RegExp(second, "u"));
+
+        const initialized = await context(a, workspace, ctxA);
+        assert.equal(initialized.temporaryDirectory, initialA.temporaryDirectory,
+            "environ_info must reuse the Context temporary directory");
+        assert.equal(initialized.memory?.name, first);
+        assert.equal(initialized.memory?.directory, workspace + "/var/agent-work/" + first);
+        assert.equal(initialized.projectMemoryDirectory, initialized.memory.directory);
+        assert.equal(initialized.projectMemoryAgentFile, initialized.memory.directory + "/INDEX.md");
+        const repeated = await context(a, workspace, ctxA);
+        assert.equal(repeated.temporaryDirectory, initialA.temporaryDirectory);
+        assert.deepEqual(repeated.memory, initialized.memory);
 
         const outbox = "var/agent-work/" + first + "/chat.md";
         const inbox = "var/agent-work/" + second + "/mailbox.md";
@@ -81,14 +96,23 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
 
         const inherited = await bash(b, ctxB, "devshell memory inherit " + first);
         assertExit(inherited, 0, "memory inherit");
+        const resumed = await context(b, workspace, ctxB);
+        assert.equal(resumed.temporaryDirectory, initialB.temporaryDirectory);
+        assert.equal(resumed.memory?.directory, initialized.memory.directory);
+        assert.equal(resumed.projectMemoryDirectory, initialized.memory.directory);
         const previous = await bash(a, ctxA, "devshell memory");
         assertExit(previous, 0, "prior owner memory");
         assert.ok(!previous.stdout.includes(first), "The prior Context must lose ownership");
+        const formerOwner = await context(a, workspace, ctxA);
+        assert.equal(formerOwner.temporaryDirectory, initialA.temporaryDirectory);
+        assert.equal(formerOwner.memory, undefined,
+            "environ_info must not show a Memory after another Context inherits it");
         const recovered = await bash(b, ctxB, "devshell memory");
         assert.match(recovered.stdout, new RegExp(first, "u"));
 
         const released = await bash(b, ctxB, "devshell memory release");
         assertExit(released, 0, "release");
+        assert.equal((await context(b, workspace, ctxB)).memory, undefined);
 
         const names = (await a.listTools()).tools.map((tool) => tool.name);
         assert.equal(names.some((name) => name.startsWith("mail_")), false,
@@ -101,12 +125,14 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
     }
 }
 
-async function context(client, workspace) {
-    const result = await client.callTool({ name: "environ_info", arguments: { workspace } });
+async function context(client, workspace, ctxId) {
+    const result = await client.callTool({ name: "environ_info", arguments: {
+        workspace, ...(ctxId === undefined ? {} : { ctxId }),
+    } });
     assert.equal(result.isError, false, JSON.stringify(result));
-    const id = result.structuredContent?.ctxId;
-    assert.ok(typeof id === "string" && id.length > 0);
-    return id;
+    assert.ok(typeof result.structuredContent?.ctxId === "string" &&
+        result.structuredContent.ctxId.length > 0);
+    return result.structuredContent;
 }
 
 async function bash(client, ctxId, command) {

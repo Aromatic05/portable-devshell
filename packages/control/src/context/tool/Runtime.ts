@@ -12,12 +12,19 @@ import {
     readRemoteEnvironmentInput,
 } from "./Input.js";
 
+type CurrentMemory = {
+    name: string;
+    directory: string;
+    mailbox: string;
+};
+
 export function installContextTools(
     contexts: ContextApi,
     hooks: ToolCallRegistration,
     options: {
         environment(instance: string): EnvironmentTransport;
         leaseInstance(instance: string): { release(): void };
+        memory?(ctxId: string, instance: string, workspace: string, signal?: AbortSignal): Promise<CurrentMemory | undefined>;
         modelCommands?(instance: string): readonly string[];
         process(instance: string): ProcessTransport;
     },
@@ -47,6 +54,7 @@ class ContextToolRuntime {
     readonly #contexts: ContextApi;
     readonly #environment: (instance: string) => EnvironmentTransport;
     readonly #leaseInstance: (instance: string) => { release(): void };
+    readonly #memory?: (ctxId: string, instance: string, workspace: string, signal?: AbortSignal) => Promise<CurrentMemory | undefined>;
     readonly #modelCommands: (instance: string) => readonly string[];
     readonly #process: (instance: string) => ProcessTransport;
 
@@ -55,6 +63,7 @@ class ContextToolRuntime {
         options: {
             environment(instance: string): EnvironmentTransport;
             leaseInstance(instance: string): { release(): void };
+            memory?(ctxId: string, instance: string, workspace: string, signal?: AbortSignal): Promise<CurrentMemory | undefined>;
             modelCommands?(instance: string): readonly string[];
             process(instance: string): ProcessTransport;
         },
@@ -62,6 +71,7 @@ class ContextToolRuntime {
         this.#contexts = contexts;
         this.#environment = options.environment;
         this.#leaseInstance = options.leaseInstance;
+        this.#memory = options.memory;
         this.#modelCommands = options.modelCommands ?? (() => []);
         this.#process = options.process;
     }
@@ -146,14 +156,23 @@ class ContextToolRuntime {
                 );
                 committed = true;
                 await this.#contexts.cleanup.reconcile(record.ctxId);
+                const memory = await this.#memory?.(
+                    record.ctxId,
+                    context.instance,
+                    prepared.workspace,
+                    signal,
+                );
                 return {
                     ...this.#expose(record, context),
                     comment: [
-                        ...(prepared.projectMemoryPresent !== false
+                        ...(memory === undefined && prepared.projectMemoryPresent !== false
                             ? [
                                   `Existing work index: ${prepared.projectMemoryAgentFile}. Consult it when looking for previous work; it is not the current Context's Memory binding.`,
                               ]
                             : []),
+                        ...(memory === undefined ? [] : [
+                            `Current Memory: ${memory.directory} (${memory.name}). Reuse this directory; do not initialize another Memory for this Context.`,
+                        ]),
                         `Use ${prepared.temporaryDirectory} only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.`,
                         `Put large working data and anything that must persist in ${prepared.workspace}/var/.`,
                         ...modelDevshellComments(
@@ -164,6 +183,7 @@ class ContextToolRuntime {
                     expiresAt: record.expiresAt,
                     instance: context.instance,
                     modelCommands: [...this.#modelCommands(context.instance)],
+                    ...(memory === undefined ? {} : { memory }),
                     platform: {
                         arch: worker.platform.arch,
                         ...(worker.platform.distribution === undefined
@@ -182,12 +202,12 @@ class ContextToolRuntime {
                             ? {}
                             : { shell: worker.platform.shell.kind }),
                     },
-                    ...(prepared.projectMemoryPresent !== false
+                    ...(memory !== undefined || prepared.projectMemoryPresent !== false
                         ? {
-                              projectMemoryAgentFile:
-                                  prepared.projectMemoryAgentFile,
-                              projectMemoryDirectory:
-                                  prepared.projectMemoryDirectory,
+                              projectMemoryAgentFile: memory === undefined
+                                  ? prepared.projectMemoryAgentFile
+                                  : `${memory.directory}/INDEX.md`,
+                              projectMemoryDirectory: memory?.directory ?? prepared.projectMemoryDirectory,
                           }
                         : {}),
                     remoteEnvironment: {
