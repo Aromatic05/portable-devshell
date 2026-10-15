@@ -21,7 +21,7 @@ use crate::capability::artifact::unix_time_millis;
 use crate::instance::sandbox::SecurityPolicy;
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedDirectory, ResolvedMetadata, ResolvedPath,
-    parse_requested_path, resolve_existing_target,
+    normalize_requested_path, parse_requested_path, resolve_existing_target,
 };
 use crate::tool::{ToolCancellation, ToolError};
 
@@ -278,7 +278,8 @@ impl ArtifactPayloadStore {
     ) -> Result<ArtifactPayloadOpenResult, ToolError> {
         cancellation.check()?;
         validate_expiration(expires_at_ms)?;
-        let requested = parse_requested_path(raw_path)?;
+        let normalized = normalize_requested_path(raw_path)?;
+        let requested = parse_requested_path(&normalized)?;
         let capability = match requested.namespace {
             PathNamespace::Workspace => FilesystemCapability::WorkspaceRead,
             PathNamespace::Absolute => FilesystemCapability::AbsoluteRead,
@@ -1236,6 +1237,21 @@ mod tests {
         assert!(chunk.eof);
 
         payloads.close(&opened.payload_id).unwrap();
+    }
+
+    #[test]
+    fn artifact_path_accepts_bare_workspace_relative_files() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("result.png"), b"image bytes").unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let opened = payloads
+            .open_path(&workspace, "result.png", &DisabledSecurityPolicy, expires_at_ms())
+            .unwrap();
+        let chunk = payloads.read(&opened.payload_id, 0, 1024).unwrap();
+        assert_eq!(STANDARD.decode(chunk.content).unwrap(), b"image bytes");
     }
 
     #[test]
