@@ -112,7 +112,6 @@ impl ExecutionConfig {
             let result = match (&provider.driver, provider.name.as_str()) {
                 (Some(driver), _) => apply_json_driver(&mut prepared, cwd, driver),
                 (None, "variables") => apply_variables(&mut prepared, &provider.content),
-                (None, "direnv") => apply_direnv(&mut prepared, cwd),
                 _ => Err(format!("unknown environment provider `{}`", provider.name)),
             };
             match result {
@@ -181,10 +180,6 @@ fn apply_variables(
     Ok(())
 }
 
-fn apply_direnv(env: &mut BTreeMap<String, Option<String>>, cwd: &Path) -> Result<(), String> {
-    apply_json_driver_command(env, cwd, "direnv", &["export".into(), "json".into()])
-}
-
 fn apply_json_driver(
     env: &mut BTreeMap<String, Option<String>>,
     cwd: &Path,
@@ -226,7 +221,7 @@ fn apply_json_driver_command(
             serde_json::Value::Null => {
                 env.insert(key.clone(), None);
             }
-            _ => return Err(format!("direnv value for {key} is not a string or null")),
+            _ => return Err(format!("environment value for {key} is not a string or null")),
         }
     }
     Ok(())
