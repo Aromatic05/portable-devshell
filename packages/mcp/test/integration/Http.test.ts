@@ -85,6 +85,7 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
 
         const discovery = await discoverModern(endpoint);
         assert.equal(discovery.status, 200);
+        assert.match(discovery.headers.get("content-type") ?? "", /^application\/json\b/iu);
         const payload = parseMcpHttpResponse<{
             result?: { supportedVersions?: string[] };
         }>(await discovery.text());
@@ -112,6 +113,7 @@ test("production MCP host advertises and reads its MCP App resource", async () =
                 params as Record<string, unknown>,
             );
             assert.equal(response.status, 200);
+            assert.match(response.headers.get("content-type") ?? "", /^application\/json\b/iu);
             return parseMcpHttpResponse<{
                 result?: {
                     resources?: Array<{ uri: string; mimeType: string }>;

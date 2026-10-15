@@ -5,7 +5,7 @@ import { McpEndpointBinding } from "../../../../src/protocol/Binding.ts";
 import { McpProtocolRoute } from "../../../../src/protocol/Route.ts";
 import { HttpHost } from "../../../../src/testing/Http.ts";
 import { createTestMcpEndpoint } from "../../../ContextRuntime.ts";
-import { postModern } from "../../../integration/ModernProtocol.ts";
+import { modernRequestInit, modernRpcRequest, postModern } from "../../../integration/ModernProtocol.ts";
 
 function createRoute() {
     const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
@@ -77,6 +77,47 @@ test("MCP final forced drain closes the old straggler after its grace period", a
         assert.ok(failure instanceof Error);
         assert.match(failure.message, /fetch|socket|terminated/iu);
         assert.equal((await postModern(url, 2, "server/discover")).status, 404);
+    } finally {
+        proceed();
+        protocol.stop();
+        await http.stop();
+    }
+});
+
+test("lost HTTP connection does not poison the next MCP request", async () => {
+    const { http, protocol, binding } = createRoute();
+    const original = binding.handleRequest.bind(binding);
+    let admitted!: () => void;
+    const entered = new Promise<void>((resolve) => { admitted = resolve; });
+    let proceed!: () => void;
+    const gate = new Promise<void>((resolve) => { proceed = resolve; });
+    let first = true;
+    binding.handleRequest = async (request, response, body) => {
+        if (first) {
+            first = false;
+            admitted();
+            await gate;
+        }
+        await original(request, response, body);
+    };
+    await http.start();
+    try {
+        const url = urlFor(http);
+        const controller = new AbortController();
+        const request = modernRpcRequest("disconnected", "server/discover");
+        const interrupted = fetch(url, {
+            ...modernRequestInit("server/discover", request),
+            signal: controller.signal,
+        }).then(() => false, () => true);
+        await entered;
+        controller.abort();
+        proceed();
+        assert.equal(await interrupted, true);
+        const resumed = await postModern(url, "reconnected", "server/discover");
+        assert.equal(resumed.status, 200);
+        assert.match(resumed.headers.get("content-type") ?? "", /^application\/json\b/iu);
+        const result = await resumed.json() as { result?: { supportedVersions?: string[] } };
+        assert.ok(result.result?.supportedVersions?.includes("2026-07-28"));
     } finally {
         proceed();
         protocol.stop();

@@ -48,7 +48,11 @@ export class McpEndpointBinding {
         this.#handler = createMcpHandler(() => this.#createServer(), {
             keepAliveMs: 15_000,
             legacy: "reject",
-            responseMode: "sse",
+            // One-shot results use JSON rather than a long-lived SSE response.
+            // The SDK upgrades to SSE when a call actually emits progress or
+            // another mid-call notification. This preserves streaming tools
+            // while avoiding a needless fragile stream for ordinary calls.
+            responseMode: "auto",
         });
         this.#nodeHandler = toNodeHandler(this.#handler);
     }
