@@ -95,6 +95,50 @@ async function setupSandbox(
     return sandbox;
 }
 
+test("Extension sandbox accepts a delayed health Pong after one missed deadline", async (t) => {
+    const faults: Error[] = [];
+    const sandbox = await setupSandbox(t, "sandbox-late-health", `
+export function activate(context) {
+    setTimeout(() => {
+        const end = Date.now() + 130;
+        while (Date.now() < end) {}
+    }, 35);
+    context.register({ id: "cli.native-commands" }, "test",
+        async () => ({ kind: "text", text: "healthy" }));
+}
+`, {
+        healthCheckIntervalMs: 20,
+        healthCheckTimeoutMs: 100,
+        onFault: (error) => faults.push(error),
+    });
+    await sandbox.start();
+    await new Promise((resolve) => setTimeout(resolve, 280));
+    assert.equal(sandbox.faultError, undefined);
+    assert.equal(faults.length, 0);
+    assert.equal(await cliText(sandbox, [], "late-health-pong"), "healthy");
+});
+
+test("Extension sandbox still faults after two full unanswered health deadlines", async (t) => {
+    const faults: Error[] = [];
+    const sandbox = await setupSandbox(t, "sandbox-stuck-health", `
+export function activate(context) {
+    setTimeout(() => {
+        const end = Date.now() + 400;
+        while (Date.now() < end) {}
+    }, 35);
+    context.register({ id: "cli.native-commands" }, "test",
+        async () => ({ kind: "text", text: "unreachable" }));
+}
+`, {
+        healthCheckIntervalMs: 20,
+        healthCheckTimeoutMs: 100,
+        onFault: (error) => faults.push(error),
+    });
+    await sandbox.start();
+    await waitFor(() => faults.length === 1);
+    assert.match(faults[0]!.message, /idle health check within 200ms/u);
+});
+
 test("Extension sandbox runs in an isolated thread and bridges assets, Worker tools, and progress", async (t) => {
     const calls: string[] = [];
     const sandbox = await setupSandbox(
@@ -1772,6 +1816,8 @@ function createSandbox(options: {
     contextObserve?: ExtensionContextObserveCapability;
     entryPath: string;
     externalMemoryLimitMb?: number;
+    healthCheckIntervalMs?: number;
+    healthCheckTimeoutMs?: number;
     hostCallbackTimeoutMs?: number;
     invocationAbortGraceMs?: number;
     instanceEventPublish?: ExtensionInstanceEventPublishCapability;
@@ -1815,6 +1861,10 @@ function createSandbox(options: {
         ...(options.externalMemoryLimitMb === undefined
             ? {}
             : { externalMemoryLimitMb: options.externalMemoryLimitMb }),
+        ...(options.healthCheckIntervalMs === undefined
+            ? {} : { healthCheckIntervalMs: options.healthCheckIntervalMs }),
+        ...(options.healthCheckTimeoutMs === undefined
+            ? {} : { healthCheckTimeoutMs: options.healthCheckTimeoutMs }),
         ...(options.hostCallbackTimeoutMs === undefined
             ? {}
             : { hostCallbackTimeoutMs: options.hostCallbackTimeoutMs }),

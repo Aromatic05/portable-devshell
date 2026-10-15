@@ -851,15 +851,18 @@ test("selecting an eager generation retires validation runtime before publishing
     assert.deepEqual(disposed, ["a", "a"]);
 });
 
-test("Extension host reports a faulted active generation as failed and rejects new leases", async () => {
+test("Extension host replaces a faulted sandbox generation without changing selection or replaying commands", async () => {
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: true, selectedGeneration: "a" } },
         schemaVersion: 1,
     });
     let loaded: ExtensionGeneration | undefined;
+    const disposed: string[] = [];
+    let loads = 0;
     const host = new ExtensionHost({
         loader: createLoader(async (id, name) => {
-            loaded = generation(id, name, () => "ok", []);
+            loads++;
+            loaded = generation(id, name, () => "ok", disposed);
             return loaded;
         }),
         registry,
@@ -868,15 +871,53 @@ test("Extension host reports a faulted active generation as failed and rejects n
     assert.equal(await commandText(host, "example", "activate"), "ok");
     loaded!.fault(new Error("sandbox OOM"));
 
+    assert.equal(await commandText(host, "example", "after-recovery"), "ok");
     const record = (await host.list())[0]!;
-    assert.equal(record.state, "failed");
+    assert.equal(record.state, "active");
     assert.equal(record.activeGeneration, "a");
-    assert.equal(record.failure?.message, "sandbox OOM");
-    await assert.rejects(
-        host.acquireRegistration("cli.native-commands", "example"),
-        /sandbox OOM/u,
-    );
+    assert.equal(registry.value.extensions.example?.selectedGeneration, "a");
+    assert.equal(loads, 2);
     await host.stop();
+    assert.deepEqual(disposed, ["a", "a"]);
+});
+
+test("Extension host can recover after a transient sandbox rebuild failure without restarting Control", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: true, selectedGeneration: "a" } },
+        schemaVersion: 1,
+    });
+    let loaded: ExtensionGeneration | undefined;
+    let loads = 0;
+    const disposed: string[] = [];
+    const warnings = [] as unknown[][];
+    const warning = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+        const host = new ExtensionHost({
+            loader: createLoader(async (id, name) => {
+                loads++;
+                if (loads === 2) throw new Error("temporary sandbox initialization failure");
+                loaded = generation(id, name, () => "recovered", disposed);
+                return loaded;
+            }),
+            registry,
+        });
+        await host.start();
+        assert.equal(await commandText(host, "example", "start"), "recovered");
+        loaded!.fault(new Error("worker health probe timed out"));
+        await assert.rejects(
+            host.acquireRegistration("cli.native-commands", "example"),
+            /worker health probe timed out|temporary sandbox initialization failure/u,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 270));
+        assert.equal(await commandText(host, "example", "retry"), "recovered");
+        assert.equal(loads, 3);
+        assert.equal((await host.list())[0]?.state, "active");
+        await host.stop();
+        assert.deepEqual(disposed, ["a", "a"]);
+    } finally {
+        console.warn = warning;
+    }
 });
 
 test("Extension host waits for every instance resource retirement even when another generation fails", async () => {
@@ -1144,7 +1185,7 @@ test("Extension host snapshots public visibility atomically and ignores retireme
     await host.stop();
 });
 
-test("Extension host publishes active runtime faults as public snapshot changes", async () => {
+test("Extension host publishes runtime faults and subsequent automatic recovery as snapshot changes", async () => {
     let activeGeneration: ExtensionGeneration | undefined;
     const changes = new ExtensionChangeHub();
     const host = new ExtensionHost({
@@ -1178,12 +1219,9 @@ test("Extension host publishes active runtime faults as public snapshot changes"
     const afterFault = await readExtensionSnapshot(host, () => ({
         tuiPages: [], tuiSupported: true, webApplications: [], webPages: [], webSupported: true,
     }));
-    assert.equal(afterFault.extensions[0]?.state, "failed");
-    assert.deepEqual(afterFault.extensions[0]?.failure, {
-        generation: "a",
-        message: "runtime fault",
-    });
-    assert.equal(afterFault.revision, beforeFault.revision + 1);
+    assert.equal(afterFault.extensions[0]?.state, "active");
+    assert.equal(afterFault.extensions[0]?.failure, undefined);
+    assert.equal(afterFault.revision, beforeFault.revision + 2);
     await host.stop();
 });
 

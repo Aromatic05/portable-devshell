@@ -170,6 +170,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     #configUnsubscribe?: () => void;
     #faulted?: Error;
     #healthDeadlineTimer?: NodeJS.Timeout;
+    #healthGraceUsed = false;
     #healthProbeId?: string;
     #healthTimer?: NodeJS.Timeout;
     #memoryWatchTimer?: NodeJS.Timeout;
@@ -1071,6 +1072,10 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         const id = randomUUID();
         this.#healthProbeId = id;
         this.#send({ id, type: "healthPing" });
+        this.#armHealthDeadline(id);
+    }
+
+    #armHealthDeadline(id: string): void {
         this.#healthDeadlineTimer = setTimeout(() => {
             if (
                 this.#healthProbeId !== id ||
@@ -1078,9 +1083,25 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 this.#faulted !== undefined
             )
                 return;
+            if (this.#pending.size > 0) {
+                // A call started after the idle ping was sent. The sandbox
+                // may legitimately be busy until its invocation deadline;
+                // the idle watchdog must not terminate that invocation.
+                this.#clearHealthProbe();
+                this.#scheduleHealthCheck();
+                return;
+            }
+            if (!this.#healthGraceUsed) {
+                // A temporarily stalled host event loop can run the deadline
+                // before delivering an already queued pong. Give that same
+                // probe another window; never replace its ID or drop late pongs.
+                this.#healthGraceUsed = true;
+                this.#armHealthDeadline(id);
+                return;
+            }
             this.#fault(
                 new Error(
-                    `Extension sandbox did not respond to an idle health check within ${this.#healthCheckTimeoutMs}ms.`,
+                    `Extension sandbox did not respond to an idle health check within ${this.#healthCheckTimeoutMs * 2}ms.`,
                 ),
             );
         }, this.#healthCheckTimeoutMs);
@@ -1089,6 +1110,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
 
     #clearHealthProbe(): void {
         this.#healthProbeId = undefined;
+        this.#healthGraceUsed = false;
         if (this.#healthDeadlineTimer !== undefined)
             clearTimeout(this.#healthDeadlineTimer);
         this.#healthDeadlineTimer = undefined;

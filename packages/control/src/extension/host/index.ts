@@ -55,6 +55,7 @@ export interface ExtensionHostOptions {
 }
 
 export class ExtensionHost {
+    readonly #recoveryAttempts = new Map<string, { attempts: number; at: number }>();
     readonly #changeHub?: ExtensionChangeHub;
     #publicVisibility = new Map<string, string>();
     readonly #active = new Map<string, ExtensionGeneration>();
@@ -177,23 +178,16 @@ export class ExtensionHost {
                 );
             }
             const currentActive = this.#active.get(current.extensionId);
-            if (currentActive?.state === "faulted") {
-                throw extensionFailure(
-                    current.extensionId,
-                    currentActive.generation,
-                    currentActive.faultError ??
-                        new Error(
-                            `Extension ${current.extensionId} sandbox faulted.`,
-                        ),
-                );
-            }
+            if (currentActive?.state === "faulted")
+                await this.#recoverFaulted(current.extensionId, currentActive);
+            const available = this.#active.get(current.extensionId);
             if (
-                currentActive?.generation === current.generation &&
-                currentActive.state === "active"
+                available?.generation === current.generation &&
+                available.state === "active"
             ) {
                 return this.#acquireRegistrationFromGeneration(
                     current.extensionId,
-                    currentActive,
+                    available,
                     pointId,
                     id,
                 );
@@ -669,17 +663,11 @@ export class ExtensionHost {
         if (catalog === undefined)
             throw extensionNotActive(id, "not present in the static catalog");
         const existing = this.#active.get(id);
-        if (existing?.state === "faulted") {
-            throw extensionFailure(
-                id,
-                existing.generation,
-                existing.faultError ??
-                    new Error(`Extension ${id} sandbox faulted.`),
-            );
-        }
+        if (existing?.state === "faulted")
+            await this.#recoverFaulted(id, existing);
         if (
-            existing?.state === "active" &&
-            existing.generation === catalog.generation
+            this.#active.get(id)?.state === "active" &&
+            this.#active.get(id)?.generation === catalog.generation
         )
             return;
 
@@ -880,9 +868,61 @@ export class ExtensionHost {
         const previous = this.#active.get(id);
         this.#active.set(id, candidate);
         candidate.onFault(() => {
-            if (this.#active.get(id) === candidate) this.#publishVisibility();
+            if (this.#active.get(id) !== candidate) return;
+            this.#recordFailure(
+                id,
+                candidate.generation,
+                candidate.faultError ?? new Error("Extension sandbox faulted."),
+            );
+            this.#publishVisibility();
+            // Recreate only the sandbox generation. Never replay the ToolCall.
+            void this.#exclusive(async () => {
+                if (this.#stopping || !this.#started ||
+                    this.#active.get(id) !== candidate) return;
+                await this.#recoverFaulted(id, candidate);
+            }).catch((error: unknown) => {
+                console.warn("Extension sandbox recovery unavailable", {
+                    extensionId: id,
+                    generation: candidate.generation,
+                    errorCode: error instanceof Error && "code" in error
+                        ? String(error.code) : "extension.recoveryFailed",
+                });
+            });
         });
         if (previous !== undefined) this.#retirement.track(id, previous);
+    }
+
+    /** Called under #exclusive. Retains the selected generation and its configuration. */
+    async #recoverFaulted(id: string, previous: ExtensionGeneration): Promise<void> {
+        if (this.#active.get(id) !== previous || previous.state !== "faulted") return;
+        const entry = this.#requireRegistry().extensions[id];
+        if (!entry?.enabled || entry.selectedGeneration !== previous.generation)
+            throw extensionNotActive(id);
+        const now = Date.now();
+        const last = this.#recoveryAttempts.get(id);
+        const attempts = last !== undefined && now - last.at < 60_000
+            ? last.attempts : 0;
+        const cooldown = attempts === 0 ? 0 : Math.min(250 * 2 ** (attempts - 1), 10_000);
+        if (last !== undefined && now - last.at < cooldown)
+            throw extensionFailure(id, previous.generation,
+                previous.faultError ?? new Error("Extension recovery cooling down."));
+        this.#recoveryAttempts.set(id, { attempts: attempts + 1, at: now });
+        let replacement: ExtensionGeneration | undefined;
+        try {
+            await this.#preflightGeneration(id, previous.generation);
+            replacement = await this.#loadCandidate(id, previous.generation);
+            replacement.activate();
+            if (replacement.state !== "active")
+                throw replacement.faultError ?? new Error("Extension recovery faulted.");
+            this.#publish(id, replacement);
+            this.#failures.delete(id);
+            this.#runtimeFailures.delete(id);
+        } catch (error) {
+            if (replacement !== undefined && this.#active.get(id) !== replacement)
+                await replacement.retire().catch(() => undefined);
+            this.#recordFailure(id, previous.generation, error);
+            throw extensionFailure(id, previous.generation, error);
+        }
     }
 
     #record(id: string, entry: ExtensionRegistryEntry, publicView = false): ExtensionRuntimeRecord {
