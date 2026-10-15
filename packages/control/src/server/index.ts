@@ -131,6 +131,7 @@ export class ControlServer {
             instanceEditor: options.instanceEditor,
             instanceChanges: options.instanceChanges,
             instances: options.instances,
+            toolCallProvenance: options.mcp.toolProvenance,
             mcpStatus: () => options.mcp.status(),
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: createOperationalOverviewRuntime({

@@ -1,5 +1,5 @@
 import type { InstanceRegistry } from "../instance/Api.js";
-import { routeModule, mergeControlPortsByName, type ControlHostDefinition, type ControlPortDefinition, JsonValue, } from "@portable-devshell/shared";
+import { routeModule, mergeControlPortsByName, type ControlHostDefinition, type ControlPortDefinition, type ToolCallProvenanceApi, JsonValue, } from "@portable-devshell/shared";
 
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
@@ -90,6 +90,7 @@ export interface ControlRouteExtensionPort {
 
 export interface ControlRouteRegistryOptions {
     artifact?: ArtifactRouteApi;
+    toolCallProvenance?: ToolCallProvenanceApi;
     cliCommands?: CliCommandPort;
     config?: ConfigEditorPort;
     configChanges?: ConfigChangeHub;
@@ -244,6 +245,7 @@ export class ControlRouteRegistry {
             definitions.push(
                 descriptor.host(
                     this.#options.extensionRoutes?.modules("instance") ?? [],
+                    this.#options.toolCallProvenance,
                 ),
             );
         }

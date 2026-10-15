@@ -23,6 +23,7 @@ import {
     type JsonValue,
     type MessageStream,
     type ToolCallQuery,
+    type ToolCallProvenanceApi,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -160,10 +161,30 @@ test("ControlSocketServer routes canonical control and instance operations over 
         { limit: 1_000 },
     );
     assert.deepEqual(harness.worker.lastReadLogsQuery, {
-        fromSeq: undefined,
         limit: 100,
         maxDecodedBytes: 1024 * 1024,
     });
+
+    // The real route must bound a large log before encoding an Envelope.
+    // The fixture deliberately does not shorten the Worker response.
+    harness.worker.logMessage = "\u0000".repeat(17 * 1024 * 1024);
+    const hugeLogs = await request(
+        harness.socketPath, asInstanceName("alpha"), "process.readLogs",
+        undefined, "tui",
+    );
+    assert.equal(hugeLogs.error, undefined);
+    assert.deepEqual(harness.worker.lastReadLogsQuery,
+        { limit: 100, maxDecodedBytes: 1024 * 1024 });
+    const projectedLog = (hugeLogs.payload as Array<{ message: string; truncated?: boolean }>)[0]!;
+    assert.equal(projectedLog.truncated, true);
+    assert.match(projectedLog.message, /log entry truncated for transport/u);
+    assert.ok(Buffer.byteLength(projectedLog.message, "utf8") <= 1024 * 1024);
+    harness.worker.logMessage = "ready\n";
+
+    await request(harness.socketPath, asInstanceName("alpha"), "process.readLogs",
+        { fromSeq: 42, limit: 1_000, maxDecodedBytes: 2048 });
+    assert.deepEqual(harness.worker.lastReadLogsQuery,
+        { fromSeq: 42, limit: 100, maxDecodedBytes: 2048 });
 
     harness.worker.toolCalls = [1, 2, 3].map((index): ToolCallRecord => ({
         callId: `large-call-${index}`,
@@ -255,6 +276,43 @@ test("ControlSocketServer routes canonical control and instance operations over 
         "process.missing",
     );
     assert.equal(missingOperation.error?.code, "method_not_found");
+});
+
+test("shared Control ToolCall history restores MCP purpose and explanation over RPC", async (t) => {
+    const provenance: ToolCallProvenanceApi = {
+        async decorate(instance, records) {
+            assert.equal(instance, "alpha");
+            return records.map((record) => ({
+                ...record,
+                purpose: "Diagnose process logs",
+                explanation: "Check transport message sizes without changing runtime state",
+            }));
+        },
+        async flush() {},
+        async record() {},
+        async warmup() {},
+    };
+    const harness = await createHarness(provenance);
+    t.after(() => harness.cleanup());
+    harness.worker.toolCalls = [{
+        callId: "audit-provenance",
+        inputSummary: "Inspect logs",
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: "2026-10-15T08:00:00.000Z",
+        status: "completed",
+        toolName: "bash_run",
+    }];
+    for (const peer of ["tui", "cli"] as const) {
+        const result = await request(harness.socketPath, asInstanceName("alpha"),
+            "tool.listCalls", { includeInput: false, includeOutput: false }, peer);
+        assert.equal(result.error, undefined);
+        assert.ok(Array.isArray(result.payload));
+        const [record] = result.payload as unknown as ToolCallRecord[];
+        assert.equal(record?.purpose, "Diagnose process logs");
+        assert.equal(record?.explanation,
+            "Check transport message sizes without changing runtime state");
+    }
 });
 
 test("local Control socket loads and rolls back a protected debug patch on a live worker object", async (t) => {
@@ -875,7 +933,7 @@ test("server.shutdown replies before invoking the shutdown action", async (t) =>
     await waitFor(() => shutdownRequested);
 });
 
-async function createHarness(): Promise<Harness> {
+async function createHarness(provenance?: ToolCallProvenanceApi): Promise<Harness> {
     const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
@@ -884,6 +942,7 @@ async function createHarness(): Promise<Harness> {
         instances: registry,
         overview: createTestOverview(),
         shutdown() {},
+        ...(provenance === undefined ? {} : { toolCallProvenance: provenance }),
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -1109,7 +1168,8 @@ class FakeWorker {
     }> = [];
     #lastSeq = 0;
     #ready = false;
-    lastReadLogsQuery?: { fromSeq?: number; limit?: number };
+    lastReadLogsQuery?: { fromSeq?: number; limit?: number; maxDecodedBytes?: number };
+    logMessage = "ready\n";
     lastReadToolCallsQuery?: ToolCallQuery;
     lastToolCall?: { ctxId?: string; requestId?: string; source?: string };
     toolCalls: ToolCallRecord[] = [];
@@ -1145,13 +1205,13 @@ class FakeWorker {
         return this.snapshot();
     }
 
-    async readLogs(query: { fromSeq?: number; limit?: number }) {
+    async readLogs(query: { fromSeq?: number; limit?: number; maxDecodedBytes?: number }) {
         this.lastReadLogsQuery = query;
         return [
             {
                 at: new Date(0).toISOString(),
                 instanceName: asInstanceName(this.#name),
-                message: "ready\n",
+                message: this.logMessage,
                 seq: 1,
                 stream: "stdout" as const,
             },

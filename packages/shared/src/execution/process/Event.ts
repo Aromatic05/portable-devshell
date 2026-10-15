@@ -44,6 +44,8 @@ export interface InstanceLogEntry {
     source?: InstanceLogSource;
     stream: "stderr" | "stdout";
     toolName?: string;
+    /** UI transport projection of an oversized historical log entry. */
+    truncated?: boolean;
 }
 
 export interface InstanceLogQuery {

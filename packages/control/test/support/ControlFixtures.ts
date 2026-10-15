@@ -129,12 +129,8 @@ export function createTestInstanceDescriptor(
                 sessions: { api: sessions },
             },
             tools: {
-                readLogs: async (query: { fromSeq?: number; limit?: number }) =>
-                    await transport.readLogs?.({
-                        fromSeq: query?.fromSeq,
-                        limit: Math.min(query?.limit ?? 100, 100),
-                        maxDecodedBytes: 1024 * 1024,
-                    }) ?? [],
+                readLogs: async (query: { fromSeq?: number; limit?: number; maxDecodedBytes?: number }) =>
+                    await transport.readLogs?.(query) ?? [],
                 readToolCalls: async (query: ToolCallQuery) => transport.readToolCalls?.(query) ?? [],
                 readToolCallFailureSummary: async () => ({ count: 0 }),
                 openSession: async (workspace: string) => ({ workspace }),

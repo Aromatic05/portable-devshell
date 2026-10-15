@@ -14,6 +14,7 @@ import {
     mergeControlPortsByName,
     type ControlHostDefinition,
     type ControlPortDefinition,
+    type ToolCallProvenanceApi,
 } from "@portable-devshell/shared";
 
 import { createApprovalRouteModule } from "../approval/Route.js";
@@ -25,9 +26,14 @@ import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { Instance } from "./model/Instance.js";
 import type { InstanceState } from "./model/State.js";
 
+const PROCESS_LOG_READ_LIMIT = 100;
+const PROCESS_LOG_READ_MAX_BYTES = 1024 * 1024;
+const LOG_TRUNCATION_MARKER = "\n... [log entry truncated for transport] ...\n";
+
 export interface InstanceRouteOptions {
     descriptor: Instance;
     extensionPorts?: readonly ControlPortDefinition[];
+    provenance?: ToolCallProvenanceApi;
     state: InstanceState;
     subscriptions: ProcessSubscriptionManager;
 }
@@ -77,7 +83,7 @@ export function createInstanceHost(
                     subscribe: events.subscribe,
                 },
             },
-            undefined,
+            options.provenance,
             state.toolCalls.api,
             subscriptions,
         ),
@@ -266,10 +272,36 @@ export function createProcessRouteModule(
                     ...workerInfo(instance),
                 } as unknown as JsonValue;
             },
-            readLogs: async (request) =>
-                (await state.tools.readLogs(
-                    request.payload as never,
-                )) as unknown as JsonValue,
+            readLogs: async (request) => {
+                const query = (request.payload ?? {}) as {
+                    limit?: number;
+                    maxDecodedBytes?: number;
+                };
+                const maxDecodedBytes = Math.min(
+                    query.maxDecodedBytes ?? PROCESS_LOG_READ_MAX_BYTES,
+                    PROCESS_LOG_READ_MAX_BYTES,
+                );
+                const logs = await state.tools.readLogs({
+                    ...query,
+                    limit: Math.min(query.limit ?? PROCESS_LOG_READ_LIMIT, PROCESS_LOG_READ_LIMIT),
+                    maxDecodedBytes,
+                });
+                return logs.map((entry) => {
+                    const bytes = Buffer.from(entry.message, "utf8");
+                    if (bytes.length <= maxDecodedBytes) return entry;
+                    const marker = maxDecodedBytes > Buffer.byteLength(LOG_TRUNCATION_MARKER, "utf8")
+                        ? LOG_TRUNCATION_MARKER : "";
+                    const available = maxDecodedBytes - Buffer.byteLength(marker, "utf8");
+                    const head = Math.floor(available / 2);
+                    return {
+                        ...entry,
+                        message: bytes.subarray(0, head).toString("utf8") +
+                            marker +
+                            bytes.subarray(bytes.length - (available - head)).toString("utf8"),
+                        truncated: true,
+                    };
+                }) as unknown as JsonValue;
+            },
             stop: async () => {
                 const result =
                     await instance.supervision.lifecycle.stop();

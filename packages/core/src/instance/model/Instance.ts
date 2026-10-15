@@ -8,6 +8,7 @@ import {
     type ControlExecutionConfig,
     type ControlPortDefinition,
     type ToolCallHooks,
+    type ToolCallProvenanceApi,
     type ToolCallApi,
     type Endpoint,
     type WorkerArtifactApi,
@@ -235,10 +236,14 @@ export class Instance {
         });
     }
 
-    host(extensionPorts: readonly ControlPortDefinition[] = []): ControlHostDefinition {
+    host(
+        extensionPorts: readonly ControlPortDefinition[] = [],
+        provenance?: ToolCallProvenanceApi,
+    ): ControlHostDefinition {
         return createInstanceHost({
             descriptor: this,
             extensionPorts,
+            ...(provenance === undefined ? {} : { provenance }),
             state: this.#state,
             subscriptions: this.#subscriptions,
         });
