@@ -221,21 +221,38 @@ test("failed tool retains its error even if failure audit cannot be persisted", 
 });
 
 test("a post-execution outbound failure reports executionCompleted to the caller", async () => {
+    let resultHookCalls = 0;
+    let errorHookCalls = 0;
     const harness = createHarness("instance-a", {
         rewrites: [async (input) => {
-            if (input.direction === "outbound") throw new Error("outbound hook unavailable");
+            if (input.direction === "outbound") {
+                if (input.value.kind === "error") errorHookCalls++;
+                if (input.value.kind === "result") resultHookCalls++;
+                throw new Error("outbound hook-private-secret");
+            }
             return input.value;
         }],
+        invoke: async () => ({ output: "raw-tool-private-secret" }),
     });
     await assert.rejects(harness.runtime.api.call(
         asInstanceName("instance-a"), "file_edit", { changes: "test" }, context,
     ), (error: unknown) => {
-        const details = (error as { details?: { executionCompleted?: boolean; failureStage?: string } }).details;
+        const failure = error as { code?: string; message?: string; details?: {
+            callId?: string; executionCompleted?: boolean; failureStage?: string;
+        } };
+        const details = failure.details;
+        assert.equal(failure.code, runtimeErrorCodes.toolResultDeliveryFailed);
+        assert.match(failure.message ?? "", /execution completed.*could not be delivered safely/iu);
         assert.equal(details?.executionCompleted, true);
         assert.equal(details?.failureStage, "outboundHook");
+        assert.ok(details?.callId);
+        assert.ok(!JSON.stringify(failure).includes("private-secret"),
+            "unmasked tool result and hook error must never leak into the failure");
         return true;
     });
     assert.equal(harness.invoked.length, 1);
+    assert.equal(resultHookCalls, 1);
+    assert.equal(errorHookCalls, 0, "failed result rewrite must not re-enter the same broken hook");
 });
 
 test("outbound error rewrite failure preserves original error identity in private diagnostics", async (t) => {

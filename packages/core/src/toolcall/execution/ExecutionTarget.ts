@@ -204,7 +204,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                           } catch (error) {
                               failureStage = "outboundHook";
                               reportOutboundFailure("progress", error);
-                              progressFailure = outboundHookFailure();
+                              progressFailure = outboundHookFailure(false, callId);
                           }
                       });
                   };
@@ -258,9 +258,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             }
             try {
                 await flushProgress();
-            } catch (error) {
+            } catch {
                 failureStage = "outboundHook";
-                throw error;
+                throw outboundHookFailure(true, callId);
             }
             try {
                 hookValue =
@@ -277,7 +277,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             } catch (error) {
                 failureStage = "outboundHook";
                 reportOutboundFailure("result", error);
-                throw outboundHookFailure();
+                throw outboundHookFailure(true, callId);
             }
             const interpreted = await interpretTerminalValue(
                 hookValue,
@@ -336,6 +336,22 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                               : { failureStage }),
                       }
                     : undefined;
+            if (failureStage === "outboundHook") {
+                // A failed outbound rewrite has already consumed the safe
+                // presentation path. Running it again for the new error can
+                // re-enter the same broken sandbox; never expose the raw result.
+                const deliveryError = outboundHookFailure(executionCompleted, callId);
+                if (hostRecorded)
+                    await recordAudit(() => this.#audit.failed(
+                        scope,
+                        runningContext,
+                        getErrorCode(deliveryError, runtimeErrorCodes.providerFailed),
+                        undefined,
+                        async () => undefined,
+                        auditFailure(),
+                    ));
+                throw withExecutionOutcome(deliveryError, executionCompleted, failureStage);
+            }
             let outerFailure: ToolCallOuterError;
             try {
                 outerFailure = await rewriteToolCallError(
@@ -347,7 +363,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             } catch (error) {
                 failureStage = "outboundHook";
                 reportOutboundFailure("error", error, failure);
-                const hookError = outboundHookFailure();
+                const hookError = outboundHookFailure(executionCompleted, callId);
                 if (hostRecorded) {
                     await recordAudit(() => this.#audit.failed(
                         scope,
@@ -565,10 +581,15 @@ function executionContext(context: ToolCallHookContext): ToolCallContext {
     return execution;
 }
 
-function outboundHookFailure(): Error {
+function outboundHookFailure(executionCompleted: boolean, callId: string): Error {
     return createRemoteError({
-        code: runtimeErrorCodes.providerFailed,
-        message: "ToolCall outbound hook failed.",
+        code: executionCompleted
+            ? runtimeErrorCodes.toolResultDeliveryFailed
+            : runtimeErrorCodes.providerFailed,
+        details: { callId, executionCompleted, failureStage: "outboundHook" },
+        message: executionCompleted
+            ? "Tool execution completed, but its result could not be delivered safely. Do not repeat the operation."
+            : "ToolCall outbound hook failed before execution completed.",
         retryable: false,
     });
 }

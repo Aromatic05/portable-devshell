@@ -389,6 +389,123 @@ test("ToolCall binding holds exact registration leases for the call", async () =
     runtime.close();
 });
 
+test("a retired sandbox is rebound before outbound masking without replaying the Worker operation", async () => {
+    const retired = new AbortController();
+    const fresh = new AbortController();
+    const invoked: string[] = [];
+    const released: string[] = [];
+    let acquisitions = 0;
+    let executions = 0;
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                executions++;
+                retired.abort();
+                const result = await request.hooks.rewrite({
+                    callId: request.callId,
+                    direction: "outbound",
+                    value: {
+                        ...request.value,
+                        kind: "result",
+                        payload: { raw: "private-output" },
+                    },
+                });
+                return result.payload;
+            },
+        }),
+    });
+    const extension = {
+        listDeclarations: () => [{
+            declaration: { hook: "100-secret-mask", id: "mask" },
+            extensionId: "secret",
+            id: "mask",
+        }],
+        async acquireRegistration() {
+            const generation = ++acquisitions;
+            return {
+                extensionId: "secret",
+                lease: {
+                    retirementSignal: generation <= 2 ? retired.signal : fresh.signal,
+                    release: () => { released.push(String(generation)); },
+                },
+                registration: {
+                    binding: async (input: ToolCallRewriteInvocation) => {
+                        invoked.push(`${generation}:${input.direction}`);
+                        return input.direction === "outbound"
+                            ? { ...input.value, payload: { masked: true } }
+                            : input.value;
+                    },
+                },
+            };
+        },
+    };
+    new ToolCallExtensionBinding(extension as never).install(runtime.hooks);
+    assert.deepEqual(await runtime.api.call("instance-a", value.toolName, value.payload, value.context),
+        { masked: true });
+    assert.equal(executions, 1);
+    assert.equal(acquisitions, 3);
+    assert.equal(invoked.filter((call) => call.endsWith(":outbound")).length, 1);
+    assert.equal(invoked.at(-1), "3:outbound");
+    assert.equal(invoked.includes("1:outbound"), false,
+        "the retired sandbox must never receive the unmasked result");
+    assert.equal(invoked.includes("2:outbound"), false);
+    assert.deepEqual([...released].sort(), ["1", "2", "3"]);
+    runtime.close();
+});
+
+test("retired outbound hook cannot transfer its Secret scope to a different Extension owner", async () => {
+    const retired = new AbortController();
+    let executions = 0;
+    let acquisitions = 0;
+    let foreignInvocations = 0;
+    let foreignLeaseReleases = 0;
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                executions++;
+                retired.abort();
+                const result = await request.hooks.rewrite({
+                    callId: request.callId,
+                    direction: "outbound",
+                    value: { ...request.value, kind: "result", payload: { raw: "private-secret" } },
+                });
+                return result.payload;
+            },
+        }),
+    });
+    const extension = {
+        listDeclarations: () => [{ declaration: { hook: "100-mask", id: "mask" },
+            extensionId: "secret", id: "mask" }],
+        async acquireRegistration() {
+            const generation = ++acquisitions;
+            return {
+                extensionId: generation <= 2 ? "secret" : "foreign",
+                lease: {
+                    retirementSignal: generation <= 2
+                        ? retired.signal : new AbortController().signal,
+                    release() { if (generation > 2) foreignLeaseReleases++; },
+                },
+                registration: {
+                    binding: async (input: ToolCallRewriteInvocation) => {
+                        if (generation > 2 && input.direction === "outbound")
+                            foreignInvocations++;
+                        return input.value;
+                    },
+                },
+            };
+        },
+    };
+    new ToolCallExtensionBinding(extension as never).install(runtime.hooks);
+    await assert.rejects(
+        runtime.api.call("instance-a", value.toolName, value.payload, value.context),
+        /ownership changed/u,
+    );
+    assert.equal(executions, 1);
+    assert.equal(foreignInvocations, 0);
+    assert.equal(foreignLeaseReleases, 1);
+    runtime.close();
+});
+
 test("ToolCall sandbox codecs expose only callId direction value and context signal", async () => {
     const signal = new AbortController().signal;
     const review = await toolCallReviewSandboxCodec.invokeBinding(

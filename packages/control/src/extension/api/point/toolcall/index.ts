@@ -117,7 +117,8 @@ export class ToolCallExtensionBinding {
             const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(rewrite.id, id);
             releases.push(() => lease.release());
-            const binding = registration.binding as ToolCallRewriteBinding;
+            let binding = registration.binding as ToolCallRewriteBinding;
+            let currentLease = lease;
             const secret = this.#secret.scope(extensionId);
             bindings.push({
                 hook: (declaration.declaration as ToolCallExtensionDeclaration)
@@ -125,18 +126,45 @@ export class ToolCallExtensionBinding {
                 id,
                 owner: extensionId,
                 rewrite: async (input) => {
+                    // A sandbox can retire while a long Worker command runs.
+                    // Rebind before invoking the outbound hook, but never
+                    // replay a hook that has already started.
+                    if (input.direction === "outbound" &&
+                        currentLease.retirementSignal?.aborted === true) {
+                        const renewed = await this.#extensions.acquireRegistration(rewrite.id, id);
+                        if (renewed.extensionId !== extensionId) {
+                            renewed.lease.release();
+                            throw new Error(
+                                `ToolCall rewrite hook ownership changed for ${id}; result delivery is unavailable.`,
+                            );
+                        }
+                        releases.push(() => renewed.lease.release());
+                        currentLease = renewed.lease;
+                        binding = renewed.registration.binding as ToolCallRewriteBinding;
+                    }
                     const invocation: ToolCallRewriteInvocation = {
                         callId: input.callId,
                         direction: input.direction,
                         value: extensionValue(input.value),
                     };
-                    return hookValue(
-                        await binding(
+                    try {
+                        return hookValue(await binding(
                             invocation,
                             secret.context(invocation, signal),
-                        ),
-                        input.value.context,
-                    );
+                        ), input.value.context);
+                    } catch (error) {
+                        // Do not log hook inputs, outputs or exception messages:
+                        // they may contain secrets the hook was about to mask.
+                        console.warn("Extension ToolCall rewrite hook unavailable", {
+                            extensionId,
+                            hookId: id,
+                            direction: input.direction,
+                            causeCode: typeof error === "object" && error !== null &&
+                                "code" in error && typeof error.code === "string"
+                                ? error.code : "error.unknown",
+                        });
+                        throw error;
+                    }
                 },
             });
         }

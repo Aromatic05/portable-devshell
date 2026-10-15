@@ -60,6 +60,7 @@ export const runtimeErrorCodes = {
     todoRevisionConflict: "todo.revisionConflict",
     toolCallCancelled: "core.toolCallCancelled",
     toolCallRejected: "core.toolCallRejected",
+    toolResultDeliveryFailed: "core.toolResultDeliveryFailed",
     toolQueueTimeout: "core.toolQueueTimeout",
     toolSchedulerFull: "core.toolSchedulerFull",
     toolSchemaUnavailable: "core.toolSchemaUnavailable",
