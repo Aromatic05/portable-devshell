@@ -111,3 +111,37 @@ test("EnvelopeCodec closes malformed wire envelopes", async () => {
     channel.inject(Uint8Array.of(0));
     assert.match((await closed)?.message ?? "", /Envelope source/u);
 });
+
+test("oversized outgoing Envelope logs only size and route metadata", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const codec = new EnvelopeCodec(new FragmentChannel());
+    const envelope: Envelope = {
+        source: { host: "server", port: "process" },
+        dest: { host: "ui", port: "process" },
+        packet: {
+            protocol: "event",
+            name: "huge",
+            message: { secret: "private-content" + "x".repeat(16 * 1024 * 1024) },
+        },
+    };
+    await assert.rejects(codec.send(envelope), /Envelope exceeds 16777216 bytes/u);
+    assert.equal(warning.mock.callCount(), 1);
+    const [description, detail] = warning.mock.calls[0]!.arguments;
+    assert.match(String(description), /rejected on send/u);
+    assert.equal((detail as { sourcePort?: string }).sourcePort, "process");
+    assert.equal((detail as { destPort?: string }).destPort, "process");
+    assert.ok((detail as { sizeBytes: number }).sizeBytes > 16 * 1024 * 1024);
+    assert.ok(!JSON.stringify(detail).includes("private-content"));
+});
+
+test("oversized inbound Envelope logs the declared byte count", async (t) => {
+    const warning = t.mock.method(console, "warn", () => undefined);
+    const channel = new FragmentChannel();
+    const codec = new EnvelopeCodec(channel);
+    const closed = new Promise<Error | undefined>((resolve) => codec.onClose(resolve));
+    channel.inject(Uint8Array.of(0x81, 0x80, 0x80, 0x08));
+    assert.match((await closed)?.message ?? "", /Envelope exceeds 16777216 bytes/u);
+    assert.equal(warning.mock.callCount(), 1);
+    const [, detail] = warning.mock.calls[0]!.arguments;
+    assert.equal((detail as { sizeBytes: number }).sizeBytes, 16 * 1024 * 1024 + 1);
+});

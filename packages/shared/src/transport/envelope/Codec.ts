@@ -2,6 +2,8 @@ import type { Channel } from "../endpoint/channel/Channel.js";
 import {
     decodeWireEnvelope,
     encodeWireEnvelope,
+    ENVELOPE_MAX_SIZE,
+    EnvelopeSizeError,
     type Envelope,
 } from "./Wire.js";
 
@@ -21,6 +23,11 @@ export class EnvelopeCodec {
             try {
                 this.#accept(data);
             } catch (error) {
+                if (error instanceof EnvelopeSizeError)
+                    console.warn("Transport Envelope rejected on receive", {
+                        sizeBytes: error.sizeBytes,
+                        maxBytes: ENVELOPE_MAX_SIZE,
+                    });
                 this.close(asError(error));
             }
         });
@@ -30,7 +37,27 @@ export class EnvelopeCodec {
     }
 
     async send(envelope: Envelope): Promise<void> {
-        await this.#channel.write(encodeWireEnvelope(envelope));
+        try {
+            await this.#channel.write(encodeWireEnvelope(envelope));
+        } catch (error) {
+            if (error instanceof EnvelopeSizeError)
+                console.warn("Transport Envelope rejected on send", {
+                    sourceHost: envelope.source.host,
+                    sourcePort: envelope.source.port,
+                    destHost: envelope.dest.host,
+                    destPort: envelope.dest.port,
+                    protocol:
+                        typeof envelope.packet === "object" &&
+                        envelope.packet !== null &&
+                        "protocol" in envelope.packet &&
+                        typeof envelope.packet.protocol === "string"
+                            ? envelope.packet.protocol
+                            : "unknown",
+                    sizeBytes: error.sizeBytes,
+                    maxBytes: ENVELOPE_MAX_SIZE,
+                });
+            throw error;
+        }
     }
 
     onEnvelope(listener: (envelope: Envelope) => void): () => void {

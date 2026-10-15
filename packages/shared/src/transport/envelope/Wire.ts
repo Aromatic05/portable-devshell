@@ -11,6 +11,16 @@ export interface Envelope {
 
 export const ENVELOPE_MAX_SIZE = 16 * 1024 * 1024;
 
+export class EnvelopeSizeError extends Error {
+    readonly sizeBytes: number;
+
+    constructor(sizeBytes: number) {
+        super(`Envelope exceeds ${ENVELOPE_MAX_SIZE} bytes.`);
+        this.name = "EnvelopeSizeError";
+        this.sizeBytes = sizeBytes;
+    }
+}
+
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
 
@@ -20,7 +30,7 @@ export function encodeWireEnvelope(envelope: Envelope): Uint8Array {
         envelope,
     ).finish();
     if (message.byteLength > ENVELOPE_MAX_SIZE)
-        throw new Error(`Envelope exceeds ${ENVELOPE_MAX_SIZE} bytes.`);
+        throw new EnvelopeSizeError(message.byteLength);
     return protobuf.Writer.create().bytes(message).finish();
 }
 
@@ -36,7 +46,7 @@ export function decodeWireEnvelope(
         throw error;
     }
     if (length > ENVELOPE_MAX_SIZE)
-        throw new Error(`Envelope exceeds ${ENVELOPE_MAX_SIZE} bytes.`);
+        throw new EnvelopeSizeError(length);
     if (reader.len - reader.pos < length) return undefined;
     const end = reader.pos + length;
     const value = decodeEnvelope(reader, end);
