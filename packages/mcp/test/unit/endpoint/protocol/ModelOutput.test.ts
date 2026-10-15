@@ -35,7 +35,7 @@ test("model projection keeps small native results and bypasses MCP App interacti
         _meta: { "openai/outputTemplate": "ui://test/app" },
     });
     assert.equal(projectMcpModelOutput("file_read", result), result);
-    assert.equal(projectMcpModelOutput("mcpapp_ask", result), result);
+    assert.equal(projectMcpModelOutput("mcpapp_open", result), result);
 });
 
 test("bash model output stays bounded and retains recovery paths and execution status", () => {
@@ -176,15 +176,32 @@ test("cursor-consuming results are never silently replaced with a preview", () =
     assert.equal(projectMcpModelOutput("file_glob", glob), glob);
 });
 
-test("model budget rejects unsafe overrides before publishing a Host", () => {
+test("model budgets allow caller-selected sizes without tool-specific minimums", () => {
     assert.doesNotThrow(() => validateMcpModelOutputBudget({
-        maxTokens: 12_000,
-        byTool: { bash_run: 4_000, file_read: 10_000 },
+        maxTokens: 3_000,
+        byTool: { tmux_read: 256, file_glob: 512 },
     }));
-    assert.throws(() => validateMcpModelOutputBudget({ byTool: { tmux_read: 256 } }));
-    assert.throws(() => validateMcpModelOutputBudget({ maxTokens: 3_000 }));
-    assert.throws(() => validateMcpModelOutputBudget({ byTool: { file_glob: 512 } }));
-    assert.throws(() => validateMcpModelOutputBudget({ byTool: { file_read: 30_000 } }));
+    assert.doesNotThrow(() => validateMcpModelOutputBudget({
+        maxTokens: 40_000,
+        byTool: { file_read: 30_000 },
+    }));
+    assert.throws(() => validateMcpModelOutputBudget({ maxTokens: 0 }));
+    assert.throws(() => validateMcpModelOutputBudget({ byTool: { bash_run: -1 } }));
+    assert.throws(() => validateMcpModelOutputBudget({ defaultTokens: 1.5 }));
+});
+
+test("explicit defaultTokens overrides per-tool library output presets", () => {
+    const original = { stdout: "line".repeat(2_000), stderr: "", exitCode: 0 };
+    const projected = projectMcpModelOutput("bash_run", original, { defaultTokens: 128 });
+    assert.ok(size(projected) <= 128 * 3);
+    assert.notDeepEqual(projected, original);
+});
+
+test("oversized read metadata does not turn a successful ToolCall into an error", () => {
+    const original = { files: Array.from({ length: 40 }, (_, i) => ({
+        path: `large-file-${i}`, content: "x".repeat(1_000), view: "content",
+    })) };
+    assert.equal(projectMcpModelOutput("file_read", original, { maxTokens: 1 }), original);
 });
 
 test("Control MCP modelOutput survives draft normalization and update patches", () => {
@@ -199,7 +216,7 @@ test("Control MCP modelOutput survives draft normalization and update patches", 
     assert.equal(next.mcp.modelOutput?.byTool?.bash_run, 6_000);
     assert.equal(next.mcp.modelOutput?.defaultTokens, 8_000);
     assert.doesNotThrow(() => validateConfigSemantics({ ...next, instances: [] }));
-    assert.throws(() => validateConfigSemantics({
+    assert.doesNotThrow(() => validateConfigSemantics({
         ...next,
         instances: [],
         mcp: { ...next.mcp, modelOutput: { byTool: { tmux_read: 2_000 } } },

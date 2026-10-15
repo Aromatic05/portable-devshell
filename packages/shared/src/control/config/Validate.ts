@@ -164,29 +164,15 @@ function validateGlobalMcp(config: ControlConfig): void {
     }
     const budget = config.mcp.modelOutput;
     if (budget !== undefined) {
-        const maximum = budget.maxTokens ?? 24_000;
-        const check = (value: number, path: string[], minimum = 256) => {
-            if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+        const check = (value: number, path: string[]) => {
+            if (!Number.isSafeInteger(value) || value < 1)
                 throw configInputError("semantic", ["mcp", "modelOutput", ...path],
-                    "config.mcp.modelOutput",
-                    `must be an integer between ${minimum} and ${maximum}`);
-            }
+                    "config.mcp.modelOutput", "must be a positive integer");
         };
-        if (!Number.isSafeInteger(maximum) || maximum < 4_000 || maximum > 24_000) {
-            throw configInputError("semantic", ["mcp", "modelOutput", "maxTokens"],
-                "config.mcp.modelOutput", "must be an integer between 4000 and 24000");
-        }
-        if (budget.defaultTokens !== undefined)
-            check(budget.defaultTokens, ["defaultTokens"]);
-        for (const [tool, value] of Object.entries(budget.byTool ?? {})) {
-            if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u.test(tool)) {
-                throw configInputError("semantic", ["mcp", "modelOutput", "byTool", tool],
-                    "config.mcp.modelOutput", "invalid tool name");
-            }
-            const minimum = tool.startsWith("tmux_") ? 4_000
-                : tool === "bash_run" || tool === "file_glob" ? 2_000 : 256;
-            check(value, ["byTool", tool], minimum);
-        }
+        if (budget.maxTokens !== undefined) check(budget.maxTokens, ["maxTokens"]);
+        if (budget.defaultTokens !== undefined) check(budget.defaultTokens, ["defaultTokens"]);
+        for (const [tool, value] of Object.entries(budget.byTool ?? {}))
+            check(value, ["byTool", tool]);
     }
     if (
         config.mcp.oauth2.approval === "token" &&

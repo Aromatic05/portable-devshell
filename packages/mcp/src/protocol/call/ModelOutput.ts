@@ -17,8 +17,7 @@ export interface McpModelOutputBudget {
 }
 
 const TOKEN_BYTES = 3;
-const MIN_TOKENS = 256;
-const HARD_MAX_TOKENS = 24_000;
+const DEFAULT_MAX_TOKENS = 24_000;
 const DEFAULT_TOKENS = 8_000;
 const DEFAULT_TOOL_TOKENS: Readonly<Record<string, number>> = {
     bash_run: 4_000,
@@ -41,22 +40,17 @@ const DEFAULT_TOOL_TOKENS: Readonly<Record<string, number>> = {
 type RecordValue = Record<string, JsonValue>;
 
 export function validateMcpModelOutputBudget(policy: McpModelOutputBudget): void {
-    const maximum = policy.maxTokens ?? HARD_MAX_TOKENS;
-    validateTokens(maximum, "maxTokens", HARD_MAX_TOKENS, 4_000);
+    if (policy.maxTokens !== undefined)
+        validateTokens(policy.maxTokens, "maxTokens");
     if (policy.defaultTokens !== undefined)
-        validateTokens(policy.defaultTokens, "defaultTokens", maximum);
-    for (const [name, tokens] of Object.entries(policy.byTool ?? {})) {
-        if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u.test(name))
-            throw new TypeError(`Invalid MCP model output tool name: ${name}`);
-        const minimum = name.startsWith("tmux_") ? 4_000
-            : name === "bash_run" || name === "file_glob" ? 2_000 : MIN_TOKENS;
-        validateTokens(tokens, `byTool.${name}`, maximum, minimum);
-    }
+        validateTokens(policy.defaultTokens, "defaultTokens");
+    for (const [name, tokens] of Object.entries(policy.byTool ?? {}))
+        validateTokens(tokens, `byTool.${name}`);
 }
 
-function validateTokens(value: number, name: string, maximum: number, minimum = MIN_TOKENS): void {
-    if (!Number.isSafeInteger(value) || value < minimum || value > maximum)
-        throw new TypeError(`MCP model output ${name} must be between ${minimum} and ${maximum} tokens.`);
+function validateTokens(value: number, name: string): void {
+    if (!Number.isSafeInteger(value) || value < 1)
+        throw new TypeError(`MCP model output ${name} must be a positive integer.`);
 }
 
 export function projectMcpModelOutput(
@@ -66,9 +60,9 @@ export function projectMcpModelOutput(
 ): McpEndpointResult {
     // App-only tools exchange UI state and capabilities, not model tool output.
     if (toolName.startsWith("mcpapp_")) return original;
-    const maximum = policy.maxTokens ?? HARD_MAX_TOKENS;
+    const maximum = policy.maxTokens ?? DEFAULT_MAX_TOKENS;
     const configured = policy.byTool?.[toolName] ??
-        DEFAULT_TOOL_TOKENS[toolName] ?? policy.defaultTokens ?? DEFAULT_TOKENS;
+        policy.defaultTokens ?? DEFAULT_TOOL_TOKENS[toolName] ?? DEFAULT_TOKENS;
     const budget = Math.min(configured, maximum) * TOKEN_BYTES;
     const native = original instanceof McpNativeToolResult;
     let result = native ? original.structuredContent : original;
@@ -110,18 +104,8 @@ export function projectMcpModelOutput(
         }
     }
     if (resultBytes(result, content) > budget) {
-        if (toolName === "file_read" || toolName === "file_grep" || toolName === "todo_read") {
-            // Reads have no stateful side effects, so reject an oversized
-            // batch rather than emit JSON that violates its output schema.
-            throw new RangeError(
-                `${toolName} response metadata exceeds the model output budget; request fewer files or narrower ranges.`,
-            );
-        }
-        // tmux_run/read consume transcript offsets, and file_glob advances a
-        // paging cursor. Trimming either after execution loses unread data.
-        // Unknown extension tools may mutate state and have strict output
-        // schemas. In these rare cases prefer an oversized valid response
-        // over lying about success or dropping unrecoverable information.
+        // A completed ToolCall must not become an error during presentation.
+        // When preserving the schema needs more bytes, use the original result.
         return original;
     }
     if (!native) return result;
