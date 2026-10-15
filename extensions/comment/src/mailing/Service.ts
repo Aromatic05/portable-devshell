@@ -7,6 +7,12 @@ interface MailingState {
     version: 2;
     bindings: Record<string, string>;
     accepted: Record<string, string>;
+    pendingNotices: Record<string, MailingNotice>;
+}
+
+interface MailingNotice {
+    recipient: string;
+    text: string;
 }
 
 export interface MailingTarget {
@@ -34,24 +40,34 @@ const INDEX_FILE = `${ROOT}/mailing.md`;
 const POLL_MS = 30_000;
 
 function parseState(input: string | undefined): MailingState {
-    if (input === undefined) return { version: 2, bindings: {}, accepted: {} };
+    if (input === undefined) return { version: 2, bindings: {}, accepted: {}, pendingNotices: {} };
     const parsed: unknown = JSON.parse(input);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
         throw new Error("Invalid Mailing state");
     const state = parsed as Record<string, unknown>;
     if (!isStringMap(state.accepted)) throw new Error("Unsupported or corrupt Mailing state");
+    const pendingNotices = state.pendingNotices ?? {};
+    if (!isNoticeMap(pendingNotices)) throw new Error("Invalid Mailing pending notices");
     // The original Mailing claims were already the persisted Context -> directory
     // relation. Reuse them as Memory bindings without losing accepted mail IDs.
     if (state.version === 1 && isStringMap(state.claims))
-        return { version: 2, bindings: { ...state.claims }, accepted: { ...state.accepted } };
+        return { version: 2, bindings: { ...state.claims }, accepted: { ...state.accepted }, pendingNotices: { ...pendingNotices } };
     if (state.version === 2 && isStringMap(state.bindings))
-        return { version: 2, bindings: { ...state.bindings }, accepted: { ...state.accepted } };
+        return { version: 2, bindings: { ...state.bindings }, accepted: { ...state.accepted }, pendingNotices: { ...pendingNotices } };
     throw new Error("Unsupported or corrupt Mailing state");
 }
 
 function isStringMap(value: unknown): value is Record<string, string> {
     return value !== null && typeof value === "object" && !Array.isArray(value) &&
         Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isNoticeMap(value: unknown): value is Record<string, MailingNotice> {
+    return value !== null && typeof value === "object" && !Array.isArray(value) &&
+        Object.values(value).every((entry) =>
+            entry !== null && typeof entry === "object" && !Array.isArray(entry) &&
+            typeof (entry as MailingNotice).recipient === "string" &&
+            typeof (entry as MailingNotice).text === "string");
 }
 
 export class MailingService {
@@ -105,8 +121,20 @@ export class MailingService {
 
     async poll(): Promise<void> {
         if (this.#closed) return;
-        // Only workspaces with a Memory binding or an Outbox edit are monitored;
-        // unrelated active Contexts incur no background Worker traffic.
+        // Context attachments persist across Control restarts, unlike #scopes.
+        // Reconcile from the owning Context registry so shell-written mail can
+        // be discovered without a new memory status call or file_edit hook.
+        try {
+            const contexts = await this.#contexts.list({ status: "active" });
+            for (const context of contexts) {
+                for (const environment of context.environments) {
+                    if (environment.workspace !== undefined)
+                        this.#remember({ instance: environment.instance, workspace: environment.workspace });
+                }
+            }
+        } catch (error) {
+            this.#onError(error);
+        }
         await Promise.all([...this.#scopes.values()].map(async (scope) => {
             try { await this.scan(scope); } catch (error) { this.#onError(error); }
         }));
@@ -238,7 +266,6 @@ export class MailingService {
     async #dispatch(files: MailingFiles, scope: MailingTarget, state: MailingState, active: Set<string>): Promise<void> {
         const tasks = await files.listTasks();
         const known = new Set(tasks);
-        let dirty = false;
         for (const task of await files.listOutboxes()) {
             const outbox = await files.read(`${ROOT}/${task}/chat.md`);
             if (outbox === undefined || !outbox.includes("<!-- MAIL BEGIN -->")) continue;
@@ -264,38 +291,53 @@ export class MailingService {
                     if (!known.has(recipient)) {
                         await files.appendUnique(`${ROOT}/${task}/mailbox.md`,
                             mailMarker(`${mail.id}:bounce:${recipient}`), renderBounce(mail, recipient));
+                        state.pendingNotices[`${mail.id}:bounce:${recipient}`] = {
+                            recipient: task,
+                            text: `New Mail\nFrom: mailer-daemon\nSubject: Undeliverable: ${mail.subject}`,
+                        };
                         continue;
                     }
                     await files.appendUnique(`${ROOT}/${recipient}/mailbox.md`, mailMarker(mail.id), renderInbox(mail));
+                    state.pendingNotices[`${mail.id}:inbox:${recipient}`] = {
+                        recipient,
+                        text: `New Mail\nFrom: ${mail.from}\nSubject: ${mail.subject}`,
+                    };
                 }
                 state.accepted[mail.id] = mail.fingerprint;
-                dirty = true;
+                // Delivery and notification acknowledgements are separate:
+                // retry pending Subjects even after the message is accepted.
                 await this.#save(files, state);
-                const senderCtx = state.bindings[task];
-                if (senderCtx !== undefined && active.has(senderCtx)) {
-                    for (const recipient of recipients.filter((name) => !known.has(name))) {
-                        await this.#notice({ ...scope, ctxId: senderCtx },
-                            mail.id + ":bounce:" + recipient,
-                            "New Mail\nFrom: mailer-daemon\nSubject: Undeliverable: " + mail.subject);
-                    }
-                }
-                for (const recipient of recipients) {
-                    if (!known.has(recipient)) continue;
-                    const ctxId = state.bindings[recipient];
-                    if (ctxId === undefined || !active.has(ctxId)) continue;
-                    await this.#notice({ ...scope, ctxId }, mail.id,
-                        `New Mail\nFrom: ${mail.from}\nSubject: ${mail.subject}`);
-                }
             }
         }
-        if (dirty) await this.#save(files, state);
+        await this.#flushNotices(files, scope, state, active);
     }
 
-    async #notice(input: MemoryContext, id: string, message: string): Promise<void> {
+    async #flushNotices(files: MailingFiles, scope: MailingTarget, state: MailingState, active: Set<string>): Promise<void> {
+        for (const [id, notice] of Object.entries(state.pendingNotices)) {
+            const ctxId = state.bindings[notice.recipient];
+            if (ctxId === undefined || !active.has(ctxId)) continue;
+            if (!(await this.#notice({ ...scope, ctxId }, id, notice.text))) continue;
+            delete state.pendingNotices[id];
+            try {
+                await this.#save(files, state);
+            } catch (error) {
+                state.pendingNotices[id] = notice;
+                throw error;
+            }
+        }
+    }
+
+    async #notice(input: MemoryContext, id: string, message: string): Promise<boolean> {
         const marker = `${input.ctxId}\0${id}`;
-        if (this.#notified.has(marker)) return;
+        if (this.#notified.has(marker)) return true;
         this.#notified.add(marker);
-        try { await this.#comment.queue(input.instance, input.ctxId, message); }
-        catch (error) { this.#notified.delete(marker); this.#onError(error); }
+        try {
+            await this.#comment.queue(input.instance, input.ctxId, message);
+            return true;
+        } catch (error) {
+            this.#notified.delete(marker);
+            this.#onError(error);
+            return false;
+        }
     }
 }

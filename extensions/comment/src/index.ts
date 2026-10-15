@@ -483,6 +483,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
         createTodoReportTool(source, comment.comment),
     );
     builtinRuntime = { comment, mailing, source };
+    // Resume pre-existing Context workspaces immediately; periodic polling
+    // will also recover from temporarily unavailable Workers.
+    void mailing.poll().catch((error) =>
+        context.logger.warn("Initial Mailing reconciliation failed", {
+            message: error instanceof Error ? error.message : String(error),
+        }),
+    );
 }
 
 export async function instanceGenerationRetired(

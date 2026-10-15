@@ -96,6 +96,7 @@ function fixture() {
     const active = new Set(["ctx-a", "ctx-b", "ctx-c"]);
     const notices: Array<{ ctxId: string; message: string }> = [];
     const errors: unknown[] = [];
+    let failNextNotice = false;
     const contexts = {
         async list(query?: { instance?: string; workspace?: string }) {
             if (query?.instance && query.instance !== instance) return [];
@@ -125,11 +126,20 @@ function fixture() {
     } as ExtensionWorkerExecuteCapability;
     const mailing = new MailingService({
         worker, contexts,
-        comment: { async queue(_instance, ctxId, message) { notices.push({ ctxId, message }); } },
+        comment: { async queue(_instance, ctxId, message) {
+            if (failNextNotice) {
+                failNextNotice = false;
+                throw new Error("simulated Comment queue failure");
+            }
+            notices.push({ ctxId, message });
+        } },
         onError(error) { errors.push(error); },
         pollMs: 3_600_000,
     });
-    return { fs, notices, errors, active, mailing };
+    return {
+        fs, notices, errors, active, mailing, worker, contexts,
+        failNoticeOnce() { failNextNotice = true; },
+    };
 }
 
 test("Mailing parses complete messages only and validates Agent Work identity", () => {
@@ -228,6 +238,79 @@ test("Memory CLI uses the caller Context for model operations and explicit targe
     await assert.rejects(executeMemoryNativeCommand(mailing, ["list", instance, workspace], {
         localOwner: false,
     } as CliNativeCommandInvocationContext), /local Control owner/u);
+});
+
+test("A failed Subject notification remains durable after its Mail has been accepted", async (t) => {
+    const { fs, mailing, notices, errors, failNoticeOnce } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    failNoticeOnce();
+    fs.files.set(outbox, mail("Retry Subject", "Persistent message body"));
+    await mailing.scan({ instance, workspace });
+    assert.match(fs.files.get(inbox)!, /Persistent message body/u);
+    const stateFile = root + ".mailing/state.json";
+    const failed = JSON.parse(fs.files.get(stateFile)!) as {
+        accepted: Record<string, string>;
+        pendingNotices: Record<string, { recipient: string; text: string }>;
+    };
+    assert.equal(Object.keys(failed.accepted).length, 1);
+    assert.equal(Object.keys(failed.pendingNotices).length, 1);
+    assert.equal(notices.length, 0);
+    assert.match(String(errors[0]), /simulated Comment queue failure/u);
+
+    await mailing.scan({ instance, workspace });
+    await mailing.scan({ instance, workspace });
+    assert.deepEqual(notices, [{
+        ctxId: "ctx-b",
+        message: "New Mail\nFrom: file-panel-unify\nSubject: Retry Subject",
+    }]);
+    const recovered = JSON.parse(fs.files.get(stateFile)!) as { pendingNotices: Record<string, unknown> };
+    assert.deepEqual(recovered.pendingNotices, {});
+    assert.equal(fs.files.get(inbox)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+});
+
+test("Control restart resumes shell-written Outbox scans and durable Subject retries", async (t) => {
+    const { fs, mailing, contexts, worker, notices, errors, failNoticeOnce } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    failNoticeOnce();
+    fs.files.set(outbox, mail("Restart delivery", "Sent before Control restart"));
+    await mailing.scan({ instance, workspace });
+    assert.equal(notices.length, 0);
+    await mailing.close();
+
+    const recovered = new MailingService({
+        worker, contexts,
+        comment: { async queue(_instance, ctxId, message) { notices.push({ ctxId, message }); } },
+        onError(error) { errors.push(error); },
+        pollMs: 3_600_000,
+    });
+    t.after(async () => recovered.close());
+    // No memory status/init/inherit, and the new service has no cached scopes.
+    await recovered.poll();
+    assert.deepEqual(notices, [{
+        ctxId: "ctx-b",
+        message: "New Mail\nFrom: file-panel-unify\nSubject: Restart delivery",
+    }]);
+    fs.files.set(outbox, fs.files.get(outbox)! + mail("Shell-only edit", "Written via shell"));
+    await recovered.poll();
+    assert.match(fs.files.get(inbox)!, /Written via shell/u);
+    assert.equal(notices.filter((entry) => entry.message.includes("Shell-only edit")).length, 1);
+    await recovered.poll();
+    assert.equal(notices.length, 2);
+    assert.equal(errors.length, 1);
+});
+
+test("Pending Subjects follow a Memory inheritance after the original Context retires", async (t) => {
+    const { fs, mailing, notices, active } = fixture();
+    t.after(async () => mailing.close());
+    fs.files.set(outbox, mail("Offline delivery", "Mailbox persists"));
+    await mailing.scan({ instance, workspace });
+    assert.equal(notices.length, 0);
+    active.delete("ctx-a");
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    assert.ok(notices.some((entry) => entry.ctxId === "ctx-b" &&
+        entry.message.includes("Subject: Offline delivery")));
 });
 
 test("Mailing repairs a partial delivery after a Worker failure without duplicate messages", async (t) => {
