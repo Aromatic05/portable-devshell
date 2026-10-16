@@ -40,19 +40,38 @@ async function assertRetiredConfigRejected(options: {
         if (source === undefined) throw new Error("missing Config rejection fixture");
         if (options.instanceName !== undefined) {
             await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+            // A malformed/retired Instance must remain inert and untouched,
+            // but must not prevent other current Instances from starting.
+            const valid = normalizeConfigInstanceDraft({
+                enabled: true, name: "current-instance", provider: "local",
+            });
+            await writeFileWithParents(
+                paths.instanceConfigFile(valid.name),
+                toml.encode(instanceDocument.encode(valid)),
+            );
         }
         await writeFileWithParents(configFile, source);
-        await assert.rejects(
-            new ControlConfigStore().readOrCreate(homeDirectory),
-            (error: unknown) => {
-                assert.equal((error as { code?: string }).code, "control.configParseFailed");
-                assert.equal(
-                    (error as { details?: { fieldPath?: string } }).details?.fieldPath,
-                    "version",
-                );
-                return true;
-            },
-        );
+        if (options.instanceName !== undefined) {
+            const config = await new ControlConfigStore().readOrCreate(homeDirectory);
+            assert.equal(config.instances.some((entry) =>
+                entry.name === options.instanceName), false,
+            "retired Instance must not silently inherit current authority");
+            assert.ok(config.instances.some((entry) =>
+                entry.name === "current-instance"),
+            "unrelated valid Instance must remain available");
+        } else {
+            await assert.rejects(
+                new ControlConfigStore().readOrCreate(homeDirectory),
+                (error: unknown) => {
+                    assert.equal((error as { code?: string }).code, "control.configParseFailed");
+                    assert.equal(
+                        (error as { details?: { fieldPath?: string } }).details?.fieldPath,
+                        "version",
+                    );
+                    return true;
+                },
+            );
+        }
         assert.equal(await readFile(configFile, "utf8"), source);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
@@ -166,7 +185,7 @@ test("global v1 MCP auth cannot be loaded or silently upgraded", async () => {
     });
 });
 
-test("retired instance v3 cannot regain default context authority", async () => {
+test("retired instance v3 cannot regain default context authority or disable valid Instances", async () => {
     await assertRetiredConfigRejected({
         instanceName: "legacy-no-auth",
         instanceSource: toml.encode({
@@ -176,7 +195,7 @@ test("retired instance v3 cannot regain default context authority", async () => 
     });
 });
 
-test("retired instance v2 with workspace and MCP group policy is rejected unchanged", async () => {
+test("retired instance v2 with workspace and MCP group policy is preserved but inactive", async () => {
     await assertRetiredConfigRejected({
         instanceName: "legacy-default",
         instanceSource: toml.encode({
@@ -188,7 +207,7 @@ test("retired instance v2 with workspace and MCP group policy is rejected unchan
     });
 });
 
-test("retired instance v3 tool policy is not silently normalized into current permissions", async () => {
+test("retired instance v3 tool policy cannot silently gain current permissions", async () => {
     await assertRetiredConfigRejected({
         instanceName: "canonical-groups",
         instanceSource: toml.encode({

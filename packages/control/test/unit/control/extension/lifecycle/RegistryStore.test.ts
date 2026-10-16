@@ -111,7 +111,7 @@ test("update preflight validates referenced installed Extension generations befo
         }),
         {
             extensions: { checkedGenerations: 1 },
-            migration: { domains: [], required: false },
+            migration: { deferredAuditFiles: [], domains: [], required: false },
             protocols: {
                 control: {
                     candidate: CONTROL_PROTOCOL_RANGE,
