@@ -10,10 +10,7 @@ import { asInstanceName, type ConfigView } from "@portable-devshell/shared";
 
 import { Connections } from "../../../src/view/page/Connections.js";
 import { WebStore } from "../../../src/state/Store.js";
-import {
-    WebTestDomains,
-    withWebDomains,
-} from "../../support/DomainHarness.js";
+import { WebTestDomains, withWebDomains } from "../../support/DomainHarness.js";
 
 function setup({
     config = connectionView(),
@@ -95,12 +92,7 @@ describe("Web Connections", () => {
         const { domains, store } = setup();
         const createReverseCode = vi
             .spyOn(store, "createReverseCode")
-            .mockResolvedValue(
-                "devshell-worker enroll --device-code code",
-            );
-        const rotateReverseToken = vi
-            .spyOn(store, "rotateReverseToken")
-            .mockResolvedValue(true);
+            .mockResolvedValue("devshell-worker enroll --device-code code");
         renderConnections(store, domains, "reverse-one");
 
         expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
@@ -110,7 +102,7 @@ describe("Web Connections", () => {
         ).not.toBeInTheDocument();
 
         fireEvent.click(
-            screen.getByRole("button", { name: "Create enrollment code" }),
+            screen.getByRole("button", { name: "Generate enrollment code" }),
         );
         await waitFor(() =>
             expect(
@@ -119,18 +111,12 @@ describe("Web Connections", () => {
         );
         expect(createReverseCode).toHaveBeenCalledWith("reverse-one");
 
-        fireEvent.click(
-            screen.getByRole("button", { name: "Rotate device token" }),
-        );
-        const rotate = screen.getByRole("dialog", { name: "Confirm rotate" });
         expect(
-            within(rotate).getByRole("button", { name: "Cancel" }),
-        ).toHaveFocus();
-        fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
-        await waitFor(() =>
-            expect(rotateReverseToken).toHaveBeenCalledWith("reverse-one"),
-        );
-        expect(rotate).not.toBeInTheDocument();
+            screen.queryByRole("button", { name: "Rotate device token" }),
+        ).toBeNull();
+        expect(
+            screen.getByText(/instance does not need to be recreated/iu),
+        ).toBeInTheDocument();
     });
 
     it("manages OAuth approval mode and rotates a masked token", async () => {
@@ -140,8 +126,9 @@ describe("Web Connections", () => {
         const updateConfig = vi.spyOn(store, "updateConfig");
         renderConnections(store, domains);
 
-        const oauth = screen.getByRole("heading", { name: "OAuth runtime" })
-            .parentElement!;
+        const oauth = screen.getByRole("heading", {
+            name: "OAuth runtime",
+        }).parentElement!;
         expect(within(oauth).getByText("token")).toBeInTheDocument();
         expect(within(oauth).getByText("configured")).toBeInTheDocument();
 
@@ -197,9 +184,7 @@ describe("Web Connections", () => {
                 }),
             ),
         );
-        expect(updateConfig.mock.calls[0]?.[0]).not.toHaveProperty(
-            "instance",
-        );
+        expect(updateConfig.mock.calls[0]?.[0]).not.toHaveProperty("instance");
     });
 });
 

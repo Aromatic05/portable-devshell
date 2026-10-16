@@ -33,7 +33,9 @@ describe("WebStore", () => {
             await new Promise<void>((resolve) => {
                 releaseInitialLoad = resolve;
             });
-            domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+            domains.setInstances([
+                { mcpEnabled: true, name: "demo", snapshot },
+            ]);
         });
         const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
         const refreshInstances = vi.spyOn(domains.domains.instances, "refresh");
@@ -363,12 +365,10 @@ describe("WebStore", () => {
 
     it("attempts every Context in a batch disable and reports the failure", async () => {
         const domains = new WebTestDomains();
-        const disable = vi.fn(
-            async (ctxId: string): Promise<ContextRecord> => {
-                if (ctxId === "ctx-b") throw new Error("ctx-b refused");
-                return { ctxId } as ContextRecord;
-            },
-        );
+        const disable = vi.fn(async (ctxId: string): Promise<ContextRecord> => {
+            if (ctxId === "ctx-b") throw new Error("ctx-b refused");
+            return { ctxId } as ContextRecord;
+        });
         domains.domains.context.disable = disable;
         const store = new WebStore(domains.domains);
         await store.load();
@@ -518,7 +518,7 @@ describe("WebStore", () => {
         expect(createCode).toHaveBeenCalledWith("reverse-web");
         expect(result).toEqual({
             enrollment:
-                "devshell-worker enroll --controller https://controller.example.test --device-code device-code (expires 2026-09-16T12:00:00.000Z)",
+                "devshell-worker enroll --controller https://controller.example.test --device-code device-code\nCode expires: 2026-09-16T12:00:00.000Z\nIf pairing fails, open this instance's Connections page to create a new code. Do not recreate the instance.",
             succeeded: true,
         });
         store.close();

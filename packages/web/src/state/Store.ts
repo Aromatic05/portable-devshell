@@ -78,7 +78,9 @@ export class WebStore {
         if (this.#stopped) return;
         this.#generation += 1;
         const generation = this.#generation;
-        this.#operations.cancelAll(new Error("Web connection is reconnecting."));
+        this.#operations.cancelAll(
+            new Error("Web connection is reconnecting."),
+        );
         this.#set({
             ...this.#state,
             error: undefined,
@@ -387,8 +389,8 @@ export class WebStore {
                             "devshell-worker enroll",
                             `--controller ${code.controllerUrl}`,
                             `--device-code ${code.deviceCode}`,
-                            `(expires ${code.expiresAt})`,
                         ].join(" ");
+                        enrollment += `\nCode expires: ${code.expiresAt}\nIf pairing fails, open this instance's Connections page to create a new code. Do not recreate the instance.`;
                     } catch (error) {
                         enrollment = [
                             `Reverse instance ${result.name} was created, but device code generation failed:`,
@@ -443,12 +445,14 @@ export class WebStore {
                 this.#requestTimeoutMs,
                 `reverse.createCode:${instance}`,
             );
-            return [
-                "devshell-worker enroll",
-                `--controller ${result.controllerUrl}`,
-                `--device-code ${result.deviceCode}`,
-                `(expires ${result.expiresAt})`,
-            ].join(" ");
+            return (
+                [
+                    "devshell-worker enroll",
+                    `--controller ${result.controllerUrl}`,
+                    `--device-code ${result.deviceCode}`,
+                ].join(" ") +
+                `\nCode expires: ${result.expiresAt}\nIf the code expires or was consumed, generate another here.`
+            );
         } catch (error) {
             this.#set({
                 ...this.#state,

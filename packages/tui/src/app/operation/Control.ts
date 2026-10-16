@@ -135,13 +135,14 @@ export class TuiRuntimeControlOperations {
                     `instances:${result.name}:enrollment`,
                     undefined,
                 );
-                status = [
-                    "Reverse instance created. Run:",
-                    "devshell-worker enroll",
-                    `--controller ${code.controllerUrl}`,
-                    `--device-code ${code.deviceCode}`,
-                    `(expires ${code.expiresAt})`,
-                ].join(" ");
+                status =
+                    [
+                        "Reverse instance created. Run:",
+                        "devshell-worker enroll",
+                        `--controller ${code.controllerUrl}`,
+                        `--device-code ${code.deviceCode}`,
+                    ].join(" ") +
+                    `\nCode expires: ${code.expiresAt}\nIf pairing fails, run: devshell instance device-code ${result.name}. Do not recreate the instance.`;
             } catch (error) {
                 const failure = toRemoteError(error);
                 this.options.store.setPanelError(
@@ -186,7 +187,10 @@ export class TuiRuntimeControlOperations {
         patch: ConfigInstancePatch,
     ): Promise<void> {
         await this.#request(
-            this.options.clients.instance.updateInstance({ instanceName, patch }),
+            this.options.clients.instance.updateInstance({
+                instanceName,
+                patch,
+            }),
             `config.instance.update:${instanceName}`,
         );
     }

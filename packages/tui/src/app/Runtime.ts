@@ -189,7 +189,8 @@ export class TuiRuntime {
         this.scheduler = scheduler;
         for (const binding of pending) {
             pending.delete(binding);
-            if (!binding.detached) binding.detach = scheduler.attach(binding.source);
+            if (!binding.detached)
+                binding.detach = scheduler.attach(binding.source);
         }
         this.projection = createTuiViewProjection(this.reader);
         this.focusManager = new TuiFocusManager(this.store, {
@@ -363,6 +364,7 @@ export class TuiRuntime {
                 await domains.messagePreferences.update(patch);
             },
             onOpenTerminal: async (instance) => {
+                await domains.instances.refresh();
                 this.store.setSelectedInstance(instance);
                 this.store.setSelectedPage("terminal");
                 this.store.setFocusScope("terminal");
@@ -438,7 +440,9 @@ export class TuiRuntime {
                 );
             },
             onToolCallDetail: async (instance, callId) => {
-                return (await domains.toolCalls.readDetail(instance, callId))[0];
+                return (
+                    await domains.toolCalls.readDetail(instance, callId)
+                )[0];
             },
             onValidateConfigDraft: async (draft) => {
                 await this.#operations.validateConfigDraft(draft);
@@ -770,14 +774,10 @@ export class TuiRuntime {
         x: number;
         y: number;
     }): Promise<void> {
-        const regions = buildTuiHitRegions(
-            this.store.getState(),
-            this.reader,
-            {
-                columns: this.columns,
-                rows: this.rows,
-            },
-        );
+        const regions = buildTuiHitRegions(this.store.getState(), this.reader, {
+            columns: this.columns,
+            rows: this.rows,
+        });
         if ((event.button & 64) !== 0) {
             if (event.kind !== "press") return;
             const delta = (event.button & 1) === 0 ? -3 : 3;

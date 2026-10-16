@@ -47,6 +47,9 @@ export class TuiRouteDataLoader {
                 await Promise.all([
                     domains.config.refresh(),
                     domains.mcp.refresh(),
+                    ...(instance === undefined
+                        ? []
+                        : [domains.runtime(instance).load()]),
                 ]);
                 return;
             case "audit":
@@ -59,7 +62,9 @@ export class TuiRouteDataLoader {
                     if (signal.aborted) return;
                     await refreshTuiAuditInstances(
                         domains,
-                        domains.instances.state.instances.map(({ name }) => name),
+                        domains.instances.state.instances.map(
+                            ({ name }) => name,
+                        ),
                     );
                 }
                 return;

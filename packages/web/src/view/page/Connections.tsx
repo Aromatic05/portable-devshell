@@ -33,13 +33,11 @@ export function Connections({
     const domains = useWebDomains();
     const config = useDomainSnapshot(domains.config);
     const instancesState = useDomainSnapshot(domains.instances);
+    const overviewState = useDomainSnapshot(domains.overview);
     const mcp = useDomainSnapshot(domains.mcp);
     const server = useDomainSnapshot(domains.server);
     const configView = config.view;
-    const instances = useMemo(
-        () => configInstances(configView),
-        [configView],
-    );
+    const instances = useMemo(() => configInstances(configView), [configView]);
     const selectedName =
         instance !== undefined &&
         instances.some((entry) => entry.name === instance)
@@ -58,7 +56,7 @@ export function Connections({
     }>();
     const [enrollment, setEnrollment] = useState<string>();
     const [approvalToken, setApprovalToken] = useState<string>();
-    const [confirm, setConfirm] = useState<"revoke" | "rotate">();
+    const [confirm, setConfirm] = useState<"revoke">();
     const [restartingControl, setRestartingControl] = useState(false);
 
     useEffect(() => {
@@ -73,9 +71,12 @@ export function Connections({
     const snapshot =
         selectedName === undefined
             ? undefined
-            : instancesState.instances.find(
+            : (overviewState.overview?.instances.find(
                   (entry) => entry.name === selectedName,
-              )?.snapshot;
+              )?.snapshot ??
+              instancesState.instances.find(
+                  (entry) => entry.name === selectedName,
+              )?.snapshot);
     const dirty = JSON.stringify(drafts) !== JSON.stringify(base);
     const pending = store.state.operations["config:update"] !== undefined;
     const interactive = server.status === "online" && !disabled && !pending;
@@ -93,7 +94,6 @@ export function Connections({
             </section>
         );
     }
-
 
     async function updateOAuthApproval(
         mode: "token" | "tui",
@@ -519,6 +519,12 @@ export function Connections({
                         <dt>Status</dt>
                         <dd>{snapshot?.status ?? "unknown"}</dd>
                     </dl>
+                    <p className="hint">
+                        If enrollment fails or the code expires, create a new
+                        code here. The instance does not need to be recreated.
+                        Existing worker credentials stay active until the new
+                        code is used.
+                    </p>
                     {enrollment === undefined ? null : <pre>{enrollment}</pre>}
                     <div className="actions">
                         <button
@@ -533,14 +539,7 @@ export function Connections({
                             }
                             type="button"
                         >
-                            Create enrollment code
-                        </button>
-                        <button
-                            disabled={!interactive}
-                            onClick={() => setConfirm("rotate")}
-                            type="button"
-                        >
-                            Rotate device token
+                            Generate enrollment code
                         </button>
                         <button
                             className="danger"
@@ -557,29 +556,21 @@ export function Connections({
             {confirm === undefined ||
             selectedEntry?.provider !== "reverse" ? null : (
                 <ConfirmationDialog
-                    actionLabel={confirm === "rotate" ? "Rotate" : "Revoke"}
+                    actionLabel="Revoke"
                     busy={
                         store.state.operations[
-                            confirm === "rotate"
-                                ? `reverse:rotate:${selectedEntry.name}`
-                                : `reverse:revoke:${selectedEntry.name}`
+                            `reverse:revoke:${selectedEntry.name}`
                         ] !== undefined
                     }
-                    description={
-                        confirm === "rotate"
-                            ? `Rotate the device token for ${selectedEntry.name}? Existing credentials will stop working.`
-                            : `Revoke the device token for ${selectedEntry.name}? The remote worker must enroll again.`
-                    }
+                    description={`Revoke the device token for ${selectedEntry.name}? The remote worker must enroll again.`}
                     variant="destructive"
                     onCancel={() => setConfirm(undefined)}
                     onConfirm={() => {
-                        const request =
-                            confirm === "rotate"
-                                ? store.rotateReverseToken(selectedEntry.name)
-                                : store.revokeReverseToken(selectedEntry.name);
-                        void request.then((succeeded) => {
-                            if (succeeded) setConfirm(undefined);
-                        });
+                        void store
+                            .revokeReverseToken(selectedEntry.name)
+                            .then((succeeded) => {
+                                if (succeeded) setConfirm(undefined);
+                            });
                     }}
                 />
             )}
@@ -621,15 +612,25 @@ function OAuthSection({
                 <dt>Approval mode</dt>
                 <dd>{approval.mode}</dd>
                 <dt>Approval token</dt>
-                <dd>{approval.tokenConfigured ? "configured" : "not configured"}</dd>
+                <dd>
+                    {approval.tokenConfigured ? "configured" : "not configured"}
+                </dd>
             </dl>
             <div className="actions">
                 {approval.mode === "token" ? (
                     <>
-                        <button disabled={!interactive} onClick={onUseTui} type="button">
+                        <button
+                            disabled={!interactive}
+                            onClick={onUseTui}
+                            type="button"
+                        >
                             Use TUI approval
                         </button>
-                        <button disabled={!interactive} onClick={onRotate} type="button">
+                        <button
+                            disabled={!interactive}
+                            onClick={onRotate}
+                            type="button"
+                        >
                             Rotate approval token
                         </button>
                     </>
@@ -646,7 +647,10 @@ function OAuthSection({
             </div>
             {newToken === undefined ? null : (
                 <div className="oauth-token-once" role="status">
-                    <p>Save this token now. It will be masked in later configuration reads.</p>
+                    <p>
+                        Save this token now. It will be masked in later
+                        configuration reads.
+                    </p>
                     <pre>{newToken}</pre>
                 </div>
             )}
@@ -812,9 +816,10 @@ function connectionDrafts(
     };
 }
 
-function globalOAuthApproval(
-    configView: ConfigView | undefined,
-): { mode: "token" | "tui"; tokenConfigured: boolean } {
+function globalOAuthApproval(configView: ConfigView | undefined): {
+    mode: "token" | "tui";
+    tokenConfigured: boolean;
+} {
     const mcp = asRecord(configView?.mcp);
     const oauth2 = asRecord(mcp?.oauth2);
     const mode = oauth2?.approval === "token" ? "token" : "tui";
