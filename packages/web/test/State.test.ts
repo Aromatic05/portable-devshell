@@ -26,6 +26,30 @@ afterEach(() => {
 });
 
 describe("WebStore", () => {
+    it("waits for initial instance discovery and coalesces Audit reloads", async () => {
+        const domains = new WebTestDomains();
+        let releaseInitialLoad!: () => void;
+        domains.domains.load = vi.fn(async () => {
+            await new Promise<void>((resolve) => {
+                releaseInitialLoad = resolve;
+            });
+            domains.setInstances([{ mcpEnabled: true, name: "demo", snapshot }]);
+        });
+        const loadToolCalls = vi.spyOn(domains.domains.toolCalls, "load");
+        const refreshInstances = vi.spyOn(domains.domains.instances, "refresh");
+        const store = new WebStore(domains.domains);
+        const initialLoad = store.load();
+        const firstAudit = store.refreshAudit();
+        const secondAudit = store.refreshAudit();
+        await Promise.resolve();
+        expect(refreshInstances).not.toHaveBeenCalled();
+        expect(loadToolCalls).not.toHaveBeenCalled();
+        releaseInitialLoad();
+        await Promise.all([initialLoad, firstAudit, secondAudit]);
+        expect(refreshInstances).toHaveBeenCalledOnce();
+        expect(loadToolCalls).toHaveBeenCalledExactlyOnceWith("demo");
+    });
+
     it("waits for the domain session before completing its load", async () => {
         const domains = new WebTestDomains();
         let resolveLoad!: () => void;

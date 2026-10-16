@@ -37,6 +37,12 @@ export function Instances({
     const instances = useDomainSnapshot(domains.instances);
     const server = useDomainSnapshot(domains.server);
     const overviewState = useDomainSnapshot(domains.overview);
+    const liveSnapshots = new Map<string, InstanceListEntry["snapshot"]>(
+        (overviewState.overview?.instances ?? []).map(({ name, snapshot }) => [
+            name,
+            snapshot,
+        ]),
+    );
     const config = useDomainSnapshot(domains.config);
     const artifact = useDomainSnapshot(domains.artifact);
     const selected = route.instance;
@@ -52,7 +58,13 @@ export function Instances({
         { kind: "share"; id: string } | { kind: "transfer"; id: string }
     >();
     const [artifactFailure, setArtifactFailure] = useState<string>();
-    const entry = instances.instances.find(({ name }) => name === selected);
+    const configuredEntry = instances.instances.find(({ name }) => name === selected);
+    const entry = configuredEntry === undefined
+        ? undefined
+        : {
+              ...configuredEntry,
+              snapshot: liveSnapshots.get(configuredEntry.name) ?? configuredEntry.snapshot,
+          };
     const selectedWorker = overviewState.overview?.instances.find(
         ({ name }) => name === entry?.name,
     )?.worker;
@@ -141,8 +153,8 @@ export function Instances({
                                         {item.name}
                                     </a>
                                     <span>
-                                        {item.snapshot.status} ·{" "}
-                                        {item.snapshot.connectionState}
+                                        {(liveSnapshots.get(item.name) ?? item.snapshot).status} ·{" "}
+                                        {(liveSnapshots.get(item.name) ?? item.snapshot).connectionState}
                                     </span>
                                     <WorkerSummary
                                         worker={

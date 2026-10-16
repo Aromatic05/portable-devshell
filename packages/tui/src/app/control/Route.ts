@@ -4,6 +4,7 @@ import { tuiRouteIdentity, type TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import {
     refreshTuiAudit,
+    refreshTuiAuditInstances,
     refreshTuiMessages,
     refreshTuiTodo,
 } from "./Refresh.js";
@@ -31,6 +32,12 @@ export class TuiRouteDataLoader {
                 await domains.overview.refresh();
                 return;
             case "instances":
+                if (signal.aborted) return;
+                await Promise.all([
+                    domains.config.refresh(),
+                    domains.instances.refresh(),
+                ]);
+                return;
             case "config":
                 if (signal.aborted) return;
                 await domains.config.refresh();
@@ -46,6 +53,14 @@ export class TuiRouteDataLoader {
                 if (instance !== undefined) {
                     if (signal.aborted) return;
                     await refreshTuiAudit(domains, instance);
+                } else {
+                    if (signal.aborted) return;
+                    await domains.instances.refresh();
+                    if (signal.aborted) return;
+                    await refreshTuiAuditInstances(
+                        domains,
+                        domains.instances.state.instances.map(({ name }) => name),
+                    );
                 }
                 return;
             case "messages":
@@ -69,7 +84,9 @@ export class TuiRouteDataLoader {
                 }
                 return;
             case "help":
+                return;
             case "terminal":
+                if (!signal.aborted) await domains.instances.refresh();
                 return;
         }
     }

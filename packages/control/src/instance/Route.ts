@@ -128,11 +128,14 @@ function readInstances(
             name: descriptor.config.name,
         }));
     return configured.map((instance): InstanceListEntry => {
+        const runtime = options.registry.get(instance.name);
+        const homeDirectory = runtime?.supervision.handshake?.homeDirectory;
         return {
             enabled: instance.enabled,
+            ...(homeDirectory === undefined ? {} : { homeDirectory }),
             mcpEnabled: instance.mcp.enabled,
             name: instance.name,
-            snapshot: inactiveSnapshot(instance.name),
+            snapshot: runtime?.supervision.snapshot() ?? inactiveSnapshot(instance.name),
         };
     });
 }

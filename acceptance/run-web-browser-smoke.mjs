@@ -22,8 +22,17 @@ if (browserExecutable === undefined) {
     try {
         runCli(["start"], fixture.env);
         runCli(["instance", "start", "aromatic-pc"], fixture.env);
+        runCli([
+            "instance",
+            "call",
+            "aromatic-pc",
+            fixture.workspace,
+            "bash_run",
+            JSON.stringify({ command: "printf alpha4-audit-persistence", timeoutMs: 10_000 }),
+        ], fixture.env);
         const result = await runTestspaceWebSmoke({
             browserExecutable,
+            exerciseAuditReload: true,
             exerciseLifecycle: true,
             expectedInstance: "aromatic-pc",
             webPort: fixture.webPort,

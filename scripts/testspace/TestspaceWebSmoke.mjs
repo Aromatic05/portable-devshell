@@ -72,6 +72,7 @@ export function chromiumLaunchArguments(options = {}) {
 export async function runTestspaceWebSmoke({
     browserExecutable = resolveChromiumExecutable(),
     webPort,
+    exerciseAuditReload = false,
     exerciseLifecycle = false,
     expectedInstance = "testspace-local",
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -145,6 +146,9 @@ export async function runTestspaceWebSmoke({
                         event.params?.entry?.level === "error"),
             );
             assertWebSmokeState(pageState, failures, expectedInstance);
+            if (exerciseAuditReload) {
+                await exerciseAuditPersistence(devtools, webPort, timeoutMs);
+            }
             if (exerciseLifecycle) {
                 await exerciseInstanceLifecycle(
                     devtools,
@@ -154,6 +158,7 @@ export async function runTestspaceWebSmoke({
             }
             return {
                 browser: browserExecutable,
+                auditRetainedAfterReload: exerciseAuditReload,
                 instanceLifecycle: exerciseLifecycle
                     ? "stop-start"
                     : "not-exercised",
@@ -179,6 +184,34 @@ export async function runTestspaceWebSmoke({
             retryDelay: 100,
         });
     }
+}
+
+async function exerciseAuditPersistence(devtools, webPort, timeoutMs) {
+    await devtools.send("Page.navigate", {
+        url: `http://${TEST_HOST}:${webPort}/web/#/audit`,
+    });
+    const hasAudit = "document.body?.innerText.includes('bash_run') === true";
+    await waitForCondition(
+        devtools,
+        hasAudit,
+        timeoutMs,
+        "Audit did not display the persisted bash_run ToolCall.",
+    );
+    const previous = await devtools.send("Runtime.evaluate", {
+        expression: "performance.timeOrigin",
+        returnByValue: true,
+    });
+    const oldTimeOrigin = previous.result?.value;
+    if (typeof oldTimeOrigin !== "number") {
+        throw new Error("Unable to identify the initial Audit navigation.");
+    }
+    await devtools.send("Page.reload", { ignoreCache: true });
+    await waitForCondition(
+        devtools,
+        `performance.timeOrigin !== ${oldTimeOrigin} && ${hasAudit}`,
+        timeoutMs,
+        "Audit dropped the persisted ToolCall after a full browser reload.",
+    );
 }
 
 async function waitForProcessExit(process, timeoutMs) {

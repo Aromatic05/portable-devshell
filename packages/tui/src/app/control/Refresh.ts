@@ -19,14 +19,25 @@ export async function refreshTuiAudit(
     domains: TuiDomainSession,
     instance: string,
 ): Promise<void> {
-    const runtime = domains.runtime(instance);
+    await refreshTuiAuditInstances(domains, [instance]);
+}
+
+export async function refreshTuiAuditInstances(
+    domains: TuiDomainSession,
+    instances: readonly string[],
+): Promise<void> {
     await Promise.all([
         domains.context.refresh(),
-        runtime.load().then(() => runtime.readLogs()),
-        domains.approval(instance).load(),
-        domains.toolCalls.load(instance),
-        domains.messageHistory.refreshInstance(instance),
-        domains.messages.refreshInstance(instance),
+        ...instances.map(async (instance) => {
+            const runtime = domains.runtime(instance);
+            await Promise.all([
+                runtime.load().then(() => runtime.readLogs()),
+                domains.approval(instance).load(),
+                domains.toolCalls.load(instance),
+                domains.messageHistory.refreshInstance(instance),
+                domains.messages.refreshInstance(instance),
+            ]);
+        }),
     ]);
 }
 

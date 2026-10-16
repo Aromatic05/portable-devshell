@@ -73,7 +73,7 @@ function ApplicationBody({
     const interactionDisabled = busy !== undefined;
 
     useEffect(() => {
-        if (route.page === "overview") {
+        if (route.page === "overview" || route.page === "instances") {
             domains.overview.start();
             domains.overview.scheduleRefresh(0);
         } else {

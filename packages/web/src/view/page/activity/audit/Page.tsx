@@ -1,5 +1,4 @@
 import {
-    useEffect,
     useMemo,
     useState,
     useSyncExternalStore,
@@ -154,11 +153,6 @@ export function Audit({
             : selection.total === 0
               ? `0 of ${scopedCalls.length} tool calls${active ? " match active filters." : "."}`
               : `Showing ${toolCallPage * toolCallPageSize + 1}-${toolCallPage * toolCallPageSize + selection.items.length} of ${selection.total} matching tool calls.`;
-
-    useEffect(() => {
-        if (server.status !== "online") return;
-        void store.refreshAudit();
-    }, [server.status, store]);
 
     function changeFilters(next: Filters): void {
         setToolCallPage(0);

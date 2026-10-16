@@ -111,6 +111,30 @@ it("starts a stopped local instance directly and marks the selected card", () =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
+it("shows live Overview status instead of a stale configured-instance snapshot", () => {
+    const { domains, store } = setup({
+        config: localConfig(),
+        instances: [localInstance("stopped")],
+    });
+    domains.setOverview({
+        instances: [{
+            name: "local-one",
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 10,
+                name: asInstanceName("local-one"),
+                ready: true,
+                status: "ready",
+            },
+        }],
+    });
+    renderInstances(domains, store, "local-one");
+
+    expect(screen.getByText("ready · connected")).toBeInTheDocument();
+    expect(screen.queryByText("stopped · disconnected")).not.toBeInTheDocument();
+});
+
 it("creates a local instance from only name and provider", async () => {
     const { domains, store } = setup({
         config: localConfig(),

@@ -25,6 +25,8 @@ export class WebStore {
     readonly #requestTimeoutMs: number;
     #messagePreferenceQueue = Promise.resolve();
     #controlRestartPromise?: Promise<boolean>;
+    #loading?: Promise<void>;
+    #auditRefresh?: Promise<void>;
     #generation = 0;
     #stopped = false;
 
@@ -52,16 +54,24 @@ export class WebStore {
         return () => this.#listeners.delete(listener);
     };
 
-    async load(): Promise<void> {
-        if (this.#stopped) return;
-        try {
-            await this.domains.load();
-            if (this.#stopped) return;
-            this.#set({ ...this.#state, error: undefined });
-        } catch (error) {
-            if (!this.#stopped)
-                this.#set({ ...this.#state, error: errorMessage(error) });
-        }
+    load(): Promise<void> {
+        if (this.#stopped) return Promise.resolve();
+        if (this.#loading !== undefined) return this.#loading;
+        const loading = (async () => {
+            try {
+                await this.domains.load();
+                if (this.#stopped) return;
+                this.#set({ ...this.#state, error: undefined });
+            } catch (error) {
+                if (!this.#stopped)
+                    this.#set({ ...this.#state, error: errorMessage(error) });
+            }
+        })();
+        this.#loading = loading;
+        void loading.finally(() => {
+            if (this.#loading === loading) this.#loading = undefined;
+        });
+        return loading;
     }
 
     async reconnect(): Promise<void> {
@@ -125,6 +135,20 @@ export class WebStore {
     }
 
     async refreshAudit(): Promise<void> {
+        if (this.#auditRefresh !== undefined) return this.#auditRefresh;
+        const refresh = this.#refreshAudit();
+        this.#auditRefresh = refresh;
+        try {
+            await refresh;
+        } finally {
+            if (this.#auditRefresh === refresh) this.#auditRefresh = undefined;
+        }
+    }
+
+    async #refreshAudit(): Promise<void> {
+        // An online socket is not the same as a fully loaded instance catalog.
+        // A concurrent catalog read can supersede this one and leave Audit empty.
+        await this.#loading;
         await Promise.all([
             this.domains.instances.refresh(),
             this.domains.context.refresh(),
