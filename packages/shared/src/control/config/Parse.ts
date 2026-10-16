@@ -264,9 +264,11 @@ export function parseConfigMcpPatch(
             ...path,
             "listenPort",
         ]),
-        modelOutput: readNullable(record.modelOutput, (entry) =>
-            parseMcpModelOutput(entry, [...path, "modelOutput"]),
-        ),
+        ...(record.modelOutput === undefined ? {} : {
+            modelOutput: readNullable(record.modelOutput, (entry) =>
+                parseMcpModelOutput(entry, [...path, "modelOutput"]),
+            ),
+        }),
         ...(record.oauth2 === undefined
             ? {}
             : {
