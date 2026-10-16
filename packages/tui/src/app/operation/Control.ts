@@ -117,6 +117,25 @@ export class TuiRuntimeControlOperations {
         throw failure;
     }
 
+    async createReverseCode(
+        instance: string,
+    ): Promise<import("@portable-devshell/shared").ReverseDeviceCodeResult> {
+        return await this.#request(
+            this.options.clients.reverse.createCode(instance),
+            `reverse.createCode:${instance}`,
+        );
+    }
+
+    async revokeReverseToken(instance: string): Promise<void> {
+        await this.#request(
+            this.options.clients.reverse.revokeToken(instance),
+            `reverse.revokeToken:${instance}`,
+        );
+        await this.#refreshBestEffort(`connections:${instance}`, async () => {
+            await this.options.domains.runtime(instance).load();
+        });
+    }
+
     async createInstance(
         draft: InstanceCreateDraft,
     ): Promise<string | undefined> {

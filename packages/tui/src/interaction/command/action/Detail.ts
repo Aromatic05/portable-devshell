@@ -12,6 +12,9 @@ interface CommandDispatcherDetailOptions {
     dispatch(intent: TuiUiIntent): Promise<boolean>;
     editor: TuiCommandDispatcherEditor;
     focus: TuiCommandDispatcherFocus;
+    onCreateReverseCode?: (
+        instance: string,
+    ) => Promise<import("@portable-devshell/shared").ReverseDeviceCodeResult>;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
 }
@@ -21,6 +24,7 @@ export class TuiCommandDispatcherDetail {
     readonly #dispatch: CommandDispatcherDetailOptions["dispatch"];
     readonly #editor: TuiCommandDispatcherEditor;
     readonly #focus: TuiCommandDispatcherFocus;
+    readonly #onCreateReverseCode: CommandDispatcherDetailOptions["onCreateReverseCode"];
     readonly #projection: TuiInteractionProjection;
     readonly #store: TuiAppStore;
 
@@ -29,6 +33,7 @@ export class TuiCommandDispatcherDetail {
         this.#dispatch = options.dispatch;
         this.#editor = options.editor;
         this.#focus = options.focus;
+        this.#onCreateReverseCode = options.onCreateReverseCode;
         this.#projection = options.projection;
         this.#store = options.store;
     }
@@ -59,7 +64,39 @@ export class TuiCommandDispatcherDetail {
             return await this.#dispatch({ type: "contextMessage.edit" });
         }
 
-
+        if (
+            state.ui.selectedPage === "connections" &&
+            actionId?.startsWith("reverse.createCode:")
+        ) {
+            const instance = actionId.slice("reverse.createCode:".length);
+            if (this.#onCreateReverseCode === undefined) return false;
+            const code = await this.#onCreateReverseCode(instance);
+            return await this.#dispatch({
+                body: [
+                    `Instance: ${instance}`,
+                    `Device Code expires: ${code.expiresAt}`,
+                    "",
+                    `devshell-worker enroll --controller ${code.controllerUrl} --device-code ${code.deviceCode}`,
+                    "",
+                    "Run this command on the remote machine. If the code expires or is consumed, generate a new one here. Do not recreate the instance.",
+                ].join("\n"),
+                title: `Reverse Enrollment · ${instance}`,
+                type: "textDetail.open",
+            });
+        }
+        if (
+            state.ui.selectedPage === "connections" &&
+            actionId?.startsWith("reverse.revokeToken:")
+        ) {
+            const instance = actionId.slice("reverse.revokeToken:".length);
+            return await this.#dispatch({
+                body: `Revoke the Reverse credential for ${instance}? The remote Worker will lose access until it re-enrolls.`,
+                confirmIntent: { instance, type: "reverse.revokeToken" },
+                confirmLabel: "Revoke",
+                title: `Revoke Reverse Credential · ${instance}`,
+                type: "overlay.openConfirm",
+            });
+        }
         if (
             state.ui.selectedPage === "connections" &&
             actionId === "oauth.approval.tui"
@@ -188,12 +225,15 @@ export class TuiCommandDispatcherDetail {
             boxId !== undefined
         ) {
             const route = currentTuiRoute(state);
-            if (route.page !== "extensions" || route.view !== "page") return false;
+            if (route.page !== "extensions" || route.view !== "page")
+                return false;
             const extensionActionId = button.slice("extension.action:".length);
             const action = this.#projection.domains.extension.tuiSnapshots
                 .get(route.pageId)
                 ?.items.find((item) => item.id === boxId)
-                ?.actions?.find((candidate) => candidate.id === extensionActionId);
+                ?.actions?.find(
+                    (candidate) => candidate.id === extensionActionId,
+                );
             if (action === undefined) return false;
             const intent = {
                 actionId: action.id,
@@ -302,9 +342,7 @@ export class TuiCommandDispatcherDetail {
                 const workspace =
                     context === undefined
                         ? undefined
-                        : (
-                              context.environments
-                          ).find(
+                        : context.environments.find(
                               (environment) =>
                                   environment.instance ===
                                   state.ui.selectedInstance,

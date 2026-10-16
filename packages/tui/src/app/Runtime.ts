@@ -384,6 +384,12 @@ export class TuiRuntime {
             onCreateInstance: async (draft) => {
                 return await this.#operations.createInstance(draft);
             },
+            onCreateReverseCode: async (instance) => {
+                return await this.#operations.createReverseCode(instance);
+            },
+            onRevokeReverseToken: async (instance) => {
+                await this.#operations.revokeReverseToken(instance);
+            },
             onGetInstanceCreateSchema: async () => {
                 return await this.#operations.getInstanceCreateSchema();
             },

@@ -116,6 +116,7 @@ export type TuiUiIntent =
     | { instance: string; type: "instance.restart" }
     | { enabled: boolean; instance: string; type: "instance.setEnabled" }
     | { instance: string; type: "instance.stop" }
+    | { instance: string; type: "reverse.revokeToken" }
     | { instance: string; type: "instance.openTerminal" }
     | { type: "terminal.requestKill" }
     | { instance: string; type: "terminal.kill" }

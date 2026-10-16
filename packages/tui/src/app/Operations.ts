@@ -26,6 +26,8 @@ export class TuiRuntimeOperations {
     readonly callTool: TuiRuntimeExecutionOperations["callTool"];
     readonly cancelArtifactTransfer: TuiRuntimeControlOperations["cancelArtifactTransfer"];
     readonly createInstance: TuiRuntimeControlOperations["createInstance"];
+    readonly createReverseCode: TuiRuntimeControlOperations["createReverseCode"];
+    readonly revokeReverseToken: TuiRuntimeControlOperations["revokeReverseToken"];
     readonly decideApproval: TuiRuntimeExecutionOperations["decideApproval"];
     readonly decideOAuthApproval: TuiRuntimeControlOperations["decideOAuthApproval"];
     readonly deleteInstance: TuiRuntimeControlOperations["deleteInstance"];
@@ -76,6 +78,8 @@ export class TuiRuntimeOperations {
         this.cancelArtifactTransfer =
             control.cancelArtifactTransfer.bind(control);
         this.createInstance = control.createInstance.bind(control);
+        this.createReverseCode = control.createReverseCode.bind(control);
+        this.revokeReverseToken = control.revokeReverseToken.bind(control);
         this.decideOAuthApproval = control.decideOAuthApproval.bind(control);
         this.deleteInstance = control.deleteInstance.bind(control);
         this.deleteTodo = control.deleteTodo.bind(control);

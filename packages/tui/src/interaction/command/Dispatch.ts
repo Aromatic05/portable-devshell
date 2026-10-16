@@ -45,6 +45,10 @@ export interface TuiCommandDispatcherOptions {
         action: "refresh" | "restart" | "start" | "stop",
         instance: string,
     ): Promise<void>;
+    onCreateReverseCode?(
+        instance: string,
+    ): Promise<import("@portable-devshell/shared").ReverseDeviceCodeResult>;
+    onRevokeReverseToken?(instance: string): Promise<void>;
     onOpenTerminal(instance: string): Promise<void>;
     onTerminalKill?(instance: string): Promise<void>;
     mainViewportRows(): number;
@@ -67,9 +71,7 @@ export interface TuiCommandDispatcherOptions {
     ): Promise<void>;
     onContextDisable?(instance: string, ctxId: string): Promise<void>;
     onContextRenew?(instance: string, ctxId: string): Promise<void>;
-    onMessagePreferencesUpdate?(
-        patch: MessagePreferencesPatch,
-    ): Promise<void>;
+    onMessagePreferencesUpdate?(patch: MessagePreferencesPatch): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
@@ -144,6 +146,7 @@ export class TuiCommandDispatcher {
             dispatch: (intent) => this.dispatch(intent),
             editor: this.#editor,
             focus: this.#focus,
+            onCreateReverseCode: options.onCreateReverseCode,
             projection: options.projection,
             store: this.#store,
         });
@@ -197,6 +200,15 @@ export class TuiCommandDispatcher {
                 return true;
             case "instance.stop":
                 await this.#options.onInstanceAction("stop", intent.instance);
+                return true;
+            case "reverse.revokeToken":
+                await (this.#options.onRevokeReverseToken ?? unavailable)(
+                    intent.instance,
+                );
+                this.#store.setScreenStatus(
+                    "connections",
+                    `Credential for ${intent.instance} revoked; the remote Worker must re-enroll.`,
+                );
                 return true;
             case "instance.setEnabled":
                 await (this.#options.onInstanceEnabledChange ?? unavailable)(

@@ -3,6 +3,7 @@ import type { TuiDomainReader } from "../../../domain/Reader.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import { formatField, makeBox } from "../../Support.js";
 import { asRecord } from "../../../../state/editor/Draft.js";
+import { buttonLine } from "../../../component/Editor.js";
 
 export function buildReverseConnectionBoxes(
     state: TuiAppState,
@@ -33,6 +34,19 @@ export function buildReverseConnectionBoxes(
                 formatField("Daemon", snapshot?.daemonState ?? "unknown"),
                 formatField("Status", snapshot?.status ?? "unknown"),
                 formatField("Last sequence", String(snapshot?.lastSeq ?? 0)),
+                "",
+                "Enrollment",
+                "If the code expires, generate another without recreating the instance.",
+                buttonLine(
+                    `reverse.createCode:${routeInstance}`,
+                    "Generate enrollment code",
+                    provider !== "reverse",
+                ),
+                buttonLine(
+                    `reverse.revokeToken:${routeInstance}`,
+                    "Revoke device credential",
+                    provider !== "reverse",
+                ),
             ],
             id: `reverse-connection:${routeInstance}`,
             status:
