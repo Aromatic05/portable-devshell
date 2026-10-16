@@ -54,7 +54,6 @@ impl ReverseConnector {
             &self.paths,
             &format!("reverse connection established transport=wss generation={generation}"),
         )?;
-        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
         Ok(socket)
     }
 
@@ -62,6 +61,7 @@ impl ReverseConnector {
         &self,
         mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
     ) -> Result<(), String> {
+        let mut remote_frame_received = false;
         while !self.bridge.is_stopping() {
             self.flush_wss_responses(&mut socket)?;
             match socket.read() {
@@ -71,6 +71,12 @@ impl ReverseConnector {
                     {
                         self.bridge.requeue_front(response)?;
                         return Err(error.to_string());
+                    }
+                    // HTTP 101 alone does not mean Control accepted this
+                    // connection. Wait until it actually sends a valid frame.
+                    if !remote_frame_received {
+                        remote_frame_received = true;
+                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
                     }
                 }
                 Ok(Message::Ping(payload)) => {

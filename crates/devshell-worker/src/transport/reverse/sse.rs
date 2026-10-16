@@ -36,7 +36,7 @@ impl ReverseConnector {
             &self.paths,
             &format!("reverse connection established transport=sse generation={generation}"),
         )?;
-        let _ = super::state::write(&self.paths, "connected", Some("sse"), None);
+        let mut remote_frame_received = false;
 
         let upload_error = Arc::new(Mutex::new(None));
         let uploader = SseUploader::spawn(
@@ -64,6 +64,10 @@ impl ReverseConnector {
                         .map_err(|error| format!("invalid reverse SSE frame: {error}"))?;
                     if let Some(response) = self.bridge.accept_inbound(&frame)? {
                         self.bridge.requeue_front(response)?;
+                    }
+                    if !remote_frame_received {
+                        remote_frame_received = true;
+                        let _ = super::state::write(&self.paths, "connected", Some("sse"), None);
                     }
                 }
                 event_name.clear();
