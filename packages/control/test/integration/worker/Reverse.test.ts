@@ -73,6 +73,76 @@ async function readServiceStream(stream: MessageStream): Promise<Buffer> {
 }
 
 test(
+    "worker enrollment reports pending instead of success when Reverse transport is unavailable",
+    realWorkerTestOptions(workerBinary),
+    async (t) => {
+        const home = await createTestTempDirectory("reverse-enroll-pending");
+        const runtime = await createTestTempDirectory("reverse-enroll-runtime");
+        const environment: NodeJS.ProcessEnv = {
+            ...process.env,
+            HOME: home,
+            PORTABLE_DEVSHELL_HOME: join(home, ".devshell"),
+            USERPROFILE: home,
+            XDG_RUNTIME_DIR: runtime,
+        };
+        delete environment.DEVSHELL_WORKER_INTERNAL_INSTANCE;
+        const gateway = createHttpServer((request, response) => {
+            if (request.method === "POST" && request.url === "/reverse/v1/enroll") {
+                request.resume();
+                response.writeHead(200, { "Content-Type": "application/json" });
+                response.end(JSON.stringify({
+                    controllerUrl: `http://127.0.0.1:${(gateway.address() as { port: number }).port}`,
+                    deviceToken: "test-device-token",
+                    instance: "reverse-pending",
+                }));
+                return;
+            }
+            response.writeHead(503);
+            response.end("reverse transport unavailable");
+        });
+        gateway.listen(0, "127.0.0.1");
+        await once(gateway, "listening");
+        t.after(async () => {
+            runWorkerCommand(
+                ["stop", "--instance", "reverse-pending"],
+                environment,
+                home,
+                true,
+            );
+            await new Promise<void>((resolve) => gateway.close(() => resolve()));
+            await Promise.all([
+                rm(home, { force: true, recursive: true }),
+                rm(runtime, { force: true, recursive: true }),
+            ]);
+        });
+        const controller = `http://127.0.0.1:${(gateway.address() as { port: number }).port}`;
+        const enrolled = await execFileAsync(
+            workerBinary!,
+            ["enroll", "--controller", controller, "--device-code", "ABCDE-FGHIJ"],
+            { cwd: home, encoding: "utf8", env: environment, windowsHide: true },
+        );
+        const result = JSON.parse(enrolled.stdout) as {
+            ok: boolean;
+            started: boolean;
+            connected: boolean;
+            retrying: boolean;
+        };
+        assert.equal(result.ok, false);
+        assert.equal(result.started, true);
+        assert.equal(result.connected, false);
+        assert.equal(result.retrying, true);
+        assert.match(enrolled.stderr, /Reverse is reconnecting/u);
+        const status = JSON.parse(runWorkerCommand(
+            ["status", "--instance", "reverse-pending"],
+            environment,
+            home,
+        ).stdout) as { running: boolean; reverse?: { state: string } };
+        assert.equal(status.running, true);
+        assert.equal(status.reverse?.state, "reconnecting");
+    },
+);
+
+test(
     "real Rust reverse worker connects to the TS gateway and executes a tool call",
     realWorkerTestOptions(workerBinary),
     async (t) => {

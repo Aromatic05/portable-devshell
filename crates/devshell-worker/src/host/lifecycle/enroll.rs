@@ -1,10 +1,12 @@
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::capability::rpc::path::protocol_path;
+use crate::daemon::process::{self, DaemonState};
 use crate::host::lifecycle::install::{install_current_binary, start_installed_worker};
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
@@ -12,6 +14,7 @@ use crate::instance::{
     InstanceLock, InstanceName, WorkerReverseConfig, build_config, read_config, write_config,
 };
 use crate::transport::reverse::proxy::{apply_http_client_proxy, validate_proxy_url};
+use crate::transport::reverse::state;
 
 #[derive(Clone, Debug)]
 pub struct EnrollOptions {
@@ -44,9 +47,13 @@ struct EnrollResult {
     installed_binary: String,
     ok: bool,
     started: bool,
+    connected: bool,
+    connection_state: String,
+    retrying: bool,
 }
 
 pub fn run(options: EnrollOptions) -> Result<String, String> {
+    eprintln!("[1/5] Checking Control enrollment endpoint...");
     validate_controller_url(&options.controller)?;
     if let Some(proxy_url) = options.proxy_url.as_deref() {
         validate_proxy_url(proxy_url)?;
@@ -71,7 +78,9 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        return Err(format!("worker enrollment rejected ({status}): {body}"));
+        return Err(format!(
+            "worker enrollment rejected ({status}): {body}\nFor an expired, invalid or consumed code, generate a new Device Code from the instance's Connections page or run: devshell instance device-code <instance>"
+        ));
     }
     let enrollment = response
         .json::<EnrollmentResponse>()
@@ -80,6 +89,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
 
     let instance = InstanceName::parse(&enrollment.instance)?;
     let paths = InstancePaths::resolve(&instance)?;
+    eprintln!("[2/5] Credential accepted for {instance}; preparing worker binary...");
     // Finish fallible binary preparation before stopping a usable local
     // daemon. The server credential was already issued at this point.
     let installed_binary = install_current_binary()?;
@@ -88,36 +98,92 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
     ensure_dir(&paths.artifacts_dir, 0o700)?;
     ensure_dir(&paths.state_dir, 0o700)?;
 
-    // Re-enrollment replaces the server-side token immediately. Stop the old
-    // daemon and close the previous execution generation, but never retire the
-    // registered instance: retire deletes config, logs, and artifacts. These
-    // remain the user's data across a routine credential renewal.
-    crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
     let socket_paths = crate::transport::endpoint::channel::EndpointPaths::resolve(&instance)?;
-    crate::tool::tmux::retire_instance_runtime(&paths, &socket_paths, instance.as_str())?;
-
-    {
+    let previous_config = if paths.config_file.exists() {
+        Some(read_config(&paths, &instance)?)
+    } else {
+        None
+    };
+    let previous_running = process::daemon_state(&paths, &socket_paths) == DaemonState::Running;
+    eprintln!("[3/5] Preparing local runtime for {instance}...");
+    let switched = (|| -> Result<(), String> {
+        crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
+        // Keep persisted user config, logs and artifacts across re-enrollment.
+        crate::tool::tmux::retire_instance_runtime(&paths, &socket_paths, instance.as_str())?;
         let _lock = InstanceLock::acquire(&paths)?;
-        let mut config = if paths.config_file.exists() {
-            read_config(&paths, &instance)?
-        } else {
-            build_config(&instance)?
+        let mut config = match &previous_config {
+            Some(config) => config.clone(),
+            None => build_config(&instance)?,
         };
         config.reverse = Some(WorkerReverseConfig {
-            controller_url: enrollment.controller_url,
-            device_token: enrollment.device_token,
+            controller_url: enrollment.controller_url.clone(),
+            device_token: enrollment.device_token.clone(),
             generation: 0,
-            proxy_url: options.proxy_url,
+            proxy_url: options.proxy_url.clone(),
         });
         write_config(&paths, &config)?;
+        drop(_lock);
+        eprintln!("[4/5] Starting worker daemon...");
+        start_installed_worker(&installed_binary, &instance)?;
+        Ok(())
+    })();
+    if let Err(error) = switched {
+        let rollback = (|| -> Result<(), String> {
+            if let Some(config) = &previous_config {
+                write_config(&paths, config)?;
+            } else if paths.config_file.exists() {
+                std::fs::remove_file(&paths.config_file)
+                    .map_err(|failure| format!("failed to remove provisional config: {failure}"))?;
+            }
+            if previous_running {
+                start_installed_worker(&installed_binary, &instance)?;
+            }
+            Ok(())
+        })();
+        return Err(match rollback {
+            Ok(()) => format!(
+                "worker enrollment installation failed: {error}. The previous configuration was restored. Generate a new Device Code before retrying."
+            ),
+            Err(rollback_error) => format!(
+                "worker enrollment installation failed: {error}; restoring the previous worker also failed: {rollback_error}. Generate a new Device Code before retrying."
+            ),
+        });
     }
-
-    start_installed_worker(&installed_binary, &instance)?;
+    eprintln!("[5/5] Checking Reverse connection (the worker will keep retrying)...");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let connection = loop {
+        let current = state::read(&paths);
+        if current
+            .as_ref()
+            .is_some_and(|status| status.state == "connected")
+        {
+            break current;
+        }
+        if Instant::now() >= deadline {
+            break current;
+        }
+        thread::sleep(Duration::from_millis(150));
+    };
+    let connected = connection
+        .as_ref()
+        .is_some_and(|status| status.state == "connected");
+    let connection_state =
+        connection.map_or_else(|| "connecting".to_string(), |status| status.state);
+    if connected {
+        eprintln!("Reverse transport connected. Check Control for instance readiness.");
+    } else {
+        eprintln!(
+            "Worker installed and running, but Reverse is {connection_state}. Background reconnect is active; do not enroll again. Inspect: devshell-worker logs --instance {instance}"
+        );
+    }
     serde_json::to_string_pretty(&EnrollResult {
         instance: instance.as_str().to_string(),
         installed_binary: protocol_path(&installed_binary),
-        ok: true,
+        ok: connected,
         started: true,
+        connected,
+        connection_state,
+        retrying: !connected,
     })
     .map_err(|error| error.to_string())
 }

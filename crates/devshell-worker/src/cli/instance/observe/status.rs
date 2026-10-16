@@ -7,6 +7,7 @@ use crate::daemon::process::{self, DaemonState};
 use crate::instance::InstanceName;
 use crate::instance::storage::InstancePaths;
 use crate::transport::endpoint::channel::EndpointPaths;
+use crate::transport::reverse::state::{self, ReverseConnectionState};
 
 #[derive(Serialize)]
 struct StatusResponse {
@@ -17,6 +18,8 @@ struct StatusResponse {
     pid: Option<u32>,
     #[serde(rename = "workerSha256")]
     worker_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reverse: Option<ReverseConnectionState>,
 }
 
 pub fn run(args: InstanceArgs) -> Result<String, String> {
@@ -53,6 +56,11 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
         running,
         pid,
         worker_sha256,
+        reverse: if running {
+            state::read(&instance_paths)
+        } else {
+            None
+        },
     })
     .map_err(|error| error.to_string())
 }
