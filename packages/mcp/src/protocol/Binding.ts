@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/node";
 import {
     createMcpHandler,
+    InMemoryServerEventBus,
     ProtocolError,
     ProtocolErrorCode,
     Server,
@@ -29,9 +30,23 @@ import {
     type McpModelOutputBudget,
 } from "./call/ModelOutput.js";
 
+function requiresStreamingResponse(body: JsonValue): boolean {
+    if (body === null || typeof body !== "object" || Array.isArray(body))
+        return false;
+    if (body.method !== "tools/call") return false;
+    const params = body.params;
+    if (params === null || typeof params !== "object" || Array.isArray(params))
+        return true;
+    // Bootstrap is inexpensive. Every other ToolCall may block on Worker,
+    // network or Hook, and needs early response headers plus SSE keepalive.
+    return params.name !== "environ_info";
+}
+
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;
     readonly #nodeHandler: NodeMcpRequestHandler;
+    readonly #streamHandler: McpHttpHandler;
+    readonly #streamNodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #endpoint: McpEndpoint;
     readonly #modelOutput: McpModelOutputBudget;
@@ -45,16 +60,27 @@ export class McpEndpointBinding {
         this.#serverVersion = serverVersion;
         this.#endpoint = endpoint;
         this.#modelOutput = modelOutput;
-        this.#handler = createMcpHandler(() => this.#createServer(), {
+        // Per-request modes share a bus so subscriptions and tool calls
+        // remain on the same notification stream across both handlers.
+        const bus = new InMemoryServerEventBus();
+        const common = {
+            bus,
             keepAliveMs: 15_000,
-            legacy: "reject",
-            // One-shot results use JSON rather than a long-lived SSE response.
-            // The SDK upgrades to SSE when a call actually emits progress or
-            // another mid-call notification. This preserves streaming tools
-            // while avoiding a needless fragile stream for ordinary calls.
+            legacy: "reject" as const,
+        };
+        this.#handler = createMcpHandler(() => this.#createServer(), {
+            ...common,
             responseMode: "auto",
         });
+        this.#streamHandler = createMcpHandler(() => this.#createServer(), {
+            ...common,
+            // The Node adapter flushes headers with the first body frame.
+            // Send a prompt heartbeat even if a long call emits no progress.
+            keepAliveMs: 1_000,
+            responseMode: "sse",
+        });
         this.#nodeHandler = toNodeHandler(this.#handler);
+        this.#streamNodeHandler = toNodeHandler(this.#streamHandler);
     }
 
     get instanceName(): string {
@@ -66,7 +92,9 @@ export class McpEndpointBinding {
         response: ServerResponse,
         body: JsonValue,
     ): Promise<void> {
-        await this.#nodeHandler(request, response, body);
+        await (requiresStreamingResponse(body)
+            ? this.#streamNodeHandler
+            : this.#nodeHandler)(request, response, body);
     }
 
     #createServer(): Server {

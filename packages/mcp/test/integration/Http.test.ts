@@ -99,6 +99,61 @@ test("legacy initialize is strictly rejected while server/discover negotiates th
     }
 });
 
+test("quiet ToolCall keeps the HTTP connection live before the Worker finishes", async () => {
+    let entered!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    const base = createHttpToolCallApi();
+    const tools: ToolCallApi = {
+        async call(...args) {
+            if (args[1] === "bash_run") {
+                entered();
+                await gate;
+            }
+            return await base.call(...args);
+        },
+    };
+    const host = createHost({ tools });
+    await host.start();
+    try {
+        const endpoint = `http://127.0.0.1:${requireTcpPort(host.server.address)}/demo/mcp`;
+        const context = await host.contexts.registry.create({ principal: "local" });
+        const ctxId = context.ctxId;
+        await host.contexts.registry.referenceInstance(ctxId, "demo");
+        const pending = postModern(endpoint, "slow-call", "tools/call", {
+            name: "bash_run",
+            arguments: { command: "quiet long-running operation", ctxId },
+        });
+        await Promise.race([started, new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("slow call never entered ToolCall API")), 3_000),
+        )]);
+        const response = await Promise.race([
+            pending,
+            new Promise<never>((_, reject) => setTimeout(
+                () => reject(new Error("quiet SSE call never sent a heartbeat")),
+                3_000,
+            )),
+        ]);
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get("content-type") ?? "", /^text\/event-stream\b/iu);
+        resume();
+        const result = parseMcpHttpResponse<{ result?: {
+            structuredContent?: { stdout?: string };
+        } }>(await response.text());
+        assert.equal(result.result?.structuredContent?.stdout, "ok\n");
+        const short = await postModern(endpoint, "short-call", "tools/call", {
+            name: "environ_info",
+            arguments: { workspace: "/workspace" },
+        });
+        assert.equal(short.status, 200);
+        assert.match(short.headers.get("content-type") ?? "", /^application\/json\b/iu);
+    } finally {
+        resume();
+        await host.stop();
+    }
+});
+
 test("production MCP host advertises and reads its MCP App resource", async () => {
     const host = createHost();
     await host.start();
@@ -436,11 +491,12 @@ function createHost(overrides?: {
     listenPort?: number;
     publicBaseUrl?: string;
     storageDir?: string;
+    tools?: ToolCallApi;
 }): McpHost {
     return new McpHost({
         listenHost: "127.0.0.1",
         listenPort: overrides?.listenPort ?? 0,
-        tools: createHttpToolCallApi(),
+        tools: overrides?.tools ?? createHttpToolCallApi(),
         publicBaseUrl: overrides?.publicBaseUrl,
         storageDir: overrides?.storageDir,
         instances: [
