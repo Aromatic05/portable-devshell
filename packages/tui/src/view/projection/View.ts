@@ -70,7 +70,7 @@ export function selectHeaderSummary(
     const instances = domains.instances.instances;
     const live =
         overview?.counts.instancesReady ??
-        instances.filter((instance) => instance.snapshot.ready).length;
+        instances.filter((instance) => instance.snapshot?.ready === true).length;
     const approvals = overview?.counts.pendingApprovals ?? 0;
     return `instances ${instances.length} | live ${live} | approvals ${approvals}`;
 }

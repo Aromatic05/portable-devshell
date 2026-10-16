@@ -40,8 +40,34 @@ import { choiceLine, fieldLine } from "../../src/view/component/Editor.ts";
 import { tuiMessagesHistoryRows } from "../../src/view/page/activity/messages/Projection.ts";
 import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.tsx";
 import { TuiTestDomains } from "../support/DomainHarness.js";
+import { selectHeaderSummary } from "../../src/view/projection/View.ts";
 
 {
+    test("TUI header tolerates instances before their runtime snapshots arrive", () => {
+        const store = new TuiAppStore();
+        const domains = new TuiTestDomains();
+        domains.setInstances([{
+            enabled: true,
+            homeDirectory: "/workspace/new",
+            mcpEnabled: true,
+            name: "new",
+            provider: "local",
+        }]);
+        assert.equal(selectHeaderSummary(store.getState(), domains.reader),
+            "instances 1 | live 0 | approvals 0");
+        domains.setInstances([{
+            enabled: true,
+            homeDirectory: "/workspace/new",
+            mcpEnabled: true,
+            name: "new",
+            provider: "local",
+            snapshot: { ready: true },
+        }]);
+        assert.equal(selectHeaderSummary(store.getState(), domains.reader),
+            "instances 1 | live 1 | approvals 0");
+        domains.dispose();
+    });
+
     function createHarness() {
         const store = new TuiAppStore();
         const domains = new TuiTestDomains();
