@@ -9,7 +9,10 @@ import type { ArtifactRuntime } from "./artifact/Api.js";
 import { installArtifactTools } from "./artifact/tool/index.js";
 import type { ContextRuntime } from "./context/Api.js";
 import { installContextTools } from "./context/Public.js";
-import { ModelCommandBroker } from "./extension/api/point/cli/command/Broker.js";
+import {
+    ModelCommandBroker,
+    modelCommandAuthorized,
+} from "./extension/api/point/cli/command/Broker.js";
 import { createDebugRuntime } from "./debug/index.js";
 import type { DebugRuntime } from "./debug/Api.js";
 import type { ExtensionRuntime } from "./extension/Api.js";
@@ -68,7 +71,7 @@ export class ControlState {
                 options.instances.get(instance)?.config.modelExtensions ?? [];
             return modelCliCommands
                 .list()
-                .filter((command) => allowed.includes(command.extensionId))
+                .filter((command) => modelCommandAuthorized(allowed, command))
                 .map((command) => command.id);
         };
 

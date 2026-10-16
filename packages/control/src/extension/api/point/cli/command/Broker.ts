@@ -12,6 +12,20 @@ import type {
 import type { ContextApi } from "../../../../../context/Api.js";
 import type { CliExtensionCommandService } from "./index.js";
 
+// This was the exact generated v0.7.x Model-command default, before Comment
+// provided Memory. Custom allowlists remain authoritative and unchanged.
+const LEGACY_MODEL_DEFAULT = ["artifact", "instance", "mcp", "secret", "skill"];
+
+export function modelCommandAuthorized(
+    allowed: readonly string[],
+    command: { id: string; extensionId: string },
+): boolean {
+    if (allowed.includes(command.extensionId)) return true;
+    return command.extensionId === "comment" && command.id === "memory" &&
+        allowed.length === LEGACY_MODEL_DEFAULT.length &&
+        LEGACY_MODEL_DEFAULT.every((id, index) => allowed[index] === id);
+}
+
 /** Connect Worker-owned command sessions to authorized model CLI extensions. */
 export class ModelCommandBroker {
     readonly #active = new Map<string, AbortController>();
@@ -125,7 +139,7 @@ export class ModelCommandBroker {
         signal.throwIfAborted();
         const [commandId, ...argv] = request.argv;
         const allowed = this.#commands.list().filter((command) =>
-            instance.config.modelExtensions.includes(command.extensionId));
+            modelCommandAuthorized(instance.config.modelExtensions, command));
         const sessions = instance.commandSessions;
         const output = async (stream: "stdout" | "stderr", data: string) => {
             for (const chunk of chunks(data)) {
