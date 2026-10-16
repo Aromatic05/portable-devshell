@@ -1833,7 +1833,8 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         json!({ "patterns": ["./tree"], "type": "file" }),
     );
     assert_eq!(first["type"], "reply", "{first}");
-    assert_eq!(first["message"]["entries"].as_array().unwrap().len(), 200);
+    let first_count = first["message"]["entries"].as_array().unwrap().len();
+    assert!(first_count > 0 && first_count <= 200, "{first}");
     let cursor = first["message"]["nextCursor"].as_str().unwrap().to_string();
 
     #[cfg(windows)]
@@ -1859,11 +1860,12 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         json!({ "cursor": cursor.clone() }),
     );
     assert_eq!(second["type"], "reply", "{second}");
-    let entries = second["message"]["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 50, "{second}");
-    assert_eq!(entries[0]["path"], "./tree/file-200.txt");
-    assert_eq!(entries[49]["path"], "./tree/file-249.txt");
-    assert!(second["message"].get("nextCursor").is_none());
+    let mut paths: Vec<String> = first["message"]["entries"]
+        .as_array().unwrap().iter()
+        .map(|entry| entry["path"].as_str().unwrap().to_string())
+        .collect();
+    paths.extend(second["message"]["entries"].as_array().unwrap().iter()
+        .map(|entry| entry["path"].as_str().unwrap().to_string()));
 
     let reused = call(
         &env,
@@ -1874,7 +1876,25 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         json!({ "cursor": cursor }),
     );
     assert_eq!(reused["type"], "reply", "{reused}");
-    assert_eq!(reused["message"]["entries"].as_array().unwrap().len(), 50);
+    assert_eq!(reused["message"]["entries"], second["message"]["entries"]);
+
+    let mut next = second["message"]["nextCursor"].as_str().map(str::to_string);
+    let mut request_id = 4;
+    while let Some(active) = next {
+        let page = call(&env, instance, &request_id.to_string(), "ctx-a",
+            "file_glob", json!({ "cursor": active }));
+        assert_eq!(page["type"], "reply", "{page}");
+        let entries = page["message"]["entries"].as_array().unwrap();
+        assert!(!entries.is_empty(), "{page}");
+        paths.extend(entries.iter()
+            .map(|entry| entry["path"].as_str().unwrap().to_string()));
+        next = page["message"]["nextCursor"].as_str().map(str::to_string);
+        request_id += 1;
+    }
+    assert_eq!(paths.len(), 250, "cursor must not lose entries after root replacement");
+    for (index, path) in paths.iter().enumerate() {
+        assert_eq!(path, &format!("./tree/file-{index:03}.txt"));
+    }
 
     env.json_command(&["stop", "--instance", instance]);
     #[cfg(windows)]
@@ -2046,7 +2066,10 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         json!({ "cursor": first_cursor.clone() }),
     );
     assert_eq!(second["type"], "reply", "{second}");
-    assert_eq!(second["message"]["entries"].as_array().unwrap().len(), 200);
+    let first_count = first["message"]["entries"].as_array().unwrap().len();
+    let second_count = second["message"]["entries"].as_array().unwrap().len();
+    assert!(first_count > 0 && first_count <= 200, "{first}");
+    assert!(second_count > 0 && second_count <= 200, "{second}");
     let second_cursor = second["message"]["nextCursor"].as_str().unwrap().to_string();
 
     let retry = call(
@@ -2069,7 +2092,7 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         json!({ "cursor": second_cursor }),
     );
     assert_eq!(third["type"], "reply", "{third}");
-    assert_eq!(third["message"]["entries"].as_array().unwrap().len(), 50);
+    assert!(!third["message"]["entries"].as_array().unwrap().is_empty(), "{third}");
 
     let retired = call(
         &env,
@@ -2080,6 +2103,29 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         json!({ "cursor": first_cursor }),
     );
     assert_eq!(retired["error"]["code"], "file.invalidCursor", "{retired}");
+
+    let mut paths: Vec<String> = [first, second, third.clone()]
+        .iter()
+        .flat_map(|page| page["message"]["entries"].as_array().unwrap().iter()
+            .map(|entry| entry["path"].as_str().unwrap().to_string()))
+        .collect();
+    let mut next = third["message"]["nextCursor"].as_str().map(str::to_string);
+    let mut request_id = 6;
+    while let Some(active) = next {
+        let page = call(&env, instance, &request_id.to_string(), "ctx-a",
+            "file_glob", json!({ "cursor": active }));
+        assert_eq!(page["type"], "reply", "{page}");
+        let entries = page["message"]["entries"].as_array().unwrap();
+        assert!(!entries.is_empty(), "{page}");
+        paths.extend(entries.iter()
+            .map(|entry| entry["path"].as_str().unwrap().to_string()));
+        next = page["message"]["nextCursor"].as_str().map(str::to_string);
+        request_id += 1;
+    }
+    assert_eq!(paths.len(), 450, "continuation pages must not lose file paths");
+    for (index, path) in paths.iter().enumerate() {
+        assert_eq!(path, &format!("./tree/file-{index:03}.txt"));
+    }
     env.json_command(&["stop", "--instance", instance]);
 }
 
