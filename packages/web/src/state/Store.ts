@@ -324,15 +324,31 @@ export class WebStore {
 
     async deleteInstance(instance: string): Promise<boolean> {
         const generation = this.#generation;
-        return await this.#operations.run(
+        let cleanupNotice: string | undefined;
+        const succeeded = await this.#operations.run(
             `delete:${instance}`,
             `${instance} deleted.`,
             generation,
             async () => {
-                await this.domains.instances.delete(instance);
+                const result = await this.domains.instances.delete(instance);
+                if (result?.cleanupPending === true) {
+                    cleanupNotice = `${instance} deregistered, but lifecycle cleanup is still pending. Review Control logs before reusing this name.`;
+                } else if (
+                    Array.isArray(result?.cleanupWarnings) &&
+                    result.cleanupWarnings.length > 0
+                ) {
+                    cleanupNotice = `${instance} deregistered; remote provider resources could not be fully removed.`;
+                }
                 this.domains.releaseInstance(instance);
             },
         );
+        if (
+            succeeded &&
+            cleanupNotice !== undefined &&
+            this.#current(generation)
+        )
+            this.#set({ ...this.#state, notice: cleanupNotice });
+        return succeeded;
     }
 
     async revokeArtifactShare(shareId: string): Promise<boolean> {

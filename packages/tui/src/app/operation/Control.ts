@@ -215,10 +215,24 @@ export class TuiRuntimeControlOperations {
     }
 
     async deleteInstance(instance: string): Promise<void> {
-        await this.#request(
+        const result = await this.#request(
             this.options.clients.instance.deleteInstance(instance),
             `instance.delete:${instance}`,
         );
+        if (result?.cleanupPending === true) {
+            this.options.store.setScreenStatus(
+                "instances",
+                `${instance} deregistered; lifecycle cleanup is pending.`,
+            );
+        } else if (
+            Array.isArray(result?.cleanupWarnings) &&
+            result.cleanupWarnings.length > 0
+        ) {
+            this.options.store.setScreenStatus(
+                "instances",
+                `${instance} deregistered; some remote provider resources could not be removed.`,
+            );
+        }
         await this.#refreshBestEffort(`instances:${instance}`, async () => {
             await refreshTuiAll(this.options.domains);
         });

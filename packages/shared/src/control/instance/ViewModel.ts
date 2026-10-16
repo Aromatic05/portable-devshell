@@ -74,18 +74,24 @@ export class InstanceConfigViewModel {
 
     /** Enables an instance, then refreshes the configured-instance catalog. */
     enable(instanceName: string): Promise<void> {
-        return this.#mutate(() => this.#transport.enableInstance(instanceName));
+        return this.#mutate(async () => {
+            await this.#transport.enableInstance(instanceName);
+        });
     }
 
     /** Disables an instance, then refreshes the configured-instance catalog. */
     disable(instanceName: string): Promise<void> {
-        return this.#mutate(() =>
-            this.#transport.disableInstance(instanceName),
-        );
+        return this.#mutate(async () => {
+            await this.#transport.disableInstance(instanceName);
+        });
     }
 
     /** Deletes an instance, then refreshes the configured-instance catalog. */
-    delete(instanceName: string): Promise<void> {
+    delete(
+        instanceName: string,
+    ): Promise<
+        Awaited<ReturnType<InstanceTransport["deleteInstance"]>> | undefined
+    > {
         return this.#mutate(() => this.#transport.deleteInstance(instanceName));
     }
 
@@ -142,19 +148,21 @@ export class InstanceConfigViewModel {
         }
     }
 
-    async #mutate(run: () => Promise<unknown>): Promise<void> {
+    async #mutate<T>(run: () => Promise<T>): Promise<T | undefined> {
         const epoch = this.#epoch;
         const generation = ++this.#generation;
         this.#begin();
+        let result: T;
         try {
-            await run();
+            result = await run();
         } catch (error) {
             if (epoch === this.#epoch && generation === this.#generation)
                 this.#fail(error);
             throw error;
         }
-        if (epoch !== this.#epoch) return;
+        if (epoch !== this.#epoch) return undefined;
         await this.#read();
+        return result;
     }
 
     #begin(): void {

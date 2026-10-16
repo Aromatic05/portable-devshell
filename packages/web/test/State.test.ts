@@ -479,6 +479,29 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("shows pending and abandoned remote cleanup after instance deregistration", async () => {
+        const domains = new WebTestDomains();
+        const remove = vi.spyOn(domains.domains.instances, "delete");
+        remove.mockResolvedValueOnce({ cleanupPending: true });
+        remove.mockResolvedValueOnce({
+            cleanupPending: false,
+            cleanupWarnings: ["provider unavailable"],
+        });
+        const store = new WebStore(domains.domains);
+        await store.load();
+
+        expect(await store.deleteInstance("demo")).toBe(true);
+        expect(store.state.notice).toContain(
+            "lifecycle cleanup is still pending",
+        );
+        expect(await store.deleteInstance("demo")).toBe(true);
+        expect(store.state.notice).toContain(
+            "remote provider resources could not be fully removed",
+        );
+        expect(remove).toHaveBeenCalledTimes(2);
+        store.close();
+    });
+
     it("creates reverse instances, returns enrollment, and refreshes the registry", async () => {
         const domains = new WebTestDomains();
         const draft = {
