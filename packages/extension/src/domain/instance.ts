@@ -3,9 +3,9 @@ import type { ExtensionJsonValue } from "../ExtensionCore.js";
 export type ExtensionInstanceProvider =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ExtensionInstanceRuntimeStatus =
-    "failed" | "ready" | "running" | "stale" | "stopped";
+    "failed" | "ready" | "running" | "stale" | "stopped" | "offline";
 export type ExtensionInstanceDaemonState =
-    "failed" | "running" | "stale" | "starting" | "stopped" | "stopping";
+    "failed" | "running" | "stale" | "starting" | "stopped" | "stopping" | "unknown";
 export type ExtensionInstanceConnectionState =
     "connected" | "connecting" | "disconnected" | "failed" | "reconnecting";
 

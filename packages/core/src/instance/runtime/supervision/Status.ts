@@ -22,10 +22,14 @@ export function deriveProcessStatus(
     daemonState: DaemonState,
     connectionState: ConnectionState,
 ): ProcessStatus {
-    if (daemonState === "failed" || connectionState === "failed") return "failed";
+    if (daemonState === "failed" || connectionState === "failed")
+        return "failed";
     if (daemonState === "stale") return "stale";
-    if (daemonState === "stopped" || daemonState === "stopping") return "stopped";
-    if (daemonState === "running" && connectionState === "connected") return "ready";
+    if (daemonState === "stopped" || daemonState === "stopping")
+        return "stopped";
+    if (daemonState === "unknown") return "offline";
+    if (daemonState === "running" && connectionState === "connected")
+        return "ready";
     return "running";
 }
 
@@ -38,7 +42,7 @@ export function isReadyState(
 
 export function normalizeLifecycleStatus(
     status: InstanceSnapshot["status"],
-): "failed" | "running" | "stale" | "stopped" {
+): "failed" | "running" | "stale" | "stopped" | "offline" {
     return status === "ready" ? "running" : status;
 }
 
@@ -61,18 +65,24 @@ export function parseWorkerStatus(
             retryable: false,
             details: {
                 instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
             },
         });
     }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+    ) {
         throw createRemoteError({
             code: runtimeErrorCodes.workerStatusFailed,
             message: `Worker status returned an invalid payload for instance ${instanceName}.`,
             retryable: false,
             details: {
                 instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
             },
         });
     }
@@ -86,7 +96,8 @@ export function parseWorkerStatus(
             details: {
                 instance: instanceName,
                 state: String(state),
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
             },
         });
     }

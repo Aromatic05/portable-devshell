@@ -9,14 +9,21 @@ import {
     type ReverseTransport,
 } from "@portable-devshell/shared";
 
-
 import type { InstanceStateUpdate } from "./State.js";
 import type { InstanceSnapshot } from "./State.js";
 import type { WorkerProtocolClient } from "../../transport/packet/Client.js";
 import type { Channel } from "@portable-devshell/shared";
-import type { TransportConnection, ReverseAttachment } from "../../transport/endpoint/Connection.js";
+import type {
+    TransportConnection,
+    ReverseAttachment,
+} from "../../transport/endpoint/Connection.js";
 import type { ResolvedWorkerInstanceConfig } from "../provision/Config.js";
-import { getErrorCode, isKnownErrorCode, readErrorMessage, wrapWorkerCommandError } from "../execution/Error.js";
+import {
+    getErrorCode,
+    isKnownErrorCode,
+    readErrorMessage,
+    wrapWorkerCommandError,
+} from "../execution/Error.js";
 import { toEventData } from "./Event.js";
 
 const reconnectRetryDelayMs = 250;
@@ -57,7 +64,9 @@ export class WorkerInstanceConnection {
         this.#endpoint = options.endpoint;
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
-        this.#unsubscribeAttach = this.#transportConnection.onAttach(input => this.#acceptAttachedReverseChannel(input));
+        this.#unsubscribeAttach = this.#transportConnection.onAttach((input) =>
+            this.#acceptAttachedReverseChannel(input),
+        );
         if (this.#config.managementMode === "selfManaged") {
             this.#reverseStatus = {
                 availability: "offline",
@@ -184,7 +193,9 @@ export class WorkerInstanceConnection {
         return this.#snapshot();
     }
 
-    async #acceptAttachedReverseChannel(input: ReverseAttachment): Promise<InstanceSnapshot> {
+    async #acceptAttachedReverseChannel(
+        input: ReverseAttachment,
+    ): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();
         const previousGeneration = this.#reverseStatus?.generation ?? 0;
         if (
@@ -267,7 +278,8 @@ export class WorkerInstanceConnection {
               ? "connecting"
               : "reconnecting",
     ): Promise<InstanceSnapshot> {
-        const shouldEmitTransportLifecycleEvents = connectionState !== "connected";
+        const shouldEmitTransportLifecycleEvents =
+            connectionState !== "connected";
 
         await this.#applyStateUpdate({
             connectionState,
@@ -454,7 +466,9 @@ export class WorkerInstanceConnection {
             );
             await this.#applyStateUpdate({
                 connectionState: "disconnected",
-                daemonState: "stopped",
+                // A disconnected transport does not tell us whether the
+                // self-managed remote daemon is alive or stopped.
+                daemonState: "unknown",
                 lastErrorCode: getErrorCode(
                     error,
                     runtimeErrorCodes.workerTransportDisconnected,

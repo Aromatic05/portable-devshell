@@ -29,6 +29,7 @@ test("worker lifecycle status normalization maps ready to running and preserves 
     assert.equal(normalizeLifecycleStatus("stale"), "stale");
     assert.equal(normalizeLifecycleStatus("stopped"), "stopped");
     assert.equal(normalizeLifecycleStatus("failed"), "failed");
+    assert.equal(normalizeLifecycleStatus("offline"), "offline");
 });
 
 test("worker status parser accepts canonical status and ignores malformed optional metadata", () => {

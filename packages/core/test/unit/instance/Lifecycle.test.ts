@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, runtimeErrorCodes, type ControlStreamMessage } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    runtimeErrorCodes,
+    type ControlStreamMessage,
+} from "@portable-devshell/shared";
 
 import { Instance } from "../../../src/instance/model/Instance.ts";
 import { ReverseExecution } from "../../../src/instance/runtime/execution/provider/Reverse.ts";
@@ -61,6 +65,24 @@ test("self-managed worker execution rejects controller start and stop", () => {
     }
 });
 
+test("offline reverse status does not falsely claim the daemon stopped", async () => {
+    const state = new InstanceStateMachine(asInstanceName("reverse-offline"));
+    const execution = new ReverseExecution({
+        applyStateUpdate: async (update) => state.apply(update),
+        connection: {
+            connected: false,
+            markReverseOffline() {},
+            clearHandshake() {},
+        } as never,
+        name: "reverse-offline",
+    });
+    const snapshot = await execution.refreshStatus();
+    assert.equal(snapshot.connectionState, "disconnected");
+    assert.equal(snapshot.daemonState, "unknown");
+    assert.equal(snapshot.status, "offline");
+    assert.equal(snapshot.ready, false);
+});
+
 test("instance retirement blocks new leases and drains existing work", async () => {
     const events: string[] = [];
     const instance = createInstance("reverse-mac", {
@@ -93,13 +115,21 @@ test("retiring a live terminal attachment drains its lease without killing the P
     let killed = false;
     let closedStream = false;
     const process: TerminalProcess = {
-        kill() { killed = true; },
-        onData() { return () => undefined; },
-        onExit() { return () => undefined; },
+        kill() {
+            killed = true;
+        },
+        onData() {
+            return () => undefined;
+        },
+        onExit() {
+            return () => undefined;
+        },
         resize() {},
         write() {},
     };
-    const sessions = new TerminalSessionService({ idFactory: () => "terminal-retire" });
+    const sessions = new TerminalSessionService({
+        idFactory: () => "terminal-retire",
+    });
     const backend = { open: async () => process };
     const opened = await sessions.open({
         backend,
@@ -119,31 +149,52 @@ test("retiring a live terminal attachment drains its lease without killing the P
     assert.ok(attach);
     const stream = {
         async send(_message: ControlStreamMessage) {},
-        async close() { closedStream = true; },
-        onClose() { return () => undefined; },
-        onCancel() { return () => undefined; },
-        onData() { return () => undefined; },
+        async close() {
+            closedStream = true;
+        },
+        onClose() {
+            return () => undefined;
+        },
+        onCancel() {
+            return () => undefined;
+        },
+        onData() {
+            return () => undefined;
+        },
     };
     const lease = instance.lifecycle.acquireLease();
-    const holding = Promise.resolve(attach.handle(stream as never, {
-        id: "attach-retire",
-        name: "attach",
-        payload: { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
-    }, {
-        afterReply() {},
-        connectionId: "test-client",
-        host: "alpha",
-        peer: "tui",
-        requestId: "attach-retire",
-        signal: new AbortController().signal,
-        sourceHost: "test-client",
-    })).finally(() => lease.release());
+    const holding = Promise.resolve(
+        attach.handle(
+            stream as never,
+            {
+                id: "attach-retire",
+                name: "attach",
+                payload: {
+                    fromSeq: 0,
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                },
+            },
+            {
+                afterReply() {},
+                connectionId: "test-client",
+                host: "alpha",
+                peer: "tui",
+                requestId: "attach-retire",
+                signal: new AbortController().signal,
+                sourceHost: "test-client",
+            },
+        ),
+    ).finally(() => lease.release());
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     await Promise.race([
         Promise.all([instance.retire(), holding]),
         new Promise<never>((_resolve, reject) =>
-            setTimeout(() => reject(new Error("terminal retirement failed to drain")), 2000),
+            setTimeout(
+                () => reject(new Error("terminal retirement failed to drain")),
+                2000,
+            ),
         ),
     ]);
     assert.equal(instance.lifecycle.phase, "retired");
@@ -163,16 +214,29 @@ test("retiring a backpressured terminal attachment releases its lease without wa
     let emitOutput!: (data: string) => void;
     let killed = false;
     const process: TerminalProcess = {
-        kill() { killed = true; },
-        onData(listener) { emitOutput = (data) => listener(data); return () => undefined; },
-        onExit() { return () => undefined; },
+        kill() {
+            killed = true;
+        },
+        onData(listener) {
+            emitOutput = (data) => listener(data);
+            return () => undefined;
+        },
+        onExit() {
+            return () => undefined;
+        },
         resize() {},
         write() {},
     };
-    const sessions = new TerminalSessionService({ idFactory: () => "terminal-backpressure" });
+    const sessions = new TerminalSessionService({
+        idFactory: () => "terminal-backpressure",
+    });
     const backend = { open: async () => process };
     const opened = await sessions.open({
-        backend, cols: 80, instance: "alpha", rows: 24, workspace: "/workspace",
+        backend,
+        cols: 80,
+        instance: "alpha",
+        rows: 24,
+        workspace: "/workspace",
     });
     const instance = createInstance("alpha");
     const route = createTerminalRouteModule({
@@ -184,7 +248,9 @@ test("retiring a backpressured terminal attachment releases its lease without wa
     const attach = route.streams?.find((entry) => entry.name === "attach");
     assert.ok(attach);
     let announceSend!: () => void;
-    const sending = new Promise<void>((resolve) => { announceSend = resolve; });
+    const sending = new Promise<void>((resolve) => {
+        announceSend = resolve;
+    });
     const neverCompletes = new Promise<void>(() => undefined);
     const stream = {
         async send(message: ControlStreamMessage) {
@@ -194,19 +260,40 @@ test("retiring a backpressured terminal attachment releases its lease without wa
             }
         },
         async close() {},
-        onClose() { return () => undefined; },
-        onCancel() { return () => undefined; },
-        onData() { return () => undefined; },
+        onClose() {
+            return () => undefined;
+        },
+        onCancel() {
+            return () => undefined;
+        },
+        onData() {
+            return () => undefined;
+        },
     };
     const lease = instance.lifecycle.acquireLease();
-    const attached = Promise.resolve(attach.handle(stream as never, {
-        id: "backpressure", name: "attach",
-        payload: { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
-    }, {
-        afterReply() {}, connectionId: "test-client", host: "alpha", peer: "tui",
-        requestId: "backpressure", signal: new AbortController().signal,
-        sourceHost: "test-client",
-    })).finally(() => lease.release());
+    const attached = Promise.resolve(
+        attach.handle(
+            stream as never,
+            {
+                id: "backpressure",
+                name: "attach",
+                payload: {
+                    fromSeq: 0,
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                },
+            },
+            {
+                afterReply() {},
+                connectionId: "test-client",
+                host: "alpha",
+                peer: "tui",
+                requestId: "backpressure",
+                signal: new AbortController().signal,
+                sourceHost: "test-client",
+            },
+        ),
+    ).finally(() => lease.release());
     await new Promise<void>((resolve) => setImmediate(resolve));
     emitOutput("blocked-output");
     await sending;
@@ -214,7 +301,13 @@ test("retiring a backpressured terminal attachment releases its lease without wa
     await Promise.race([
         Promise.all([instance.retire(), attached]),
         new Promise<never>((_resolve, reject) =>
-            setTimeout(() => reject(new Error("retirement waited on blocked terminal send")), 500),
+            setTimeout(
+                () =>
+                    reject(
+                        new Error("retirement waited on blocked terminal send"),
+                    ),
+                500,
+            ),
         ),
     ]);
     assert.equal(instance.lifecycle.phase, "retired");

@@ -1,4 +1,7 @@
-import { createRemoteError, runtimeErrorCodes } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 
 import type { WorkerInstanceConnection } from "../../supervision/Connection.js";
 import type {
@@ -39,7 +42,7 @@ export class ReverseExecution {
             this.#connection.clearHandshake();
             return await this.#applyStateUpdate({
                 connectionState: "disconnected",
-                daemonState: "stopped",
+                daemonState: "unknown",
                 lastErrorCode: undefined,
                 lastErrorMessage: undefined,
                 pid: undefined,

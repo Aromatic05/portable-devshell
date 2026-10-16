@@ -21,11 +21,17 @@ export interface ReverseInstanceStatus {
 }
 
 export type DaemonState =
-    "running" | "starting" | "stopped" | "stale" | "stopping" | "failed";
+    | "running"
+    | "starting"
+    | "stopped"
+    | "stale"
+    | "stopping"
+    | "failed"
+    | "unknown";
 export type ConnectionState =
     "connected" | "connecting" | "disconnected" | "reconnecting" | "failed";
 export type ProcessStatus =
-    "ready" | "running" | "stale" | "stopped" | "failed";
+    "ready" | "running" | "stale" | "stopped" | "failed" | "offline";
 export type EffectiveSecurityMode = "disabled" | "workspace";
 
 export interface InstanceSnapshot {
