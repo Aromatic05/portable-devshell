@@ -3,7 +3,7 @@ use serde::Serialize;
 use crate::cli::GcArgs;
 use crate::daemon::process::{self, DaemonState};
 use crate::host::home::devshell_home;
-use crate::instance::{InstanceName, read_config};
+use crate::instance::{InstanceLock, InstanceName, read_config};
 use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
@@ -54,6 +54,13 @@ pub fn run(args: GcArgs) -> Result<String, String> {
             continue;
         }
 
+        // Serialize the state check and cleanup with the normal start/stop
+        // lifecycle. Never remove IPC sockets belonging to a new daemon.
+        let _lock = if args.dry_run {
+            None
+        } else {
+            Some(InstanceLock::acquire(&instance_paths)?)
+        };
         match process::daemon_state(&instance_paths, &socket_paths) {
             DaemonState::Running => {
                 skipped_running_instances.push(raw_name);
