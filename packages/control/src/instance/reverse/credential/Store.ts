@@ -64,10 +64,12 @@ export class ReverseCredentialStore {
                 version: 1,
                 deviceCodeExpiresAt: expiresAt,
                 deviceCodeHash: hashSecret(normalizeDeviceCode(deviceCode)),
-                ...(previous?.tokenHash === undefined
+                ...(previous?.revokedAt !== undefined ||
+                previous?.tokenHash === undefined
                     ? {}
                     : { tokenHash: previous.tokenHash }),
-                ...(previous?.previousTokenHash === undefined
+                ...(previous?.revokedAt !== undefined ||
+                previous?.previousTokenHash === undefined
                     ? {}
                     : { previousTokenHash: previous.previousTokenHash }),
             });
@@ -157,7 +159,10 @@ export class ReverseCredentialStore {
     ): Promise<boolean> {
         return await this.#exclusive(async () => {
             const record = await this.#readOptional(instance);
-            if (record === undefined || !credentialMatches(record, deviceToken)) {
+            if (
+                record === undefined ||
+                !credentialMatches(record, deviceToken)
+            ) {
                 return false;
             }
             const replacementActivated =
@@ -207,6 +212,7 @@ export class ReverseCredentialStore {
                 deviceCodeHash: undefined,
                 enrollmentState: "revoked",
                 revokedAt: new Date().toISOString(),
+                previousTokenHash: undefined,
                 tokenHash: undefined,
             });
         });
@@ -222,6 +228,7 @@ export class ReverseCredentialStore {
                 deviceCodeHash: undefined,
                 enrollmentState: "revoked",
                 revokedAt: new Date().toISOString(),
+                previousTokenHash: undefined,
                 tokenHash: undefined,
             });
             return true;

@@ -166,6 +166,33 @@ test("a malformed unrelated credential file does not block enrollment", async ()
     );
 });
 
+test("revoked rollover credentials cannot revive after generating a new code", async () => {
+    const home = await createTestTempDirectory("devshell-reverse-revocation");
+    const store = new ReverseCredentialStore(home);
+    const original = await store.createDeviceCode("remote-test");
+    const first = await store.consumeDeviceCode(original.deviceCode);
+    const code = await store.createDeviceCode("remote-test");
+    const replacement = await store.consumeDeviceCode(code.deviceCode);
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        true,
+    );
+    assert.equal(
+        await store.authenticate("remote-test", replacement.deviceToken),
+        true,
+    );
+    await store.revoke("remote-test");
+    await store.createDeviceCode("remote-test");
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        false,
+    );
+    assert.equal(
+        await store.authenticate("remote-test", replacement.deviceToken),
+        false,
+    );
+});
+
 test("token rotation and revocation invalidate the previous credential", async () => {
     const home = await createTestTempDirectory("devshell-reverse");
     const store = new ReverseCredentialStore(home);
