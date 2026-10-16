@@ -65,6 +65,7 @@ impl ToolHandler for FileGlobTool {
                 || input.entry_type.is_some()
                 || input.hidden.is_some()
                 || input.gitignore.is_some()
+                || input.max_depth.is_some()
             {
                 return Err(ToolError::new(
                     "tool.invalidArguments",
@@ -93,11 +94,12 @@ impl ToolHandler for FileGlobTool {
             }
             (
                 GlobContinuation {
-                    discovery: DiscoveryCursor::new(
+                    discovery: DiscoveryCursor::bounded(
                         &call,
                         &patterns,
                         input.hidden.unwrap_or(true),
                         input.gitignore.unwrap_or(true),
+                        input.max_depth,
                     )?,
                     pending: None,
                     kind: input.entry_type.unwrap_or(GlobType::Any),

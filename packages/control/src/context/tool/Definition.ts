@@ -62,81 +62,15 @@ function environmentInfoDefinition(): ToolDefinition {
         outputSchema: {
             additionalProperties: false,
             properties: {
-                ...contextStateProperties,
                 comment: {
-                    description: "Actionable notes.",
+                    description: "Memory status and actionable workspace alerts.",
                     items: { minLength: 1, type: "string" },
                     type: "array",
                 },
-                instance: { minLength: 1, type: "string" },
-                memory: {
-                    additionalProperties: false,
-                    description: "Current Context Memory bound by devshell memory init/inherit; absent if unclaimed or temporarily unavailable. Check memoryStatus to distinguish these cases.",
-                    properties: {
-                        name: { minLength: 1, type: "string" },
-                        directory: { minLength: 1, type: "string" },
-                        mailbox: { minLength: 1, type: "string" },
-                    },
-                    required: ["name", "directory", "mailbox"],
-                    type: "object",
-                },
-                memoryStatus: {
-                    description: "Set to unavailable when the optional Comment Memory lookup fails or times out; the Context's existing Memory binding is unknown, not unclaimed.",
-                    enum: ["unavailable"],
-                    type: "string",
-                },
-                modelCommands: {
-                    description: "Model commands offered by the enabled Extensions for this Instance.",
-                    items: { minLength: 1, type: "string" },
-                    type: "array",
-                },
-                platform: {
-                    additionalProperties: false,
-                    properties: {
-                        arch: { minLength: 1, type: "string" },
-                        distribution: {
-                            additionalProperties: false,
-                            properties: {
-                                id: { minLength: 1, type: "string" },
-                                name: { minLength: 1, type: "string" },
-                                version: { minLength: 1, type: "string" },
-                            },
-                            required: ["id", "name"],
-                            type: "object",
-                        },
-                        os: { minLength: 1, type: "string" },
-                        packageManager: { minLength: 1, type: "string" },
-                        shell: { minLength: 1, type: "string" },
-                    },
-                    required: ["arch", "os"],
-                    type: "object",
-                },
-                projectMemoryAgentFile: { minLength: 1, type: "string" },
-                projectMemoryDirectory: { minLength: 1, type: "string" },
-                remoteEnvironment: {
-                    additionalProperties: false,
-                    properties: {
-                        commands: {
-                            items: { minLength: 1, type: "string" },
-                            type: "array",
-                        },
-                    },
-                    required: ["commands"],
-                    type: "object",
-                },
-                skillsDirectory: { minLength: 1, type: "string" },
-                temporaryDirectory: { minLength: 1, type: "string" },
-                workspace: { minLength: 1, type: "string" },
+                // Explicit Context callers need this binding for subsequent calls.
+                ctxId: { minLength: 1, type: "string" },
             },
-            required: [
-                "expiresAt",
-                "status",
-                "instance",
-                "workspace",
-                "platform",
-                "skillsDirectory",
-                "temporaryDirectory",
-            ],
+            required: ["comment"],
             type: "object",
         },
         requiredCapabilities: [],

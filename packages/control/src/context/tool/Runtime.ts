@@ -124,7 +124,6 @@ class ContextToolRuntime {
                         retryable: true,
                     });
 
-                let skillsDirectory = "";
                 let alerts: Array<{ code: string; text: string }> = [];
                 const environment = this.#environment(context.instance);
                 const prepared = await this.#contexts.environment.prepareLocal(
@@ -141,12 +140,10 @@ class ContextToolRuntime {
                                   },
                               }),
                         beforeCommit: async (facts) => {
-                            skillsDirectory = (
-                                await environment.prepareExtensionResource({
-                                    collection: "managed",
-                                    extensionId: "skill",
-                                })
-                            ).directory;
+                            await environment.prepareExtensionResource({
+                                collection: "managed",
+                                extensionId: "skill",
+                            });
                             alertCleanupWorkspace = facts.workspace;
                             alerts = (await environment.readAlerts(facts.workspace))
                                 .advice;
@@ -168,63 +165,15 @@ class ContextToolRuntime {
                 return {
                     ...this.#expose(record, context),
                     comment: [
-                        ...(memory === undefined && prepared.projectMemoryPresent !== false
-                            ? [
-                                  `Existing work index: ${prepared.projectMemoryAgentFile}. Consult it when looking for previous work; it is not the current Context's Memory binding.`,
-                              ]
-                            : []),
-                        ...(memory === undefined ? [] : [
-                            `Current Memory: ${memory.directory} (${memory.name}). Reuse this directory; do not initialize another Memory for this Context.`,
-                        ]),
-                        ...(memoryUnavailable ? [
-                            "Current Context Memory status is temporarily unavailable. The shared project work index is not proof that Memory is unclaimed. Do not initialize, inherit or create a Memory directory until status is available again.",
-                        ] : []),
-                        `Use ${prepared.temporaryDirectory} only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.`,
-                        `Put large working data and anything that must persist in ${prepared.workspace}/var/.`,
-                        ...modelDevshellComments(
-                            this.#modelCommands(context.instance),
-                        ),
+                        ...(memoryUnavailable
+                            ? ["Memory: unavailable"]
+                            : memory !== undefined
+                                ? [`Memory: ${memory.directory}`]
+                                : this.#modelCommands(context.instance).includes("memory")
+                                    ? ["Memory 未初始化。执行 devshell memory init <name>；接续已有记忆可使用 devshell memory inherit <name>。"]
+                                    : []),
                         ...alerts.map((advice) => advice.text),
                     ],
-                    expiresAt: record.expiresAt,
-                    instance: context.instance,
-                    modelCommands: [...this.#modelCommands(context.instance)],
-                    ...(memory === undefined ? {} : { memory }),
-                    ...(memoryUnavailable ? { memoryStatus: "unavailable" } : {}),
-                    platform: {
-                        arch: worker.platform.arch,
-                        ...(worker.platform.distribution === undefined
-                            ? {}
-                            : {
-                                  distribution: worker.platform.distribution,
-                              }),
-                        os: worker.platform.os,
-                        ...(worker.platform.packageManager === undefined
-                            ? {}
-                            : {
-                                  packageManager:
-                                      worker.platform.packageManager,
-                              }),
-                        ...(worker.platform.shell === undefined
-                            ? {}
-                            : { shell: worker.platform.shell.kind }),
-                    },
-                    ...(!memoryUnavailable &&
-                    (memory !== undefined || prepared.projectMemoryPresent !== false)
-                        ? {
-                              projectMemoryAgentFile: memory === undefined
-                                  ? prepared.projectMemoryAgentFile
-                                  : `${memory.directory}/INDEX.md`,
-                              projectMemoryDirectory: memory?.directory ?? prepared.projectMemoryDirectory,
-                          }
-                        : {}),
-                    remoteEnvironment: {
-                        commands: remoteEnvironmentCommandHints(),
-                    },
-                    skillsDirectory,
-                    status: record.status,
-                    temporaryDirectory: prepared.temporaryDirectory,
-                    workspace: prepared.workspace,
                 };
             } finally {
                 generation.release();
@@ -522,18 +471,6 @@ function unboundContext(requireExplicitContextId: boolean) {
             : "No Context is bound to this request. Call environ_info with workspace.",
         retryable: false,
     });
-}
-
-function modelDevshellComments(commands: readonly string[]): string[] {
-    if (commands.length === 0) return [];
-    return [
-        `Model devshell commands available through bash_run/tmux_run: ${commands.join(", ")}.`,
-        "Use devshell --help or devshell <command> --help to inspect the allowed model command surface.",
-    ];
-}
-
-function remoteEnvironmentCommandHints(): string[] {
-    return ["help", "attach handle [workspace]", "mask handle"];
 }
 
 function remoteEnvironmentCommandCatalog(): JsonValue[] {

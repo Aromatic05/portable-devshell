@@ -1376,6 +1376,80 @@ fn file_glob_treats_missing_roots_and_exact_paths_as_empty_results() {
 }
 
 #[test]
+fn file_glob_max_depth_limits_directory_traversal() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-glob-shallow-directory";
+    fs::create_dir_all(env.workspace().join("var/agent-work/alpha/deep")).unwrap();
+    fs::create_dir_all(env.workspace().join("var/agent-work/beta")).unwrap();
+    fs::write(
+        env.workspace().join("var/agent-work/alpha/chat.md"),
+        "subject",
+    )
+    .unwrap();
+    fs::write(
+        env.workspace().join("var/agent-work/alpha/deep/chat.md"),
+        "nested",
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let shallow = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_glob",
+        json!({
+            "patterns": ["var/agent-work/**"],
+            "type": "directory",
+            "gitignore": false,
+            "maxDepth": 1
+        }),
+    );
+    assert_eq!(shallow["type"], "reply", "{shallow}");
+    assert_eq!(
+        shallow["message"]["entries"],
+        json!([
+            { "path": "./var/agent-work/alpha", "type": "directory" },
+            { "path": "./var/agent-work/beta", "type": "directory" }
+        ])
+    );
+
+    let outboxes = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_glob",
+        json!({
+            "patterns": ["var/agent-work/**"],
+            "type": "file",
+            "gitignore": false,
+            "maxDepth": 2
+        }),
+    );
+    assert_eq!(outboxes["type"], "reply", "{outboxes}");
+    assert_eq!(
+        outboxes["message"]["entries"],
+        json!([
+            { "path": "./var/agent-work/alpha/chat.md", "type": "file" }
+        ])
+    );
+
+    let unlimited = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_glob",
+        json!({ "patterns": ["var/agent-work/**"], "type": "file", "gitignore": false }),
+    );
+    assert_eq!(unlimited["type"], "reply", "{unlimited}");
+    assert_eq!(unlimited["message"]["entries"].as_array().unwrap().len(), 2);
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_glob_respects_gitignore_and_can_explicitly_include_ignored_files() {
     let env = TestEnv::new();
     let instance = "aromatic-file-find-ignore-v2";

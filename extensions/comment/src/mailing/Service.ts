@@ -200,9 +200,13 @@ export class MailingService {
     }
 
     async list(input: MailingTarget): Promise<{ memories: string[] }> {
-        return await this.#exclusive(input, async (files) => ({
-            memories: await files.listTasks(),
-        }));
+        if (this.#closed) throw new Error("Mailing Service is closed");
+        const session = await this.#worker.openSession(input);
+        try {
+            return { memories: await new WorkerMailingFiles(session).listTasks() };
+        } finally {
+            await session.close();
+        }
     }
 
     #selection(input: MailingTarget, name: string): MemorySelection {

@@ -141,7 +141,7 @@ function processEnvelope(): InstanceProcessEnvelope {
     };
 }
 
-test("Context owns environ tool definitions with structured environment output", () => {
+test("Context environ_info exposes only comment and explicit Context identity", () => {
     const definitions = contextToolDefinitions();
     assert.deepEqual(
         definitions.map((definition) => definition.name),
@@ -150,9 +150,8 @@ test("Context owns environ tool definitions with structured environment output",
     const info = definitions[0]!;
     const output = info.outputSchema as Record<string, JsonValue>;
     const properties = output.properties as Record<string, JsonValue>;
-    const platform = properties.platform as Record<string, JsonValue>;
-    assert.equal(platform.additionalProperties, false);
-    assert.deepEqual(platform.required, ["arch", "os"]);
+    assert.deepEqual(Object.keys(properties).sort(), ["comment", "ctxId"]);
+    assert.deepEqual(output.required, ["comment"]);
 });
 
 test("Context registers definitions and executes environ_info through ToolCall hook", async () => {
@@ -230,8 +229,8 @@ test("Context registers definitions and executes environ_info through ToolCall h
         assert.equal(externalPrincipal, "alice");
         assert.ok(preparedCtxId !== undefined && preparedCtxId.length > 0);
         assert.equal(record.ctxId, preparedCtxId);
-        assert.equal(record.workspace, "/repo");
-        assert.equal(record.skillsDirectory, "/skills");
+        assert.deepEqual(record.comment, []);
+        assert.deepEqual(Object.keys(record).sort(), ["comment", "ctxId"]);
     } finally {
         uninstall();
         unbind();
@@ -287,9 +286,10 @@ test("repeated environ_info keeps the Context temporary directory and reports it
         }) as Record<string, JsonValue>;
     try {
         const before = await bootstrap("chat-1");
-        assert.equal(before.memory, undefined);
-        assert.equal(before.ctxId, undefined);
-        assert.equal(before.temporaryDirectory, "/tmp/context-1");
+        assert.deepEqual(before.comment, [
+            "Memory 未初始化。执行 devshell memory init <name>；接续已有记忆可使用 devshell memory inherit <name>。",
+        ]);
+        assert.deepEqual(Object.keys(before), ["comment"]);
 
         selectedMemory = {
             name: "chosen-agent",
@@ -297,16 +297,13 @@ test("repeated environ_info keeps the Context temporary directory and reports it
             mailbox: "/repo/var/agent-work/chosen-agent/mailbox.md",
         };
         const after = await bootstrap("chat-1");
-        assert.equal(after.temporaryDirectory, before.temporaryDirectory);
-        assert.deepEqual(after.memory, selectedMemory);
-        assert.equal(after.projectMemoryDirectory, selectedMemory.directory);
-        assert.equal(after.projectMemoryAgentFile, selectedMemory.directory + "/INDEX.md");
-        assert.match(JSON.stringify(after.comment), /Reuse this directory/u);
+        assert.deepEqual(after.comment, [`Memory: ${selectedMemory.directory}`]);
+        assert.deepEqual(Object.keys(after), ["comment"]);
         assert.deepEqual(allocations.slice(0, 2), [undefined, "/tmp/context-1"]);
 
         const differentAgent = await bootstrap("chat-2");
-        assert.equal(differentAgent.temporaryDirectory, "/tmp/context-3");
-        assert.equal(differentAgent.memory, undefined);
+        assert.deepEqual(differentAgent.comment, before.comment);
+        assert.equal(allocations[2], undefined);
     } finally {
         uninstall();
         unbind();
@@ -358,30 +355,19 @@ test("environ_info survives Comment Memory failures and timeouts without treatin
     ) as Record<string, JsonValue>;
     try {
         const failed = await bootstrap();
-        assert.equal(failed.memoryStatus, "unavailable");
-        assert.equal(failed.memory, undefined);
-        assert.equal(failed.projectMemoryDirectory, undefined,
-            "an unknown binding must not masquerade as the shared agent-work root");
-        assert.equal(failed.workspace, "/repo");
-        assert.equal(failed.temporaryDirectory, "/tmp/context");
-        assert.match(JSON.stringify(failed.comment), /Do not initialize, inherit or create a Memory directory/u);
+        assert.deepEqual(failed, { comment: ["Memory: unavailable"] });
         assert.ok(!JSON.stringify(failed).includes("PRIVATE_PATH"));
 
         phase = "stalled";
         const started = Date.now();
         const timeout = await bootstrap();
-        assert.equal(timeout.memoryStatus, "unavailable");
-        assert.equal(timeout.projectMemoryDirectory, undefined);
-        assert.equal(timeout.temporaryDirectory, failed.temporaryDirectory);
+        assert.deepEqual(timeout, failed);
         assert.ok(Date.now() - started < 6_000,
             "optional Comment status cannot indefinitely block environ_info");
 
         phase = "recovered";
         const recovered = await bootstrap();
-        assert.equal(recovered.memoryStatus, undefined);
-        assert.deepEqual(recovered.memory, selectedMemory);
-        assert.equal(recovered.projectMemoryDirectory, selectedMemory.directory);
-        assert.equal(recovered.temporaryDirectory, failed.temporaryDirectory);
+        assert.deepEqual(recovered, { comment: [`Memory: ${selectedMemory.directory}`] });
     } finally {
         uninstall();
         unbind();

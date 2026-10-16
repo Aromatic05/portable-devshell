@@ -42,6 +42,7 @@ struct WalkState {
     matcher: Option<Arc<GlobMatcher>>,
     hidden: bool,
     gitignore: bool,
+    max_depth: Option<usize>,
     frames: Vec<WalkFrame>,
 }
 
@@ -61,6 +62,16 @@ impl DiscoveryCursor {
         hidden: bool,
         gitignore: bool,
     ) -> Result<Self, ToolError> {
+        Self::bounded(call, specs, hidden, gitignore, None)
+    }
+
+    pub fn bounded(
+        call: &ToolCall,
+        specs: &[String],
+        hidden: bool,
+        gitignore: bool,
+        max_depth: Option<usize>,
+    ) -> Result<Self, ToolError> {
         call.check_cancelled()?;
         if specs.is_empty() {
             return Err(ToolError::new(
@@ -72,7 +83,7 @@ impl DiscoveryCursor {
         for spec in specs {
             call.check_cancelled()?;
             let spec = normalize_requested_path(spec)?;
-            pending.push_back(prepare_source(call, &spec, hidden, gitignore)?);
+            pending.push_back(prepare_source(call, &spec, hidden, gitignore, max_depth)?);
         }
         Ok(Self {
             pending,
@@ -106,11 +117,12 @@ fn prepare_source(
     spec: &str,
     hidden: bool,
     gitignore: bool,
+    max_depth: Option<usize>,
 ) -> Result<DiscoverySource, ToolError> {
     if has_glob(spec) {
-        prepare_glob(call, spec, hidden, gitignore)
+        prepare_glob(call, spec, hidden, gitignore, max_depth)
     } else {
-        prepare_exact(call, spec, hidden, gitignore)
+        prepare_exact(call, spec, hidden, gitignore, max_depth)
     }
 }
 
@@ -119,6 +131,7 @@ fn prepare_exact(
     spec: &str,
     hidden: bool,
     gitignore: bool,
+    max_depth: Option<usize>,
 ) -> Result<DiscoverySource, ToolError> {
     let (requested, resolved) = match resolve_existing(call, spec, false) {
         Ok(resolved) => resolved,
@@ -146,6 +159,7 @@ fn prepare_exact(
         None,
         hidden,
         gitignore,
+        max_depth,
     )?))
 }
 
@@ -154,6 +168,7 @@ fn prepare_glob(
     spec: &str,
     hidden: bool,
     gitignore: bool,
+    max_depth: Option<usize>,
 ) -> Result<DiscoverySource, ToolError> {
     let requested = parse_requested_path(spec)?;
     authorize(call, requested.namespace, false)?;
@@ -200,6 +215,7 @@ fn prepare_glob(
         Some(matcher),
         hidden,
         gitignore,
+        max_depth,
     )?))
 }
 
@@ -210,6 +226,7 @@ impl WalkState {
         matcher: Option<Arc<GlobMatcher>>,
         hidden: bool,
         gitignore: bool,
+        max_depth: Option<usize>,
     ) -> Result<Self, ToolError> {
         let directory = root
             .open_directory()
@@ -221,6 +238,7 @@ impl WalkState {
             matcher,
             hidden,
             gitignore,
+            max_depth,
             frames: vec![frame],
         })
     }
@@ -267,7 +285,12 @@ impl WalkState {
                 )
             };
 
-            if metadata.is_dir() && !metadata.is_symlink() {
+            if metadata.is_dir()
+                && !metadata.is_symlink()
+                && self
+                    .max_depth
+                    .is_none_or(|depth| relative.components().count() < depth)
+            {
                 let child = directory
                     .open_directory(Path::new(&name))
                     .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?;

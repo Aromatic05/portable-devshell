@@ -9,42 +9,20 @@ import { executeMemoryModelCommand, executeMemoryNativeCommand } from "../../src
 import { MailingService } from "../../src/mailing/Service.ts";
 import { parseOutbox, taskName } from "../../src/mailing/Protocol.ts";
 
-test("Memory usage advice is contributed only when Comment's model command is available", async () => {
+test("Mailing Hook never adds instructions to environ_info", async () => {
     const hook = createMailingHook({ scan: async () => {} }, () => {});
-    const input = (modelCommands: string[]) => ({
+    const input = {
         callId: "call-bootstrap",
         direction: "outbound" as const,
         value: {
             context: { instance: "demo", source: "mcp" as const },
             kind: "result" as const,
             toolName: "environ_info",
-            payload: { modelCommands, comment: ["Context ready"] },
+            payload: { comment: ["Memory 未初始化。执行 devshell memory init <name>。"] },
         },
-    });
-    const available = await hook(input(["memory"]), {} as never);
-    const offered = available.payload as { comment: string[] };
-    assert.equal(offered.comment[0], "Context ready");
-    assert.match(offered.comment[1]!, /devshell memory inherit/u);
-    const unavailable = await hook(input([]), {} as never);
-    assert.deepEqual((unavailable.payload as { comment: string[] }).comment, ["Context ready"]);
-    const bound = await hook({
-        ...input(["memory"]),
-        value: {
-            ...input(["memory"]).value,
-            payload: {
-                comment: ["Current Memory: /repo/var/agent-work/chosen-agent"],
-                modelCommands: ["memory"],
-                memory: {
-                    name: "chosen-agent",
-                    directory: "/repo/var/agent-work/chosen-agent",
-                    mailbox: "/repo/var/agent-work/chosen-agent/mailbox.md",
-                },
-            },
-        },
-    }, {} as never);
-    assert.deepEqual((bound.payload as { comment: string[] }).comment, [
-        "Current Memory: /repo/var/agent-work/chosen-agent",
-    ]);
+    };
+    const result = await hook(input, {} as never);
+    assert.deepEqual(result.payload, input.value.payload);
 });
 
 const A = "file-panel-unify";
@@ -68,6 +46,7 @@ type Row = Record<string, unknown>;
 class FakeWorkspace {
     readonly files = new Map<string, string>();
     readonly calls: string[] = [];
+    readonly globDepths: number[] = [];
     failAppendOnceOn?: string;
 
     constructor() {
@@ -79,6 +58,7 @@ class FakeWorkspace {
         const input = raw as Row;
         this.calls.push(name);
         if (name === "file_glob") {
+            this.globDepths.push(Number(input.maxDepth ?? 0));
             if (input.type === "file")
                 return { entries: [...this.files.keys()].filter((name) => name.endsWith("/chat.md"))
                     .map((path) => ({ path: "./" + path, type: "file" })) };
@@ -193,6 +173,15 @@ test("Mailing parses complete messages only and validates Agent Work identity", 
     assert.throws(() => taskName(".mailing"), /Invalid/u);
 });
 
+test("memory list is a single shallow directory query, without reading Mailing state", async (t) => {
+    const { fs, mailing } = fixture();
+    t.after(async () => mailing.close());
+    const result = await mailing.list({ instance, workspace });
+    assert.deepEqual(result, { memories: [A, B].sort() });
+    assert.deepEqual(fs.calls, ["file_glob"]);
+    assert.deepEqual(fs.globDepths, [1]);
+});
+
 test("Memory bindings derive Mailing identities and Subject notifications are idempotent", async (t) => {
     const { fs, notices, mailing } = fixture();
     t.after(async () => mailing.close());
@@ -201,6 +190,7 @@ test("Memory bindings derive Mailing identities and Subject notifications are id
     fs.files.set(outbox, mail("Upload Context owner", "Sensitive full body line"));
     await mailing.scan({ instance, workspace });
     await mailing.scan({ instance, workspace });
+    assert.ok(fs.globDepths.includes(2), "Outbox discovery is limited to two levels");
     assert.equal(fs.files.get(inbox)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
     assert.match(fs.files.get(inbox)!, /Sensitive full body line/u);
     assert.equal(fs.files.get(index)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);

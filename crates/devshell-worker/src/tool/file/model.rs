@@ -251,6 +251,9 @@ pub struct FileGlobInput {
     pub hidden: Option<bool>,
     /// Respect ignore files. Defaults to true.
     pub gitignore: Option<bool>,
+    /// Maximum traversal depth from each search root. Defaults to unlimited.
+    #[schemars(range(min = 1))]
+    pub max_depth: Option<usize>,
     /// Continue a previous page. When present, omit all other fields.
     #[schemars(length(min = 1))]
     pub cursor: Option<String>,

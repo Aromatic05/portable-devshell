@@ -39,7 +39,7 @@ export class WorkerMailingFiles implements MailingFiles {
         do {
             const value = record(await this.#session.callTool("file_glob",
                 cursor === undefined
-                    ? { patterns: [`${ROOT}/*`], type: "directory", gitignore: false, hidden: true }
+                    ? { patterns: [`${ROOT}/*`], type: "directory", gitignore: false, hidden: true, maxDepth: 1 }
                     : { cursor }));
             if (!Array.isArray(value.entries)) throw new Error("Invalid file_glob entries");
             for (const entry of value.entries) {
@@ -60,7 +60,7 @@ export class WorkerMailingFiles implements MailingFiles {
         do {
             const value = record(await this.#session.callTool("file_glob",
                 cursor === undefined
-                    ? { patterns: [ROOT + "/*/chat.md"], type: "file", gitignore: false, hidden: true }
+                    ? { patterns: [ROOT + "/*/chat.md"], type: "file", gitignore: false, hidden: true, maxDepth: 2 }
                     : { cursor }));
             if (!Array.isArray(value.entries)) throw new Error("Invalid file_glob entries");
             for (const entry of value.entries) {
