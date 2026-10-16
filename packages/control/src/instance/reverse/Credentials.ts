@@ -48,15 +48,20 @@ export class ReverseCredentials {
     async consumeDeviceCode(
         deviceCode: string,
     ): Promise<ReverseEnrollmentCredential> {
-        const credential = await this.#credentialStore.consumeDeviceCode(deviceCode);
+        const credential =
+            await this.#credentialStore.consumeDeviceCode(deviceCode);
         this.#requireReverseInstance(credential.instance);
-        this.#disconnect?.(credential.instance);
         return credential;
     }
 
-    async authenticate(instance: string, deviceToken: string): Promise<Instance> {
+    async authenticate(
+        instance: string,
+        deviceToken: string,
+    ): Promise<Instance> {
         const descriptor = this.#requireReverseInstance(instance);
-        if (!(await this.#credentialStore.authenticate(instance, deviceToken))) {
+        if (
+            !(await this.#credentialStore.authenticate(instance, deviceToken))
+        ) {
             throw invalidDeviceToken(instance);
         }
         return descriptor;
@@ -68,11 +73,13 @@ export class ReverseCredentials {
         operation: () => Promise<void>,
     ): Promise<void> {
         this.#requireReverseInstance(instance);
-        const authenticated = await this.#credentialStore.withAuthenticatedToken(
-            instance,
-            deviceToken,
-            operation,
-        );
+        const authenticated =
+            await this.#credentialStore.withAuthenticatedToken(
+                instance,
+                deviceToken,
+                operation,
+                () => this.#disconnect?.(instance),
+            );
         if (!authenticated) throw invalidDeviceToken(instance);
     }
 

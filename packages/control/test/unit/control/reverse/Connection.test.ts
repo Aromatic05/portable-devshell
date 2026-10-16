@@ -6,10 +6,7 @@ import {
     type Instance,
     type ReverseConnectionIdentity,
 } from "@portable-devshell/core";
-import {
-    asInstanceName,
-    type Channel,
-} from "@portable-devshell/shared";
+import { asInstanceName, type Channel } from "@portable-devshell/shared";
 
 import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
 import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";
@@ -120,7 +117,58 @@ test("credential rotation disconnects the active core transport", async () => {
     assert.equal(channel.closed, true);
 });
 
-function reverseDescriptor(onAttach: (generation: number) => void = () => undefined) {
+test("re-enrollment only displaces the previous connection after replacement authenticates", async () => {
+    const home = await createTestTempDirectory("reverse-credential-reenroll");
+    const descriptor = reverseDescriptor();
+    const instances = instanceLookup(descriptor);
+    const connections = new ReverseConnections({ instances });
+    const credentials = new ReverseCredentials({
+        credentialStore: new ReverseCredentialStore(home),
+        instanceRegistry: instances,
+        publicBaseUrl: "https://controller.example.test",
+    });
+    credentials.setDisconnectHandler((instance) =>
+        connections.disconnect(instance),
+    );
+    const code = await credentials.createDeviceCode(descriptor.config.name);
+    const oldCredential = await credentials.consumeDeviceCode(code.deviceCode);
+    const oldChannel = new MemoryChannel();
+    await credentials.runAuthenticated(
+        descriptor.config.name,
+        oldCredential.deviceToken,
+        async () =>
+            connections.activate(identity(descriptor, 8), "wss", oldChannel),
+    );
+    const newCode = await credentials.createDeviceCode(descriptor.config.name);
+    const newCredential = await credentials.consumeDeviceCode(
+        newCode.deviceCode,
+    );
+    assert.equal(oldChannel.closed, false);
+    await credentials.authenticate(
+        descriptor.config.name,
+        oldCredential.deviceToken,
+    );
+    const newChannel = new MemoryChannel();
+    await credentials.runAuthenticated(
+        descriptor.config.name,
+        newCredential.deviceToken,
+        async () =>
+            connections.activate(identity(descriptor, 1), "wss", newChannel),
+    );
+    assert.equal(oldChannel.closed, true);
+    assert.equal(newChannel.closed, false);
+    await assert.rejects(
+        credentials.authenticate(
+            descriptor.config.name,
+            oldCredential.deviceToken,
+        ),
+        (error: unknown) => hasCode(error, "reverse.deviceTokenInvalid"),
+    );
+});
+
+function reverseDescriptor(
+    onAttach: (generation: number) => void = () => undefined,
+) {
     // Only the fields observed by ReverseConnections are implemented here.
     const descriptor: Instance = {
         config: {
@@ -134,10 +182,7 @@ function reverseDescriptor(onAttach: (generation: number) => void = () => undefi
         },
         provision: {
             reverseConnection: {
-                async attach(
-                    _channel: Channel,
-                    input: { generation: number },
-                ) {
+                async attach(_channel: Channel, input: { generation: number }) {
                     onAttach(input.generation);
                 },
             },
@@ -154,7 +199,10 @@ function instanceLookup(descriptor: Instance) {
     };
 }
 
-function identity(descriptor: Instance, generation: number): ReverseConnectionIdentity {
+function identity(
+    descriptor: Instance,
+    generation: number,
+): ReverseConnectionIdentity {
     return { descriptor, generation };
 }
 

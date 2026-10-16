@@ -9,6 +9,7 @@ export interface ReverseCredentialRecord {
     deviceCodeHash?: string;
     enrollmentState: ReverseEnrollmentState;
     instance: string;
+    previousTokenHash?: string;
     revokedAt?: string;
     tokenHash?: string;
     version: 1;
@@ -62,7 +63,7 @@ export function credentialMatches(
     return (
         record !== undefined &&
         record.revokedAt === undefined &&
-        record.tokenHash !== undefined &&
-        safeHashEquals(record.tokenHash, hashSecret(deviceToken))
+        (safeHashEquals(record.tokenHash, hashSecret(deviceToken)) ||
+            safeHashEquals(record.previousTokenHash, hashSecret(deviceToken)))
     );
 }

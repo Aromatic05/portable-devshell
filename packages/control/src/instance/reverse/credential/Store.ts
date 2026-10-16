@@ -67,6 +67,9 @@ export class ReverseCredentialStore {
                 ...(previous?.tokenHash === undefined
                     ? {}
                     : { tokenHash: previous.tokenHash }),
+                ...(previous?.previousTokenHash === undefined
+                    ? {}
+                    : { previousTokenHash: previous.previousTokenHash }),
             });
             return {
                 deviceCode,
@@ -126,6 +129,8 @@ export class ReverseCredentialStore {
                 consumedDeviceCodeHash: hash,
                 enrollmentState: "enrolled",
                 instance: record.instance,
+                // Keep the last working token valid until replacement transport activation.
+                previousTokenHash: record.previousTokenHash ?? record.tokenHash,
                 tokenHash: hashSecret(deviceToken),
                 version: 1,
             });
@@ -148,13 +153,21 @@ export class ReverseCredentialStore {
         instance: string,
         deviceToken: string,
         operation: () => Promise<void>,
+        beforeReplacement?: () => void,
     ): Promise<boolean> {
         return await this.#exclusive(async () => {
             const record = await this.#readOptional(instance);
-            if (!credentialMatches(record, deviceToken)) {
+            if (record === undefined || !credentialMatches(record, deviceToken)) {
                 return false;
             }
+            const replacementActivated =
+                record.previousTokenHash !== undefined &&
+                safeHashEquals(record.tokenHash, hashSecret(deviceToken));
+            if (replacementActivated) beforeReplacement?.();
             await operation();
+            if (replacementActivated) {
+                await this.#write({ ...record, previousTokenHash: undefined });
+            }
             return true;
         });
     }
@@ -178,6 +191,7 @@ export class ReverseCredentialStore {
             const token = randomBytes(32).toString("base64url");
             await this.#write({
                 ...record,
+                previousTokenHash: undefined,
                 tokenHash: hashSecret(token),
             });
             return token;

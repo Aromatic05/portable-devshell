@@ -125,6 +125,7 @@ test("issuing a replacement code keeps the old token valid until the code is con
     const replacement = await store.consumeDeviceCode(
         replacementCode.deviceCode,
     );
+    assert.equal(await store.authenticate("remote-test", rotated), true);
     assert.equal(
         await store.authenticate("remote-test", first.deviceToken),
         false,
@@ -133,6 +134,20 @@ test("issuing a replacement code keeps the old token valid until the code is con
         await store.authenticate("remote-test", replacement.deviceToken),
         true,
     );
+    const events: string[] = [];
+    assert.equal(
+        await store.withAuthenticatedToken(
+            "remote-test",
+            replacement.deviceToken,
+            async () => {
+                events.push("connected");
+            },
+            () => events.push("old-connection-closed"),
+        ),
+        true,
+    );
+    assert.deepEqual(events, ["old-connection-closed", "connected"]);
+    assert.equal(await store.authenticate("remote-test", rotated), false);
 });
 
 test("a malformed unrelated credential file does not block enrollment", async () => {
