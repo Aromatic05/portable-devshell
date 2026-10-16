@@ -37,10 +37,6 @@ import {
 
 const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
 
-
-
-
-
 export class ReverseCredentialStore {
     readonly #fileSecurity: ReverseCredentialFileSecurity;
     readonly #paths: ControlPathHome;
@@ -167,7 +163,7 @@ export class ReverseCredentialStore {
         return await this.#exclusive(async () => {
             const record = await this.#readRequired(instance);
             if (
-                record.enrollmentState !== "enrolled" ||
+                record.tokenHash === undefined ||
                 record.revokedAt !== undefined
             ) {
                 throw reverseError(
@@ -267,14 +263,28 @@ export class ReverseCredentialStore {
                 if (!entry.isFile() || !entry.name.endsWith(".json")) {
                     continue;
                 }
-                records.push(
-                    parseCredentialRecord(
-                        await readFile(
-                            `${this.#paths.reverseDir}/${entry.name}`,
-                            "utf8",
-                        ),
-                    ),
-                );
+                const path = `${this.#paths.reverseDir}/${entry.name}`;
+                let record: ReverseCredentialRecord;
+                try {
+                    record = parseCredentialRecord(
+                        await readFile(path, "utf8"),
+                    );
+                } catch (error) {
+                    // One malformed record must not block enrollment of other instances.
+                    if (
+                        error instanceof SyntaxError ||
+                        (error instanceof Error &&
+                            error.message ===
+                                "Invalid reverse credential record.")
+                    ) {
+                        console.warn(
+                            `Ignoring invalid reverse credential record: ${path}`,
+                        );
+                        continue;
+                    }
+                    throw error;
+                }
+                records.push(record);
             }
             return records;
         } catch (error) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -115,6 +115,12 @@ test("issuing a replacement code keeps the old token valid until the code is con
         await store.authenticate("remote-test", first.deviceToken),
         true,
     );
+    const rotated = await store.rotateToken("remote-test");
+    assert.equal(await store.authenticate("remote-test", rotated), true);
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        false,
+    );
 
     const replacement = await store.consumeDeviceCode(
         replacementCode.deviceCode,
@@ -125,6 +131,22 @@ test("issuing a replacement code keeps the old token valid until the code is con
     );
     assert.equal(
         await store.authenticate("remote-test", replacement.deviceToken),
+        true,
+    );
+});
+
+test("a malformed unrelated credential file does not block enrollment", async () => {
+    const home = await createTestTempDirectory("devshell-reverse-corrupt");
+    const store = new ReverseCredentialStore(home);
+    const code = await store.createDeviceCode("remote-test");
+    await writeFile(
+        join(home, ".devshell", "control", "reverse", "unrelated.json"),
+        "{broken",
+    );
+    const enrolled = await store.consumeDeviceCode(code.deviceCode);
+    assert.equal(enrolled.instance, "remote-test");
+    assert.equal(
+        await store.authenticate("remote-test", enrolled.deviceToken),
         true,
     );
 });
