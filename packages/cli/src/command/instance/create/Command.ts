@@ -11,6 +11,7 @@ import { CliWizardInstanceCreate } from "./Wizard.js";
 
 export interface CliInstanceCreateResult extends InstanceCreateResult {
     reverseDeviceCode?: ReverseDeviceCodeResult;
+    enrollmentError?: string;
 }
 
 export class CliCommandInstanceCreate {
@@ -31,10 +32,20 @@ export class CliCommandInstanceCreate {
         if (prepared.draft.provider !== "reverse") {
             return result;
         }
-        return {
-            ...result,
-            reverseDeviceCode: await reverseClient.createCode(result.name),
-        };
+        try {
+            return {
+                ...result,
+                reverseDeviceCode: await reverseClient.createCode(result.name),
+            };
+        } catch (error) {
+            // The instance already exists. Do not make a successful create
+            // look like a failed operation that should be retried.
+            return {
+                ...result,
+                enrollmentError:
+                    error instanceof Error ? error.message : String(error),
+            };
+        }
     }
 }
 

@@ -8,6 +8,7 @@ export function renderReverseDeviceCode(
         `device code: ${result.deviceCode}`,
         `expires: ${result.expiresAt}`,
         `enroll: devshell-worker enroll --controller ${result.controllerUrl} --device-code ${result.deviceCode}`,
+        `If this code expires, rerun: devshell instance device-code ${result.instance}`,
         "",
     ].join("\n");
 }

@@ -5,6 +5,7 @@ import type {
 
 interface RenderableInstanceCreateResult extends InstanceCreateResult {
     reverseDeviceCode?: ReverseDeviceCodeResult;
+    enrollmentError?: string;
 }
 
 export function renderInstanceCreateResult(
@@ -30,6 +31,18 @@ export function renderInstanceCreateResult(
         );
         lines.push(
             `enroll: devshell-worker enroll --controller ${result.reverseDeviceCode.controllerUrl} --device-code ${result.reverseDeviceCode.deviceCode}`,
+        );
+        lines.push(
+            `If this code expires, run: devshell instance device-code ${result.name}`,
+        );
+    }
+    if (result.enrollmentError !== undefined) {
+        lines.push(
+            `enrollment code could not be issued: ${result.enrollmentError}`,
+        );
+        lines.push(`Instance ${result.name} was created; do not recreate it.`);
+        lines.push(
+            `Recover with: devshell instance device-code ${result.name}`,
         );
     }
 
