@@ -25,5 +25,11 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 for local_sha in $dev_shas; do
-    node scripts/run-dev-tag-gate.mjs --check "$local_sha"
+    # For annotated tags the pushed object is a tag, not the commit tested by
+    # run-dev-tag-gate. Peel both lightweight and annotated tags to a commit.
+    commit_sha=$(git rev-parse --verify "$local_sha^{commit}") || {
+        echo "dev tag push blocked: tag must resolve to a commit" >&2
+        exit 1
+    }
+    node scripts/run-dev-tag-gate.mjs --check "$commit_sha"
 done
