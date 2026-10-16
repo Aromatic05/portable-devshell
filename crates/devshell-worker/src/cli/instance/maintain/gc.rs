@@ -1,7 +1,6 @@
 use serde::Serialize;
 
 use crate::cli::GcArgs;
-use crate::cli::instance::maintain::retire::retire_instance;
 use crate::daemon::process::{self, DaemonState};
 use crate::host::home::devshell_home;
 use crate::instance::{InstanceName, read_config};
@@ -12,6 +11,7 @@ struct GcResponse {
     ok: bool,
     dry_run: bool,
     removed_instances: Vec<String>,
+    cleaned_runtime_instances: Vec<String>,
     skipped_running_instances: Vec<String>,
     skipped_stale_instances: Vec<String>,
 }
@@ -21,7 +21,8 @@ pub fn run(args: GcArgs) -> Result<String, String> {
     std::fs::create_dir_all(&home_root)
         .map_err(|error| format!("failed to create {}: {error}", home_root.display()))?;
 
-    let mut removed_instances = Vec::new();
+    let removed_instances = Vec::new();
+    let mut cleaned_runtime_instances = Vec::new();
     let mut skipped_running_instances = Vec::new();
     let mut skipped_stale_instances = Vec::new();
 
@@ -65,16 +66,20 @@ pub fn run(args: GcArgs) -> Result<String, String> {
             DaemonState::Stopped => {}
         }
 
+        // A stopped, configured instance is still a registered instance.
+        // Garbage collection may remove orphaned PID/IPC files, never its
+        // credentials, logs, artifacts, or persisted execution history.
         if !args.dry_run {
-            retire_instance(&instance)?;
+            process::clear_runtime_files(&instance_paths, &socket_paths)?;
         }
-        removed_instances.push(raw_name);
+        cleaned_runtime_instances.push(raw_name);
     }
 
     serde_json::to_string_pretty(&GcResponse {
         ok: true,
         dry_run: args.dry_run,
         removed_instances,
+        cleaned_runtime_instances,
         skipped_running_instances,
         skipped_stale_instances,
     })

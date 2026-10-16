@@ -787,7 +787,15 @@ test(
             marker,
         );
 
+        const retainedRoot = join(workerHome, ".devshell", "reverse-reenroll");
+        const retainedLog = join(retainedRoot, "logs", "retained.log");
+        const retainedArtifact = join(retainedRoot, "artifacts", "retained.bin");
+        await writeFile(retainedLog, "saved log", "utf8");
+        await writeFile(retainedArtifact, "saved artifact", "utf8");
+
         await enroll();
+        assert.equal(await readFile(retainedLog, "utf8"), "saved log");
+        assert.equal(await readFile(retainedArtifact, "utf8"), "saved artifact");
         const secondGeneration = await waitForReverseGeneration(
             server.socketPath,
             "reverse-reenroll",

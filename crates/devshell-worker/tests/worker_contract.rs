@@ -1743,6 +1743,11 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
         .join("control-worker/history.keep");
     fs::create_dir_all(control_history.parent().unwrap()).unwrap();
     fs::write(&control_history, "keep\n").unwrap();
+    let historical_log = env.instance_root(stopped).join("logs/historical.keep");
+    let historical_artifact = env.instance_root(stopped).join("artifacts/history.keep");
+    fs::create_dir_all(historical_artifact.parent().unwrap()).unwrap();
+    fs::write(&historical_log, "old log\n").unwrap();
+    fs::write(&historical_artifact, "old artifact\n").unwrap();
 
     fs::create_dir_all(&no_config).unwrap();
     fs::create_dir_all(&bad_config).unwrap();
@@ -1755,7 +1760,8 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
     .unwrap();
 
     let gc = env.json_command(&["gc", "--dry-run"]);
-    assert_eq!(gc["removed_instances"][0], stopped);
+    assert!(gc["removed_instances"].as_array().unwrap().is_empty());
+    assert_eq!(gc["cleaned_runtime_instances"][0], stopped);
     assert_eq!(gc["skipped_running_instances"][0], running);
     assert!(gc["skipped_stale_instances"].as_array().unwrap().is_empty());
     assert!(no_config.exists());
@@ -1763,9 +1769,11 @@ fn gc_skips_invalid_markers_and_responsive_instances() {
     assert!(mismatch.exists());
 
     let applied = env.json_command(&["gc"]);
-    assert_eq!(applied["removed_instances"][0], stopped);
-    assert!(!env.instance_root(stopped).join("config.toml").exists());
-    assert!(!env.instance_root(stopped).join("logs").exists());
+    assert!(applied["removed_instances"].as_array().unwrap().is_empty());
+    assert_eq!(applied["cleaned_runtime_instances"][0], stopped);
+    assert!(env.instance_root(stopped).join("config.toml").exists());
+    assert_eq!(fs::read_to_string(&historical_log).unwrap(), "old log\n");
+    assert_eq!(fs::read_to_string(&historical_artifact).unwrap(), "old artifact\n");
     assert!(control_history.exists());
 
     env.json_command(&["stop", "--instance", running]);

@@ -80,18 +80,21 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
 
     let instance = InstanceName::parse(&enrollment.instance)?;
     let paths = InstancePaths::resolve(&instance)?;
+    // Finish fallible binary preparation before stopping a usable local
+    // daemon. The server credential was already issued at this point.
+    let installed_binary = install_current_binary()?;
     ensure_dir(&paths.instance_root, 0o700)?;
     ensure_dir(&paths.logs_dir, 0o700)?;
     ensure_dir(&paths.artifacts_dir, 0o700)?;
     ensure_dir(&paths.state_dir, 0o700)?;
 
-    // Re-enrollment replaces the server-side token immediately. Stop any old
-    // daemon and retire the previous local execution generation before changing
-    // its credential or binary. A new controller enrollment must not inherit
-    // old tmux tasks, artifact handles, or worker runtime from the same name.
+    // Re-enrollment replaces the server-side token immediately. Stop the old
+    // daemon and close the previous execution generation, but never retire the
+    // registered instance: retire deletes config, logs, and artifacts. These
+    // remain the user's data across a routine credential renewal.
     crate::cli::instance::lifecycle::stop::stop_instance(&instance)?;
-    crate::cli::instance::maintain::retire::retire_instance(&instance)?;
-    let installed_binary = install_current_binary()?;
+    let socket_paths = crate::transport::endpoint::channel::EndpointPaths::resolve(&instance)?;
+    crate::tool::tmux::retire_instance_runtime(&paths, &socket_paths, instance.as_str())?;
 
     {
         let _lock = InstanceLock::acquire(&paths)?;
