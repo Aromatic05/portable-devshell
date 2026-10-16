@@ -151,6 +151,69 @@ test("routed input validates the opt-in and strips the target before tool execut
     );
 });
 
+test("a single MCP endpoint routes a call to an attached remote without leaking instance to the Worker", async () => {
+    const registry = new TestToolSource();
+    registry.register("alpha", [workerTool]);
+    const attached: ContextRecord = {
+        ...contextRecord,
+        environments: [
+            ...contextRecord.environments,
+            { instance: "beta", workspace: "/work/beta" },
+        ],
+    };
+    const dispatched: string[] = [];
+    const tools: ToolCallIngressPort = {
+        async call(instance, toolName, input, context, _signal, _transform, invocationInput) {
+            dispatched.push(instance);
+            assert.equal(toolName, "bash_run");
+            assert.deepEqual(input, { command: "pwd" });
+            assert.equal(context.workspace, "/work/beta");
+            const value: ToolCallHookValue = {
+                context: { ...context, instance: asInstanceName(instance) },
+                kind: "call",
+                payload: input,
+                toolName,
+            };
+            await invocationInput!(input, "remote-call-1", value);
+            return { exitCode: 0, stdout: "/work/beta" };
+        },
+    };
+    const endpoint = new McpEndpoint({
+        context: {
+            async resolve(request: Parameters<ContextTransport["resolve"]>[0]) {
+                if (request.instance !== undefined &&
+                    !attached.environments.some((environment) => environment.instance === request.instance)) {
+                    throw new Error("instance is not attached to this Context");
+                }
+                return attached;
+            },
+        } as never,
+        instanceName: "alpha",
+        instanceRoutingEnabled: true,
+        toolSource: registry,
+        tools,
+    });
+    const schema = endpoint.listTools().find((tool) => tool.name === "bash_run")?.inputSchema;
+    assert.match(JSON.stringify(schema), /"instance":\s*\{/u);
+    const request = { principal: "user-alpha", requestId: "request-remote" };
+    const result = await endpoint.callTool("bash_run", {
+        command: "pwd",
+        ctxId: "ctx-alpha",
+        instance: "beta",
+    }, request);
+    assert.deepEqual(result, { exitCode: 0, stdout: "/work/beta" });
+    assert.deepEqual(dispatched, ["beta"]);
+    await assert.rejects(
+        endpoint.callTool("bash_run", {
+            command: "pwd",
+            ctxId: "ctx-alpha",
+            instance: "not-attached",
+        }, request),
+        /not attached/u,
+    );
+    assert.deepEqual(dispatched, ["beta"]);
+});
+
 const bootstrapTool: ToolDefinition = {
     description: "Create or find a workspace Context.",
     group: "environ",

@@ -128,6 +128,17 @@ export class McpEndpointDispatch {
                       this.#instanceName,
                   )
                 : { input, instance: this.#instanceName };
+        if (routed.instance !== this.#instanceName) {
+            // Validate an explicit target before entering ToolCall ingress.
+            // A missing or masked attachment must never reach a Worker.
+            await this.#context.resolve({
+                ctxId: resolvedContext.record.ctxId,
+                instance: routed.instance,
+                principal: requestContext.principal,
+                renewExpired: touchContext,
+                touch: false,
+            });
+        }
         const context = this.#createToolContext(
             resolvedContext.record,
             requestContext,
@@ -151,7 +162,7 @@ export class McpEndpointDispatch {
         const result = await this.#tools.call(
                 routed.instance,
                 toolName,
-                input,
+                routed.input,
                 context,
                 signal,
                 async (structured, _callId, nextPresentation) => {

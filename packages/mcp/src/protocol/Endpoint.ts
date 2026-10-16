@@ -26,6 +26,7 @@ export interface McpEndpointOptions {
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     instanceName: string;
+    instanceRoutingEnabled?: boolean;
     modelOutput?: McpModelOutputBudget;
     toolAdapter?: (dispatch: Pick<McpEndpointDispatch, 'callTool'>) => {
         call(name: string, input: JsonValue, request: McpEndpointCallContext,
@@ -59,6 +60,7 @@ export class McpEndpoint {
                 this.#extensions.environmentPresentation()?.toolCallResourceUriForTool,
             contextSelector,
             instanceName: options.instanceName,
+            instanceRoutingEnabled: options.instanceRoutingEnabled,
             source: options.toolSource,
         });
         this.#dispatch = new McpEndpointDispatch({

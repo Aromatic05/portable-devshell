@@ -179,6 +179,7 @@ export class McpHost {
                     contextMode: instance.contextMode ?? "explicit",
                     extensions: [mcpAppExtension],
                     instanceName: instance.name,
+                    instanceRoutingEnabled: true,
                     modelOutput: instance.modelOutput ?? this.#config.modelOutput,
                     toolAdapter: (dispatch) =>
                         new McpAppCall({
