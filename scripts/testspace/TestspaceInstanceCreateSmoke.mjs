@@ -109,9 +109,22 @@ export async function runTestspaceInstanceCreateSmoke({ endpoint, runtimeDirecto
             after.map((entry) => entry.name).sort(),
             [...baseline, ...names].sort(),
         );
+        // Config removal alone is not a completed delete. A stale cleanup
+        // debt can leave the name unusable despite a successful delete RPC.
+        for (const draft of [...drafts].reverse()) {
+            await instances(async (transport) => {
+                const deleted = await transport.deleteInstance(draft.name);
+                assert.equal(deleted.cleanupPending, false, `${draft.provider}: initial delete left lifecycle debt`);
+                await transport.createInstance(draft);
+                const repeated = await transport.deleteInstance(draft.name);
+                assert.equal(repeated.cleanupPending, false, `${draft.provider}: repeated delete left lifecycle debt`);
+            });
+            await assert.rejects(readFile(configPath(draft.name), "utf8"), { code: "ENOENT" });
+        }
         return { providers: drafts.map((draft) => draft.provider), created: names.length,
             enabledLocalRegistered: true, duplicateRejected: true,
-            invalidRejected: 4, persistenceVerified: true };
+            invalidRejected: 4, persistenceVerified: true,
+            deleteRecreateVerified: true };
     } finally {
         try {
             await instances(async (transport) => {
