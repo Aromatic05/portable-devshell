@@ -156,12 +156,15 @@ class ContextToolRuntime {
                 );
                 committed = true;
                 await this.#contexts.cleanup.reconcile(record.ctxId);
-                const memory = await this.#memory?.(
+                const memoryLookup = await readOptionalMemory(
+                    this.#memory,
                     record.ctxId,
                     context.instance,
                     prepared.workspace,
                     signal,
                 );
+                const memoryUnavailable = memoryLookup === "unavailable";
+                const memory = memoryUnavailable ? undefined : memoryLookup;
                 return {
                     ...this.#expose(record, context),
                     comment: [
@@ -173,6 +176,9 @@ class ContextToolRuntime {
                         ...(memory === undefined ? [] : [
                             `Current Memory: ${memory.directory} (${memory.name}). Reuse this directory; do not initialize another Memory for this Context.`,
                         ]),
+                        ...(memoryUnavailable ? [
+                            "Current Context Memory status is temporarily unavailable. The shared project work index is not proof that Memory is unclaimed. Do not initialize, inherit or create a Memory directory until status is available again.",
+                        ] : []),
                         `Use ${prepared.temporaryDirectory} only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.`,
                         `Put large working data and anything that must persist in ${prepared.workspace}/var/.`,
                         ...modelDevshellComments(
@@ -184,6 +190,7 @@ class ContextToolRuntime {
                     instance: context.instance,
                     modelCommands: [...this.#modelCommands(context.instance)],
                     ...(memory === undefined ? {} : { memory }),
+                    ...(memoryUnavailable ? { memoryStatus: "unavailable" } : {}),
                     platform: {
                         arch: worker.platform.arch,
                         ...(worker.platform.distribution === undefined
@@ -202,7 +209,8 @@ class ContextToolRuntime {
                             ? {}
                             : { shell: worker.platform.shell.kind }),
                     },
-                    ...(memory !== undefined || prepared.projectMemoryPresent !== false
+                    ...(!memoryUnavailable &&
+                    (memory !== undefined || prepared.projectMemoryPresent !== false)
                         ? {
                               projectMemoryAgentFile: memory === undefined
                                   ? prepared.projectMemoryAgentFile
@@ -429,6 +437,53 @@ class ContextToolRuntime {
                 retryable: false,
             });
         }
+    }
+}
+
+/**
+ * Memory status is supplementary metadata, not a precondition for the
+ * Context/Worker environment already committed by environ_info.
+ */
+async function readOptionalMemory(
+    lookup: ((ctxId: string, instance: string, workspace: string, signal?: AbortSignal) =>
+        Promise<CurrentMemory | undefined>) | undefined,
+    ctxId: string,
+    instance: string,
+    workspace: string,
+    parentSignal?: AbortSignal,
+): Promise<CurrentMemory | "unavailable" | undefined> {
+    if (lookup === undefined) return undefined;
+    const deadline = AbortSignal.timeout(3_000);
+    const signal = parentSignal === undefined
+        ? deadline : AbortSignal.any([parentSignal, deadline]);
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(
+            signal.reason instanceof Error
+                ? signal.reason
+                : new Error("Context Memory lookup was cancelled."),
+        );
+        signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+        signal.throwIfAborted();
+        return await Promise.race([
+            lookup(ctxId, instance, workspace, signal),
+            aborted,
+        ]);
+    } catch (error) {
+        // Caller cancellation is authoritative and must not be suppressed.
+        if (parentSignal?.aborted) throw error;
+        // Do not record the exception text or the returned Memory metadata;
+        // either may contain private directory paths or extension secrets.
+        console.warn("Optional Context Memory status unavailable", {
+            extensionId: "comment",
+            instance,
+            reason: deadline.aborted ? "timeout" : "lookupFailed",
+        });
+        return "unavailable";
+    } finally {
+        if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
     }
 }
 

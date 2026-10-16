@@ -95,7 +95,14 @@ export class ControlState {
                     return descriptor.lifecycle.acquireLease();
                 },
                 memory: async (ctxId, instance, workspace, signal) => {
-                    if (!modelCommands(instance).includes("memory")) return undefined;
+                    // A faulted Comment generation disappears from the active
+                    // command catalog. The configured Model ACL, not transient
+                    // discovery, determines whether we should attempt recovery.
+                    const allowed = options.instances.get(instance)?.config.modelExtensions ?? [];
+                    if (!modelCommandAuthorized(allowed, {
+                        id: "memory",
+                        extensionId: "comment",
+                    })) return undefined;
                     const result = await modelCliCommands.command("memory", ["status"], {
                         ctxId,
                         context: {

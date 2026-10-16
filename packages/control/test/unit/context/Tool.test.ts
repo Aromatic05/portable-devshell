@@ -314,3 +314,78 @@ test("repeated environ_info keeps the Context temporary directory and reports it
         await rm(contextFile, { force: true });
     }
 });
+
+test("environ_info survives Comment Memory failures and timeouts without treating the binding as unclaimed", async () => {
+    const { registry, toolRuntime, unbind } = createBoundRegistry();
+    const contextFile = join(tmpdir(), `portable-devshell-optional-memory-${randomUUID()}.jsonl`);
+    const runtime = createContextRuntime({
+        contextFile,
+        environment: () => environmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        process: () => processTransport,
+        runtime: () => instanceRuntimeTransport,
+    });
+    let phase: "unavailable" | "stalled" | "recovered" = "unavailable";
+    const selectedMemory = {
+        name: "existing-agent",
+        directory: "/repo/var/agent-work/existing-agent",
+        mailbox: "/repo/var/agent-work/existing-agent/mailbox.md",
+    };
+    await runtime.initialize();
+    const uninstall = installContextTools(runtime.api, registry, {
+        environment: () => environmentTransport,
+        leaseInstance: () => ({ release() {} }),
+        memory: async (_ctxId, _instance, _workspace, signal) => {
+            if (phase === "unavailable")
+                throw new Error("Comment sandbox unavailable: PRIVATE_PATH");
+            if (phase === "stalled")
+                return await new Promise<never>((_resolve, reject) => {
+                    signal?.addEventListener("abort",
+                        () => reject(new Error("Comment status cancelled")), { once: true });
+                });
+            return selectedMemory;
+        },
+        modelCommands: () => ["memory"],
+        process: () => processTransport,
+    });
+    const bootstrap = async () => await toolRuntime.api.call(
+        "local", "environ_info", { workspace: "/repo" }, {
+            contextMode: "openai-session",
+            externalBindings: [{ kind: "openai/session", value: "existing-chat" }],
+            principal: "alice",
+            source: "mcp",
+        },
+    ) as Record<string, JsonValue>;
+    try {
+        const failed = await bootstrap();
+        assert.equal(failed.memoryStatus, "unavailable");
+        assert.equal(failed.memory, undefined);
+        assert.equal(failed.projectMemoryDirectory, undefined,
+            "an unknown binding must not masquerade as the shared agent-work root");
+        assert.equal(failed.workspace, "/repo");
+        assert.equal(failed.temporaryDirectory, "/tmp/context");
+        assert.match(JSON.stringify(failed.comment), /Do not initialize, inherit or create a Memory directory/u);
+        assert.ok(!JSON.stringify(failed).includes("PRIVATE_PATH"));
+
+        phase = "stalled";
+        const started = Date.now();
+        const timeout = await bootstrap();
+        assert.equal(timeout.memoryStatus, "unavailable");
+        assert.equal(timeout.projectMemoryDirectory, undefined);
+        assert.equal(timeout.temporaryDirectory, failed.temporaryDirectory);
+        assert.ok(Date.now() - started < 6_000,
+            "optional Comment status cannot indefinitely block environ_info");
+
+        phase = "recovered";
+        const recovered = await bootstrap();
+        assert.equal(recovered.memoryStatus, undefined);
+        assert.deepEqual(recovered.memory, selectedMemory);
+        assert.equal(recovered.projectMemoryDirectory, selectedMemory.directory);
+        assert.equal(recovered.temporaryDirectory, failed.temporaryDirectory);
+    } finally {
+        uninstall();
+        unbind();
+        runtime.close();
+        await rm(contextFile, { force: true });
+    }
+});

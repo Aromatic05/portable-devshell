@@ -71,7 +71,7 @@ function environmentInfoDefinition(): ToolDefinition {
                 instance: { minLength: 1, type: "string" },
                 memory: {
                     additionalProperties: false,
-                    description: "Current Context Memory bound by devshell memory init/inherit; absent when unbound.",
+                    description: "Current Context Memory bound by devshell memory init/inherit; absent if unclaimed or temporarily unavailable. Check memoryStatus to distinguish these cases.",
                     properties: {
                         name: { minLength: 1, type: "string" },
                         directory: { minLength: 1, type: "string" },
@@ -79,6 +79,11 @@ function environmentInfoDefinition(): ToolDefinition {
                     },
                     required: ["name", "directory", "mailbox"],
                     type: "object",
+                },
+                memoryStatus: {
+                    description: "Set to unavailable when the optional Comment Memory lookup fails or times out; the Context's existing Memory binding is unknown, not unclaimed.",
+                    enum: ["unavailable"],
+                    type: "string",
                 },
                 modelCommands: {
                     description: "Model commands offered by the enabled Extensions for this Instance.",
