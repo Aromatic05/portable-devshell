@@ -1,6 +1,7 @@
-pub(crate) mod proxy;
 mod bridge;
+pub(crate) mod proxy;
 mod sse;
+pub(crate) mod state;
 mod websocket;
 
 use std::fs::{self, OpenOptions};
@@ -8,17 +9,17 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
 use url::Url;
 
+use crate::capability::rpc::router::RpcRouter;
 use crate::daemon::log::append_log;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_file_mode;
 use crate::instance::{InstanceName, WorkerReverseConfig};
 use bridge::ReverseBridge;
-use crate::capability::rpc::router::RpcRouter;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
@@ -54,6 +55,7 @@ impl ReverseConnector {
     }
 
     fn run(mut self) {
+        let _ = state::write(&self.paths, "connecting", None, None);
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(SSE_READ_TIMEOUT);
@@ -69,6 +71,7 @@ impl ReverseConnector {
                     &self.paths,
                     &format!("reverse connector client setup failed: {error}"),
                 );
+                let _ = state::write(&self.paths, "failed", None, Some(&error));
                 return;
             }
         };
@@ -76,6 +79,7 @@ impl ReverseConnector {
         let mut backoff = Duration::from_secs(1);
 
         while !self.bridge.is_stopping() {
+            let attempt_started = Instant::now();
             let generation = match self.next_generation() {
                 Ok(generation) => generation,
                 Err(error) => {
@@ -83,16 +87,15 @@ impl ReverseConnector {
                         &self.paths,
                         &format!("reverse generation persistence failed: {error}"),
                     );
-                    return;
+                    let _ = state::write(&self.paths, "reconnecting", None, Some(&error));
+                    thread::sleep(backoff);
+                    backoff = (backoff * 2).min(MAX_RECONNECT_BACKOFF);
+                    continue;
                 }
             };
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
                 match self.connect_wss(generation) {
-                    Ok(socket) => {
-                        wss_failures = 0;
-                        backoff = Duration::from_secs(1);
-                        ("wss", true, self.run_wss(socket))
-                    }
+                    Ok(socket) => ("wss", true, self.run_wss(socket)),
                     Err(error) => ("wss", false, Err(error)),
                 }
             } else {
@@ -109,8 +112,14 @@ impl ReverseConnector {
                         &self.paths,
                         &format!("reverse {transport} connection ended: {error}"),
                     );
-                    if transport == "wss" && !established {
+                    let _ =
+                        state::write(&self.paths, "reconnecting", Some(transport), Some(&error));
+                    if transport == "wss"
+                        && (!established || attempt_started.elapsed() < Duration::from_secs(5))
+                    {
                         wss_failures = wss_failures.saturating_add(1);
+                    } else if transport == "wss" {
+                        wss_failures = 0;
                     } else if transport == "sse" {
                         wss_failures = 0;
                     }
@@ -132,10 +141,18 @@ impl ReverseConnector {
     fn next_generation(&mut self) -> Result<u64, String> {
         let generation_file = self.paths.state_dir.join("reverse-generation");
         let persisted = match fs::read_to_string(&generation_file) {
-            Ok(value) => value
-                .trim()
-                .parse::<u64>()
-                .map_err(|error| format!("invalid {}: {error}", generation_file.display()))?,
+            Ok(value) => match value.trim().parse::<u64>() {
+                Ok(value) => value,
+                Err(error) => {
+                    // The current time is also included below to avoid
+                    // reusing a prior generation after a damaged state file.
+                    let _ = append_log(
+                        &self.paths,
+                        &format!("repairing invalid reverse generation file: {error}"),
+                    );
+                    0
+                }
+            },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => {
                 return Err(format!(

@@ -19,8 +19,8 @@ use crate::instance::storage::InstancePaths;
 use crate::instance::storage::{ensure_dir, ensure_file_mode};
 use crate::instance::{InstanceLock, InstanceName, read_config};
 use crate::tool::builtin_registry;
+use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcListener, LocalIpcStream};
 use crate::transport::reverse::ReverseConnector;
-use crate::transport::endpoint::channel::{LocalIpcListener, LocalIpcStream, EndpointPaths};
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
 const FAIL_ACCEPT_LOOP_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP";
@@ -114,6 +114,9 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         receives,
     );
     payload_maintenance.schedule_maintenance();
+    if config.reverse.is_some() {
+        let _ = crate::transport::reverse::state::write(&instance_paths, "connecting", None, None);
+    }
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         ReverseConnector::new(
             instance.clone(),

@@ -36,6 +36,7 @@ impl ReverseConnector {
             &self.paths,
             &format!("reverse connection established transport=sse generation={generation}"),
         )?;
+        let _ = super::state::write(&self.paths, "connected", Some("sse"), None);
 
         let upload_error = Arc::new(Mutex::new(None));
         let uploader = SseUploader::spawn(
@@ -179,7 +180,7 @@ impl SseUploader {
 impl Drop for SseUploader {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
-                if let Some(handle) = self.handle.take() {
+        if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
     }

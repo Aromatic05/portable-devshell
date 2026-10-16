@@ -36,10 +36,9 @@ impl ReverseBridge {
 
     pub(super) fn prepare(&self) -> Result<(), String> {
         self.close();
-        self.pending
-            .lock()
-            .map_err(|_| "reverse pending queue lock poisoned".to_string())?
-            .clear();
+        // Keep completed responses that were not acknowledged by the previous
+        // transport generation. Only result frames are replayed here; never
+        // re-execute the original tool call.
         let writer = LocalIpcStream::connect(&self.transport_endpoint).map_err(|error| {
             format!(
                 "failed to connect reverse Endpoint bridge {}: {error}",
@@ -128,10 +127,7 @@ impl ReverseBridge {
         }
     }
 
-    pub(super) fn wait_pop_outbound(
-        &self,
-        timeout: Duration,
-    ) -> Result<Option<Vec<u8>>, String> {
+    pub(super) fn wait_pop_outbound(&self, timeout: Duration) -> Result<Option<Vec<u8>>, String> {
         if let Some(frame) = self
             .pending
             .lock()
@@ -182,4 +178,3 @@ impl Drop for ReverseBridge {
         self.close();
     }
 }
-

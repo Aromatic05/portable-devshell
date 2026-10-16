@@ -54,6 +54,7 @@ impl ReverseConnector {
             &self.paths,
             &format!("reverse connection established transport=wss generation={generation}"),
         )?;
+        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
         Ok(socket)
     }
 
@@ -66,8 +67,7 @@ impl ReverseConnector {
             match socket.read() {
                 Ok(Message::Binary(frame)) => {
                     if let Some(response) = self.bridge.accept_inbound(&frame)?
-                        && let Err(error) =
-                            socket.send(Message::Binary(response.clone().into()))
+                        && let Err(error) = socket.send(Message::Binary(response.clone().into()))
                     {
                         self.bridge.requeue_front(response)?;
                         return Err(error.to_string());
