@@ -23,13 +23,16 @@ const environment = {
     XDG_RUNTIME_DIR: runtime,
 };
 let command;
-let controlStarted = false;
+let controlMayBeRunning = false;
+let primaryFailure;
 
 try {
+    stage("extract application archive");
     await mkdir(app, { recursive: true });
     await mkdir(home, { recursive: true });
     await mkdir(runtime, { recursive: true });
     run("tar", ["-xzf", archive, "-C", app]);
+    stage("verify packaged files");
     await assertNoSymlinks(app);
 
     const cli = await assertPackageBinFile(
@@ -37,44 +40,90 @@ try {
     );
     command = await createInstalledCommand(root, cli.absolutePath);
 
+    stage("check initial Control state");
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
         "control: stopped",
         "initial packaged status",
     );
 
+    // A timed-out start may still have launched Control. Cleanup must attempt
+    // to stop it even if the start command never returned success.
+    controlMayBeRunning = true;
+    stage("start Control");
     assertCommandOutput(
         runInstalled(command, ["start"], environment),
         "control: running",
         "packaged control start",
     );
-    controlStarted = true;
 
+    stage("check running Control");
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
         "control: running",
         "running packaged status",
     );
+    stage("read Control startup logs");
     assertCommandOutput(
         runInstalled(command, ["logs"], environment),
         "control server started",
         "packaged control logs",
     );
 
+    stage("stop Control");
     runInstalled(command, ["stop"], environment);
-    controlStarted = false;
+    controlMayBeRunning = false;
+    stage("check stopped Control");
     assertCommandOutput(
         runInstalled(command, ["status"], environment),
         "control: stopped",
         "stopped packaged status",
     );
 
-    process.stdout.write("package smoke passed\n");
-} finally {
-    if (controlStarted && command !== undefined) {
-        runInstalled(command, ["stop"], environment, true);
+} catch (error) {
+    primaryFailure = error;
+}
+const cleanupFailures = [];
+if (controlMayBeRunning && command !== undefined) {
+    try {
+        const stopped = runInstalled(command, ["stop"], environment, true);
+        if (stopped.status !== 0) {
+            cleanupFailures.push(new Error(
+                `packaged Control cleanup stop failed (${stopped.status ?? "unknown"})`,
+            ));
+        }
+    } catch (error) {
+        cleanupFailures.push(error);
     }
-    await rm(root, { force: true, recursive: true });
+}
+try {
+    // Windows can report ENOTEMPTY while stopped Control releases its
+    // extension-data handles. Retry only temporary file deletion.
+    await rm(root, {
+        force: true,
+        maxRetries: 10,
+        recursive: true,
+        retryDelay: 100,
+    });
+} catch (error) {
+    cleanupFailures.push(error);
+}
+if (primaryFailure !== undefined) {
+    if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+            [primaryFailure, ...cleanupFailures],
+            "Package smoke failed; cleanup also failed.",
+        );
+    }
+    throw primaryFailure;
+}
+if (cleanupFailures.length === 1) throw cleanupFailures[0];
+if (cleanupFailures.length > 1)
+    throw new AggregateError(cleanupFailures, "Package smoke cleanup failed.");
+process.stdout.write("package smoke passed\n");
+
+function stage(message) {
+    process.stdout.write(`[package-smoke] ${message}\n`);
 }
 
 async function createInstalledCommand(root, cli) {
