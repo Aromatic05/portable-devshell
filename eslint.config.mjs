@@ -294,6 +294,8 @@ export default [
             "target/**",
             ".codegraph/**",
             ".testspace/**",
+            ".testspace-*/**",
+            "var/**",
             "var/backup/**",
         ],
     },
