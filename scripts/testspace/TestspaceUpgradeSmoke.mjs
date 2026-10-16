@@ -44,7 +44,7 @@ export async function runTestspaceUpgradeSmoke({ root, baselineDirectory = basel
             "successful-upgrade",
             "existing-comment-target-recovery",
             "failed-startup-rollback",
-            "partial-audit-migration-rollback",
+            "partial-audit-migration-deferred",
             "unsupported-schema-rejection",
             "incident-expired-contexts",
             "incident-missing-instance",
@@ -201,7 +201,13 @@ async function runCase(name, { current, legacy, testRoot }) {
             assert.notEqual(failed.status, 0, "unsupported audit schema must be rejected");
             assert.equal(queryVersion(cli, env), baselineVersion);
             assert.match(execute(cli, ["status"], env).stdout, /control: running/u);
-            assert.equal(readAudit(auditPath).version, 1);
+            const restoredAudit = readAudit(auditPath);
+            // The rolled-back v0.7.7 Worker starts again and normalizes its
+            // own historical schema from 1 to 2. This is not a candidate
+            // migration; check preserved records and the healthy old schema.
+            assert.equal(restoredAudit.version, before.version);
+            assert.equal(restoredAudit.sentinel, before.sentinel);
+            assert.ok(restoredAudit.rows >= before.rows);
             assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
             assert.equal(await readFile(legacyProvidersPath, "utf8"), legacyProviders);
             assert.equal(await readFile(contextsPath, "utf8"), legacyContexts);
@@ -212,22 +218,30 @@ async function runCase(name, { current, legacy, testRoot }) {
             return { name, passed: true, version: baselineVersion, migration: "rejected" };
         }
 
-        if (name === "partial-audit-migration-rollback") {
+        if (name === "partial-audit-migration-deferred") {
             const secondDatabase = join(devshellHome, "zz-failure", "control-worker", "audit.sqlite3");
             await seedConflictingAuditDatabase(secondDatabase);
-            const failed = install(candidateInstaller, current, env, true);
-            assert.notEqual(failed.status, 0, "second Audit database must fail after the first migration");
-            assert.equal(queryVersion(cli, env), baselineVersion);
+            const originalDeferredAudit = await readFile(secondDatabase);
+            const attempted = install(candidateInstaller, current, env);
+            assert.equal(attempted.status, 0, "damaged unrelated Instance audit must be deferred");
+            const version = queryVersion(cli, env);
+            assert.match(version, /^1\.0\.0/u);
             assert.match(execute(cli, ["status"], env).stdout, /control: running/u);
-            assert.equal(readAudit(auditPath).version, 2, "first Audit database must be rolled back");
-            assert.equal(readAudit(auditPath).sentinel, before.sentinel);
-            assert.equal(readAudit(secondDatabase).version, 2);
+            const migratedAudit = readAudit(auditPath);
+            assert.equal(migratedAudit.version, 3, "healthy audit must still migrate");
+            assert.equal(migratedAudit.sentinel, before.sentinel);
+            assert.ok(migratedAudit.rows >= before.rows);
+            assert.deepEqual(await readFile(secondDatabase), originalDeferredAudit,
+                "unsupported secondary audit must remain byte-for-byte unchanged");
             assert.deepEqual(readMessage(legacyMessagePath, "conversation_entries"), legacyMessage);
             assert.equal(await readFile(legacyProvidersPath, "utf8"), legacyProviders);
-            assert.equal(await readFile(contextsPath, "utf8"), legacyContexts);
-            assert.ok(!existsSync(newMessagePath));
-            assert.ok(!existsSync(newProvidersPath));
-            return { name, passed: true, version: baselineVersion, migration: "two-database-rollback" };
+            const migratedContexts = JSON.parse(await readFile(contextsPath, "utf8"));
+            assert.equal(migratedContexts.version, 2);
+            assert.ok(migratedContexts.contexts.some((record) =>
+                record.ctxId === JSON.parse(legacyContexts).contexts[0].ctxId));
+            assert.equal(await readFile(controlConfig, "utf8"), originalControlConfig);
+            assert.equal(await readFile(instanceConfig, "utf8"), originalInstanceConfig);
+            return { name, passed: true, version, migration: "healthy-audit-migrated,damaged-audit-deferred" };
         }
 
         const candidate = name === "failed-startup-rollback"
@@ -237,6 +251,13 @@ async function runCase(name, { current, legacy, testRoot }) {
                 : current;
         const attempted = install(candidateInstaller, candidate, env, name !== "successful-upgrade");
         if (name.startsWith("incident-")) {
+            const disconnectInjected = name === "incident-disconnected-control" &&
+                existsSync(join(root, "control-disconnect-injected"));
+            const instanceList = name === "incident-disconnected-control"
+                ? execute(cli, ["instance", "list"], env, { allowFailure: true })
+                : undefined;
+            const instanceRecovered = (instanceList?.stdout ?? "").split("\n")
+                .some((line) => line.startsWith(`${TESTSPACE_INSTANCE}\tready\tready=true`));
             const output = `${attempted.stdout ?? ""}\n${attempted.stderr ?? ""}`;
             const handshakeFailure = output.includes("server.hello must be the first request");
             const routeFailure = output.includes("No route for testspace-removed");
@@ -262,11 +283,17 @@ async function runCase(name, { current, legacy, testRoot }) {
                 (status.stdout ?? "").includes("control: running") &&
                 restoredAudit.version === 3 &&
                 restoredSentinel?.ctxId === sentinel?.ctxId &&
+                (name !== "incident-disconnected-control" ||
+                    (disconnectInjected && instanceRecovered)) &&
                 (name !== "incident-missing-instance" || unresolvedInstanceDebt);
             return {
                 name,
                 passed: healthy,
                 diagnosticCompleted: true,
+                ...(name === "incident-disconnected-control"
+                    ? { disconnectInjected, instanceRecovered,
+                        recovered: healthy && disconnectInjected && instanceRecovered }
+                    : {}),
                 candidateFailed: attempted.status !== 0,
                 reproduced: attempted.status !== 0 &&
                     (name === "incident-disconnected-control"
@@ -690,10 +717,20 @@ async function makeDisconnectedCandidate(current, root) {
     execute("tar", ["--no-same-owner", "-xzf", join(current, appName), "-C", app], process.env);
     const server = join(app, "node_modules/@portable-devshell/control/dist/server/index.js");
     const original = await readFile(server, "utf8");
-    const marker = "        await this.#web.startHost();";
-    assert.equal(original.split(marker).length, 2, "Expected one Control startHosts marker");
-    await writeFile(server, original.replace(marker,
-        `${marker}\n        this.#internalControlEndpoint.disconnect();`));
+    // Inject at the method boundary, not at a Web Host implementation
+    // detail. Startup now intentionally tolerates a failed Web listener.
+    const matches = [...original.matchAll(/ {4}async startHosts\(\) \{[\s\S]*?\n {4}\}/gu)];
+    assert.equal(matches.length, 1, "Expected exactly one Control startHosts method");
+    const body = matches[0][0];
+    // A successful installer alone does not prove that this injected code ran.
+    // Persist a marker only after the disconnection call has been reached.
+    const injected = [
+        "        this.#internalControlEndpoint.disconnect();",
+        `        await (await import("node:fs/promises")).writeFile(${JSON.stringify(join(root, "control-disconnect-injected"))}, "disconnected");`,
+    ].join("\n");
+    const patched = body.replace(/\n {4}\}$/u, `\n${injected}\n    }`);
+    assert.notEqual(patched, body, "Control disconnection was not injected");
+    await writeFile(server, original.replace(body, patched));
     execute("tar", ["-czf", join(candidate, appName), "-C", app, "."], process.env);
     const hash = createHash("sha256").update(await readFile(join(candidate, appName))).digest("hex");
     await writeFile(join(candidate, `${appName}.sha256`), `${hash}  ${appName}\n`);
