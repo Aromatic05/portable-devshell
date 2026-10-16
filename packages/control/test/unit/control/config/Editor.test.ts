@@ -2510,7 +2510,7 @@ test("instance delete permits a stopped instance when runtime and provider clean
     assert.deepEqual(workerRetirements, ["runtime", "provider"]);
 });
 
-test("config editor rejects delete and rebuild patches while an instance is running before persistence", async () => {
+test("config editor allows deleting a running instance but rejects rebuild patches", async () => {
     let config = createConfig();
     const writes: unknown[] = [];
     const registry = new InstanceRegistry([
@@ -2535,10 +2535,6 @@ test("config editor rejects delete and rebuild patches while an instance is runn
     });
 
     await assert.rejects(
-        service.deleteInstance({ instanceName: "demo-local" }),
-        hasCode("instance.conflict"),
-    );
-    await assert.rejects(
         service.updateInstanceConfig({
             instanceName: "demo-local",
             patch: { tools: { scheduler: { maxRunning: 2 } } },
@@ -2555,6 +2551,10 @@ test("config editor rejects delete and rebuild patches while an instance is runn
     assert.equal(writes.length, 0);
     assert.equal(config.instances[0]?.tools, undefined);
     assert.equal(config.instances[0]?.security.mode, "disabled");
+    const result = await service.deleteInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
+    assert.equal(result.cleanupPending, false);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(config.instances, []);
 });
 
 test("config editor hot-applies model Extension ACL and MCP context changes without restarting control", async () => {

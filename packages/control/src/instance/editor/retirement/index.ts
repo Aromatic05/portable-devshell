@@ -1,5 +1,11 @@
 import type { InstanceRegistry } from "../../Registry.js";
-import { createRemoteError, controlErrorCodes, parseConfigInstanceTargetRequest, type ControlConfig, type JsonValue, } from "@portable-devshell/shared";
+import {
+    createRemoteError,
+    controlErrorCodes,
+    parseConfigInstanceTargetRequest,
+    type ControlConfig,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 import { InstanceRetirementHooks } from "./Hooks.js";
 import { assertInstanceDeletable } from "./Runtime.js";
@@ -73,10 +79,9 @@ export class InstanceRetirementCoordinator {
         await cleanup.assertInstanceCleanupSettled(instanceName);
 
         const descriptor = this.#instanceRegistry.get(instanceName);
-        const skipRuntimeRetirement = assertInstanceDeletable(
-            instanceName,
-            descriptor,
-        );
+        const skipRuntimeRetirement =
+            (descriptor === undefined && existing.provider !== "local") ||
+            assertInstanceDeletable(instanceName, descriptor);
         const nextConfig = this.#engine.validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.filter(
@@ -108,7 +113,9 @@ export class InstanceRetirementCoordinator {
         if (descriptor !== undefined) {
             cleanup.retainDescriptor(instanceName, descriptor);
             await this.#instanceRegistry
-                .remove(instanceName, descriptor, () => this.#instanceChanges.publish("registry"))
+                .remove(instanceName, descriptor, () =>
+                    this.#instanceChanges.publish("registry"),
+                )
                 .catch((error) => cleanupFailures.push(error));
         }
         try {
@@ -116,23 +123,42 @@ export class InstanceRetirementCoordinator {
         } catch (error) {
             cleanupFailures.push(error);
         }
-        cleanupFailures.push(
-            ...(await this.cleanupCommittedDelete(
-                existing,
-                descriptor,
-                skipRuntimeRetirement,
-                cleanup,
-            )),
+        const retirement = await this.cleanupCommittedDelete(
+            existing,
+            descriptor,
+            skipRuntimeRetirement,
+            cleanup,
         );
+        cleanupFailures.push(...retirement.failures);
         if (cleanupFailures.length === 0) {
             await cleanup
                 .clearDebt(instanceName)
                 .catch((error) => cleanupFailures.push(error));
         }
         warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
-        return this.#engine.finalizeApplyResult(currentConfig, nextConfig, [
-            { kind: "instance.deleted", target: instanceName },
-        ]);
+        for (const warning of retirement.warnings)
+            console.warn(
+                `Instance ${instanceName} remote retirement incomplete:`,
+                warning,
+            );
+        const result = this.#engine.finalizeApplyResult(
+            currentConfig,
+            nextConfig,
+            [{ kind: "instance.deleted", target: instanceName }],
+        );
+        return {
+            ...(result as Record<string, JsonValue>),
+            cleanupPending: cleanupFailures.length > 0,
+            ...(retirement.warnings.length === 0
+                ? {}
+                : {
+                      cleanupWarnings: retirement.warnings.map((error) =>
+                          error instanceof Error
+                              ? error.message
+                              : String(error),
+                      ),
+                  }),
+        };
     }
 
     async cleanupCommittedInstanceChange(
@@ -171,8 +197,9 @@ export class InstanceRetirementCoordinator {
         descriptor: InstanceDescriptor,
         skipRuntimeRetirement: boolean,
         cleanup: InstanceCleanupDebt,
-    ): Promise<unknown[]> {
+    ): Promise<{ failures: unknown[]; warnings: unknown[] }> {
         const failures: unknown[] = [];
+        const warnings: unknown[] = [];
         const cleanupDescriptor =
             descriptor ??
             (this.#reconcileContextInstanceCleanup === undefined
@@ -185,15 +212,19 @@ export class InstanceRetirementCoordinator {
             await this.#detachContextInstance?.(existing.name);
         } catch (error) {
             failures.push(error);
-            return failures;
+            return { failures, warnings };
         }
         try {
-            await this.#reconcileContextCleanup(existing.name, cleanupDescriptor);
+            await this.#reconcileContextCleanup(
+                existing.name,
+                cleanupDescriptor,
+            );
         } catch (error) {
             failures.push(error);
-            return failures;
+            return { failures, warnings };
         }
-        await this.#mcp?.retireMcpApp(existing.name)
+        await this.#mcp
+            ?.retireMcpApp(existing.name)
             .catch((error) => failures.push(error));
         if (descriptor !== undefined && !descriptor.lifecycle.active) {
             await this.hooks
@@ -210,10 +241,18 @@ export class InstanceRetirementCoordinator {
         let workerRetirementSucceeded = cleanupDescriptor === undefined;
         if (cleanupDescriptor !== undefined) {
             try {
-                await cleanupDescriptor.retireWorkerResources(skipRuntimeRetirement);
+                await cleanupDescriptor.retireWorkerResources(
+                    skipRuntimeRetirement,
+                );
                 workerRetirementSucceeded = true;
             } catch (error) {
-                failures.push(error);
+                if (existing.provider === "local") failures.push(error);
+                else {
+                    // Retrying a retired remote generation against a newly
+                    // created same-name instance would be destructive.
+                    warnings.push(error);
+                    workerRetirementSucceeded = true;
+                }
             }
         }
         if (cleanupDescriptor !== undefined) {
@@ -226,7 +265,7 @@ export class InstanceRetirementCoordinator {
                     .catch((error) => failures.push(error));
             }
         }
-        return failures;
+        return { failures, warnings };
     }
 
     async prepareContextCleanup(
@@ -243,12 +282,26 @@ export class InstanceRetirementCoordinator {
     ): Promise<void> {
         const reconcile = this.#reconcileContextInstanceCleanup;
         if (reconcile === undefined) return;
-        if (descriptor === undefined) {
-            await reconcile(instance);
-            return;
+        let needsRemoteWorker = false;
+        const requireWorker = async (): Promise<void> => {
+            needsRemoteWorker = true;
+            throw new Error("Context cleanup requires an Instance Worker.");
+        };
+        try {
+            // A no-op target lets the ledger skip already-settled records,
+            // but explicitly defers actual remote releases until a Worker
+            // has been acquired. Never pretend a release succeeded.
+            await reconcile(instance, {
+                releaseAlerts: requireWorker,
+                releaseReference: requireWorker,
+            });
+        } catch (error) {
+            if (!needsRemoteWorker || descriptor === undefined) throw error;
+            // A cleanup-only Worker is only needed if outstanding Context
+            // records actually require a remote release.
+            await descriptor.withWorkerForCleanup(async (worker) => {
+                await reconcile(instance, worker);
+            });
         }
-        await descriptor.withWorkerForCleanup(async (worker) => {
-            await reconcile(instance, worker);
-        });
     }
 }

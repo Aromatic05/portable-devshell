@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-    createRemoteError, normalizeConfigInstanceDraft, parseConfigInstanceDraft, toConfigInstanceDraft, type ControlConfig, runtimeErrorCodes, } from "@portable-devshell/shared";
+    createRemoteError,
+    normalizeConfigInstanceDraft,
+    parseConfigInstanceDraft,
+    toConfigInstanceDraft,
+    type ControlConfig,
+    runtimeErrorCodes,
+} from "@portable-devshell/shared";
 import type { Instance } from "@portable-devshell/core";
 import type { ConfigEngine } from "../../../config/engine/index.js";
 import type { InstanceEditorCoordinatorOptions } from "../Options.js";
@@ -219,10 +225,7 @@ export class InstanceCleanupDebt {
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
     }
 
-    retainDescriptor(
-        instance: string,
-        descriptor: Instance,
-    ): void {
+    retainDescriptor(instance: string, descriptor: Instance): void {
         this.#cleanupOnlyDescriptors.set(instance, descriptor);
     }
 
@@ -347,7 +350,11 @@ export class InstanceCleanupDebt {
         let candidate = this.#instanceRegistry.get(record.instance.name);
         if (candidate !== undefined) {
             try {
-                await this.#instanceRegistry.remove(record.instance.name, candidate, () => this.#instanceChanges.publish("registry"));
+                await this.#instanceRegistry.remove(
+                    record.instance.name,
+                    candidate,
+                    () => this.#instanceChanges.publish("registry"),
+                );
             } catch (error) {
                 failures.push(error);
                 return failures;
@@ -362,9 +369,7 @@ export class InstanceCleanupDebt {
                 await closeDescriptorResourcesBestEffort(
                     candidate,
                     this.#finalizeRuntimeInstance,
-                ).catch(
-                    (error) => failures.push(error),
-                );
+                ).catch((error) => failures.push(error));
             }
             return failures;
         }
@@ -390,7 +395,9 @@ export class InstanceCleanupDebt {
                 this.#instanceRegistry.get(record.instance.name) === candidate
             ) {
                 await this.#instanceRegistry
-                    .remove(record.instance.name, candidate, () => this.#instanceChanges.publish("registry"))
+                    .remove(record.instance.name, candidate, () =>
+                        this.#instanceChanges.publish("registry"),
+                    )
                     .catch((cleanupError) => failures.push(cleanupError));
                 await this.#syncMcpEndpoint(record.instance.name).catch(
                     (cleanupError) => failures.push(cleanupError),
@@ -399,9 +406,7 @@ export class InstanceCleanupDebt {
             await closeDescriptorResourcesBestEffort(
                 candidate,
                 this.#finalizeRuntimeInstance,
-            ).catch(
-                (cleanupError) => failures.push(cleanupError),
-            );
+            ).catch((cleanupError) => failures.push(cleanupError));
         }
         return failures;
     }
@@ -427,7 +432,8 @@ export class InstanceCleanupDebt {
             }
         }
         if (record.operation === "delete") {
-            await this.#mcp?.retireMcpApp(record.instance.name)
+            await this.#mcp
+                ?.retireMcpApp(record.instance.name)
                 .catch((error) => failures.push(error));
         }
         if (!descriptor.lifecycle.retired) {
@@ -439,9 +445,7 @@ export class InstanceCleanupDebt {
         let workerRetirementSucceeded = false;
         if (record.operation === "disable") {
             failures.push(
-                ...(await this.#hooks.retireDisable(
-                    record.instance,
-                )),
+                ...(await this.#hooks.retireDisable(record.instance)),
             );
             await this.#mcp
                 ?.retireMcpApp(record.instance.name)
@@ -453,16 +457,27 @@ export class InstanceCleanupDebt {
                 failures.push(error);
             }
         } else {
-            failures.push(
-                ...(await this.#hooks.retireDelete(
-                    record.instance,
-                )),
-            );
+            failures.push(...(await this.#hooks.retireDelete(record.instance)));
             try {
-                await descriptor.retireWorkerResources(record.skipRuntimeRetirement);
+                await descriptor.retireWorkerResources(
+                    record.skipRuntimeRetirement === true ||
+                        (record.instance.provider !== "local" &&
+                            !record.instance.enabled),
+                );
                 workerRetirementSucceeded = true;
             } catch (error) {
-                failures.push(error);
+                if (record.instance.provider === "local") failures.push(error);
+                else {
+                    // Legacy remote cleanup debt must not persist forever
+                    // when the host/container can no longer be reached.
+                    // Once this debt is cleared, never replay its destructive
+                    // retire command against a new same-name generation.
+                    console.warn(
+                        `Abandoning unreachable remote retirement for ${record.instance.name}:`,
+                        error,
+                    );
+                    workerRetirementSucceeded = true;
+                }
             }
         }
         let descriptorFinalized = false;
@@ -478,7 +493,8 @@ export class InstanceCleanupDebt {
         }
         if (
             descriptorFinalized &&
-            this.#cleanupOnlyDescriptors.get(record.instance.name) === descriptor
+            this.#cleanupOnlyDescriptors.get(record.instance.name) ===
+                descriptor
         ) {
             this.#cleanupOnlyDescriptors.delete(record.instance.name);
         }
