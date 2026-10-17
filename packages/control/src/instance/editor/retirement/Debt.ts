@@ -18,8 +18,14 @@ import { closeDescriptorResourcesBestEffort } from "./State.js";
 import type { InstanceRetirementHooks } from "./Hooks.js";
 
 export interface InstanceCleanupDebtRecord {
+    /** Controller retirement record identity; not a remote Worker identifier. */
+    generationId?: string;
     instance: ControlConfig["instances"][number];
     operation: "delete" | "disable" | "rebuild";
+    /** Remote target could not be safely retired; never replay by name. */
+    remoteAbandoned?: boolean;
+    /** Local cleanup completed; retained solely as an orphan resource record. */
+    orphaned?: boolean;
     skipRuntimeRetirement?: boolean;
 }
 
@@ -36,7 +42,7 @@ class InstanceCleanupDebtStore {
     async get(
         instance: string,
     ): Promise<InstanceCleanupDebtRecord | undefined> {
-        return await this.#exclusive(async () => this.#records.get(instance));
+        return await this.#exclusive(async () => this.#pendingRecord(instance)?.[1]);
     }
 
     async list(): Promise<InstanceCleanupDebtRecord[]> {
@@ -45,14 +51,15 @@ class InstanceCleanupDebtStore {
 
     async put(record: InstanceCleanupDebtRecord): Promise<void> {
         await this.#exclusive(async () => {
-            const previous = this.#records.get(record.instance.name);
-            this.#records.set(record.instance.name, record);
+            const previous = this.#pendingRecord(record.instance.name);
+            const generationId = record.generationId ?? randomUUID();
+            if (previous !== undefined) this.#records.delete(previous[0]);
+            this.#records.set(generationId, { ...record, generationId });
             try {
                 await this.#persist();
             } catch (error) {
-                if (previous === undefined)
-                    this.#records.delete(record.instance.name);
-                else this.#records.set(record.instance.name, previous);
+                this.#records.delete(generationId);
+                if (previous !== undefined) this.#records.set(previous[0], previous[1]);
                 throw error;
             }
         });
@@ -60,16 +67,38 @@ class InstanceCleanupDebtStore {
 
     async clear(instance: string): Promise<void> {
         await this.#exclusive(async () => {
-            const previous = this.#records.get(instance);
+            const previous = this.#pendingRecord(instance);
             if (previous === undefined) return;
-            this.#records.delete(instance);
+            const [id, record] = previous;
+            if (record.remoteAbandoned) this.#records.set(id, { ...record, orphaned: true });
+            else this.#records.delete(id);
             try {
                 await this.#persist();
             } catch (error) {
-                this.#records.set(instance, previous);
+                this.#records.set(id, record);
                 throw error;
             }
         });
+    }
+
+    async markRemoteAbandoned(instance: string): Promise<void> {
+        await this.#exclusive(async () => {
+            const previous = this.#pendingRecord(instance);
+            if (previous === undefined) return;
+            const [id, record] = previous;
+            this.#records.set(id, { ...record, remoteAbandoned: true });
+            try {
+                await this.#persist();
+            } catch (error) {
+                this.#records.set(id, record);
+                throw error;
+            }
+        });
+    }
+
+    #pendingRecord(instance: string): [string, InstanceCleanupDebtRecord] | undefined {
+        return [...this.#records.entries()].find(([, record]) =>
+            record.instance.name === instance && record.orphaned !== true);
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -109,7 +138,8 @@ class InstanceCleanupDebtStore {
             this.#records.clear();
             for (const value of parsed) {
                 const record = parseCleanupDebtRecord(value);
-                this.#records.set(record.instance.name, record);
+                const generationId = record.generationId ?? `legacy:${record.instance.name}`;
+                this.#records.set(generationId, { ...record, generationId });
             }
         } catch (error) {
             this.#records.clear();
@@ -175,9 +205,19 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
     ) {
         throw new Error("Invalid lifecycle cleanup retirement flag.");
     }
+    if (record.generationId !== undefined &&
+        (typeof record.generationId !== "string" || record.generationId.length === 0))
+        throw new Error("Invalid lifecycle cleanup generation identity.");
+    if (record.remoteAbandoned !== undefined && typeof record.remoteAbandoned !== "boolean")
+        throw new Error("Invalid lifecycle remote abandonment state.");
+    if (record.orphaned !== undefined && typeof record.orphaned !== "boolean")
+        throw new Error("Invalid lifecycle orphan state.");
     return {
+        ...(record.generationId === undefined ? {} : { generationId: record.generationId as string }),
         instance,
         operation: record.operation,
+        ...(record.remoteAbandoned === undefined ? {} : { remoteAbandoned: record.remoteAbandoned as boolean }),
+        ...(record.orphaned === undefined ? {} : { orphaned: record.orphaned as boolean }),
         ...(record.skipRuntimeRetirement === undefined
             ? {}
             : {
@@ -241,9 +281,16 @@ export class InstanceCleanupDebt {
         await this.#cleanupDebts.clear(instance);
     }
 
-    async assertInstanceCleanupSettled(instance: string): Promise<void> {
+    async markRemoteAbandoned(instance: string): Promise<void> {
+        await this.#cleanupDebts.markRemoteAbandoned(instance);
+    }
+
+    async assertInstanceCleanupSettled(
+        instance: string,
+        reconcile = true,
+    ): Promise<void> {
         if ((await this.#cleanupDebts.get(instance)) === undefined) return;
-        if (this.#instanceRegistry.get(instance) === undefined) {
+        if (reconcile && this.#instanceRegistry.get(instance) === undefined) {
             await this.reconcileCleanupDebt(instance);
         }
         if ((await this.#cleanupDebts.get(instance)) === undefined) return;
@@ -257,6 +304,7 @@ export class InstanceCleanupDebt {
 
     async reconcileCleanupDebt(instance?: string): Promise<void> {
         for (const record of await this.#cleanupDebts.list()) {
+            if (record.orphaned) continue;
             if (instance !== undefined && record.instance.name !== instance)
                 continue;
             try {
@@ -458,7 +506,8 @@ export class InstanceCleanupDebt {
             }
         } else {
             failures.push(...(await this.#hooks.retireDelete(record.instance)));
-            try {
+            if (record.remoteAbandoned) workerRetirementSucceeded = true;
+            else try {
                 await descriptor.retireWorkerResources(
                     record.skipRuntimeRetirement === true ||
                         (record.instance.provider !== "local" &&
@@ -468,12 +517,11 @@ export class InstanceCleanupDebt {
             } catch (error) {
                 if (record.instance.provider === "local") failures.push(error);
                 else {
-                    // Legacy remote cleanup debt must not persist forever
-                    // when the host/container can no longer be reached.
-                    // Once this debt is cleared, never replay its destructive
-                    // retire command against a new same-name generation.
+                    // Persist the orphan identity before releasing the name.
+                    // No later reconciliation may retire a different generation.
+                    await this.#cleanupDebts.markRemoteAbandoned(record.instance.name);
                     console.warn(
-                        `Abandoning unreachable remote retirement for ${record.instance.name}:`,
+                        `Remote resource orphan recorded for ${record.instance.name}:`,
                         error,
                     );
                     workerRetirementSucceeded = true;

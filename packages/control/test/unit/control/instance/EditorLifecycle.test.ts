@@ -15,6 +15,40 @@ import {
     testRuntimeHooks,
 } from "../../../support/InstanceRuntime.ts";
 
+test("a draining Instance deletion does not block unrelated config commits", async () => {
+    let config = configWithInstance();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "healthy-local",
+        provider: "local",
+        security: { mode: "disabled" },
+    }));
+    const oldInstance = createTestInstance(config.instances[0]!);
+    const healthy = createTestInstance(config.instances[1]!);
+    const lease = oldInstance.lifecycle.acquireLease();
+    const registry = new InstanceRegistry([oldInstance, healthy]);
+    const coordinator = createCoordinator({
+        config,
+        registry,
+        setConfig: (next) => { config = next; },
+        hooks: testRuntimeHooks(),
+    });
+    const pendingDelete = coordinator.deleteInstance({ instanceName: "demo-local" });
+    try {
+        await Promise.race([
+            coordinator.updateInstanceConfig({
+                instanceName: "healthy-local",
+                patch: { security: { mode: "workspace" } },
+            }),
+            new Promise<never>((_resolve, reject) =>
+                setTimeout(() => reject(new Error("unrelated config update blocked by drain")), 2000)),
+        ]);
+        assert.equal(config.instances.find((entry) => entry.name === "healthy-local")?.security.mode, "workspace");
+    } finally {
+        lease.release();
+    }
+    await pendingDelete;
+});
+
 test("failed generation retirement leaves committed rebuild debt until reconciliation", async () => {
     let config = configWithInstance();
     const original = createTestInstance(config.instances[0]!);

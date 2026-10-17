@@ -189,5 +189,12 @@ test("historical unreachable-provider cleanup debts no longer block same-name re
         const result = await instances.deleteInstance(draft.name);
         assert.equal(result.cleanupPending, false, draft.name);
     }
-    assert.deepEqual(JSON.parse(await readFile(cleanupFile, "utf8")), []);
+    const retained = JSON.parse(await readFile(cleanupFile, "utf8")) as Array<{
+        generationId?: string;
+        orphaned?: boolean;
+        instance: { name: string };
+    }>;
+    assert.ok(retained.every((record) => record.orphaned === true));
+    assert.equal(new Set(retained.map((record) => record.generationId)).size, retained.length);
+    assert.ok(retained.every((record) => drafts.some((draft) => draft.name === record.instance.name)));
 });

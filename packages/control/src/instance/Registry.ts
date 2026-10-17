@@ -49,22 +49,30 @@ export class InstanceRegistry {
         expected?: Instance,
         onRemoved?: () => void,
     ): Promise<Instance | undefined> {
+        const detached = this.detach(name, expected, onRemoved);
+        if (detached === undefined) return undefined;
+        await detached.retirement;
+        return detached.instance;
+    }
+
+    /** Remove visibility synchronously; let the coordinator await drain after committing. */
+    detach(
+        name: string,
+        expected?: Instance,
+        onRemoved?: () => void,
+    ): { instance: Instance; retirement: Promise<void> } | undefined {
         const instance = this.#instances.get(name);
         if (instance === undefined) return undefined;
         if (expected !== undefined && instance !== expected) {
             throw new Error(`Cannot remove stale instance generation ${name}.`);
         }
-        const retiring = instance.retire();
+        const retirement = instance.retire();
+        // If the caller fails before awaiting drain, this rejection is still
+        // handled. The original promise remains available for error reporting.
+        void retirement.catch(() => undefined);
         this.#instances.delete(name);
-        // The coordinator commits its revision synchronously with visibility.
-        // The following lease drain can wait indefinitely on finite operations.
-        // Registry itself does not own the revision publisher.
-        try {
-            onRemoved?.();
-        } finally {
-            await retiring;
-        }
-        return instance;
+        onRemoved?.();
+        return { instance, retirement };
     }
 
     list(): readonly Instance[] {
