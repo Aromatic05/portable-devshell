@@ -18,8 +18,27 @@ import { Control } from "../../../src/Control.ts";
 import { ControlFactory } from "../../../src/Factory.ts";
 import { ControlConfigStore } from "../../../src/config/store/index.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { resolveTestWorkerBinary } from "../../../../../test/TestPlatformSupport.ts";
 
 test("deletion removes unreachable providers and permits same-name recreation", async (t) => {
+    // The Linux release resolver intentionally does not pick up a native
+    // target/debug binary. Tell the integration fixture which Worker was
+    // prepared by test:prepare instead of relying on an old musl build.
+    const preparedWorker = resolveTestWorkerBinary();
+    if (process.env.CI && preparedWorker === undefined)
+        throw new Error("Instance delete integration requires the prepared Worker.");
+    if (preparedWorker !== undefined &&
+        process.platform === "linux" &&
+        (process.arch === "x64" || process.arch === "arm64")) {
+        const key = "PORTABLE_DEVSHELL_WORKER_LINUX_" +
+            (process.arch === "x64" ? "X64" : "ARM64") + "_PATH";
+        const previous = process.env[key];
+        process.env[key] = preparedWorker;
+        t.after(() => {
+            if (previous === undefined) delete process.env[key];
+            else process.env[key] = previous;
+        });
+    }
     const home = await createTestTempDirectory(
         "control-instance-delete-recovery",
     );
@@ -94,7 +113,11 @@ test("deletion removes unreachable providers and permits same-name recreation", 
             assert.equal(snapshot.status, "offline");
         }
         const deleted = await instances.deleteInstance(draft.name);
-        assert.equal(deleted.cleanupPending, false, draft.provider);
+        assert.equal(
+            deleted.cleanupPending,
+            false,
+            draft.provider + ": " + JSON.stringify(deleted.cleanupWarnings ?? []),
+        );
         assert.equal(
             (await instances.listInstances()).some(
                 (entry) => entry.name === draft.name,
@@ -104,7 +127,11 @@ test("deletion removes unreachable providers and permits same-name recreation", 
         );
         await instances.createInstance(draft);
         const deletedAgain = await instances.deleteInstance(draft.name);
-        assert.equal(deletedAgain.cleanupPending, false, draft.provider);
+        assert.equal(
+            deletedAgain.cleanupPending,
+            false,
+            draft.provider + ": " + JSON.stringify(deletedAgain.cleanupWarnings ?? []),
+        );
     }
 
     assert.ok(
