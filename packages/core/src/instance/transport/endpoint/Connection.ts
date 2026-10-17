@@ -2,6 +2,7 @@ import type { Channel, ReverseTransport } from "@portable-devshell/shared";
 
 export interface ReverseAttachment {
     connectedAt?: string;
+    credentialReplacement?: boolean;
     generation: number;
     transport: ReverseTransport;
 }
@@ -21,16 +22,17 @@ export class TransportConnection {
     }
 
     async attach(channel: Channel, input?: ReverseAttachment): Promise<void> {
-        this.#attached?.close();
+        const previous = this.#attached;
         this.#attached = channel;
-        if (input === undefined) return;
         try {
-            for (const listener of this.#attachListeners) await listener(input);
+            if (input !== undefined)
+                for (const listener of this.#attachListeners) await listener(input);
         } catch (error) {
             channel.close(error instanceof Error ? error : new Error(String(error)));
-            if (this.#attached === channel) this.#attached = undefined;
+            if (this.#attached === channel) this.#attached = previous;
             throw error;
         }
+        if (previous !== channel) previous?.close();
     }
 
     takeAttached(): Channel | undefined {

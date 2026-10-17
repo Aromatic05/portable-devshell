@@ -152,8 +152,10 @@ test("re-enrollment only displaces the previous connection after replacement aut
     await credentials.runAuthenticated(
         descriptor.config.name,
         newCredential.deviceToken,
-        async () =>
-            connections.activate(identity(descriptor, 1), "wss", newChannel),
+        async (credentialReplacement) =>
+            connections.activate(identity(descriptor, 1), "wss", newChannel, {
+                credentialReplacement,
+            }),
     );
     assert.equal(oldChannel.closed, true);
     assert.equal(newChannel.closed, false);
@@ -164,6 +166,23 @@ test("re-enrollment only displaces the previous connection after replacement aut
         ),
         (error: unknown) => hasCode(error, "reverse.deviceTokenInvalid"),
     );
+});
+
+test("failed reverse connection activation preserves the previous live channel", async () => {
+    const descriptor = reverseDescriptor((generation) => {
+        if (generation === 2) throw new Error("injected failed handshake");
+    });
+    const connections = new ReverseConnections({ instances: instanceLookup(descriptor) });
+    const oldChannel = new MemoryChannel();
+    await connections.activate(identity(descriptor, 9), "wss", oldChannel);
+    const failed = new MemoryChannel();
+    await assert.rejects(connections.activate(identity(descriptor, 2), "wss", failed, {
+        credentialReplacement: true,
+    }), /injected failed handshake/u);
+    assert.equal(failed.closed, true);
+    assert.equal(oldChannel.closed, false);
+    connections.disconnect(descriptor.config.name);
+    assert.equal(oldChannel.closed, true);
 });
 
 function reverseDescriptor(

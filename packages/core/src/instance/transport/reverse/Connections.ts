@@ -23,6 +23,7 @@ export interface ReverseConnectionsOptions {
 
 interface ActiveReverseConnection {
     channel: Channel;
+    closed: boolean;
     generation: number;
     transport: ReverseTransport;
 }
@@ -46,6 +47,7 @@ export class ReverseConnections {
         identity: ReverseConnectionIdentity,
         transport: ReverseTransport,
         channel: Channel,
+        options: { credentialReplacement?: boolean } = {},
     ): Promise<void> {
         let generation: ReverseGenerationLease | undefined;
         try {
@@ -55,11 +57,26 @@ export class ReverseConnections {
                 const connection = this.#requireReverseConnection(
                     identity.descriptor,
                 );
-                this.#prepareActivation(identity, transport, channel);
-                await connection.attach(channel, {
-                    generation: identity.generation,
-                    transport,
-                });
+                const previous = this.#active.get(identity.descriptor.config.name);
+                const active = this.#prepareActivation(
+                    identity, transport, channel, options.credentialReplacement === true,
+                );
+                try {
+                    await connection.attach(channel, {
+                        credentialReplacement: options.credentialReplacement,
+                        generation: identity.generation,
+                        transport,
+                    });
+                } catch (error) {
+                    if (this.#active.get(identity.descriptor.config.name) === active) {
+                        if (previous !== undefined && !previous.closed)
+                            this.#active.set(identity.descriptor.config.name, previous);
+                        else this.#active.delete(identity.descriptor.config.name);
+                    }
+                    throw error;
+                }
+                if (previous !== undefined && previous !== active)
+                    previous.channel.close();
             });
         } catch (error) {
             channel.close();
@@ -131,13 +148,15 @@ export class ReverseConnections {
         identity: ReverseConnectionIdentity,
         transport: ReverseTransport,
         channel: Channel,
+        credentialReplacement: boolean,
     ): ActiveReverseConnection {
         const name = identity.descriptor.config.name;
         const previous = this.#active.get(name);
         const previousGeneration = previous?.generation ?? 0;
         if (
             !Number.isSafeInteger(identity.generation) ||
-            identity.generation <= previousGeneration
+            identity.generation <= 0 ||
+            (!credentialReplacement && identity.generation <= previousGeneration)
         ) {
             channel.close();
             throw createRemoteError({
@@ -154,11 +173,13 @@ export class ReverseConnections {
 
         const active: ActiveReverseConnection = {
             channel,
+            closed: false,
             generation: identity.generation,
             transport,
         };
         this.#active.set(name, active);
         channel.onClose(() => {
+            active.closed = true;
             if (this.#active.get(name) === active) this.#active.delete(name);
         });
         return active;

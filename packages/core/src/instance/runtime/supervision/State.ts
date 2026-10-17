@@ -101,6 +101,7 @@ export class InstanceStateMachine {
 export class WorkerInstanceState {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #events: InstanceEventPort;
+    readonly #listeners = new Set<() => void>();
     readonly #onReadyChanged: (ready: boolean) => Promise<void>;
     readonly #stateMachine: InstanceStateMachine;
     #cursorLoaded = false;
@@ -115,6 +116,21 @@ export class WorkerInstanceState {
         this.#events = options.events;
         this.#onReadyChanged = options.onReadyChanged;
         this.#stateMachine = options.stateMachine;
+    }
+
+    onChange(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    metadataChanged(): void {
+        this.#notify();
+    }
+
+    #notify(): void {
+        for (const listener of this.#listeners) {
+            try { listener(); } catch { /* Observers cannot fail Worker state updates. */ }
+        }
     }
 
     snapshot(reverse?: ReverseInstanceStatus): InstanceSnapshot {
@@ -139,6 +155,7 @@ export class WorkerInstanceState {
         });
         this.#stateMachine.apply({ lastSeq: event.seq });
         this.#cursorLoaded = true;
+        if (type.startsWith("reverse.")) this.#notify();
         return event;
     }
 
@@ -188,6 +205,13 @@ export class WorkerInstanceState {
             );
             if (!next.ready) await this.#onReadyChanged(false);
         }
+        if (
+            previous.connectionState !== next.connectionState ||
+            previous.daemonState !== next.daemonState ||
+            previous.pid !== next.pid ||
+            previous.lastErrorCode !== next.lastErrorCode ||
+            previous.lastErrorMessage !== next.lastErrorMessage
+        ) this.#notify();
         return this.snapshot(reverse);
     }
 }

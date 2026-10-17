@@ -37,6 +37,7 @@ interface WorkerInstanceConnectionOptions {
     config: ResolvedWorkerInstanceConfig;
     protocolClient: WorkerProtocolClient;
     endpoint: Endpoint;
+    metadataChanged(): void;
     snapshot(): InstanceSnapshot;
     transportConnection: TransportConnection;
 }
@@ -47,6 +48,7 @@ export class WorkerInstanceConnection {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #endpoint: Endpoint;
+    readonly #metadataChanged: WorkerInstanceConnectionOptions["metadataChanged"];
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
     readonly #transportConnection: TransportConnection;
     readonly #unsubscribeAttach: () => void;
@@ -62,6 +64,7 @@ export class WorkerInstanceConnection {
         this.#config = options.config;
         this.#protocolClient = options.protocolClient;
         this.#endpoint = options.endpoint;
+        this.#metadataChanged = options.metadataChanged;
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
         this.#unsubscribeAttach = this.#transportConnection.onAttach((input) =>
@@ -97,6 +100,7 @@ export class WorkerInstanceConnection {
 
     clearHandshake(): void {
         this.#handshake = undefined;
+        this.#metadataChanged();
     }
 
     async connectStarted(): Promise<InstanceSnapshot> {
@@ -106,6 +110,7 @@ export class WorkerInstanceConnection {
             this.#handshake = await this.#protocolClient.handshake(
                 this.#config.handshake,
             );
+            this.#metadataChanged();
             await this.#appendEvent("worker.transportConnected");
             await this.#appendEvent("instance.started", {
                 workerVersion: this.#handshake.workerVersion,
@@ -199,8 +204,9 @@ export class WorkerInstanceConnection {
         this.#requireSelfManaged();
         const previousGeneration = this.#reverseStatus?.generation ?? 0;
         if (
-            !Number.isInteger(input.generation) ||
-            input.generation <= previousGeneration
+            !Number.isSafeInteger(input.generation) ||
+            input.generation <= 0 ||
+            (!input.credentialReplacement && input.generation <= previousGeneration)
         ) {
             this.#transportConnection.close();
             throw createRemoteError({
@@ -216,7 +222,16 @@ export class WorkerInstanceConnection {
         }
 
         const connectedAt = input.connectedAt ?? new Date().toISOString();
-        await this.#endpoint.reconnect();
+        let verifiedHandshake: WorkerHandshakeResult | undefined;
+        await this.#endpoint.reconnect({
+            preserveExisting: true,
+            verify: async () => {
+                await this.#protocolClient.ping();
+                verifiedHandshake = await this.#protocolClient.handshake(this.#config.handshake);
+            },
+        });
+        this.#handshake = verifiedHandshake;
+        this.#metadataChanged();
         this.#reverseStatus = {
             availability: "online",
             connectedAt,
@@ -240,7 +255,13 @@ export class WorkerInstanceConnection {
                 transport: input.transport,
             }),
         );
-        return await this.refreshRunningStatus(undefined, "connecting");
+        await this.#appendEvent("worker.transportConnected");
+        return await this.#applyStateUpdate({
+            connectionState: "connected",
+            daemonState: "running",
+            lastErrorCode: undefined,
+            lastErrorMessage: undefined,
+        });
     }
 
     async reconnectTransport(): Promise<InstanceSnapshot> {

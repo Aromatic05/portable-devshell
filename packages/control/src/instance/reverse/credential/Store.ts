@@ -40,6 +40,7 @@ const DEVICE_CODE_LIFETIME_MS = 10 * 60 * 1000;
 export class ReverseCredentialStore {
     readonly #fileSecurity: ReverseCredentialFileSecurity;
     readonly #paths: ControlPathHome;
+    readonly #activationQueues = new Map<string, Promise<void>>();
     #operationQueue: Promise<unknown> = Promise.resolve();
 
     constructor(
@@ -154,27 +155,68 @@ export class ReverseCredentialStore {
     async withAuthenticatedToken(
         instance: string,
         deviceToken: string,
-        operation: () => Promise<void>,
-        beforeReplacement?: () => void,
+        operation: (credentialReplacement: boolean) => Promise<void>,
     ): Promise<boolean> {
-        return await this.#exclusive(async () => {
+        return await this.#exclusiveActivation(instance, async () =>
+            await this.#activateAuthenticatedToken(instance, deviceToken, operation));
+    }
+
+    async #activateAuthenticatedToken(
+        instance: string,
+        deviceToken: string,
+        operation: (credentialReplacement: boolean) => Promise<void>,
+    ): Promise<boolean> {
+        const admission = await this.#exclusive(async () => {
             const record = await this.#readOptional(instance);
             if (
                 record === undefined ||
                 !credentialMatches(record, deviceToken)
             ) {
-                return false;
+                return undefined;
             }
-            const replacementActivated =
+            return {
+                replacement:
                 record.previousTokenHash !== undefined &&
-                safeHashEquals(record.tokenHash, hashSecret(deviceToken));
-            if (replacementActivated) beforeReplacement?.();
-            await operation();
-            if (replacementActivated) {
-                await this.#write({ ...record, previousTokenHash: undefined });
+                safeHashEquals(record.tokenHash, hashSecret(deviceToken)),
+                tokenHash: record.tokenHash,
+                previousTokenHash: record.previousTokenHash,
+            };
+        });
+        if (admission === undefined) return false;
+
+        // Network activation may wait for an unresponsive Worker. Never hold
+        // the credential store's global filesystem mutation lock across it.
+        await operation(admission.replacement);
+        return await this.#exclusive(async () => {
+            const current = await this.#readOptional(instance);
+            if (!credentialMatches(current, deviceToken)) return false;
+            // A concurrent re-enrollment or rotation owns the newer record;
+            // an older connection must not discard its rollover credential.
+            if (
+                admission.replacement &&
+                current !== undefined &&
+                current.tokenHash === admission.tokenHash &&
+                current.previousTokenHash === admission.previousTokenHash
+            ) {
+                await this.#write({ ...current, previousTokenHash: undefined });
             }
             return true;
         });
+    }
+
+    async #exclusiveActivation<T>(
+        instance: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        const previous = this.#activationQueues.get(instance) ?? Promise.resolve();
+        const next = previous.then(operation, operation);
+        const tracked = next.then(() => undefined, () => undefined);
+        this.#activationQueues.set(instance, tracked);
+        void tracked.finally(() => {
+            if (this.#activationQueues.get(instance) === tracked)
+                this.#activationQueues.delete(instance);
+        });
+        return await next;
     }
 
     async rotateToken(instance: string): Promise<string> {

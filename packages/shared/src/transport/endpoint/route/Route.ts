@@ -245,6 +245,13 @@ export class Route {
         };
     }
 
+    restoreGateway(codec: EnvelopeCodec): void {
+        // A staged replacement failed: the previous link and its listeners
+        // remain live, so restore routing without adding subscriptions.
+        this.#gateway = codec;
+        this.#refreshReachability();
+    }
+
     send(source: Address, dest: Address, packet: Packet): Promise<void> {
         return this.#dispatch({ source, dest, packet });
     }

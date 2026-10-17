@@ -81,6 +81,7 @@ export class WorkerInstance implements WorkerInstanceApi {
             config,
             protocolClient,
             endpoint: dependencies.endpoint,
+            metadataChanged: () => state.metadataChanged(),
             snapshot: () => state.snapshot(connection.snapshotReverse()),
             transportConnection: dependencies.transportConnection,
         });

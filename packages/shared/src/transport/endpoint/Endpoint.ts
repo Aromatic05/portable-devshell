@@ -31,6 +31,7 @@ export class Endpoint {
     readonly #route = new Route();
     readonly #links = new Set<Link>();
     #gateway?: Link;
+    #standbyGateway?: Link;
     #connecting?: Promise<void>;
 
     constructor(options: EndpointOptions = {}) {
@@ -92,9 +93,43 @@ export class Endpoint {
         if (this.#gateway !== undefined) this.#close(this.#gateway);
     }
 
-    async reconnect(): Promise<void> {
-        this.disconnect();
-        await this.#connect();
+    async reconnect(options: {
+        preserveExisting?: boolean;
+        verify?: () => Promise<void>;
+    } = {}): Promise<void> {
+        const previous = options.preserveExisting ? this.#gateway : undefined;
+        if (previous === undefined) {
+            this.disconnect();
+            await this.#connect();
+            try {
+                await options.verify?.();
+            } catch (error) {
+                this.disconnect();
+                throw error;
+            }
+            return;
+        }
+        // Keep the established channel alive until the replacement has
+        // completed application-level verification.
+        this.#standbyGateway = previous;
+        this.#gateway = undefined;
+        try {
+            await this.#connect();
+            await options.verify?.();
+        } catch (error) {
+            const failed = this.#gateway;
+            if (failed !== undefined && failed !== previous) this.#close(failed);
+            if (this.#links.has(previous)) {
+                this.#route.restoreGateway(previous.codec);
+                this.#gateway = previous;
+            } else {
+                for (const listener of this.#closeListeners) listener();
+            }
+            throw error;
+        } finally {
+            this.#standbyGateway = undefined;
+        }
+        this.#close(previous);
     }
 
     close(): void {
@@ -124,9 +159,11 @@ export class Endpoint {
             this.#links.add(link);
             this.#gateway = link;
             codec.onClose((error) => {
-                if (this.#gateway === link) this.#gateway = undefined;
+                const wasGateway = this.#gateway === link;
+                if (wasGateway) this.#gateway = undefined;
                 this.#links.delete(link);
-                for (const listener of this.#closeListeners) listener(error);
+                if (wasGateway && this.#standbyGateway === undefined)
+                    for (const listener of this.#closeListeners) listener(error);
             });
             try {
                 await this.#initializeConnection?.((host, port) =>

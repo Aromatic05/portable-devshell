@@ -33,6 +33,11 @@ export class ControlInstances {
 
     createRuntimeInstance(config: ControlInstanceConfig): Instance {
         const instance = createInstance(config);
+        instance.supervision.state.onChange(() => {
+            // Only the registry's current generation may invalidate the list.
+            if (this.#registry.get(instance.config.name) === instance)
+                this.changes.publish("registry");
+        });
         if (this.#toolCallEndpoint !== undefined)
             instance.attachToolCallEndpoint(this.#toolCallEndpoint);
         return instance;

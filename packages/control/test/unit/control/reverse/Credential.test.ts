@@ -142,12 +142,31 @@ test("issuing a replacement code keeps the old token valid until the code is con
             async () => {
                 events.push("connected");
             },
-            () => events.push("old-connection-closed"),
         ),
         true,
     );
-    assert.deepEqual(events, ["old-connection-closed", "connected"]);
+    assert.deepEqual(events, ["connected"]);
     assert.equal(await store.authenticate("remote-test", rotated), false);
+});
+
+test("slow reverse activation does not lock out another instance's credential updates", async () => {
+    const home = await createTestTempDirectory("reverse-activation-lock");
+    const store = new ReverseCredentialStore(home);
+    const code = await store.createDeviceCode("slow-worker");
+    const { deviceToken } = await store.consumeDeviceCode(code.deviceCode);
+    let started!: () => void;
+    const activationStarted = new Promise<void>((resolve) => { started = resolve; });
+    let release!: () => void;
+    const finishActivation = new Promise<void>((resolve) => { release = resolve; });
+    const activation = store.withAuthenticatedToken("slow-worker", deviceToken, async () => {
+        started();
+        await finishActivation;
+    });
+    await activationStarted;
+    const unrelated = await store.createDeviceCode("healthy-worker");
+    assert.equal(unrelated.instance, "healthy-worker");
+    release();
+    assert.equal(await activation, true);
 });
 
 test("a malformed unrelated credential file does not block enrollment", async () => {

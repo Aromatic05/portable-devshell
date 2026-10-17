@@ -153,11 +153,12 @@ export class ReverseIngress {
                         .runAuthenticated(
                             authentication.identity.descriptor.config.name,
                             authentication.token,
-                            async () =>
+                            async (credentialReplacement) =>
                                 await this.#connections.activate(
                                     authentication.identity,
                                     "wss",
                                     channel,
+                                    { credentialReplacement },
                                 ),
                         )
                         .catch(() => channel.close());
@@ -188,11 +189,12 @@ export class ReverseIngress {
             await this.#credentials.runAuthenticated(
                 authentication.identity.descriptor.config.name,
                 authentication.token,
-                async () =>
+                async (credentialReplacement) =>
                     await this.#connections.activate(
                         authentication.identity,
                         "sse",
                         channel,
+                        { credentialReplacement },
                     ),
             );
         } catch (error) {

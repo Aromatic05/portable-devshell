@@ -37,6 +37,27 @@ test("ControlInstances loads only enabled instance generations without starting 
     assert.equal(active.supervision.snapshot().ready, false);
 });
 
+test("Worker metadata changes invalidate Instance lists without a new wire event kind", async (t) => {
+    const config = createDefaultControlConfig();
+    config.instances = [normalizeConfigInstanceDraft({
+        enabled: true,
+        name: "metadata-local",
+        provider: "local",
+    })];
+    const instances = new ControlInstances();
+    t.after(async () => await instances.close());
+    await instances.load(config);
+    const instance = instances.registry.get("metadata-local")!;
+    const changes: string[] = [];
+    instances.changes.onChange((change) => changes.push(change.kind));
+    instance.supervision.state.metadataChanged();
+    assert.deepEqual(changes, ["registry"]);
+    await instances.registry.remove("metadata-local", instance);
+    instance.supervision.state.metadataChanged();
+    assert.deepEqual(changes, ["registry"],
+        "retired generation must not invalidate a replacement's view");
+});
+
 test("ControlInstances closes only owned workers and preserves failed ownership for retry", async () => {
     const config = createDefaultControlConfig();
     config.instances = [

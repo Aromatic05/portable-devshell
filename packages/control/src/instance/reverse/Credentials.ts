@@ -70,7 +70,7 @@ export class ReverseCredentials {
     async runAuthenticated(
         instance: string,
         deviceToken: string,
-        operation: () => Promise<void>,
+        operation: (credentialReplacement: boolean) => Promise<void>,
     ): Promise<void> {
         this.#requireReverseInstance(instance);
         const authenticated =
@@ -78,7 +78,6 @@ export class ReverseCredentials {
                 instance,
                 deviceToken,
                 operation,
-                () => this.#disconnect?.(instance),
             );
         if (!authenticated) throw invalidDeviceToken(instance);
     }

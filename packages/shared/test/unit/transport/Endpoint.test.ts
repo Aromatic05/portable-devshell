@@ -92,6 +92,46 @@ async function endpoints(): Promise<{
     return { client, dispose, right, server };
 }
 
+test("staged Endpoint reconnection preserves its old gateway on validation failure", async (t) => {
+    const server = new Endpoint({ host: "worker" });
+    const serverRpc = new Rpc(server.bind("core"), { echo: (value) => value });
+    const channels: MemoryChannel[] = [];
+    const accepts: Array<Promise<() => void>> = [];
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            channels.push(left);
+            accepts.push(server.accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close();
+        server.close();
+        serverRpc.close();
+        await Promise.all(accepts);
+    });
+    await client.connect("worker", "core");
+    const original = channels[0]!;
+    await assert.rejects(client.reconnect({
+        preserveExisting: true,
+        verify: async () => { throw new Error("injected handshake failure"); },
+    }), /injected handshake failure/u);
+    assert.equal(original.closed, false);
+    const recovered = new Rpc(await client.connect("worker", "core"));
+    assert.equal(await recovered.request("echo", "old"), "old");
+    recovered.close();
+    await client.reconnect({ preserveExisting: true, verify: async () => undefined });
+    assert.equal(original.closed, true);
+    const replacement = new Rpc(await client.connect("worker", "core"));
+    assert.equal(await replacement.request("echo", "new"), "new");
+    replacement.close();
+});
+
 test("accepted Endpoint link retires when its Channel closes", async () => {
     const { client, dispose, right, server } = await endpoints();
     client.disconnect();

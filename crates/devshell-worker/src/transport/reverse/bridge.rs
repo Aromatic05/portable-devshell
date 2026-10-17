@@ -168,8 +168,47 @@ impl ReverseBridge {
             let _ = writer.shutdown_both();
         }
         if let Ok(mut output) = self.output.lock() {
-            output.take();
+            if let Some(receiver) = output.take() {
+                // Output already read from the Worker bridge belongs to the
+                // completed call, even if the network transport disappeared.
+                // Drain the old bounded channel before dropping its receiver.
+                let buffered = drain_buffered_output(receiver);
+                if !buffered.is_empty()
+                    && let Ok(mut pending) = self.pending.lock()
+                {
+                    pending.extend(buffered);
+                }
+            }
         }
+    }
+}
+
+fn drain_buffered_output(receiver: Receiver<Result<Vec<u8>, String>>) -> VecDeque<Vec<u8>> {
+    let mut buffered = VecDeque::new();
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(Ok(frame)) => buffered.push_back(frame),
+            Ok(Err(_)) | Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => break,
+        }
+    }
+    buffered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drain_buffered_output;
+    use std::sync::mpsc;
+
+    #[test]
+    fn buffered_responses_survive_bridge_receiver_replacement_in_order() {
+        let (send, recv) = mpsc::sync_channel(64);
+        send.send(Ok(vec![1, 2, 3])).unwrap();
+        send.send(Ok(vec![4, 5])).unwrap();
+        drop(send);
+        assert_eq!(
+            drain_buffered_output(recv).into_iter().collect::<Vec<_>>(),
+            vec![vec![1, 2, 3], vec![4, 5]]
+        );
     }
 }
 
