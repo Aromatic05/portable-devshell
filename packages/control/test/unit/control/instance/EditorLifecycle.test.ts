@@ -474,6 +474,10 @@ test("delete cleanup debt retries provider retirement before finalizing the gene
 
     const deleted = await coordinator.deleteInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
     assert.equal(deleted.cleanupPending, true);
+    assert.match(
+        String(deleted.cleanupWarnings),
+        /provider cleanup failed once/u,
+    );
     assert.deepEqual(config.instances, []);
     assert.equal(registry.get("demo-local"), undefined);
     assert.equal(providerRetirements, 1);

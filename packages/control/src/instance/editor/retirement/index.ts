@@ -84,12 +84,12 @@ export class InstanceRetirementCoordinator {
             warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
             for (const warning of retirement.warnings)
                 console.warn(`Instance ${instanceName} remote retirement incomplete:`, warning);
+            const warnings = [...cleanupFailures, ...retirement.warnings];
             return {
                 ...(result as Record<string, JsonValue>),
                 cleanupPending: cleanupFailures.length > 0,
-                ...(retirement.warnings.length === 0 ? {} : {
-                    cleanupWarnings: retirement.warnings.map((error) =>
-                        error instanceof Error ? error.message : String(error)),
+                ...(warnings.length === 0 ? {} : {
+                    cleanupWarnings: warnings.map(describeCleanupFailure),
                 }),
             };
         } finally {
@@ -329,4 +329,13 @@ export class InstanceRetirementCoordinator {
             });
         }
     }
+}
+
+function describeCleanupFailure(error: unknown): string {
+    if (error instanceof AggregateError) {
+        return [error.message, ...error.errors.map(describeCleanupFailure)]
+            .filter(Boolean)
+            .join(": ");
+    }
+    return error instanceof Error ? error.message : String(error);
 }
