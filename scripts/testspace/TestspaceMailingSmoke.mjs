@@ -23,8 +23,7 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         const ctxA = initialA.ctxId;
         const ctxB = initialB.ctxId;
         assert.notEqual(ctxA, ctxB, "Independent agents need independent Contexts");
-        assert.notEqual(initialA.temporaryDirectory, initialB.temporaryDirectory,
-            "Independent Contexts must not share temporary directories");
+        assert.ok(Array.isArray(initialA.comment) && Array.isArray(initialB.comment));
 
         const claimedA = await bash(a, ctxA, "devshell memory init " + first);
         const claimedB = await bash(b, ctxB, "devshell memory init " + second);
@@ -34,15 +33,10 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         assert.match(claimedB.stdout, new RegExp(second, "u"));
 
         const initialized = await context(a, workspace, ctxA);
-        assert.equal(initialized.temporaryDirectory, initialA.temporaryDirectory,
-            "environ_info must reuse the Context temporary directory");
-        assert.equal(initialized.memory?.name, first);
-        assert.equal(initialized.memory?.directory, workspace + "/var/agent-work/" + first);
-        assert.equal(initialized.projectMemoryDirectory, initialized.memory.directory);
-        assert.equal(initialized.projectMemoryAgentFile, initialized.memory.directory + "/INDEX.md");
+        const memoryDirectory = workspace + "/var/agent-work/" + first;
+        assert.ok(initialized.comment.some((message) => message === "Memory: " + memoryDirectory));
         const repeated = await context(a, workspace, ctxA);
-        assert.equal(repeated.temporaryDirectory, initialA.temporaryDirectory);
-        assert.deepEqual(repeated.memory, initialized.memory);
+        assert.ok(repeated.comment.some((message) => message === "Memory: " + memoryDirectory));
 
         const outbox = "var/agent-work/" + first + "/chat.md";
         const inbox = "var/agent-work/" + second + "/mailbox.md";
@@ -97,22 +91,20 @@ export async function runTestspaceMailingSmoke({ endpoint, workspace }) {
         const inherited = await bash(b, ctxB, "devshell memory inherit " + first);
         assertExit(inherited, 0, "memory inherit");
         const resumed = await context(b, workspace, ctxB);
-        assert.equal(resumed.temporaryDirectory, initialB.temporaryDirectory);
-        assert.equal(resumed.memory?.directory, initialized.memory.directory);
-        assert.equal(resumed.projectMemoryDirectory, initialized.memory.directory);
+        assert.ok(resumed.comment.some((message) => message === "Memory: " + memoryDirectory));
         const previous = await bash(a, ctxA, "devshell memory");
         assertExit(previous, 0, "prior owner memory");
         assert.ok(!previous.stdout.includes(first), "The prior Context must lose ownership");
         const formerOwner = await context(a, workspace, ctxA);
-        assert.equal(formerOwner.temporaryDirectory, initialA.temporaryDirectory);
-        assert.equal(formerOwner.memory, undefined,
+        assert.ok(formerOwner.comment.every((message) => message !== "Memory: " + memoryDirectory),
             "environ_info must not show a Memory after another Context inherits it");
         const recovered = await bash(b, ctxB, "devshell memory");
         assert.match(recovered.stdout, new RegExp(first, "u"));
 
         const released = await bash(b, ctxB, "devshell memory release");
         assertExit(released, 0, "release");
-        assert.equal((await context(b, workspace, ctxB)).memory, undefined);
+        assert.ok((await context(b, workspace, ctxB)).comment.every(
+            (message) => !String(message).startsWith("Memory: " + memoryDirectory)));
 
         const names = (await a.listTools()).tools.map((tool) => tool.name);
         assert.equal(names.some((name) => name.startsWith("mail_")), false,

@@ -17,6 +17,7 @@ import { createDebugRuntime } from "./debug/index.js";
 import type { DebugRuntime } from "./debug/Api.js";
 import type { ExtensionRuntime } from "./extension/Api.js";
 import { CliExtensionCommandService } from "./extension/api/point/cli/command/index.js";
+import { createModelMemoryLookup } from "./extension/api/point/cli/command/Memory.js";
 import { McpExtensionService } from "./extension/api/point/mcp/index.js";
 import { resolveExecutionDrivers } from "./extension/api/point/execution/index.js";
 import { ToolCallExtensionBinding } from "./extension/api/point/toolcall/index.js";
@@ -66,6 +67,11 @@ export class ControlState {
         const modelCliCommands = new CliExtensionCommandService(this.extensions, {
             surface: "model",
         });
+        const memoryLookup = createModelMemoryLookup({
+            commands: modelCliCommands,
+            contexts: this.contexts.api,
+            instances: options.instances,
+        });
         const modelCommands = (instance: string): readonly string[] => {
             const allowed =
                 options.instances.get(instance)?.config.modelExtensions ?? [];
@@ -94,34 +100,7 @@ export class ControlState {
                     if (descriptor === undefined) throw new Error(name);
                     return descriptor.lifecycle.acquireLease();
                 },
-                memory: async (ctxId, instance, workspace, signal) => {
-                    // A faulted Comment generation disappears from the active
-                    // command catalog. The configured Model ACL, not transient
-                    // discovery, determines whether we should attempt recovery.
-                    const allowed = options.instances.get(instance)?.config.modelExtensions ?? [];
-                    if (!modelCommandAuthorized(allowed, {
-                        id: "memory",
-                        extensionId: "comment",
-                    })) return undefined;
-                    const result = await modelCliCommands.command("memory", ["status"], {
-                        ctxId,
-                        context: {
-                            instanceReference: (target) =>
-                                this.contexts.api.registry.referenceInstance(ctxId, target),
-                        },
-                        instance,
-                        requestId: "environ_info",
-                        signal: signal ?? new AbortController().signal,
-                        workspace,
-                    });
-                    if (result.kind !== "json" || result.value === null ||
-                        typeof result.value !== "object" || Array.isArray(result.value))
-                        return undefined;
-                    const { name, directory, mailbox } = result.value;
-                    return typeof name === "string" && typeof directory === "string" &&
-                        typeof mailbox === "string"
-                        ? { name, directory, mailbox } : undefined;
-                },
+                memory: memoryLookup,
                 modelCommands,
                 process: (name) =>
                     createProcessTransport(options.internalEndpoint, name),

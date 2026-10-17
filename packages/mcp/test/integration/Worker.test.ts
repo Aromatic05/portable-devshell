@@ -420,17 +420,9 @@ import { tmpdir } from "node:os";
             },
         );
         const ctxId = response.result?.structuredContent?.ctxId;
-        const memoryDirectory =
-            response.result?.structuredContent?.projectMemoryDirectory;
-        const memoryAgentFile =
-            response.result?.structuredContent?.projectMemoryAgentFile;
-        const temporaryDirectory =
-            response.result?.structuredContent?.temporaryDirectory;
         assert.ok(typeof ctxId === "string");
-        assert.equal(memoryDirectory, undefined);
-        assert.equal(memoryAgentFile, undefined);
-        assert.ok(typeof temporaryDirectory === "string");
-        assert.equal((await stat(temporaryDirectory)).isDirectory(), true);
+        assert.ok(Array.isArray(response.result?.structuredContent?.comment));
+        assert.equal(response.result?.structuredContent?.temporaryDirectory, undefined);
         return ctxId;
     }
 

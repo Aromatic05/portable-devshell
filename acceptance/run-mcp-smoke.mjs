@@ -56,18 +56,8 @@ try {
     assert.equal(typeof ctxId, "string");
     assert.notEqual(ctxId, "");
     assert.equal(environment?.ctxId, ctxId);
-    assert.equal(environment?.instance, "aromatic-pc");
-    assert.equal(environment?.workspace, fixture.workspace);
-    assert.equal(typeof environment?.platform?.os, "string");
-    assert.equal(typeof environment?.platform?.arch, "string");
-    assert.equal(typeof environment?.platform?.distribution?.id, "string");
-    assert.equal(typeof environment?.platform?.distribution?.name, "string");
-    assert.equal(typeof environment?.platform?.packageManager, "string");
-    assert.equal(typeof environment?.platform?.shell, "string");
-    assert.equal(
-        Number.isNaN(Date.parse(String(environment?.expiresAt ?? ""))),
-        false,
-    );
+    assert.ok(Array.isArray(environment?.comment));
+    assert.equal(environment?.platform, undefined);
 
     const toolCall = await postJson(
         endpoint,

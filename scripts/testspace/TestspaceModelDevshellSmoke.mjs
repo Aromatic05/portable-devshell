@@ -44,20 +44,8 @@ export async function runTestspaceModelDevshellSmoke({
                 "model devshell smoke environ_info did not return a ctxId",
             );
         }
-        const remoteCommands =
-            environment.structuredContent?.remoteEnvironment?.commands;
-        if (
-            !Array.isArray(remoteCommands) ||
-            !remoteCommands.includes("help") ||
-            !remoteCommands.some((value) =>
-                String(value).startsWith("attach "),
-            ) ||
-            !remoteCommands.some((value) => String(value).startsWith("mask "))
-        ) {
-            throw new Error(
-                `environ_info did not advertise remote commands: ${JSON.stringify(environment.structuredContent)}`,
-            );
-        }
+        if (!Array.isArray(environment.structuredContent?.comment))
+            throw new Error("environ_info must provide the minimal comment contract");
 
         const instanceStatus = await runBash(
             client,
