@@ -502,6 +502,19 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("shows incomplete lifecycle cleanup after a committed disable", async () => {
+        const domains = new WebTestDomains();
+        const disable = vi.spyOn(domains.domains.instances, "disable");
+        disable.mockResolvedValueOnce({ cleanupPending: true });
+        const store = new WebStore(domains.domains);
+        await store.load();
+
+        expect(await store.setInstanceEnabled("demo", false)).toBe(true);
+        expect(store.state.notice).toContain("lifecycle cleanup is still pending");
+        expect(disable).toHaveBeenCalledWith("demo");
+        store.close();
+    });
+
     it("creates reverse instances, returns enrollment, and refreshes the registry", async () => {
         const domains = new WebTestDomains();
         const draft = {

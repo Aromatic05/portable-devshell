@@ -311,15 +311,22 @@ export class WebStore {
         enabled: boolean,
     ): Promise<boolean> {
         const generation = this.#generation;
-        return await this.#operations.run(
-            `enabled:${instance}`,
-            `${instance} ${enabled ? "enabled" : "disabled"}.`,
+        let cleanupNotice: string | undefined;
+        const succeeded = await this.#operations.run(
+            "enabled:" + instance,
+            instance + (enabled ? " enabled." : " disabled."),
             generation,
             async () => {
-                if (enabled) await this.domains.instances.enable(instance);
-                else await this.domains.instances.disable(instance);
+                const result = enabled
+                    ? await this.domains.instances.enable(instance)
+                    : await this.domains.instances.disable(instance);
+                if (result?.cleanupPending === true)
+                    cleanupNotice = instance + " configuration committed; lifecycle cleanup is still pending.";
             },
         );
+        if (succeeded && cleanupNotice !== undefined && this.#current(generation))
+            this.#set({ ...this.#state, notice: cleanupNotice });
+        return succeeded;
     }
 
     async deleteInstance(instance: string): Promise<boolean> {

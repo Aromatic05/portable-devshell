@@ -529,6 +529,9 @@ export type ConfigInstanceView = ControlInstanceConfig extends infer T
     : never;
 
 export interface ConfigView {
+    /** Present on committed instance operations with incomplete retirement. */
+    cleanupPending?: boolean;
+    cleanupWarnings?: string[];
     control: ControlGlobalConfig["control"];
     instances: ConfigInstanceView[];
     mcp: ControlGlobalConfig["mcp"];

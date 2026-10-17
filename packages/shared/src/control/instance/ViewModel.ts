@@ -15,6 +15,7 @@ import {
     type InstanceChangeStreamPort,
     readInstanceChangeStreamGap,
 } from "./Revision.js";
+import type { JsonValue } from "../../types/Json.js";
 import type { InstanceTransport } from "./Transport.js";
 
 export interface InstanceConfigViewModelState {
@@ -73,17 +74,13 @@ export class InstanceConfigViewModel {
     }
 
     /** Enables an instance, then refreshes the configured-instance catalog. */
-    enable(instanceName: string): Promise<void> {
-        return this.#mutate(async () => {
-            await this.#transport.enableInstance(instanceName);
-        });
+    enable(instanceName: string): Promise<Record<string, JsonValue> | undefined> {
+        return this.#mutate(() => this.#transport.enableInstance(instanceName));
     }
 
     /** Disables an instance, then refreshes the configured-instance catalog. */
-    disable(instanceName: string): Promise<void> {
-        return this.#mutate(async () => {
-            await this.#transport.disableInstance(instanceName);
-        });
+    disable(instanceName: string): Promise<Record<string, JsonValue> | undefined> {
+        return this.#mutate(() => this.#transport.disableInstance(instanceName));
     }
 
     /** Deletes an instance, then refreshes the configured-instance catalog. */

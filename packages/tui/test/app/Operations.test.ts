@@ -14,6 +14,7 @@ import {
     function createHarness(
         options: {
             failConfigUpdate?: boolean;
+            cleanupPending?: boolean;
             failReverseCode?: boolean;
             failStart?: boolean;
             initialHomeDirectory?: string | null;
@@ -92,6 +93,7 @@ import {
                     calls.push(`config.instance:${input.instanceName}`);
                     if (options.failConfigUpdate)
                         throw new Error("config update failed");
+                    return { cleanupPending: options.cleanupPending ?? false };
                 },
                 async validateInstanceCreate(draft: InstanceCreateDraft) {
                     calls.push("instance.validate");
@@ -429,6 +431,15 @@ import {
         await harness.operations.setInstanceEnabled("alpha", false);
 
         assert.deepEqual(harness.calls, ["config.instance:alpha"]);
+    });
+
+    test("instance disable reports committed configuration with pending cleanup", async () => {
+        const harness = createHarness({ cleanupPending: true });
+        await harness.operations.setInstanceEnabled("alpha", false);
+        assert.match(
+            harness.store.getState().interaction.screenStatusByPage.instances ?? "",
+            /lifecycle cleanup remains pending/u,
+        );
     });
 
     test("control restart retries until the replacement runtime is reachable", async () => {

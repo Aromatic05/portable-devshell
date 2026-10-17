@@ -193,11 +193,14 @@ export class TuiRuntimeControlOperations {
             this.options.clients.config.update(request),
             "config.update",
         );
+        if (result?.cleanupPending === true)
+            this.options.store.setScreenStatus(
+                "config",
+                "Config committed; Instance lifecycle cleanup remains pending.",
+            );
         await this.#refreshBestEffort(this.#panelKey("config"), async () => {
             await this.options.domains.config.refresh();
         });
-        // The config projection owns the full view; the command layer only
-        // consumes the restart signal through a JSON boundary.
         return { restartControlRequired: result.restartControlRequired };
     }
 
@@ -205,13 +208,18 @@ export class TuiRuntimeControlOperations {
         instanceName: string,
         patch: ConfigInstancePatch,
     ): Promise<void> {
-        await this.#request(
+        const result = await this.#request(
             this.options.clients.instance.updateInstance({
                 instanceName,
                 patch,
             }),
-            `config.instance.update:${instanceName}`,
+            "config.instance.update:" + instanceName,
         );
+        if (result?.cleanupPending === true)
+            this.options.store.setScreenStatus(
+                "instances",
+                instanceName + " configuration committed; lifecycle cleanup remains pending.",
+            );
     }
 
     async deleteInstance(instance: string): Promise<void> {
@@ -252,14 +260,19 @@ export class TuiRuntimeControlOperations {
         instance: string,
         enabled: boolean,
     ): Promise<void> {
-        await this.#request(
+        const result = await this.#request(
             this.options.clients.instance.updateInstance({
                 instanceName: instance,
                 patch: { enabled },
             }),
-            `config.instance.enabled:${instance}`,
+            "config.instance.enabled:" + instance,
         );
-        await this.#refreshBestEffort(`instances:${instance}`, async () => {
+        if (result?.cleanupPending === true)
+            this.options.store.setScreenStatus(
+                "instances",
+                instance + " configuration committed; lifecycle cleanup remains pending.",
+            );
+        await this.#refreshBestEffort("instances:" + instance, async () => {
             await refreshTuiAll(this.options.domains);
         });
     }
