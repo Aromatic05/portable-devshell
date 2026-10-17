@@ -17,25 +17,41 @@ export class Connection {
     readonly local: Address;
     readonly remote: Address;
     readonly #port: Port;
+    readonly #direct?: { codec: EnvelopeCodec; channel: Channel };
 
-    constructor(port: Port, remote: Address, local: Address = port.local) {
+    constructor(
+        port: Port,
+        remote: Address,
+        local: Address = port.local,
+        direct?: { codec: EnvelopeCodec; channel: Channel },
+    ) {
         this.#port = port;
+        this.#direct = direct;
         this.local = local;
         this.remote = remote;
     }
 
     get connected(): boolean {
-        return !this.#port.closed && this.#port.canReach(this.remote);
+        return !this.#port.closed &&
+            (this.#direct === undefined
+                ? this.#port.canReach(this.remote)
+                : !this.#direct.channel.closed);
     }
 
     send(packet: Packet): Promise<void> {
         if (!this.connected) throw new Error("Connection is closed.");
+        if (this.#direct !== undefined)
+            return this.#direct.codec.send({
+                source: this.local, dest: this.remote, packet,
+            });
         return this.#port.send(this.remote, packet, this.local);
     }
 
     onPacket(listener: (packet: Packet) => Promise<void> | void): () => void {
-        return this.#port.onPacket((packet, source, destination) => {
+        return this.#port.onPacket((packet, source, destination, incoming) => {
             if (
+                (this.#direct === undefined ||
+                    incoming === this.#direct.channel) &&
                 source.host === this.remote.host &&
                 source.port === this.remote.port &&
                 destination.host === this.local.host &&
@@ -47,7 +63,9 @@ export class Connection {
 
     onClose(listener: (error?: Error) => void): () => void {
         const offPort = this.#port.onClose(listener);
-        const offRoute = this.#port.onUnreachable(this.remote, listener);
+        const offRoute = this.#direct === undefined
+            ? this.#port.onUnreachable(this.remote, listener)
+            : this.#direct.codec.onClose(listener);
         return () => {
             offPort();
             offRoute();
@@ -79,6 +97,28 @@ export class Port {
         local: Address = this.local,
     ): Connection {
         return new Connection(this, { host, port }, local);
+    }
+
+    connectVia(
+        host: Host,
+        port: PortName,
+        codec: EnvelopeCodec,
+        channel: Channel,
+        local: Address = this.local,
+    ): Connection {
+        return new Connection(this, { host, port }, local, { codec, channel });
+    }
+
+    connectIncoming(
+        host: Host,
+        port: PortName,
+        local: Address,
+        incoming: Channel,
+    ): Connection {
+        const codec = this.#route.codecFor(incoming);
+        return codec === undefined
+            ? this.connect(host, port, local)
+            : this.connectVia(host, port, codec, incoming, local);
     }
 
     canReach(dest: Address): boolean {
@@ -140,12 +180,20 @@ export class Port {
 export class Route {
     readonly #ports = new Map<Host, Map<PortName, Port>>();
     readonly #peers = new Map<Host, EnvelopeCodec>();
+    readonly #incomingCodecs = new WeakMap<Channel, EnvelopeCodec>();
+    // A second channel from the same Host is a candidate until the existing
+    // channel actually closes. Verifier replies use their incoming channel.
+    readonly #peerCandidates = new Map<Host, Set<EnvelopeCodec>>();
     readonly #reachability = new Set<{
         dest: Address;
         listener: (error?: Error) => void;
         reachable: boolean;
     }>();
     #gateway?: EnvelopeCodec;
+
+    codecFor(channel: Channel): EnvelopeCodec | undefined {
+        return this.#incomingCodecs.get(channel);
+    }
 
     bind(host: Host, port: PortName): Port {
         let ports = this.#ports.get(host);
@@ -192,11 +240,26 @@ export class Route {
         codec: EnvelopeCodec,
         channel: Channel,
         lifecycle?: { attached(host: Host): void; detached(host: Host): void },
+        preserveExisting = false,
     ): () => void {
         const hosts = new Set<Host>();
+        this.#incomingCodecs.set(channel, codec);
         const detach = (error?: Error) => {
+            this.#incomingCodecs.delete(channel);
             for (const host of hosts) {
-                if (this.#peers.get(host) === codec) this.#peers.delete(host);
+                const candidates = this.#peerCandidates.get(host);
+                if (this.#peers.get(host) === codec) {
+                    const replacement = candidates?.values().next().value;
+                    if (replacement !== undefined) {
+                        candidates!.delete(replacement);
+                        this.#peers.set(host, replacement);
+                    } else {
+                        this.#peers.delete(host);
+                    }
+                } else {
+                    candidates?.delete(codec);
+                }
+                if (candidates?.size === 0) this.#peerCandidates.delete(host);
                 lifecycle?.detached(host);
             }
             hosts.clear();
@@ -207,7 +270,45 @@ export class Route {
                 hosts.add(envelope.source.host);
                 lifecycle?.attached(envelope.source.host);
             }
-            this.#peers.set(envelope.source.host, codec);
+            const host = envelope.source.host;
+            const packet = envelope.packet as {
+                protocol?: string;
+                type?: string;
+                method?: string;
+                message?: { __devshellActivatePeer?: boolean };
+            } | null;
+            const activate =
+                packet?.protocol === "rpc" &&
+                packet.type === "request" &&
+                packet.method === "worker.ping" &&
+                packet.message?.__devshellActivatePeer === true;
+            const active = this.#peers.get(host);
+            if (!preserveExisting) {
+                // Independent Control sessions may reuse a Host identity.
+                // Retain the ordinary latest-peer behavior for those endpoints.
+                this.#peers.set(host, codec);
+            } else if (activate && active !== codec) {
+                // Controller has already switched its inbound gateway before
+                // sending the confirmed cutover ping. Keep the old channel as
+                // rollback candidate until it physically closes.
+                let candidates = this.#peerCandidates.get(host);
+                if (candidates === undefined) {
+                    candidates = new Set<EnvelopeCodec>();
+                    this.#peerCandidates.set(host, candidates);
+                }
+                candidates.delete(codec);
+                if (active !== undefined) candidates.add(active);
+                this.#peers.set(host, codec);
+            } else if (active === undefined) {
+                this.#peers.set(host, codec);
+            } else if (active !== codec) {
+                let candidates = this.#peerCandidates.get(host);
+                if (candidates === undefined) {
+                    candidates = new Set<EnvelopeCodec>();
+                    this.#peerCandidates.set(host, candidates);
+                }
+                candidates.add(codec);
+            }
             this.#refreshReachability();
             void this.#dispatch(envelope, codec, channel).catch((error) =>
                 codec.close(normalizeError(error)),
@@ -221,15 +322,24 @@ export class Route {
         };
     }
 
-    gateway(codec: EnvelopeCodec, channel: Channel): () => void {
-        this.#gateway = codec;
-        this.#refreshReachability();
-        const offEnvelope = codec.onEnvelope((envelope) =>
+    gateway(codec: EnvelopeCodec, channel: Channel, staged = false): () => void {
+        this.#incomingCodecs.set(channel, codec);
+        if (!staged) this.activateGateway(codec);
+        const offEnvelope = codec.onEnvelope((envelope) => {
+            // Only replies to candidate-specific verification calls may enter
+            // the local routing table before cutover. Ordinary traffic stays
+            // on the established gateway until handshake succeeds.
+            if (staged && this.#gateway !== codec) {
+                const packet = envelope.packet as { protocol?: string; type?: string } | null;
+                if (packet?.protocol !== "rpc" ||
+                    (packet.type !== "reply" && packet.type !== "error")) return;
+            }
             void this.#dispatch(envelope, codec, channel).catch((error) =>
                 codec.close(normalizeError(error)),
-            ),
-        );
+            );
+        });
         const offClose = codec.onClose((error) => {
+            this.#incomingCodecs.delete(channel);
             if (this.#gateway === codec) {
                 this.#gateway = undefined;
                 this.#refreshReachability(error);
@@ -238,6 +348,7 @@ export class Route {
         return () => {
             offEnvelope();
             offClose();
+            this.#incomingCodecs.delete(channel);
             if (this.#gateway === codec) {
                 this.#gateway = undefined;
                 this.#refreshReachability();
@@ -245,11 +356,13 @@ export class Route {
         };
     }
 
-    restoreGateway(codec: EnvelopeCodec): void {
-        // A staged replacement failed: the previous link and its listeners
-        // remain live, so restore routing without adding subscriptions.
+    activateGateway(codec: EnvelopeCodec): void {
         this.#gateway = codec;
         this.#refreshReachability();
+    }
+
+    restoreGateway(codec: EnvelopeCodec): void {
+        this.activateGateway(codec);
     }
 
     send(source: Address, dest: Address, packet: Packet): Promise<void> {

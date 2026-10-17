@@ -225,9 +225,12 @@ export class WorkerInstanceConnection {
         let verifiedHandshake: WorkerHandshakeResult | undefined;
         await this.#endpoint.reconnect({
             preserveExisting: true,
-            verify: async () => {
-                await this.#protocolClient.ping();
-                verifiedHandshake = await this.#protocolClient.handshake(this.#config.handshake);
+            verify: async (candidate) => {
+                await this.#protocolClient.ping(candidate);
+                verifiedHandshake = await this.#protocolClient.handshake(
+                    this.#config.handshake,
+                    candidate,
+                );
             },
         });
         this.#handshake = verifiedHandshake;

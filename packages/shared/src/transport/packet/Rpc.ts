@@ -190,7 +190,9 @@ export class Rpc {
         const connection =
             this.#target instanceof Connection
                 ? this.#target
-                : this.#target.connect(peer.host, peer.port, local);
+                : incoming === undefined
+                    ? this.#target.connect(peer.host, peer.port, local)
+                    : this.#target.connectIncoming(peer.host, peer.port, local, incoming);
         const handler = this.#handlers.get(packet.method);
         if (handler === undefined) {
             if (connection.connected)

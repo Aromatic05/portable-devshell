@@ -1,6 +1,7 @@
 import { EnvelopeCodec } from "../envelope/Codec.js";
 import { FrameProtocol } from "../frame/Protocol.js";
 import { FrameStreamChannel } from "../frame/Stream.js";
+import { Rpc } from "../packet/Rpc.js";
 import { createTransportId, type Host, type PortName } from "./Address.js";
 import type { Channel } from "./channel/Channel.js";
 import { Connection, Port, Route } from "./route/Route.js";
@@ -10,12 +11,15 @@ const CONNECT_RETRY_DELAY_MS = [100, 250] as const;
 
 export interface EndpointOptions {
     readonly host?: Host;
+    /** Keep a validated accepted peer during a candidate handoff, rather than replacing it on first traffic. */
+    readonly preserveAcceptedPeers?: boolean;
     connectChannel?(signal?: AbortSignal): Promise<Channel>;
     /** Authenticate a newly opened link before releasing regular RPC/stream requests. */
     initializeConnection?(connect: (host: Host, port: PortName) => Connection): Promise<void>;
 }
 
 interface Link {
+    readonly channel?: Channel;
     readonly codec: EnvelopeCodec;
     readonly detach: () => void;
     readonly frame: FrameProtocol;
@@ -25,6 +29,7 @@ export class Endpoint {
     readonly host: Host;
     readonly #connectChannel?: EndpointOptions["connectChannel"];
     readonly #initializeConnection?: EndpointOptions["initializeConnection"];
+    readonly #preserveAcceptedPeers: boolean;
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #openListeners = new Set<() => void>();
     readonly #ports = new Map<string, Port>();
@@ -38,6 +43,7 @@ export class Endpoint {
         this.host = options.host ?? createTransportId();
         this.#connectChannel = options.connectChannel;
         this.#initializeConnection = options.initializeConnection;
+        this.#preserveAcceptedPeers = options.preserveAcceptedPeers ?? false;
     }
 
     get connected(): boolean {
@@ -76,7 +82,9 @@ export class Endpoint {
         const codec = new EnvelopeCodec(
             new FrameStreamChannel(await request.accept()),
         );
-        return this.#link(frame, codec, this.#route.attach(codec, channel, lifecycle));
+        return this.#link(frame, codec, this.#route.attach(
+            codec, channel, lifecycle, this.#preserveAcceptedPeers,
+        ));
     }
 
     onTransportClose(listener: (error?: Error) => void): () => void {
@@ -95,30 +103,56 @@ export class Endpoint {
 
     async reconnect(options: {
         preserveExisting?: boolean;
-        verify?: () => Promise<void>;
+        verify?: (connect: (host: Host, port: PortName) => Connection) => Promise<void>;
     } = {}): Promise<void> {
         const previous = options.preserveExisting ? this.#gateway : undefined;
         if (previous === undefined) {
             this.disconnect();
             await this.#connect();
             try {
-                await options.verify?.();
+                await options.verify?.((host, port) => this.bind(port).connect(host, port));
             } catch (error) {
                 this.disconnect();
                 throw error;
             }
             return;
         }
-        // Keep the established channel alive until the replacement has
-        // completed application-level verification.
+        if (this.#standbyGateway !== undefined)
+            throw new Error("An Endpoint replacement is already being verified.");
         this.#standbyGateway = previous;
-        this.#gateway = undefined;
+        let candidate: Link | undefined;
+        let verifiedHost: Host | undefined;
         try {
-            await this.#connect();
-            await options.verify?.();
+            // Do not change the regular Route gateway until the replacement
+            // has passed its application handshake. Only verifier RPCs use it.
+            candidate = await this.#openLink(true);
+            const link = candidate;
+            await options.verify?.((host, port) => {
+                verifiedHost = host;
+                return this.bind(port).connectVia(host, port, link.codec, link.channel!);
+            });
+            if (!this.#links.has(link))
+                throw new Error("Endpoint candidate closed during verification.");
+            this.#route.activateGateway(link.codec);
+            this.#gateway = link;
+            // Keep the old inbound gateway alive until the Worker has
+            // acknowledged outbound peer promotion on the new channel. This
+            // reuses worker.ping, which existing Rust Workers already accept.
+            if (verifiedHost !== undefined) {
+                const rpc = new Rpc(
+                    this.bind("core").connectVia(
+                        verifiedHost, "core", link.codec, link.channel!,
+                    ),
+                );
+                try {
+                    await rpc.request("worker.ping", { __devshellActivatePeer: true });
+                } finally {
+                    rpc.close();
+                }
+            }
+            for (const listener of this.#openListeners) listener();
         } catch (error) {
-            const failed = this.#gateway;
-            if (failed !== undefined && failed !== previous) this.#close(failed);
+            if (candidate !== undefined) this.#close(candidate);
             if (this.#links.has(previous)) {
                 this.#route.restoreGateway(previous.codec);
                 this.#gateway = previous;
@@ -143,39 +177,8 @@ export class Endpoint {
     async #connect(signal?: AbortSignal): Promise<void> {
         if (this.#connecting !== undefined) return await this.#connecting;
         if (this.#gateway !== undefined) return;
-        const connectChannel = this.#connectChannel;
-        if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         const connecting = (async () => {
-            // Retry only before a channel exists. Never replay RPC/tool execution.
-            const channel = await connectChannelWithRetry(connectChannel, signal);
-            const frame = new FrameProtocol(channel, {
-                role: "opener",
-            });
-            const codec = new EnvelopeCodec(
-                new FrameStreamChannel(await frame.open(ENVELOPE_SERVICE)),
-            );
-            const detach = this.#route.gateway(codec, channel);
-            const link: Link = { codec, detach, frame };
-            this.#links.add(link);
-            this.#gateway = link;
-            codec.onClose((error) => {
-                const wasGateway = this.#gateway === link;
-                if (wasGateway) this.#gateway = undefined;
-                this.#links.delete(link);
-                if (wasGateway && this.#standbyGateway === undefined)
-                    for (const listener of this.#closeListeners) listener(error);
-            });
-            try {
-                await this.#initializeConnection?.((host, port) =>
-                    this.bind(port).connect(host, port),
-                );
-                if (this.#gateway !== link)
-                    throw new Error("Endpoint connection closed during initialization.");
-            } catch (error) {
-                this.#close(link);
-                throw error;
-            }
-            for (const listener of this.#openListeners) listener();
+            await this.#openLink(false, signal);
         })();
         this.#connecting = connecting;
         try {
@@ -183,6 +186,49 @@ export class Endpoint {
         } finally {
             this.#connecting = undefined;
         }
+    }
+
+    async #openLink(staged: boolean, signal?: AbortSignal): Promise<Link> {
+        const connectChannel = this.#connectChannel;
+        if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
+        // Retry only transport establishment, never RPC or tool execution.
+        const channel = await connectChannelWithRetry(connectChannel, signal);
+        const frame = new FrameProtocol(channel, { role: "opener" });
+        let codec: EnvelopeCodec;
+        try {
+            codec = new EnvelopeCodec(
+                new FrameStreamChannel(await frame.open(ENVELOPE_SERVICE)),
+            );
+        } catch (error) {
+            frame.close();
+            throw error;
+        }
+        const detach = this.#route.gateway(codec, channel, staged);
+        const link: Link = { channel, codec, detach, frame };
+        this.#links.add(link);
+        if (!staged) this.#gateway = link;
+        codec.onClose((error) => {
+            const wasGateway = this.#gateway === link;
+            if (wasGateway) this.#gateway = undefined;
+            this.#links.delete(link);
+            if (wasGateway && this.#standbyGateway === undefined)
+                for (const listener of this.#closeListeners) listener(error);
+        });
+        try {
+            await this.#initializeConnection?.((host, port) =>
+                staged
+                    ? this.bind(port).connectVia(host, port, codec, channel)
+                    : this.bind(port).connect(host, port),
+            );
+            if (!this.#links.has(link) || (!staged && this.#gateway !== link))
+                throw new Error("Endpoint connection closed during initialization.");
+        } catch (error) {
+            this.#close(link);
+            throw error;
+        }
+        if (!staged)
+            for (const listener of this.#openListeners) listener();
+        return link;
     }
 
     #link(frame: FrameProtocol, codec: EnvelopeCodec, detach: () => void): () => void {

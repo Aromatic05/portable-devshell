@@ -35,6 +35,8 @@ import {
 
 
 
+type VerificationConnect = (host: string, port: string) => Awaited<ReturnType<Endpoint["connect"]>>;
+
 export class WorkerProtocolClient {
     readonly #endpoint: Endpoint;
     readonly #workerHost: string;
@@ -44,14 +46,15 @@ export class WorkerProtocolClient {
         this.#workerHost = workerHost;
     }
 
-    async ping(): Promise<WorkerPingResult> {
+    async ping(connect?: VerificationConnect): Promise<WorkerPingResult> {
         return asObjectResult<WorkerPingResult>(
-            await this.#request("core", "worker.ping", {}),
+            await this.#request("core", "worker.ping", {}, undefined, connect),
         );
     }
 
     async handshake(
         params: WorkerHandshakeParams,
+        connect?: VerificationConnect,
     ): Promise<WorkerHandshakeResult> {
         const result = asObjectResult<
             Omit<WorkerHandshakeResult, "protocolVersion"> & {
@@ -62,6 +65,8 @@ export class WorkerProtocolClient {
                 "core",
                 "worker.handshake",
                 params as unknown as JsonValue,
+                undefined,
+                connect,
             ),
         );
         if (typeof result.protocolVersion !== "string") {
@@ -186,9 +191,11 @@ export class WorkerProtocolClient {
         method: string,
         message?: JsonValue,
         signal?: AbortSignal,
+        connect?: VerificationConnect,
     ): Promise<JsonValue> {
         const rpc = new Rpc(
-            await this.#endpoint.connect(this.#workerHost, port, signal),
+            connect?.(this.#workerHost, port) ??
+                await this.#endpoint.connect(this.#workerHost, port, signal),
         );
         try {
             return ((await rpc.request(method, message, signal)) ??

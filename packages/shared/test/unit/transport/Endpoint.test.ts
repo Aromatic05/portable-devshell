@@ -132,6 +132,146 @@ test("staged Endpoint reconnection preserves its old gateway on validation failu
     replacement.close();
 });
 
+test("unverified replacement cannot receive ordinary RPC and only verifier uses candidate", async (t) => {
+    const oldServer = new Endpoint({ host: "worker" });
+    const newServer = new Endpoint({ host: "worker" });
+    const oldRpc = new Rpc(oldServer.bind("core"), { echo: () => "old" });
+    const nextRpc = new Rpc(newServer.bind("core"), {
+        echo: () => "candidate",
+        "worker.ping": () => ({ pong: true }),
+    });
+    const accepts: Array<Promise<() => void>> = [];
+    let attempts = 0;
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push((++attempts === 1 ? oldServer : newServer).accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close();
+        oldServer.close();
+        newServer.close();
+        oldRpc.close();
+        nextRpc.close();
+        await Promise.allSettled(accepts);
+    });
+    const business = new Rpc(await client.connect("worker", "core"));
+    t.after(() => business.close());
+    assert.equal(await business.request("echo"), "old");
+    let unlock!: () => void;
+    const gate = new Promise<void>((resolve) => { unlock = resolve; });
+    let begin!: () => void;
+    const entered = new Promise<void>((resolve) => { begin = resolve; });
+    const pending = client.reconnect({
+        preserveExisting: true,
+        verify: async (connect) => {
+            const verifier = new Rpc(connect("worker", "core"));
+            try {
+                assert.equal(await verifier.request("echo"), "candidate");
+            } finally {
+                verifier.close();
+            }
+            begin();
+            await gate;
+            throw new Error("candidate refused");
+        },
+    });
+    try {
+        await entered;
+        assert.equal(await business.request("echo"), "old");
+    } finally {
+        unlock();
+    }
+    await assert.rejects(pending, /candidate refused/u);
+    assert.equal(await business.request("echo"), "old");
+    await client.reconnect({
+        preserveExisting: true,
+        verify: async (connect) => {
+            const verifier = new Rpc(connect("worker", "core"));
+            try {
+                assert.equal(await verifier.request("echo"), "candidate");
+                assert.equal(await business.request("echo"), "old");
+            } finally {
+                verifier.close();
+            }
+        },
+    });
+    assert.equal(await business.request("echo"), "candidate");
+});
+
+test("Worker-originated events stay on the old peer until verified cutover", async (t) => {
+    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const workerRpc = new Rpc(worker.bind("core"), {
+        echo: () => "ok",
+        "worker.ping": () => ({ pong: true }),
+    });
+    const accepts: Array<Promise<() => void>> = [];
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(worker.accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close();
+        worker.close();
+        workerRpc.close();
+        await Promise.allSettled(accepts);
+    });
+    const rpc = new Rpc(await client.connect("worker", "core"));
+    t.after(() => rpc.close());
+    await rpc.request("echo");
+    const notifications = new Event(client.bind("notifications"));
+    const sender = new Event(worker.bind("notifications").connect("control", "notifications"));
+    t.after(() => { notifications.close(); sender.close(); });
+    const events: string[] = [];
+    notifications.onEvent((name) => { events.push(name); });
+    await sender.send("before");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ["before"]);
+
+    let unblock!: () => void;
+    const gate = new Promise<void>((resolve) => { unblock = resolve; });
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const pending = client.reconnect({
+        preserveExisting: true,
+        verify: async (connect) => {
+            const verifier = new Rpc(connect("worker", "core"));
+            try {
+                assert.equal(await verifier.request("echo"), "ok");
+            } finally {
+                verifier.close();
+            }
+            started();
+            await gate;
+        },
+    });
+    try {
+        await entered;
+        await sender.send("during");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.deepEqual(events, ["before", "during"]);
+    } finally {
+        unblock();
+    }
+    await pending;
+    await sender.send("after");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ["before", "during", "after"]);
+});
+
 test("accepted Endpoint link retires when its Channel closes", async () => {
     const { client, dispose, right, server } = await endpoints();
     client.disconnect();
