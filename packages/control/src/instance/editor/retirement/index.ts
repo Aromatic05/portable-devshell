@@ -61,36 +61,40 @@ export class InstanceRetirementCoordinator {
             async () => await this.#commitDeleteInstance(params, cleanup),
         );
         const { instanceName, existing, descriptor, skipRuntimeRetirement,
-            cleanupFailures, retirementPending, result } = committed;
+            cleanupFailures, retirementPending, result, finishCleanup } = committed;
         // Remote retirement and Context reconciliation can wait for network or
         // accepted ToolCalls. Neither may hold the global configuration lock.
-        await retirementPending?.catch((error) => cleanupFailures.push(error));
-        const retirement = await this.cleanupCommittedDelete(
-            existing,
-            descriptor,
-            skipRuntimeRetirement,
-            cleanup,
-        );
-        cleanupFailures.push(...retirement.failures);
-        if (retirement.warnings.length > 0) {
-            await cleanup.markRemoteAbandoned(instanceName)
-                .catch((error) => cleanupFailures.push(error));
+        try {
+            await retirementPending?.catch((error) => cleanupFailures.push(error));
+            const retirement = await this.cleanupCommittedDelete(
+                existing,
+                descriptor,
+                skipRuntimeRetirement,
+                cleanup,
+            );
+            cleanupFailures.push(...retirement.failures);
+            if (retirement.warnings.length > 0) {
+                await cleanup.markRemoteAbandoned(instanceName)
+                    .catch((error) => cleanupFailures.push(error));
+            }
+            if (cleanupFailures.length === 0) {
+                await cleanup.clearDebt(instanceName)
+                    .catch((error) => cleanupFailures.push(error));
+            }
+            warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
+            for (const warning of retirement.warnings)
+                console.warn(`Instance ${instanceName} remote retirement incomplete:`, warning);
+            return {
+                ...(result as Record<string, JsonValue>),
+                cleanupPending: cleanupFailures.length > 0,
+                ...(retirement.warnings.length === 0 ? {} : {
+                    cleanupWarnings: retirement.warnings.map((error) =>
+                        error instanceof Error ? error.message : String(error)),
+                }),
+            };
+        } finally {
+            finishCleanup();
         }
-        if (cleanupFailures.length === 0) {
-            await cleanup.clearDebt(instanceName)
-                .catch((error) => cleanupFailures.push(error));
-        }
-        warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
-        for (const warning of retirement.warnings)
-            console.warn(`Instance ${instanceName} remote retirement incomplete:`, warning);
-        return {
-            ...(result as Record<string, JsonValue>),
-            cleanupPending: cleanupFailures.length > 0,
-            ...(retirement.warnings.length === 0 ? {} : {
-                cleanupWarnings: retirement.warnings.map((error) =>
-                    error instanceof Error ? error.message : String(error)),
-            }),
-        };
     }
 
     async #commitDeleteInstance(
@@ -125,53 +129,61 @@ export class InstanceRetirementCoordinator {
             ),
         });
 
-        await this.#engine.persist(nextConfig);
+        // Reserve before the first persistence await. The deletion's cleanup
+        // must remain the sole owner even between debt commit and detach.
+        const finishCleanup = cleanup.reserveCommittedCleanup(instanceName);
         try {
-            await cleanup.recordDebt({
-                instance: existing,
-                operation: "delete",
-                ...(skipRuntimeRetirement
-                    ? { skipRuntimeRetirement: true }
-                    : {}),
-            });
-        } catch (error) {
+            await this.#engine.persist(nextConfig);
             try {
-                await this.#engine.persist(currentConfig);
-            } catch (rollbackError) {
-                throw new AggregateError(
-                    [error, rollbackError],
-                    `Instance ${instanceName} deletion could not persist cleanup debt or restore configuration.`,
-                );
+                await cleanup.recordDebt({
+                    instance: existing,
+                    operation: "delete",
+                    ...(skipRuntimeRetirement
+                        ? { skipRuntimeRetirement: true }
+                        : {}),
+                });
+            } catch (error) {
+                try {
+                    await this.#engine.persist(currentConfig);
+                } catch (rollbackError) {
+                    throw new AggregateError(
+                        [error, rollbackError],
+                        `Instance ${instanceName} deletion could not persist cleanup debt or restore configuration.`,
+                    );
+                }
+                throw error;
             }
-            throw error;
-        }
-        const cleanupFailures: unknown[] = [];
-        let retirementPending: Promise<void> | undefined;
-        if (descriptor !== undefined) {
-            cleanup.retainDescriptor(instanceName, descriptor);
+            const cleanupFailures: unknown[] = [];
+            let retirementPending: Promise<void> | undefined;
+            if (descriptor !== undefined) {
+                cleanup.retainDescriptor(instanceName, descriptor);
+                try {
+                    retirementPending = this.#instanceRegistry.detach(
+                        instanceName, descriptor,
+                        () => this.#instanceChanges.publish("registry"),
+                    )?.retirement;
+                } catch (error) {
+                    cleanupFailures.push(error);
+                }
+            }
             try {
-                retirementPending = this.#instanceRegistry.detach(
-                    instanceName, descriptor,
-                    () => this.#instanceChanges.publish("registry"),
-                )?.retirement;
+                this.#mcp?.unregisterInstance(instanceName);
             } catch (error) {
                 cleanupFailures.push(error);
             }
-        }
-        try {
-            this.#mcp?.unregisterInstance(instanceName);
+            const result = this.#engine.finalizeApplyResult(
+                currentConfig,
+                nextConfig,
+                [{ kind: "instance.deleted", target: instanceName }],
+            );
+            return {
+                instanceName, existing, descriptor, skipRuntimeRetirement,
+                cleanupFailures, retirementPending, result, finishCleanup,
+            };
         } catch (error) {
-            cleanupFailures.push(error);
+            finishCleanup();
+            throw error;
         }
-        const result = this.#engine.finalizeApplyResult(
-            currentConfig,
-            nextConfig,
-            [{ kind: "instance.deleted", target: instanceName }],
-        );
-        return {
-            instanceName, existing, descriptor, skipRuntimeRetirement,
-            cleanupFailures, retirementPending, result,
-        };
     }
 
     async cleanupCommittedInstanceChange(

@@ -10,6 +10,7 @@ import {
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { InstanceEditorCoordinator } from "../../../../src/instance/editor/index.ts";
+import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
 import {
     createTestInstance,
     testRuntimeHooks,
@@ -47,6 +48,111 @@ test("a draining Instance deletion does not block unrelated config commits", asy
         lease.release();
     }
     await pendingDelete;
+});
+
+test("concurrent debt recovery joins deletion and never retires newly created same-name resources", async () => {
+    let config = configWithInstance();
+    const resources = new Map([["demo-local", "old"]]);
+    let unblock!: () => void;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    let retirements = 0;
+    const hooks = {
+        ...testRuntimeHooks(),
+        createRuntimeInstance: (instance: ControlConfig["instances"][number]) => {
+            resources.set(instance.name, "new");
+            return createTestInstance(instance);
+        },
+    };
+    const original = createTestInstance(config.instances[0]!);
+    const registry = new InstanceRegistry([original]);
+    const changes = new InstanceChangeHub();
+    const engine = new ConfigEngine({
+        configStore: { async write(next) { config = next; } },
+        getConfig: () => config,
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (next) => { config = next; },
+    });
+    const editor = new InstanceEditorCoordinator({
+        ...hooks, engine, instanceChanges: changes, instanceRegistry: registry,
+    });
+    const creator = new InstanceCreateCoordinator({
+        ...hooks, engine, instanceChanges: changes, instanceRegistry: registry,
+        assertCleanupSettled: (instance, reconcile) =>
+            editor.assertInstanceCleanupSettled(instance, reconcile),
+    });
+    editor.registerInstanceDeleteRetirement(async (instance) => {
+        retirements += 1;
+        if (retirements === 1) {
+            notifyStarted();
+            await blocked;
+        }
+        resources.delete(instance.name);
+    });
+
+    const deletion = editor.deleteInstance({ instanceName: "demo-local" });
+    try {
+        await started;
+        const recovery = editor.reconcileCleanupDebt("demo-local");
+        let recreated = false;
+        const creating = creator.createInstance({
+            name: "demo-local", provider: "local", security: { mode: "disabled" },
+        }).then((result) => {
+            recreated = true;
+            return result;
+        });
+        // All clients can run while the old deletion owns this instance
+        // name, but none may commit a replacement before it releases it.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(retirements, 1, "a pending cleanup cannot be replayed");
+        assert.equal(recreated, false, "old cleanup must fence same-name creation");
+        assert.equal(resources.get("demo-local"), "old");
+        unblock();
+        const [deleted, , created] = await Promise.all([deletion, recovery, creating]);
+        assert.equal((deleted as Record<string, unknown>).cleanupPending, false);
+        assert.equal(created.name, "demo-local");
+        assert.equal(retirements, 1, "only one retirement may run for the old generation");
+        assert.equal(resources.get("demo-local"), "new");
+        assert.equal(registry.get("demo-local") !== undefined, true);
+    } finally {
+        unblock();
+        await deletion;
+    }
+});
+
+test("failed delete persistence releases the instance cleanup reservation", async () => {
+    let config = configWithInstance();
+    let failPersist = true;
+    const descriptor = createTestInstance(config.instances[0]!);
+    const registry = new InstanceRegistry([descriptor]);
+    const changes = new InstanceChangeHub();
+    const engine = new ConfigEngine({
+        configStore: {
+            async write(next) {
+                if (failPersist) throw new Error("injected config write failure");
+                config = next;
+            },
+        },
+        getConfig: () => config,
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (next) => { config = next; },
+    });
+    const hooks = testRuntimeHooks();
+    const editor = new InstanceEditorCoordinator({
+        ...hooks, engine, instanceChanges: changes, instanceRegistry: registry,
+    });
+    await assert.rejects(
+        editor.deleteInstance({ instanceName: "demo-local" }),
+        /injected config write failure/u,
+    );
+    await editor.assertInstanceCleanupSettled("demo-local", false);
+    assert.equal(registry.get("demo-local"), descriptor);
+    assert.equal(config.instances.length, 1);
+    failPersist = false;
+    const deleted = await editor.deleteInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
+    assert.equal(deleted.cleanupPending, false);
+    await editor.assertInstanceCleanupSettled("demo-local", false);
 });
 
 test("failed generation retirement leaves committed rebuild debt until reconciliation", async () => {

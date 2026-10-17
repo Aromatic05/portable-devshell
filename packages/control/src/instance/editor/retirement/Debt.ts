@@ -228,6 +228,9 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
 
 export class InstanceCleanupDebt {
     readonly #cleanupDebts: InstanceCleanupDebtStore;
+    // A committed retirement owns its name until every cleanup side effect
+    // finishes. Reconciliation joins that operation instead of replaying it.
+    readonly #activeCleanups = new Map<string, Promise<void>>();
     readonly #cleanupOnlyDescriptors = new Map<string, Instance | undefined>();
     readonly #mcp: InstanceEditorCoordinatorOptions["mcp"];
     readonly #engine: ConfigEngine;
@@ -285,21 +288,41 @@ export class InstanceCleanupDebt {
         await this.#cleanupDebts.markRemoteAbandoned(instance);
     }
 
+    reserveCommittedCleanup(instance: string): () => void {
+        if (this.#activeCleanups.has(instance)) {
+            throw this.#cleanupConflict(instance);
+        }
+        let resolve!: () => void;
+        const pending = new Promise<void>((done) => { resolve = done; });
+        this.#activeCleanups.set(instance, pending);
+        let finished = false;
+        return () => {
+            if (finished) return;
+            finished = true;
+            if (this.#activeCleanups.get(instance) === pending) {
+                this.#activeCleanups.delete(instance);
+            }
+            resolve();
+        };
+    }
+
     async assertInstanceCleanupSettled(
         instance: string,
         reconcile = true,
     ): Promise<void> {
+        const active = this.#activeCleanups.get(instance);
+        // Callers inside ConfigEngine.runExclusive must never wait for a
+        // cleanup which can itself need the configuration transaction.
+        if (active !== undefined) {
+            if (!reconcile) throw this.#cleanupConflict(instance);
+            await active;
+        }
         if ((await this.#cleanupDebts.get(instance)) === undefined) return;
         if (reconcile && this.#instanceRegistry.get(instance) === undefined) {
             await this.reconcileCleanupDebt(instance);
         }
         if ((await this.#cleanupDebts.get(instance)) === undefined) return;
-        throw createRemoteError({
-            code: runtimeErrorCodes.instanceConflict,
-            details: { instance, operation: "cleanup" },
-            message: `Instance ${instance} still has incomplete lifecycle cleanup.`,
-            retryable: true,
-        });
+        throw this.#cleanupConflict(instance);
     }
 
     async reconcileCleanupDebt(instance?: string): Promise<void> {
@@ -307,28 +330,52 @@ export class InstanceCleanupDebt {
             if (record.orphaned) continue;
             if (instance !== undefined && record.instance.name !== instance)
                 continue;
+            const active = this.#activeCleanups.get(record.instance.name);
+            if (active !== undefined) {
+                await active;
+                continue;
+            }
+            const finish = this.reserveCommittedCleanup(record.instance.name);
             try {
-                const failures =
-                    record.operation === "rebuild"
-                        ? await this.#reconcileRebuildCleanup(record)
-                        : await this.#reconcileCleanupRecord(record);
-                if (failures.length === 0) {
-                    await this.#cleanupDebts.clear(record.instance.name);
-                    continue;
+                // Another reconciler may have settled or replaced the debt
+                // while the original list was being read.
+                const current = await this.#cleanupDebts.get(record.instance.name);
+                if (current === undefined || current.orphaned ||
+                    current.generationId !== record.generationId) continue;
+                try {
+                    const failures =
+                        current.operation === "rebuild"
+                            ? await this.#reconcileRebuildCleanup(current)
+                            : await this.#reconcileCleanupRecord(current);
+                    if (failures.length === 0) {
+                        await this.#cleanupDebts.clear(current.instance.name);
+                        continue;
+                    }
+                    warnCommittedCleanupFailures(
+                        current.instance.name,
+                        current.operation === "delete" ? "delete" : "update",
+                        failures,
+                    );
+                } catch (error) {
+                    warnCommittedCleanupFailures(
+                        current.instance.name,
+                        current.operation === "delete" ? "delete" : "update",
+                        [error],
+                    );
                 }
-                warnCommittedCleanupFailures(
-                    record.instance.name,
-                    record.operation === "delete" ? "delete" : "update",
-                    failures,
-                );
-            } catch (error) {
-                warnCommittedCleanupFailures(
-                    record.instance.name,
-                    record.operation === "delete" ? "delete" : "update",
-                    [error],
-                );
+            } finally {
+                finish();
             }
         }
+    }
+
+    #cleanupConflict(instance: string): Error {
+        return createRemoteError({
+            code: runtimeErrorCodes.instanceConflict,
+            details: { instance, operation: "cleanup" },
+            message: `Instance ${instance} still has incomplete lifecycle cleanup.`,
+            retryable: true,
+        });
     }
 
     async cleanupCommittedInstanceChangeWithDebt(
