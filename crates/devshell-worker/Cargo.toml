@@ -1,6 +1,6 @@
 [package]
 name = "devshell-worker"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 edition = "2024"
 
 [dependencies]

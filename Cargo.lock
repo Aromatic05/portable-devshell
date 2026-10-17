@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "devshell-worker"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",
