@@ -187,8 +187,8 @@ export class ControlFactory {
                 createRuntimeInstance: (config) => options.instances.createRuntimeInstance(config),
                 engine: configEngine,
                 finalizeRuntimeInstance: (descriptor) => descriptor.close(),
-                assertCleanupSettled: async (instance) =>
-                    await instanceEditor.assertInstanceCleanupSettled(instance),
+                assertCleanupSettled: async (instance, reconcile) =>
+                    await instanceEditor.assertInstanceCleanupSettled(instance, reconcile),
                 instanceChanges: options.instances.changes,
                 instanceRegistry: options.instances.registry,
                 mcp: mcp.instancePort,

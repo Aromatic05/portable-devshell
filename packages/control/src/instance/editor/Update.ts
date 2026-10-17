@@ -67,7 +67,7 @@ export class InstanceReconfigurationCoordinator {
             ),
         );
         if (!existing.enabled && instance.enabled) {
-            await this.#cleanup.assertInstanceCleanupSettled(existing.name);
+            await this.#cleanup.assertInstanceCleanupSettled(existing.name, false);
         }
         const descriptor = this.#instanceRegistry.get(request.instanceName);
         const rebuildRequired =
@@ -195,6 +195,14 @@ export class InstanceReconfigurationCoordinator {
     async updateInstanceConfig(
         params: JsonValue | undefined,
     ): Promise<JsonValue> {
+        const request = this.#engine.readInput(() =>
+            parseConfigUpdateInstanceRequest(params));
+        const existing = this.#engine.current.instances.find(
+            (entry) => entry.name === request.instanceName);
+        if (existing !== undefined && !existing.enabled &&
+            applyConfigInstancePatch(existing, request.patch).enabled) {
+            await this.#cleanup.assertInstanceCleanupSettled(request.instanceName);
+        }
         return await this.#engine.runExclusive(
             async () => await this.#updateInstanceConfig(params),
         );
@@ -238,10 +246,10 @@ export class InstanceReconfigurationCoordinator {
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
+        const { instanceName } = this.#engine.readInput(() =>
+            parseConfigInstanceTargetRequest(params));
+        await this.#cleanup.assertInstanceCleanupSettled(instanceName);
         return await this.#engine.runExclusive(async () => {
-            const { instanceName } = this.#engine.readInput(() =>
-                parseConfigInstanceTargetRequest(params),
-            );
             return await this.#setInstanceEnabled(instanceName, true);
         });
     }
@@ -265,7 +273,7 @@ export class InstanceReconfigurationCoordinator {
         );
         if (existing === undefined) throw missingInstance(instanceName);
         if (enabled && !existing.enabled) {
-            await this.#cleanup.assertInstanceCleanupSettled(instanceName);
+            await this.#cleanup.assertInstanceCleanupSettled(instanceName, false);
         }
 
         const instance = normalizeConfigInstanceDraft(

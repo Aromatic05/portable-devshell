@@ -80,8 +80,11 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
         return this.#retirement.hooks.registerInstanceGenerationRetirement(retire);
     }
 
-    async assertInstanceCleanupSettled(instance: string): Promise<void> {
-        await this.#cleanup.assertInstanceCleanupSettled(instance);
+    async assertInstanceCleanupSettled(
+        instance: string,
+        reconcile = true,
+    ): Promise<void> {
+        await this.#cleanup.assertInstanceCleanupSettled(instance, reconcile);
     }
 
     async reconcileCleanupDebt(instance?: string): Promise<void> {

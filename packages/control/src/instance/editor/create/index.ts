@@ -14,7 +14,7 @@ import type { ConfigEngine } from "../../../config/engine/index.js";
 import { closeDescriptorResourcesBestEffort } from "../retirement/State.js";
 
 export interface InstanceCreateCoordinatorOptions {
-    assertCleanupSettled?: (instance: string) => Promise<void>;
+    assertCleanupSettled?: (instance: string, reconcile?: boolean) => Promise<void>;
     createRuntimeInstance(
         config: ControlConfig["instances"][number],
     ): Instance;
@@ -30,7 +30,7 @@ export interface InstanceCreateCoordinatorOptions {
 }
 
 export class InstanceCreateCoordinator {
-    readonly #assertCleanupSettled: (instance: string) => Promise<void>;
+    readonly #assertCleanupSettled: (instance: string, reconcile?: boolean) => Promise<void>;
     readonly #createRuntimeInstance: InstanceCreateCoordinatorOptions["createRuntimeInstance"];
     readonly #engine: ConfigEngine;
     readonly #finalizeRuntimeInstance: InstanceCreateCoordinatorOptions["finalizeRuntimeInstance"];
@@ -80,6 +80,9 @@ export class InstanceCreateCoordinator {
             params,
             this.#platform,
         );
+        // Historical cleanup may need an unavailable remote Worker. Resolve
+        // it before acquiring the global config mutation lock.
+        await this.#assertCleanupSettled(normalized.name);
         return await this.#engine.runExclusive(
             async () => await this.#createNormalized(normalized),
         );
@@ -87,7 +90,8 @@ export class InstanceCreateCoordinator {
     async #createNormalized(
         normalized: ControlInstanceConfig,
     ): Promise<InstanceCreateResult> {
-        await this.#assertCleanupSettled(normalized.name);
+        // Revalidate under the lock without retrying remote cleanup there.
+        await this.#assertCleanupSettled(normalized.name, false);
         const previousConfig = this.#engine.current;
         const nextConfig = this.#validateMergedConfig(normalized);
         const descriptor = normalized.enabled

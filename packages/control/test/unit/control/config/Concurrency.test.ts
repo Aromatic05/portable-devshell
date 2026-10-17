@@ -79,3 +79,53 @@ test("instance creation and endpoint updates share one configuration mutation bo
     );
     assert.equal(writeCount, 2);
 });
+
+test("stale cleanup reconciliation during instance creation does not hold the configuration lock", async () => {
+    let config = createDefaultControlConfig();
+    const engine = new ConfigEngine({
+        configStore: { async write(next) { config = next; } },
+        getConfig: () => config,
+        mutationRunner: new ControlConfigMutationLock(),
+        setConfig: (next) => { config = next; },
+    });
+    let started!: () => void;
+    const observed = new Promise<void>((resolve) => { started = resolve; });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const creator = new InstanceCreateCoordinator({
+        ...testRuntimeHooks(),
+        assertCleanupSettled: async (_instance, reconcile = true) => {
+            if (!reconcile) return;
+            started();
+            await pending;
+        },
+        engine,
+        instanceChanges: new InstanceChangeHub(),
+        instanceRegistry: buildTestInstanceRegistry(config),
+    });
+    const creating = creator.createInstance({
+        enabled: false,
+        name: "cleanup-waiting",
+        provider: "local",
+    });
+    await observed;
+    try {
+        await Promise.race([
+            new ConfigEditorCoordinator({ engine }).updateWebConfig({
+                patch: {
+                    enabled: true,
+                    listenHost: "127.0.0.1",
+                    listenPort: 17910,
+                    publicBaseUrl: "http://127.0.0.1:17910",
+                },
+            }),
+            new Promise<never>((_resolve, reject) =>
+                setTimeout(() => reject(new Error("slow cleanup held global config lock")), 1500)),
+        ]);
+        assert.equal(config.web.listenPort, 17910);
+    } finally {
+        release();
+    }
+    await creating;
+    assert.ok(config.instances.some((instance) => instance.name === "cleanup-waiting"));
+});
