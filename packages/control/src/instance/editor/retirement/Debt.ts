@@ -29,6 +29,11 @@ export interface InstanceCleanupDebtRecord {
     skipRuntimeRetirement?: boolean;
 }
 
+export interface InstanceCleanupStatus {
+    cleanupPending: boolean;
+    cleanupWarnings?: string[];
+}
+
 class InstanceCleanupDebtStore {
     readonly #filePath?: string;
     readonly #records = new Map<string, InstanceCleanupDebtRecord>();
@@ -385,7 +390,7 @@ export class InstanceCleanupDebt {
         preparedDescriptor: Instance | undefined,
         rebuildRequired: boolean,
         cleanup: () => Promise<unknown[]>,
-    ): Promise<void> {
+    ): Promise<InstanceCleanupStatus> {
         const debt: InstanceCleanupDebtRecord | undefined =
             existing !== undefined &&
             next !== undefined &&
@@ -418,14 +423,14 @@ export class InstanceCleanupDebt {
                 })
                 .catch((error) => failures.push(error));
         }
-        const cleanupFailures = await cleanup();
+        const cleanupFailures = await cleanup().catch((error) => [error]);
         failures.push(...cleanupFailures);
         const cleanupSettled =
-            debt?.operation === "rebuild"
-                ? preparedDescriptor !== undefined &&
-                  this.#instanceRegistry.get(debt.instance.name) ===
-                      preparedDescriptor
-                : cleanupFailures.length === 0;
+            cleanupFailures.length === 0 &&
+            (debt?.operation !== "rebuild" ||
+                (preparedDescriptor !== undefined &&
+                    this.#instanceRegistry.get(debt.instance.name) ===
+                        preparedDescriptor));
         if (debt !== undefined && debtPersisted && cleanupSettled) {
             await this.#cleanupDebts
                 .clear(debt.instance.name)
@@ -436,6 +441,15 @@ export class InstanceCleanupDebt {
             "update",
             failures,
         );
+        return {
+            cleanupPending:
+                failures.length > 0 ||
+                (debt !== undefined && (!debtPersisted || !cleanupSettled)),
+            ...(failures.length === 0 ? {} : {
+                cleanupWarnings: failures.map((error) =>
+                    error instanceof Error ? error.message : String(error)),
+            }),
+        };
     }
 
     async #reconcileRebuildCleanup(

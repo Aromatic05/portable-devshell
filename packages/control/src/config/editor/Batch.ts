@@ -12,14 +12,20 @@ import type { ConfigRuntimeChangeSet } from "../engine/Api.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
 import { coupledRuntimeChanges } from "./GlobalPatch.js";
 
+export interface ConfigBatchCleanupStatus {
+    cleanupPending: boolean;
+    cleanupWarnings?: string[];
+}
+
 export interface ConfigBatchInstancePlan {
     readonly authChanged: boolean;
     readonly instance: ControlConfig["instances"][number];
     readonly target: string;
     apply(): Promise<void>;
     assertReady(): void;
-    cleanup(): Promise<void>;
+    cleanup(): Promise<ConfigBatchCleanupStatus>;
     prepare(): void;
+    reserve(): Promise<() => void>;
     rollback(): Promise<void>;
 }
 
@@ -40,12 +46,18 @@ export class ConfigBatchEditor {
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#engine.runExclusive(
+        const committed = await this.#engine.runExclusive(
             async () => await this.#updateConfig(params),
         );
+        if (committed.cleanup === undefined) return committed.result;
+        const cleanup = await committed.cleanup();
+        return { ...(committed.result as Record<string, JsonValue>), ...cleanup };
     }
 
-    async #updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
+    async #updateConfig(params: JsonValue | undefined): Promise<{
+        result: JsonValue;
+        cleanup?: () => Promise<ConfigBatchCleanupStatus>;
+    }> {
         const request = this.#engine.readInput(() =>
             parseConfigBatchUpdateRequest(params),
         );
@@ -111,16 +123,24 @@ export class ConfigBatchEditor {
         requestedRuntimeChanges: ConfigRuntimeChangeSet,
         preflight = true,
         plan?: ConfigBatchInstancePlan,
-    ): Promise<JsonValue> {
+    ): Promise<{
+        result: JsonValue;
+        cleanup?: () => Promise<ConfigBatchCleanupStatus>;
+    }> {
         const runtimeChanges = coupledRuntimeChanges(previous, next, requestedRuntimeChanges);
         if (plan === undefined) {
-            return await this.#engine.commit(previous, next, changes, runtimeChanges, preflight);
+            return {
+                result: await this.#engine.commit(previous, next, changes, runtimeChanges, preflight),
+            };
         }
         const validated = this.#engine.validateConfig(next);
         if (preflight) await this.#engine.preflight(previous, validated);
-        plan.prepare();
+        // The reservation covers the short commit and the following cleanup.
+        // A failed preparation releases it via the rollback path below.
+        const release = await plan.reserve();
         let hotApplied = false;
         try {
+            plan.prepare();
             await this.#engine.persist(validated);
             hotApplied = await this.#engine.applyRuntimeOrRestore(
                 previous,
@@ -143,14 +163,23 @@ export class ConfigBatchEditor {
             await plan
                 .rollback()
                 .catch((rollbackError) => failures.push(rollbackError));
+            release();
             if (failures.length === 1) throw error;
             throw new AggregateError(
                 failures,
                 "Configuration batch update failed and rollback was incomplete.",
             );
         }
-        await plan.cleanup();
-        return this.#engine.finalizeApplyResult(previous, validated, changes, hotApplied);
+        return {
+            result: this.#engine.finalizeApplyResult(previous, validated, changes, hotApplied),
+            cleanup: async () => {
+                try {
+                    return await plan.cleanup();
+                } finally {
+                    release();
+                }
+            },
+        };
     }
 
     #requireInstances(): ConfigBatchInstancePort {

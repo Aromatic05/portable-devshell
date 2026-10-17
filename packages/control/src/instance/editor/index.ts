@@ -57,6 +57,7 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
             prepare: () => {
                 prepared = this.#updates.prepareUpdate(plan);
             },
+            reserve: async () => await this.#updates.reservePreparedUpdate(plan),
             rollback: async () =>
                 await this.#updates.rollbackPreparedInstance(plan, prepared),
         };

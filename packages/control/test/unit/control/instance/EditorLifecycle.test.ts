@@ -8,6 +8,7 @@ import {
     type ControlConfig,
 } from "@portable-devshell/shared";
 import { ConfigEngine } from "../../../../src/config/engine/index.ts";
+import { ConfigBatchEditor } from "../../../../src/config/editor/Batch.ts";
 import { InstanceChangeHub } from "../../../../src/instance/Change.ts";
 import { InstanceEditorCoordinator } from "../../../../src/instance/editor/index.ts";
 import { InstanceCreateCoordinator } from "../../../../src/instance/editor/create/index.ts";
@@ -48,6 +49,204 @@ test("a draining Instance deletion does not block unrelated config commits", asy
         lease.release();
     }
     await pendingDelete;
+});
+
+test("accepted ToolCall drain during disable does not hold the global config lock", async () => {
+    let config = configWithInstance();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "healthy-local", provider: "local", security: { mode: "disabled" },
+    }));
+    const oldInstance = createTestInstance(config.instances[0]!);
+    const lease = oldInstance.lifecycle.acquireLease();
+    const registry = new InstanceRegistry([
+        oldInstance, createTestInstance(config.instances[1]!),
+    ]);
+    const coordinator = createCoordinator({
+        config, registry,
+        setConfig: (next) => { config = next; },
+        hooks: testRuntimeHooks(),
+    });
+    const disabling = coordinator.disableInstance({ instanceName: "demo-local" });
+    try {
+        await Promise.race([
+            coordinator.updateInstanceConfig({
+                instanceName: "healthy-local",
+                patch: { security: { mode: "workspace" } },
+            }),
+            new Promise<never>((_, reject) => setTimeout(
+                () => reject(new Error("a draining ToolCall blocked other config commits")),
+                2000,
+            )),
+        ]);
+        assert.equal(config.instances.find((x) => x.name === "healthy-local")?.security.mode, "workspace");
+    } finally {
+        lease.release();
+    }
+    const result = await disabling as Record<string, unknown>;
+    assert.equal(result.cleanupPending, false);
+});
+
+test("disable retirement joins concurrent reconciliation without blocking unrelated updates", async () => {
+    let config = configWithInstance();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "healthy-local",
+        provider: "local",
+        security: { mode: "disabled" },
+    }));
+    const registry = new InstanceRegistry(
+        config.instances.map((instance) => createTestInstance(instance)),
+    );
+    const coordinator = createCoordinator({
+        config, registry,
+        setConfig: (next) => { config = next; },
+        hooks: testRuntimeHooks(),
+    });
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let retirements = 0;
+    coordinator.registerInstanceDisableRetirement(async (instance) => {
+        if (instance.name !== "demo-local") return;
+        retirements++;
+        started();
+        await gate;
+    });
+    const disable = coordinator.disableInstance({ instanceName: "demo-local" });
+    try {
+        await entered;
+        const recovery = coordinator.reconcileCleanupDebt("demo-local");
+        await Promise.race([
+            coordinator.updateInstanceConfig({
+                instanceName: "healthy-local",
+                patch: { security: { mode: "workspace" } },
+            }),
+            new Promise<never>((_, reject) => setTimeout(
+                () => reject(new Error("healthy update blocked by disable cleanup")),
+                2000,
+            )),
+        ]);
+        assert.equal(retirements, 1);
+        assert.equal(config.instances.find((x) => x.name === "healthy-local")?.security.mode, "workspace");
+        release();
+        const [result] = await Promise.all([disable, recovery]);
+        assert.equal((result as Record<string, unknown>).cleanupPending, false);
+        assert.equal(retirements, 1, "in-flight disable must not run a second cleanup");
+    } finally {
+        release();
+        await disable;
+    }
+});
+
+test("batch Instance cleanup runs outside the global configuration lock", async () => {
+    let config = configWithInstance();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "healthy-local", provider: "local", security: { mode: "disabled" },
+    }));
+    const registry = new InstanceRegistry(
+        config.instances.map((instance) => createTestInstance(instance)),
+    );
+    const engine = new ConfigEngine({
+        configStore: { async write(next) { config = next; } },
+        getConfig: () => config,
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (next) => { config = next; },
+    });
+    const changes = new InstanceChangeHub();
+    const editor = new InstanceEditorCoordinator({
+        ...testRuntimeHooks(), engine, instanceChanges: changes, instanceRegistry: registry,
+    });
+    const batch = new ConfigBatchEditor(engine, editor);
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    editor.registerInstanceDisableRetirement(async (instance) => {
+        if (instance.name === "demo-local") {
+            enter();
+            await pending;
+        }
+    });
+    const updating = batch.updateConfig({
+        instance: { instanceName: "demo-local", patch: { enabled: false } },
+    });
+    try {
+        await entered;
+        await Promise.race([
+            editor.updateInstanceConfig({
+                instanceName: "healthy-local",
+                patch: { security: { mode: "workspace" } },
+            }),
+            new Promise<never>((_, reject) => setTimeout(
+                () => reject(new Error("batch cleanup held the global config lock")),
+                2000,
+            )),
+        ]);
+        assert.equal(config.instances.find((x) => x.name === "healthy-local")?.security.mode, "workspace");
+        finish();
+        const result = await updating as Record<string, unknown>;
+        assert.equal(result.cleanupPending, false);
+    } finally {
+        finish();
+        await updating;
+    }
+});
+
+test("failed rebuild descriptor finalization remains recoverable cleanup debt", async () => {
+    let config = configWithInstance();
+    const original = createTestInstance(config.instances[0]!, {
+        async close() { throw new Error("old generation close failed"); },
+    });
+    const registry = new InstanceRegistry([original]);
+    const coordinator = createCoordinator({
+        config, registry,
+        setConfig: (next) => { config = next; },
+        hooks: testRuntimeHooks(),
+    });
+    const warnings: unknown[] = [];
+    const before = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(...args); };
+    try {
+        const result = await coordinator.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { security: { mode: "workspace" } },
+        }) as Record<string, unknown>;
+        assert.equal(result.cleanupPending, true);
+        assert.match(String(result.cleanupWarnings), /old generation close failed/u);
+        assert.notEqual(registry.get("demo-local"), original);
+        await assert.rejects(
+            coordinator.assertInstanceCleanupSettled("demo-local", false),
+            /incomplete lifecycle cleanup/u,
+        );
+    } finally {
+        console.warn = before;
+    }
+    assert.equal(warnings.length, 1);
+});
+
+test("disable reports committed config and incomplete resource cleanup separately", async () => {
+    let config = configWithInstance();
+    const coordinator = createCoordinator({
+        config,
+        registry: new InstanceRegistry([createTestInstance(config.instances[0]!)]),
+        setConfig: (next) => { config = next; },
+        hooks: testRuntimeHooks(),
+    });
+    coordinator.registerInstanceDisableRetirement(async () => {
+        throw new Error("retirement hook failed");
+    });
+    const before = console.warn;
+    console.warn = () => undefined;
+    try {
+        const result = await coordinator.disableInstance({
+            instanceName: "demo-local",
+        }) as Record<string, unknown>;
+        assert.equal(config.instances[0]?.enabled, false);
+        assert.equal(result.cleanupPending, true);
+        assert.match(String(result.cleanupWarnings), /retirement hook failed/u);
+    } finally {
+        console.warn = before;
+    }
 });
 
 test("concurrent debt recovery joins deletion and never retires newly created same-name resources", async () => {

@@ -12,12 +12,18 @@ import { requiresWorkerRebuild } from "../../config/engine/Result.js";
 
 import type { InstanceEditorCoordinatorOptions } from "./Options.js";
 import type { InstanceRetirementCoordinator } from "./retirement/index.js";
-import type { InstanceCleanupDebt } from "./retirement/Debt.js";
+import type { InstanceCleanupDebt, InstanceCleanupStatus } from "./retirement/Debt.js";
 import { closeDescriptorResourcesBestEffort } from "./retirement/State.js";
 
 type InstanceConfig = ControlConfig["instances"][number];
 type InstanceDescriptor = Instance | undefined;
 export type PreparedInstanceDescriptor = Instance;
+
+interface CommittedInstanceUpdate {
+    result: JsonValue;
+    cleanup(): Promise<InstanceCleanupStatus>;
+    release(): void;
+}
 
 export interface InstanceConfigUpdatePlan {
     readonly authChanged: boolean;
@@ -33,6 +39,7 @@ export class InstanceReconfigurationCoordinator {
     readonly #engine: ConfigEngine;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #pendingRetirements = new WeakMap<Instance, Promise<void>>();
     readonly #mcp?: InstanceMcpRuntimePort;
     readonly #retirement: InstanceRetirementCoordinator;
     readonly #cleanup: InstanceCleanupDebt;
@@ -182,8 +189,8 @@ export class InstanceReconfigurationCoordinator {
     async cleanupPreparedUpdate(
         plan: InstanceConfigUpdatePlan,
         preparedDescriptor: PreparedInstanceDescriptor | undefined,
-    ): Promise<void> {
-        await this.#cleanupCommittedInstanceChangeWithDebt(
+    ): Promise<InstanceCleanupStatus> {
+        return await this.#cleanupCommittedInstanceChangeWithDebt(
             plan.existing,
             plan.instance,
             plan.descriptor,
@@ -192,28 +199,35 @@ export class InstanceReconfigurationCoordinator {
         );
     }
 
-    async updateInstanceConfig(
-        params: JsonValue | undefined,
-    ): Promise<JsonValue> {
+    async reservePreparedUpdate(plan: InstanceConfigUpdatePlan): Promise<() => void> {
+        await this.#cleanup.assertInstanceCleanupSettled(plan.target, false);
+        return this.#cleanup.reserveCommittedCleanup(plan.target);
+    }
+
+    async #completeCommittedUpdate(committed: CommittedInstanceUpdate): Promise<JsonValue> {
+        try {
+            const cleanup = await committed.cleanup();
+            return { ...(committed.result as Record<string, JsonValue>), ...cleanup };
+        } finally {
+            committed.release();
+        }
+    }
+
+    async updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
         const request = this.#engine.readInput(() =>
             parseConfigUpdateInstanceRequest(params));
-        const existing = this.#engine.current.instances.find(
-            (entry) => entry.name === request.instanceName);
-        if (existing !== undefined && !existing.enabled &&
-            applyConfigInstancePatch(existing, request.patch).enabled) {
-            await this.#cleanup.assertInstanceCleanupSettled(request.instanceName);
-        }
-        return await this.#engine.runExclusive(
+        await this.#cleanup.assertInstanceCleanupSettled(request.instanceName);
+        const committed = await this.#engine.runExclusive(
             async () => await this.#updateInstanceConfig(params),
         );
+        return await this.#completeCommittedUpdate(committed);
     }
 
     async #updateInstanceConfig(
         params: JsonValue | undefined,
-    ): Promise<JsonValue> {
+    ): Promise<CommittedInstanceUpdate> {
         const request = this.#engine.readInput(() =>
-            parseConfigUpdateInstanceRequest(params),
-        );
+            parseConfigUpdateInstanceRequest(params));
         const currentConfig = this.#engine.current;
         const plan = await this.createUpdatePlan(request, currentConfig);
         const nextConfig = this.#engine.validateConfig({
@@ -224,58 +238,65 @@ export class InstanceReconfigurationCoordinator {
         });
         const preparedDescriptor = this.prepareUpdate(plan);
         this.assertUpdateReady(plan);
-        await this.persistPreparedConfig(nextConfig, plan, preparedDescriptor);
-        const hotApplied = await this.applyPreparedUpdate(
-            plan,
-            currentConfig,
-            nextConfig,
-            preparedDescriptor,
-            {
-                instanceAuth: plan.authChanged,
-                mcp: false,
-                web: false,
-            },
-        );
-        await this.cleanupPreparedUpdate(plan, preparedDescriptor);
-        return this.#engine.finalizeApplyResult(
-            currentConfig,
-            nextConfig,
-            [{ kind: "instance.updated", target: request.instanceName }],
-            hotApplied,
-        );
+        const release = await this.reservePreparedUpdate(plan);
+        try {
+            await this.persistPreparedConfig(nextConfig, plan, preparedDescriptor);
+            const hotApplied = await this.applyPreparedUpdate(
+                plan,
+                currentConfig,
+                nextConfig,
+                preparedDescriptor,
+                {
+                    instanceAuth: plan.authChanged,
+                    mcp: false,
+                    web: false,
+                },
+            );
+            return {
+                result: this.#engine.finalizeApplyResult(
+                    currentConfig,
+                    nextConfig,
+                    [{ kind: "instance.updated", target: request.instanceName }],
+                    hotApplied,
+                ),
+                cleanup: () => this.cleanupPreparedUpdate(plan, preparedDescriptor),
+                release,
+            };
+        } catch (error) {
+            release();
+            throw error;
+        }
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
         const { instanceName } = this.#engine.readInput(() =>
             parseConfigInstanceTargetRequest(params));
         await this.#cleanup.assertInstanceCleanupSettled(instanceName);
-        return await this.#engine.runExclusive(async () => {
-            return await this.#setInstanceEnabled(instanceName, true);
-        });
+        const committed = await this.#engine.runExclusive(
+            async () => await this.#setInstanceEnabled(instanceName, true),
+        );
+        return await this.#completeCommittedUpdate(committed);
     }
 
     async disableInstance(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#engine.runExclusive(async () => {
-            const { instanceName } = this.#engine.readInput(() =>
-                parseConfigInstanceTargetRequest(params),
-            );
-            return await this.#setInstanceEnabled(instanceName, false);
-        });
+        const { instanceName } = this.#engine.readInput(() =>
+            parseConfigInstanceTargetRequest(params));
+        await this.#cleanup.assertInstanceCleanupSettled(instanceName);
+        const committed = await this.#engine.runExclusive(
+            async () => await this.#setInstanceEnabled(instanceName, false),
+        );
+        return await this.#completeCommittedUpdate(committed);
     }
 
     async #setInstanceEnabled(
         instanceName: string,
         enabled: boolean,
-    ): Promise<JsonValue> {
+    ): Promise<CommittedInstanceUpdate> {
         const currentConfig = this.#engine.current;
         const existing = currentConfig.instances.find(
             (entry) => entry.name === instanceName,
         );
         if (existing === undefined) throw missingInstance(instanceName);
-        if (enabled && !existing.enabled) {
-            await this.#cleanup.assertInstanceCleanupSettled(instanceName, false);
-        }
-
         const instance = normalizeConfigInstanceDraft(
             applyConfigInstancePatch(existing, { enabled }),
         );
@@ -291,34 +312,44 @@ export class InstanceReconfigurationCoordinator {
             descriptor,
             false,
         );
-        await this.#persistInstanceConfig(
-            nextConfig,
-            preparedDescriptor,
-            descriptor,
-        );
-        await this.#applyPersistedChanges({
-            currentConfig,
-            descriptor,
-            existing,
-            instance,
-            nextConfig,
-            preparedDescriptor,
-            rebuildRequired: false,
-            runtimeChanges: { instanceAuth: false, mcp: false, web: false },
-        });
-        await this.#cleanupCommittedInstanceChangeWithDebt(
-            existing,
-            instance,
-            descriptor,
-            preparedDescriptor,
-            false,
-        );
-        return this.#engine.finalizeApplyResult(currentConfig, nextConfig, [
-            {
-                kind: enabled ? "instance.enabled" : "instance.disabled",
-                target: instanceName,
-            },
-        ]);
+        await this.#cleanup.assertInstanceCleanupSettled(instanceName, false);
+        const release = this.#cleanup.reserveCommittedCleanup(instanceName);
+        try {
+            await this.#persistInstanceConfig(
+                nextConfig,
+                preparedDescriptor,
+                descriptor,
+            );
+            await this.#applyPersistedChanges({
+                currentConfig,
+                descriptor,
+                existing,
+                instance,
+                nextConfig,
+                preparedDescriptor,
+                rebuildRequired: false,
+                runtimeChanges: { instanceAuth: false, mcp: false, web: false },
+            });
+            return {
+                result: this.#engine.finalizeApplyResult(currentConfig, nextConfig, [
+                    {
+                        kind: enabled ? "instance.enabled" : "instance.disabled",
+                        target: instanceName,
+                    },
+                ]),
+                cleanup: () => this.#cleanupCommittedInstanceChangeWithDebt(
+                    existing,
+                    instance,
+                    descriptor,
+                    preparedDescriptor,
+                    false,
+                ),
+                release,
+            };
+        } catch (error) {
+            release();
+            throw error;
+        }
     }
 
     async #applyPersistedChanges(input: {
@@ -476,7 +507,12 @@ export class InstanceReconfigurationCoordinator {
     ): Promise<void> {
         if (!instance.enabled) {
             if (descriptor !== undefined) {
-                await this.#instanceRegistry.remove(instance.name, descriptor, () => this.#instanceChanges.publish("registry"));
+                const pending = this.#instanceRegistry.detach(
+                    instance.name,
+                    descriptor,
+                    () => this.#instanceChanges.publish("registry"),
+                )?.retirement;
+                if (pending !== undefined) this.#pendingRetirements.set(descriptor, pending);
             }
             return;
         }
@@ -492,7 +528,12 @@ export class InstanceReconfigurationCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            await this.#instanceRegistry.remove(instance.name, descriptor, () => this.#instanceChanges.publish("registry"));
+            const pending = this.#instanceRegistry.detach(
+                instance.name,
+                descriptor,
+                () => this.#instanceChanges.publish("registry"),
+            )?.retirement;
+            if (pending !== undefined) this.#pendingRetirements.set(descriptor, pending);
             return;
         }
         descriptor.update(instance);
@@ -644,7 +685,7 @@ export class InstanceReconfigurationCoordinator {
         descriptor: InstanceDescriptor,
         preparedDescriptor: PreparedInstanceDescriptor | undefined,
         rebuildRequired: boolean,
-    ): Promise<void> {
+    ): Promise<InstanceCleanupStatus> {
         if (
             existing.enabled &&
             !next.enabled &&
@@ -652,20 +693,28 @@ export class InstanceReconfigurationCoordinator {
         ) {
             this.#cleanup.retainDescriptor(existing.name, descriptor);
         }
-        await this.#cleanup.cleanupCommittedInstanceChangeWithDebt(
+        return await this.#cleanup.cleanupCommittedInstanceChangeWithDebt(
             existing,
             next,
             descriptor,
             preparedDescriptor,
             rebuildRequired,
-            () =>
-                this.#cleanupCommittedInstanceChange(
+            async () => {
+                const failures: unknown[] = [];
+                if (descriptor !== undefined) {
+                    const retirement = this.#pendingRetirements.get(descriptor);
+                    this.#pendingRetirements.delete(descriptor);
+                    await retirement?.catch((error) => failures.push(error));
+                }
+                failures.push(...(await this.#cleanupCommittedInstanceChange(
                     existing,
                     next,
                     descriptor,
                     preparedDescriptor,
                     rebuildRequired,
-                ),
+                )));
+                return failures;
+            },
         );
     }
 
