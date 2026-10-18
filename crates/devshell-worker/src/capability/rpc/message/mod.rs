@@ -28,7 +28,7 @@ pub mod error {
 
     impl From<crate::instance::sandbox::path::PathError> for RpcError {
         fn from(error: crate::instance::sandbox::path::PathError) -> Self {
-            Self::new(error.code, error.message)
+            Self::new(error.file_code(), error.message)
         }
     }
 

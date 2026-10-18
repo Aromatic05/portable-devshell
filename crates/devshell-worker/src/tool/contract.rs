@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::instance::sandbox::SecurityPolicy;
 use schemars::JsonSchema;
@@ -196,7 +196,7 @@ impl From<crate::instance::sandbox::policy::SecurityError> for ToolError {
 
 impl From<crate::instance::sandbox::path::PathError> for ToolError {
     fn from(error: crate::instance::sandbox::path::PathError) -> Self {
-        Self::new(error.code, error.message)
+        Self::new(error.file_code(), error.message)
     }
 }
 

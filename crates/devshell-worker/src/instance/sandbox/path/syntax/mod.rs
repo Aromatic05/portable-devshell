@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::PathError;
+use super::{PathError, PathErrorKind};
 #[cfg(unix)]
 #[path = "unix.rs"]
 mod platform;
@@ -33,7 +33,7 @@ pub fn normalize_requested_path(raw: &str) -> Result<String, PathError> {
     }
     if raw == "~" || raw.starts_with("~/") || cfg!(windows) && raw.starts_with("~\\") {
         return Err(PathError::new(
-            "file.invalidPath",
+            PathErrorKind::InvalidPath,
             "home-relative paths are not supported; use a workspace-relative or absolute path",
         ));
     }
@@ -48,7 +48,7 @@ pub fn normalize_requested_path(raw: &str) -> Result<String, PathError> {
                 ))
         {
             return Err(PathError::new(
-                "file.invalidPath",
+                PathErrorKind::InvalidPath,
                 "Windows drive-relative and root-relative paths are not supported; use a workspace-relative or absolute path",
             ));
         }
@@ -84,10 +84,10 @@ mod tests {
     #[test]
     fn bare_normalization_rejects_windows_drive_relative_paths() {
         let error = normalize_requested_path("C:relative").unwrap_err();
-        assert_eq!(error.code, "file.invalidPath");
+        assert_eq!(error.kind, PathErrorKind::InvalidPath);
         let error = normalize_requested_path(r"\relative").unwrap_err();
-        assert_eq!(error.code, "file.invalidPath");
+        assert_eq!(error.kind, PathErrorKind::InvalidPath);
         let error = normalize_requested_path("/relative").unwrap_err();
-        assert_eq!(error.code, "file.invalidPath");
+        assert_eq!(error.kind, PathErrorKind::InvalidPath);
     }
 }

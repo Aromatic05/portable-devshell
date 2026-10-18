@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::PathError;
+use super::{PathError, PathErrorKind};
 
 use super::PathNamespace;
 
@@ -15,7 +15,7 @@ pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, PathError> {
         PathNamespace::Absolute
     } else {
         return Err(PathError::new(
-            "file.invalidPath",
+            PathErrorKind::InvalidPath,
             "path must start with `./` or use an absolute Windows drive path",
         ));
     };
@@ -49,5 +49,8 @@ pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, PathError> {
 }
 
 fn invalid_segment() -> PathError {
-    PathError::new("file.invalidPath", "path contains an invalid segment")
+    PathError::new(
+        PathErrorKind::InvalidPath,
+        "path contains an invalid segment",
+    )
 }
