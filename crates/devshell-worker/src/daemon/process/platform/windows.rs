@@ -116,10 +116,6 @@ pub fn spawn_daemon_process(
     Ok(process_id)
 }
 
-pub fn configure_child_process(command: &mut Command) {
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-}
-
 fn null_terminated(value: &OsStr) -> Vec<u16> {
     value.encode_wide().chain(Some(0)).collect()
 }

@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex};
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::capability::rpc::command::client::ModelDevshellShim;
-use crate::daemon::process::WorkerRuntimeContext;
+use crate::instance::runtime::WorkerRuntimeContext;
 use crate::instance::storage::InstancePaths;
+use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::tmux::backend::TmuxBackend;
 use crate::tool::tmux::model::{
     TmuxInputOutput, TmuxInputParams, TmuxInspectParams, TmuxManageOutput, TmuxManageParams,
@@ -78,7 +78,7 @@ where
 
 struct TmuxStateRegistry {
     instance_paths: InstancePaths,
-    model_devshell: Arc<ModelDevshellShim>,
+    model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     runtime: WorkerRuntimeContext,
     socket_paths: EndpointPaths,
     states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
@@ -89,7 +89,7 @@ impl TmuxStateRegistry {
         instance_paths: &InstancePaths,
         socket_paths: &EndpointPaths,
         runtime: &WorkerRuntimeContext,
-        model_devshell: Arc<ModelDevshellShim>,
+        model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     ) -> Self {
         Self {
             instance_paths: instance_paths.clone(),
@@ -153,7 +153,7 @@ pub fn register_tools(
     instance_paths: &InstancePaths,
     socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
-    model_devshell: Arc<ModelDevshellShim>,
+    model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
 ) -> Result<(), ToolError> {
     if !TmuxBackend::available() {
         return Ok(());

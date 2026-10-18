@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
-use crate::daemon::process::platform::configure_child_process;
 use crate::instance::sandbox::path::ResolvedPath;
 use crate::tool::ToolError;
 use crate::tool::bash::model::{ShellRuntime, powershell_command};
+use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 pub fn spawn_shell(
     shell: &ShellRuntime,
@@ -13,8 +14,14 @@ pub fn spawn_shell(
     env: &BTreeMap<String, Option<String>>,
     execution: Option<&crate::capability::execution::ExecutionConfig>,
 ) -> Result<Child, ToolError> {
-    if crate::capability::execution::process_sandbox(execution).map_err(|e| ToolError::new("execution.sandboxFailed", e))?.is_some() {
-        return Err(ToolError::new("execution.sandboxFailed", "bubblewrap process sandbox is unavailable on Windows"));
+    if crate::capability::execution::process_sandbox(execution)
+        .map_err(|e| ToolError::new("execution.sandboxFailed", e))?
+        .is_some()
+    {
+        return Err(ToolError::new(
+            "execution.sandboxFailed",
+            "bubblewrap process sandbox is unavailable on Windows",
+        ));
     }
     let mut command = Command::new(&shell.executable);
     command
@@ -35,11 +42,11 @@ pub fn spawn_shell(
         }
     }
     command
-        .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
-        .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove(crate::instance::runtime::INTERNAL_INSTANCE_ENV)
+        .env_remove(crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV)
         .env_remove(crate::capability::execution::CONFIG_ENV)
         .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
-    configure_child_process(&mut command);
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     command.spawn().map_err(|error| {
         ToolError::new(
             "bash.spawnFailed",

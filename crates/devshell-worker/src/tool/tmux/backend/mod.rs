@@ -18,11 +18,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::capability::rpc::command::client::ModelDevshellEnvironment;
-use crate::capability::rpc::path::protocol_path;
-use crate::daemon::process::WorkerRuntimeContext;
+use crate::instance::path::protocol_path;
+use crate::instance::runtime::WorkerRuntimeContext;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
+use crate::tool::ToolCommandEnvironment;
 use crate::tool::ToolError;
 #[cfg(windows)]
 use crate::tool::bash::model::{ShellRuntime, powershell_command};
@@ -571,7 +571,7 @@ impl TmuxBackend {
         task_id: &str,
         cwd: &Path,
         command: &str,
-        model_environment: Option<&ModelDevshellEnvironment>,
+        model_environment: Option<&ToolCommandEnvironment>,
         execution_environment: Option<&std::collections::BTreeMap<String, Option<String>>>,
         process_sandbox: Option<&(String, Vec<String>)>,
     ) -> Result<BackendPane, ToolError> {
@@ -599,16 +599,35 @@ impl TmuxBackend {
                 (_, Some(environment)) => {
                     let mut assignments = Vec::new();
                     for (name, value) in environment {
-                        if !valid_env_name(name) { return Err(ToolError::new("execution.invalidEnvironment", format!("invalid environment variable name `{name}`"))); }
-                        if name == "BASH_ENV" || name == "TMUX" || name == "TMUX_PANE" || name == "TMUX_TMPDIR"
+                        if !valid_env_name(name) {
+                            return Err(ToolError::new(
+                                "execution.invalidEnvironment",
+                                format!("invalid environment variable name `{name}`"),
+                            ));
+                        }
+                        if name == "BASH_ENV"
+                            || name == "TMUX"
+                            || name == "TMUX_PANE"
+                            || name == "TMUX_TMPDIR"
                             || name.starts_with("DEVSHELL_WORKER_INTERNAL_")
-                            || name == crate::capability::execution::CONFIG_ENV { continue; }
-                        if let Some(value) = value { assignments.push(format!("{}={}", name, shell_quote(value))); }
+                            || name == crate::capability::execution::CONFIG_ENV
+                        {
+                            continue;
+                        }
+                        if let Some(value) = value {
+                            assignments.push(format!("{}={}", name, shell_quote(value)));
+                        }
                     }
                     if let Some(model) = model_environment {
-                        for (name, value) in model.pairs() { assignments.push(format!("{}={}", name, shell_quote(value))); }
+                        for (name, value) in model.pairs() {
+                            assignments.push(format!("{}={}", name, shell_quote(value)));
+                        }
                     }
-                    format!("/usr/bin/env -i -- {} /bin/bash --noprofile --norc {}", assignments.join(" "), shell_quote(&script_path.to_string_lossy()))
+                    format!(
+                        "/usr/bin/env -i -- {} /bin/bash --noprofile --norc {}",
+                        assignments.join(" "),
+                        shell_quote(&script_path.to_string_lossy())
+                    )
                 }
                 (Some(environment), None) => format!(
                     "/usr/bin/env {} /bin/bash --noprofile --norc {}",
@@ -627,8 +646,17 @@ impl TmuxBackend {
             };
             let task_command = match process_sandbox {
                 Some((driver, args)) => {
-                    let quoted_args = args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ");
-                    format!("{} {} -- {}", shell_quote(driver), quoted_args, task_command)
+                    let quoted_args = args
+                        .iter()
+                        .map(|arg| shell_quote(arg))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    format!(
+                        "{} {} -- {}",
+                        shell_quote(driver),
+                        quoted_args,
+                        task_command
+                    )
                 }
                 None => task_command,
             };
@@ -668,16 +696,21 @@ impl TmuxBackend {
             if let Some(environment) = execution_environment {
                 for (name, value) in environment {
                     if !valid_env_name(name) {
-                        return Err(ToolError::new("execution.invalidEnvironment", format!("invalid environment variable name `{name}`")));
+                        return Err(ToolError::new(
+                            "execution.invalidEnvironment",
+                            format!("invalid environment variable name `{name}`"),
+                        ));
                     }
                     if name.starts_with("DEVSHELL_WORKER_INTERNAL_")
-                        || name == crate::capability::execution::CONFIG_ENV {
+                        || name == crate::capability::execution::CONFIG_ENV
+                    {
                         continue;
                     }
                     match value {
                         Some(value) => script.push_str(&format!(
                             "[Environment]::SetEnvironmentVariable({}, {}, 'Process')\n",
-                            powershell_literal(name), powershell_literal(value),
+                            powershell_literal(name),
+                            powershell_literal(value),
                         )),
                         None => script.push_str(&format!(
                             "[Environment]::SetEnvironmentVariable({}, $null, 'Process')\n",

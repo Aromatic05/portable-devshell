@@ -15,10 +15,10 @@ use crate::capability::rpc::response::RpcResponse;
 use crate::capability::rpc::router::RpcRouter;
 use crate::daemon::log::append_log;
 use crate::daemon::process;
+use crate::daemon::tools::builtin_registry;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::{ensure_dir, ensure_file_mode};
 use crate::instance::{InstanceLock, InstanceName, read_config};
-use crate::tool::builtin_registry;
 use crate::transport::endpoint::channel::{EndpointPaths, LocalIpcListener, LocalIpcStream};
 use crate::transport::reverse::ReverseConnector;
 

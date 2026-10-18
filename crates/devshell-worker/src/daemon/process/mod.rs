@@ -18,29 +18,16 @@ use self::platform::spawn_daemon_process;
 use crate::capability::rpc::bridge::send_request_with_timeout;
 use crate::capability::rpc::request::RpcRequest;
 use crate::instance::InstanceName;
+pub use crate::instance::runtime::{
+    INTERNAL_INSTANCE_ENV, INTERNAL_SECURITY_MODE_ENV, PlatformInfo, WorkerRuntimeContext,
+};
 use crate::instance::sandbox::SecurityMode;
 use crate::instance::storage::InstancePaths;
 #[cfg(unix)]
 use crate::instance::storage::ensure_file_mode;
 use crate::transport::endpoint::channel::EndpointPaths;
 
-pub const INTERNAL_INSTANCE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_INSTANCE";
-pub const INTERNAL_SECURITY_MODE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
 pub const SECURITY_MODE_ENV: &str = "DEVSHELL_WORKER_SECURITY_MODE";
-
-#[derive(Clone, Debug)]
-pub struct PlatformInfo {
-    pub os: &'static str,
-    pub arch: &'static str,
-}
-
-#[derive(Clone, Debug)]
-pub struct WorkerRuntimeContext {
-    pub instance: InstanceName,
-    pub platform: PlatformInfo,
-    pub security_mode: SecurityMode,
-    pub worker_sha256: Option<String>,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DaemonState {
@@ -106,8 +93,12 @@ pub fn spawn(
         if let Some(config) = execution.as_ref() {
             for (name, value) in config.environment_for(&paths.instance_root, "daemon")? {
                 match value {
-                    Some(value) => { command.env(name, value); }
-                    None => { command.env_remove(name); }
+                    Some(value) => {
+                        command.env(name, value);
+                    }
+                    None => {
+                        command.env_remove(name);
+                    }
                 }
             }
             // The worker requires the same immutable provider selection when it
@@ -141,10 +132,18 @@ pub fn spawn(
     #[cfg(windows)]
     {
         if execution.as_ref().is_some_and(|config| {
-            config.environment.iter().any(|provider| provider.phase == "daemon")
-                || config.sandbox.as_ref().is_some_and(|sandbox| sandbox.phase == "daemon")
+            config
+                .environment
+                .iter()
+                .any(|provider| provider.phase == "daemon")
+                || config
+                    .sandbox
+                    .as_ref()
+                    .is_some_and(|sandbox| sandbox.phase == "daemon")
         }) {
-            return Err("daemon-phase execution providers require a supported Windows launcher".to_string());
+            return Err(
+                "daemon-phase execution providers require a supported Windows launcher".to_string(),
+            );
         }
         let _ = paths;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(windows)]
-use crate::capability::rpc::path::protocol_path;
+use crate::instance::path::protocol_path;
 use crate::tool::ToolError;
 #[cfg(windows)]
 use crate::tool::bash::model::{ShellRuntime, powershell_command};

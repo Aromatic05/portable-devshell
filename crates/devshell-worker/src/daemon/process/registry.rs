@@ -116,6 +116,15 @@ pub struct ActiveProcessGuard {
     registry: Arc<ActiveProcessRegistry>,
 }
 
+impl ToolProcessGuard for ActiveProcessGuard {
+    fn terminate_process_group(&self, force: bool) -> Result<(), String> {
+        match self.process_group {
+            Some(process_group) => platform::terminate_process_group(process_group, force),
+            None => Ok(()),
+        }
+    }
+}
+
 impl ToolProcessRegistry for ActiveProcessRegistry {
     fn register(self: Arc<Self>, process_group: i32) -> Result<Box<dyn ToolProcessGuard>, String> {
         ActiveProcessRegistry::register(&self, process_group)

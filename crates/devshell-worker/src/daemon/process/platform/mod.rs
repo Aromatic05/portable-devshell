@@ -9,6 +9,5 @@ pub use unix::{
 };
 #[cfg(windows)]
 pub use windows::{
-    configure_child_process, process_is_running, spawn_daemon_process, terminate_process,
-    terminate_process_group,
+    process_is_running, spawn_daemon_process, terminate_process, terminate_process_group,
 };

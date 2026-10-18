@@ -24,7 +24,9 @@ pub fn spawn_shell(
         let mut command = Command::new(wrapper);
         command.args(args).arg("--").arg(&shell.executable);
         command
-    } else { Command::new(&shell.executable) };
+    } else {
+        Command::new(&shell.executable)
+    };
     command
         .args(["--noprofile", "--norc", "-c"])
         .arg(command_text)
@@ -62,8 +64,8 @@ fn apply_environment(command: &mut Command, env: &BTreeMap<String, Option<String
         }
     }
     command
-        .env_remove(crate::daemon::process::INTERNAL_INSTANCE_ENV)
-        .env_remove(crate::daemon::process::INTERNAL_SECURITY_MODE_ENV)
+        .env_remove(crate::instance::runtime::INTERNAL_INSTANCE_ENV)
+        .env_remove(crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV)
         .env_remove(crate::capability::execution::CONFIG_ENV)
         .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE");
 }
@@ -116,11 +118,11 @@ mod tests {
         let resolved = resolve_existing_target(&workspace, &requested).unwrap();
         let mut env = BTreeMap::new();
         env.insert(
-            crate::daemon::process::INTERNAL_INSTANCE_ENV.to_string(),
+            crate::instance::runtime::INTERNAL_INSTANCE_ENV.to_string(),
             Some("aromatic-pc".to_string()),
         );
         env.insert(
-            crate::daemon::process::INTERNAL_SECURITY_MODE_ENV.to_string(),
+            crate::instance::runtime::INTERNAL_SECURITY_MODE_ENV.to_string(),
             Some("disabled".to_string()),
         );
         env.insert(

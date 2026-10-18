@@ -46,9 +46,9 @@ pub struct ToolCall {
 }
 
 /// A registered process group is released when its RAII guard is dropped.
-pub trait ToolProcessGuard: Send {}
-
-impl<T: Send> ToolProcessGuard for T {}
+pub trait ToolProcessGuard: Send {
+    fn terminate_process_group(&self, force: bool) -> Result<(), String>;
+}
 
 /// Process lifetime port supplied by the Worker runtime.
 pub trait ToolProcessRegistry: Send + Sync {

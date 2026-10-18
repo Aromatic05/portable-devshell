@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::warning;
-use crate::capability::rpc::command::client::ModelDevshellShim;
+use crate::tool::ToolCommandEnvironmentProvider;
 
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
@@ -61,7 +61,7 @@ struct PersistedTaskRecord {
 
 pub struct TmuxState {
     backend: TmuxBackend,
-    model_devshell: Arc<ModelDevshellShim>,
+    model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     structure: Mutex<()>,
     pane_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     tasks: Mutex<TaskRegistry>,
@@ -72,7 +72,7 @@ pub struct TmuxState {
 impl TmuxState {
     pub fn new(
         backend: TmuxBackend,
-        model_devshell: Arc<ModelDevshellShim>,
+        model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     ) -> Result<Self, ToolError> {
         let mut tasks = TaskRegistry::default();
         for record in backend.load_task_records::<PersistedTaskRecord>()? {
@@ -168,10 +168,17 @@ impl TmuxState {
             .map_err(|error| ToolError::new("execution.sandboxUnavailable", error))?;
         #[cfg(windows)]
         if process_sandbox.is_some() {
-            return Err(ToolError::new("execution.sandboxUnavailable", "process sandbox is unavailable for managed Windows tasks"));
+            return Err(ToolError::new(
+                "execution.sandboxUnavailable",
+                "process sandbox is unavailable for managed Windows tasks",
+            ));
         }
         let execution_environment = match execution.as_ref() {
-            Some(config) => Some(config.environment(&cwd.canonical).map_err(|error| ToolError::new("execution.providerFailed", error))?),
+            Some(config) => Some(
+                config
+                    .environment(&cwd.canonical)
+                    .map_err(|error| ToolError::new("execution.providerFailed", error))?,
+            ),
             None => None,
         };
         let wait = params.wait.unwrap_or(TmuxWaitMode::Nonblock);

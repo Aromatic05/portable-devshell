@@ -1,19 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::capability::artifact::store::ArtifactStore;
-use crate::capability::rpc::command::client::ModelDevshellShim;
-use crate::daemon::process::WorkerRuntimeContext;
-use crate::instance::storage::InstancePaths;
-use crate::tool::bash::run::BashRunTool;
-use crate::tool::file::FileToolState;
-use crate::tool::file::edit::FileEditTool;
-use crate::tool::file::read::FileReadTool;
-use crate::tool::file::search::glob::FileGlobTool;
-use crate::tool::file::search::grep::FileGrepTool;
-use crate::tool::tmux::register_tools as register_tmux_tools;
 use crate::tool::{ToolCatalogEntry, ToolError, ToolHandler, ToolName};
-use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Default)]
 pub struct ToolRegistry {
@@ -228,39 +216,6 @@ fn is_numeric_type(value: &serde_json::Value) -> bool {
         serde_json::Value::Array(kinds) => kinds.iter().any(is_numeric_type),
         _ => false,
     }
-}
-
-pub fn builtin_registry(
-    instance_paths: &InstancePaths,
-    socket_paths: &EndpointPaths,
-    runtime: &WorkerRuntimeContext,
-    artifacts: Arc<ArtifactStore>,
-) -> Result<ToolRegistry, ToolError> {
-    let mut registry = ToolRegistry::new();
-    let files = FileToolState::new();
-    let model_devshell = Arc::new(
-        ModelDevshellShim::prepare(socket_paths)
-            .map_err(|error| ToolError::new("devshell.command.shimUnavailable", error))?,
-    );
-    registry.register(Arc::new(BashRunTool::new(
-        Arc::clone(&artifacts),
-        Arc::clone(&model_devshell),
-    )?) as Arc<_>)?;
-    registry.register(Arc::new(FileReadTool::new(
-        Arc::clone(&files),
-        Arc::clone(&artifacts),
-    )) as Arc<_>)?;
-    registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileGlobTool::new(Arc::clone(&files))) as Arc<_>)?;
-    registry.register(Arc::new(FileGrepTool::new(Arc::clone(&files))) as Arc<_>)?;
-    register_tmux_tools(
-        &mut registry,
-        instance_paths,
-        socket_paths,
-        runtime,
-        model_devshell,
-    )?;
-    Ok(registry)
 }
 
 #[cfg(test)]

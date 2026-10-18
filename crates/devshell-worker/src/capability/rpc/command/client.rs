@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io::{Write, stderr, stdout};
 use std::path::{Path, PathBuf};
@@ -10,7 +9,7 @@ use crate::capability::rpc::path::protocol_path;
 use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
 use crate::instance::storage::ensure_dir;
-use crate::tool::ToolCall;
+use crate::tool::{ToolCall, ToolCommandEnvironment, ToolCommandEnvironmentProvider};
 use crate::transport::endpoint::channel::EndpointPaths;
 
 pub const BROKER_SOCKET_ENV: &str = "DEVSHELL_MODEL_BROKER_SOCKET";
@@ -23,16 +22,6 @@ pub const WORKSPACE_ENV: &str = "DEVSHELL_MODEL_WORKSPACE";
 pub struct ModelDevshellShim {
     bin_dir: PathBuf,
     socket_file: PathBuf,
-}
-
-#[derive(Clone, Debug)]
-pub struct ModelDevshellEnvironment {
-    pub broker_socket: String,
-    pub ctx_id: String,
-    pub parent_call_id: String,
-    pub path: String,
-    pub task_id: Option<String>,
-    pub workspace: String,
 }
 
 impl ModelDevshellShim {
@@ -57,7 +46,7 @@ impl ModelDevshellShim {
         call: &ToolCall,
         task_id: Option<&str>,
         requested_path: Option<&str>,
-    ) -> Option<ModelDevshellEnvironment> {
+    ) -> Option<ToolCommandEnvironment> {
         if call.source.as_deref() != Some("mcp") {
             return None;
         }
@@ -71,53 +60,50 @@ impl ModelDevshellShim {
         } else {
             format!("{}{}{}", shim_path, path_separator(), inherited)
         };
-        Some(ModelDevshellEnvironment {
-            broker_socket: self.socket_file.to_string_lossy().into_owned(),
-            ctx_id: call.ctx_id.clone(),
-            parent_call_id: call.operation_id.clone(),
+        Some(model_command_environment(
+            self.socket_file.to_string_lossy().into_owned(),
+            call.ctx_id.clone(),
+            call.operation_id.clone(),
             path,
-            task_id: task_id.map(ToOwned::to_owned),
-            workspace: protocol_path(&call.workspace),
-        })
+            task_id,
+            protocol_path(&call.workspace),
+        ))
     }
 }
 
-impl ModelDevshellEnvironment {
-    pub fn inject(&self, env: &mut BTreeMap<String, Option<String>>) {
-        env.insert(
-            BROKER_SOCKET_ENV.to_string(),
-            Some(self.broker_socket.clone()),
-        );
-        env.insert(CTX_ID_ENV.to_string(), Some(self.ctx_id.clone()));
-        env.insert(
-            PARENT_CALL_ID_ENV.to_string(),
-            Some(self.parent_call_id.clone()),
-        );
-        env.insert(WORKSPACE_ENV.to_string(), Some(self.workspace.clone()));
-        match &self.task_id {
-            Some(task_id) => {
-                env.insert(TASK_ID_ENV.to_string(), Some(task_id.clone()));
-            }
-            None => {
-                env.insert(TASK_ID_ENV.to_string(), None);
-            }
-        }
-        env.insert("PATH".to_string(), Some(self.path.clone()));
+impl ToolCommandEnvironmentProvider for ModelDevshellShim {
+    fn environment(
+        &self,
+        call: &ToolCall,
+        task_id: Option<&str>,
+        requested_path: Option<&str>,
+    ) -> Option<ToolCommandEnvironment> {
+        ModelDevshellShim::environment(self, call, task_id, requested_path)
     }
+}
 
-    pub fn pairs(&self) -> Vec<(&'static str, &str)> {
-        let mut pairs = vec![
-            (BROKER_SOCKET_ENV, self.broker_socket.as_str()),
-            (CTX_ID_ENV, self.ctx_id.as_str()),
-            (PARENT_CALL_ID_ENV, self.parent_call_id.as_str()),
-            (WORKSPACE_ENV, self.workspace.as_str()),
-            ("PATH", self.path.as_str()),
-        ];
-        if let Some(task_id) = self.task_id.as_deref() {
-            pairs.push((TASK_ID_ENV, task_id));
-        }
-        pairs
-    }
+fn model_command_environment(
+    broker_socket: String,
+    ctx_id: String,
+    parent_call_id: String,
+    path: String,
+    task_id: Option<&str>,
+    workspace: String,
+) -> ToolCommandEnvironment {
+    let mut values = vec![
+        (BROKER_SOCKET_ENV, broker_socket),
+        (CTX_ID_ENV, ctx_id),
+        (PARENT_CALL_ID_ENV, parent_call_id),
+        (WORKSPACE_ENV, workspace),
+        ("PATH", path),
+    ];
+    let unset = if let Some(task_id) = task_id {
+        values.push((TASK_ID_ENV, task_id.to_string()));
+        Vec::new()
+    } else {
+        vec![TASK_ID_ENV]
+    };
+    ToolCommandEnvironment::new(values, unset)
 }
 
 pub fn try_run_shim() -> Option<Result<i32, String>> {
@@ -327,20 +313,20 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        BROKER_SOCKET_ENV, CTX_ID_ENV, ModelDevshellEnvironment, PARENT_CALL_ID_ENV, TASK_ID_ENV,
-        WORKSPACE_ENV,
+        BROKER_SOCKET_ENV, CTX_ID_ENV, PARENT_CALL_ID_ENV, TASK_ID_ENV, WORKSPACE_ENV,
+        model_command_environment,
     };
 
     #[test]
     fn authoritative_model_environment_overrides_caller_values() {
-        let model = ModelDevshellEnvironment {
-            broker_socket: "/run/worker.sock".to_string(),
-            ctx_id: "ctx-real".to_string(),
-            parent_call_id: "call-real".to_string(),
-            path: "/run/model-bin:/usr/bin".to_string(),
-            task_id: Some("task-real".to_string()),
-            workspace: "/repo".to_string(),
-        };
+        let model = model_command_environment(
+            "/run/worker.sock".to_string(),
+            "ctx-real".to_string(),
+            "call-real".to_string(),
+            "/run/model-bin:/usr/bin".to_string(),
+            Some("task-real"),
+            "/repo".to_string(),
+        );
         let mut env = BTreeMap::from([
             (CTX_ID_ENV.to_string(), Some("ctx-spoofed".to_string())),
             ("PATH".to_string(), Some("/malicious".to_string())),
@@ -356,14 +342,14 @@ mod tests {
 
     #[test]
     fn bash_model_environment_explicitly_clears_inherited_tmux_task_binding() {
-        let model = ModelDevshellEnvironment {
-            broker_socket: "/run/worker.sock".to_string(),
-            ctx_id: "ctx-real".to_string(),
-            parent_call_id: "call-real".to_string(),
-            path: "/run/model-bin:/usr/bin".to_string(),
-            task_id: None,
-            workspace: "/repo".to_string(),
-        };
+        let model = model_command_environment(
+            "/run/worker.sock".to_string(),
+            "ctx-real".to_string(),
+            "call-real".to_string(),
+            "/run/model-bin:/usr/bin".to_string(),
+            None,
+            "/repo".to_string(),
+        );
         let mut env = BTreeMap::from([(
             TASK_ID_ENV.to_string(),
             Some("task-inherited-from-outer-tmux".to_string()),

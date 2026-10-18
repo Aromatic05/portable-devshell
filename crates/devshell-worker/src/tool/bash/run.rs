@@ -10,19 +10,18 @@ use std::time::{Duration, Instant};
 use crate::capability::artifact::result_path::tool_result_path;
 use crate::capability::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::capability::artifact::types::{ArtifactReference, ArtifactStream};
-use crate::capability::rpc::command::client::ModelDevshellShim;
-use crate::daemon::process::platform;
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
     parse_requested_path, resolve_existing_target,
 };
+use crate::tool::ToolCommandEnvironmentProvider;
 use crate::tool::bash::bash_run_name;
 use crate::tool::bash::model::ShellRuntime;
 use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tool::bash::process::spawn_shell;
 use crate::tool::{
-    ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName,
-    ToolProcessGuard, ToolProgressEmitter,
+    ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolProcessGuard,
+    ToolProgressEmitter,
 };
 
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
@@ -41,13 +40,13 @@ const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
 pub struct BashRunTool {
     name: ToolName,
     artifacts: Arc<ArtifactStore>,
-    model_devshell: Arc<ModelDevshellShim>,
+    model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     shell: ShellRuntime,
 }
 impl BashRunTool {
     pub fn new(
         artifacts: Arc<ArtifactStore>,
-        model_devshell: Arc<ModelDevshellShim>,
+        model_devshell: Arc<dyn ToolCommandEnvironmentProvider>,
     ) -> Result<Self, ToolError> {
         Ok(Self {
             name: bash_run_name(),
@@ -132,9 +131,12 @@ impl ToolHandler for BashRunTool {
         let execution = crate::capability::execution::ExecutionConfig::from_env()
             .map_err(|error| ToolError::new("execution.invalidConfig", error))?;
         if let Some(config) = execution.as_ref() {
-            let mut effective_env = config.environment(cwd.access_path())
+            let mut effective_env = config
+                .environment(cwd.access_path())
                 .map_err(|error| ToolError::new("execution.providerFailed", error))?;
-            for (key, value) in std::mem::take(&mut params.env) { effective_env.insert(key, value); }
+            for (key, value) in std::mem::take(&mut params.env) {
+                effective_env.insert(key, value);
+            }
             params.env = effective_env;
         }
         let requested_path = match params.env.get("PATH") {
@@ -146,7 +148,13 @@ impl ToolHandler for BashRunTool {
             environment.inject(&mut params.env);
         }
         let started = Instant::now();
-        let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env, execution.as_ref())?;
+        let mut child = spawn_shell(
+            &self.shell,
+            &params.command,
+            &cwd,
+            &params.env,
+            execution.as_ref(),
+        )?;
         let pid = child.id() as i32;
         let process_guard = match Arc::clone(&call.process_registry).register(pid) {
             Ok(process_guard) => process_guard,
@@ -155,7 +163,7 @@ impl ToolHandler for BashRunTool {
                 return Err(ToolError::new("bash.spawnFailed", error));
             }
         };
-        let mut child = ManagedBashChild::new(child, pid, process_guard);
+        let mut child = ManagedBashChild::new(child, process_guard);
         let input = child
             .stdin
             .take()
@@ -202,7 +210,7 @@ impl ToolHandler for BashRunTool {
             }
         };
         let deadline = started + Duration::from_millis(timeout_ms);
-        let wait_outcome = wait(&mut child, pid, deadline, &call.cancellation)?;
+        let wait_outcome = wait(&mut child, deadline, &call.cancellation)?;
         let status = child
             .wait_and_reap()
             .map_err(|error| ToolError::new("bash.ioFailed", error.to_string()))?;
@@ -302,23 +310,23 @@ impl ToolHandler for BashRunTool {
 }
 struct ManagedBashChild {
     child: Child,
-    process_group: i32,
     reaped: bool,
-    _process_guard: Box<dyn ToolProcessGuard>,
+    process_guard: Box<dyn ToolProcessGuard>,
 }
 
 impl ManagedBashChild {
-    fn new(
-        child: Child,
-        process_group: i32,
-        process_guard: Box<dyn ToolProcessGuard>,
-    ) -> Self {
+    fn new(child: Child, process_guard: Box<dyn ToolProcessGuard>) -> Self {
         Self {
             child,
-            process_group,
             reaped: false,
-            _process_guard: process_guard,
+            process_guard,
         }
+    }
+
+    fn terminate_group(&self) -> Result<(), ToolError> {
+        self.process_guard
+            .terminate_process_group(true)
+            .map_err(|error| ToolError::new("bash.ioFailed", error))
     }
 
     fn wait_and_reap(&mut self) -> std::io::Result<ExitStatus> {
@@ -347,7 +355,7 @@ impl Drop for ManagedBashChild {
         if self.reaped {
             return;
         }
-        let _ = platform::terminate_process_group(self.process_group, true);
+        let _ = self.process_guard.terminate_process_group(true);
         let _ = self.child.wait();
         self.reaped = true;
     }
@@ -704,35 +712,30 @@ enum BashWaitOutcome {
 }
 
 fn wait(
-    child: &mut Child,
-    pid: i32,
+    child: &mut ManagedBashChild,
     deadline: Instant,
     cancellation: &crate::tool::ToolCancellation,
 ) -> Result<BashWaitOutcome, ToolError> {
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {
-                terminate(pid)?;
+                child.terminate_group()?;
                 return Ok(BashWaitOutcome::Termination(BashTermination::Exited));
             }
             Ok(None) => {}
             Err(error) => return Err(ToolError::new("bash.ioFailed", error.to_string())),
         }
         if cancellation.is_cancelled() {
-            terminate(pid)?;
+            child.terminate_group()?;
             return Ok(BashWaitOutcome::Cancelled);
         }
         let now = Instant::now();
         if now >= deadline {
-            terminate(pid)?;
+            child.terminate_group()?;
             return Ok(BashWaitOutcome::Termination(BashTermination::Timeout));
         }
         thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
-}
-fn terminate(pid: i32) -> Result<(), ToolError> {
-    platform::terminate_process_group(pid, true)
-        .map_err(|error| ToolError::new("bash.ioFailed", error))
 }
 #[cfg(unix)]
 trait ExitSignal {
