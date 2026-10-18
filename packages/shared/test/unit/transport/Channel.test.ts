@@ -11,6 +11,8 @@ import {
     WebServerChannel,
     type Channel,
 } from "@portable-devshell/shared";
+import { FrameProtocol } from "../../../src/transport/frame/Protocol.ts";
+import { encodeFrame } from "../../../src/transport/frame/Codec.ts";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -454,6 +456,32 @@ test("WSS v2 does not acknowledge a frame until FrameProtocol subscribes", async
     assert.deepEqual(received, ["data"], "replayed message may be acknowledged, not redelivered");
     assert.equal(socket.acknowledgements.length, 2);
     channel.close();
+});
+
+test("WSS v2 never commits or acknowledges a Frame rejected by FrameProtocol", async () => {
+    const socket = new FakeServerWebSocket();
+    let committed = 0;
+    const channel = new WebServerChannel(socket, {
+        reliableFrames: (_session, _seq) => () => { committed++; },
+    });
+    const protocol = new FrameProtocol(channel, { role: "acceptor" });
+    // A DATA frame without an OPEN is a protocol violation, not a result
+    // received by Control. The FrameProtocol closes its Channel internally
+    // rather than throwing from its onData listener.
+    const rejected = encodeFrame({
+        data: Uint8Array.from([1, 2, 3]),
+        streamId: 1,
+        type: "data",
+    });
+    const header = Buffer.alloc(28);
+    header.write("DSR2", 0, "ascii");
+    Buffer.alloc(16, 8).copy(header, 4);
+    header.writeBigUInt64BE(1n, 20);
+    socket.message(Buffer.concat([header, Buffer.from(rejected)]), true);
+    assert.equal(protocol.closed, true);
+    assert.equal(channel.closed, true);
+    assert.equal(committed, 0, "the rejected Frame cannot advance the durable receipt");
+    assert.deepEqual(socket.acknowledgements, []);
 });
 
 test("WebServerChannel isolates late close listener failures", async () => {

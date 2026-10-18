@@ -99,13 +99,7 @@ impl ReverseConnector {
                     Err(error) => ("wss", false, Err(error)),
                 }
             } else {
-                (
-                    "sse",
-                    false,
-                    self.bridge
-                        .requeue_wss_inflight()
-                        .and_then(|()| self.run_sse(&client, generation)),
-                )
+                ("sse", false, self.run_sse(&client, generation))
             };
 
             match result {

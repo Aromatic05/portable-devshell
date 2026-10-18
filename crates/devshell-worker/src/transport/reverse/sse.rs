@@ -31,7 +31,15 @@ impl ReverseConnector {
             .error_for_status()
             .map_err(|error| format!("reverse SSE rejected: {error}"))?;
 
-        self.bridge.prepare()?;
+        let abandoned = self.bridge.prepare()?;
+        if abandoned > 0 {
+            let _ = append_log(
+                &self.paths,
+                &format!(
+                    "reverse discarded {abandoned} stale Frame(s) on SSE fallback; prior RPC result is uncertain"
+                ),
+            );
+        }
         append_log(
             &self.paths,
             &format!("reverse connection established transport=sse generation={generation}"),

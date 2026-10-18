@@ -18,7 +18,7 @@ pub(super) struct ReverseBridge {
     output: Mutex<Option<Receiver<Result<Vec<u8>, String>>>>,
     pending: Mutex<VecDeque<Vec<u8>>>,
     wss_inflight: Mutex<VecDeque<(u64, Vec<u8>)>>,
-    wss_session: [u8; 16],
+    wss_session: Mutex<[u8; 16]>,
     wss_next_seq: AtomicU64,
     router: Arc<RpcRouter>,
     transport_endpoint: PathBuf,
@@ -31,7 +31,7 @@ impl ReverseBridge {
             output: Mutex::new(None),
             pending: Mutex::new(VecDeque::new()),
             wss_inflight: Mutex::new(VecDeque::new()),
-            wss_session: *uuid::Uuid::new_v4().as_bytes(),
+            wss_session: Mutex::new(*uuid::Uuid::new_v4().as_bytes()),
             wss_next_seq: AtomicU64::new(1),
             router,
             transport_endpoint,
@@ -43,11 +43,30 @@ impl ReverseBridge {
         self.router.shutdown_requested()
     }
 
-    pub(super) fn prepare(&self) -> Result<(), String> {
+    pub(super) fn prepare(&self) -> Result<usize, String> {
         self.close();
-        // Keep completed responses that were not acknowledged by the previous
-        // transport generation. Only result frames are replayed here; never
-        // re-execute the original tool call.
+        // New transports have new Frame/Envelope streams. Old DATA fragments
+        // cannot be replayed into one: their RPC result is uncertain instead.
+        let abandoned = {
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| "reverse pending queue lock poisoned".to_string())?;
+            let mut inflight = self
+                .wss_inflight
+                .lock()
+                .map_err(|_| "reverse WSS inflight lock poisoned".to_string())?;
+            let count = pending.len() + inflight.len();
+            pending.clear();
+            inflight.clear();
+            count
+        };
+        *self
+            .wss_session
+            .lock()
+            .map_err(|_| "reverse WSS session lock poisoned".to_string())? =
+            *uuid::Uuid::new_v4().as_bytes();
+        self.wss_next_seq.store(1, Ordering::Relaxed);
         let writer = LocalIpcStream::connect(&self.transport_endpoint).map_err(|error| {
             format!(
                 "failed to connect reverse Endpoint bridge {}: {error}",
@@ -108,7 +127,7 @@ impl ReverseBridge {
             .output
             .lock()
             .map_err(|_| "reverse Endpoint output lock poisoned".to_string())? = Some(output_rx);
-        Ok(())
+        Ok(abandoned)
     }
 
     pub(super) fn accept_inbound(&self, frame: &[u8]) -> Result<Option<Vec<u8>>, String> {
@@ -182,17 +201,11 @@ impl ReverseBridge {
         }
     }
 
-    pub(super) fn wss_session(&self) -> [u8; 16] {
+    pub(super) fn wss_session(&self) -> Result<[u8; 16], String> {
         self.wss_session
-    }
-
-    pub(super) fn highest_unacknowledged_wss_sequence(&self) -> Result<u64, String> {
-        Ok(self
-            .wss_inflight
             .lock()
-            .map_err(|_| "reverse WSS inflight lock poisoned".to_string())?
-            .back()
-            .map_or(0, |(seq, _)| *seq))
+            .map(|session| *session)
+            .map_err(|_| "reverse WSS session lock poisoned".to_string())
     }
 
     pub(super) fn next_wss_frame(
@@ -231,21 +244,6 @@ impl ReverseBridge {
             .lock()
             .map_err(|_| "reverse WSS inflight lock poisoned".to_string())?;
         retire_acknowledged_frames(&mut inflight, seq);
-        Ok(())
-    }
-
-    pub(super) fn requeue_wss_inflight(&self) -> Result<(), String> {
-        // A legacy WSS controller or SSE fallback cannot send v2 ACKs.
-        // Keep unfinished results in original order; never replay the call.
-        let mut pending = self
-            .pending
-            .lock()
-            .map_err(|_| "reverse pending queue lock poisoned".to_string())?;
-        let mut inflight = self
-            .wss_inflight
-            .lock()
-            .map_err(|_| "reverse WSS inflight lock poisoned".to_string())?;
-        requeue_unacknowledged_frames(&mut inflight, &mut pending);
         Ok(())
     }
 
@@ -295,15 +293,6 @@ fn retire_acknowledged_frames(inflight: &mut VecDeque<(u64, Vec<u8>)>, seq: u64)
     }
 }
 
-fn requeue_unacknowledged_frames(
-    inflight: &mut VecDeque<(u64, Vec<u8>)>,
-    pending: &mut VecDeque<Vec<u8>>,
-) {
-    for (_, frame) in inflight.drain(..).rev() {
-        pending.push_front(frame);
-    }
-}
-
 fn drain_buffered_output(receiver: Receiver<Result<Vec<u8>, String>>) -> VecDeque<Vec<u8>> {
     let mut buffered = VecDeque::new();
     loop {
@@ -317,43 +306,18 @@ fn drain_buffered_output(receiver: Receiver<Result<Vec<u8>, String>>) -> VecDequ
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        drain_buffered_output, next_unacknowledged_frame, requeue_unacknowledged_frames,
-        retire_acknowledged_frames,
-    };
+    use super::{drain_buffered_output, next_unacknowledged_frame, retire_acknowledged_frames};
     use std::collections::VecDeque;
     use std::sync::mpsc;
 
     #[test]
-    fn completed_wss_result_replays_with_same_identity_until_ack() {
-        let mut inflight = VecDeque::from([(41_u64, b"one".to_vec()), (42_u64, b"two".to_vec())]);
-        // Both socket.send calls returned Ok, but no Controller ACK arrived.
-        assert_eq!(next_unacknowledged_frame(&inflight, 40).unwrap().0, 41);
-        assert_eq!(next_unacknowledged_frame(&inflight, 41).unwrap().0, 42);
-        // A fresh transport must replay the identical sequence, never the call.
-        assert_eq!(
-            next_unacknowledged_frame(&inflight, 0).unwrap(),
-            (41, b"one".to_vec())
-        );
-        retire_acknowledged_frames(&mut inflight, 41);
-        assert_eq!(
-            next_unacknowledged_frame(&inflight, 0).unwrap(),
-            (42, b"two".to_vec())
-        );
-        retire_acknowledged_frames(&mut inflight, 42);
+    fn acknowledged_frames_retire_only_within_the_current_transport() {
+        let mut inflight = VecDeque::from([(1_u64, b"one".to_vec()), (2_u64, b"two".to_vec())]);
+        assert_eq!(next_unacknowledged_frame(&inflight, 0).unwrap().0, 1);
+        retire_acknowledged_frames(&mut inflight, 1);
+        assert_eq!(next_unacknowledged_frame(&inflight, 0).unwrap().0, 2);
+        retire_acknowledged_frames(&mut inflight, 2);
         assert!(inflight.is_empty());
-    }
-
-    #[test]
-    fn wss_to_sse_fallback_preserves_unacknowledged_frame_order() {
-        let mut inflight = VecDeque::from([(11_u64, b"old1".to_vec()), (12_u64, b"old2".to_vec())]);
-        let mut pending = VecDeque::from([b"new".to_vec()]);
-        requeue_unacknowledged_frames(&mut inflight, &mut pending);
-        assert!(inflight.is_empty());
-        assert_eq!(
-            pending.into_iter().collect::<Vec<_>>(),
-            vec![b"old1".to_vec(), b"old2".to_vec(), b"new".to_vec()]
-        );
     }
 
     #[test]

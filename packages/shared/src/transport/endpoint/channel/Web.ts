@@ -451,8 +451,8 @@ export class WebServerChannel extends ChannelBase {
                 if (seq === 0n) throw new Error("Reverse frame sequence must be positive.");
                 const commit = this.#reliableFrames(session, seq);
                 if (commit !== undefined) {
-                    if (!this.emitData(bytes.subarray(28)))
-                        throw new Error("Reverse frame delivery was not accepted.");
+                    if (!this.emitData(bytes.subarray(28)) || this.closed)
+                        throw new Error("Reverse FrameProtocol rejected the received frame.");
                     commit();
                 }
                 this.#pendingReliableFrames.shift();

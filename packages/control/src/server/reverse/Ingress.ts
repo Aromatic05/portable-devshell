@@ -175,12 +175,18 @@ export class ReverseIngress {
                                         !credentialReplacementAllowed)
                                         throw new Error("Stale reverse generation frame.");
                                     if (previous !== undefined &&
-                                        previous.session === session &&
-                                        seq <= previous.acceptedThrough)
-                                        return undefined;
-                                    // Only commit after the Channel successfully
-                                    // accepted the bytes. A failed dispatch must
-                                    // be eligible for retransmission.
+                                        previous.session === session) {
+                                        if (seq <= previous.acceptedThrough)
+                                            return undefined;
+                                        if (seq !== previous.acceptedThrough + 1n)
+                                            throw new Error("Reverse WSS acknowledgement sequence gap.");
+                                    } else if (seq !== 1n) {
+                                        // A new physical connection starts a new
+                                        // FrameProtocol and session at sequence one.
+                                        throw new Error("Reverse WSS session must start at sequence one.");
+                                    }
+                                    // Acknowledge only contiguous bytes actually
+                                    // accepted by the current FrameProtocol.
                                     return () => this.#acceptedWss.set(descriptor, {
                                         generation,
                                         session,
@@ -194,8 +200,8 @@ export class ReverseIngress {
                         if (error !== undefined)
                             console.warn("Reverse WSS channel closed:", error.message);
                     });
-                    void this.#credentials
-                        .runAuthenticated(
+                    void (async () => {
+                        await this.#credentials.runAuthenticated(
                             authentication.identity.descriptor.config.name,
                             authentication.token,
                             async (credentialReplacement) => {
@@ -209,7 +215,19 @@ export class ReverseIngress {
                                     { credentialReplacement },
                                 );
                             },
-                        )
+                        );
+                        if (webSocket.protocol === "devshell-worker-transport.v2") {
+                            // Credential replacement commits AFTER activation.
+                            // Do not signal ready before the old token has been
+                            // revoked and the new generation has been admitted.
+                            await new Promise<void>((resolve, reject) => {
+                                webSocket.send("DSR2:ready", { binary: false }, (error) => {
+                                    if (error == null) resolve();
+                                    else reject(error);
+                                });
+                            });
+                        }
+                    })()
                         .catch((error) => {
                             console.warn("Reverse WSS activation failed:", error);
                             channel.close();

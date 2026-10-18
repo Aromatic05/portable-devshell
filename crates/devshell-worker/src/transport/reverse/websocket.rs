@@ -103,11 +103,14 @@ impl ReverseConnector {
             .get("sec-websocket-protocol")
             .is_some_and(|value| value == "devshell-worker-transport.v2");
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
-        self.bridge.prepare()?;
-        if !acknowledged {
-            // Older Control versions speak v1. Preserve inflight results in
-            // their original order, without presenting v2 headers to v1.
-            self.bridge.requeue_wss_inflight()?;
+        let abandoned = self.bridge.prepare()?;
+        if abandoned > 0 {
+            let _ = append_log(
+                &self.paths,
+                &format!(
+                    "reverse discarded {abandoned} stale Frame(s) on WSS reconnect; prior RPC result is uncertain"
+                ),
+            );
         }
         append_log(
             &self.paths,
@@ -124,17 +127,9 @@ impl ReverseConnector {
         acknowledged: bool,
     ) -> Result<(), String> {
         let mut remote_frame_received = false;
-        // Old frames refer to the previous FrameProtocol stream. Allow the
-        // replacement session to open its Envelope stream and send its first
-        // RPC before replaying any old DATA; never prefix a fresh service OPEN
-        // with stale DATA from the retired transport.
-        let mut sent_through = if acknowledged {
-            self.bridge.highest_unacknowledged_wss_sequence()?
-        } else {
-            0
-        };
-        let mut replay_waiting = acknowledged && sent_through > 0;
-        let mut inbound_frames = 0_u32;
+        // Each connection starts a fresh Frame/Envelope stream and sequence;
+        // never replay raw DATA from the previous physical transport.
+        let mut sent_through = 0_u64;
         let mut heartbeat = WssHeartbeat::new(Instant::now());
         while !self.bridge.is_stopping() {
             if let Some(token) = heartbeat.tick(Instant::now())? {
@@ -157,14 +152,10 @@ impl ReverseConnector {
                     }
                     // HTTP 101 alone does not mean Control accepted this
                     // connection. Wait until it actually sends a valid frame.
-                    if !remote_frame_received {
+                    if !remote_frame_received && !acknowledged {
+                        // Legacy v1 does not carry a usable/ready control frame.
                         remote_frame_received = true;
                         let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
-                    }
-                    inbound_frames = inbound_frames.saturating_add(1);
-                    if replay_waiting && inbound_frames >= 2 {
-                        replay_waiting = false;
-                        sent_through = 0;
                     }
                 }
                 Ok(Message::Ping(payload)) => {
@@ -174,7 +165,12 @@ impl ReverseConnector {
                 }
                 Ok(Message::Close(_)) => return Err("controller closed websocket".to_string()),
                 Ok(Message::Text(text)) if acknowledged => {
-                    self.accept_wss_ack(text.as_str(), sent_through)?;
+                    if text.as_str() == "DSR2:ready" {
+                        remote_frame_received = true;
+                        let _ = super::state::write(&self.paths, "connected", Some("wss"), None);
+                    } else {
+                        self.accept_wss_ack(text.as_str(), sent_through)?;
+                    }
                 }
                 Ok(Message::Text(_)) => {
                     return Err("controller sent text on binary RPC websocket".to_string());
@@ -212,7 +208,7 @@ impl ReverseConnector {
         while let Some((seq, response)) = self.bridge.next_wss_frame(*sent_through)? {
             let mut packet = Vec::with_capacity(28 + response.len());
             packet.extend_from_slice(b"DSR2");
-            packet.extend_from_slice(&self.bridge.wss_session());
+            packet.extend_from_slice(&self.bridge.wss_session()?);
             packet.extend_from_slice(&seq.to_be_bytes());
             packet.extend_from_slice(&response);
             // The frame stays in the bounded inflight queue even after send Ok;
@@ -230,7 +226,7 @@ impl ReverseConnector {
             .strip_prefix("DSR2:")
             .and_then(|value| value.split_once(':'))
             .ok_or_else(|| "invalid reverse WSS acknowledgement".to_string())?;
-        let expected = uuid::Uuid::from_bytes(self.bridge.wss_session())
+        let expected = uuid::Uuid::from_bytes(self.bridge.wss_session()?)
             .simple()
             .to_string();
         let seq = seq

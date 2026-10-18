@@ -372,7 +372,11 @@ function connectWorker(
     });
     socket.on("message", (data, isBinary) => {
         if (!isBinary && protocol === "v2") {
-            acks.push(data.toString());
+            if (data.toString() === "DSR2:ready") {
+                acks.push("ready");
+            } else {
+                acks.push(data.toString());
+            }
             return;
         }
         assert.equal(isBinary, true);
