@@ -6,7 +6,7 @@ import { Box, Text } from "ink";
 
 import type { TuiAppState } from "../../state/store/Model.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import { TuiComponentConfirmDialog } from "./Confirm.js";
 import { TuiComponentTextDetail } from "../component/content/Detail.js";
 import {

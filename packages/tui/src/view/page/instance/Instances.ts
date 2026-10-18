@@ -4,7 +4,7 @@ import { isTuiTerminalSupported } from "../../../terminal/control/Capability.js"
 import { buildArtifactActivityView } from "../../component/content/Artifact.js";
 import { createDefaultInstanceDraft } from "../../../state/editor/Instance.js";
 import type { BoxModel } from "../../component/content/Box.js";
-import type { TuiDomainReader } from "../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../app/control/Reader.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import {
     compactSummary,

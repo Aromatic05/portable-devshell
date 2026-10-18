@@ -20,7 +20,7 @@ import {
     createTuiViewProjection,
     selectErrorMessage,
 } from "../view/projection/View.js";
-import { TuiDomainReader } from "../view/domain/Reader.js";
+import { TuiDomainReader } from "./control/Reader.js";
 import type { TuiInteractionProjection } from "../interaction/Projection.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
 import { currentTuiRoute } from "../state/route/State.js";

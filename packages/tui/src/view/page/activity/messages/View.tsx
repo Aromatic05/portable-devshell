@@ -6,7 +6,7 @@ import {
     currentTuiRoute,
     currentTuiRouteScrollKey,
 } from "../../../../state/route/State.js";
-import type { TuiDomainReader } from "../../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 import {
     renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,

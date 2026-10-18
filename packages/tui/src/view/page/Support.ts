@@ -6,7 +6,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { BoxLine, BoxModel } from "../component/content/Box.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import type { TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRouteItemKey } from "../../state/route/State.js";
 import { resolveSelectedDetailLineId } from "../../interaction/selection/Detail.js";

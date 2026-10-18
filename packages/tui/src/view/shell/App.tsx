@@ -36,7 +36,7 @@ import { type TuiAppState } from "../../state/store/Model.js";
 import { type TuiTerminalTab } from "../../state/route/Model.js";
 import { type TuiTextSelectionRenderSource } from "../../interaction/selection/Model.js";
 import { type TuiViewportRenderSource } from "../../app/Render.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 
 export interface TuiAppProps {
     runtime: TuiAppController;

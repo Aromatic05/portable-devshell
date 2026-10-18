@@ -7,7 +7,7 @@ import { type BoxModel } from "../../component/content/Box.js";
 import { workspaceFolderName } from "../../presentation/Workspace.js";
 import { type TuiAppState } from "../../../state/store/Model.js";
 import { type TuiExpandableBoxStatus } from "../../../state/Ui.js";
-import type { TuiDomainReader } from "../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../app/control/Reader.js";
 import { compactSummary, formatField, makeBox } from "../Support.js";
 import { projectTodoSummaries } from "./Goal.js";
 import { currentTuiRoute } from "../../../state/route/State.js";

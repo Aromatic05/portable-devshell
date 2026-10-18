@@ -3,7 +3,7 @@ import type { TodoItem, TodoReadResult } from "@portable-devshell/shared";
 import type { BoxModel } from "../../component/content/Box.js";
 import type { TuiAppState } from "../../../state/store/Model.js";
 import type { TuiExpandableBoxStatus } from "../../../state/Ui.js";
-import type { TuiDomainReader } from "../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../app/control/Reader.js";
 import { buttonLine } from "../../component/Editor.js";
 import { compactSummary, formatField, makeBox } from "../Support.js";
 import { projectTodoSummaries } from "./Goal.js";

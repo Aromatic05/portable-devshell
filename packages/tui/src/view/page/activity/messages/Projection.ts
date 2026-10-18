@@ -21,7 +21,7 @@ import {
 } from "../../../../interaction/selection/Model.js";
 import type { TuiSidebarContextEntry } from "../../../../state/Ui.js";
 import { wrapTerminalText } from "../../../../terminal/Public.js";
-import type { TuiDomainReader } from "../../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 
 export interface TuiMessageEntry {
     at: string;

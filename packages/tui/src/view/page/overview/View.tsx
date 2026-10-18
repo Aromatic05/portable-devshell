@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
 import type { TuiAppState } from "../../../state/store/Model.js";
-import type { TuiDomainReader } from "../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../app/control/Reader.js";
 import type {
     TuiOverviewActivityRowModel,
     TuiOverviewInstanceRowModel,

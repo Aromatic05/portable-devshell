@@ -7,7 +7,7 @@ import { workspaceFolderName } from "../../../presentation/Workspace.js";
 
 import type { BoxModel } from "../../../component/content/Box.js";
 import { type TuiAppState } from "../../../../state/store/Model.js";
-import type { TuiDomainReader } from "../../../domain/Reader.js";
+import type { TuiDomainReader } from "../../../../app/control/Reader.js";
 import {
     auditInputSummary,
     auditOutputSummary,

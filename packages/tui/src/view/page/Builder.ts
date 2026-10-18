@@ -1,5 +1,5 @@
 import type { BoxModel } from "../component/content/Box.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiAppState } from "../../state/store/Model.js";
 import { buildAuditPageBoxes } from "./activity/audit/List.js";

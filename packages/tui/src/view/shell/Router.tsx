@@ -22,7 +22,7 @@ import {
 import { TuiMessagesView } from "../page/activity/messages/View.js";
 import { TuiOverviewView } from "../page/overview/View.js";
 import { tuiBlockHeight } from "./Layout.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 
 export interface TuiScreenRouterProps {
     boxInnerWidth: number;

@@ -38,7 +38,7 @@ import {
     renderTuiMessageHistoryLines,
     selectTuiMessagesSidebarEntries,
 } from "../page/activity/messages/Projection.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import type { TuiInteractionProjection } from "../../interaction/Projection.js";
 
 export function selectActivePage(state: TuiAppState): TuiActivePage {

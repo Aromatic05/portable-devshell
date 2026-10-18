@@ -1,6 +1,6 @@
 import { topTuiOverlay } from "../../state/Overlay.js";
 import type { TuiAppState } from "../../state/store/Model.js";
-import type { TuiDomainReader } from "../domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import type { TuiTerminalTab } from "../../state/route/Model.js";
 import { renderExpandableBoxLines } from "../component/content/Box.js";
