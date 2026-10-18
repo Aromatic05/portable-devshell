@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import {
@@ -6,7 +7,7 @@ import {
     type Instance,
     type ReverseConnectionIdentity,
 } from "@portable-devshell/core";
-import { asInstanceName, type Channel } from "@portable-devshell/shared";
+import { asInstanceName, ReverseSseChannel, type Channel } from "@portable-devshell/shared";
 
 import { ReverseCredentials } from "../../../../src/instance/reverse/Credentials.ts";
 import { ReverseCredentialStore } from "../../../../src/instance/reverse/credential/Store.ts";
@@ -87,6 +88,45 @@ test("core reverse transport owns connection generation replacement", async () =
     assert.deepEqual(accepted, [1, 2]);
     connections.disconnect(descriptor.config.name);
     assert.equal(second.closed, true);
+});
+
+test("stalled WSS replacement does not steal active SSE upstream routing", async () => {
+    let candidateEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { candidateEntered = resolve; });
+    let finishCandidate!: () => void;
+    const candidateGate = new Promise<void>((resolve) => { finishCandidate = resolve; });
+    const descriptor = reverseDescriptor(async (generation) => {
+        if (generation === 2) {
+            candidateEntered();
+            await candidateGate;
+        }
+    });
+    const connections = new ReverseConnections({ instances: instanceLookup(descriptor) });
+    const response = Object.assign(new EventEmitter(), {
+        writableEnded: false,
+        write: (_value: string) => true,
+        end() { this.writableEnded = true; },
+    });
+    const old = new ReverseSseChannel(response as never, 0, {
+        heartbeatIntervalMs: 60_000,
+    });
+    await connections.activate(identity(descriptor, 1), "sse", old);
+    const incoming = new MemoryChannel();
+    const replacement = connections.activate(identity(descriptor, 2), "wss", incoming);
+    try {
+        await entered;
+        assert.deepEqual(connections.acceptUpstream(identity(descriptor, 1), {
+            generation: 1,
+            frames: [{ seq: 1, frame: Buffer.from("still-live").toString("base64") }],
+        }), { acceptedThrough: 1, generation: 1 });
+        assert.equal(old.closed, false);
+    } finally {
+        finishCandidate();
+    }
+    await replacement;
+    assert.equal(old.closed, true);
+    assert.equal(incoming.closed, false);
+    connections.stop();
 });
 
 test("credential rotation disconnects the active core transport", async () => {
@@ -186,7 +226,7 @@ test("failed reverse connection activation preserves the previous live channel",
 });
 
 function reverseDescriptor(
-    onAttach: (generation: number) => void = () => undefined,
+    onAttach: (generation: number) => void | Promise<void> = () => undefined,
 ) {
     // Only the fields observed by ReverseConnections are implemented here.
     const descriptor: Instance = {
@@ -202,7 +242,7 @@ function reverseDescriptor(
         provision: {
             reverseConnection: {
                 async attach(_channel: Channel, input: { generation: number }) {
-                    onAttach(input.generation);
+                    await onAttach(input.generation);
                 },
             },
         },

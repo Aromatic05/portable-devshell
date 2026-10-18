@@ -95,11 +95,17 @@ impl ReverseConnector {
             };
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
                 match self.connect_wss(generation) {
-                    Ok(socket) => ("wss", true, self.run_wss(socket)),
+                    Ok((socket, acknowledged)) => ("wss", true, self.run_wss(socket, acknowledged)),
                     Err(error) => ("wss", false, Err(error)),
                 }
             } else {
-                ("sse", false, self.run_sse(&client, generation))
+                (
+                    "sse",
+                    false,
+                    self.bridge
+                        .requeue_wss_inflight()
+                        .and_then(|()| self.run_sse(&client, generation)),
+                )
             };
 
             match result {
@@ -115,7 +121,9 @@ impl ReverseConnector {
                     let _ =
                         state::write(&self.paths, "reconnecting", Some(transport), Some(&error));
                     if transport == "wss"
-                        && (!established || attempt_started.elapsed() < Duration::from_secs(5))
+                        && (!established
+                            || attempt_started.elapsed() < Duration::from_secs(5)
+                            || error.contains(websocket::HEARTBEAT_TIMEOUT_ERROR))
                     {
                         wss_failures = wss_failures.saturating_add(1);
                     } else if transport == "wss" {

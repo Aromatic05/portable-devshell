@@ -28,6 +28,8 @@ interface ActiveReverseConnection {
     transport: ReverseTransport;
 }
 
+const REVERSE_ACTIVATION_TIMEOUT_MS = 20_000;
+
 interface ReverseGenerationLease {
     readonly descriptor: Instance;
     release(): void;
@@ -36,6 +38,9 @@ interface ReverseGenerationLease {
 export class ReverseConnections {
     readonly #instances: ReverseConnectionsOptions["instances"];
     readonly #active = new Map<string, ActiveReverseConnection>();
+    // A verifying SSE candidate must receive its own upstream RPC responses
+    // without prematurely replacing the previously active generation.
+    readonly #candidates = new Map<string, ActiveReverseConnection>();
     readonly #activationQueues = new Map<string, Promise<unknown>>();
     #stopped = false;
 
@@ -61,11 +66,23 @@ export class ReverseConnections {
                 const active = this.#prepareActivation(
                     identity, transport, channel, options.credentialReplacement === true,
                 );
+                const controller = new AbortController();
+                const timeout = setTimeout(
+                    () => controller.abort(new Error(
+                        "Reverse candidate handshake timed out; previous connection retained.",
+                    )),
+                    REVERSE_ACTIVATION_TIMEOUT_MS,
+                );
+                const onClose = () => controller.abort(
+                    new Error("Reverse candidate disconnected during handshake."),
+                );
+                const offClose = channel.onClose(onClose);
                 try {
                     await connection.attach(channel, {
                         credentialReplacement: options.credentialReplacement,
                         generation: identity.generation,
                         transport,
+                        signal: controller.signal,
                     });
                 } catch (error) {
                     if (this.#active.get(identity.descriptor.config.name) === active) {
@@ -74,7 +91,17 @@ export class ReverseConnections {
                         else this.#active.delete(identity.descriptor.config.name);
                     }
                     throw error;
+                } finally {
+                    clearTimeout(timeout);
+                    offClose();
+                    if (this.#candidates.get(identity.descriptor.config.name) === active)
+                        this.#candidates.delete(identity.descriptor.config.name);
                 }
+                // Candidate validation must not replace the active SSE
+                // upstream route. Promote only after Endpoint's application
+                // handshake and peer cutover acknowledgement have succeeded.
+                if (active.closed) throw new Error("Reverse candidate closed before promotion.");
+                this.#active.set(identity.descriptor.config.name, active);
                 if (previous !== undefined && previous !== active)
                     previous.channel.close();
             });
@@ -101,11 +128,15 @@ export class ReverseConnections {
                 });
             }
 
-            const active = this.#active.get(identity.descriptor.config.name);
+            const name = identity.descriptor.config.name;
+            const current = this.#active.get(name);
+            const pending = this.#candidates.get(name);
+            const active = current?.generation === identity.generation
+                ? current
+                : pending?.generation === identity.generation ? pending : undefined;
             if (
                 active === undefined ||
                 active.transport !== "sse" ||
-                active.generation !== identity.generation ||
                 !(active.channel instanceof ReverseSseChannel)
             ) {
                 throw createRemoteError({
@@ -133,15 +164,19 @@ export class ReverseConnections {
 
     disconnect(instance: string): void {
         const active = this.#active.get(instance);
-        if (active === undefined) return;
+        const candidate = this.#candidates.get(instance);
         this.#active.delete(instance);
-        active.channel.close();
+        this.#candidates.delete(instance);
+        candidate?.channel.close();
+        active?.channel.close();
     }
 
     stop(): void {
         this.#stopped = true;
         for (const active of this.#active.values()) active.channel.close();
+        for (const candidate of this.#candidates.values()) candidate.channel.close();
         this.#active.clear();
+        this.#candidates.clear();
     }
 
     #prepareActivation(
@@ -177,9 +212,10 @@ export class ReverseConnections {
             generation: identity.generation,
             transport,
         };
-        this.#active.set(name, active);
+        this.#candidates.set(name, active);
         channel.onClose(() => {
             active.closed = true;
+            if (this.#candidates.get(name) === active) this.#candidates.delete(name);
             if (this.#active.get(name) === active) this.#active.delete(name);
         });
         return active;

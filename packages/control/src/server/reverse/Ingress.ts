@@ -42,9 +42,20 @@ export class ReverseIngress {
     readonly #credentials: ReverseCredentials;
     #publicBaseUrl: string;
     #unregisterRoutes: Array<() => void> = [];
+    #acceptedWss = new WeakMap<ReverseConnectionIdentity["descriptor"], {
+        generation: number;
+        session: string;
+        acceptedThrough: bigint;
+    }>();
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
         noServer: true,
+        handleProtocols: (offered) =>
+            offered.has("devshell-worker-transport.v2")
+                ? "devshell-worker-transport.v2"
+                : offered.has("devshell-worker-transport.v1")
+                    ? "devshell-worker-transport.v1"
+                    : false,
     });
 
     constructor(options: ReverseIngressOptions) {
@@ -97,6 +108,7 @@ export class ReverseIngress {
     stop(): void {
         this.uninstall();
         this.#webSocketServer.close();
+        this.#acceptedWss = new WeakMap();
     }
 
     uninstall(): void {
@@ -133,7 +145,8 @@ export class ReverseIngress {
         try {
             const authentication = await this.#authenticateRequest(request);
             if (
-                !hasWebSocketProtocol(request, "devshell-worker-transport.v1")
+                !hasWebSocketProtocol(request, "devshell-worker-transport.v1") &&
+                !hasWebSocketProtocol(request, "devshell-worker-transport.v2")
             ) {
                 throw createRemoteError({
                     code: runtimeErrorCodes.reverseTransportUnavailable,
@@ -148,20 +161,59 @@ export class ReverseIngress {
                 socket,
                 head,
                 (webSocket) => {
-                    const channel = new WebServerChannel(webSocket as never);
+                    let credentialReplacementAllowed = false;
+                    const channel = new WebServerChannel(
+                        webSocket as never,
+                        webSocket.protocol === "devshell-worker-transport.v2"
+                            ? {
+                                reliableFrames: (session, seq) => {
+                                    const descriptor = authentication.identity.descriptor;
+                                    const generation = authentication.identity.generation;
+                                    const previous = this.#acceptedWss.get(descriptor);
+                                    if (previous !== undefined &&
+                                        generation < previous.generation &&
+                                        !credentialReplacementAllowed)
+                                        throw new Error("Stale reverse generation frame.");
+                                    if (previous !== undefined &&
+                                        previous.session === session &&
+                                        seq <= previous.acceptedThrough)
+                                        return undefined;
+                                    // Only commit after the Channel successfully
+                                    // accepted the bytes. A failed dispatch must
+                                    // be eligible for retransmission.
+                                    return () => this.#acceptedWss.set(descriptor, {
+                                        generation,
+                                        session,
+                                        acceptedThrough: seq,
+                                    });
+                                },
+                            }
+                            : {},
+                    );
+                    channel.onClose((error) => {
+                        if (error !== undefined)
+                            console.warn("Reverse WSS channel closed:", error.message);
+                    });
                     void this.#credentials
                         .runAuthenticated(
                             authentication.identity.descriptor.config.name,
                             authentication.token,
-                            async (credentialReplacement) =>
+                            async (credentialReplacement) => {
+                                // A new credential may legitimately restart the
+                                // Worker generation counter at a lower value.
+                                credentialReplacementAllowed = credentialReplacement;
                                 await this.#connections.activate(
                                     authentication.identity,
                                     "wss",
                                     channel,
                                     { credentialReplacement },
-                                ),
+                                );
+                            },
                         )
-                        .catch(() => channel.close());
+                        .catch((error) => {
+                            console.warn("Reverse WSS activation failed:", error);
+                            channel.close();
+                        });
                 },
             );
         } catch (error) {

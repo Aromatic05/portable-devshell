@@ -7,6 +7,7 @@ import {
 } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
@@ -294,8 +295,17 @@ test(
                     snapshot.snapshot.reverse?.transport === "wss"
                 );
             },
-            () =>
-                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+            () => {
+                let log = "";
+                try {
+                    log = readFileSync(join(workerHome, "logs", "worker.log"), "utf8").slice(-3500);
+                } catch {
+                    log = "(Worker log not created)";
+                }
+                return "worker stdout:\\n" + workerStdout
+                    + "\\nworker stderr:\\n" + workerStderr
+                    + "\\nworker log:\\n" + log;
+            },
         );
 
         const result = await request(

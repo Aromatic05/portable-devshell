@@ -103,14 +103,18 @@ export class Endpoint {
 
     async reconnect(options: {
         preserveExisting?: boolean;
+        signal?: AbortSignal;
         verify?: (connect: (host: Host, port: PortName) => Connection) => Promise<void>;
     } = {}): Promise<void> {
+        options.signal?.throwIfAborted();
         const previous = options.preserveExisting ? this.#gateway : undefined;
         if (previous === undefined) {
             this.disconnect();
-            await this.#connect();
+            await this.#connect(options.signal);
             try {
-                await options.verify?.((host, port) => this.bind(port).connect(host, port));
+                await untilAborted(options.verify?.(
+                    (host, port) => this.bind(port).connect(host, port),
+                ), options.signal);
             } catch (error) {
                 this.disconnect();
                 throw error;
@@ -125,12 +129,13 @@ export class Endpoint {
         try {
             // Do not change the regular Route gateway until the replacement
             // has passed its application handshake. Only verifier RPCs use it.
-            candidate = await this.#openLink(true);
+            candidate = await this.#openLink(true, options.signal);
             const link = candidate;
-            await options.verify?.((host, port) => {
+            await untilAborted(options.verify?.((host, port) => {
                 verifiedHost = host;
                 return this.bind(port).connectVia(host, port, link.codec, link.channel!);
-            });
+            }), options.signal);
+            options.signal?.throwIfAborted();
             if (!this.#links.has(link))
                 throw new Error("Endpoint candidate closed during verification.");
             this.#route.activateGateway(link.codec);
@@ -145,11 +150,12 @@ export class Endpoint {
                     ),
                 );
                 try {
-                    await rpc.request("worker.ping", { __devshellActivatePeer: true });
+                    await rpc.request("worker.ping", { __devshellActivatePeer: true }, options.signal);
                 } finally {
                     rpc.close();
                 }
             }
+            options.signal?.throwIfAborted();
             for (const listener of this.#openListeners) listener();
         } catch (error) {
             if (candidate !== undefined) this.#close(candidate);
@@ -193,6 +199,11 @@ export class Endpoint {
         if (connectChannel === undefined) throw new Error("Endpoint cannot connect.");
         // Retry only transport establishment, never RPC or tool execution.
         const channel = await connectChannelWithRetry(connectChannel, signal);
+        const abort = () => channel.close(
+            signal?.reason instanceof Error ? signal.reason : new Error("Transport connection aborted."),
+        );
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
         const frame = new FrameProtocol(channel, { role: "opener" });
         let codec: EnvelopeCodec;
         try {
@@ -200,6 +211,7 @@ export class Endpoint {
                 new FrameStreamChannel(await frame.open(ENVELOPE_SERVICE)),
             );
         } catch (error) {
+            signal?.removeEventListener("abort", abort);
             frame.close();
             throw error;
         }
@@ -222,9 +234,14 @@ export class Endpoint {
             );
             if (!this.#links.has(link) || (!staged && this.#gateway !== link))
                 throw new Error("Endpoint connection closed during initialization.");
+            // Aborting at this boundary must close the candidate through the
+            // catch path, not leave an unowned Link behind.
+            signal?.throwIfAborted();
         } catch (error) {
             this.#close(link);
             throw error;
+        } finally {
+            signal?.removeEventListener("abort", abort);
         }
         if (!staged)
             for (const listener of this.#openListeners) listener();
@@ -292,3 +309,37 @@ async function waitBeforeReconnect(delayMs: number, signal?: AbortSignal): Promi
 }
 
 export { Connection, Port } from "./route/Route.js";
+
+async function untilAborted<T>(
+    work: Promise<T> | undefined,
+    signal?: AbortSignal,
+): Promise<T | undefined> {
+    if (work === undefined) return undefined;
+    if (signal === undefined) return await work;
+    signal.throwIfAborted();
+    return await new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const abort = () => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            reject(signal.reason ?? new Error("Endpoint verification aborted."));
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        void work.then(
+            (value) => {
+                if (settled) return;
+                settled = true;
+                signal.removeEventListener("abort", abort);
+                resolve(value);
+            },
+            (error: unknown) => {
+                if (settled) return;
+                settled = true;
+                signal.removeEventListener("abort", abort);
+                reject(error);
+            },
+        );
+    });
+}

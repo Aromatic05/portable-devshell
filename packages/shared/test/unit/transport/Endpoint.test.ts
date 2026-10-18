@@ -272,6 +272,96 @@ test("Worker-originated events stay on the old peer until verified cutover", asy
     assert.deepEqual(events, ["before", "during", "after"]);
 });
 
+test("stalled candidate verification aborts and leaves old peer available for a healthy replacement", async (t) => {
+    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const serverRpc = new Rpc(worker.bind("core"), {
+        echo: (value) => value,
+        "worker.ping": () => ({ pong: true }),
+    });
+    const accepts: Array<Promise<() => void>> = [];
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(worker.accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close(); worker.close(); serverRpc.close();
+        await Promise.allSettled(accepts);
+    });
+    await client.connect("worker", "core");
+    const old = new Rpc(await client.connect("worker", "core"));
+    t.after(() => old.close());
+    const signal = AbortSignal.timeout(50);
+    await assert.rejects(
+        client.reconnect({
+            preserveExisting: true,
+            signal,
+            verify: async () => await new Promise<void>(() => undefined),
+        }),
+        (error: unknown) => error === signal.reason,
+    );
+    assert.equal(await old.request("echo", "old"), "old");
+    await client.reconnect({
+        preserveExisting: true,
+        verify: async (connect) => {
+            const rpc = new Rpc(connect("worker", "core"));
+            try { await rpc.request("worker.ping"); } finally { rpc.close(); }
+        },
+    });
+    const replacement = new Rpc(await client.connect("worker", "core"));
+    assert.equal(await replacement.request("echo", "new"), "new");
+    replacement.close();
+});
+
+test("stalled peer cutover acknowledgement aborts without replacing the old gateway", async (t) => {
+    const worker = new Endpoint({ host: "worker", preserveAcceptedPeers: true });
+    const serverRpc = new Rpc(worker.bind("core"), {
+        echo: (value) => value,
+        "worker.ping": (value) =>
+            (value as { __devshellActivatePeer?: boolean } | undefined)?.__devshellActivatePeer
+                ? new Promise(() => undefined)
+                : { pong: true },
+    });
+    const accepts: Array<Promise<() => void>> = [];
+    const client = new Endpoint({
+        host: "control",
+        connectChannel: async () => {
+            const left = new MemoryChannel();
+            const right = new MemoryChannel();
+            left.connect(right);
+            right.connect(left);
+            accepts.push(worker.accept(right));
+            return left;
+        },
+    });
+    t.after(async () => {
+        client.close(); worker.close(); serverRpc.close();
+        await Promise.allSettled(accepts);
+    });
+    await client.connect("worker", "core");
+    const signal = AbortSignal.timeout(50);
+    await assert.rejects(
+        client.reconnect({
+            preserveExisting: true,
+            signal,
+            verify: async (connect) => {
+                const rpc = new Rpc(connect("worker", "core"));
+                try { await rpc.request("worker.ping", undefined, signal); } finally { rpc.close(); }
+            },
+        }),
+        (error: unknown) => error === signal.reason,
+    );
+    const old = new Rpc(await client.connect("worker", "core"));
+    assert.equal(await old.request("echo", "preserved"), "preserved");
+    old.close();
+});
+
 test("accepted Endpoint link retires when its Channel closes", async () => {
     const { client, dispose, right, server } = await endpoints();
     client.disconnect();
@@ -442,6 +532,30 @@ test("Rpc rejects when the remote route is unavailable", async (t) => {
     );
     assert.equal(client.connected, true, "Missing RPC route must not disconnect the shared link");
     assert.deepEqual(await healthyRpc.request("echo", { ok: true }), { ok: true });
+});
+
+test("RPC disconnect exposes uncertain remote outcome and forbids automatic retry", async (t) => {
+    const { client, server, right } = await endpoints();
+    const serverRpc = new Rpc(server.bind("core"), {
+        sideEffect: async () => await new Promise<void>(() => undefined),
+    });
+    const rpc = new Rpc(await client.connect("worker", "core"));
+    t.after(() => {
+        client.close();
+        server.close();
+        serverRpc.close();
+        rpc.close();
+    });
+    const result = rpc.request("sideEffect", { operation: "once" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    right.close(new Error("network blackhole during result return"));
+    await assert.rejects(result, (error: unknown) => {
+        const failure = error as { code?: string; message?: string; retryable?: boolean };
+        assert.equal(failure.code, "rpc.resultUncertain");
+        assert.equal(failure.retryable, false);
+        assert.match(failure.message ?? "", /may have completed/u);
+        return true;
+    });
 });
 
 test("Rpc cancellation owns the cancel write during transport close", async (t) => {

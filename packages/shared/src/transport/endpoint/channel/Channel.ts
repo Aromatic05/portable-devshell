@@ -33,15 +33,18 @@ export abstract class ChannelBase implements Channel {
         return () => this.#closeListeners.delete(listener);
     }
 
-    protected emitData(data: Uint8Array): void {
-        if (this.#closed) return;
+    protected emitData(data: Uint8Array): boolean {
+        if (this.#closed || this.#dataListeners.size === 0) return false;
+        let received = true;
         for (const listener of [...this.#dataListeners]) {
             try {
                 listener(data);
             } catch (error) {
+                received = false;
                 console.warn(asError(error));
             }
         }
+        return received;
     }
 
     protected finish(error?: Error): void {

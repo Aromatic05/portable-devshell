@@ -302,6 +302,9 @@ export interface WebSocketServerLike {
 }
 
 export interface WebServerChannelOptions {
+    /** WSS v2 only: deduplicate acknowledged Worker result frames per instance. */
+    /** Return a commit callback for a new frame, or undefined for a duplicate. */
+    reliableFrames?: (session: string, seq: bigint) => (() => void) | undefined;
     deadConnectionMs?: number;
     heartbeatIntervalMs?: number;
     now?: () => number;
@@ -309,6 +312,9 @@ export interface WebServerChannelOptions {
 
 export class WebServerChannel extends ChannelBase {
     readonly #socket: WebSocketServerLike;
+    readonly #reliableFrames?: WebServerChannelOptions["reliableFrames"];
+    readonly #pendingReliableFrames: Uint8Array[] = [];
+    #reliableSubscribed = false;
     readonly #deadConnectionMs: number;
     readonly #heartbeat: NodeJS.Timeout;
     readonly #now: () => number;
@@ -321,6 +327,7 @@ export class WebServerChannel extends ChannelBase {
     ) {
         super();
         this.#socket = socket;
+        this.#reliableFrames = options.reliableFrames;
         this.#deadConnectionMs =
             options.deadConnectionMs ?? SERVER_DEAD_CONNECTION_MS;
         this.#now = options.now ?? Date.now;
@@ -345,6 +352,14 @@ export class WebServerChannel extends ChannelBase {
             options.heartbeatIntervalMs ?? SERVER_HEARTBEAT_INTERVAL_MS,
         );
         this.#heartbeat.unref();
+    }
+
+    override onData(listener: (data: Uint8Array) => void): () => void {
+        const off = super.onData(listener);
+        this.#reliableSubscribed = true;
+        // Allow FrameProtocol to install onClose as well before admitting frames.
+        queueMicrotask(() => this.#drainReliableFrames());
+        return off;
     }
 
     async write(data: Uint8Array): Promise<void> {
@@ -405,11 +420,54 @@ export class WebServerChannel extends ChannelBase {
             return;
         }
         try {
-            this.emitData(toServerBytes(data));
+            const bytes = toServerBytes(data);
+            if (this.#reliableFrames === undefined) {
+                this.emitData(bytes);
+                return;
+            }
+            // WSS can deliver bytes before FrameProtocol attaches onData.
+            // Never ACK such frames without a consumer; queue a bounded copy.
+            if (this.#pendingReliableFrames.length >= 64)
+                throw new Error("Reverse frame admission queue exhausted.");
+            this.#pendingReliableFrames.push(bytes);
+            this.#drainReliableFrames();
         } catch (error) {
             this.#fail(error);
         }
     };
+
+    #drainReliableFrames(): void {
+        if (!this.#reliableSubscribed || this.closed ||
+            this.#reliableFrames === undefined) return;
+        try {
+            while (this.#pendingReliableFrames.length > 0) {
+                const bytes = this.#pendingReliableFrames[0]!;
+                if (bytes.byteLength <= 28 ||
+                    Buffer.from(bytes.subarray(0, 4)).toString("ascii") !== "DSR2")
+                    throw new Error("Invalid acknowledged reverse frame.");
+                const session = Buffer.from(bytes.subarray(4, 20)).toString("hex");
+                const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                const seq = view.getBigUint64(20, false);
+                if (seq === 0n) throw new Error("Reverse frame sequence must be positive.");
+                const commit = this.#reliableFrames(session, seq);
+                if (commit !== undefined) {
+                    if (!this.emitData(bytes.subarray(28)))
+                        throw new Error("Reverse frame delivery was not accepted.");
+                    commit();
+                }
+                this.#pendingReliableFrames.shift();
+                const sendText = this.#socket as WebSocketServerLike & {
+                    send(data: string, options: { binary: false }, callback: (error?: Error) => void): void;
+                };
+                sendText.send("DSR2:" + session + ":" + seq.toString(),
+                    { binary: false }, (error) => {
+                        if (error != null) this.#fail(error);
+                    });
+            }
+        } catch (error) {
+            this.#fail(error);
+        }
+    }
 
     #heartbeatTick(): void {
         if (this.closed) return;

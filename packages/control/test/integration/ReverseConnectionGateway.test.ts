@@ -99,7 +99,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         assert.equal(instance.supervision.snapshot().reverse?.generation, 1);
 
         const firstClosed = first.closed;
-        const second = connectWorker(port, enrollment.deviceToken, 2);
+        const second = connectWorker(port, enrollment.deviceToken, 2, "v2");
         await second.opened;
         await waitUntil(
             () =>
@@ -109,6 +109,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         );
         await firstClosed;
         assert.equal(instance.supervision.snapshot().reverse?.transport, "wss");
+        assert.ok(second.acks.length > 0, "WSS v2 replies must receive frame ACKs");
 
         const reverseControl = credentials;
         reverseControl.setDisconnectHandler((instanceName) =>
@@ -136,6 +137,27 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             () => instance.supervision.snapshot().reverse?.availability === "offline",
             () => JSON.stringify(instance.supervision.snapshot()),
         );
+
+        // A new Device Code can retain its predecessor until authentication,
+        // permitting a replacement Worker to restart generation 2 at 1.
+        const replacementCode = await credentialStore.createDeviceCode("reverse-test");
+        const replacement = await credentialStore.consumeDeviceCode(replacementCode.deviceCode);
+        const restarted = connectWorker(port, replacement.deviceToken, 1, "v2");
+        await restarted.opened;
+        await waitUntil(
+            () =>
+                instance.supervision.snapshot().reverse?.generation === 1 &&
+                instance.supervision.snapshot().ready === true,
+            () => JSON.stringify({
+                snapshot: instance.supervision.snapshot(),
+                methods: restarted.methods,
+                errors: restarted.errors,
+            }),
+        );
+        assert.ok(restarted.acks.length > 0);
+        assert.equal(await credentialStore.authenticate("reverse-test", rotated.deviceToken), false);
+        connections.disconnect("reverse-test");
+        await restarted.closed;
     } finally {
         ingress.stop();
         await server.stop();
@@ -302,7 +324,9 @@ function connectWorker(
     port: number,
     token: string,
     generation: number,
+    protocol: "v1" | "v2" = "v1",
 ): {
+    acks: string[];
     closed: Promise<{ code: number; reason: string }>;
     errors: string[];
     methods: string[];
@@ -311,9 +335,12 @@ function connectWorker(
 } {
     const methods: string[] = [];
     const errors: string[] = [];
+    const acks: string[] = [];
+    let frameSequence = 0n;
+    const session = Buffer.alloc(16, generation);
     const socket = new WebSocket(
         `ws://127.0.0.1:${port}/base/reverse/v1/connect`,
-        "devshell-worker-transport.v1",
+        protocol === "v2" ? "devshell-worker-transport.v2" : "devshell-worker-transport.v1",
         {
             headers: {
                 Authorization: `Bearer ${token}`,
@@ -325,7 +352,16 @@ function connectWorker(
     const channel = new TestWorkerChannel(
         async (data) =>
             await new Promise<void>((resolve, reject) => {
-                socket.send(data, { binary: true }, (error) =>
+                const frame = protocol === "v2"
+                    ? (() => {
+                        const header = Buffer.alloc(28);
+                        header.write("DSR2", 0, "ascii");
+                        session.copy(header, 4);
+                        header.writeBigUInt64BE(++frameSequence, 20);
+                        return Buffer.concat([header, Buffer.from(data)]);
+                    })()
+                    : data;
+                socket.send(frame, { binary: true }, (error) =>
                     error == null ? resolve() : reject(error),
                 );
             }),
@@ -335,6 +371,10 @@ function connectWorker(
         errors.push(error instanceof Error ? error.message : String(error));
     });
     socket.on("message", (data, isBinary) => {
+        if (!isBinary && protocol === "v2") {
+            acks.push(data.toString());
+            return;
+        }
         assert.equal(isBinary, true);
         channel.emit(
             Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer),
@@ -352,6 +392,7 @@ function connectWorker(
         );
     });
     return {
+        acks,
         closed: new Promise((resolve) =>
             socket.once("close", (code, reason) =>
                 resolve({ code, reason: reason.toString() }),

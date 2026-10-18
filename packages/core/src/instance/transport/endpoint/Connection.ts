@@ -5,6 +5,7 @@ export interface ReverseAttachment {
     credentialReplacement?: boolean;
     generation: number;
     transport: ReverseTransport;
+    signal?: AbortSignal;
 }
 
 export class TransportConnection {

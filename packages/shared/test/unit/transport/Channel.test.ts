@@ -267,19 +267,26 @@ class FakeServerWebSocket extends EventEmitter {
     pingError?: Error;
     sendError?: Error;
     readonly sendCallbacks: Array<(error?: Error) => void> = [];
+    readonly acknowledgements: string[] = [];
     terminated = false;
 
     send(
-        _data: Uint8Array,
-        _options: { binary: true },
+        data: Uint8Array | string,
+        options: { binary: boolean },
         callback: (error?: Error) => void,
     ): void {
+        if (!options.binary && typeof data === "string") this.acknowledgements.push(data);
         if (this.sendError !== undefined) throw this.sendError;
         if (this.deferSend) {
             this.sendCallbacks.push(callback);
             return;
         }
-        callback();
+        if (!options.binary) {
+            // ws invokes successful send callbacks with null, not only undefined.
+            (callback as (error: Error | null) => void)(null);
+        } else {
+            callback();
+        }
     }
 
     completeSend(error?: Error): void {
@@ -384,6 +391,69 @@ test("WebServerChannel owns shared send, close, heartbeat, and binary-frame life
         "ping failed",
     );
     assert.equal(heartbeatSocket.terminated, true);
+});
+
+test("acknowledged WSS v2 frames deduplicate across sockets and acknowledge replay", () => {
+    const accepted = new Map<string, bigint>();
+    const received: string[] = [];
+    const reliableFrames = (session: string, seq: bigint): (() => void) | undefined => {
+        const old = accepted.get(session) ?? 0n;
+        if (seq <= old) return undefined;
+        return () => { accepted.set(session, seq); };
+    };
+    const makeFrame = (seq: bigint, text: string): Buffer => {
+        const header = Buffer.alloc(28);
+        header.write("DSR2", 0, "ascii");
+        Buffer.alloc(16, 7).copy(header, 4);
+        header.writeBigUInt64BE(seq, 20);
+        return Buffer.concat([header, Buffer.from(text)]);
+    };
+    const one = new FakeServerWebSocket();
+    const first = new WebServerChannel(one, { reliableFrames });
+    first.onData((frame) => received.push(Buffer.from(frame).toString()));
+    one.message(makeFrame(1n, "first"), true);
+    one.message(makeFrame(1n, "first"), true);
+    one.message(makeFrame(2n, "second"), true);
+    assert.deepEqual(received, ["first", "second"]);
+    assert.equal(one.acknowledgements.length, 3);
+    first.close();
+
+    const two = new FakeServerWebSocket();
+    const replacement = new WebServerChannel(two, { reliableFrames });
+    replacement.onData((frame) => received.push(Buffer.from(frame).toString()));
+    two.message(makeFrame(2n, "second"), true);
+    two.message(makeFrame(3n, "third"), true);
+    assert.deepEqual(received, ["first", "second", "third"]);
+    assert.equal(two.acknowledgements.length, 2);
+    assert.match(two.acknowledgements[0]!, /:2$/u);
+    replacement.close();
+});
+
+test("WSS v2 does not acknowledge a frame until FrameProtocol subscribes", async () => {
+    const socket = new FakeServerWebSocket();
+    const admitted = new Set<string>();
+    const channel = new WebServerChannel(socket, {
+        reliableFrames: (session, seq) => {
+            const key = session + ":" + String(seq);
+            return admitted.has(key) ? undefined : () => { admitted.add(key); };
+        },
+    });
+    const frame = Buffer.alloc(32);
+    frame.write("DSR2", 0, "ascii");
+    Buffer.alloc(16, 3).copy(frame, 4);
+    frame.writeBigUInt64BE(1n, 20);
+    frame.write("data", 28, "ascii");
+    socket.message(frame, true);
+    assert.equal(socket.acknowledgements.length, 0);
+    const received: string[] = [];
+    channel.onData((value) => received.push(Buffer.from(value).toString()));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, ["data"]);
+    assert.equal(socket.acknowledgements.length, 1);
+    socket.message(frame, true);
+    assert.deepEqual(received, ["data"], "replayed message may be acknowledged, not redelivered");
+    assert.equal(socket.acknowledgements.length, 2);
+    channel.close();
 });
 
 test("WebServerChannel isolates late close listener failures", async () => {

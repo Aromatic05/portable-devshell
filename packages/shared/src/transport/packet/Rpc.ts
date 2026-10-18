@@ -1,7 +1,11 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
 import { createTransportId, type Address } from "../endpoint/Address.js";
 import type { Channel } from "../endpoint/channel/Channel.js";
-import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../Error.js";
+import {
+    createRemoteError,
+    TRANSPORT_METHOD_NOT_FOUND_CODE,
+    TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+} from "../Error.js";
 import type { Message } from "./Packet.js";
 
 export interface RpcError {
@@ -148,7 +152,19 @@ export class Rpc {
         const failure = error ?? new Error("RPC connection closed.");
         for (const controller of this.#active.values())
             controller.abort(failure);
-        for (const pending of this.#pending.values()) pending.reject(failure);
+        if (this.#pending.size > 0) {
+            // Once an RPC was sent, a transport close cannot prove the
+            // remote handler never executed. Never offer an automatic retry
+            // of a potentially side-effecting call after losing its result.
+            const uncertain = createRemoteError({
+                code: TRANSPORT_RPC_RESULT_UNCERTAIN_CODE,
+                cause: failure,
+                message: "RPC result is uncertain: the connection closed before its reply. " +
+                    "The remote operation may have completed; do not retry it automatically.",
+                retryable: false,
+            });
+            for (const pending of this.#pending.values()) pending.reject(uncertain);
+        }
         this.#active.clear();
         this.#pending.clear();
     }

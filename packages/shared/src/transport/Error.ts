@@ -4,6 +4,7 @@ import type { JsonValue } from "../types/Json.js";
 // a domain catalog: they describe transport mechanics, not a bounded context's
 // failure vocabulary.
 export const TRANSPORT_METHOD_NOT_FOUND_CODE = "method_not_found";
+export const TRANSPORT_RPC_RESULT_UNCERTAIN_CODE = "rpc.resultUncertain";
 export const TRANSPORT_PROTOCOL_INVALID_FRAME_CODE = "protocol.invalidFrame";
 export const TRANSPORT_PROTOCOL_FRAME_TOO_LARGE_CODE = "protocol.frameTooLarge";
 export const TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE =

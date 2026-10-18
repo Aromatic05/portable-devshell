@@ -46,15 +46,16 @@ export class WorkerProtocolClient {
         this.#workerHost = workerHost;
     }
 
-    async ping(connect?: VerificationConnect): Promise<WorkerPingResult> {
+    async ping(connect?: VerificationConnect, signal?: AbortSignal): Promise<WorkerPingResult> {
         return asObjectResult<WorkerPingResult>(
-            await this.#request("core", "worker.ping", {}, undefined, connect),
+            await this.#request("core", "worker.ping", {}, signal, connect),
         );
     }
 
     async handshake(
         params: WorkerHandshakeParams,
         connect?: VerificationConnect,
+        signal?: AbortSignal,
     ): Promise<WorkerHandshakeResult> {
         const result = asObjectResult<
             Omit<WorkerHandshakeResult, "protocolVersion"> & {
@@ -65,7 +66,7 @@ export class WorkerProtocolClient {
                 "core",
                 "worker.handshake",
                 params as unknown as JsonValue,
-                undefined,
+                signal,
                 connect,
             ),
         );
