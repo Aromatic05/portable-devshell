@@ -11,6 +11,7 @@ import {
 export async function openAgentToolSession(
     context: ExtensionContext,
     target: AgentWorkerTarget,
+    ctxId?: string,
 ): Promise<AgentToolSession> {
     const workers = context.capabilities.workerDelegate;
     if (workers === undefined)
@@ -18,6 +19,7 @@ export async function openAgentToolSession(
             "Agent Extension requires the workerDelegate capability.",
         );
     const worker = await workers.openSession({
+        ...(ctxId === undefined ? {} : { ctxId }),
         instance: target.instance,
         workspace: target.workspace,
     });

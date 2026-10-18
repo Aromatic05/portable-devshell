@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
-import type { ExtensionWorkerExecuteCapability } from "@portable-devshell/extension/worker";
+import type { ExtensionWorkerExecuteCapability, ExtensionWorkerOpenInput } from "@portable-devshell/extension/worker";
 import type { CliModelCommandInvocationContext, CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
 import { createMailingHook } from "../../src/mailing/Hook.ts";
 import { executeMemoryModelCommand, executeMemoryNativeCommand } from "../../src/mailing/Command.ts";
@@ -111,6 +111,7 @@ class FakeWorkspace {
 
 function fixture() {
     const fs = new FakeWorkspace();
+    const openedTargets: ExtensionWorkerOpenInput[] = [];
     const active = new Set(["ctx-a", "ctx-b", "ctx-c"]);
     const notices: Array<{ ctxId: string; message: string }> = [];
     const errors: unknown[] = [];
@@ -129,9 +130,10 @@ function fixture() {
         },
     } as ExtensionContextObserveCapability;
     const worker = {
-        async openSession(target: { instance: string; workspace: string }) {
+        async openSession(target: ExtensionWorkerOpenInput) {
             assert.equal(target.instance, instance);
             assert.equal(target.workspace, workspace);
+            openedTargets.push({ ...target });
             return {
                 instance, workspace,
                 environment: { homeDirectory: "/testspace", platform: { arch: "x64", os: "linux" } },
@@ -155,7 +157,7 @@ function fixture() {
         pollMs: 3_600_000,
     });
     return {
-        fs, notices, errors, active, mailing, worker, contexts,
+        fs, notices, errors, active, mailing, worker, contexts, openedTargets,
         failNoticeOnce() { failNextNotice = true; },
     };
 }
@@ -180,6 +182,15 @@ test("memory list is a single shallow directory query, without reading Mailing s
     assert.deepEqual(result, { memories: [A, B].sort() });
     assert.deepEqual(fs.calls, ["file_glob"]);
     assert.deepEqual(fs.globDepths, [1]);
+});
+
+test("Mailing binds direct Memory operations to their Context but keeps background scans independent", async (t) => {
+    const { mailing, openedTargets } = fixture();
+    t.after(async () => mailing.close());
+    await mailing.status({ instance, workspace, ctxId: "ctx-a" });
+    await mailing.list({ instance, workspace, ctxId: "ctx-a" });
+    await mailing.scan({ instance, workspace });
+    assert.deepEqual(openedTargets.map((target) => target.ctxId), ["ctx-a", "ctx-a", undefined]);
 });
 
 test("Memory bindings derive Mailing identities and Subject notifications are idempotent", async (t) => {

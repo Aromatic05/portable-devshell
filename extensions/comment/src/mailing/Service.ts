@@ -16,6 +16,8 @@ interface MailingNotice {
 }
 
 export interface MailingTarget {
+    /** Direct Memory calls have a parent Context; background scans do not. */
+    ctxId?: string;
     instance: string;
     workspace: string;
 }

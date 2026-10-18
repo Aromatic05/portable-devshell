@@ -68,10 +68,12 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
 
 test("Agent Extension start opens one canonical Worker session and owns it until stop", async () => {
     const events: string[] = [];
+    const openedCtxIds: Array<string | undefined> = [];
     const starts: AgentProviderStartContext[] = [];
     const context = extensionContext({
         canonicalWorkspace: "/repo/canonical",
         events,
+        openedCtxIds,
     });
     const provider = providerFixture(starts, events);
     const runtime = new AgentExtensionRuntime(context, {
@@ -81,6 +83,7 @@ test("Agent Extension start opens one canonical Worker session and owns it until
     const record = await runtime.start({ target: "worker-a:/repo/requested" });
     assert.equal(record.target.instance, "worker-a");
     assert.equal(record.target.workspace, "/repo/canonical");
+    assert.deepEqual(openedCtxIds, [undefined]);
     assert.deepEqual(events.slice(0, 2), [
         "worker.open:worker-a:/repo/requested:caller",
         `provider.start:${record.agentId}:/state/extensions/agent`,
@@ -103,6 +106,20 @@ test("Agent Extension start opens one canonical Worker session and owns it until
         `provider.stop:${record.agentId}`,
         "worker.close:/repo/canonical",
     ]);
+});
+
+test("Agent Extension passes its model invocation parent Context to the Worker session", async () => {
+    const events: string[] = [];
+    const openedCtxIds: Array<string | undefined> = [];
+    const runtime = new AgentExtensionRuntime(extensionContext({ events, openedCtxIds }), {
+        providers: [providerFixture([], events)],
+    });
+    const record = await runtime.start(
+        { target: "worker-a:/repo" },
+        { ctxId: "ctx-model" },
+    );
+    assert.deepEqual(openedCtxIds, ["ctx-model"]);
+    await runtime.stop({ agentId: record.agentId });
 });
 
 test("Agent Extension startup failure closes the already acquired Worker session", async () => {
@@ -467,6 +484,7 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
 function extensionContext(options: {
     canonicalWorkspace?: string;
     events: string[];
+    openedCtxIds?: Array<string | undefined>;
     registrations?: Array<{ binding: unknown; id: string; pointId: string }>;
     workerClosures?: Map<string, () => void>;
 }): ExtensionContext {
@@ -508,6 +526,7 @@ function extensionContext(options: {
             },
             workerDelegate: {
                 async openSession(input) {
+                    options.openedCtxIds?.push(input.ctxId);
                     options.events.push(
                         `worker.open:${input.instance ?? ""}:${input.workspace}:caller`,
                     );

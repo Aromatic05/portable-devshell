@@ -15,7 +15,7 @@ export interface AgentModelRuntimePort {
     list(): AgentHostRecord[];
     prompt(value: ExtensionJsonValue | undefined): Promise<void>;
     reload(value: ExtensionJsonValue | undefined): Promise<void>;
-    start(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord>;
+    start(value: ExtensionJsonValue | undefined, options?: { ctxId?: string }): Promise<AgentHostRecord>;
     steer(value: ExtensionJsonValue | undefined): Promise<void>;
     stop(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord>;
     waitForIdle(value: ExtensionJsonValue | undefined): Promise<void>;
@@ -153,7 +153,7 @@ async function start(
     const record = await runtime.start({
         ...(provider === undefined ? {} : { provider }),
         target: `${context.instance}:${context.workspace}`,
-    });
+    }, context.ctxId === undefined ? undefined : { ctxId: context.ctxId });
     if (!inScope(record, context)) {
         await runtime.stop({ agentId: record.agentId }).catch(() => undefined);
         throw new Error(

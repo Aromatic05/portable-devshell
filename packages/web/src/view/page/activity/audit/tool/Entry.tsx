@@ -96,7 +96,9 @@ export function ToolCallEntry({
                     <span>
                         {workspaceFolderName(call.workspace)} · {call.instance}
                     </span>
-                    <span>ctx {call.ctxId ?? "unscoped"}</span>
+                    <span>{call.ctxId === undefined
+                        ? `${call.extensionId === undefined ? call.source : `extension ${call.extensionId}`} · no Context`
+                        : `ctx ${call.ctxId}`}</span>
                     <span className={`result ${toolCallResult(call)}`}>
                         {call.status}
                     </span>
@@ -272,8 +274,18 @@ function ToolCallDetails({
                 </div>
                 <div>
                     <dt>Context</dt>
-                    <dd>{call.ctxId ?? "unscoped"}</dd>
+                    <dd>{call.ctxId ?? "Not bound"}</dd>
                 </div>
+                <div>
+                    <dt>Source</dt>
+                    <dd>{call.source}</dd>
+                </div>
+                {call.extensionId === undefined ? null : (
+                    <div>
+                        <dt>Extension</dt>
+                        <dd>{call.extensionId}</dd>
+                    </div>
+                )}
                 <div>
                     <dt>Workspace</dt>
                     <dd>{call.workspace ?? "-"}</dd>

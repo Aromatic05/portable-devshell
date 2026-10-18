@@ -199,6 +199,17 @@ export class ControlFactory {
                 engine: configEngine,
                 instances: instanceEditor,
             });
+            const validateWorkerContext = async (
+                ctxId: string,
+                instance: string,
+                workspace: string,
+            ): Promise<void> => {
+                const record = await contexts.api.registry.validateForInstance(ctxId, instance);
+                if (!record.environments.some((environment) =>
+                    environment.instance === instance && environment.workspace === workspace)) {
+                    throw new Error("Worker Context is not bound to the selected Instance and Workspace.");
+                }
+            };
             const extensions = createExtensionRuntime({
                 configRegistry: options.config.registry,
                 pathOptions: {
@@ -319,6 +330,7 @@ export class ControlFactory {
                         extensionId,
                         instances: options.instances.registry,
                         recording: "caller",
+                        validateContext: validateWorkerContext,
                     }),
                 workerExecuteFactory: ({ allowed, extensionId }) =>
                     new ExtensionWorkerCapabilityControl({
@@ -326,6 +338,7 @@ export class ControlFactory {
                         extensionId,
                         instances: options.instances.registry,
                         recording: "host",
+                        validateContext: validateWorkerContext,
                     }),
             });
             extensionsOwner = extensions;

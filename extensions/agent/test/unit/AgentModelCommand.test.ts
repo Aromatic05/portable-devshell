@@ -10,6 +10,7 @@ import {
 
 function invocation() {
     return {
+        ctxId: "ctx-model",
         context: {
             async instanceReference() {
                 return { current: true };
@@ -60,8 +61,9 @@ function fixtures(events: string[]) {
         async reload(value) {
             events.push(`reload:${(value as { agentId: string }).agentId}`);
         },
-        async start(value) {
+        async start(value, options) {
             events.push(`start:${JSON.stringify(value)}`);
+            events.push(`parent:${options?.ctxId ?? "none"}`);
             const target = (value as { target: string }).target;
             const delimiter = target.indexOf(":");
             const created = record(
@@ -106,6 +108,7 @@ test("Agent model start is pinned to the authoritative instance/workspace", asyn
         events[0],
         'start:{"provider":"pi","target":"worker-a:/repo"}',
     );
+    assert.equal(events[1], "parent:ctx-model");
 });
 
 test("Agent model lifecycle cannot control an Agent outside the current Context", async () => {

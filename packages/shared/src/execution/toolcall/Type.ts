@@ -34,6 +34,7 @@ export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
     ctxId?: string;
+    extensionId?: string;
     workspace?: string;
     principal?: string;
     externalBindings?: readonly ToolCallExternalBinding[];
@@ -63,6 +64,7 @@ export interface ToolCallHookValue {
 export interface ToolCallRecord {
     callId: string;
     completedAt?: string;
+    extensionId?: string;
     error?: string;
     executionCompleted?: boolean;
     exitCode?: number | null;

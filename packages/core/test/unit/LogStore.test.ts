@@ -600,6 +600,22 @@ test("ToolCallHistory persists post-execution failure metadata", async () => {
     assert.equal(records[0]?.failureStage, "outboundHook");
 });
 
+test("ToolCallHistory persists the originating Extension without fabricating a Context", async () => {
+    const records: ToolCallRecord[] = [];
+    const history = new ToolCallHistory(asInstanceName("extension-audit"), {
+        async append(record) { records.push(record); },
+        hasCall() { return false; },
+        readFailureSummary() { return { count: 0 }; },
+        readQuery() { return records; },
+    });
+    await history.started("scan-1", "file_read", "{}", {
+        extensionId: "comment", source: "extension", workspace: "/repo",
+    }, "2026-10-18T00:00:00.000Z");
+    await history.completed("scan-1", "2026-10-18T00:00:01.000Z");
+    assert.equal(records[0]?.extensionId, "comment");
+    assert.equal(records[0]?.ctxId, undefined);
+});
+
 test("ToolCallHistory keeps active calls when bounded history is already full", async () => {
     const instanceName = asInstanceName("active-first-history");
     const persisted = ["old", "new"].map((callId, index): ToolCallRecord => ({

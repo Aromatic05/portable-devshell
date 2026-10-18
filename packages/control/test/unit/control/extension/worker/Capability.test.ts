@@ -8,6 +8,8 @@ import { ExtensionWorkerCapabilityControl } from "../../../../../src/extension/a
 import { InstanceRegistry } from "../../../../../src/instance/Registry.ts";
 
 interface WorkerCall {
+    ctxId?: string;
+    extensionId?: string;
     input: JsonValue;
     operationId?: string;
     recording?: "host" | "caller";
@@ -60,6 +62,8 @@ function workerInstance(name = "worker-a") {
                 recording?: "host" | "caller",
             ): Promise<JsonValue> {
                 calls.push({
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
                     input,
                     operationId: context.operationId,
                     recording,
@@ -124,6 +128,54 @@ test("Extension Worker execute and delegate use the Instance ToolCall pipeline w
     assert.equal(worker.opened.length, 2);
     assert.deepEqual(new Set(worker.released), new Set(worker.opened));
     await assert.rejects(execute.openSession({ workspace: "/repo" }), /closed/u);
+});
+
+test("Extension Worker binds ToolCalls to a validated Context without inventing one for independent calls", async () => {
+    const worker = workerInstance();
+    const verified: string[] = [];
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]),
+        recording: "caller",
+        validateContext: async (ctxId, instance, workspace) => {
+            verified.push(`${ctxId}:${instance}:${workspace}`);
+            if (ctxId !== "ctx-valid") throw new Error("Context is not bound to this Workspace.");
+        },
+    });
+    const bound = await capability.openSession({
+        ctxId: "ctx-valid", instance: "worker-a", workspace: "/repo",
+    });
+    const independent = await capability.openSession({ workspace: "/repo" });
+    await bound.callTool("file_read", { path: "associated" });
+    await independent.callTool("file_read", { path: "independent" });
+    assert.deepEqual(verified, ["ctx-valid:worker-a:/canonical/repo"]);
+    assert.deepEqual(worker.calls.map((call) => call.ctxId), ["ctx-valid", undefined]);
+    assert.deepEqual(worker.calls.map((call) => call.extensionId), ["agent", "agent"]);
+    await assert.rejects(
+        capability.openSession({ ctxId: "ctx-other", instance: "worker-a", workspace: "/repo" }),
+        /not bound/u,
+    );
+    assert.equal(worker.released.length, 1, "invalid Context releases the pending Worker session");
+    assert.equal(worker.opened.length, 3);
+    await capability.closeAll();
+    assert.deepEqual(new Set(worker.released), new Set(worker.opened));
+});
+
+test("Extension Worker does not accept a Context without host validation", async () => {
+    const worker = workerInstance();
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]),
+        recording: "caller",
+    });
+    await assert.rejects(
+        capability.openSession({ ctxId: "ctx-unchecked", workspace: "/repo" }),
+        /cannot be validated/u,
+    );
+    assert.deepEqual(worker.released, worker.opened);
+    await capability.closeAll();
 });
 
 test("Extension Worker sessions abort ongoing calls when their Instance retires", async () => {

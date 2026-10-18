@@ -175,6 +175,21 @@ function renderAudit({
 }
 
 describe("Audit", () => {
+    it("identifies independent Extension calls by source rather than fabricating a Context", () => {
+        const { container } = renderAudit({
+            toolCalls: {
+                alpha: [{ ...alphaCall, callId: "call-independent", ctxId: undefined, extensionId: "comment", source: "extension" }],
+                beta: [],
+            },
+        });
+        expect(screen.getByText("extension comment · no Context")).toBeInTheDocument();
+        expect(screen.queryByText(/ctx unscoped/u)).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText("bash_run", { selector: "strong" }).closest("summary")!);
+        expect(container.querySelector(".activity-detail")).toHaveTextContent("ContextNot bound");
+        expect(container.querySelector(".activity-detail")).toHaveTextContent("Sourceextension");
+        expect(container.querySelector(".activity-detail")).toHaveTextContent("Extensioncomment");
+    });
+
     it("keeps pending approval actions on the matching Tool Call card", async () => {
         const decideTool = vi.fn(async () => true);
         renderAudit({

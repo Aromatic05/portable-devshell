@@ -33,6 +33,8 @@ export interface ExtensionWorkerEnvironment {
 }
 
 export interface ExtensionWorkerOpenInput {
+    /** Optional parent Context; the host validates its Instance/Workspace binding. */
+    ctxId?: string;
     instance?: string;
     workspace: string;
 }

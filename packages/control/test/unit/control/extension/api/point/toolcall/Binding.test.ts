@@ -348,6 +348,34 @@ test("ToolCall Sandbox rewrites preserve Host-owned OAuth and OpenAI session aut
     runtime.close();
 });
 
+test("ToolCall rewrites cannot forge the originating Extension id", async () => {
+    const runtime = createToolCallRuntime({
+        resolveTarget: () => ({
+            async dispatch(request) {
+                assert.equal(request.value.context.extensionId, "comment");
+                return request.value.payload;
+            },
+        }),
+    });
+    const binding = new ToolCallExtensionBinding(host({
+        rewrites: [{
+            hook: "100-sandbox",
+            id: "sandbox",
+            binding: async (input) => {
+                assert.equal("extensionId" in input.value.context, false);
+                return { ...input.value, context: { ...input.value.context, extensionId: "forged" } };
+            },
+        }],
+    }) as never);
+    const uninstall = binding.install(runtime.hooks);
+    const result = await runtime.api.call("instance-a", "file_read", { path: "README.md" }, {
+        source: "extension", extensionId: "comment",
+    });
+    assert.deepEqual(result, { path: "README.md" });
+    uninstall();
+    runtime.close();
+});
+
 test("ToolCall binding holds exact registration leases for the call", async () => {
     const releases: string[] = [];
     const runtime = createToolCallRuntime({

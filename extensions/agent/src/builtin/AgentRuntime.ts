@@ -60,11 +60,12 @@ export class AgentExtensionRuntime {
 
     async start(
         value: ExtensionJsonValue | undefined,
+        options?: { ctxId?: string },
     ): Promise<AgentHostRecord> {
         const input = readStartInput(value);
         const requested = parseAgentWorkerTarget(input.target);
         const provider = await this.#selectProvider(input.provider);
-        const tools = await openAgentToolSession(this.#context, requested);
+        const tools = await openAgentToolSession(this.#context, requested, options?.ctxId);
         return await this.#host.start({
             provider,
             target: tools.target,

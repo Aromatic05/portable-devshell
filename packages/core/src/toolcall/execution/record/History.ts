@@ -11,6 +11,7 @@ import type { AuditToolCalls, AuditToolCallFailureSummary } from "../../../audit
 
 interface ActiveToolCall {
     callId: string;
+    extensionId?: string;
     inputSummary: string;
     input?: JsonValue;
     requestId?: string;
@@ -54,6 +55,7 @@ export class ToolCallHistory {
     ): Promise<void> {
         this.#activeCalls.set(callId, {
             callId,
+            ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),
             inputSummary,
             input,
             requestId: context.requestId,

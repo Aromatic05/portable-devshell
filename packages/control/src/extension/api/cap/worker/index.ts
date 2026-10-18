@@ -20,6 +20,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
     readonly #recording: "host" | "caller";
+    readonly #validateContext?: (ctxId: string, instance: string, workspace: string) => Promise<void>;
     readonly #sessions = new Set<ExtensionWorkerSessionControl>();
     readonly #opening = new Set<{ instance: string; promise: Promise<ExtensionWorkerSession> }>();
     readonly #retiring = new Set<string>();
@@ -31,11 +32,13 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
         extensionId: string;
         instances: InstanceRegistry;
         recording: "host" | "caller";
+        validateContext?: (ctxId: string, instance: string, workspace: string) => Promise<void>;
     }) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
         this.#recording = options.recording;
+        this.#validateContext = options.validateContext;
     }
 
     async openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
@@ -44,7 +47,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
         if (this.#closed)
             throw new Error(`Extension ${this.#extensionId} Worker capability is closed.`);
         const instance = this.#resolve(input.instance);
-        const promise = this.#open(instance, input.workspace);
+        const promise = this.#open(instance, input);
         const pending = { instance: instance.config.name, promise };
         this.#opening.add(pending);
         try {
@@ -91,14 +94,26 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
         return available[0]!;
     }
 
-    async #open(instance: Instance, workspace: string): Promise<ExtensionWorkerSession> {
+    async #open(instance: Instance, input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
         const sessionId = randomUUID();
-        const opened = await instance.openToolSession(workspace, sessionId);
+        const opened = await instance.openToolSession(input.workspace, sessionId);
+        try {
+            if (input.ctxId !== undefined) {
+                if (this.#validateContext === undefined)
+                    throw new Error("Worker Context binding cannot be validated.");
+                await this.#validateContext(input.ctxId, instance.config.name, opened.workspace);
+            }
+        } catch (error) {
+            await instance.closeToolSession(sessionId);
+            throw error;
+        }
         if (this.#closed || this.#retiring.has(instance.config.name) || !instance.lifecycle.active) {
             await instance.closeToolSession(sessionId);
             throw new Error(`Worker Instance ${instance.config.name} retired while opening a session.`);
         }
         const session = new ExtensionWorkerSessionControl({
+            ctxId: input.ctxId,
+            extensionId: this.#extensionId,
             instance,
             opened,
             onClosed: (closed) => this.#sessions.delete(closed),
@@ -117,6 +132,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
     readonly workspace: string;
     readonly #instance: Instance;
     readonly #onClosed: (session: ExtensionWorkerSessionControl) => void;
+    readonly #ctxId?: string;
+    readonly #extensionId: string;
     readonly #recording: "host" | "caller";
     readonly #sessionId: string;
     readonly #tools: readonly ExtensionWorkerToolDefinition[];
@@ -128,6 +145,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
     #closePromise?: Promise<void>;
 
     constructor(options: {
+        ctxId?: string;
+        extensionId: string;
         instance: Instance;
         opened: Awaited<ReturnType<Instance["openToolSession"]>>;
         onClosed(session: ExtensionWorkerSessionControl): void;
@@ -143,6 +162,8 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         this.workspace = options.opened.workspace;
         this.#tools = options.opened.tools;
         this.#onClosed = options.onClosed;
+        this.#ctxId = options.ctxId;
+        this.#extensionId = options.extensionId;
         this.#recording = options.recording;
         this.#sessionId = options.sessionId;
     }
@@ -178,7 +199,9 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
             input as JsonValue,
             {
                 source: "extension",
+                extensionId: this.#extensionId,
                 workspace: this.workspace,
+                ...(this.#ctxId === undefined ? {} : { ctxId: this.#ctxId }),
                 ...(options.operationId === undefined ? {} : { operationId: options.operationId }),
             },
             signal,

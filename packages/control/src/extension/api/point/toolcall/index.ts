@@ -173,12 +173,13 @@ export class ToolCallExtensionBinding {
 }
 
 function extensionValue(value: Readonly<ToolCallHookValue>): ToolCallValue {
-    // OAuth identity and external session authority belong to the Host,
+    // OAuth identity, Extension origin, and external session authority belong to the Host,
     // not to the Extension's rewritable ToolCall context.
     const {
         principal: _principal,
         externalBindings: _externalBindings,
         contextMode: _contextMode,
+        extensionId: _extensionId,
         ...context
     } = value.context;
     return {
@@ -197,6 +198,7 @@ function hookValue(
         principal: _principal,
         externalBindings: _externalBindings,
         contextMode: _contextMode,
+        extensionId: _extensionId,
         ...context
     } = value.context as ToolCallHookValue["context"];
     return {
@@ -211,6 +213,9 @@ function hookValue(
             ...(original.contextMode === undefined
                 ? {}
                 : { contextMode: original.contextMode }),
+            ...(original.extensionId === undefined
+                ? {}
+                : { extensionId: original.extensionId }),
         },
         kind: value.kind,
         payload: value.payload as JsonValue,
