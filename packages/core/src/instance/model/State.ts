@@ -15,17 +15,19 @@ import {
 
 import type { ApprovalRuntime } from "../../approval/Api.js";
 import { createApprovalRuntime } from "../../approval/index.js";
-import { registerApprovalToolCallReview } from "../../approval/execution/ToolCallReview.js";
+import { registerApprovalToolCallReview } from "../../approval/Public.js";
 import type { AuditRuntime } from "../../audit/Api.js";
 import type { TaskRuntime } from "../../task/Api.js";
 import { createTaskRuntime } from "../../task/index.js";
-import { installTodoTools } from "../../task/todo/tool/Runtime.js";
-import { todoToolDefinitions } from "../../task/todo/tool/Definition.js";
+import {
+    installTodoTools,
+    installWaitToolCallRewrite,
+    todoToolDefinitions,
+} from "../../task/Public.js";
 import { mcpAppActionDefinition, mcpAppReentryDefinition, mcpAppOpenDefinition } from "../mcpapp/Definition.js";
 import { installMcpAppOpen } from "../mcpapp/Open.js";
 import { installMcpAppAction } from "../mcpapp/index.js";
 import { installMcpAppReentry } from "../mcpapp/Reentry.js";
-import { installWaitToolCallRewrite } from "../../task/wait/Runtime.js";
 import type { TerminalRuntime } from "../../terminal/Api.js";
 import { createTerminalRuntime } from "../../terminal/index.js";
 import type {

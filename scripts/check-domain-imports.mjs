@@ -78,7 +78,6 @@ const rules = [
 
 const coreDomains = ["approval", "audit", "instance", "task", "terminal", "toolcall"];
 for (const owner of coreDomains) {
-    if (owner === "instance") continue;
     rules.push({
         name: `${owner}-uses-domain-public-entries`,
         roots: [domain(`packages/core/src/${owner}`)],
@@ -88,9 +87,16 @@ for (const owner of coreDomains) {
                     target === owner ||
                     !under(candidate, domain(`packages/core/src/${target}`))
                 ) return false;
-                const entryFile = entry.typeOnly ? "Api" : "Public";
-                return candidate !== domain(
-                    `packages/core/src/${target}/${entryFile}`,
+                const entryFiles = entry.typeOnly
+                    ? ["Api"]
+                    : owner === "instance"
+                      ? ["index", "Public"]
+                      : ["Public"];
+                return !entryFiles.some(
+                    (entryFile) =>
+                        candidate === domain(
+                            `packages/core/src/${target}/${entryFile}`,
+                        ),
                 );
             }),
     });

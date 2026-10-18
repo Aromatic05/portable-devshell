@@ -17,10 +17,9 @@ import {
     type ToolCallProvenanceApi,
 } from "@portable-devshell/shared";
 
-import { createApprovalRouteModule } from "../approval/Route.js";
-import { createGoalTaskRouteModule } from "../task/goal/Route.js";
-import { createTodoTaskRouteModule } from "../task/todo/Route.js";
-import { createTerminalRouteModule } from "../terminal/Route.js";
+import { createApprovalRouteModule } from "../approval/Public.js";
+import { createGoalTaskRouteModule, createTodoTaskRouteModule } from "../task/Public.js";
+import { createTerminalRouteModule } from "../terminal/Public.js";
 import { ProcessInteractiveSession } from "./runtime/execution/Interactive.js";
 import type { ProcessSubscriptionManager } from "@portable-devshell/shared";
 import type { Instance } from "./model/Instance.js";

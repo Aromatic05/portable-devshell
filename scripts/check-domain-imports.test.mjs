@@ -42,6 +42,48 @@ test("domain import checker rejects core domain private imports and toolcall-to-
     }
 });
 
+test("instance may compose domain runtimes and public hooks but not import private implementations", async () => {
+    const instanceFixture = await mkdtemp(
+        join(root, "packages/core/src/instance/.domain-check-"),
+    );
+
+    try {
+        await writeFile(
+            join(instanceFixture, "Allowed.ts"),
+            [
+                'import { createTaskRuntime } from "../../task/index.js";',
+                'import { installTodoTools } from "../../task/Public.js";',
+                'import type { TaskRuntime } from "../../task/Api.js";',
+                "",
+            ].join("\n"),
+        );
+        await writeFile(
+            join(instanceFixture, "Rejected.ts"),
+            [
+                'import { installTodoTools } from "../../task/todo/tool/Runtime.js";',
+                'import type { TaskRuntime } from "../../task/index.js";',
+                "",
+            ].join("\n"),
+        );
+
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+        assert.equal(result.status, 1);
+        const violations = result.stderr.trim().split("\n");
+        assert.equal(violations.length, 2);
+        assert.ok(violations.every((line) =>
+            line.includes("instance-uses-domain-public-entries") &&
+            line.includes("Rejected.ts"),
+        ));
+        assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
+    } finally {
+        await rm(instanceFixture, { force: true, recursive: true });
+    }
+});
+
 test("domain import checker rejects Control domain private imports", async () => {
     const extensionFixture = await mkdtemp(
         join(root, "packages/control/src/extension/.domain-check-"),
