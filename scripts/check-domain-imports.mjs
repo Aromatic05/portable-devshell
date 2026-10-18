@@ -131,14 +131,33 @@ for (const owner of controlPublicDomains) {
 // UI state may consume domain ViewModels, not their presentation projections.
 rules.push(
     {
+        name: "extension-uses-config-public-entries",
+        roots: [domain("packages/control/src/extension")],
+        forbidden: (candidate, entry) =>
+            under(candidate, domain("packages/control/src/config")) &&
+            candidate !== domain(
+                `packages/control/src/config/${entry.typeOnly ? "Api" : "Public"}`,
+            ),
+    },
+    {
         name: "tui-state-does-not-depend-on-view",
         roots: [domain("packages/tui/src/state")],
         forbidden: pathTarget("packages/tui/src/view"),
     },
     {
-        name: "tui-interaction-does-not-depend-on-render-components",
+        name: "tui-interaction-does-not-depend-on-view",
         roots: [domain("packages/tui/src/interaction")],
-        forbidden: pathTarget("packages/tui/src/view/component"),
+        forbidden: pathTarget("packages/tui/src/view"),
+    },
+    {
+        name: "web-state-does-not-depend-on-view",
+        roots: [domain("packages/web/src/state")],
+        forbidden: pathTarget("packages/web/src/view"),
+    },
+    {
+        name: "web-domain-does-not-depend-on-view",
+        roots: [domain("packages/web/src/app/domain")],
+        forbidden: pathTarget("packages/web/src/view"),
     },
 );
 
@@ -215,6 +234,9 @@ const failures = [];
 for (const entryRoot of [
     ...coreDomains.map((name) => domain("packages/core/src/" + name)),
     ...controlPublicDomains.map((name) => domain("packages/control/src/" + name)),
+    domain("packages/control/src/config"),
+    domain("packages/control/src/context"),
+    domain("packages/control/src/server"),
 ]) {
     try {
         await access(join(entryRoot, "index.ts"));

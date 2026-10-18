@@ -142,7 +142,7 @@ test("TUI State and Interaction cannot depend on View implementations", async ()
         );
         await writeFile(
             join(interactionFixture, "Rejected.ts"),
-            'import { wrapTerminalText } from "../../view/component/content/Box.js";\n',
+            'import { selectMainScreenModel } from "../../view/projection/View.js";\n',
         );
 
         const result = spawnSync(
@@ -159,7 +159,7 @@ test("TUI State and Interaction cannot depend on View implementations", async ()
             2,
         );
         assert.equal(
-            violations.filter((line) => line.includes("tui-interaction-does-not-depend-on-render-components")).length,
+            violations.filter((line) => line.includes("tui-interaction-does-not-depend-on-view")).length,
             1,
         );
         assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
@@ -167,6 +167,84 @@ test("TUI State and Interaction cannot depend on View implementations", async ()
         await Promise.all([
             rm(stateFixture, { force: true, recursive: true }),
             rm(interactionFixture, { force: true, recursive: true }),
+        ]);
+    }
+});
+
+test("Extension Config consumers use type and runtime domain entries", async () => {
+    const fixture = await mkdtemp(
+        join(root, "packages/control/src/extension/.domain-check-"),
+    );
+    try {
+        await writeFile(
+            join(fixture, "Allowed.ts"),
+            [
+                'import { ConfigChangeHub } from "../../config/Public.js";',
+                'import type { ConfigRegistry } from "../../config/Api.js";',
+                "",
+            ].join("\n"),
+        );
+        await writeFile(
+            join(fixture, "Rejected.ts"),
+            [
+                'import { ConfigChangeHub } from "../../config/change/Config.js";',
+                'import type { ConfigRegistry } from "../../config/Public.js";',
+                "",
+            ].join("\n"),
+        );
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+        assert.equal(result.status, 1);
+        const violations = result.stderr.trim().split("\n");
+        assert.equal(violations.length, 2);
+        assert.ok(violations.every((line) =>
+            line.includes("extension-uses-config-public-entries") &&
+            line.includes("Rejected.ts"),
+        ));
+        assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
+    } finally {
+        await rm(fixture, { force: true, recursive: true });
+    }
+});
+
+test("Web state and domain sessions stay independent of presentation", async () => {
+    const state = await mkdtemp(
+        join(root, "packages/web/src/state/.domain-check-"),
+    );
+    const domainFixture = await mkdtemp(
+        join(root, "packages/web/src/app/domain/.domain-check-"),
+    );
+    try {
+        await writeFile(
+            join(state, "Allowed.ts"),
+            'import type { WebDomainSession } from "../../app/domain/Session.js";\n',
+        );
+        await writeFile(
+            join(state, "Rejected.ts"),
+            'import { todoSummaries } from "../../view/ReadModel.js";\n',
+        );
+        await writeFile(
+            join(domainFixture, "Rejected.ts"),
+            'import { todoSummaries } from "../../../view/ReadModel.js";\n',
+        );
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+        assert.equal(result.status, 1);
+        const violations = result.stderr.trim().split("\n");
+        assert.equal(violations.length, 2);
+        assert.match(result.stderr, /web-state-does-not-depend-on-view/u);
+        assert.match(result.stderr, /web-domain-does-not-depend-on-view/u);
+        assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
+    } finally {
+        await Promise.all([
+            rm(state, { force: true, recursive: true }),
+            rm(domainFixture, { force: true, recursive: true }),
         ]);
     }
 });
