@@ -17,7 +17,7 @@ import {
 } from "@portable-devshell/core";
 import { WebSocketServer } from "ws";
 
-import type { ReverseCredentials } from "../../instance/reverse/Credentials.js";
+import type { ReverseCredentials } from "../../instance/Api.js";
 import type { ReverseHttpHost } from "./Api.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";

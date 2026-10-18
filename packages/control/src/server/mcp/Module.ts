@@ -15,7 +15,7 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type { InstanceMcpRuntimePort } from "../../instance/Mcp.js";
+import type { InstanceMcpRuntimePort } from "../../instance/Api.js";
 import type { ContextChangeSource } from "../../context/Api.js";
 import {
     type ToolCallProvenanceApi,

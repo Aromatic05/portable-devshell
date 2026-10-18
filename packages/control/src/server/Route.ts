@@ -3,39 +3,36 @@ import { routeModule, mergeControlPortsByName, type ControlHostDefinition, type 
 
 import { negotiateControlProtocol } from "./Protocol.js";
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
-import { createConnectionRouteModule } from "../instance/reverse/Route.js";
-
-
+import {
+    createConnectionRouteModule,
+    createInstanceConfigRouteModule,
+    InstanceChangeHub,
+} from "../instance/Public.js";
 import type { ArtifactRouteApi } from "../artifact/Api.js";
-import { createArtifactRouteModule } from "../artifact/route/index.js";
+import { createArtifactRouteModule } from "../artifact/Public.js";
 import {
     createCliRouteModule,
-    type CliCommandPort,
-} from "../extension/api/point/cli/Endpoint.js";
-import {
     createTuiPageRouteModule,
-    type TuiPagePort,
-} from "../extension/api/point/tui/index.js";
-import type { ConfigEditorPort } from "../config/Route.js";
-import { createConfigRouteModule } from "../config/Route.js";
-import { ConfigChangeHub } from "../config/change/Config.js";
+    createExtensionRouteModule,
+} from "../extension/Public.js";
+import type {
+    CliCommandPort,
+    TuiPagePort,
+    ExtensionControlPort,
+} from "../extension/Api.js";
+import type { ConfigEditorPort } from "../config/Api.js";
+import { createConfigRouteModule, ConfigChangeHub } from "../config/Public.js";
 import { createDebugRouteModule } from "../debug/Public.js";
 import type { DebugApi } from "../debug/Api.js";
-import { createExtensionRouteModule } from "../extension/manager/Endpoint.js";
-import type { ExtensionControlPort } from "../extension/Api.js";
 import type {
     InstanceCreatePort,
     InstanceEditorPort,
     InstanceConfigRouteModuleOptions,
 } from "../instance/Api.js";
-import {
-    createInstanceConfigRouteModule,
-} from "../instance/Public.js";
-import { InstanceChangeHub } from "../instance/Change.js";
 import { createAuthRouteModule } from "./auth/Route.js";
 import { createOperationalOverviewRouteModule } from "../overview/Public.js";
 import type { OperationalOverviewApi } from "../overview/Api.js";
-import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
+import type { ReverseCredentials } from "../instance/Api.js";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,

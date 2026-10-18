@@ -1,6 +1,6 @@
 import type { ControlConfig } from "@portable-devshell/shared";
 
-import type { ConfigRuntimeChangeSet } from "../config/engine/Api.js";
+import type { ConfigRuntimeChangeSet } from "../config/Api.js";
 import type { McpControlModule } from "./mcp/Module.js";
 import type {
     ControlWebRuntime,

@@ -7,6 +7,8 @@ import type {
 import type { ExtensionCatalogRegistration } from "./discovery/Catalog.js";
 import type { ExtensionGenerationLease } from "./registration/Generation.js";
 import type { ExtensionRuntimeRegistration } from "./registration/Registration.js";
+export type { CliCommandPort } from "./api/point/cli/Endpoint.js";
+export type { TuiPagePort } from "./api/point/tui/Service.js";
 
 export interface ExtensionRegistrationLease {
     extensionId: string;

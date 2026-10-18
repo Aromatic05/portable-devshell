@@ -4,22 +4,28 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { ArtifactRuntime } from "../artifact/Api.js";
-import type { ConfigChangeHub } from "../config/change/Config.js";
-import type { ConfigRuntimeChangeSet } from "../config/engine/Api.js";
-import type { ConfigEditorCoordinator } from "../config/editor/index.js";
+import type {
+    ConfigChangeHub,
+    ConfigRuntimeChangeSet,
+    ConfigEditorCoordinator,
+} from "../config/Api.js";
 import type { ContextRuntime } from "../context/Api.js";
 import type { DebugRuntime } from "../debug/Api.js";
 import type { ExtensionRuntime } from "../extension/Api.js";
-import { CliExtensionCommandService } from "../extension/api/point/cli/command/index.js";
-import { ControlExtensionRouteService } from "../extension/api/point/control/Dispatch.js";
-import { TuiExtensionPageService } from "../extension/api/point/tui/index.js";
-import type { InstanceRegistry } from "../instance/Api.js";
-import type { InstanceChangeHub } from "../instance/Change.js";
-import type { InstanceCreateCoordinator } from "../instance/editor/create/index.js";
-import type { InstanceEditorCoordinator } from "../instance/editor/index.js";
-import type { ReverseCredentials } from "../instance/reverse/Credentials.js";
+import {
+    CliExtensionCommandService,
+    ControlExtensionRouteService,
+    TuiExtensionPageService,
+} from "../extension/Public.js";
+import type {
+    InstanceRegistry,
+    InstanceChangeHub,
+    InstanceCreateCoordinator,
+    InstanceEditorCoordinator,
+    ReverseCredentials,
+} from "../instance/Api.js";
 import { createOperationalOverviewRuntime } from "../overview/index.js";
-import { OperationalOverviewInstanceCollector } from "../overview/collector/Instance.js";
+import { OperationalOverviewInstanceCollector } from "../overview/Public.js";
 import { ControlRouteRegistry } from "./Route.js";
 import { ControlHttpServer } from "./http/index.js";
 import type { ControlHttpLease } from "./http/Api.js";

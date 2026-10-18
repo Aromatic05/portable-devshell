@@ -9,6 +9,12 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { InstanceChangeHub } from "./Change.js";
+export type { InstanceChangeHub } from "./Change.js";
+export type { ReverseCredentials } from "./reverse/Credentials.js";
+export type { InstanceMcpRuntimePort } from "./Mcp.js";
+import type { InstanceCreateCoordinator } from "./editor/create/index.js";
+import type { InstanceEditorCoordinator } from "./editor/index.js";
+export type { InstanceCreateCoordinator, InstanceEditorCoordinator };
 
 export interface InstanceCreatePort {
     createInstance(params?: JsonValue): Promise<InstanceCreateResult>;
