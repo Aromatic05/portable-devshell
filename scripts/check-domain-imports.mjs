@@ -128,6 +128,20 @@ for (const owner of controlPublicDomains) {
     });
 }
 
+// UI state may consume domain ViewModels, not their presentation projections.
+rules.push(
+    {
+        name: "tui-state-does-not-depend-on-view",
+        roots: [domain("packages/tui/src/state")],
+        forbidden: pathTarget("packages/tui/src/view"),
+    },
+    {
+        name: "tui-interaction-does-not-depend-on-render-components",
+        roots: [domain("packages/tui/src/interaction")],
+        forbidden: pathTarget("packages/tui/src/view/component"),
+    },
+);
+
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 for (const sourceRoot of rules.flatMap((rule) => rule.roots)) {
@@ -198,6 +212,21 @@ function imports(sourceFile, text) {
 }
 
 const failures = [];
+for (const entryRoot of [
+    ...coreDomains.map((name) => domain("packages/core/src/" + name)),
+    ...controlPublicDomains.map((name) => domain("packages/control/src/" + name)),
+]) {
+    try {
+        await access(join(entryRoot, "index.ts"));
+    } catch {
+        failures.push({
+            file: relative(root, entryRoot),
+            line: 1,
+            rule: "domain-has-composition-entrypoint",
+            message: relative(root, entryRoot) + " requires index.ts",
+        });
+    }
+}
 const corePackagePath = domain("packages/core/package.json");
 const corePackage = JSON.parse(await readFile(corePackagePath, "utf8"));
 const coreExports = Object.keys(corePackage.exports ?? {});

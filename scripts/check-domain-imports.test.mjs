@@ -110,3 +110,63 @@ test("domain import checker rejects Control domain private imports", async () =>
         await rm(extensionFixture, { force: true, recursive: true });
     }
 });
+
+test("TUI State and Interaction cannot depend on View implementations", async () => {
+    const stateFixture = await mkdtemp(
+        join(root, "packages/tui/src/state/.domain-check-"),
+    );
+    const interactionFixture = await mkdtemp(
+        join(root, "packages/tui/src/interaction/.domain-check-"),
+    );
+
+    try {
+        await writeFile(
+            join(stateFixture, "Allowed.ts"),
+            [
+                'import type { TuiDomainReader } from "../../app/control/Reader.js";',
+                'import { wrapTerminalText } from "../../terminal/Public.js";',
+                "",
+            ].join("\n"),
+        );
+        await writeFile(
+            join(stateFixture, "Rejected.ts"),
+            [
+                'import { projectAuditContexts } from "../../view/page/activity/audit/List.js";',
+                'import type { TuiDomainReader } from "../../view/domain/Reader.js";',
+                "",
+            ].join("\n"),
+        );
+        await writeFile(
+            join(interactionFixture, "Allowed.ts"),
+            'import { wrapTerminalText } from "../../terminal/Public.js";\n',
+        );
+        await writeFile(
+            join(interactionFixture, "Rejected.ts"),
+            'import { wrapTerminalText } from "../../view/component/content/Box.js";\n',
+        );
+
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+        assert.equal(result.status, 1);
+        const violations = result.stderr.trim().split("\n");
+        assert.equal(violations.length, 3);
+        assert.ok(violations.every((line) => line.includes("Rejected.ts")));
+        assert.equal(
+            violations.filter((line) => line.includes("tui-state-does-not-depend-on-view")).length,
+            2,
+        );
+        assert.equal(
+            violations.filter((line) => line.includes("tui-interaction-does-not-depend-on-render-components")).length,
+            1,
+        );
+        assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
+    } finally {
+        await Promise.all([
+            rm(stateFixture, { force: true, recursive: true }),
+            rm(interactionFixture, { force: true, recursive: true }),
+        ]);
+    }
+});
