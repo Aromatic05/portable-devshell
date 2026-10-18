@@ -17,7 +17,7 @@ use cap_std::fs::{Dir as CapabilityDir, OpenOptions as CapabilityOpenOptions};
 use cap_std::fs::{MetadataExt as _, Permissions as CapabilityPermissions};
 
 use crate::instance::sandbox::path::{PathNamespace, RequestedPath};
-use crate::tool::ToolError;
+use super::PathError;
 
 #[derive(Clone, Debug)]
 enum AnchoredAccess {
@@ -670,7 +670,7 @@ impl ResolvedPath {
 pub fn resolve_existing_target(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     if requested.namespace == PathNamespace::Workspace {
         #[cfg(any(unix, windows))]
         {
@@ -685,7 +685,7 @@ pub fn resolve_existing_target(
         } else {
             "file.writeFailed"
         };
-        ToolError::new(
+        PathError::new(
             code,
             format!("failed to resolve {}: {error}", candidate.display()),
         )
@@ -697,7 +697,7 @@ pub fn resolve_existing_target(
 pub fn resolve_entry(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedEntry, ToolError> {
+) -> Result<ResolvedEntry, PathError> {
     if requested.namespace == PathNamespace::Workspace {
         #[cfg(any(unix, windows))]
         {
@@ -709,7 +709,7 @@ pub fn resolve_entry(
     let metadata = match fs::symlink_metadata(&candidate) {
         Ok(metadata) => ResolvedMetadata::from_std(metadata),
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(ResolvedEntry::Missing),
-        Err(error) => return Err(ToolError::new("file.readFailed", error.to_string())),
+        Err(error) => return Err(PathError::new("file.readFailed", error.to_string())),
     };
     let target = if candidate.file_name().is_none() {
         ResolvedTarget {
@@ -725,11 +725,11 @@ pub fn resolve_entry(
     } else {
         let parent = candidate
             .parent()
-            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no parent"))?
+            .ok_or_else(|| PathError::new("file.invalidPath", "path has no parent"))?
             .to_path_buf();
         let name = candidate
             .file_name()
-            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no file name"))?
+            .ok_or_else(|| PathError::new("file.invalidPath", "path has no file name"))?
             .to_owned();
         ResolvedTarget {
             path: candidate,
@@ -745,10 +745,10 @@ pub fn resolve_entry(
     Ok(ResolvedEntry::Existing { target, metadata })
 }
 
-fn existing_entry(target: ResolvedTarget) -> Result<ResolvedEntry, ToolError> {
+fn existing_entry(target: ResolvedTarget) -> Result<ResolvedEntry, PathError> {
     let metadata = match target
         .metadata(false)
-        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
+        .map_err(|error| PathError::new("file.readFailed", error.to_string()))?
     {
         Some(metadata) => metadata,
         None => return Ok(ResolvedEntry::Missing),
@@ -759,7 +759,7 @@ fn existing_entry(target: ResolvedTarget) -> Result<ResolvedEntry, ToolError> {
 pub fn resolve_create_target(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     let candidate = requested.path(workspace);
     if candidate.exists() || candidate.symlink_metadata().is_ok() {
         return resolve_existing_target(workspace, requested);
@@ -777,15 +777,15 @@ pub fn resolve_create_target(
     while ancestor.symlink_metadata().is_err() {
         let name = ancestor
             .file_name()
-            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no existing parent"))?;
+            .ok_or_else(|| PathError::new("file.invalidPath", "path has no existing parent"))?;
         tail.push(name.to_owned());
         ancestor = ancestor
             .parent()
-            .ok_or_else(|| ToolError::new("file.invalidPath", "path has no existing parent"))?;
+            .ok_or_else(|| PathError::new("file.invalidPath", "path has no existing parent"))?;
     }
     let canonical_ancestor = ancestor
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     require_workspace_containment(workspace, requested.namespace, &canonical_ancestor)?;
     let canonical = tail
         .iter()
@@ -797,7 +797,7 @@ pub fn resolve_create_target(
 pub fn resolve_create_candidate(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<PathBuf, ToolError> {
+) -> Result<PathBuf, PathError> {
     match resolve_create_target(workspace, requested) {
         Ok(resolved) => Ok(resolved.canonical),
         #[cfg(any(unix, windows))]
@@ -806,10 +806,10 @@ pub fn resolve_create_candidate(
         {
             let root = workspace
                 .canonicalize()
-                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+                .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
             let segments = workspace_segments(requested)?;
             if segments.is_empty() {
-                return Err(ToolError::new(
+                return Err(PathError::new(
                     "file.invalidPath",
                     "workspace root cannot be created",
                 ));
@@ -825,29 +825,29 @@ pub fn resolve_create_candidate(
 pub fn create_parent_directories(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<(), ToolError> {
+) -> Result<(), PathError> {
     let candidate = resolve_create_candidate(workspace, requested)?;
     let parent = candidate
         .parent()
-        .ok_or_else(|| ToolError::new("file.invalidPath", "target has no parent directory"))?;
+        .ok_or_else(|| PathError::new("file.invalidPath", "target has no parent directory"))?;
 
     if requested.namespace != PathNamespace::Workspace {
         return fs::create_dir_all(parent)
-            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()));
+            .map_err(|error| PathError::new("file.writeFailed", error.to_string()));
     }
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let relative_parent = parent.strip_prefix(&root).map_err(|_| {
-        ToolError::new(
+        PathError::new(
             "file.pathEscapesWorkspace",
             format!("path escapes workspace: {}", parent.display()),
         )
     })?;
     let directory = CapabilityDir::open_ambient_dir(&root, ambient_authority())
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     directory.create_dir_all(relative_parent).map_err(|error| {
-        ToolError::new(
+        PathError::new(
             "file.writeFailed",
             format!(
                 "failed to create parent directory for {}: {error}",
@@ -873,19 +873,19 @@ fn plain(canonical: PathBuf) -> ResolvedPath {
 fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let root_fd = open(
         &root,
         OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::empty(),
     )
-    .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     if segments.is_empty() {
         #[cfg(target_os = "linux")]
@@ -936,7 +936,7 @@ fn resolve_workspace_existing(
     let final_file = File::from(final_fd);
     let anchored_access = if final_file
         .metadata()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?
         .is_dir()
     {
         AnchoredAccess::Directory(Arc::new(CapabilityDir::from_std_file(final_file)))
@@ -959,23 +959,23 @@ fn resolve_workspace_existing(
 fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     let (name, parents) = segments
         .split_last()
-        .ok_or_else(|| ToolError::new("file.invalidPath", "workspace root cannot be created"))?;
+        .ok_or_else(|| PathError::new("file.invalidPath", "workspace root cannot be created"))?;
     let mut parent_fd = open(
         &root,
         OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::empty(),
     )
-    .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     for segment in parents {
         parent_fd = openat(
             &parent_fd,
@@ -1009,13 +1009,13 @@ fn resolve_workspace_create(
 fn resolve_workspace_entry(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedEntry, ToolError> {
+) -> Result<ResolvedEntry, PathError> {
     use nix::fcntl::{OFlag, open, openat};
     use nix::sys::stat::Mode;
 
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     let canonical = segments
         .iter()
@@ -1025,7 +1025,7 @@ fn resolve_workspace_entry(
         OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::empty(),
     )
-    .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     if segments.is_empty() {
         let directory = Arc::new(CapabilityDir::from_std_file(File::from(parent_fd)));
         let target = ResolvedTarget {
@@ -1072,10 +1072,10 @@ fn resolve_workspace_entry(
 fn resolve_workspace_existing(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     let root_directory = Arc::new(
         CapabilityDir::open_ambient_dir(&root, ambient_authority())
@@ -1146,14 +1146,14 @@ fn resolve_workspace_existing(
 fn resolve_workspace_create(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedPath, ToolError> {
+) -> Result<ResolvedPath, PathError> {
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     let (name, parents) = segments
         .split_last()
-        .ok_or_else(|| ToolError::new("file.invalidPath", "workspace root cannot be created"))?;
+        .ok_or_else(|| PathError::new("file.invalidPath", "workspace root cannot be created"))?;
     let root_directory = Arc::new(
         CapabilityDir::open_ambient_dir(&root, ambient_authority())
             .map_err(|error| map_capability_resolution_error(error, requested))?,
@@ -1190,10 +1190,10 @@ fn resolve_workspace_create(
 fn resolve_workspace_entry(
     workspace: &Path,
     requested: &RequestedPath,
-) -> Result<ResolvedEntry, ToolError> {
+) -> Result<ResolvedEntry, PathError> {
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     let segments = workspace_segments(requested)?;
     let canonical = segments
         .iter()
@@ -1227,7 +1227,7 @@ fn resolve_workspace_entry(
             Err(error) => return Err(map_capability_resolution_error(error, requested)),
         };
         if metadata.file_type().is_symlink() {
-            return Err(ToolError::new(
+            return Err(PathError::new(
                 "file.pathEscapesWorkspace",
                 format!(
                     "workspace path contains a symbolic link or reparse point: {}",
@@ -1236,7 +1236,7 @@ fn resolve_workspace_entry(
             ));
         }
         if !metadata.is_dir() {
-            return Err(ToolError::new(
+            return Err(PathError::new(
                 "file.notDirectory",
                 format!(
                     "workspace path parent is not a directory: {}",
@@ -1271,12 +1271,12 @@ fn reject_workspace_symlink(
     directory: &CapabilityDir,
     path: &Path,
     requested: &RequestedPath,
-) -> Result<(), ToolError> {
+) -> Result<(), PathError> {
     let metadata = directory
         .symlink_metadata(path)
         .map_err(|error| map_capability_resolution_error(error, requested))?;
     if metadata.file_type().is_symlink() {
-        return Err(ToolError::new(
+        return Err(PathError::new(
             "file.pathEscapesWorkspace",
             format!(
                 "workspace path contains a symbolic link or reparse point: {}",
@@ -1288,13 +1288,13 @@ fn reject_workspace_symlink(
 }
 
 #[cfg(windows)]
-fn map_capability_resolution_error(error: io::Error, requested: &RequestedPath) -> ToolError {
+fn map_capability_resolution_error(error: io::Error, requested: &RequestedPath) -> PathError {
     let code = if error.kind() == io::ErrorKind::NotFound {
         "file.notFound"
     } else {
         "file.writeFailed"
     };
-    ToolError::new(
+    PathError::new(
         code,
         format!(
             "failed to resolve {} within workspace: {error}",
@@ -1304,11 +1304,11 @@ fn map_capability_resolution_error(error: io::Error, requested: &RequestedPath) 
 }
 
 #[cfg(any(unix, windows))]
-fn workspace_segments(requested: &RequestedPath) -> Result<Vec<OsString>, ToolError> {
+fn workspace_segments(requested: &RequestedPath) -> Result<Vec<OsString>, PathError> {
     let relative = requested
         .raw
         .strip_prefix("./")
-        .ok_or_else(|| ToolError::new("file.invalidPath", "workspace path must start with ./"))?;
+        .ok_or_else(|| PathError::new("file.invalidPath", "workspace path must start with ./"))?;
     if relative.is_empty() {
         return Ok(Vec::new());
     }
@@ -1324,13 +1324,13 @@ fn descriptor_path(fd: &OwnedFd) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn map_resolution_error(error: nix::errno::Errno, requested: &RequestedPath) -> ToolError {
+fn map_resolution_error(error: nix::errno::Errno, requested: &RequestedPath) -> PathError {
     let code = match error {
         nix::errno::Errno::ENOENT => "file.notFound",
         nix::errno::Errno::ELOOP => "file.pathEscapesWorkspace",
         _ => "file.writeFailed",
     };
-    ToolError::new(
+    PathError::new(
         code,
         format!(
             "failed to resolve {} without symbolic links: {error}",
@@ -1343,15 +1343,15 @@ fn require_workspace_containment(
     workspace: &Path,
     namespace: PathNamespace,
     target: &Path,
-) -> Result<(), ToolError> {
+) -> Result<(), PathError> {
     if namespace != PathNamespace::Workspace {
         return Ok(());
     }
     let root = workspace
         .canonicalize()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        .map_err(|error| PathError::new("file.writeFailed", error.to_string()))?;
     if target.strip_prefix(&root).is_err() {
-        return Err(ToolError::new(
+        return Err(PathError::new(
             "file.pathEscapesWorkspace",
             format!("path escapes workspace: {}", target.display()),
         ));

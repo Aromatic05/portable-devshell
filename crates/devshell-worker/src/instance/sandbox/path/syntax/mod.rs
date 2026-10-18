@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::tool::ToolError;
+use super::PathError;
 #[cfg(unix)]
 #[path = "unix.rs"]
 mod platform;
@@ -20,19 +20,19 @@ pub struct RequestedPath {
     pub raw: String,
 }
 
-pub fn parse_requested_path(raw: &str) -> Result<RequestedPath, ToolError> {
+pub fn parse_requested_path(raw: &str) -> Result<RequestedPath, PathError> {
     Ok(RequestedPath {
         namespace: platform::classify_and_validate(raw)?,
         raw: raw.to_string(),
     })
 }
 
-pub fn normalize_requested_path(raw: &str) -> Result<String, ToolError> {
+pub fn normalize_requested_path(raw: &str) -> Result<String, PathError> {
     if raw == "." {
         return Ok("./".to_string());
     }
     if raw == "~" || raw.starts_with("~/") || cfg!(windows) && raw.starts_with("~\\") {
-        return Err(ToolError::new(
+        return Err(PathError::new(
             "file.invalidPath",
             "home-relative paths are not supported; use a workspace-relative or absolute path",
         ));
@@ -47,7 +47,7 @@ pub fn normalize_requested_path(raw: &str) -> Result<String, ToolError> {
                     Some(std::path::Component::Prefix(_))
                 ))
         {
-            return Err(ToolError::new(
+            return Err(PathError::new(
                 "file.invalidPath",
                 "Windows drive-relative and root-relative paths are not supported; use a workspace-relative or absolute path",
             ));

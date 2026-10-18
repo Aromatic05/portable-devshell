@@ -16,7 +16,7 @@ use crate::capability::artifact::receive::ArtifactReceiveStore;
 use crate::capability::rpc::control::register_control_handlers;
 use crate::capability::rpc::error::RpcError;
 use crate::capability::rpc::notification::{
-    DEFAULT_MAX_NOTIFICATION_BYTES, WorkerNotificationQueue,
+    DEFAULT_MAX_NOTIFICATION_BYTES, WorkerNotificationQueue, tool_progress_emitter,
 };
 use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
@@ -27,7 +27,7 @@ use crate::instance::WorkerConfig;
 use crate::instance::sandbox::{SecurityPolicy, build_security_policy};
 use crate::instance::storage::ExtensionResourceStore;
 use crate::instance::workspace::alert::AlertService;
-use crate::tool::{ToolCall, ToolCancellation, ToolName, ToolProgressEmitter, ToolRegistry};
+use crate::tool::{ToolCall, ToolCancellation, ToolName, ToolRegistry};
 
 pub struct RpcRouter {
     active_processes: Arc<ActiveProcessRegistry>,
@@ -196,9 +196,10 @@ impl RpcRouter {
             operation_id: operation_id.clone(),
             source: context.and_then(|value| value.source.clone()),
             policy: Arc::clone(&self.policy),
-            process_registry: Arc::clone(&self.active_processes),
+            process_registry: Arc::clone(&self.active_processes)
+                as Arc<dyn crate::tool::ToolProcessRegistry>,
             cancellation,
-            progress: ToolProgressEmitter::new(operation_id, Arc::clone(&self.notifications)),
+            progress: tool_progress_emitter(operation_id, Arc::clone(&self.notifications)),
         })
         .map_err(RpcError::from)
     }

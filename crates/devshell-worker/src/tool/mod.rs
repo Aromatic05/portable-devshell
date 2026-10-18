@@ -6,7 +6,7 @@ pub mod tmux;
 
 pub use contract::{
     ToolCall, ToolCancellation, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName,
-    ToolProgressEmitter,
+    ToolProcessGuard, ToolProcessRegistry, ToolProgressEmitter,
 };
 pub use registry::{ToolRegistry, builtin_registry};
 

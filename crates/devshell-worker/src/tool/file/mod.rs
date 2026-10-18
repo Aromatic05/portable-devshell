@@ -89,7 +89,7 @@ pub fn create_parent_directories(
     requested: &RequestedPath,
 ) -> Result<(), ToolError> {
     authorize(call, requested.namespace, true)?;
-    create_sandbox_parent_directories(&call.workspace, requested)
+    create_sandbox_parent_directories(&call.workspace, requested).map_err(ToolError::from)
 }
 
 pub fn resolve_info(

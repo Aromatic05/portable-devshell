@@ -1,10 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-use crate::capability::rpc::notification::WorkerNotificationQueue;
-use crate::daemon::process::registry::ActiveProcessRegistry;
 
 use crate::instance::sandbox::SecurityPolicy;
 use schemars::JsonSchema;
@@ -43,9 +40,19 @@ pub struct ToolCall {
     pub operation_id: String,
     pub source: Option<String>,
     pub policy: Arc<dyn SecurityPolicy>,
-    pub process_registry: Arc<ActiveProcessRegistry>,
+    pub process_registry: Arc<dyn ToolProcessRegistry>,
     pub cancellation: ToolCancellation,
     pub progress: ToolProgressEmitter,
+}
+
+/// A registered process group is released when its RAII guard is dropped.
+pub trait ToolProcessGuard: Send {}
+
+impl<T: Send> ToolProcessGuard for T {}
+
+/// Process lifetime port supplied by the Worker runtime.
+pub trait ToolProcessRegistry: Send + Sync {
+    fn register(self: Arc<Self>, process_group: i32) -> Result<Box<dyn ToolProcessGuard>, String>;
 }
 
 impl ToolCall {
@@ -69,32 +76,18 @@ impl ToolCall {
 
 #[derive(Clone)]
 pub struct ToolProgressEmitter {
-    notifications: Arc<WorkerNotificationQueue>,
-    operation_id: String,
-    sequence: Arc<AtomicU64>,
+    publish: Arc<dyn Fn(serde_json::Value) + Send + Sync>,
 }
 
 impl ToolProgressEmitter {
-    pub fn new(operation_id: String, notifications: Arc<WorkerNotificationQueue>) -> Self {
+    pub fn new(publish: impl Fn(serde_json::Value) + Send + Sync + 'static) -> Self {
         Self {
-            notifications,
-            operation_id,
-            sequence: Arc::new(AtomicU64::new(0)),
+            publish: Arc::new(publish),
         }
     }
 
     pub fn emit(&self, value: serde_json::Value) {
-        let sequence = self.sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        let notification = serde_json::json!({
-            "type": "notification",
-            "method": "tool.progress",
-            "params": {
-                "operationId": self.operation_id,
-                "sequence": sequence,
-                "value": value,
-            }
-        });
-        let _ = self.notifications.push_lossy_json(&notification);
+        (self.publish)(value);
     }
 }
 
@@ -198,6 +191,12 @@ impl From<crate::instance::sandbox::policy::SecurityError> for ToolError {
             retryable: false,
             details: error.details,
         }
+    }
+}
+
+impl From<crate::instance::sandbox::path::PathError> for ToolError {
+    fn from(error: crate::instance::sandbox::path::PathError) -> Self {
+        Self::new(error.code, error.message)
     }
 }
 

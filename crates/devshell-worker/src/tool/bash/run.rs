@@ -12,7 +12,6 @@ use crate::capability::artifact::store::{ArtifactDraft, ArtifactStore};
 use crate::capability::artifact::types::{ArtifactReference, ArtifactStream};
 use crate::capability::rpc::command::client::ModelDevshellShim;
 use crate::daemon::process::platform;
-use crate::daemon::process::registry::ActiveProcessGuard;
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
     parse_requested_path, resolve_existing_target,
@@ -23,7 +22,7 @@ use crate::tool::bash::model::{BashRunOutput, BashRunParams, BashTermination};
 use crate::tool::bash::process::spawn_shell;
 use crate::tool::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName,
-    ToolProgressEmitter,
+    ToolProcessGuard, ToolProgressEmitter,
 };
 
 const DEFAULT_MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
@@ -149,7 +148,7 @@ impl ToolHandler for BashRunTool {
         let started = Instant::now();
         let mut child = spawn_shell(&self.shell, &params.command, &cwd, &params.env, execution.as_ref())?;
         let pid = child.id() as i32;
-        let process_guard = match call.process_registry.register(pid) {
+        let process_guard = match Arc::clone(&call.process_registry).register(pid) {
             Ok(process_guard) => process_guard,
             Err(error) => {
                 let _ = child.wait();
@@ -305,11 +304,15 @@ struct ManagedBashChild {
     child: Child,
     process_group: i32,
     reaped: bool,
-    _process_guard: ActiveProcessGuard,
+    _process_guard: Box<dyn ToolProcessGuard>,
 }
 
 impl ManagedBashChild {
-    fn new(child: Child, process_group: i32, process_guard: ActiveProcessGuard) -> Self {
+    fn new(
+        child: Child,
+        process_group: i32,
+        process_guard: Box<dyn ToolProcessGuard>,
+    ) -> Self {
         Self {
             child,
             process_group,

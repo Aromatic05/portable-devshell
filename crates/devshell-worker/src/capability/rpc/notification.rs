@@ -1,9 +1,32 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
+use crate::tool::ToolProgressEmitter;
 use serde_json::Value;
 
 pub const DEFAULT_MAX_NOTIFICATION_BYTES: usize = 4 * 1024 * 1024;
+
+/// Map Tool progress to the existing RPC notification format and sequence.
+pub fn tool_progress_emitter(
+    operation_id: String,
+    notifications: Arc<WorkerNotificationQueue>,
+) -> ToolProgressEmitter {
+    let sequence = AtomicU64::new(0);
+    ToolProgressEmitter::new(move |value| {
+        let sequence = sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let notification = serde_json::json!({
+            "type": "notification",
+            "method": "tool.progress",
+            "params": {
+                "operationId": operation_id,
+                "sequence": sequence,
+                "value": value,
+            }
+        });
+        let _ = notifications.push_lossy_json(&notification);
+    })
+}
 
 pub struct WorkerNotificationQueue {
     inner: Mutex<WorkerNotificationQueueState>,
@@ -89,9 +112,34 @@ impl WorkerNotificationQueue {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use serde_json::Value;
 
-    use super::WorkerNotificationQueue;
+    use super::{WorkerNotificationQueue, tool_progress_emitter};
+
+    #[test]
+    fn tool_progress_preserves_wire_format_and_monotonic_sequence() {
+        let queue = Arc::new(WorkerNotificationQueue::new(4096));
+        let progress = tool_progress_emitter("operation-a".into(), Arc::clone(&queue));
+        progress.emit(serde_json::json!({"status": "running"}));
+        progress.clone().emit(serde_json::json!({"status": "done"}));
+
+        assert_eq!(
+            queue.try_pop().unwrap().unwrap(),
+            serde_json::json!({
+                "type": "notification",
+                "method": "tool.progress",
+                "params": {
+                    "operationId": "operation-a",
+                    "sequence": 1,
+                    "value": {"status": "running"}
+                }
+            })
+        );
+        assert_eq!(queue.try_pop().unwrap().unwrap()["params"]["sequence"], 2);
+        assert_eq!(queue.try_pop().unwrap(), None);
+    }
 
     #[test]
     fn bounded_queue_drops_oldest_notifications() {

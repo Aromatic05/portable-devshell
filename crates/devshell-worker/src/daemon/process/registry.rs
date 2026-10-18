@@ -3,6 +3,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::daemon::process::platform;
+use crate::tool::{ToolProcessGuard, ToolProcessRegistry};
 
 #[derive(Default)]
 pub struct ActiveProcessRegistry {
@@ -115,10 +116,36 @@ pub struct ActiveProcessGuard {
     registry: Arc<ActiveProcessRegistry>,
 }
 
+impl ToolProcessRegistry for ActiveProcessRegistry {
+    fn register(self: Arc<Self>, process_group: i32) -> Result<Box<dyn ToolProcessGuard>, String> {
+        ActiveProcessRegistry::register(&self, process_group)
+            .map(|guard| Box::new(guard) as Box<dyn ToolProcessGuard>)
+    }
+}
+
 impl Drop for ActiveProcessGuard {
     fn drop(&mut self) {
         if let Some(process_group) = self.process_group.take() {
             self.registry.unregister(process_group);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::tool::ToolProcessRegistry;
+
+    use super::ActiveProcessRegistry;
+
+    #[test]
+    fn process_port_releases_registration_when_guard_drops() {
+        let registry = Arc::new(ActiveProcessRegistry::new());
+        let port: Arc<dyn ToolProcessRegistry> = registry.clone();
+        let guard = port.register(200_001).unwrap();
+        drop(guard);
+        registry.stop_all(Duration::from_millis(10)).unwrap();
     }
 }

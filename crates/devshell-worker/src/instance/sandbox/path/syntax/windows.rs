@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use crate::tool::ToolError;
+use super::PathError;
 
 use super::PathNamespace;
 
-pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, ToolError> {
+pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, PathError> {
     if raw.contains('\0') {
         return Err(invalid_segment());
     }
@@ -14,7 +14,7 @@ pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, ToolError> {
     } else if Path::new(raw).is_absolute() && !raw.starts_with("\\\\") {
         PathNamespace::Absolute
     } else {
-        return Err(ToolError::new(
+        return Err(PathError::new(
             "file.invalidPath",
             "path must start with `./` or use an absolute Windows drive path",
         ));
@@ -48,6 +48,6 @@ pub fn classify_and_validate(raw: &str) -> Result<PathNamespace, ToolError> {
     Ok(namespace)
 }
 
-fn invalid_segment() -> ToolError {
-    ToolError::new("file.invalidPath", "path contains an invalid segment")
+fn invalid_segment() -> PathError {
+    PathError::new("file.invalidPath", "path contains an invalid segment")
 }
