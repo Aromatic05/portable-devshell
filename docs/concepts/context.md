@@ -27,7 +27,7 @@ Workspace scope 由 instance 与 Worker canonical workspace path 组成。目录
 
 ## 实现归属
 
-Context 的权威状态、生命周期、environment 准备和清理集中在 `packages/control/src/control/context/`，由 Control runtime 创建并共享。MCP、CLI、App 和扩展通过注入能力访问同一份状态；MCP Host 不创建私有 Context Registry。
+Context 的权威状态、生命周期、environment 准备和清理集中在 `packages/control/src/context/`，由 Control runtime 创建并共享。MCP、CLI、App 和扩展通过注入能力访问同一份状态；MCP Host 不创建私有 Context Registry。
 
 持久化格式为 v2。启动时仅对已含明确 `environments[]` 的合法 v1 文档执行一次原子升级，移除顶层重复字段；缺少关联或仅有旧 external identity 的记录明确报错且不覆盖原文件。正常运行不合成旧 primary 关联。
 

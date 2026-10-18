@@ -1,6 +1,6 @@
 # 系统架构
 
-这份文档描述当前 `0.7.x` 代码和运行时边界，不保留已经被替换的早期方案。
+这份文档以当前 `1.0.0-beta.1` 代码和运行时边界为基线，不保留已经被替换的早期方案。
 
 ## 总体结构
 
@@ -54,6 +54,17 @@ crates/devshell-worker  目标环境 Rust worker
 ```
 
 依赖方向的基本原则是：上层入口依赖 Control/Core，worker 不反向依赖 MCP/CLI/UI。
+
+## Domain 模块边界
+
+- Core 与 Control 中具有 Runtime 生命周期的 Domain 以各自根目录的 `index.ts` 组装本 Domain 的实现；`Api.ts` 向其他 Domain 提供类型，`Public.ts` 提供允许跨 Domain 调用的运行时接口。这三个入口不可互相取代。
+- `packages/core/src/instance` 是组合根，可以通过其他 Domain 的 `index.ts` 创建 Runtime，再连接 Hook 和生命周期；其他跨 Domain 调用遵循 `Api.ts` / `Public.ts` 契约，而不是直接导入私有子目录。
+- Control 的 Extension Config Capability 经由 `packages/control/src/config/Api.ts`、`Public.ts` 使用 Config 相关接口。Config 负责持久化、权限与 Domain 注册，Extension 只提供 Capability 适配。
+- TUI 的 State 和 Interaction 不依赖 View 实现。Interaction 通过注入的 `TuiInteractionProjection` 获取需要的页面投影；公共尺寸算法属于 `terminal`，Context、Draft 与导航状态属于 `state`。Terminal Controller 的渲染几何读取是单独的终端适配职责。
+- Web 前端以 `main.tsx` 启动，并由 App 组装 View、Domain Session 与 State。Web State 和 Domain Session 不反向依赖 View。并非每个前端组织目录都是需要 `index.ts` 的 Runtime Domain。
+- Worker 的 Sandbox 独立提供 `PathError`，由 Tool / RPC 边界转换成外部错误类型。Tool 通过进程生命周期接口和进度回调接收 Worker 能力；RPC 负责将进度编码为通知，不反向进入 Tool 契约。
+
+已识别 Domain 根和跨层边界由 `scripts/check-domain-imports.mjs` 检查；新增 Domain 时要同步维护该规则及其正反例测试，不通过生成空入口文件替代 Domain 组装。
 
 ## Instance
 
@@ -158,7 +169,7 @@ input
 
 ## Context
 
-Context 是由 Control 管理的应用级状态 key，不是 MCP session。权威实现集中在 `packages/control/src/control/context/`；MCP 使用注入的 Context 能力，不拥有 Registry 或 Context 生命周期。
+Context 是由 Control 管理的应用级状态 key，不是 MCP session。权威实现集中在 `packages/control/src/context/`；MCP 使用注入的 Context 能力，不拥有 Registry 或 Context 生命周期。
 
 `environments[]` 是唯一当前关联来源。每条关联明确 instance 与可选 workspace；删除 Instance 只解除关联，即使没有剩余关联也不终止 Context。
 
@@ -262,7 +273,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 ## 设计原则
 
-当前 0.7.x 架构可以归纳为：
+当前 1.0.0-beta.1 架构可以归纳为：
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**
