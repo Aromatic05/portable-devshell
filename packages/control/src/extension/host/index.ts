@@ -4,7 +4,7 @@ import type {
     ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 import type { ExtensionChangeHub } from "../manager/Change.js";
-import type { ConfigRegistry } from "../../config/domain/Registry.js";
+import type { ConfigRegistry } from "../../config/Api.js";
 
 import {
     ExtensionGeneration,

@@ -10,24 +10,22 @@ import type {
 import type { ExtensionCoreConfigCapability } from "@portable-devshell/extension/config";
 import type { ControlConfig, JsonValue } from "@portable-devshell/shared";
 
+import type {
+    ConfigCommittedChange,
+    ConfigDomainDefinition,
+    ConfigPathPermission,
+    ConfigRegistry,
+    ControlConfigMutationRunner,
+} from "../../../../config/Api.js";
 import {
     ConfigChangeHub,
-    type ConfigCommittedChange,
-} from "../../../../config/change/Config.js";
-import { ConfigDomainController } from "../../../../config/domain/index.js";
-import { ConfigDomainStore } from "../../../../config/domain/Store.js";
-import type { ControlConfigMutationRunner } from "../../../../config/engine/Lock.js";
-import {
+    ConfigDomainController,
+    ConfigDomainStore,
     diffConfigPaths,
     getConfigPathValue,
     parseConfigPath,
     setConfigPathValue,
-} from "../../../../config/Path.js";
-import type {
-    ConfigDomainDefinition,
-    ConfigPathPermission,
-    ConfigRegistry,
-} from "../../../../config/domain/Registry.js";
+} from "../../../../config/Public.js";
 
 export interface ExtensionConfigControlOptions {
     changeHub: ConfigChangeHub;

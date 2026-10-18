@@ -2,7 +2,7 @@ import type {
     ExtensionControlPort,
     ExtensionRuntime,
 } from "./Api.js";
-import type { ConfigRegistry } from "../config/domain/Registry.js";
+import type { ConfigRegistry } from "../config/Api.js";
 import {
     ExtensionLoader,
     type ExtensionLoaderOptions,

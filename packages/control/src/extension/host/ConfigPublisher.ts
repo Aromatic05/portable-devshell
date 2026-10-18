@@ -3,7 +3,7 @@ import type { ExtensionManifest } from "@portable-devshell/extension";
 import {
     ConfigRegistry,
     createCoreConfigRegistry,
-} from "../../config/domain/Registry.js";
+} from "../../config/Public.js";
 import {
     assertExtensionCoreConfigAccess,
     extensionConfigDomainDefinition,
