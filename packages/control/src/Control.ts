@@ -26,6 +26,10 @@ export class Control {
     readonly #socketFile: ControlSocketFile;
     readonly #startupDiagnostic: (message: string) => void;
     #operationTail: Promise<void> = Promise.resolve();
+    #backgroundCleanup?: {
+        controller: AbortController;
+        timer?: ReturnType<typeof setImmediate>;
+    };
     #server?: ControlServer;
     #state?: ControlState;
 
@@ -117,12 +121,14 @@ export class Control {
             await server.prepare();
             await server.startTransport();
             await state.start();
-            await this.#instances.reconcile();
+            // Historical debt cannot hold healthy instances hostage.
+            // Recover by named lifecycle admission or the explicit cleanup CLI.
             await server.startHosts();
             await state.reconcile();
             this.#state = state;
             this.#server = server;
             server.markReady();
+            this.#scheduleCleanupRecovery(server);
             this.#startupDiagnostic("control start completed");
         } catch (error) {
             const cleanupFailures: unknown[] = [];
@@ -150,6 +156,7 @@ export class Control {
     }
 
     async #stop(): Promise<void> {
+        this.#cancelCleanupRecovery();
         const failures: unknown[] = [];
         await this.#server?.stop().catch((error) => failures.push(error));
         await this.#state?.close().catch((error) => failures.push(error));
@@ -164,6 +171,40 @@ export class Control {
         this.#state = undefined;
         this.#instances.reset();
         this.#config.reset();
+    }
+
+    #scheduleCleanupRecovery(server: ControlServer): void {
+        this.#cancelCleanupRecovery();
+        const recovery: {
+            controller: AbortController;
+            timer?: ReturnType<typeof setImmediate>;
+        } = { controller: new AbortController() };
+        this.#backgroundCleanup = recovery;
+        // Start after markReady and after the initiating lifecycle operation
+        // has yielded. An unreachable legacy provider must not block Control.
+        recovery.timer = setImmediate(() => {
+            recovery.timer = undefined;
+            if (this.#backgroundCleanup !== recovery ||
+                recovery.controller.signal.aborted || this.#server !== server) return;
+            void this.#instances.reconcile(recovery.controller.signal)
+                .catch((error: unknown) =>
+                    console.warn("Deferred instance cleanup recovery failed:", error),
+                ).finally(() => {
+                    if (this.#backgroundCleanup === recovery)
+                        this.#backgroundCleanup = undefined;
+                });
+        });
+        recovery.timer.unref();
+    }
+
+    #cancelCleanupRecovery(): void {
+        const recovery = this.#backgroundCleanup;
+        this.#backgroundCleanup = undefined;
+        if (recovery === undefined) return;
+        recovery.controller.abort(
+            new Error("Control lifecycle ended before cleanup recovery completed."),
+        );
+        if (recovery.timer !== undefined) clearImmediate(recovery.timer);
     }
 
     async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {

@@ -482,11 +482,20 @@ test("delete cleanup debt retries provider retirement before finalizing the gene
     assert.equal(registry.get("demo-local"), undefined);
     assert.equal(providerRetirements, 1);
     assert.equal(finalizations, 0);
+    const pending = await coordinator.listCleanupDebts();
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]?.instance, "demo-local");
+    assert.equal(pending[0]?.state, "pending");
+    assert.match(pending[0]?.reason ?? "", /provider cleanup failed once/u);
+    assert.ok(pending[0]?.createdAt);
+    assert.match(pending[0]?.guidance ?? "", /cleanup retry demo-local/u);
+    assert.equal(JSON.stringify(pending).includes("deviceToken"), false);
 
     await coordinator.reconcileCleanupDebt("demo-local");
     await coordinator.assertInstanceCleanupSettled("demo-local");
     assert.equal(providerRetirements, 2);
     assert.equal(finalizations, 1);
+    assert.deepEqual(await coordinator.listCleanupDebts(), []);
 });
 
 test("cleanup-only Worker stops after a failed Context cleanup", async () => {

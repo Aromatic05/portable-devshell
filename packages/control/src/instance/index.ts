@@ -43,12 +43,34 @@ export class ControlInstances {
         return instance;
     }
 
-    async reconcile(): Promise<void> {
-        // Damaged historical cleanup debt must not prevent healthy Instances
-        // from starting. Explicit lifecycle operations still validate debt.
-        await this.#editor?.reconcileCleanupDebt().catch((error) => {
-            console.warn("Instance cleanup debt reconciliation deferred:", error);
-        });
+    async reconcile(signal?: AbortSignal): Promise<void> {
+        const editor = this.#editor;
+        if (editor === undefined || signal?.aborted) return;
+        // Independent debts are reconciled in bounded parallel batches.
+        // One unreachable old Worker must not hold sibling retirements
+        // or Control readiness hostage. A stopping Control never starts
+        // additional batches, while in-flight operations remain generation-
+        // fenced by InstanceCleanupDebt.
+        const pending = (await editor.listCleanupDebts())
+            .filter((record) => record.state === "pending");
+        const BATCH_SIZE = 4;
+        for (let index = 0; index < pending.length; index += BATCH_SIZE) {
+            if (signal?.aborted) return;
+            await Promise.allSettled(
+                pending.slice(index, index + BATCH_SIZE).map(async (record) => {
+                    if (signal?.aborted) return;
+                    try {
+                        await editor.reconcileCleanupDebt(record.instance);
+                    } catch (error) {
+                        console.warn(
+                            "Instance cleanup debt reconciliation deferred:",
+                            record.instance,
+                            error,
+                        );
+                    }
+                }),
+            );
+        }
     }
 
     connectionClosed(connectionId: string): void {

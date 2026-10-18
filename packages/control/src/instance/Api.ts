@@ -17,6 +17,8 @@ export interface InstanceCreatePort {
 }
 
 export interface InstanceEditorPort {
+    listCleanupDebts(): Promise<Array<Record<string, string>>>;
+    reconcileCleanupDebt(instance?: string): Promise<void>;
     deleteInstance(params?: JsonValue): Promise<JsonValue>;
     disableInstance(params?: JsonValue): Promise<JsonValue>;
     enableInstance(params?: JsonValue): Promise<JsonValue>;

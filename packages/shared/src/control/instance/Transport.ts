@@ -29,6 +29,8 @@ export interface InstanceTransport {
     disableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     enableInstance(instanceName: string): Promise<Record<string, JsonValue>>;
     listInstances(): Promise<InstanceListEnvelope["instances"]>;
+    listCleanupDebts(): Promise<Array<Record<string, string>>>;
+    retryCleanupDebt(instanceName: string): Promise<Array<Record<string, string>>>;
     snapshotInstances(): Promise<InstanceListEnvelope>;
     subscribeInstances(fromRevision: number): Promise<InstanceChangeStreamPort>;
     updateInstance(request: ConfigUpdateInstanceRequest): Promise<ConfigView>;
@@ -56,6 +58,10 @@ export function createInstanceTransport(endpoint: Endpoint): InstanceTransport {
             port.request<Record<string, JsonValue>>("enableInstance", {
                 instanceName,
             }),
+        listCleanupDebts: () =>
+            port.request<Array<Record<string, string>>>("listCleanupDebts"),
+        retryCleanupDebt: (instanceName) =>
+            port.request<Array<Record<string, string>>>("retryCleanupDebt", { instanceName }),
         listInstances: () =>
             port.request<InstanceListEnvelope["instances"]>("listInstances"),
         snapshotInstances: () =>

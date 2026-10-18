@@ -73,6 +73,14 @@ export class InstanceConfigViewModel {
         return this.#read();
     }
 
+    listCleanupDebts(): Promise<Array<Record<string, string>>> {
+        return this.#transport.listCleanupDebts();
+    }
+
+    retryCleanupDebt(instanceName: string): Promise<Array<Record<string, string>>> {
+        return this.#transport.retryCleanupDebt(instanceName);
+    }
+
     /** Enables an instance, then refreshes the configured-instance catalog. */
     enable(instanceName: string): Promise<Record<string, JsonValue> | undefined> {
         return this.#mutate(() => this.#transport.enableInstance(instanceName));

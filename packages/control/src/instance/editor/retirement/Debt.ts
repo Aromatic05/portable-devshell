@@ -20,6 +20,8 @@ import type { InstanceRetirementHooks } from "./Hooks.js";
 export interface InstanceCleanupDebtRecord {
     /** Controller retirement record identity; not a remote Worker identifier. */
     generationId?: string;
+    createdAt?: string;
+    lastFailure?: string;
     instance: ControlConfig["instances"][number];
     operation: "delete" | "disable" | "rebuild";
     /** Remote target could not be safely retired; never replay by name. */
@@ -59,13 +61,35 @@ class InstanceCleanupDebtStore {
             const previous = this.#pendingRecord(record.instance.name);
             const generationId = record.generationId ?? randomUUID();
             if (previous !== undefined) this.#records.delete(previous[0]);
-            this.#records.set(generationId, { ...record, generationId });
+            this.#records.set(generationId, {
+                ...record,
+                generationId,
+                createdAt: record.createdAt ?? new Date().toISOString(),
+            });
             try {
                 await this.#persist();
             } catch (error) {
                 this.#records.delete(generationId);
                 if (previous !== undefined) this.#records.set(previous[0], previous[1]);
                 throw error;
+            }
+        });
+    }
+
+    async recordFailure(instance: string, error: unknown): Promise<void> {
+        await this.#exclusive(async () => {
+            const previous = this.#pendingRecord(instance);
+            if (previous === undefined) return;
+            const [id, record] = previous;
+            this.#records.set(id, {
+                ...record,
+                lastFailure: describeDebtFailure(error).slice(0, 500),
+            });
+            try {
+                await this.#persist();
+            } catch (failure) {
+                this.#records.set(id, record);
+                throw failure;
             }
         });
     }
@@ -217,12 +241,18 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
         throw new Error("Invalid lifecycle remote abandonment state.");
     if (record.orphaned !== undefined && typeof record.orphaned !== "boolean")
         throw new Error("Invalid lifecycle orphan state.");
+    if (record.createdAt !== undefined && typeof record.createdAt !== "string")
+        throw new Error("Invalid cleanup debt creation time.");
+    if (record.lastFailure !== undefined && typeof record.lastFailure !== "string")
+        throw new Error("Invalid cleanup debt failure description.");
     return {
         ...(record.generationId === undefined ? {} : { generationId: record.generationId as string }),
         instance,
         operation: record.operation,
         ...(record.remoteAbandoned === undefined ? {} : { remoteAbandoned: record.remoteAbandoned as boolean }),
         ...(record.orphaned === undefined ? {} : { orphaned: record.orphaned as boolean }),
+        ...(record.createdAt === undefined ? {} : { createdAt: record.createdAt as string }),
+        ...(record.lastFailure === undefined ? {} : { lastFailure: record.lastFailure as string }),
         ...(record.skipRuntimeRetirement === undefined
             ? {}
             : {
@@ -283,6 +313,26 @@ export class InstanceCleanupDebt {
 
     async recordDebt(record: InstanceCleanupDebtRecord): Promise<void> {
         await this.#cleanupDebts.put(record);
+    }
+
+    /** Read-only, sanitized projection; never expose full provider credentials. */
+    async listCleanupDebts(): Promise<Array<Record<string, string>>> {
+        return (await this.#cleanupDebts.list()).map((record) => ({
+            generationId: record.generationId ?? "legacy",
+            instance: record.instance.name,
+            provider: record.instance.provider,
+            operation: record.operation,
+            state: record.orphaned ? "orphaned" : "pending",
+            ...(record.createdAt === undefined ? {} : { createdAt: record.createdAt }),
+            ...(record.lastFailure === undefined ? {} : { reason: record.lastFailure }),
+            guidance: record.orphaned
+                ? "Inspect the old remote resource manually; no immutable remote generation identity is available."
+                : "Retry with: devshell instance cleanup retry " + record.instance.name,
+        }));
+    }
+
+    async rememberCleanupFailure(instance: string, error: unknown): Promise<void> {
+        await this.#cleanupDebts.recordFailure(instance, error);
     }
 
     async clearDebt(instance: string): Promise<void> {
@@ -356,12 +406,16 @@ export class InstanceCleanupDebt {
                         await this.#cleanupDebts.clear(current.instance.name);
                         continue;
                     }
+                    await this.#cleanupDebts.recordFailure(current.instance.name, failures[0])
+                        .catch((error) => console.warn("Could not persist cleanup failure:", error));
                     warnCommittedCleanupFailures(
                         current.instance.name,
                         current.operation === "delete" ? "delete" : "update",
                         failures,
                     );
                 } catch (error) {
+                    await this.#cleanupDebts.recordFailure(current.instance.name, error)
+                        .catch((persistError) => console.warn("Could not persist cleanup failure:", persistError));
                     warnCommittedCleanupFailures(
                         current.instance.name,
                         current.operation === "delete" ? "delete" : "update",
@@ -436,6 +490,9 @@ export class InstanceCleanupDebt {
                 .clear(debt.instance.name)
                 .catch((error) => failures.push(error));
         }
+        if (debtPersisted && debt !== undefined && failures.length > 0)
+            await this.#cleanupDebts.recordFailure(debt.instance.name, failures[0])
+                .catch((error) => failures.push(error));
         warnCommittedCleanupFailures(
             next?.name ?? existing?.name ?? "unknown",
             "update",
@@ -623,4 +680,11 @@ export function warnCommittedCleanupFailures(
             `Instance ${instance} ${operation} committed but cleanup was incomplete.`,
         ),
     );
+}
+
+function describeDebtFailure(error: unknown): string {
+    if (error instanceof AggregateError)
+        return [error.message, ...error.errors.map(describeDebtFailure)]
+            .filter(Boolean).join(": ");
+    return error instanceof Error ? error.message : String(error);
 }

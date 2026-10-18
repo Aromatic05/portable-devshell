@@ -25,6 +25,14 @@ export function createInstanceConfigRouteModule(
         "instance",
         {
             listInstances: () => readInstances(options) as never,
+            listCleanupDebts: async () => await editor().listCleanupDebts() as never,
+            retryCleanupDebt: async (request) => {
+                const payload = request.payload as { instanceName?: string } | undefined;
+                if (typeof payload?.instanceName !== "string" || payload.instanceName.length === 0)
+                    throw new Error("An instance name is required to retry cleanup.");
+                await editor().reconcileCleanupDebt(asInstanceName(payload.instanceName));
+                return await editor().listCleanupDebts() as never;
+            },
             snapshotInstances: () => {
                 // Stable read: the envelope's revision must label exactly the
                 // list we returned, so retry if the feed advanced mid-read.

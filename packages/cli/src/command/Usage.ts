@@ -135,6 +135,8 @@ export function renderInstanceUsage(command?: string): string {
         "  devshell instance enable <instance>",
         "  devshell instance disable <instance>",
         "  devshell instance list",
+        "  devshell instance cleanup list",
+        "  devshell instance cleanup retry <instance>",
         "  devshell instance status <instance>",
         "  devshell instance start <instance>",
         "  devshell instance stop <instance>",

@@ -92,6 +92,10 @@ export class InstanceEditorCoordinator implements ConfigBatchInstancePort {
         await this.#cleanup.reconcileCleanupDebt(instance);
     }
 
+    async listCleanupDebts(): Promise<Array<Record<string, string>>> {
+        return await this.#cleanup.listCleanupDebts();
+    }
+
     async updateInstanceConfig(params?: JsonValue): Promise<JsonValue> {
         return await this.#updates.updateInstanceConfig(params);
     }

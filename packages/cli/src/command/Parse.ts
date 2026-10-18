@@ -100,6 +100,8 @@ export type CliParsedCommand =
     | { command?: string; kind: "instance.help" }
     | { instance: string; kind: "instance.deviceCode" }
     | { kind: "instance.list" }
+    | { kind: "instance.cleanup.list" }
+    | { kind: "instance.cleanup.retry"; instance: string }
     | { follow: boolean; instance: string; kind: "instance.logs" }
     | { follow: boolean; instance: string; kind: "instance.todo" }
     | { instance: string; kind: "instance.start" }

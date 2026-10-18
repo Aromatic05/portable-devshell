@@ -12,6 +12,15 @@ export function parseInstanceCommand(
             return expectNoExtra(argv, { kind: "instance.help" });
         case "create":
             return expectNoExtra(argv, { kind: "instance.create" });
+        case "cleanup":
+            if (argv[1] === "list" && argv.length === 2)
+                return { kind: "instance.cleanup.list" };
+            if (argv[1] === "retry" && argv.length === 3)
+                return {
+                    kind: "instance.cleanup.retry",
+                    instance: required(argv[2], "cleanup retry requires an instance"),
+                };
+            throw CliRenderError.usage("instance cleanup requires list or retry <instance>");
         case "delete":
             return expectInstance(argv, "instance.delete");
         case "enable":

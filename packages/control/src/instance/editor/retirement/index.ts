@@ -81,6 +81,11 @@ export class InstanceRetirementCoordinator {
                 await cleanup.clearDebt(instanceName)
                     .catch((error) => cleanupFailures.push(error));
             }
+            if (cleanupFailures.length > 0 || retirement.warnings.length > 0)
+                await cleanup.rememberCleanupFailure(
+                    instanceName,
+                    (cleanupFailures[0] ?? retirement.warnings[0]),
+                ).catch((error) => cleanupFailures.push(error));
             warnCommittedCleanupFailures(instanceName, "delete", cleanupFailures);
             for (const warning of retirement.warnings)
                 console.warn(`Instance ${instanceName} remote retirement incomplete:`, warning);

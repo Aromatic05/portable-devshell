@@ -27,6 +27,12 @@ export async function executeInstanceLifecycle(
             context.writeRecords(live, renderInstanceList(live));
             return true;
         }
+        case "instance.cleanup.list":
+            context.writeJson(await context.clients.instance.listCleanupDebts());
+            return true;
+        case "instance.cleanup.retry":
+            context.writeJson(await context.clients.instance.retryCleanupDebt(command.instance));
+            return true;
         case "instance.delete":
             context.writeJson(
                 await context.clients.instance.deleteInstance(command.instance),

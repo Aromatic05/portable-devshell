@@ -8,6 +8,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { Control } from "../../../src/Control.ts";
+import { ControlInstances } from "../../../src/instance/index.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("Control interleaves domain and server lifecycle phases in dependency order", async (t) => {
@@ -69,6 +70,79 @@ test("Control interleaves domain and server lifecycle phases in dependency order
         "server.markReady",
     ]);
     await server.stop();
+});
+
+test("Control becomes ready without waiting for historical cleanup recovery", async (t) => {
+    const xdgRuntimeDir = await createTestTempDirectory("control-debt-ready");
+    t.after(async () => {
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    });
+    let ready = false;
+    let backgroundAttempted = false;
+    const control = new Control({
+        configStore: {
+            async readOrCreate() { return createDefaultControlConfig(); },
+        } as never,
+        factory: {
+            async create(options: { instances: { reconcile(): Promise<void> } }) {
+                // Simulate an old SSH provider that never finishes retiring.
+                options.instances.reconcile = async () => {
+                    backgroundAttempted = true;
+                    await new Promise<void>(() => undefined);
+                };
+                return {
+                    state: {
+                        async initialize() {},
+                        async start() {},
+                        async reconcile() {},
+                        async close() {},
+                    },
+                    server: {
+                        async prepare() {},
+                        async startTransport() {},
+                        async startHosts() {},
+                        markReady() { ready = true; },
+                        async stop() {},
+                    },
+                };
+            },
+        } as never,
+        xdgRuntimeDir,
+    });
+    await control.start();
+    assert.equal(ready, true);
+    assert.equal(backgroundAttempted, false, "recovery is deferred until Control is ready");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(backgroundAttempted, true, "historical debt starts recovering independently");
+    // The forever-pending legacy Worker must not hold shutdown hostage.
+    await control.stop();
+});
+
+test("recovery attempts independent pending debts while a sibling provider never responds", async () => {
+    const instances = new ControlInstances();
+    const attempted: string[] = [];
+    instances.attachRuntime({
+        editor: {
+            async listCleanupDebts() {
+                return [
+                    { instance: "blocked-ssh", state: "pending" },
+                    { instance: "healthy-container", state: "pending" },
+                    { instance: "old-orphan", state: "orphaned" },
+                ];
+            },
+            async reconcileCleanupDebt(name: string) {
+                attempted.push(name);
+                if (name === "blocked-ssh")
+                    await new Promise<void>(() => undefined);
+            },
+        },
+        toolCallEndpoint: {},
+    } as never);
+    const controller = new AbortController();
+    void instances.reconcile(controller.signal);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(attempted, ["blocked-ssh", "healthy-container"]);
+    controller.abort();
 });
 
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {

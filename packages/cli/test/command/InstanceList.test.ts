@@ -51,3 +51,37 @@ test("instance list does not conceal an unreachable runtime as stopped", async (
     } as never), /Instance unreachable/u);
     assert.equal(rendered, false);
 });
+
+test("instance cleanup CLI parses read-only listing and explicit named retry", async () => {
+    const { parseInstanceCommand } = await import("../../src/command/instance/Parse.js");
+    assert.deepEqual(parseInstanceCommand(["cleanup", "list"]), {
+        kind: "instance.cleanup.list",
+    });
+    assert.deepEqual(parseInstanceCommand(["cleanup", "retry", "old-host"]), {
+        kind: "instance.cleanup.retry",
+        instance: "old-host",
+    });
+    assert.throws(() => parseInstanceCommand(["cleanup", "retry"]), /cleanup/u);
+
+    const received: unknown[] = [];
+    const calls: string[] = [];
+    const debts = [{
+        instance: "old-host",
+        generationId: "prior-generation",
+        state: "orphaned",
+        guidance: "Inspect the old remote resource manually.",
+    }];
+    const context = {
+        clients: { instance: {
+            async listCleanupDebts() { calls.push("list"); return debts; },
+            async retryCleanupDebt(name: string) { calls.push("retry:" + name); return debts; },
+        } },
+        writeJson(value: unknown) { received.push(value); },
+    };
+    await executeInstanceLifecycle({ kind: "instance.cleanup.list" }, context as never);
+    await executeInstanceLifecycle({
+        kind: "instance.cleanup.retry", instance: "old-host",
+    }, context as never);
+    assert.deepEqual(calls, ["list", "retry:old-host"]);
+    assert.deepEqual(received, [debts, debts]);
+});
