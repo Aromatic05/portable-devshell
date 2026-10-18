@@ -7,8 +7,7 @@ import {
     type TuiTextDetailOverlay,
 } from "../../state/Overlay.js";
 import { isTuiSearchablePage } from "../../state/route/Navigation.js";
-import { wrapTerminalText } from "../../view/component/content/Box.js";
-import { tuiTextDetailBodyRows } from "../../view/component/content/Detail.js";
+import { wrapTerminalText, tuiTextDetailBodyRows } from "../../terminal/Public.js";
 import type { TuiFocusManager } from "../focus/Manager.js";
 import type { TuiCommandDispatcherFocus } from "./navigation/Focus.js";
 

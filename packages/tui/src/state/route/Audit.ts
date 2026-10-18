@@ -5,8 +5,8 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type { TuiExpandableBoxStatus } from "../../../../../state/Ui.js";
-import type { TuiDomainReader } from "../../../../domain/Reader.js";
+import type { TuiExpandableBoxStatus } from "../Ui.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 
 export type TuiAuditContextKey =
     | { readonly kind: "unscoped" }

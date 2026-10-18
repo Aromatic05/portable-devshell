@@ -3,7 +3,7 @@ import { workspaceFolderName } from "../../../presentation/Workspace.js";
 import { type TuiAppState } from "../../../../state/store/Model.js";
 import type { TuiDomainReader } from "../../../domain/Reader.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
-import { projectAuditContexts } from "./projection/Context.js";
+import { projectAuditContexts } from "../../../../state/route/Audit.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
 import { buildAuditContextBoxes } from "./Context.js";
 import { buildAuditMessageBoxes } from "./Message.js";

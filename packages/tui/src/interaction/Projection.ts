@@ -4,7 +4,7 @@ import type {
     TuiMainScreenModel,
     TuiSidebarModel,
 } from "../state/Ui.js";
-import type { TuiDomainReader } from "../view/domain/Reader.js";
+import type { TuiDomainReader } from "../app/control/Reader.js";
 
 export interface TuiInteractionProjection {
     readonly domains: TuiDomainReader;

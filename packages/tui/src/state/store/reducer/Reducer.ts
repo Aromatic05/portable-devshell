@@ -1,5 +1,5 @@
 import { reconcileTuiRouteResources } from "../../route/State.js";
-import type { TuiDomainReader } from "../../../view/domain/Reader.js";
+import type { TuiDomainReader } from "../../../app/control/Reader.js";
 import { reduceTuiStoreReducerControl } from "./data/Control.js";
 import { reduceTuiStoreReducerInstance } from "./data/Instance.js";
 import { reduceTuiStoreReducerInteraction } from "./ui/Interaction.js";

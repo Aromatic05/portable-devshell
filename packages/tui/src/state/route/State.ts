@@ -1,5 +1,5 @@
 import type { TuiAppState } from "../store/Model.js";
-import type { TuiDomainReader } from "../../view/domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import type { TuiPageId } from "../Ui.js";
 import {
     defaultTuiRouteViewState,
@@ -8,7 +8,7 @@ import {
     type TuiRoute,
     type TuiRouteViewState,
 } from "./Model.js";
-import { findAuditContext } from "../../view/page/activity/audit/projection/Context.js";
+import { findAuditContext } from "./Audit.js";
 
 const CONTEXT_SEPARATOR = "\u0000";
 

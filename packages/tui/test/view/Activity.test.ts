@@ -14,7 +14,7 @@ import {
     topTuiOverlay,
 } from "@portable-devshell/tui/testing";
 import { TuiTestDomains } from "../support/DomainHarness.ts";
-import { projectAuditContexts } from "../../src/view/page/activity/audit/projection/Context.ts";
+import { projectAuditContexts } from "../../src/state/route/Audit.ts";
 import { PassThrough } from "node:stream";
 import { type WriteStream } from "node:tty";
 import { stripVTControlCharacters } from "node:util";

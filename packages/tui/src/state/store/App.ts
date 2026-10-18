@@ -14,7 +14,7 @@ import type {
 } from "../Ui.js";
 import { createInitialTuiAppState } from "./Initial.js";
 import { tuiAppReducer } from "./reducer/Reducer.js";
-import type { TuiDomainReader } from "../../view/domain/Reader.js";
+import type { TuiDomainReader } from "../../app/control/Reader.js";
 import {
     type TuiAppAction,
     type TuiAppState,

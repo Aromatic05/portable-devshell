@@ -11,7 +11,7 @@ import {
 import type { TuiDomainSession } from "../../src/app/control/Client.js";
 import type { TuiRenderSource } from "../../src/app/Render.js";
 import type { TuiInteractionProjection } from "../../src/interaction/Projection.js";
-import { TuiDomainReader } from "../../src/view/domain/Reader.js";
+import { TuiDomainReader } from "../../src/app/control/Reader.js";
 import { createTuiViewProjection } from "../../src/view/projection/View.js";
 
 export class TestDomainSource<State extends object> {

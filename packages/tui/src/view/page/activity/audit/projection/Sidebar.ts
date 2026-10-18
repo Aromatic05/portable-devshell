@@ -3,7 +3,7 @@ import { workspaceFolderName } from "../../../../presentation/Workspace.js";
 import { currentTuiRoute } from "../../../../../state/route/State.js";
 import type { TuiSidebarContextEntry } from "../../../../../state/Ui.js";
 import type { TuiDomainReader } from "../../../../domain/Reader.js";
-import { projectAuditContexts } from "./Context.js";
+import { projectAuditContexts } from "../../../../../state/route/Audit.js";
 
 export function selectTuiAuditSidebarEntries(
     state: TuiAppState,

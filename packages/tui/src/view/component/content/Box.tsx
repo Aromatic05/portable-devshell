@@ -1,4 +1,7 @@
 import stringWidth from "string-width";
+import { takeTerminalWidth, wrapTerminalText } from "../../../terminal/Public.js";
+
+export { wrapTerminalText } from "../../../terminal/Text.js";
 
 import type { TuiBoxLineTone, TuiBoxModel } from "../../../state/Ui.js";
 import type { TuiExpandableBoxStatus } from "../../../state/Ui.js";
@@ -258,56 +261,6 @@ function truncateTerminalText(text: string, width: number): string {
     }
 
     return `${takeTerminalWidth(text, width - 1)}…`;
-}
-
-export function wrapTerminalText(text: string, width: number): string[] {
-    const safeWidth = Math.max(1, width);
-    const output: string[] = [];
-
-    for (const sourceLine of text.split(/\r?\n/u)) {
-        if (sourceLine.length === 0) {
-            output.push("");
-            continue;
-        }
-
-        let current = "";
-        for (const token of sourceLine.match(/\s+|\S+/gu) ?? []) {
-            if (stringWidth(current + token) <= safeWidth) {
-                current += token;
-                continue;
-            }
-
-            if (current.length > 0) {
-                output.push(current.trimEnd());
-                current = token.trimStart();
-            } else {
-                current = token;
-            }
-
-            while (stringWidth(current) > safeWidth) {
-                const chunk = takeTerminalWidth(current, safeWidth);
-                output.push(chunk);
-                current = current.slice(chunk.length);
-            }
-        }
-
-        output.push(current.trimEnd());
-    }
-
-    return output;
-}
-
-function takeTerminalWidth(text: string, width: number): string {
-    let output = "";
-    for (const segment of new Intl.Segmenter(undefined, {
-        granularity: "grapheme",
-    }).segment(text)) {
-        if (stringWidth(output + segment.segment) > width) {
-            break;
-        }
-        output += segment.segment;
-    }
-    return output.length === 0 ? text.slice(0, 1) : output;
 }
 
 function lineColor(tone: TuiBoxLineTone | undefined): string | undefined {
