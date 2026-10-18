@@ -128,6 +128,35 @@ for (const owner of controlPublicDomains) {
     });
 }
 
+// Server composes Control route adapters from Domain public contracts.
+// Overview's index.ts is the explicit Runtime composition entrypoint.
+rules.push({
+    name: "server-uses-control-domain-public-entries",
+    roots: [domain("packages/control/src/server")],
+    forbidden: (candidate, entry) =>
+        [
+            "artifact",
+            "config",
+            "context",
+            "debug",
+            "extension",
+            "instance",
+            "overview",
+            "toolcall",
+        ].some((target) => {
+            if (!under(candidate, domain(`packages/control/src/${target}`)))
+                return false;
+            if (
+                target === "overview" &&
+                !entry.typeOnly &&
+                candidate === domain("packages/control/src/overview/index")
+            ) return false;
+            return candidate !== domain(
+                `packages/control/src/${target}/${entry.typeOnly ? "Api" : "Public"}`,
+            );
+        }),
+});
+
 // UI state may consume domain ViewModels, not their presentation projections.
 rules.push(
     {

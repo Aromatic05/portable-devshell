@@ -248,3 +248,45 @@ test("Web state and domain sessions stay independent of presentation", async () 
         ]);
     }
 });
+
+test("Control Server uses Domain Api/Public entries except Overview composition", async () => {
+    const fixture = await mkdtemp(
+        join(root, "packages/control/src/server/.domain-check-"),
+    );
+    try {
+        await writeFile(
+            join(fixture, "Allowed.ts"),
+            [
+                'import { createConfigRouteModule } from "../../config/Public.js";',
+                'import type { ConfigChangeHub } from "../../config/Api.js";',
+                'import { createOperationalOverviewRuntime } from "../../overview/index.js";',
+                "",
+            ].join("\n"),
+        );
+        await writeFile(
+            join(fixture, "Rejected.ts"),
+            [
+                'import { ConfigChangeHub } from "../../config/change/Config.js";',
+                'import type { TuiPagePort } from "../../extension/api/point/tui/Service.js";',
+                'import { createOperationalOverviewRouteModule } from "../../overview/Route.js";',
+                'import type { ConfigChangeHub } from "../../config/Public.js";',
+                "",
+            ].join("\n"),
+        );
+        const result = spawnSync(
+            process.execPath,
+            [join(root, "scripts/check-domain-imports.mjs")],
+            { cwd: root, encoding: "utf8" },
+        );
+        assert.equal(result.status, 1);
+        const violations = result.stderr.trim().split("\n");
+        assert.equal(violations.length, 4);
+        assert.ok(violations.every((line) =>
+            line.includes("server-uses-control-domain-public-entries") &&
+            line.includes("Rejected.ts"),
+        ));
+        assert.doesNotMatch(result.stderr, /Allowed\.ts/u);
+    } finally {
+        await rm(fixture, { force: true, recursive: true });
+    }
+});
