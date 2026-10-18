@@ -1,8 +1,6 @@
 import type { TuiAppStore } from "../../../state/store/App.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
-import { overviewInstanceViewportRows } from "../../../view/page/overview/Presentation.js";
-import { tuiMessagesHistoryRows } from "../../../view/page/activity/messages/Projection.js";
-import { tuiBlockHeight } from "../../../view/shell/Layout.js";
+import { overviewInstanceViewportRows, tuiMessagesHistoryRows, tuiBlockHeight } from "../../../terminal/Public.js";
 
 interface CommandFocusOptions {
     mainBoxInnerColumns?(): number;

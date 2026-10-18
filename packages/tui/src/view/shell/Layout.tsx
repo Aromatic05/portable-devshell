@@ -1,4 +1,6 @@
 import React from "react";
+
+export { tuiBlockHeight } from "../../terminal/Layout.js";
 import { Box, Text } from "ink";
 
 const GAP = 1;
@@ -31,10 +33,6 @@ export function mainContentWidth(columns: number, fullWidth = false): number {
 
 export function mainBoxInnerWidth(columns: number, fullWidth = false): number {
     return Math.max(0, mainContentWidth(columns, fullWidth) - 4);
-}
-
-export function tuiBlockHeight(lines: readonly string[] | undefined): number {
-    return lines === undefined ? 0 : lines.length + 2;
 }
 
 export function tuiMainLayoutMetrics(

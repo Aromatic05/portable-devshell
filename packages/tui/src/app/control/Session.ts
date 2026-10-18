@@ -5,7 +5,7 @@ import {
     type TuiDomainSession,
 } from "./Client.js";
 import { TuiAppStore } from "../../state/store/App.js";
-import { TuiDomainReader } from "../../view/domain/Reader.js";
+import { TuiDomainReader } from "./Reader.js";
 
 export interface TuiControlSessionOptions {
     domains?: TuiDomainSession;

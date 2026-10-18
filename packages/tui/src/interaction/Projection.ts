@@ -1,3 +1,4 @@
+import type { JsonValue } from "@portable-devshell/shared";
 import type { TuiAppState } from "../state/store/Model.js";
 import type {
     TuiMainBoxFlowMetrics,
@@ -7,7 +8,14 @@ import type {
 import type { TuiDomainReader } from "../app/control/Reader.js";
 
 export interface TuiInteractionProjection {
+    auditInputText(input: JsonValue | undefined, fallback: string | undefined): string;
+    auditOutputText(output: JsonValue | undefined): string;
     readonly domains: TuiDomainReader;
+    resolveAuditOutput(
+        output: JsonValue | undefined,
+        instance: string,
+        callId: string,
+    ): JsonValue | undefined;
     selectMainBoxFlowMetrics(
         state: TuiAppState,
         boxInnerWidth?: number,

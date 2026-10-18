@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 
-import { readContextMessageDraft } from "./Draft.js";
+import { readContextMessageDraft } from "../../../../state/editor/MessageDraft.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
 import {
     currentTuiRoute,

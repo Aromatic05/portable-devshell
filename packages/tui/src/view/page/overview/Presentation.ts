@@ -5,6 +5,11 @@ import {
     OperationalOverviewInstance,
 } from "@portable-devshell/shared";
 
+import { overviewInstanceViewportRows } from "../../../terminal/Public.js";
+
+export { selectTuiOverviewInstanceName } from "../../../state/route/Overview.js";
+export { overviewInstanceViewportRows } from "../../../terminal/Layout.js";
+
 import type { TuiAppState } from "../../../state/store/Model.js";
 import { currentTuiRouteScrollKey } from "../../../state/route/State.js";
 import type { TuiDomainReader } from "../../domain/Reader.js";
@@ -134,19 +139,6 @@ export function selectTuiOverviewFocusIds(
     return selectTuiOverviewPresentation(state, reader).instances.map(
         (instance) => instance.id,
     );
-}
-
-export function selectTuiOverviewInstanceName(
-    focusId: string | undefined,
-): string | undefined {
-    const prefix = "overview-instance:";
-    return focusId?.startsWith(prefix)
-        ? focusId.slice(prefix.length)
-        : undefined;
-}
-
-export function overviewInstanceViewportRows(viewportRows: number): number {
-    return Math.max(1, Math.floor(Math.max(0, viewportRows - 10) * 0.45));
 }
 
 export function selectTuiOverviewInstanceViewport(

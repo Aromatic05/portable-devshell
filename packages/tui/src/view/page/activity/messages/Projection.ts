@@ -7,6 +7,10 @@ import {
     type MessagePreferencesSnapshot,
 } from "@portable-devshell/shared";
 
+import { tuiMessagesHistoryRows } from "../../../../terminal/Public.js";
+
+export { tuiMessagesHistoryRows } from "../../../../terminal/Layout.js";
+
 import { workspaceFolderName } from "../../../presentation/Workspace.js";
 
 import type { TuiAppState } from "../../../../state/store/Model.js";
@@ -16,7 +20,7 @@ import {
     normalizeTuiGraphemeCursor,
 } from "../../../../interaction/selection/Model.js";
 import type { TuiSidebarContextEntry } from "../../../../state/Ui.js";
-import { wrapTerminalText } from "../../../component/content/Box.js";
+import { wrapTerminalText } from "../../../../terminal/Public.js";
 import type { TuiDomainReader } from "../../../domain/Reader.js";
 
 export interface TuiMessageEntry {
@@ -487,10 +491,6 @@ export function renderTuiMessageHistoryLines(
     );
     byContextAndWidth.set(cacheKey, rendered);
     return rendered;
-}
-
-export function tuiMessagesHistoryRows(viewportRows: number): number {
-    return Math.max(0, viewportRows - 4);
 }
 
 export function tuiMessagesRenderedHistoryRows(

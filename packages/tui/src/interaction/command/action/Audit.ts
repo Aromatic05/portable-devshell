@@ -5,11 +5,6 @@ import type {
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import {
-    auditInputText,
-    auditOutputText,
-    resolveAuditOutput,
-} from "../../../view/page/activity/audit/projection/Detail.js";
 import type { TuiAppStore } from "../../../state/store/App.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
 import type { TuiUiIntent } from "../../../state/Interaction.js";
@@ -76,7 +71,7 @@ export class TuiCommandDispatcherAudit {
         const record = await this.#readToolCall(instance, callId);
         if (record === undefined) return false;
         return await this.#dispatch({
-            body: auditInputText(record.input, record.inputSummary),
+            body: this.#projection.auditInputText(record.input, record.inputSummary),
             title: `${record.toolName} · input`,
             type: "textDetail.open",
         });
@@ -85,11 +80,7 @@ export class TuiCommandDispatcherAudit {
     async openOutput(instance: string, callId: string): Promise<boolean> {
         const record = await this.#readToolCall(instance, callId);
         if (record === undefined) return false;
-        const output = resolveAuditOutput(
-            record.output,
-            this.#projection.domains.runtime(instance).logs,
-            callId,
-        );
+        const output = this.#projection.resolveAuditOutput(record.output, instance, callId);
         const imageInput =
             record.toolName === "artifact_viewImage"
                 ? readArtifactViewImageInput(record.input, record.output)
@@ -106,7 +97,7 @@ export class TuiCommandDispatcherAudit {
             );
         }
         return await this.#dispatch({
-            body: auditOutputText(output),
+            body: this.#projection.auditOutputText(output),
             title: `${record.toolName} · output`,
             type: "textDetail.open",
         });
@@ -143,7 +134,7 @@ export class TuiCommandDispatcherAudit {
                     approval.callId,
                 );
                 return await this.#dispatch({
-                    body: auditInputText(
+                    body: this.#projection.auditInputText(
                         toolCall?.input,
                         approval.inputSummary,
                     ),
@@ -200,7 +191,7 @@ export class TuiCommandDispatcherAudit {
     ): Promise<boolean> {
         const title = `${toolName} · output`;
         await this.#dispatch({
-            body: `${auditOutputText(output)}\n\nLoading image preview...`,
+            body: `${this.#projection.auditOutputText(output)}\n\nLoading image preview...`,
             title,
             type: "textDetail.open",
         });
@@ -213,7 +204,7 @@ export class TuiCommandDispatcherAudit {
                 return true;
             this.#store.replaceTopOverlay({
                 ...overlay,
-                body: auditOutputText(output),
+                body: this.#projection.auditOutputText(output),
                 image,
             });
         } catch (error) {
@@ -223,7 +214,7 @@ export class TuiCommandDispatcherAudit {
             if (overlay?.kind === "text-detail" && overlay.title === title) {
                 this.#store.replaceTopOverlay({
                     ...overlay,
-                    body: `${auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`,
+                    body: `${this.#projection.auditOutputText(output)}\n\nImage preview unavailable: ${readErrorMessage(error)}`,
                 });
             }
         }

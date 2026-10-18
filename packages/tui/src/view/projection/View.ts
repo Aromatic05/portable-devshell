@@ -3,6 +3,11 @@ import type { TuiMode } from "../../state/Interaction.js";
 import type { TuiActivePage } from "../../state/Ui.js";
 import { buildBoxesForPage } from "../page/Builder.js";
 import { buildHelpLines } from "../page/Help.js";
+import {
+    auditInputText,
+    auditOutputText,
+    resolveAuditOutput,
+} from "../page/activity/audit/projection/Detail.js";
 import { selectTuiOverviewFocusIds } from "../page/overview/Presentation.js";
 import type {
     TuiAppState,
@@ -555,7 +560,11 @@ export function createTuiViewProjection(
     domains: TuiDomainReader,
 ): TuiInteractionProjection {
     return {
+        auditInputText,
+        auditOutputText,
         domains,
+        resolveAuditOutput: (output, instance, callId) =>
+            resolveAuditOutput(output, domains.runtime(instance).logs, callId),
         selectMainBoxFlowMetrics: (state, boxInnerWidth) =>
             selectMainBoxFlowMetrics(state, domains, boxInnerWidth),
         selectMainBoxIds: (state) => selectMainBoxIds(state, domains),

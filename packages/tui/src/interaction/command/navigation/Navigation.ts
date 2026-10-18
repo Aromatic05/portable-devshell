@@ -6,7 +6,7 @@ import type { TuiFocusManager } from "../../focus/Manager.js";
 import type { TuiCommandDispatcherFocus } from "./Focus.js";
 import { TuiCommandDispatcherOverlay } from "../Overlay.js";
 import { TuiCommandDispatcherViewport } from "./Viewport.js";
-import { selectTuiOverviewInstanceName } from "../../../view/page/overview/Presentation.js";
+import { selectTuiOverviewInstanceName } from "../../../state/route/Overview.js";
 import { topTuiOverlay } from "../../../state/Overlay.js";
 import {
     currentTuiRoute,
@@ -15,13 +15,13 @@ import {
 import {
     contextMessageDraftKey,
     readContextMessageDraft,
-} from "../../../view/page/activity/messages/Draft.js";
+} from "../../../state/editor/MessageDraft.js";
 import {
     nextTuiGraphemeCursor,
     normalizeTuiGraphemeCursor,
     previousTuiGraphemeCursor,
 } from "../../selection/Model.js";
-import { buildContextualHelpLines } from "../../../view/page/Help.js";
+import { buildContextualHelpLines } from "../../../state/route/Help.js";
 
 export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;

@@ -1,18 +1,1 @@
-import type { TuiAppState } from "../../../../state/store/Model.js";
-
-export function contextMessageDraftKey(
-    instance: string,
-    ctxId: string,
-): string {
-    return `contextMessage:${instance}:${ctxId}`;
-}
-
-export function readContextMessageDraft(
-    state: TuiAppState,
-    instance: string,
-    ctxId: string,
-): string {
-    const value =
-        state.ui.formDrafts[contextMessageDraftKey(instance, ctxId)];
-    return typeof value === "string" ? value : "";
-}
+export { contextMessageDraftKey, readContextMessageDraft } from "../../../../state/editor/MessageDraft.js";
