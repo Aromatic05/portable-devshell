@@ -498,6 +498,43 @@ test("delete cleanup debt retries provider retirement before finalizing the gene
     assert.deepEqual(await coordinator.listCleanupDebts(), []);
 });
 
+test("new editor rejects a former Control generation's in-flight retirement", async () => {
+    let config = configWithInstance();
+    config.instances.push(normalizeConfigInstanceDraft({
+        name: "unrelated-local", provider: "local",
+    }));
+    let oldGenerationBusy = true;
+    const coordinator = createCoordinator({
+        config,
+        registry: new InstanceRegistry([
+            createTestInstance(config.instances[0]!),
+            createTestInstance(config.instances[1]!),
+        ]),
+        hooks: testRuntimeHooks(),
+        setConfig(next) { config = next; },
+        isPreviousLifecycleRecoveryPending: (name) =>
+            name === "demo-local" && oldGenerationBusy,
+    });
+    await assert.rejects(
+        coordinator.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { security: { mode: "workspace" } },
+        }),
+        /incomplete lifecycle cleanup/u,
+    );
+    await assert.rejects(
+        coordinator.reconcileCleanupDebt("demo-local"),
+        /incomplete lifecycle cleanup/u,
+    );
+    await coordinator.updateInstanceConfig({
+        instanceName: "unrelated-local",
+        patch: { security: { mode: "workspace" } },
+    });
+    assert.equal(config.instances[1]?.security.mode, "workspace");
+    oldGenerationBusy = false;
+    await coordinator.assertInstanceCleanupSettled("demo-local", false);
+});
+
 test("cleanup-only Worker stops after a failed Context cleanup", async () => {
     const events: string[] = [];
     const instance = createTestInstance(configWithInstance().instances[0]!, {
@@ -573,6 +610,7 @@ function createCoordinator(input: {
     registry: InstanceRegistry;
     setConfig(next: ControlConfig): void;
     hooks: ReturnType<typeof testRuntimeHooks>;
+    isPreviousLifecycleRecoveryPending?: (name: string) => boolean;
 }): InstanceEditorCoordinator {
     const engine = new ConfigEngine({
         configStore: {
@@ -592,5 +630,6 @@ function createCoordinator(input: {
         engine,
         instanceChanges: new InstanceChangeHub(),
         instanceRegistry: input.registry,
+        isPreviousLifecycleRecoveryPending: input.isPreviousLifecycleRecoveryPending,
     });
 }

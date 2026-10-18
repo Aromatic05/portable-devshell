@@ -181,6 +181,8 @@ export class ControlFactory {
                     await contexts.api.cleanup.reconcileInstance(instance, target),
                 instanceRegistry: options.instances.registry,
                 instanceChanges: options.instances.changes,
+                isPreviousLifecycleRecoveryPending: (name) =>
+                    options.instances.isRecovering(name),
                 mcp: mcp.instancePort,
             });
             const instanceCreate = new InstanceCreateCoordinator({

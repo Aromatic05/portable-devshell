@@ -271,6 +271,7 @@ export class InstanceCleanupDebt {
     readonly #engine: ConfigEngine;
     readonly #instanceChanges: InstanceChangeHub;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #isPreviousLifecycleRecoveryPending?: (instance: string) => boolean;
     readonly #hooks: InstanceRetirementHooks;
     readonly #prepareContextCleanup: (
         instance: string,
@@ -296,6 +297,7 @@ export class InstanceCleanupDebt {
         this.#mcp = options.mcp;
         this.#instanceChanges = options.instanceChanges;
         this.#instanceRegistry = options.instanceRegistry;
+        this.#isPreviousLifecycleRecoveryPending = options.isPreviousLifecycleRecoveryPending;
         this.#hooks = hooks;
         this.#prepareContextCleanup = prepareContextCleanup;
         this.#syncMcpEndpoint = syncMcpEndpoint;
@@ -321,6 +323,7 @@ export class InstanceCleanupDebt {
             generationId: record.generationId ?? "legacy",
             instance: record.instance.name,
             provider: record.instance.provider,
+            target: cleanupTargetDescription(record.instance),
             operation: record.operation,
             state: record.orphaned ? "orphaned" : "pending",
             ...(record.createdAt === undefined ? {} : { createdAt: record.createdAt }),
@@ -365,6 +368,8 @@ export class InstanceCleanupDebt {
         instance: string,
         reconcile = true,
     ): Promise<void> {
+        if (this.#isPreviousLifecycleRecoveryPending?.(instance))
+            throw this.#cleanupConflict(instance);
         const active = this.#activeCleanups.get(instance);
         // Callers inside ConfigEngine.runExclusive must never wait for a
         // cleanup which can itself need the configuration transaction.
@@ -381,9 +386,13 @@ export class InstanceCleanupDebt {
     }
 
     async reconcileCleanupDebt(instance?: string): Promise<void> {
+        if (instance !== undefined && this.#isPreviousLifecycleRecoveryPending?.(instance))
+            throw this.#cleanupConflict(instance);
         for (const record of await this.#cleanupDebts.list()) {
             if (record.orphaned) continue;
             if (instance !== undefined && record.instance.name !== instance)
+                continue;
+            if (this.#isPreviousLifecycleRecoveryPending?.(record.instance.name))
                 continue;
             const active = this.#activeCleanups.get(record.instance.name);
             if (active !== undefined) {
@@ -687,4 +696,24 @@ function describeDebtFailure(error: unknown): string {
         return [error.message, ...error.errors.map(describeDebtFailure)]
             .filter(Boolean).join(": ");
     return error instanceof Error ? error.message : String(error);
+}
+
+/** Display only resource locators, never provider configuration or credentials. */
+function cleanupTargetDescription(instance: ControlConfig["instances"][number]): string {
+    switch (instance.provider) {
+        case "docker":
+        case "podman":
+            return instance.container.mode === "compose"
+                ? "compose " + instance.container.compose.projectName + "/" +
+                    instance.container.compose.service
+                : "container " + instance.container.containerName;
+        case "ssh":
+            // ssh.command may contain ProxyCommand, private paths or tokens.
+            // Never echo that shell expression into a cleanup status response.
+            return "SSH target (inspect the saved instance ssh.command locally)";
+        case "reverse":
+            return "reverse Worker (enrolled instance name: " + instance.name + ")";
+        case "local":
+            return "this Control host";
+    }
 }

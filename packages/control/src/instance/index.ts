@@ -18,6 +18,23 @@ export class ControlInstances {
     #registry = new InstanceRegistry([]);
     #reverseConnections?: ReverseConnections;
     #toolCallEndpoint?: Endpoint;
+    // ControlInstances survives Control.stop()/restart(); recovery fences must
+    // survive registry reset to prevent a stale Hook from retiring a new peer.
+    readonly #recoveringNames = new Map<
+        string,
+        { task: Promise<void>; editor: InstanceEditorCoordinator }
+    >();
+    readonly #quarantinedNames = new Set<string>();
+    #onRecoveryFenceCleared?: () => void;
+
+    onRecoveryFenceCleared(callback: () => void): void {
+        this.#onRecoveryFenceCleared = callback;
+    }
+
+    isRecovering(name: string): boolean {
+        const recovery = this.#recoveringNames.get(name);
+        return recovery !== undefined && recovery.editor !== this.#editor;
+    }
 
     get registry(): InstanceRegistry {
         return this.#registry;
@@ -46,31 +63,42 @@ export class ControlInstances {
     async reconcile(signal?: AbortSignal): Promise<void> {
         const editor = this.#editor;
         if (editor === undefined || signal?.aborted) return;
-        // Independent debts are reconciled in bounded parallel batches.
-        // One unreachable old Worker must not hold sibling retirements
-        // or Control readiness hostage. A stopping Control never starts
-        // additional batches, while in-flight operations remain generation-
-        // fenced by InstanceCleanupDebt.
         const pending = (await editor.listCleanupDebts())
             .filter((record) => record.state === "pending");
-        const BATCH_SIZE = 4;
-        for (let index = 0; index < pending.length; index += BATCH_SIZE) {
-            if (signal?.aborted) return;
-            await Promise.allSettled(
-                pending.slice(index, index + BATCH_SIZE).map(async (record) => {
-                    if (signal?.aborted) return;
+        let cursor = 0;
+        const workers = Array.from(
+            { length: Math.min(4, pending.length) },
+            async () => {
+                // Refill a completed slot immediately, independently of a
+                // sibling SSH provider that remains unreachable.
+                while (!signal?.aborted) {
+                    const record = pending[cursor++];
+                    if (record === undefined) return;
+                    const name = record.instance;
+                    if (this.#recoveringNames.has(name)) continue;
+                    const run = editor.reconcileCleanupDebt(name);
+                    this.#recoveringNames.set(name, { task: run, editor });
                     try {
-                        await editor.reconcileCleanupDebt(record.instance);
+                        await run;
                     } catch (error) {
                         console.warn(
                             "Instance cleanup debt reconciliation deferred:",
-                            record.instance,
+                            name,
                             error,
                         );
+                    } finally {
+                        if (this.#recoveringNames.get(name)?.task === run)
+                            this.#recoveringNames.delete(name);
+                        if (this.#quarantinedNames.delete(name)) {
+                            // Do not instantiate from a stale editor snapshot.
+                            // A new Control start reloads durable debt state.
+                            this.#onRecoveryFenceCleared?.();
+                        }
                     }
-                }),
-            );
-        }
+                }
+            },
+        );
+        await Promise.allSettled(workers);
     }
 
     connectionClosed(connectionId: string): void {
@@ -80,9 +108,17 @@ export class ControlInstances {
 
     async load(config: ControlConfig): Promise<void> {
         const created: Instance[] = [];
+        this.#quarantinedNames.clear();
         try {
             for (const definition of config.instances) {
                 if (!definition.enabled) continue;
+                if (this.#recoveringNames.has(definition.name)) {
+                    this.#quarantinedNames.add(definition.name);
+                    console.warn(
+                        "Instance " + definition.name + " is deferred: previous Control lifecycle cleanup is still running.",
+                    );
+                    continue;
+                }
                 try {
                     created.push(this.createRuntimeInstance(definition));
                 } catch (error) {
@@ -126,6 +162,7 @@ export class ControlInstances {
     }
 
     reset(): void {
+        this.#quarantinedNames.clear();
         this.#editor = undefined;
         this.#registry = new InstanceRegistry([]);
         this.#reverseConnections = undefined;

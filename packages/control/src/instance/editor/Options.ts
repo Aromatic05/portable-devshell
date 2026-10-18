@@ -15,6 +15,8 @@ export interface InstanceEditorCoordinatorOptions {
     engine: ConfigEngine;
     instanceChanges: InstanceChangeHub;
     instanceRegistry: InstanceRegistry;
+    /** Old Control lifecycle retirement may still own a same-name resource. */
+    isPreviousLifecycleRecoveryPending?: (instance: string) => boolean;
     mcp?: InstanceMcpRuntimePort;
     reconcileContextInstanceCleanup?: (
         instance: string,

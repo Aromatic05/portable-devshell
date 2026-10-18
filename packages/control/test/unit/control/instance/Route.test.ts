@@ -67,3 +67,44 @@ test("config instance route reports the live Worker state and home", async () =>
     assert.equal(entries[0]?.snapshot.connectionState, "connected");
     assert.equal(entries[0]?.homeDirectory, "/home/worker");
 });
+
+test("orphan cleanup retry gives manual-action-required without touching remote resources", async () => {
+    let retired = 0;
+    const debts = [{
+        instance: "old-remote",
+        provider: "ssh",
+        target: "SSH target (inspect the saved instance ssh.command locally)",
+        state: "orphaned",
+        generationId: "old-generation",
+    }];
+    const module = createInstanceConfigRouteModule({
+        changes: new InstanceChangeHub(),
+        registry: new InstanceRegistry([]),
+        editor: {
+            async listCleanupDebts() { return debts; },
+            async reconcileCleanupDebt() { retired++; },
+        } as never,
+    });
+    const listing = module.operations.find(({ name }) => name === "listCleanupDebts");
+    const retry = module.operations.find(({ name }) => name === "retryCleanupDebt");
+    if (listing === undefined || retry === undefined)
+        throw new Error("cleanup routes are missing");
+    assert.deepEqual(await listing.handle(
+        { id: "list", name: "listCleanupDebts" }, {} as never,
+    ), debts);
+    await assert.rejects(
+        async () => await retry.handle({
+            id: "retry",
+            name: "retryCleanupDebt",
+            payload: { instanceName: "old-remote" },
+        }, {} as never),
+        (error: unknown) => {
+            const failure = error as { code?: string; retryable?: boolean; message?: string };
+            assert.equal(failure.code, "instance.cleanupManualRequired");
+            assert.equal(failure.retryable, false);
+            assert.match(failure.message ?? "", /manual inspection/u);
+            return true;
+        },
+    );
+    assert.equal(retired, 0, "orphan remote resources must never be retired by instance name");
+});

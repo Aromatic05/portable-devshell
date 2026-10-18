@@ -127,6 +127,10 @@ test("recovery attempts independent pending debts while a sibling provider never
                 return [
                     { instance: "blocked-ssh", state: "pending" },
                     { instance: "healthy-container", state: "pending" },
+                    { instance: "healthy-3", state: "pending" },
+                    { instance: "healthy-4", state: "pending" },
+                    { instance: "healthy-5", state: "pending" },
+                    { instance: "healthy-6", state: "pending" },
                     { instance: "old-orphan", state: "orphaned" },
                 ];
             },
@@ -141,8 +145,125 @@ test("recovery attempts independent pending debts while a sibling provider never
     const controller = new AbortController();
     void instances.reconcile(controller.signal);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.deepEqual(attempted, ["blocked-ssh", "healthy-container"]);
+    assert.deepEqual(attempted, [
+        "blocked-ssh", "healthy-container", "healthy-3", "healthy-4",
+        "healthy-5", "healthy-6",
+    ], "a stalled first slot must not starve fifth and sixth debts");
     controller.abort();
+});
+
+test("recovery fences a retired Control generation against same-name runtime reuse", async () => {
+    const instances = new ControlInstances();
+    const config = createDefaultControlConfig();
+    config.instances = [
+        normalizeConfigInstanceDraft({ name: "reused-local", provider: "local" }),
+    ];
+    await instances.load(config);
+    let complete!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>((resolve) => { complete = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const actualCleanup: string[] = [];
+    let cleared = 0;
+    instances.onRecoveryFenceCleared(() => { cleared++; });
+    instances.attachRuntime({
+        editor: {
+            async listCleanupDebts() {
+                return [{ instance: "reused-local", state: "pending" }];
+            },
+            async reconcileCleanupDebt() {
+                started();
+                await pending;
+                actualCleanup.push("old-generation-retired");
+            },
+        },
+        toolCallEndpoint: {},
+    } as never);
+    const oldRecovery = instances.reconcile();
+    await entered;
+    await instances.close();
+    instances.reset();
+    await instances.load(config);
+    assert.equal(instances.registry.get("reused-local"), undefined,
+        "a new Control must not create a same-name generation before the old retirement settles");
+    complete();
+    await oldRecovery;
+    assert.deepEqual(actualCleanup, ["old-generation-retired"]);
+    assert.equal(cleared, 1, "the Control must refresh its editor after old debt settles");
+    instances.reset();
+    await instances.load(config);
+    assert.ok(instances.registry.get("reused-local"));
+    await instances.close();
+});
+
+test("Control restart quarantines an in-flight old cleanup until a fresh configuration load", async (t) => {
+    const xdgRuntimeDir = await createTestTempDirectory("control-cross-generation-cleanup");
+    t.after(async () => { await rm(xdgRuntimeDir, { recursive: true, force: true }); });
+    const config = createDefaultControlConfig();
+    config.instances = [normalizeConfigInstanceDraft({
+        name: "reused-local", provider: "local",
+    })];
+    const resources = new Map<string, number>();
+    let generation = 0;
+    let unblock!: () => void;
+    let oldStarted!: () => void;
+    let thirdStarted!: () => void;
+    const oldPending = new Promise<void>((resolve) => { unblock = resolve; });
+    const oldEntered = new Promise<void>((resolve) => { oldStarted = resolve; });
+    const thirdReady = new Promise<void>((resolve) => { thirdStarted = resolve; });
+    const control = new Control({
+        configStore: { async readOrCreate() { return config; } } as never,
+        factory: {
+            async create(options: { instances: ControlInstances }) {
+                const current = ++generation;
+                if (options.instances.registry.get("reused-local") !== undefined)
+                    resources.set("reused-local", current);
+                options.instances.attachRuntime({
+                    editor: {
+                        async listCleanupDebts() {
+                            return current === 1
+                                ? [{ instance: "reused-local", state: "pending" }]
+                                : [];
+                        },
+                        async reconcileCleanupDebt() {
+                            oldStarted();
+                            await oldPending;
+                            resources.delete("reused-local");
+                        },
+                    },
+                    toolCallEndpoint: {},
+                } as never);
+                if (current === 3) thirdStarted();
+                return {
+                    state: {
+                        async initialize() {}, async start() {},
+                        async reconcile() {}, async close() {},
+                    },
+                    server: {
+                        async prepare() {}, async startTransport() {},
+                        async startHosts() {}, markReady() {}, async stop() {},
+                    },
+                };
+            },
+        } as never,
+        xdgRuntimeDir,
+    });
+    try {
+        await control.start();
+        await oldEntered;
+        await control.restart();
+        assert.equal(generation, 2);
+        assert.equal(resources.get("reused-local"), 1,
+            "a new Control generation must defer loading the still-retiring name");
+        unblock();
+        await thirdReady;
+        assert.equal(generation, 3);
+        assert.equal(resources.get("reused-local"), 3,
+            "old cleanup completed before the replacement resource was admitted");
+    } finally {
+        unblock();
+        await control.stop();
+    }
 });
 
 test("concurrent restart then shutdown preserves lifecycle request order", async (t) => {

@@ -26,6 +26,8 @@ export class Control {
     readonly #socketFile: ControlSocketFile;
     readonly #startupDiagnostic: (message: string) => void;
     #operationTail: Promise<void> = Promise.resolve();
+    #recoveryRestartScheduled = false;
+    #desiredRunning = false;
     #backgroundCleanup?: {
         controller: AbortController;
         timer?: ReturnType<typeof setImmediate>;
@@ -36,6 +38,20 @@ export class Control {
     constructor(options: ControlOptions = {}) {
         this.#config = new ControlConfig({ store: options.configStore });
         this.#instances = new ControlInstances();
+        this.#instances.onRecoveryFenceCleared(() => {
+            if (this.#recoveryRestartScheduled || !this.#desiredRunning) return;
+            this.#recoveryRestartScheduled = true;
+            queueMicrotask(() => {
+                this.#recoveryRestartScheduled = false;
+                // An explicit user stop supersedes any automatic recovery.
+                if (!this.#desiredRunning) return;
+                // A deferred instance may only return after a fresh Control
+                // editor reloads persisted debt and validates config.
+                void this.restart().catch((error: unknown) =>
+                    console.warn("Deferred instance activation restart failed:", error),
+                );
+            });
+        });
         this.#config.changes.onChange((change) => {
             if (
                 change.paths.some(
@@ -67,14 +83,22 @@ export class Control {
     }
 
     async start(): Promise<void> {
-        await this.#runExclusive(async () => await this.#start());
+        this.#desiredRunning = true;
+        try {
+            await this.#runExclusive(async () => await this.#start());
+        } catch (error) {
+            this.#desiredRunning = false;
+            throw error;
+        }
     }
 
     async stop(): Promise<void> {
+        this.#desiredRunning = false;
         await this.#runExclusive(async () => await this.#stop());
     }
 
     async restart(): Promise<void> {
+        this.#desiredRunning = true;
         await this.#runExclusive(async () => {
             await this.#stop();
             await this.#start();

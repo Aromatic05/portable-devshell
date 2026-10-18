@@ -30,7 +30,21 @@ export function createInstanceConfigRouteModule(
                 const payload = request.payload as { instanceName?: string } | undefined;
                 if (typeof payload?.instanceName !== "string" || payload.instanceName.length === 0)
                     throw new Error("An instance name is required to retry cleanup.");
-                await editor().reconcileCleanupDebt(asInstanceName(payload.instanceName));
+                const name = asInstanceName(payload.instanceName);
+                const record = (await editor().listCleanupDebts())
+                    .find((entry) => entry.instance === name);
+                if (record?.state === "orphaned")
+                    throw createRemoteError({
+                        code: "instance.cleanupManualRequired",
+                        details: {
+                            instance: name,
+                            provider: record.provider,
+                            target: record.target,
+                        },
+                        message: "Old remote resources need manual inspection; retry cannot safely retire an orphaned generation by instance name.",
+                        retryable: false,
+                    });
+                await editor().reconcileCleanupDebt(name);
                 return await editor().listCleanupDebts() as never;
             },
             snapshotInstances: () => {
