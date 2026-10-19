@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { stat, writeFile } from "node:fs/promises";
+import { rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -345,3 +345,29 @@ function assertOwnerOnlyAcl(snapshot: WindowsAclSnapshot): void {
     assert.match(snapshot.rules[0]?.rights ?? "", /FullControl/u);
     assert.equal(snapshot.rules[0]?.inherited, false);
 }
+
+
+test("failed replacement activation preserves rollover credentials until a successful retry", async (t) => {
+    const home = await createTestTempDirectory("reverse-activation-retry");
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const store = new ReverseCredentialStore(home);
+    const firstCode = await store.createDeviceCode("remote-retry");
+    const first = await store.consumeDeviceCode(firstCode.deviceCode);
+    const replacementCode = await store.createDeviceCode("remote-retry");
+    const replacement = await store.consumeDeviceCode(replacementCode.deviceCode);
+    await assert.rejects(store.withAuthenticatedToken("remote-retry", replacement.deviceToken, async (replacing) => {
+        assert.equal(replacing, true);
+        throw new Error("worker handshake failed");
+    }), /worker handshake failed/u);
+    const reopened = new ReverseCredentialStore(home);
+    assert.equal(await reopened.authenticate("remote-retry", first.deviceToken), true);
+    assert.equal(await reopened.authenticate("remote-retry", replacement.deviceToken), true);
+    assert.equal(await store.withAuthenticatedToken("remote-retry", replacement.deviceToken, async (replacing) => {
+        assert.equal(replacing, true);
+    }), true);
+    assert.equal(await reopened.authenticate("remote-retry", first.deviceToken), false);
+    assert.equal(await reopened.authenticate("remote-retry", replacement.deviceToken), true);
+    let unauthorizedActivations = 0;
+    assert.equal(await store.withAuthenticatedToken("remote-retry", first.deviceToken, async () => { unauthorizedActivations += 1; }), false);
+    assert.equal(unauthorizedActivations, 0);
+});

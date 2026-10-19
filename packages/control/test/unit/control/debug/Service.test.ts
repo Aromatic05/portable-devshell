@@ -142,3 +142,32 @@ test("DebugPatchManager rejects a scoped patch when the target cannot resolve Co
 
     await manager.dispose();
 });
+
+
+test("a throwing scoped debug patch retires without intercepting another Context and can be replaced", async (t) => {
+    const manager = new DebugPatchManager();
+    t.after(() => manager.dispose());
+    const target = new WorkerTarget();
+    const before = Object.getOwnPropertyDescriptor(target, "callTool");
+    register(manager, target);
+    const patch = await manager.load({
+        scope: { ctxId: "ctx-own" }, source: `() => { throw new Error("probe failed"); }`, target: "worker:demo-local",
+    });
+    const invoke = (ctxId: string) => target.callTool({ value: { context: { ctxId }, toolName: "file_read" } });
+    assert.deepEqual(await invoke("ctx-other"), { ctxId: "ctx-other", toolName: "file_read" });
+    assert.equal(manager.listPatches()[0]!.invocationCount, 0);
+    assert.deepEqual(await invoke("ctx-own"), { ctxId: "ctx-own", toolName: "file_read" });
+    const record = manager.listPatches().find((entry) => entry.patchId === patch.patchId)!;
+    assert.equal(record.state, "faulted");
+    assert.match(record.fault!, /probe failed/u);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(target, "callTool"), before);
+    assert.deepEqual(target.calls, ["ctx-other:file_read", "ctx-own:file_read"]);
+
+    const replacement = await manager.load({
+        scope: { ctxId: "ctx-own" }, source: `() => ({ action: "return", value: "recovered" })`, target: "worker:demo-local",
+    });
+    assert.equal(await invoke("ctx-own"), "recovered");
+    assert.deepEqual(await invoke("ctx-other"), { ctxId: "ctx-other", toolName: "file_read" });
+    await manager.unload(replacement.patchId);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(target, "callTool"), before);
+});

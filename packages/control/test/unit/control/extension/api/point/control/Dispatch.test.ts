@@ -105,3 +105,36 @@ test("route dispatch preserves scope, request context, change notifications, and
     unsubscribe();
     assert.equal(changed, undefined);
 });
+
+
+test("a failing route releases its lease and preserves the next caller's identity and request", async () => {
+    const failure = new Error("route failed during configuration update");
+    let releases = 0;
+    let calls = 0;
+    const service = new ControlExtensionRouteService({
+        listDeclarations: (pointId: string) => pointId === routes.id ? [{
+            declaration: { id: "update", module: "settings", operation: "update", scope: "instance" },
+            extensionId: "example", generation: "g1",
+        }] : [],
+        onChange: () => () => {},
+        acquireRegistration: async () => ({
+            lease: { release: () => { releases += 1; } },
+            registration: { binding: (async (request, invocation) => {
+                calls += 1;
+                assert.equal(Object.isFrozen(request), true);
+                assert.equal(Object.isFrozen(invocation), true);
+                if (calls === 1) throw failure;
+                return { payload: request.payload, subject: invocation.subject!.id, destination: invocation.destination };
+            }) as ControlRouteBinding },
+        }),
+    } as never);
+    const handle = service.modules("instance")[0]!.operations[0]!.handle;
+    await assert.rejects(async () => await handle({ id: "first", name: "update", payload: {} }, context()), failure);
+    assert.equal(releases, 1);
+    const nextContext = { ...context(), host: asInstanceName("other"), subject: { id: "subject-2", kind: "web-session" as const } };
+    assert.deepEqual(await handle({ id: "second", name: "update", payload: { enabled: true } }, nextContext), {
+        payload: { enabled: true }, subject: "subject-2", destination: "other",
+    });
+    assert.equal(releases, 2);
+    assert.equal(calls, 2);
+});

@@ -635,3 +635,38 @@ function oauthApproval(
         status,
     };
 }
+
+
+test("overview isolates RPC collection failure to one instance and clears its alert after recovery", async (t) => {
+    let unavailable = true;
+    const snapshot = (name: string) => processEnvelope({
+        connectionState: "connected", daemonState: "running", lastSeq: 4,
+        name: asInstanceName(name), ready: true, status: "ready",
+    });
+    const endpoint = overviewEndpoint({
+        "recovering": {
+            snapshot: () => { if (unavailable) throw new Error("snapshot service unavailable"); return snapshot("recovering"); },
+            approvals: () => [{ id: "recovering-approval" }],
+        },
+        "healthy": { snapshot: () => snapshot("healthy"), approvals: () => [{ id: "healthy-approval" }] },
+    });
+    t.after(() => endpoint.close());
+    const service = createOperationalOverviewRuntime({
+        instances: { list: () => [instance("recovering"), instance("healthy")] },
+        instanceCollector: collector(endpoint), now: () => now, systemCollector: healthySystemCollector,
+    });
+    const degraded = await service.read();
+    assert.equal(degraded.counts.instancesTotal, 2);
+    assert.equal(degraded.counts.instancesReady, 1);
+    assert.equal(degraded.counts.pendingApprovals, 2);
+    assert.equal(degraded.instances.find((entry) => entry.name === "healthy")!.snapshot.ready, true);
+    assert.ok(degraded.alerts.some((alert) => alert.instance === "recovering" && alert.detail?.includes("snapshot service unavailable")));
+    assert.equal(degraded.alerts.some((alert) => alert.instance === "healthy" && alert.severity === "critical"), false);
+
+    unavailable = false;
+    const recovered = await service.read();
+    assert.equal(recovered.counts.instancesReady, 2);
+    assert.equal(recovered.counts.instancesCritical, 0);
+    assert.equal(recovered.counts.pendingApprovals, 2);
+    assert.equal(recovered.alerts.some((alert) => alert.detail?.includes("snapshot service unavailable")), false);
+});

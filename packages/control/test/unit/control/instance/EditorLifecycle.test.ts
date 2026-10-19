@@ -633,3 +633,74 @@ function createCoordinator(input: {
         isPreviousLifecycleRecoveryPending: input.isPreviousLifecycleRecoveryPending,
     });
 }
+
+
+test("disable debt can be retried before enabling a fresh generation", async () => {
+    let config = configWithInstance();
+    const original = createTestInstance(config.instances[0]!);
+    const registry = new InstanceRegistry([original]);
+    const coordinator = createCoordinator({
+        config, registry, setConfig: (next) => { config = next; }, hooks: testRuntimeHooks(),
+    });
+    let failedHooks = 0;
+    const failure = new Error("subscription retirement unavailable");
+    coordinator.registerInstanceDisableRetirement(async () => {
+        failedHooks += 1;
+        if (failedHooks === 1) throw failure;
+    });
+
+    const disabled = await coordinator.disableInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
+    assert.equal(disabled.cleanupPending, true);
+    assert.equal(config.instances[0]!.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.throws(() => original.lifecycle.acquireLease(), /retired/u);
+    await assert.rejects(coordinator.assertInstanceCleanupSettled("demo-local", false), /incomplete lifecycle cleanup/u);
+
+    await coordinator.reconcileCleanupDebt("demo-local");
+    await coordinator.assertInstanceCleanupSettled("demo-local", false);
+    assert.equal(failedHooks, 2);
+    await coordinator.enableInstance({ instanceName: "demo-local" });
+    const replacement = registry.get("demo-local");
+    assert.ok(replacement);
+    assert.notEqual(replacement, original);
+    assert.equal(replacement.lifecycle.active, true);
+    assert.equal(config.instances[0]!.enabled, true);
+    await coordinator.reconcileCleanupDebt("demo-local");
+    assert.equal(registry.get("demo-local"), replacement);
+    assert.equal(failedHooks, 2);
+});
+
+test("failed disable persistence preserves admission and revision and permits a later retry", async () => {
+    let config = configWithInstance();
+    let failWrite = true;
+    const descriptor = createTestInstance(config.instances[0]!);
+    const registry = new InstanceRegistry([descriptor]);
+    const changes = new InstanceChangeHub();
+    const engine = new ConfigEngine({
+        configStore: { async write() { if (failWrite) throw new Error("disk write rejected"); } },
+        getConfig: () => config,
+        setConfig: (next) => { config = next; },
+        runtimePreflight: { async assertAvailable() {} },
+    });
+    const coordinator = new InstanceEditorCoordinator({
+        ...testRuntimeHooks(), engine, instanceChanges: changes, instanceRegistry: registry,
+    });
+    let retirements = 0;
+    coordinator.registerInstanceDisableRetirement(async () => { retirements += 1; });
+    await assert.rejects(coordinator.disableInstance({ instanceName: "demo-local" }), /disk write rejected/u);
+    assert.equal(config.instances[0]!.enabled, true);
+    assert.equal(registry.get("demo-local"), descriptor);
+    assert.equal(changes.revision, 0);
+    assert.equal(retirements, 0);
+    const lease = descriptor.lifecycle.acquireLease();
+    lease.release();
+    await coordinator.assertInstanceCleanupSettled("demo-local", false);
+
+    failWrite = false;
+    const disabled = await coordinator.disableInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
+    assert.equal(disabled.cleanupPending, false);
+    assert.equal(config.instances[0]!.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(retirements, 1);
+    assert.ok(changes.revision > 0);
+});

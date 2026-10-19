@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EXTENSION_API_VERSION, EXTENSION_MANIFEST_SCHEMA_VERSION } from "@portable-devshell/extension";
+import { ExtensionGeneration } from "../../../../src/extension/registration/Generation.ts";
+import { ExtensionRegistrationSet } from "../../../../src/extension/registration/Registration.ts";
 import type { ControlStreamBinding, ControlStreamMessage } from "@portable-devshell/extension/control";
 import type {
     ControlPortContext,
@@ -149,4 +152,117 @@ test("stream admission releases the host handler while instance and extension re
     assert.equal(releases, 2);
     assert.equal(changes.size, 0);
     assert.deepEqual(frames.map((frame) => frame.name), ["seed", "seed"]);
+});
+
+
+test("same-hash runtime retirement closes its stream and permits a replacement subscription", { timeout: 5000 }, async () => {
+    let disposals = 0;
+    const createGeneration = () => {
+        const generation = new ExtensionGeneration({
+            generation: "same-content-hash",
+            manifest: {
+                activation: "lazy", apiVersion: EXTENSION_API_VERSION,
+                schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
+                capabilities: [], entry: "extension.mjs", extensions: {}, hostDependencies: {},
+                id: "comment", name: "Comment", version: "1.0.0",
+            },
+            registrations: new ExtensionRegistrationSet([]),
+            dispose: async () => { disposals += 1; },
+        });
+        generation.activate();
+        return generation;
+    };
+    const original = createGeneration();
+    let current = original;
+    const changes = new Set<() => void>();
+    const binding: ControlStreamBinding = async (stream, _request, context) => {
+        const cancelled = new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve(), { once: true }));
+        await stream.send({ name: "seed", payload: null });
+        await cancelled;
+    };
+    const routes = new ControlExtensionRouteService({
+        listDeclarations: (pointId) => pointId === "control.streams" ? [{ declaration, extensionId: "comment", generation: current.generation, id: declaration.id, pointId }] : [],
+        onChange: (listener) => { changes.add(listener); return () => { changes.delete(listener); }; },
+        acquireRegistration: async () => ({
+            extensionId: "comment", lease: current.acquire(),
+            registration: { binding, declaration, id: declaration.id, pointId: "control.streams" },
+        }),
+    });
+    const handler = routes.modules("instance")[0]!.streams![0]!.handle;
+    const open = async () => {
+        let closes = 0;
+        const frames: string[] = [];
+        await handler({
+            send: async (message: ControlStreamMessage) => { frames.push(message.name); },
+            close: async () => { closes += 1; },
+            cancel: async () => { assert.fail("retirement must close the subscription"); },
+        } as unknown as MessageStream, { id: "subscribe", name: "subscribe" }, {
+            host: "dev", peer: "cli", requestId: "subscribe", signal: new AbortController().signal,
+        } as ControlPortContext);
+        assert.deepEqual(frames, ["seed"]);
+        return () => closes;
+    };
+    try {
+        const oldCloses = await open();
+        assert.equal(original.inFlight, 1);
+        current = createGeneration();
+        for (const listener of changes) listener();
+        assert.equal(oldCloses(), 0);
+        await original.retire();
+        assert.equal(oldCloses(), 1);
+        assert.equal(original.inFlight, 0);
+        assert.equal(changes.size, 0);
+        assert.equal(disposals, 1);
+        const newCloses = await open();
+        assert.equal(current.inFlight, 1);
+        await routes.retireInstance("unrelated");
+        assert.equal(newCloses(), 0);
+        assert.equal(current.inFlight, 1);
+        await routes.retireInstance("dev");
+        assert.equal(newCloses(), 1);
+        assert.equal(current.inFlight, 0);
+        assert.equal(changes.size, 0);
+    } finally {
+        await routes.retireInstance("dev");
+        await original.retire();
+        await current.retire();
+    }
+    assert.equal(disposals, 2);
+});
+
+test("ungranted instance observation cancels the stream before runtime access and releases its lease", { timeout: 5000 }, async () => {
+    let runtimeAccesses = 0;
+    const capability = new ExtensionInstanceObserveCapabilityControl({
+        allowed: false, extensionId: "comment", listConfigured: () => [],
+        process: () => { assert.fail("unauthorized process access"); },
+        runtime: () => { runtimeAccesses += 1; assert.fail("unauthorized runtime access"); },
+    });
+    let releases = 0;
+    const changes = new Set<() => void>();
+    const routes = new ControlExtensionRouteService({
+        listDeclarations: (pointId) => pointId === "control.streams" ? [{ declaration, extensionId: "comment", generation: "g1", id: declaration.id, pointId }] : [],
+        onChange: (listener) => { changes.add(listener); return () => { changes.delete(listener); }; },
+        acquireRegistration: async () => ({
+            extensionId: "comment",
+            registration: { binding: createMessageSubscriptionBinding(capability), declaration, id: declaration.id, pointId: "control.streams" },
+            lease: {
+                generation: "g1", release: () => { releases += 1; },
+                retirementSignal: new AbortController().signal, manifest: {} as never, registrations: {} as never,
+            },
+        }),
+    });
+    const failures: unknown[] = [];
+    await routes.modules("instance")[0]!.streams![0]!.handle({
+        send: async () => { assert.fail("unauthorized stream must not emit frames"); },
+        close: async () => { assert.fail("permission denial must be an error"); },
+        cancel: async (error: unknown) => { failures.push(error); },
+    } as unknown as MessageStream, { id: "denied", name: "subscribe", payload: { fromSeq: 1 } }, {
+        host: "dev", peer: "web", requestId: "denied", signal: new AbortController().signal,
+    } as ControlPortContext);
+    await routes.retireInstance("dev");
+    assert.equal(failures.length, 1);
+    assert.match((failures[0] as { message: string }).message, /did not declare the instance\.observe capability/u);
+    assert.equal(runtimeAccesses, 0);
+    assert.equal(releases, 1);
+    assert.equal(changes.size, 0);
 });
