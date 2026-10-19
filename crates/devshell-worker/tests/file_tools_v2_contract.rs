@@ -5,6 +5,99 @@ use std::fs;
 use serde_json::{Value, json};
 use support::TestEnv;
 
+#[test]
+fn file_edit_generated_coverage_does_not_expand_another_contexts_partial_read() {
+    let env = TestEnv::new();
+    let instance = "file-context-coverage-isolation";
+    let path = env.workspace().join("document.txt");
+    fs::write(&path, "one\ntwo\nthree\n").unwrap();
+    start(&env, instance);
+
+    for (id, ctx, selector) in [("1", "ctx-a", "1-3:raw"), ("2", "ctx-b", "1-1:raw")] {
+        let read = call(&env, instance, id, ctx, "file_read", json!({
+            "files": [{ "path": "./document.txt", "selector": selector }]
+        }));
+        assert_eq!(read["type"], "reply", "{read}");
+        assert!(read["message"]["files"][0].get("error").is_none(), "{read}");
+    }
+
+    let first = call(&env, instance, "3", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-two\n+second\n*** End Edit"
+    }));
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(first["message"]["operations"][0]["status"], "applied", "{first}");
+
+    let denied = call(&env, instance, "4", "ctx-b", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-three\n+third\n*** End Edit"
+    }));
+    assert_eq!(denied["type"], "reply", "{denied}");
+    assert_eq!(denied["message"]["operations"][0]["status"], "failed", "{denied}");
+    assert_eq!(denied["message"]["operations"][0]["error"]["code"], "file.unreadRange", "{denied}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "one\nsecond\nthree\n");
+
+    let stale = call(&env, instance, "5", "ctx-b", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-one\n+first\n*** End Edit"
+    }));
+    assert_eq!(stale["type"], "reply", "{stale}");
+    assert_eq!(stale["message"]["operations"][0]["status"], "failed", "{stale}");
+    assert_eq!(stale["message"]["operations"][0]["error"]["code"], "file.revisionMismatch", "{stale}");
+    let refreshed = call(&env, instance, "6", "ctx-b", "file_read", json!({
+        "files": [{ "path": "./document.txt", "selector": "1-1:raw" }]
+    }));
+    assert_eq!(refreshed["type"], "reply", "{refreshed}");
+    let allowed = call(&env, instance, "7", "ctx-b", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-one\n+first\n*** End Edit"
+    }));
+    assert_eq!(allowed["type"], "reply", "{allowed}");
+    assert_eq!(allowed["message"]["operations"][0]["status"], "applied", "{allowed}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "first\nsecond\nthree\n");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_conflicting_context_recovers_only_after_reading_the_new_revision() {
+    let env = TestEnv::new();
+    let instance = "file-context-conflict-recovery";
+    let path = env.workspace().join("document.txt");
+    fs::write(&path, "one\ntwo\nthree\n").unwrap();
+    start(&env, instance);
+
+    for (id, ctx) in [("1", "ctx-a"), ("2", "ctx-b")] {
+        let read = call(&env, instance, id, ctx, "file_read", json!({
+            "files": [{ "path": "./document.txt", "view": "content" }]
+        }));
+        assert_eq!(read["type"], "reply", "{read}");
+        assert_eq!(read["message"]["files"][0]["content"], "1:one\n2:two\n3:three", "{read}");
+    }
+    let first = call(&env, instance, "3", "ctx-a", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+second\n three\n*** End Edit"
+    }));
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(first["message"]["operations"][0]["status"], "applied", "{first}");
+
+    for id in ["4", "5"] {
+        let conflict = call(&env, instance, id, "ctx-b", "file_edit", json!({
+            "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+other\n three\n*** End Edit"
+        }));
+        assert_eq!(conflict["type"], "reply", "{conflict}");
+        assert_eq!(conflict["message"]["operations"][0]["status"], "failed", "{conflict}");
+        assert_eq!(conflict["message"]["operations"][0]["error"]["code"], "file.revisionMismatch", "{conflict}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\nsecond\nthree\n");
+    }
+    let refreshed = call(&env, instance, "6", "ctx-b", "file_read", json!({
+        "files": [{ "path": "./document.txt", "view": "content" }]
+    }));
+    assert_eq!(refreshed["type"], "reply", "{refreshed}");
+    assert_eq!(refreshed["message"]["files"][0]["content"], "1:one\n2:second\n3:three", "{refreshed}");
+    let recovered = call(&env, instance, "7", "ctx-b", "file_edit", json!({
+        "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-second\n+other\n three\n*** End Edit"
+    }));
+    assert_eq!(recovered["type"], "reply", "{recovered}");
+    assert_eq!(recovered["message"]["operations"][0]["status"], "applied", "{recovered}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "one\nother\nthree\n");
+    env.json_command(&["stop", "--instance", instance]);
+}
+
 fn start(env: &TestEnv, instance: &str) {
     env.command()
         .current_dir(env.workspace())

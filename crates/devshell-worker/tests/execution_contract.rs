@@ -159,6 +159,109 @@ mod unix {
     }
 
     #[test]
+    fn optional_driver_partial_patch_is_rolled_back_before_later_hooks() {
+        let env = TestEnv::new();
+        let instance = "execution-hook-rollback";
+        let config = json!({ "environment": [
+            { "order": 100, "name": "variables", "content": {
+                "set": { "EXECUTION_LAYER": "original" },
+                "unset": ["EXECUTION_REMOVED"]
+            } },
+            { "order": 200, "name": "broken-driver", "driver": {
+                "name": "broken-driver", "version": 1, "executable": "/bin/sh",
+                "args": ["-c", "printf '%s' '{\"EXECUTION_LAYER\":\"poisoned\",\"ZZ_INVALID\":42}'"]
+            } },
+            { "order": 300, "name": "observer", "content": { "required": true }, "driver": {
+                "name": "observer", "version": 1, "executable": "/bin/sh",
+                "args": ["-c", "printf '{\"EXECUTION_OBSERVED\":\"%s|%s\"}' \"$EXECUTION_LAYER\" \"${EXECUTION_REMOVED-absent}\""]
+            } },
+            { "order": 400, "name": "variables", "content": {
+                "set": { "EXECUTION_LAYER": "final" }
+            } }
+        ] });
+        env.command_with_env("DEVSHELL_WORKER_EXECUTION_CONFIG", &config.to_string())
+            .env("EXECUTION_REMOVED", "inherited")
+            .args(["start", "--instance", instance])
+            .assert()
+            .success();
+
+        let result = bash_call(
+            &env,
+            instance,
+            json!({
+                "command": "printf '%s|%s' \"$EXECUTION_LAYER\" \"$EXECUTION_OBSERVED\"",
+                "timeoutMs": 10000
+            }),
+        );
+        assert_eq!(result["type"], "reply", "{result}");
+        assert_eq!(result["message"]["exitCode"], 0, "{result}");
+        assert_eq!(result["message"]["stdout"], "final|original|absent", "{result}");
+        env.json_command(&["stop", "--instance", instance]);
+    }
+
+    #[test]
+    fn required_driver_failure_recovers_without_leaking_call_environment() {
+        let env = TestEnv::new();
+        let instance = "execution-driver-recovery";
+        let patch = env.workspace().join("driver-patch.json");
+        let marker = env.workspace().join("command-ran");
+        let config = json!({ "environment": [{
+            "order": 100, "name": "recoverable", "content": { "required": true },
+            "driver": {
+                "name": "recoverable", "version": 1, "executable": "/bin/sh",
+                "args": ["-c", "test -f driver-patch.json || { printf 'patch unavailable' >&2; exit 23; }; cat driver-patch.json"]
+            }
+        }] });
+        env.command_with_env("DEVSHELL_WORKER_EXECUTION_CONFIG", &config.to_string())
+            .env_remove("EXECUTION_TRANSIENT")
+            .args(["start", "--instance", instance])
+            .assert()
+            .success();
+
+        let failed = bash_call(
+            &env,
+            instance,
+            json!({ "command": "printf ran > command-ran", "timeoutMs": 10000 }),
+        );
+        assert_eq!(failed["type"], "error", "{failed}");
+        assert_eq!(failed["error"]["code"], "execution.providerFailed", "{failed}");
+        assert_eq!(
+            failed["error"]["message"],
+            "required execution provider recoverable failed: patch unavailable",
+            "{failed}"
+        );
+        assert!(!marker.exists());
+
+        fs::write(&patch, r#"{"EXECUTION_SESSION":"recovered","EXECUTION_TRANSIENT":"hook-value"}"#).unwrap();
+        let recovered = bash_call(
+            &env,
+            instance,
+            json!({
+                "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"$EXECUTION_TRANSIENT\"",
+                "timeoutMs": 10000,
+                "env": { "EXECUTION_TRANSIENT": "request-value" }
+            }),
+        );
+        assert_eq!(recovered["type"], "reply", "{recovered}");
+        assert_eq!(recovered["message"]["exitCode"], 0, "{recovered}");
+        assert_eq!(recovered["message"]["stdout"], "recovered|request-value", "{recovered}");
+
+        fs::write(&patch, r#"{"EXECUTION_SESSION":"next-call"}"#).unwrap();
+        let isolated = bash_call(
+            &env,
+            instance,
+            json!({
+                "command": "printf '%s|%s' \"$EXECUTION_SESSION\" \"${EXECUTION_TRANSIENT-absent}\"",
+                "timeoutMs": 10000
+            }),
+        );
+        assert_eq!(isolated["type"], "reply", "{isolated}");
+        assert_eq!(isolated["message"]["exitCode"], 0, "{isolated}");
+        assert_eq!(isolated["message"]["stdout"], "next-call|absent", "{isolated}");
+        env.json_command(&["stop", "--instance", instance]);
+    }
+
+    #[test]
     fn ordered_environment_hooks_reach_a_managed_tmux_task() {
         if !Command::new("tmux")
             .arg("-V")

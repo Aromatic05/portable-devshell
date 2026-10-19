@@ -3299,6 +3299,78 @@ fn tmux_read_marks_a_running_task_lost_when_the_tmux_server_disappears() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_server_loss_recreates_session_without_resurrecting_lost_task() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "tmux-loss-recovery";
+    start(&env, instance);
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({ "command": "sleep 30", "wait": "nonblock" }),
+        "ctx-a",
+        "run-before-server-loss-recovery",
+    );
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
+
+    kill_tmux_server(&env, instance);
+
+    let lost = call(
+        &env,
+        instance,
+        "2",
+        "tmux_read",
+        json!({ "task": task, "timeMs": 0 }),
+        "ctx-b",
+        "read-after-server-loss",
+    );
+    assert_eq!(lost["type"], "reply", "{lost}");
+    assert_eq!(lost["message"]["task"]["status"], "unknown", "{lost}");
+    assert!(lost["message"].get("pane").is_none(), "{lost}");
+
+    let listed = call(
+        &env,
+        instance,
+        "3",
+        "tmux_list",
+        json!({}),
+        "ctx-c",
+        "list-after-server-loss",
+    );
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let panes = listed["message"]["panes"].as_array().unwrap();
+    assert!(panes.iter().any(|pane| pane["name"] == "main"), "{listed}");
+    assert!(
+        panes.iter().all(|pane| pane["task"]["id"] != task),
+        "lost task was resurrected during session recovery: {listed}"
+    );
+
+    let still_lost = call(
+        &env,
+        instance,
+        "4",
+        "tmux_read",
+        json!({ "task": task, "timeMs": 0 }),
+        "ctx-d",
+        "read-after-session-recovery",
+    );
+    assert_eq!(still_lost["type"], "reply", "{still_lost}");
+    assert_eq!(
+        still_lost["message"]["task"]["status"],
+        "unknown",
+        "{still_lost}"
+    );
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_capacity_never_collects_persistent_panes() {
     assert!(
         tmux_available(),
