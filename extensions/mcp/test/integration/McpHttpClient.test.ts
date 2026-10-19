@@ -40,6 +40,28 @@ test("MCP HTTP client lists and calls tools through a real Streamable HTTP serve
     });
 });
 
+test("MCP HTTP client remains usable after a tool reports an error", async (t) => {
+    const server = await startEchoServer();
+    t.after(async () => await server.close());
+
+    const abort = new AbortController();
+    const client = await new McpHttpClientFactory("0.1.0").connect(
+        { name: "echo", url: server.url },
+        abort.signal,
+    );
+    t.after(async () => await client.close());
+
+    const failed = await client.callTool("fail", {}, abort.signal);
+    assert.equal(
+        (failed as { isError?: boolean }).isError,
+        true,
+    );
+    assert.deepEqual(
+        await client.callTool("echo", { text: "still connected" }, abort.signal),
+        { content: [{ text: "still connected", type: "text" }] },
+    );
+});
+
 async function startEchoServer(): Promise<TestServer> {
     const mcp = new McpServer({ name: "mcp-extension-test", version: "1.0.0" });
     mcp.registerTool(
@@ -51,6 +73,13 @@ async function startEchoServer(): Promise<TestServer> {
         async ({ text }) => ({
             content: [{ text, type: "text" }],
         }),
+    );
+    mcp.registerTool(
+        "fail",
+        { description: "Return a tool error" },
+        async () => {
+            throw new Error("intentional tool failure");
+        },
     );
 
     const transport = new NodeStreamableHTTPServerTransport({
