@@ -226,3 +226,78 @@ test("WaitService persists detached task and resolves it through native tmux_rea
     await service.close();
     await restored.close();
 });
+
+test("Wait recovery keeps same-target Contexts isolated and resumes each monitor once", { timeout: 5_000 }, async (t) => {
+    const root = await createTestTempDirectory("wait-context-recovery");
+    const filePath = join(root, "waits.json");
+    const monitored: string[] = [];
+    const aborted: string[] = [];
+    let ids = 0;
+    const service = new WaitService({
+        filePath,
+        appendEvent: async () => undefined,
+        waitId: () => `wait-${++ids}`,
+        invoke: {
+            async invoke(_tool, _input, context, signal) {
+                const ctxId = context.ctxId!;
+                monitored.push(ctxId);
+                assert.ok(signal);
+                return await new Promise<JsonValue>((_resolve, reject) => {
+                    signal.addEventListener("abort", () => {
+                        aborted.push(ctxId);
+                        reject(new Error("monitor stopped"));
+                    }, { once: true });
+                });
+            },
+        },
+    });
+    t.after(() => service.close());
+    const input = {
+        callId: "call-a", ctxId: "ctx-a", instance: asInstanceName("local"),
+        source: "mcp" as const, targetId: "same-task", toolName: "tmux_run", workspace: "/shared",
+    };
+    const first = await service.detach(input);
+    const duplicate = await service.detach({ ...input, callId: "call-a-retry" });
+    const second = await service.detach({ ...input, ctxId: "ctx-b", callId: "call-b" });
+    assert.equal(duplicate.waitId, first.waitId);
+    assert.notEqual(second.waitId, first.waitId);
+    assert.deepEqual(monitored, ["ctx-a", "ctx-b"]);
+    assert.deepEqual((await service.list("ctx-a")).map(({ waitId }) => waitId), [first.waitId]);
+    assert.deepEqual(await service.list("ctx-empty"), []);
+    await service.close();
+    assert.deepEqual(aborted.sort(), ["ctx-a", "ctx-b"]);
+    assert.deepEqual((await service.list()).map(({ status }) => status), ["detached", "detached"]);
+    await assert.rejects(service.detach(input), /closed/u);
+
+    const resumed: string[] = [];
+    const resolved: string[] = [];
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const restored = new WaitService({
+        filePath,
+        appendEvent: async (type, data) => {
+            assert.equal(type, "wait.resolved");
+            resolved.push((data as { ctxId: string }).ctxId);
+            if (resolved.length === 2) finish();
+        },
+        invoke: {
+            async invoke(tool, payload, context) {
+                assert.equal(tool, "tmux_read");
+                assert.equal(context.workspace, "/shared");
+                assert.deepEqual(payload, { consumeOutput: false, line: -1, task: "same-task", timeMs: WAIT_SYNC_MS });
+                resumed.push(context.ctxId!);
+                return { waitReason: "terminal", task: { id: "same-task", status: "exited" } };
+            },
+        },
+    });
+    t.after(() => restored.close());
+    assert.deepEqual(resumed, [], "recovery waits for an explicit resume");
+    restored.resume();
+    restored.resume();
+    await finished;
+    await restored.close();
+    assert.deepEqual(resumed.sort(), ["ctx-a", "ctx-b"]);
+    assert.deepEqual(resolved.sort(), ["ctx-a", "ctx-b"]);
+    assert.equal((await restored.list("ctx-a"))[0]?.status, "resolved");
+    assert.equal((await restored.list("ctx-b"))[0]?.status, "resolved");
+});

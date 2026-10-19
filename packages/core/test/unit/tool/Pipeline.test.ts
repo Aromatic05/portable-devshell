@@ -767,3 +767,37 @@ test("invocationInput prepares the final rewritten call before reservation, read
     assert.deepEqual(order, ["prepare", "ready", "invoke"]);
     assert.deepEqual(harness.invoked[0]?.input, { adapted: true });
 });
+
+test("review denial is isolated from a later Context call through rewrite, execution, and audit", async () => {
+    const reviewed: string[] = [];
+    const harness = createHarness("instance-a", {
+        rewrites: [async (input) => input.direction === "outbound"
+            ? { ...input.value, payload: { safe: true } }
+            : input.value],
+        reviews: [async (input) => {
+            reviewed.push(`${input.direction}:${input.value.context.ctxId}`);
+            if (input.direction === "inbound" && input.value.context.ctxId === "ctx-1")
+                return { decision: "reject", reason: "execution blocked" };
+            if (input.direction === "outbound") {
+                assert.deepEqual(input.value.payload, { safe: true });
+            }
+            return { decision: "continue" };
+        }],
+    });
+    await assert.rejects(harness.runtime.api.call(
+        "instance-a", "file_edit", {}, context,
+    ), (error: unknown) => {
+        assert.equal((error as { code?: string }).code, runtimeErrorCodes.toolCallRejected);
+        return true;
+    });
+    assert.equal(harness.invoked.length, 0);
+    assert.deepEqual(harness.scheduled, []);
+    assert.deepEqual(harness.audit, ["requested", "denied"]);
+    assert.deepEqual(await harness.runtime.api.call(
+        "instance-a", "file_edit", {}, { ...context, ctxId: "ctx-2" },
+    ), { safe: true });
+    assert.deepEqual(harness.invoked.map(({ context: value }) => value.ctxId), ["ctx-2"]);
+    assert.deepEqual(reviewed, ["inbound:ctx-1", "inbound:ctx-2", "outbound:ctx-2"]);
+    assert.deepEqual(harness.audit, ["requested", "denied", "requested", "queued", "running", "completed"]);
+    assert.deepEqual(harness.released, ["release", "release"]);
+});

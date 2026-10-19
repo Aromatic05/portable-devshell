@@ -186,3 +186,34 @@ test("GoalService falls back to structural persistence when the activity sidecar
         "2026-09-05T12:00:01.000Z",
     );
 });
+
+test("concurrent Goal claims have one owner and a persisted human pause prevents reacquisition", async () => {
+    const root = await createTestTempDirectory("goal-claim-pause");
+    const filePath = join(root, "goals.json");
+    const options = { filePath, instanceName: "alpha", appendEvent: async () => undefined };
+    const service = new GoalService(options);
+    for (const ctxId of ["ctx-a", "ctx-b"]) {
+        await service.manage(ctxId, {
+            action: "start", objective: `Goal ${ctxId}`, workspace: "/shared",
+            steps: [{ id: "work", text: "Work" }],
+        });
+    }
+    const claim = (claimId: string) => ({
+        action: "claim" as const, available: true, userInitiated: true, claimId,
+    });
+    const claims = await Promise.all([
+        service.continuation("ctx-a", claim("app-a")),
+        service.continuation("ctx-a", claim("app-b")),
+    ]);
+    assert.deepEqual(claims.map((result) => (result as { claimed: boolean }).claimed), [true, false]);
+    assert.equal((await service.continuation("ctx-b", claim("app-other")) as { claimed: boolean }).claimed, true);
+    await service.manage("ctx-a", { action: "pause", userControl: true });
+    const restored = new GoalService(options);
+    assert.equal((await restored.read("ctx-a"))?.status, "paused");
+    assert.equal((await restored.continuation("ctx-a", claim("late-app")) as { claimed: boolean }).claimed, false);
+    await assert.rejects(restored.manage("ctx-a", { action: "resume" }), /explicit user resume/u);
+    assert.equal((await restored.read("ctx-a"))?.status, "paused");
+    assert.equal((await restored.read("ctx-b"))?.continuationPending, true);
+    await restored.manage("ctx-a", { action: "resume", userControl: true });
+    assert.equal((await restored.continuation("ctx-a", claim("resumed-app")) as { claimed: boolean }).claimed, true);
+});

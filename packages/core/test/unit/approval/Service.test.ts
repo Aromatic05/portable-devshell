@@ -384,6 +384,34 @@ for (const status of ["cancelled", "expired"] as const) {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+test("competing UI decisions have one persisted winner and one terminal event", async (t) => {
+    const { service, events } = fixture();
+    t.after(() => service.close());
+    const evaluation = await service.evaluate(input);
+    assert.ok(evaluation.decision === "ask");
+    const [winner, loser] = await Promise.allSettled([
+        service.decideApproval("approval-1", {
+            decision: "deny", decidedBy: "web", reason: "unsafe command",
+        }),
+        service.decideApproval("approval-1", {
+            decision: "approve", decidedBy: "cli",
+        }),
+    ]);
+    assert.equal(winner.status, "fulfilled");
+    assert.equal(loser.status, "rejected");
+    assert.ok(loser.status === "rejected");
+    assert.equal(loser.reason.code, runtimeErrorCodes.approvalAlreadyDecided);
+    const persisted = await service.getApproval("approval-1");
+    assert.equal(persisted.status, "denied");
+    assert.equal(persisted.decision?.decidedBy, "web");
+    assert.equal(persisted.decision?.reason, "unsafe command");
+    assert.equal((await evaluation.awaitDecision).status, "denied");
+    assert.deepEqual(events.records.map(({ type }) => type), [
+        "approval.requested", "approval.denied",
+    ]);
+    assert.deepEqual(await service.listPendingApprovals(), []);
+});
+
 function retentionFixture() {
     let now = 60 * DAY_MS;
     const store = new MemoryStore();
