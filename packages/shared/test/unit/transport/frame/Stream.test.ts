@@ -186,3 +186,33 @@ test("RESET aborts both directions without closing FrameProtocol", async () => {
     assert.equal(opener.closed, false);
     assert.equal(acceptor.closed, false);
 });
+
+test("RESET releases a backpressured write and pending read without closing the protocol", async (t) => {
+    const { opener, acceptor } = pair();
+    t.after(() => { opener.close(); acceptor.close(); });
+    const blocked = await open(opener, acceptor, "blocked", 1);
+    await blocked.local.write(Uint8Array.of(1));
+    let settled = false;
+    const writing = blocked.local.write(Uint8Array.of(2)).finally(() => {
+        settled = true;
+    });
+    const rejected = assert.rejects(writing, (error: unknown) => {
+        assert.ok(error instanceof FrameResetError);
+        assert.equal(error.resetCode, frameResetCodes.cancelled);
+        return true;
+    });
+    const reading = assert.rejects(blocked.local.read(), (error: unknown) => {
+        assert.ok(error instanceof FrameResetError);
+        assert.equal(error.resetCode, frameResetCodes.cancelled);
+        return true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "the peer has not consumed its receive window");
+    await blocked.remote.reset(frameResetCodes.cancelled, "reader cancelled");
+    await rejected;
+    await reading;
+    assert.equal(blocked.local.closed, true);
+    await assert.rejects(blocked.remote.write(Uint8Array.of(8)), /reset|closed/iu);
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+});
