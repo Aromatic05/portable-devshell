@@ -142,6 +142,48 @@ test("Agent model lifecycle cannot control an Agent outside the current Context"
     assert.deepEqual(events, []);
 });
 
+test("Agent model message commands cannot reach an Agent outside the current Context", async () => {
+    const events: string[] = [];
+    const { providers, runtime } = fixtures(events);
+
+    await assert.rejects(
+        executeAgentModelCommand(
+            runtime,
+            providers,
+            ["send", "other", "change the other workspace"],
+            invocation(),
+        ),
+        /unavailable in the current model Context/u,
+    );
+    await assert.rejects(
+        executeAgentModelCommand(
+            runtime,
+            providers,
+            ["abort", "other"],
+            invocation(),
+        ),
+        /unavailable in the current model Context/u,
+    );
+    assert.deepEqual(events, []);
+});
+
+test("Agent model start stops a runtime result returned outside the authoritative Context", async () => {
+    const events: string[] = [];
+    const { providers, runtime } = fixtures(events);
+    runtime.start = async () => record("misrouted", "worker-b", "/else");
+
+    await assert.rejects(
+        executeAgentModelCommand(
+            runtime,
+            providers,
+            ["start"],
+            invocation(),
+        ),
+        /outside the authoritative model Context/u,
+    );
+    assert.deepEqual(events, ["stop:misrouted"]);
+});
+
 test("Agent model wait blocks through the scoped runtime idle boundary", async () => {
     const events: string[] = [];
     const { providers, runtime } = fixtures(events);
