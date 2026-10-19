@@ -4,6 +4,7 @@ export const DEFAULT_TESTSPACE_COMMAND = "start";
 const USER_TESTSPACE_COMMANDS = new Set([
     "approval-smoke",
     "comment-smoke",
+    "extension-smoke",
     "mailing-smoke",
     "exec",
     "long-smoke",

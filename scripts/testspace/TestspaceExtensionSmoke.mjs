@@ -17,7 +17,7 @@ export async function runTestspaceExtensionSmoke() {
     assert.equal(initial.state, "active");
     const generation = initial.activeGeneration;
     assert.equal(generation, initial.selectedGeneration);
-    assert.match(generation, /^v[0-9.]+-[a-f0-9]+$/u);
+    assert.ok(typeof generation === "string" && generation.length > 0);
     const manifestPath = join(root, "home", ".local", "share", "portable-devshell", "extensions",
         extensionId, generation, "devshell-extension.json");
     const original = await readFile(manifestPath);

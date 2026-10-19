@@ -33,6 +33,7 @@ import {
 } from "./testspace/TestspaceReverse.mjs";
 import { runTestspaceTerminalSmoke } from "./testspace/TestspaceTerminalSmoke.mjs";
 import { runTestspaceCommentSmoke } from "./testspace/TestspaceCommentSmoke.mjs";
+import { runTestspaceExtensionSmoke } from "./testspace/TestspaceExtensionSmoke.mjs";
 import { runTestspaceMailingSmoke } from "./testspace/TestspaceMailingSmoke.mjs";
 import { runTestspaceApprovalSmoke } from "./testspace/TestspaceApprovalSmoke.mjs";
 import { runTestspaceModelDevshellSmoke } from "./testspace/TestspaceModelDevshellSmoke.mjs";
@@ -139,6 +140,9 @@ switch (command) {
         break;
     case "comment-smoke":
         await commentSmoke();
+        break;
+    case "extension-smoke":
+        await extensionSmoke();
         break;
     case "mailing-smoke":
         await mailingSmoke();
@@ -522,6 +526,12 @@ async function mailingSmoke() {
         workspace: paths.reverseWorkspace,
     });
     process.stdout.write(JSON.stringify({ local, reverse }, null, 2) + "\n");
+}
+
+async function extensionSmoke() {
+    await requireRunningState();
+    const result = await runTestspaceExtensionSmoke();
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
 async function commentSmoke() {

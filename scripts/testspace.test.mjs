@@ -81,6 +81,11 @@ test("testspace launcher prepares build artifacts before entering the isolated r
         prepare: false,
         runtimeArgv: ["status"],
     });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["extension-smoke"]), {
+        command: "extension-smoke",
+        prepare: false,
+        runtimeArgv: ["extension-smoke"],
+    });
     assert.deepEqual(resolveTestspaceLaunchPlan(["upgrade-smoke", "--skip-build"]), {
         command: "upgrade-smoke",
         prepare: false,
@@ -181,6 +186,9 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("workflow-smoke"), "workflow-smoke");
     assert.equal(resolveTestspaceCommand("approval-smoke"), "approval-smoke");
     assert.equal(resolveTestspaceCommand("comment-smoke"), "comment-smoke");
+    assert.equal(resolveTestspaceCommand("extension-smoke"), "extension-smoke");
+    assert.equal(resolveTestspaceCommand("mailing-smoke"), "mailing-smoke");
+    assert.equal(resolveTestspaceCommand("mcpapp-smoke"), "mcpapp-smoke");
     assert.equal(resolveTestspaceCommand("smoke"), "smoke");
     assert.equal(resolveTestspaceCommand("status"), "status");
     assert.equal(resolveTestspaceCommand("stop"), "stop");
