@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { ControlPortContext } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
-import { routes, type ControlRouteBinding } from "@portable-devshell/extension/control";
+import { routes, streams, type ControlRouteBinding } from "@portable-devshell/extension/control";
 
 import { ControlExtensionRouteService } from "../../../../../../../src/extension/api/point/control/Dispatch.ts";
 
@@ -44,6 +44,7 @@ test("route dispatch preserves scope, request context, change notifications, and
             } as never;
         },
         listDeclarations(pointId: string) {
+            if (pointId === streams.id) return [];
             assert.equal(pointId, routes.id);
             return [
                 {
