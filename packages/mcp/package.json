@@ -41,6 +41,7 @@
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b && node scripts/install-mcpapp-assets.mjs",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
-        "test": "pnpm --filter @portable-devshell/mcpapp build && node scripts/install-mcpapp-assets.mjs && node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\""
+        "test": "pnpm --filter @portable-devshell/mcpapp build && node scripts/install-mcpapp-assets.mjs && node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/unit/*/*.test.ts\" \"test/unit/*/*/*.test.ts\" \"test/integration/*.test.ts\"",
+        "test:stress": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/stress/*.stress.test.ts\""
     }
 }
