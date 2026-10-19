@@ -432,3 +432,104 @@ test("A bounced message notifies the sender's claimed Context by Subject", async
         n.message === "New Mail\nFrom: mailer-daemon\nSubject: Undeliverable: Undeliverable test"));
     assert.ok(!notices.some((n) => n.message.includes("Not part of notification")));
 });
+
+test("Concurrent Mailing scans deliver one mailbox entry, index entry and Subject", async (t) => {
+    const { fs, mailing, notices } = fixture();
+    t.after(() => mailing.close());
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    fs.files.set(outbox, mail("Concurrent delivery", "Only one copy"));
+    await Promise.all(Array.from({ length: 3 }, () => mailing.scan({ instance, workspace })));
+    assert.equal(fs.files.get(inbox)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.equal(fs.files.get(index)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.deepEqual(notices, [{ ctxId: "ctx-b",
+        message: "New Mail\nFrom: file-panel-unify\nSubject: Concurrent delivery" }]);
+    const state = JSON.parse(fs.files.get(root + ".mailing/state.json")!);
+    assert.deepEqual(Object.keys(state.accepted), [A + "#1"]);
+    assert.deepEqual(state.pendingNotices, {});
+});
+
+test("Competing Memory inheritances leave one durable owner and preserve the mailbox", async (t) => {
+    const { fs, mailing, worker, contexts, notices } = fixture();
+    t.after(() => mailing.close());
+    fs.files.set(inbox, "# Mailbox\nExisting durable memory\n");
+    fs.files.set(root + B + "/notes.md", "Keep these decisions\n");
+    await Promise.all([
+        mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B),
+        mailing.inherit({ instance, workspace, ctxId: "ctx-c" }, B),
+    ]);
+    const statuses = await Promise.all(["ctx-b", "ctx-c"].map((ctxId) =>
+        mailing.status({ instance, workspace, ctxId })));
+    assert.equal(statuses.filter((status) => status.name === B).length, 1);
+    const state = JSON.parse(fs.files.get(root + ".mailing/state.json")!);
+    const owner = state.bindings[B] as string;
+    assert.ok(["ctx-b", "ctx-c"].includes(owner));
+    assert.equal(fs.files.get(inbox), "# Mailbox\nExisting durable memory\n");
+    assert.equal(fs.files.get(root + B + "/notes.md"), "Keep these decisions\n");
+    await mailing.close();
+
+    const recovered = new MailingService({ worker, contexts, pollMs: 3_600_000,
+        comment: { async queue(_instance, ctxId, message) { notices.push({ ctxId, message }); } },
+        onError: (error) => assert.fail(String(error)),
+    });
+    t.after(() => recovered.close());
+    assert.equal((await recovered.status({ instance, workspace, ctxId: owner })).name, B);
+    notices.length = 0;
+    fs.files.set(outbox, mail("After inheritance", "Append to existing mailbox"));
+    await recovered.poll();
+    assert.deepEqual(notices, [{ ctxId: owner,
+        message: "New Mail\nFrom: file-panel-unify\nSubject: After inheritance" }]);
+    assert.match(fs.files.get(inbox)!, /Existing durable memory/u);
+    assert.match(fs.files.get(inbox)!, /Append to existing mailbox/u);
+});
+
+test("Mailing replays mailbox writes after a failed acceptance save and Control restart", async (t) => {
+    const { fs, mailing, worker, contexts, notices } = fixture();
+    t.after(() => mailing.close());
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    fs.files.set(outbox, mail("Save interrupted", "Mailbox committed before state"));
+    const stateFile = root + ".mailing/state.json";
+    fs.failAppendOnceOn = stateFile;
+    await assert.rejects(mailing.scan({ instance, workspace }), /simulated Worker disconnect/u);
+    assert.match(fs.files.get(inbox)!, /Mailbox committed before state/u);
+    assert.deepEqual(JSON.parse(fs.files.get(stateFile)!).accepted, {});
+    assert.equal(notices.length, 0);
+    await mailing.close();
+
+    const recovered = new MailingService({ worker, contexts, pollMs: 3_600_000,
+        comment: { async queue(_instance, ctxId, message) { notices.push({ ctxId, message }); } },
+        onError: (error) => assert.fail(String(error)),
+    });
+    t.after(() => recovered.close());
+    await recovered.poll();
+    await recovered.poll();
+    assert.equal(fs.files.get(inbox)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.equal(fs.files.get(index)!.match(/<!-- MAIL ID file-panel-unify#1 -->/gu)?.length, 1);
+    assert.deepEqual(notices, [{ ctxId: "ctx-b",
+        message: "New Mail\nFrom: file-panel-unify\nSubject: Save interrupted" }]);
+    assert.deepEqual(Object.keys(JSON.parse(fs.files.get(stateFile)!).accepted), [A + "#1"]);
+});
+
+test("Memory rejects an inactive or out-of-scope Context without stealing the binding", async (t) => {
+    const { mailing, fs, active, worker, contexts } = fixture();
+    t.after(() => mailing.close());
+    await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
+    const state = fs.files.get(root + ".mailing/state.json");
+    active.delete("ctx-c");
+    await assert.rejects(mailing.inherit({ instance, workspace, ctxId: "ctx-c" }, B),
+        /active Context in this Instance and Workspace/u);
+    const outOfScope = new MailingService({ worker, pollMs: 3_600_000,
+        contexts: { ...contexts, async list() {
+            return (await contexts.list()).map((context) => ({ ...context,
+                environments: [{ instance, workspace: "/other-workspace" }],
+            }));
+        } },
+        comment: { async queue() { assert.fail("Rejected binding must not notify"); } },
+        onError: (error) => assert.fail(String(error)),
+    });
+    t.after(() => outOfScope.close());
+    await assert.rejects(outOfScope.inherit({ instance, workspace, ctxId: "ctx-a" }, B),
+        /active Context in this Instance and Workspace/u);
+    assert.equal(fs.files.get(root + ".mailing/state.json"), state);
+    assert.equal((await mailing.status({ instance, workspace, ctxId: "ctx-b" })).name, B);
+    assert.deepEqual(await mailing.status({ instance, workspace, ctxId: "ctx-a" }), {});
+});
