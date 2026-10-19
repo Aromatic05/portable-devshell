@@ -681,6 +681,24 @@ test("McpContextRegistry validates attached instances without binding ctxId auth
     );
 });
 
+test("McpContextRegistry does not resolve a Context across principals", async () => {
+    const registry = new McpContextRegistry({ idFactory: () => "ctx-private" });
+    await registry.initialize();
+    const created = await registry.create({
+        environments: [{ instance: "alpha", workspace: "/alpha" }],
+        principal: "owner",
+    });
+
+    await assert.rejects(
+        registry.validate(created.ctxId, { principal: "intruder" }),
+        hasCode("mcp.contextInvalid"),
+    );
+    assert.equal(
+        (await registry.validate(created.ctxId, { principal: "owner" })).principal,
+        "owner",
+    );
+});
+
 test("McpContextRegistry lists contexts and supports manual disable and renew", async () => {
     const now = 1_000;
     const registry = new McpContextRegistry({

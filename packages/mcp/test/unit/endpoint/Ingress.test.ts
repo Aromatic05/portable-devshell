@@ -140,6 +140,39 @@ test("workspace calls pass through Control callbacks and preserve worker present
     assert.deepEqual(result.structuredContent, { exitCode: 0, stdout: { command: "pwd" } });
 });
 
+test("a Context owned by another principal is rejected before tool ingress", async () => {
+    const registry = new TestToolSource();
+    registry.register("alpha", [workerTool]);
+    let ingressCalls = 0;
+    const endpoint = new McpEndpoint({
+        context: {
+            async resolve(request: Parameters<ContextTransport["resolve"]>[0]) {
+                assert.equal(request.ctxId, "ctx-alpha");
+                assert.equal(request.principal, "user-intruder");
+                throw new Error("Context principal mismatch");
+            },
+        } as never,
+        instanceName: "alpha",
+        toolSource: registry,
+        tools: {
+            async call() {
+                ingressCalls++;
+                return { exitCode: 0 };
+            },
+        },
+    });
+
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: "ctx-alpha" },
+            { principal: "user-intruder", requestId: "foreign-context" },
+        ),
+        /Context principal mismatch/u,
+    );
+    assert.equal(ingressCalls, 0);
+});
+
 test("routed input validates the opt-in and strips the target before tool execution", () => {
     assert.deepEqual(
         readMcpRoutedInput({ command: "pwd", instance: "beta" }, true, "alpha"),

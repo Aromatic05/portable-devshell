@@ -436,6 +436,17 @@ test("running host replaces and unregisters instance bindings without restart", 
             "environ_remote",
             "file_read",
         ]);
+        const removedToolCall = await postModern(endpoint, "removed-tool", "tools/call", {
+            arguments: { command: "pwd" },
+            name: "bash_run",
+        });
+        assert.equal(removedToolCall.status, 200);
+        const removedToolPayload = parseMcpHttpResponse<{
+            error?: { data?: { code?: string }; message?: string };
+            result?: unknown;
+        }>(await removedToolCall.text());
+        assert.equal(removedToolPayload.error?.data?.code, "core.toolSchemaUnavailable");
+        assert.equal(removedToolPayload.result, undefined);
 
         host.unregisterInstance("demo");
         host.replaceTestTools("demo", []);
