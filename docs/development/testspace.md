@@ -20,6 +20,10 @@ pnpm testspace stop
 ```bash
 pnpm testspace web-smoke
 pnpm testspace comment-smoke
+pnpm testspace mailing-smoke
+pnpm testspace mcpapp-smoke
+pnpm testspace extension-smoke
+pnpm testspace long-smoke
 pnpm testspace update-smoke
 pnpm testspace upgrade-smoke
 pnpm testspace workflow-smoke
@@ -40,6 +44,10 @@ pnpm testspace exec -- <command...>
 `workflow-smoke` 通过真实 MCP Client → Instance ToolCall → Todo/Bash → MCPApp Action/Reentry 运行一条 Context 级工作流，检查任务的暂停/恢复、Action 重试去重、持久化恢复收据和审计。脚本使用管理端 Task Transport 清理自身创建的测试任务。它没有真实 ChatGPT Host，恢复消息被明确报告为 `simulated-rejected`；不能将其作为 Host `sendMessage` 成功或 Agent 真正续跑的证据。
 
 `approval-smoke` 只将隔离测试实例 MCP 侧的 `file_grep` 配置为 `ask`，检查 ToolCall 等待审批、MCPApp Action 同意/拒绝，以及 Instance Audit 的 `completed`/`denied` 记录。其他工具保持 `allow`，避免阻塞活动 Connector。退出时恢复审批策略并清理测试 Context 的待决审批。它模拟授权用户调用 MCPApp Action，不代表真实 ChatGPT Host 点击成功。
+
+`extension-smoke` 是单独显式执行的 Extension 生命周期验收：在隔离 Testspace 的 Comment Extension 安装目录中**临时写入无效 Manifest**，验证损坏候选被拒绝但旧 Generation 仍可服务真实 MCP 消息，随后在 `finally` 恢复文件、重新加载并检查订阅回收。它会改变正在运行的 Testspace Extension 状态，因此**不属于默认 `smoke`**；应只在可独占使用的 Testspace 上手动执行。普通 `pnpm test:scripts` 只验证该子命令的路由注册，不执行 Manifest 故障注入。
+
+MCP App Receipt 增长压力测试同样独立于常规单元测试，可显式运行 `pnpm --filter @portable-devshell/mcp test:stress`；它不能代替真实 ChatGPT Host 验收。
 
 活动 connector 默认周期是 2 秒，可通过：
 
@@ -74,7 +82,7 @@ MCP auth          none
 contextMode       explicit
 approval          allow
 security.mode     workspace
-extensions.model  artifact,instance,mcp,secret,skill
+extensions.model  artifact,comment,instance,mcp,secret,skill
 MCP tools         fixed runtime catalog
 ```
 

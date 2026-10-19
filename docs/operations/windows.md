@@ -32,11 +32,14 @@ Windows worker 使用普通 detached 用户进程，不安装 Windows Service，
 ```text
 bash_run
 file 工具组
+tmux 工具组（内嵌 psmux）
 artifact 工具组
 reverse connection
 ```
 
-Windows worker 不注册 `tmux` 工具组，也不提供本地 Attach Shell。Windows client 管理 SSH Linux/macOS instance 时，仍可使用目标 worker 提供的 tmux 和 shell attach。
+Windows Worker 将 `psmux` 静态链接到 `devshell-worker`，由 Worker 自身以内部分支启动持久化终端后端；用户不需要另行安装 `tmux` 或 `psmux`。后端可用时注册 `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`，支持 persistent pane、managed task、transcript 和 Worker 重启接续。Worker 的本地 Attach Shell 能力与这些 tmux 工具是不同功能，不应混为一谈。
+
+`crates/devshell-worker/tests/tmux_windows_contract.rs` 包含 Windows Pane/Task 持久化和输入等专项测试。当前发布 CI 的 Windows target 主要验证构建与打包，并**没有运行完整 Windows psmux/PowerShell 端到端交互验收**；因此不能以发布资产构建通过宣称 Windows 运行时全部验证成功。
 
 ## PowerShell backend
 

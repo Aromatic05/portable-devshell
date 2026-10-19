@@ -146,7 +146,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
 | tmux              | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`                           |
 | Todo              | `todo_read`、`todo_write`                                                                      |
-| Workspace         | 小型 model-facing surface + App-only wire protocol                                             |
+| Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |
 | Instance          | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
 Worker catalog 的 description 只描述 canonical capability 契约；MCP endpoint 在暴露 Worker tool 时独立投影面向 ChatGPT/MCP consumer 的使用说明。这个投影不回写 Worker，也不与 Agent Extension 的 model description 共用实现。
@@ -171,23 +171,15 @@ Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 M
 
 ## Workspace App 工具边界
 
-模型可以看到的 Workspace 工具保持很小：
+模型侧正常调用 `environ_info` 完成 Context 与 Workspace bootstrap。启用 Workspace 后，`mcpapp_open` 仅用于显式重新呈现/恢复界面，并不是每次工具调用的前置步骤。独立 Ask/Question Store 和 `workspace_ask` / `mcpapp_ask` 已退役，不是当前模型工具。
 
-```text
-workspace_open
-workspace_ask
-workspace_goal
-```
-
-其中 `workspace_open` 只是重新呈现/恢复入口；正常 bootstrap 已由 `environ_info` 完成。
-
-`workspace_snapshot`、`workspace_watch`、`workspace_reconnect` 是 direct Live Workspace transport 不可用时的 app-only 兼容 fallback；`workspace_action` 与 `workspace_reentry` 是 App 的常规 app-only 写路径，App 正常情况下经 live Workspace route 读取 snapshot/watch。App 消费 Workspace presentation，并用 `itemId + actionId` 发起操作，不解释 Todo、Approval、Wait 或 Goal 的领域 DTO。动作后的交付指令、模型上下文和调度时间由服务端提供；这些内部协议不应出现在模型工具列表或 Agent 使用示例中。
+App 通过带隐藏 capability 的 Live Workspace route 读取 `snapshot` / `watch`；修改 Approval、Goal、Task 使用 app-only `mcpapp_action`，自动模型恢复使用 app-only `mcpapp_reentry`。这些写入仍由 ToolCall Pipeline 验证和审计，不允许普通模型直接调用，也不会将领域内部的 Goal/Todo/Wait DTO 交给 UI 自行修改。Inline ToolCall/Interaction 与 Fullscreen Workspace 使用不同的 presentation resource。
 
 详见 [Workspace](workspace.md)。
 
 ## Skills、Project memory 与环境信息
 
-`environ_info` 返回当前 worker 上的 canonical workspace、platform、skills directory、temporary directory，以及存在时的 project memory 路径。
+`environ_info` 使用紧凑 `comment` 提示报告当前 Workspace、临时目录、Skills 和 Memory 的必要信息；Memory 的 `init` / `inherit` 指引由 Comment Extension 提供，不另建结构化 Memory 状态字段。
 
 Worker handshake 本身只提供通用的 `homeDirectory + platform`；MCP builtin module 通过通用 Worker Resource Host 准备 `skill/managed` collection，并把返回目录作为 `skillsDirectory`。Worker handshake 不理解 Skill。
 

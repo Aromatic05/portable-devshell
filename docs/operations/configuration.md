@@ -1,6 +1,6 @@
 # 配置与运行目录
 
-这份文档记录当前 `0.7.x` 的持久配置、运行路径和运维入口。命令参数以当前 `devshell <command> --help` 为准；配置结构以 Control 的 normalize/validate 结果为准。
+这份文档记录当前 1.0 系列的持久配置、运行路径和运维入口。命令参数以当前 `devshell <command> --help` 为准；配置结构以 Control 的 normalize/validate 结果为准。
 
 ## 支持平台
 
@@ -13,7 +13,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。Windows 提供完整 client 和基础能力 worker；Windows worker 使用 PowerShell，不提供 tmux 或本地 Attach Shell。
+主程序需要 Node.js 24 或更高版本。Windows 提供完整 client 和 worker，`bash_run` 使用 PowerShell，持久化 tmux 工具使用 Worker 内嵌的 psmux；本地 Attach Shell 与 tmux 工具分别建模。
 
 ## 配置路径
 
@@ -49,7 +49,7 @@ Windows control 使用当前用户专属 Named Pipe：
 
 因此 macOS 不需要手动设置 `XDG_RUNTIME_DIR`。Windows 不使用 Unix socket；每个 worker instance 使用 `\\.\pipe\devshell-worker-<user>-<instance>`。
 
-worker 和 tmux 在 Unix 上仍维护各 instance 的独立运行目录与 socket；Windows worker 不注册 tmux 工具。
+Worker 和 tmux/psmux 运行时按 instance 与 workspace 隔离；Unix 使用对应 socket，Windows 使用 Worker Named Pipe 和内嵌 psmux 后端。
 
 ## 初始化、迁移与升级
 
@@ -237,7 +237,7 @@ timeoutMs = 5000
 - `name`：必须包含连字符；
 - `provider`：`local`、`ssh`、`docker`、`podman`、`reverse`；
 - instance 配置不包含持久化默认 workspace path。worker 启动与实例生命周期不绑定项目目录；MCP Context 通过 `environ_info` 选择 primary instance 的绝对 workspace。其他 managed instance 由 model-facing `devshell instance list/status` 返回 Context-scoped opaque handle，再通过固定 MCP `environ_remote(command="attach", handle=..., workspace=...)` 附加；`mask` 会在当前 Context 中永久屏蔽该 remote instance，直到 Context 结束；
-- `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Question/Approval/Wait 交互与自动 re-entry。fresh instance 默认 `false`；旧 version 2/3 instance 迁移时为保持历史行为写成 `true`。设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
+- `[workspace].enabled`：是否启用该 instance 的 Workspace App、Goal/Todo/Approval/Wait 交互与自动 re-entry。fresh instance 默认 `false`；旧 version 2/3 instance 迁移时为保持历史行为写成 `true`。设为 `false` 会 retire 已存在的 Workspace presentation/recovery state，但不会关闭 MCP endpoint、停止 Worker 或移除 bash/file/tmux runtime primitive；
 - `[mcp].enabled`：是否注册该 instance 的 MCP endpoint；
 - `[mcp].auth`：该 instance 独立使用 `none`、`token` 或 `oauth2`；
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。fresh instance 默认 `openai-session`，使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外；`explicit` 允许 model-facing 工具显式携带 `ctxId`。旧 version 2/3 instance 未显式配置该字段时迁移为 `explicit`，保持旧版本行为。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；

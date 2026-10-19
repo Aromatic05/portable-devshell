@@ -1,226 +1,122 @@
 # Workspace
 
-Workspace 是 portable-devshell 面向长程 Agent 工作的**交互与恢复层**。它建立在 Context 之上，把 Goal、Todo、Question、Approval、durable Wait 和模型 re-entry 组织成一个可观察、可人工接管的状态机。
+Workspace 是 portable-devshell 基于 Context 的交互与恢复层，负责 Goal、Todo、Tool Approval、durable Wait、ToolCall Activity 和自动模型 re-entry。它不是独立 Worker，也不拥有第二套任务状态；服务端的 Context、Task、Approval 和 Audit 才是权威数据来源。
 
-它不是一个独立 worker，也不是 ChatGPT 中永久常驻的窗口；服务端状态属于 Context，MCP App 只是该状态的一种呈现和控制界面。
+独立 Ask/Question Store 已按产品决策退役，不再提供 `workspace_ask` 或 `mcpapp_ask`。需要人工处理的 Tool Approval 仍通过 Inline Interaction 呈现，Goal、Todo 和后台 Wait 不依赖 Question。
 
 ## 组成
 
 ```text
-Context
-  ├── Workspace App presentation
+Context / Instance authoritative state
   ├── Goal
   ├── Todo / checkpoint
-  ├── Question Wait
-  ├── tmux Wait
-  ├── Approval
-  └── automatic re-entry state
+  ├── Tool Approval
+  ├── durable Wait (tmux task / long read)
+  ├── ToolCall Audit / Activity
+  └── re-entry ownership
+          │
+          ▼
+     MCP App presentation
+       ├── Fullscreen Workspace
+       ├── Inline Interaction (Approval / Wait)
+       └── per-tool Inline ToolCall
 ```
 
-Workspace snapshot 是服务端的 authoritative view。UI 只投影它，不自己维护第二套任务真相。
-
-App-facing snapshot 将三类输入分开：`presentation` 提供 `primary` / `work` / `background` 卡片、输入和按钮，`modelContext` 提供交给 Host 的模型上下文，`reentry` 提供交付指令与调度时间。领域解释集中在 Workspace contributors；App 不读取 Todo、Approval、Wait 或 Goal 的原始状态与 revision。
-
-用户操作统一调用 app-only `workspace_action`，提交 `itemId + actionId` 和可选输入。服务端重新验证当前 action 与领域原子约束，返回 `applied` 或 `stale`、最新 snapshot，以及必要的 re-entry effect。action 身份绑定 Context、instance 和领域 fence，普通刷新不使其失效。
-
-Workspace action receipt 保存未完成的交付，不取代领域 authoritative state。操作成功但响应丢失时，旧 action 重试不重复 mutation；未交付的同身份指令也由 snapshot 提供给 remount 后的 App。已尝试发送但结果不确定时不盲重发。`workspace_reentry` 继续独立负责 claim、validation 和 Host 交付仲裁。
+MCP App 的 snapshot 按当前 `ctxId` 和 instance 过滤领域状态，并投影 `primary / work / background`、`modelContext`、`reentry` 和 Activity。UI 不修改 Todo、Goal 或 Approval 的权威状态，也不将 iframe 本地缓存作为事实来源。
 
 ## Bootstrap 与重新呈现
 
-正常 bootstrap 发生在 `environ_info`：
+正常模型调用从 `environ_info` 开始：准备 Worker workspace、建立或续租 Context attachment，并在启用 MCP App 时附加有权限的 presentation metadata。模型无须额外执行 Workspace Open。
 
-```text
-environ_info
-  -> prepare environment
-  -> bind Context/workspace
-  -> issue Workspace App capability
-  -> return current Workspace presentation metadata
-```
+`mcpapp_open` 是当前的重新呈现入口：当 Fullscreen Workspace 被关闭或需重新打开时使用，不是每次工作的固定前置步骤。历史 ToolCall Inline 卡片与 Workspace 可以通过对应资源 URI 恢复显示。
 
-`workspace_open` 仍保留，但职责是**重新呈现**已存在的 Workspace，例如：
+## 启用、关闭与权限
 
-- 用户关闭了 App；
-- iframe remount 后需要重新挂载；
-- 某个需要人类交互的工具明确发现当前 presentation 已失活。
-
-它不应该成为每次 Agent 工作的固定第一步。
-
-## 启用与关闭
-
-Workspace 是 instance 级可关闭子系统，默认启用：
+新建 version 4 Instance 默认关闭 Workspace：
 
 ```toml
 [workspace]
 enabled = false
 ```
 
-关闭不是简单地从 `tools/list` 隐藏入口。Control 会先执行完整的 Workspace retirement：撤销 App presence/capability、停止 wait recovery、回收 automatic re-entry/Goal continuation claim，并终止仍等待 Workspace 人机交互的状态，然后以 Workspace-disabled endpoint 重新注册该 instance。
+启用后才提供 Workspace 的展示与自动恢复能力。关闭时回收当前 Instance 的 App presence/capability、Wait recovery 和相关 Goal continuation/re-entry 资格；它不停止 Worker、不删除 Context、不关闭 MCP endpoint，也不移除 bash/file/tmux 等基本工具。TUI 的 Instance Config 页面可以修改该设置。
 
-这个开关只关闭 Workspace 交互与恢复层。MCP endpoint、Context、Worker、`bash_run`、file/tmux primitive 和跨 instance routing 仍可继续使用。TUI 的 instance Config 页面可以直接切换 `workspace.enabled`；重新设为 `true` 会热恢复 Workspace surface，不要求重启 Worker。
+App-only 的读写请求必须持有当前 Context 的隐藏能力凭据。知道 `ctxId` 不是授权；审批状态属于 Core，MCP App 只调用经过验证的审批操作。
 
-## MCP App 生命周期
+## MCP App 与 UI 生命周期
 
-Workspace UI 使用官方 MCP Apps SDK，而不是自定义 postMessage bridge。
+MCP App 使用官方 MCP Apps SDK，按用途分三类资源：
 
-当前实现的重要约束：
+- **Fullscreen Workspace**：Overview、Tasks、Activity；显示持续存在的 Goal/Todo、后台 Wait 和审计记录。
+- **Inline Interaction**：等待用户处理的 Approval / Wait，不要求打开 Fullscreen。
+- **Inline ToolCall**：面向各工具的紧凑结果卡片。展开后可以查看语义化输出；反复 `tmux_read` 的结果在 Activity 中按对应 Task 汇聚。
 
-- render resource 使用内容 hash 生成版本化 URI，避免 Host template cache 把旧 HTML 当成新版本；
-- stable reader alias 与已发布过的历史 URI 继续可读，保证旧会话升级后仍能 remount；
-- App 通过 live Workspace route 直接读取 `snapshot` / `watch`，并用 app-only `workspace_action` / `workspace_reentry` 提交操作和交付；`workspace_snapshot` / `workspace_watch` / `workspace_reconnect` 只是 direct transport 不可用时的 fallback；
-- `watch` 基于 instance event sequence，只在当前 Context 的相关事件变化时返回新 snapshot，正常无变化时是 heartbeat，不做固定频率全量 polling；
-- 已建立 App bridge 后，单次 `tools/call`、model-context 或 Host message 请求超时只进入原 bridge 内的 `Reconnecting` / retry 路径，不能 `app.close()`、重新 `ui/initialize` 或重新申请 display mode；只有 SDK 报告真实 `app.onclose` 或初始握手失败时才执行 lifecycle reconnect；
-- app-only 写操作必须携带当前 Context 和隐藏 app capability。
+ToolCall 的完整记录由 Audit 持久化；Activity 在原始 Inline 卡片被 Host 销毁后仍可按需读取输出、图片和 Terminal transcript。普通 ToolCall 的 Inline 输出不依赖 Workspace 的 Live Lease。
 
-这些 helper 属于 App 协议，不应成为模型主动调用的工具。
+资源提供内容哈希 URI 及历史兼容别名，使旧会话在升级与 iframe remount 后仍可读取。建立 MCP App bridge 后，单次工具调用或 Host 消息失败只重试原会话；只有真正的 App 关闭或初次握手失败才重建 SDK 生命周期。
 
-## 可见状态优先级
+App 从受鉴权的 Live Workspace HTTP route 读取 `snapshot / watch`。Watch 使用 instance event sequence 和相关变化通知，无变化时返回 heartbeat，不在客户端循环全量读取。
 
-Workspace 视图优先展示需要用户处理的状态，而不是后台噪声：
+## 人工操作与 Action Receipt
+
+UI 通过 app-only `mcpapp_action` 提交 `itemId`、`actionId`、`requestId` 以及需要时的 `expectedRevision`。当前支持：
 
 ```text
-Question / Approval
-        ↓
-      Goal
-        ↓
-Todo / background waits
+Approval  approve / deny
+Task      pause / resume / cancel
+Goal      pause / resume / retry / stop
 ```
 
-waiting/detached 的 tmux Wait 属于后台状态，不会覆盖正在等待用户回答的 Question 或 Approval。
-
-## Question
-
-`workspace_ask` 用于模型确实需要人类输入时创建 durable Question。
-
-关联优先级：
-
-1. 当前 active/blocked Goal；
-2. 当前唯一 `in_progress` Todo；
-3. 都没有时，仅归属当前 Context。
-
-Question 需要一个仍活跃的 Workspace presentation。这样模型不会在 UI 已经消失时创建一个无人能够回答的 held call。
-
-如果 Host 取消原始 tool call，Question 可以从 held `waiting` 转成 detached；用户随后回答时仍可通过 durable recovery 恢复模型。
+服务器执行前重新检查 Context、Workspace、当前对象及 revision。Receipt 用于一次操作的幂等投递与恢复，不能取代领域状态；响应丢失后相同请求不会重复执行 mutation，过期的 UI 动作不能覆盖新的状态。模型侧不应直接调用这些 app-only 写操作。
 
 ## Goal
 
-Goal 用于描述一个有明确 ordered items 的连续工作目标。它与“执行一条 tool call”不同：Goal 的职责是约束**跨多轮模型工作的推进顺序**。
-
-关键状态包括：
-
-```text
-active
-blocked
-paused
-completed
-stopped
-```
-
-当前 Workspace 会把 Goal 的进度、当前项和下一项投影给模型。continuation 语义要求模型完成当前项后立即进入下一项，而不是把“完成当前 item”解释成可以直接结束整个回合。
-
-Goal 的 pause/resume/stop 由服务端做 revision/ownership 校验，避免旧 UI 或并发 App 操作覆盖更新后的 Goal。
+Goal 是跨多轮模型执行的有序目标，状态包括 `active`、`blocked`、`paused`、`completed`、`stopped`。Workspace 按当前 Context 与 Workspace 投影 Goal 进度；Continuation 使模型在完成当前步骤后继续处理后续步骤。用户 Pause/Resume/Stop 与旧恢复指令之间使用 revision 和 ownership fencing。
 
 ## Todo 与 checkpoint
 
-Todo 是更通用的任务计划和持久状态；Goal 可以与 Todo 共存。
+Todo 使用稳定 `taskId`、revision 和任务项状态；Goal 可以与 Todo 并存。Checkpoint 包含 `summary`、`next`、`blockers` 等可恢复信息，供下一轮模型重入，而不仅是 UI 装饰。模型使用 `todo_read` / `todo_write` 维护计划；人工清理使用独立管理入口。
 
-Todo task 使用稳定 `taskId` 和 revision。更新时可以携带：
+## durable Wait 与 tmux 长任务
 
-```text
-checkpoint.summary
-checkpoint.next
-checkpoint.blockers
-```
-
-checkpoint 是 model re-entry 的可恢复上下文，不是展示用日志。Workspace 在重新进入模型前可以把最新 snapshot/context 写回 Host，使新的模型回合知道上一轮做到哪里。
-
-## durable Wait
-
-Wait 把“原始 HTTP/tool call 是否还在”与“工作是否仍然有效”分离。
-
-主要来源：
-
-- Question；
-- `tmux_run(wait=block)`；
-- `tmux_read` 的长等待；
-- 其他需要 durable recovery 的交互。
-
-Wait 可以经历：
+Wait 将底层 Task 是否仍在运行，与原 MCP `tools/call` 是否仍然保持连接分离：
 
 ```text
 waiting
   ├── resolved
-  ├── detached -> resolved
+  ├── detached → resolved
   └── cancelled / consumed
 ```
 
-`detached` 不代表 task 失败，只代表原始调用链不再负责等待最终结果。
+主要来源是 `tmux_run(wait=block)`、`tmux_read` 的长等待和其他需要后台恢复的工作。`detached` 不是 Task 失败，且不会自动停止进程。
 
-## tmux 长等待
+`tmux_run(wait=block)` 使用最长 180 秒同步等待窗口，HTTP SSE 每 15 秒发送 keepalive。窗口内 Task 完成则在当前工具调用返回结果；窗口结束后仍在运行则转为 durable handoff，Worker 上的 Task 继续运行，后台 tracker 观察最终结果或超时。
 
-`tmux_run(wait=block)` 的流程是：
+`timeout` 是 Task 自身的总 deadline，不因同步窗口缩短而改变。
 
-```text
-start managed task
-  -> create durable Wait immediately
-  -> keep current tools/call blocked
-  -> task finishes within 180s: return result directly
-  -> still running at 180s: detach Wait
-  -> background tracker continues
-  -> task/timeout/user action resolves Wait
-  -> Workspace re-enters model when eligible
-```
+## Stop waiting 与 Stop task
 
-当前 MCP HTTP transport 使用 request-scoped SSE 和 15 秒 keepalive，因此 180 秒同步窗口可以真实保持同一个 tool call，而不会因为上游 HTTP idle timeout 在约两分钟提前产生 5xx。
+用户选择 `Stop waiting` 只停止当前等待或其自动恢复链：同步阶段可让 held 调用返回 `interrupted`，detached 阶段撤销相关恢复资格。两者均不杀掉 Worker 上的 tmux Task。
 
-`timeout` 是从 task 启动开始计算的总 deadline，可以长于 180 秒；它不会把产品同步窗口自动延长到同样长度。
-
-详见 [tmux 工具](../tools/tmux.md)。
-
-## `Stop waiting` 不等于 `Stop task`
-
-这是 Workspace 最重要的边界之一。
-
-用户选择 `Stop waiting`：
-
-- 同步阶段：原 tool call 返回 `interrupted: true`；
-- detached 阶段：停止该 Wait 的后台恢复链并让模型按 Workspace 语义继续；
-- **两种情况都不杀 tmux task。**
-
-真正停止 task 需要显式的 tmux task control。
+真正结束 Task 需要明确执行 tmux Task control；长时间运行本身不是自动清理 Task 的理由。
 
 ## 自动模型 re-entry
 
-resolved Wait 或到期 Goal 都不会简单地“发一条消息”。它们先以 `reentry.directives`（以及 action 返回的 `effect`）暴露给 App，再由 app-only `workspace_reentry` 在每个 Context 内统一仲裁：
+resolved Wait 或需要继续的 Goal/Task 通过 `reentry.directives` 暴露恢复资格。App 使用 app-only `mcpapp_reentry` 仲裁：
 
-1. `claim` 当前 Context 的 re-entry ownership，并绑定 Wait 或 Goal/task 来源；
-2. `validate` 重新验证来源与关联 Goal/Todo 仍然有效；
-3. 确认没有新的 model execution 正在占用 Context，也没有 pending Approval；
-4. 返回带 authoritative `modelContext` 的 delivery；
-5. App 应用 model context 后 `attempt`，再 `report` `accepted` / `rejected` / `uncertain`；
-6. `accepted` 时 consume/complete 来源；失败或 `uncertain` 时 release 或保留 claim，允许之后按 ownership 重试。
+1. `claim` 取得当前 Context 的 re-entry ownership；
+2. `validate` 再次核对 Wait、Goal/Todo 和 Context 状态；
+3. 当前模型执行仍在进行或存在待决 Approval 时，不抢占用户和模型；
+4. 使用服务器生成的 `modelContext` 更新 Host，随后 `attempt`；
+5. 调用 Host `sendMessage`，再 `report` accepted/rejected/uncertain；失败时适时 `release`，不盲目重复发送。
 
-因此 remount、Control 重启、多 App 并发或消息发送失败不会把同一个来源重复恢复多次。
-
-## 用户优先级
-
-Workspace 的自动恢复必须让位于人类显式操作：
-
-- 用户中断模型后，不应该立即被旧 Goal/Wait 自动唤醒；
-- pending Approval / Question 不应被后台 tmux 完成事件覆盖；
-- Goal/Todo 已停止或 revision 已变化时，旧 recovery claim 必须失效。
-
-这也是 Context execution state 与 re-entry state 分离的原因。
+因此，iframe remount、旧 Action 回执重试或 Control 重启不应导致同一个来源被重复恢复；用户显式暂停、中断或停止 Goal/Task 时，旧的恢复资格必须失效。
 
 ## 恢复与重启
 
-Control / MCP / iframe 重启后：
+Control/MCP/iframe 重启后，Context、Goal/Todo、durable Wait 与 Audit 从权威持久状态恢复。原 HTTP 请求已消失的 held Wait 需要作为可恢复后台状态处理，而不是假定旧工具调用仍在。Workspace 重新获取 snapshot 后再考虑是否 re-entry。
 
-- Context 与 durable Wait 从持久化状态恢复；
-- 已失去原 held tool call 的 `waiting` Wait 会按 orphaned owner 语义转入可恢复状态，而不是假装旧 HTTP 请求仍存在；
-- App 重新读取 authoritative snapshot；
-- background tracker 对仍有效的 detached tmux Wait 继续观察。
-
-worker 上的 tmux task 生命周期独立于 Context 和 MCP HTTP 连接，因此 transport 重连不会重启 task。
+tmux Task 的生命周期属于 Worker/runtime，不因 MCP HTTP 断连、Context 刷新、Workspace remount 或 Control transport 重连而自动结束。
 
 ## 相关文档
 

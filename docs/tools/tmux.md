@@ -423,4 +423,4 @@ tmux runtime schema 与当前 worker 不兼容时不会混用新旧 pane 语义�
 
 每个 workspace 的 tmux runtime 使用独立 storage/socket scope。tmux session/pane identity 由 tmux options 自身保存；instance 的 tmux state 目录只持久化 task completion metadata、task runtime 文件、transcript 与 unread offset。
 
-目标环境必须安装 `tmux`。如果 `tmux -V` 不可用，worker 不注册 tmux 工具。
+Unix 目标环境需安装 `tmux`；若对应后端不可用，Worker 不注册 tmux 工具。Windows 目标使用静态链接到 `devshell-worker` 的 psmux 后端，不要求外部安装 `tmux`/`psmux`。Windows 的持久 Pane、Task、Transcript 与重启恢复有独立 Rust 契约测试；发布目标构建成功不等于这些运行时测试已经通过。

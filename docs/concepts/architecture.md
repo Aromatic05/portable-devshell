@@ -196,7 +196,6 @@ Workspace App 是 Context 上的交互/恢复层，不是另一份 workspace 关
 MCP App presentation
 Goal
 Todo checkpoint
-Question
 Approval
 durable Wait
 automatic model re-entry

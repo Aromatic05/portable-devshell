@@ -83,7 +83,7 @@ environ_info(workspace=<absolute worker path>)
 5. 启动该 workspace 的 alert lease（如果配置）；
 6. 在启用 Workspace MCP App 时附带 Workspace bootstrap metadata。
 
-模型不需要再先执行一个独立 `workspace_open` 才能开始工作。
+模型不需要先执行 `mcpapp_open`；该工具仅用于重新呈现已启用的 Workspace。
 
 ## Environment attachment
 

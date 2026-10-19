@@ -75,7 +75,7 @@ windows-arm64
 
 每个目标执行对应 release-asset gate，并上传该提交的候选资产。Linux x64 额外保留完整 acceptance 日志。
 
-Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的构建/打包目标；通用 TypeScript/Rust 正确性由 common job 证明。不要把“Windows target 构建成功”描述成已经覆盖了与 Unix 同等的 PowerShell/ConPTY runtime 交互测试。
+Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的构建/打包目标；通用 TypeScript/Rust 正确性由 common job 证明。Windows Worker 虽已内嵌 psmux 并设有 `tmux_windows_contract.rs`，CI 仍未进行完整 Windows Pane/Task/PowerShell runtime 验收。不要把“Windows target 构建成功”描述成已覆盖这些交互测试。
 
 ## Release workflow
 
@@ -92,7 +92,7 @@ Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的�
 
 只有全部目标成功后才发布 GitHub Release。发布完成后 workflow 会在默认分支推进到下一个开发版本。
 
-## 0.7.x 配置契约
+## 持久化配置与迁移契约
 
 发布前文档与测试应统一确认：
 
@@ -115,13 +115,13 @@ instance version 4 中：
 
 ## MCP / Context / Workspace 门禁
 
-0.7.x release gate 至少应证明：
+1.0 Beta release gate 至少应证明：
 
 1. `explicit` Context 可以通过 `environ_info` bootstrap 并继续普通工具调用；
 2. `openai-session` 不把内部 `ctxId` 暴露到 model-facing schema；
 3. App-only Workspace 调用仍能用内部 `ctxId` + capability 定位同一个 Context；
-4. `environ_info` 正常 bootstrap Workspace，`workspace_open` 只承担 re-presentation/restoration；
-5. Goal/Todo/Question/Approval/Wait 的 ownership 与 revision fencing 不因 remount/restart 丢失；
+4. `environ_info` 正常 bootstrap Workspace，`mcpapp_open` 只承担 re-presentation/restoration；
+5. Goal/Todo/Approval/Wait 的 ownership 与 revision fencing 不因 remount/restart 丢失；独立 Ask/Question 功能已退役；
 6. `Stop waiting` 不停止 tmux task；
 7. MCP v2 request-scoped SSE keepalive 能让长 `tools/call` 跨过普通 HTTP idle timeout；
 8. `tmux_run(wait=block)` 在 180 秒内可以真实同步返回，超过 180 秒正常 `detached`，task 继续运行；
