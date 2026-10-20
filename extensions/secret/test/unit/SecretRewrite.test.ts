@@ -178,3 +178,47 @@ test("Secret rewrite rejects an inbound reference missing from the current insta
         /Secret MISSING is not configured in instance demo env/u,
     );
 });
+
+
+test("Secret rewrite isolates concurrent calls across contexts while one lookup is stalled", { timeout: 5_000 }, async () => {
+    const rewrite = createSecretRewrite();
+    const first = rewriteContext({ TOKEN: "fixture-alpha" });
+    const second = rewriteContext({ TOKEN: "fixture-beta" });
+    const entered = deferred();
+    const release = deferred();
+    const pendingContext = {
+        ...first.context,
+        async requestInterface(operation: string, input?: unknown) {
+            entered.resolve();
+            await release.promise;
+            return await first.context.requestInterface(operation, input);
+        },
+    };
+    const a = invocation("inbound", { command: "${SECRET:TOKEN}", nested: ["${SECRET:TOKEN}", 7] });
+    const b = invocation("inbound", { command: "${SECRET:TOKEN}" });
+    const inputA = { ...a, callId: "call-alpha", value: { ...a.value, context: { ...a.value.context, ctxId: "ctx-alpha" } } };
+    const inputB = { ...b, callId: "call-beta", value: { ...b.value, context: { ...b.value.context, ctxId: "ctx-beta", instance: "other-instance" } } };
+    const pending = rewrite(inputA, pendingContext);
+    await entered.promise;
+    const expandedB = await rewrite(inputB, second.context);
+    assert.deepEqual(expandedB.payload, { command: "fixture-beta" });
+    release.resolve();
+    const expandedA = await pending;
+    assert.deepEqual(expandedA.payload, { command: "fixture-alpha", nested: ["fixture-alpha", 7] });
+    const [maskedA, maskedB] = await Promise.all([
+        rewrite({ ...inputA, direction: "outbound", value: { ...inputA.value, kind: "result", payload: "fixture-alpha fixture-beta" } }, first.context),
+        rewrite({ ...inputB, direction: "outbound", value: { ...inputB.value, kind: "result", payload: "fixture-alpha fixture-beta" } }, second.context),
+    ]);
+    assert.equal(maskedA.payload, "${SECRET:TOKEN} fixture-beta");
+    assert.equal(maskedB.payload, "fixture-alpha ${SECRET:TOKEN}");
+    assert.deepEqual(expandedA.context, inputA.value.context);
+    assert.deepEqual(expandedB.context, inputB.value.context);
+    assert.deepEqual(inputA.value.payload, { command: "${SECRET:TOKEN}", nested: ["${SECRET:TOKEN}", 7] });
+});
+
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+}
