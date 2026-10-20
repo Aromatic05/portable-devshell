@@ -2,13 +2,13 @@
 
 This directory contains deliberately **failing** tests for independently reproduced implementation defects. They are **not** part of the regular `pnpm test:packages`, `pnpm test:scripts` or Cargo discovery. A nonzero exit is expected **until the implementation is fixed**; do not change the assertions simply to make the tests green.
 
-For the eight confirmed non-UI defects, run from the repository root:
+Run the remaining opt-in non-UI reproducers from the repository root:
 
 ```bash
 TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/*.test.ts
 ```
 
-This invokes 9 failing scenarios: two foreign instance TOML filenames, one post-commit cleanup failure, two Extension lifecycle races, one Stream admission race, one OAuth refresh-token rotation race, and two Reentry claim-ownership races.
+The third-round remaining cases cover two Extension lifecycle races, one Stream admission race, one OAuth refresh-token race, and two Reentry claim-ownership races. Fixed A/B cases have moved into their owning packages' default suites; this glob includes other unresolved rounds too.
 
 For component-boundary UI findings (real rendered components with stubbed Host/domain connections):
 
@@ -30,14 +30,11 @@ These tests are **expected to fail** and are not discovered by any default packa
 # Provider adopted container state is lost across runtime reconstruction
 TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ProviderAdoptionRuntime.test.ts
 
-# Control Call and Stream error metadata + ApprovalService closure race
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallAuditBoundary.test.ts
+# ApprovalService closure race (still RED)
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ApprovalServiceCloseRound4.test.ts
 
 # Comment/Mailing real SQLite and disk: duplicate, wrong scope, quoted ID, invalid sender
 TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./extensions/comment/test/RegisterWorkspacePackages.mjs --test --test-isolation=none test/known-bugs/CommentMailingDelivery.test.ts
-
-# Native MCP cancellation audit; real SDK/OIDC/SQLite, simulated HTTP (not TCP)
-ROUND4_MCP_TRANSPORT=memory TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/McpNativeAbortAudit.test.ts
 
 # Four Web UI and three TUI Overlay rendering/state-machine regressions
 node packages/web/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/web-round4-repro.config.ts
@@ -72,18 +69,25 @@ For the isolated positive three-phase running-system retirement proof, start a *
 
 ## Sixth-round standalone regressions
 
-All three failures below were reproduced on the normal Linux host using real local filesystem, SQLite and/or TCP. They **must not be included in default green package discovery** until the implementation is corrected without changing the original invariant.
+The ToolCall Audit ownership and post-execution retry failures are now in default package discovery. Only the Reverse WSS candidate failure remains RED in this section.
 
 ```sh
-# An already executed side effect must not be advertised as safely retryable
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts
-
-# A rejected duplicate callId must not take the original caller's durable audit identity
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts
-
 # A failed WSS replacement must not poison the retained predecessor's reliable RPC session
 TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts
 ```
+
+## Promoted A/B regressions (now in default package tests)
+
+The original assertions are retained in their owning suites:
+
+- Config recovery: `packages/control/test/unit/control/config/persistence/ConfigForeignDocument.test.ts` and `ConfigPostcommitCleanup.test.ts` in the same directory.
+- Config commit/GC fault injection: `packages/control/test/unit/control/config/persistence/CommittedCleanup.test.ts`.
+- Duplicate Audit ownership: `packages/control/test/integration/server/transport/ToolCallDuplicateAuditOwnershipRound6.test.ts`.
+- Normal/stream delivery metadata: `packages/control/test/integration/server/transport/ToolCallDeliveryFailure.test.ts`.
+- Post-execution retry and running cancellation: `packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts` and `ToolCallCancellationAfterEffect.test.ts`.
+- SDK cancellation via localhost TCP: `packages/mcp/test/integration/McpNativeAbortAudit.test.ts`.
+
+All run as part of `pnpm test:packages`. The ApprovalService close race remains in `test/known-bugs/ApprovalServiceCloseRound4.test.ts`.
 
 Real positive acceptance programs:
 

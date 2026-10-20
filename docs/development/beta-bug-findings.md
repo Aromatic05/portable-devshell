@@ -2,6 +2,21 @@
 
 范围：`portable-devshell 1.0.0-beta.1`，承接 `docs/development/feature-test-matrix.md`。本轮严格区分**真正复现失败**、**组件级复现**、**静态可疑行为**和**已修复/实测通过**。严重度仅表示工程优先级，不自动决定运行阻断、发布门禁或无关 Instance 的可用性。
 
+## A/B修复进展（2026-10-20）
+
+本节为当前修复状态；下面各轮的 RED 表保留发现时的历史证据，不能据其旧路径和旧状态判断当前是否仍失败。
+
+| ID | 当前结论 | 默认回归证据 |
+|---|---|---|
+| R3-001 | 已修复：恢复Manifest接受安全的外来TOML文件名，保留中文和下划线文档 | `packages/control/test/unit/control/config/persistence/ConfigForeignDocument.test.ts` |
+| R3-002 | 已修复：提交标记边界之后不得回滚；垃圾清理失败不影响ConfigEngine已提交状态，残留备份可在后续写入回收 | `packages/control/test/unit/control/config/persistence/{ConfigPostcommitCleanup,CommittedCleanup}.test.ts` |
+| R4-02 | 已修复：ToolCall普通和Stream结果保留最小必要执行完成元数据，不公开内部错误详情 | `packages/control/test/integration/server/transport/ToolCallDeliveryFailure.test.ts` |
+| R4-08 | 已修复：SDK运行中取消的Audit记录为cancelled，已运行调用不宣称安全重试；localhost真实TCP通过 | `packages/mcp/test/integration/McpNativeAbortAudit.test.ts`、`packages/core/test/unit/tool/ToolCallCancellationAfterEffect.test.ts` |
+| R6-01 | 已修复：拒绝活跃和历史重复callId覆写原执行审计身份 | `packages/control/test/integration/server/transport/ToolCallDuplicateAuditOwnershipRound6.test.ts` |
+| R6-02 | 已修复：执行后适配/Outbound失败保留callId与failureStage，retryable=false | `packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts` |
+
+R4-03 ApprovalService关闭竞态仍为独立红测（`test/known-bugs/ApprovalServiceCloseRound4.test.ts`），不属于A/B修复范围。其他OAuth、Reverse、Extension、Mailing和UI缺陷状态未改变。原A/B红测迁入默认Package后保持原始业务断言；本节不表示全部跨客户端功能链已通过。
+
 ## A. 实际复现且仍待修复
 
 | Bug ID | 影响链路 | 现象与关键证据 | 复现入口 | 等级 |
