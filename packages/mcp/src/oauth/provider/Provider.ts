@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { chmod, link, mkdir, open, readFile, rm } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import {
@@ -596,14 +596,25 @@ async function readOrCreateJwks(
     storageDir: string,
 ): Promise<{ keys: Array<Record<string, unknown>> }> {
     const jwksPath = join(storageDir, "jwks.json");
-    try {
+    const readJwks = async () => {
         const jwks = JSON.parse(await readFile(jwksPath, "utf8")) as {
             keys: Array<Record<string, unknown>>;
         };
         if (process.platform !== "win32") {
             await chmod(jwksPath, 0o600);
+            // A concurrent publisher may not have synced the new directory entry
+            // yet. Every reader makes it durable before using the signing key.
+            const directory = await open(storageDir, "r");
+            try {
+                await directory.sync();
+            } finally {
+                await directory.close();
+            }
         }
         return jwks;
+    };
+    try {
+        return await readJwks();
     } catch (error) {
         if (!isMcpOAuthStorageMissing(error)) {
             throw error;
@@ -623,28 +634,27 @@ async function readOrCreateJwks(
     const temporary = `${jwksPath}.${process.pid}.${randomUUID()}.tmp`;
     const file = await open(temporary, "wx", 0o600);
     try {
-        await file.writeFile(JSON.stringify(jwks), "utf8");
-        await file.sync();
-    } catch (error) {
-        await file.close().catch(() => undefined);
-        await rm(temporary, { force: true }).catch(() => undefined);
-        throw error;
-    }
-    await file.close();
-    try {
-        await rename(temporary, jwksPath);
-        if (process.platform !== "win32") {
-            await chmod(jwksPath, 0o600);
-            const directory = await open(storageDir, "r");
-            try {
-                await directory.sync();
-            } finally {
-                await directory.close();
+        try {
+            await file.writeFile(JSON.stringify(jwks), "utf8");
+            await file.sync();
+        } finally {
+            await file.close();
+        }
+        try {
+            // Same-filesystem hard links publish the complete, synced private
+            // file atomically and never replace another starter's winning key.
+            await link(temporary, jwksPath);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
             }
         }
-    } catch (error) {
-        await rm(temporary, { force: true }).catch(() => undefined);
-        throw error;
+    } finally {
+        // A throw from removing an obsolete temporary file cannot invalidate
+        // an already published, complete signing key.
+        await rm(temporary, { force: true }).catch((error: unknown) => {
+            console.warn("OAuth JWKS temporary cleanup deferred:", error);
+        });
     }
-    return jwks;
+    return await readJwks();
 }
