@@ -7,7 +7,7 @@
 远程 endpoint  https://devshell.example.com/demo-local/mcp
 ```
 
-portable-devshell 同时支持 MCP v2 的 2026-07-28 请求和 2025-era Streamable HTTP stateless fallback，因此新旧 Host 可以在同一个 endpoint 上逐步迁移。
+portable-devshell 使用 MCP v2 的 2026-07-28 请求语义；当前 endpoint 配置 `legacy = "reject"`，不支持旧 Streamable HTTP 协议回退。客户端必须支持当前协议。
 
 客户端接入时需要区分三件事：
 
@@ -95,7 +95,7 @@ Settings -> Apps -> Create
 2. 选择认证方式；
 3. 执行 tool scan；
 4. OAuth 模式完成浏览器授权；
-5. 在 portable-devshell TUI/CLI 审批待处理 OAuth registration/authorization；
+5. fresh init 默认在浏览器授权页输入 init 输出的 approval token，确认 registration/authorization；配置 `approval = "tui"` 时才使用 portable-devshell TUI/CLI；
 6. scan 完成后保存 App。
 
 示例 URL：
@@ -133,7 +133,7 @@ contextMode = "explicit"
 
 云端 Host 应优先使用 OAuth，而不是把静态 bearer secret 填进无法安全保存自定义 secret 的 UI。
 
-portable-devshell 支持当前 legacy/compatibility 客户端仍在使用的动态客户端注册与授权流程，并保存 refresh/revocation 所需状态。MCP 2026-07-28 上游已经开始把客户端注册模型迁向新的 client identity 机制；portable-devshell 的 v2 server transport 与 OAuth compatibility path是分开的，因此协议升级不要求现有 ChatGPT/Codex/Claude 配置一次性全部重做。
+当前 provider 已采用 CIMD：新客户端使用 HTTPS 元数据文档 URL 作为 `client_id`。不开放公共 Dynamic Client Registration（DCR / `/register`）；既有预注册客户端（含历史 DCR 注册）继续使用已有授权、refresh 和 revoke 生命周期。OAuth 客户端状态保留不代表 endpoint 接受 legacy MCP wire protocol。
 
 详见 [OAuth](../operations/oauth.md)。
 
@@ -156,7 +156,7 @@ devshell instance logs demo-local
 5. `contextMode` 是否与 Host 能力匹配；
 6. remote Host 到 endpoint 的 HTTPS/tunnel 链路是否真实可达。
 
-MCP `tools/list` 使用固定 runtime catalog，不再由 instance group/capability policy 控制。如果缺少的是 `bash_run` / `tmux_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。
+MCP `tools/list` 合并 Worker、Control primitive 和 Extension `mcp.tools`，Extension contribution 变化会更新目录；instance group/capability policy 不裁剪目录。如果缺少的是 `bash_run` / `tmux_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。
 
 ## 长工具调用
 

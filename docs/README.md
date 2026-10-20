@@ -27,7 +27,7 @@
 
 - [Control 管理面](operations/control-plane.md)：CLI/TUI/Web、overview、watch、audit、Todo 与 instance 管理。
 - [配置与运行目录](operations/configuration.md)：Control/instance 配置、路径、CLI 管理面和 worker target。
-- [安全、审批与 Secret 扫描](operations/security.md)：tool approval、workspace security 和本机 secret preflight。
+- [安全、审批与 Secret 扫描](operations/security.md)：ToolCall Review/Rewrite、workspace security、Secret 输入展开/输出 masking 与扫描。
 - [OAuth 与公网暴露](operations/oauth.md)：OAuth 资源服务器、审批和代理要求。
 - [ChatGPT 公网隧道](operations/chatgpt-tunnels.md)：FRP / Nginx / Cloudflare Tunnel 示例。
 - [Reverse Worker](operations/reverse-connections.md)：反向注册、WSS、SSE+POST 回退与重连。
@@ -42,7 +42,7 @@
 - [Version 与 Compatibility Lifecycle](development/compatibility.md)：产品版本、Protocol、Extension API、persistent schema、update 与 migrate 的独立版本和兼容边界。
 - [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
 - [Extension Database Capability](development/extension-database.md)：由 Host 持有的 SQLite 连接、事务租约、数据库路径隔离与 Generation 退役。
-- [Transport 通信协议](development/transport-protocol.md)：当前 Provider → Carrier → Channel → Frame → Service → Protocol 分层、Frame v1 wire contract、流控、Service 与 Reverse 边界。
+- [Transport 通信协议](development/transport-protocol.md)：当前 Provider / Carrier → Channel → Frame `envelope` service → Endpoint/Route → Envelope → Rpc/Event/Stream Packet、流控与 Reverse 边界。
 
 ## 文档约定
 
@@ -50,4 +50,6 @@
 2. **Context 与 MCP transport session 是不同概念。** 2026-07-28 MCP 不依赖 protocol session；portable-devshell 的 Context 是应用状态。
 3. **workspace 不属于 instance 配置。** 它属于一次操作或一个 Context 在某个 instance 上的 environment attachment。
 4. **长任务与长 HTTP 请求分离。** `tmux_run(wait=block)` 可以同步等待一段时间，超过产品同步窗口后由 durable Wait/Workspace 接管，但 task 本身继续运行。
-5. **旧 wire 名称只用于兼容。** 已从 model-facing catalog 移除的工具或 app-only helper 不应出现在新文档示例中。
+5. **旧名称不代表现行协议支持。** MCP endpoint 拒绝 legacy 协议；少量隐藏 stale-recipient 转换不重新进入 catalog。当前 catalog 包含 Worker、Control primitive 与 Extension `mcp.tools`，shell command ACL 是另一条边界。
+6. **fresh 默认与旧配置默认分开。** fresh init 使用 OAuth token 审批和 `openai-session`；通用 client 应显式配置 `explicit`。
+7. **安全目标与现状分开。** Execute、发布与 Audit 不是统一 Commit；已知执行后 adapter retry 偏差见 [架构](concepts/architecture.md)。

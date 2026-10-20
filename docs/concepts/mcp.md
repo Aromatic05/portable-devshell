@@ -22,7 +22,7 @@ MCP 负责把 Control/Worker 能力映射成 Host 可以调用的工具；Contex
 2. 目标 instance 的 `[mcp].enabled = true`；
 3. instance 已经注册到当前 Control。
 
-全局配置只决定 HTTP host：
+全局配置管理 HTTP host 与 OAuth 审批模式/token；endpoint 的 auth 由 instance 选择。Control 持有真实 TCP listener，MCP 取得可撤销 lease，不拥有 listener：
 
 ```toml
 # ~/.devshell/control/config.toml
@@ -49,10 +49,10 @@ contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
-model = ["artifact", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
 ```
 
-这是 version 4 fresh defaults 对 Context selector / model Extension ACL 的示例；需要模型显式携带 `ctxId` 的通用 Host 应改用 `contextMode = "explicit"`。MCP `tools/list` 本身使用固定 runtime catalog，不受 `[extensions].model` 影响。
+这是 version 4 fresh defaults 对 Context selector / model Extension ACL 的示例；需要模型显式携带 `ctxId` 的通用 Host 应改用 `contextMode = "explicit"`。MCP `tools/list` 本身合并 Worker、Control primitive 与 Extension `mcp.tools` 声明，不由 `[extensions].model` 裁剪。
 
 `path` 由 instance 名生成，当前契约固定为 `/<instance>/mcp`。
 
@@ -62,19 +62,18 @@ model = ["artifact", "instance", "mcp", "secret", "skill"]
 
 2026-07-28 请求按新的 stateless protocol core 服务：不依赖 `initialize`/`initialized` 握手，也不依赖 `Mcp-Session-Id`。portable-devshell 自己的 Context 仍然可以跨请求保持，因为它是应用状态，不是 transport session。
 
-为了兼容尚未迁移的 MCP Host，同一 endpoint 还保留 2025-era Streamable HTTP 的 stateless fallback。旧 client 是否执行 `initialize` 与 portable-devshell Context 是否存在是两件独立的事。
+当前两个 HTTP handler 均设置 `legacy = "reject"`：2025-era legacy 协议路径不被接受。Context 持续性不能用作旧协议兼容的依据。
 
 ## 长调用 transport
 
-MCP HTTP handler 显式使用：
+MCP 按请求选择两个共享 event bus 的 handler：
 
-```text
-responseMode = sse
-keepAliveMs = 15000
-legacy = stateless
-```
+| 请求 | responseMode | keepAliveMs | legacy |
+| --- | --- | --- | --- |
+| `tools/call`，但工具不是 `environ_info` | `sse` | `1000` | `reject` |
+| 其他请求（含 `environ_info`） | `auto` | `15000` | `reject` |
 
-也就是每个 request-scoped SSE stream 在调用期间持续发送 keepalive comment frame。
+长调用的 request-scoped SSE 在调用期间持续发送 keepalive comment frame；auto handler 不意味着每个响应都是 SSE。
 
 这个设计不是为了把工具改成流式输出，而是为了保证**同一个长时间 `tools/call` 可以真实阻塞**，不会因为 HTTP 链路长时间没有 response bytes 而被中间 Host/代理当成 idle connection 关闭。
 
@@ -83,12 +82,12 @@ legacy = stateless
 ```text
 0s ----------------------------- 180s
        同一个 tools/call 阻塞
-       SSE 每 15s keepalive
+       SSE 每 1s keepalive
                                    |
                                    +-- task 未完成 -> durable handoff
 ```
 
-实测 175 秒调用可以在当前 ChatGPT 链路上完整同步返回；190 秒 task 会在约 180 秒正常返回 `detached: true`，底层 task 继续运行。这里的 180 秒是 portable-devshell 的产品窗口，不是 OpenAI 公布的 MCP hard limit。
+历史链路实验曾观察到 175 秒调用同步返回、190 秒 task 在约 180 秒返回 `detached: true`；这些是当时环境的观测，本次文档修订未重跑。当前实现的同步窗口仍是 180 秒，handoff 后底层 task 继续运行。这里的 180 秒是 portable-devshell 的产品窗口，不是 OpenAI 公布的 MCP hard limit。
 
 详见 [Workspace](workspace.md) 与 [tmux 工具](../tools/tmux.md)。
 
@@ -98,7 +97,7 @@ legacy = stateless
 
 ### `explicit`
 
-通用 MCP client 默认使用：
+通用 MCP client 应显式配置此模式（fresh instance 产品默认仍为 `openai-session`）：
 
 - `environ_info` 可以返回 `ctxId`；
 - 后续需要 Context 的 model-facing 工具显式携带它；
@@ -133,9 +132,9 @@ oauth2
 
 `oauth2` 使用 portable-devshell 自带 OAuth resource server/authorization flow；它也是云端 Host 的推荐路径。OAuth v2 路径执行 issuer/resource/scope 校验，具体部署见 [OAuth 与公网暴露](../operations/oauth.md)。
 
-## 固定 MCP primitive 与 Extension command ACL
+## MCP catalog、Extension contribution 与 command ACL
 
-MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `tools/list`。MCP 是稳定的 Agent Runtime ABI：Control 合并固定的 protocol/runtime primitive 与当前 Worker tool schema，Extension 安装、卸载和 `[extensions].model` 变化不会通过增删 MCP tool 来表达授权。
+MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `tools/list`。Control 合并固定的 protocol/runtime primitive、当前 Worker tool schema 和 Extension `mcp.tools` 静态声明。Extension contribution 的安装、移除或声明变化会同步增删 catalog 和 executor；`[extensions].model` 则只授权 shell model command，不能代替 MCP tool contribution 的生命周期或执行检查。
 
 主要边界是：
 
@@ -145,7 +144,7 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 | Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
 | Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
 | tmux              | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`                           |
-| Todo              | `todo_read`、`todo_write`                                                                      |
+| Todo              | `todo_read`、`todo_write`、Comment `mcp.tools` contribution `todo_report`                                                                      |
 | Workspace         | `mcpapp_open` 重新呈现入口；`mcpapp_action` / `mcpapp_reentry` 为 App-only                       |
 | Instance          | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
@@ -165,7 +164,7 @@ Worker catalog 的 description 只描述 canonical capability 契约；MCP endpo
 model = ["instance", "artifact"]
 ```
 
-当前 bundled 默认是 `artifact / instance / mcp / secret / skill`；独立安装的 Extension（例如 `agent`）需要显式加入。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
+当前 bundled 默认是 `artifact / comment / instance / mcp / secret / skill`；独立安装的 Extension（例如 `agent`）需要显式加入。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
 
 Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 MCP tool。人类本地使用 `devshell artifact ...`；模型只有在 `artifact` 被当前 instance 的 model Extension ACL 允许时，才能通过 shell/tmux 中的 `devshell artifact ...` 调用。
 
@@ -181,9 +180,9 @@ App 通过带隐藏 capability 的 Live Workspace route 读取 `snapshot` / `wat
 
 `environ_info` 使用紧凑 `comment` 提示报告当前 Workspace、临时目录、Skills 和 Memory 的必要信息；Memory 的 `init` / `inherit` 指引由 Comment Extension 提供，不另建结构化 Memory 状态字段。
 
-Worker handshake 本身只提供通用的 `homeDirectory + platform`；MCP builtin module 通过通用 Worker Resource Host 准备 `skill/managed` collection，并把返回目录作为 `skillsDirectory`。Worker handshake 不理解 Skill。
+Worker handshake 本身只提供通用的 `homeDirectory + platform`；MCP builtin module 通过通用 Worker Resource Host 准备 `skill/managed` collection；当前 `environ_info` 不返回 `skillsDirectory` 字段。Worker handshake 不理解 Skill。
 
-本机 `devshell skill` catalog 的发现优先级是：
+Skill 的 native 命令读取 Control-host catalog；Context-bound model 命令通过 Worker session 读取当前 workspace 的 project Skills，再合并 Control-host managed/global catalog。native catalog 的发现优先级是：
 
 ```text
 project  <workspace>/.agents/skills
@@ -197,7 +196,7 @@ Skill 不再绑定 provider 生命周期。local、SSH、Docker、Podman 和 sel
 
 ## 请求取消
 
-MCP v2 的 per-request HTTP stream cancellation 会传播成当前 request 的 AbortSignal；2025-era client 还可能通过旧 cancellation 机制触发取消。
+MCP v2 的 per-request HTTP stream cancellation 会传播成当前 request 的 AbortSignal；当前 endpoint 拒绝 legacy 协议路径。
 
 工具按自身安全点处理：
 
@@ -221,18 +220,9 @@ server 对一小部分历史 recipient 保留隐藏兼容：能安全等价转�
 
 ## 手动验证
 
-最可靠的验证方式是使用真实 MCP client 或项目 integration tests，因为 2026-07-28 与 2025-era 请求形状不同。
+使用支持 2026-07-28 的真实 MCP client 读取 `tools/list`，再按该 endpoint 实际 schema 调用 `environ_info`。OAuth endpoint 应先完成认证；通用 client 应显式配置 `contextMode = "explicit"`。
 
-HTTP 层可以先确认 endpoint 存活：
-
-```bash
-curl -i -N http://127.0.0.1:17890/demo-local/mcp \
-  -H 'accept: application/json, text/event-stream' \
-  -H 'content-type: application/json' \
-  -d '{"jsonrpc":"2.0","id":"req-init","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-check","version":"0.0.0"}}}'
-```
-
-旧兼容路径的成功响应可能是 SSE `event: message`，不要假设响应一定可以直接 `response.json()`，也不要把 `Mcp-Session-Id` 当成 portable-devshell Context。
+网络层可单独验证 OAuth discovery/challenge，见 [OAuth](../operations/oauth.md)。旧 `initialize(protocolVersion=2025-11-25)` 请求属于 legacy 负向检查，应被拒绝，不能作为当前 endpoint 成功验证。不要把 `Mcp-Session-Id` 当作 portable-devshell Context。
 
 ## 本地与公网
 

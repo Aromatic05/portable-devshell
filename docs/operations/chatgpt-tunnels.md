@@ -54,10 +54,10 @@ Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、
 
 ## ChatGPT 兼容性范围
 
-当前 compatibility path 覆盖 ChatGPT 连接远程 MCP server 所需的核心流程：
+当前 endpoint 的协议与认证边界如下（Host 还必须支持当前 MCP 协议）：
 
-- MCP v2 request handling + 2025-era Streamable HTTP stateless fallback；
-- request-scoped SSE 与 15 秒 keepalive；
+- MCP v2 / 2026-07-28 request handling，`legacy = "reject"`，无旧协议回退；
+- 除 `environ_info` 外的 `tools/call` 使用 request-scoped SSE / 1 秒 keepalive；其他请求为 auto / 15 秒 keepalive；
 - `401` Bearer challenge 与 `resource_metadata`；
 - OAuth protected-resource metadata 和 authorization-server discovery；
 - OAuth Client ID Metadata Document（CIMD）客户端身份：AS metadata 广播 `client_id_metadata_document_supported`，不再提供 Dynamic Client Registration（`/register` 返回 404）；
@@ -114,7 +114,7 @@ devshell config get
 devshell instance status <instance>
 ```
 
-OAuth 审批不在 ChatGPT 配置页代替 portable-devshell 自身审批。运行 `devshell tui`，进入 `OAuth` 面板处理客户端实际发出的 registration / authorization 请求；审批都有生命周期，不应长期悬挂。
+OAuth 仍需 portable-devshell 自身审批。fresh `devshell init` 默认 token 模式：在浏览器授权页输入 init 输出的 approval token，确认 registration / authorization。仅配置全局 `[mcp.oauth2] approval = "tui"` 时，才使用 `devshell tui` 的 OAuth 面板或 CLI。旧全局文件完全缺少 OAuth 配置时保留 tui 默认，详见 [OAuth](oauth.md)。
 
 ## 方式一：FRP + VPS + Nginx
 
@@ -191,7 +191,7 @@ server {
 }
 ```
 
-`proxy_buffering off` 对当前版本是功能要求而不只是性能优化：MCP handler 每 15 秒发送 SSE keepalive。如果代理把这些 frame 缓冲到很久以后才转发，Host 仍可能把一个正常的长 `tools/call` 当成 idle connection 关闭。
+`proxy_buffering off` 对当前版本是功能要求而不只是性能优化：长 `tools/call` 的 MCP handler 每 1 秒发送 SSE keepalive（其他请求使用 auto / 15 秒配置）。如果代理把这些 frame 缓冲到很久以后才转发，Host 仍可能把一个正常的长 `tools/call` 当成 idle connection 关闭。
 
 `portable-devshell` 在只监听回环地址时会信任反向代理提供的 `X-Forwarded-Host` 和 `X-Forwarded-Proto`，因此上面的通用 location 会直接生成正确的 HTTPS OAuth endpoint，不需要 `sub_filter` 改写响应。
 
@@ -234,7 +234,7 @@ sudo systemctl enable --now cloudflared
 
 系统服务需要读取 tunnel credential；将配置和 credential 安装到服务账户可读的位置，并限制 credential 权限。运行 `cloudflared tunnel run portable-devshell` 可先进行前台调试。
 
-不要给这个 MCP hostname 叠加需要浏览器登录的 Cloudflare Access 策略：ChatGPT 无法完成 Cloudflare 的交互式 Access 登录。这里的访问控制应由项目自身的 OAuth 和 OAuth 面板审批承担。
+不要给这个 MCP hostname 叠加需要浏览器登录的 Cloudflare Access 策略：ChatGPT 无法完成 Cloudflare 的交互式 Access 登录。这里的访问控制应由项目自身的 OAuth 与所配置的 token/TUI 审批承担。
 
 ## 验证并在 ChatGPT 中创建 App
 
@@ -254,13 +254,13 @@ curl -i https://dev.example.com/<instance>/mcp
 https://dev.example.com/<instance>/mcp
 ```
 
-ChatGPT 发起注册和授权后，在本机 TUI 的 `OAuth` 面板处理对应请求。完成授权后执行 tool scan/refresh。具体 UI 会随 OpenAI 产品版本变化，见 [客户端接入](../getting-started/clients.md)。
+ChatGPT 发起注册和授权后，fresh init 用户在授权页使用 approval token 确认；`approval = "tui"` 的安装在本机 TUI/CLI 处理对应请求。完成授权后执行 tool scan/refresh。具体 UI 会随 OpenAI 产品版本变化，见 [客户端接入](../getting-started/clients.md)。
 
 ## 故障排查
 
 - 公开 endpoint 返回 `502`：确认隧道已连接，以及上游 `127.0.0.1:17890` 正在监听。
 - discovery 中出现 `http://`：确认 control 只监听 `127.0.0.1` 或 `::1`，并确认反向代理保留了 `Host`、`X-Forwarded-Host` 和 `X-Forwarded-Proto: https`。
-- ChatGPT 一直等待授权：打开 TUI 的 `OAuth` 面板，检查注册或授权请求是否待批准、被拒绝或已过期。
-- TUI 没有新请求：确认目标 instance 的 `[mcp] auth = "oauth2"`，并等待最多一秒让审批轮询刷新。
+- ChatGPT 一直等待授权：先检查全局 OAuth approval 模式；token 模式在授权页确认 token，tui 模式检查 TUI/CLI 中的 registration/authorization 是否待批准、被拒绝或已过期。
+- 授权页无法继续：确认目标 instance 的 `[mcp] auth = "oauth2"`、approval token 与当前全局配置一致，并确认客户端使用 CIMD 或已有预注册身份；公共 DCR 不可用。
 - 工具调用被拒绝：OAuth 授权与 instance 的 `approvalPolicy` 独立；后者控制 MCP 工具实际执行。
 - 约两分钟后长工具出现 `5xx`，但 task 仍在运行：优先检查 Nginx/Cloudflare/其他中间层是否缓冲或吞掉 SSE keepalive。当前 portable-devshell 自身可以让同一个 `tools/call` 阻塞到 180 秒后再 handoff。

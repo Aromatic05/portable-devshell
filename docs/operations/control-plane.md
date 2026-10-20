@@ -75,6 +75,8 @@ devshell instance logs <instance>
 devshell instance enable <instance>
 devshell instance disable <instance>
 devshell instance delete <instance>
+devshell instance cleanup list
+devshell instance cleanup retry <instance>
 ```
 
 CLI `instance call` 是绕过 MCP Host、直接通过 Control/Core 调 worker 的诊断入口：
@@ -83,7 +85,9 @@ CLI `instance call` 是绕过 MCP Host、直接通过 Control/Core 调 worker �
 devshell instance call <instance> <absolute-workspace> <toolName> '<jsonInput>'
 ```
 
-它仍经过 tool policy、approval、scheduler 与 audit，不是“裸 RPC 后门”。
+它仍经过 Review（含 Approval）→ inbound Rewrite → Target/Execute → outbound Rewrite/Review 与 Audit。Control `call` RPC 不携带 signal/progress，`callStream` 使用 Packet Stream 承载取消和进度；两者不同于内部 Worker RPC。`recording = "caller"` 时 Target 不承担 host Audit。
+
+删除会保留失败的 cleanup debt；`cleanup list` 查看债务，`cleanup retry <instance>` 重试清理，不恢复 instance 注册。Reverse 是 self-managed，Control 删除不会代替远端 owner 的永久清理；需要永久退役时，在远端先 `devshell-worker stop --instance <name>`，再 `devshell-worker retire --instance <name>`，后者会清理该实例的配置、artifact、日志与 tmux runtime。
 
 Reverse instance 还有 device code/token 生命周期命令，见 [Reverse Worker](reverse-connections.md)。
 
@@ -120,6 +124,8 @@ started/completed state
 result or error
 purpose / explanation provenance（存在时）
 ```
+
+Audit 尽力持久化；部分存储失败不会改变执行结果，不保证完整记录。输入记录来自 inbound Rewrite 后的值。执行成功不等于发布成功，failed 也不等于无副作用；执行后 adapter 仍可能保留 `retryable: true`，这是 [已知未解决偏差](../concepts/architecture.md#core-工具调用链)，不能作为自动重试依据。
 
 审计存储与保留策略见 [配置与运行目录](configuration.md)。
 
@@ -196,11 +202,13 @@ publicBaseUrl = "http://127.0.0.1:17891/web"
 auth = "none"
 ```
 
+Control 是物理 Listener owner，按 host:port 共享监听；MCP/Web/Artifact/Reverse 取得可撤销 lease。Web 缺省继承 MCP 地址；不同地址可独立监听，同地址共享 Listener。stop 释放 active lease，最后一个停止才关闭监听；dispose 永久撤销 routes。
+
 Web 支持 `none`、`token`、`oauth2`。公网部署同样应由部署者明确选择认证和反向代理边界；Control 不根据公网/内网自动替换你的安全策略。
 
 ## Debug / Secret / Skill
 
-这些是 local-owner 管理能力，不进入普通 model-facing MCP catalog：
+Debug 是受保护的 local-owner 管理能力；Secret/Skill 还提供 Context-bound shell model command，其授权由 instance model Extension ACL 决定，不能统称为 owner-only：
 
 ```text
 devshell debug ...
@@ -208,7 +216,7 @@ devshell secret ...
 devshell skill ...
 ```
 
-其中 Secret 与 Skill 都以 builtin Extension 运行在 Control，并通过标准 ExtensionHost/Generation/command ABI 装载；CLI 只保留命令入口和 caller context 注入。Debug 仍是 Control 自身的受保护调试能力。
+其中 Secret 与 Skill 都以 builtin Extension 运行在 Control，并通过标准 ExtensionHost/Generation/command ABI 装载；CLI 只保留命令入口和 caller context 注入。model Secret 扫描当前 Worker workspace，model Skill 读取 Worker project Skills 并合并 Control-host managed/global catalog；native 命令使用各自的 owner/cwd 边界。Secret 另注册 ToolCall Rewrite 做引用展开与输出 masking。Debug 仍是 Control 自身的受保护调试能力。
 
 分别见：
 

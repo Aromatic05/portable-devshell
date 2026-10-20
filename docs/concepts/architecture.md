@@ -12,7 +12,8 @@ TypeScript Control daemon
   ├── config + instance registry
   ├── audit / approval / todo
   ├── Context + Workspace state
-  ├── MCP v2 / OAuth HTTP host
+  ├── physical HTTP Listener + revocable leases
+  ├── MCP v2 / OAuth routes
   ├── Artifact share / transfer
   └── provider lifecycle
           │
@@ -46,7 +47,7 @@ packages/shared   wire types、error、schema、公共数据结构
 packages/core     WorkerInstance、RPC、provider-neutral 工具调用链
 packages/control  daemon、配置、instance 生命周期、持久状态、审计
 packages/extension  Control Extension public ABI
-packages/mcp      MCP endpoint、Workspace App、OAuth、HTTP integration
+packages/mcp      MCP endpoint、Workspace App、OAuth、注入式 HTTP route/lease
 packages/cli      Control CLI、instance/config/debug/skill/artifact 管理
 packages/tui      终端 UI
 packages/web      Web 管理面
@@ -58,6 +59,7 @@ crates/devshell-worker  目标环境 Rust worker
 ## Domain 模块边界
 
 - Core 与 Control 中具有 Runtime 生命周期的 Domain 以各自根目录的 `index.ts` 组装本 Domain 的实现；`Api.ts` 向其他 Domain 提供类型，`Public.ts` 提供允许跨 Domain 调用的运行时接口。这三个入口不可互相取代。
+- `Route.ts` 提供 Domain 的 host/port 路由适配与组装；供其他 Domain 使用时经 `Public.ts` 导出，不替代 in-process API。
 - `packages/core/src/instance` 是组合根，可以通过其他 Domain 的 `index.ts` 创建 Runtime，再连接 Hook 和生命周期；其他跨 Domain 调用遵循 `Api.ts` / `Public.ts` 契约，而不是直接导入私有子目录。
 - Control 的 Extension Config Capability 经由 `packages/control/src/config/Api.ts`、`Public.ts` 使用 Config 相关接口。Config 负责持久化、权限与 Domain 注册，Extension 只提供 Capability 适配。
 - TUI 的 State 和 Interaction 不依赖 View 实现。Interaction 通过注入的 `TuiInteractionProjection` 获取需要的页面投影；公共尺寸算法属于 `terminal`，Context、Draft 与导航状态属于 `state`。Terminal Controller 的渲染几何读取是单独的终端适配职责。
@@ -75,6 +77,7 @@ name
 provider
 provider config
 security / approval config
+execution environment / sandbox providers
 MCP endpoint config
 model Extension ACL
 Workspace feature switch
@@ -90,6 +93,8 @@ workspace 是操作级或 Context-level authority：
 - model-facing `devshell instance list/status` 为当前 Context 可见的 remote instance 返回 opaque handle；
 - fixed MCP `environ_remote(command="attach")` 使用 handle 在同一个 Context 下附着另一个 instance/workspace；`mask` 对当前 Context 永久撤销该 remote instance 的访问；
 - TUI 的人工 terminal 入口可以使用 worker handshake 报告的用户 home 作为交互起点，但这不写回 instance config。
+
+`execution.environment[]` 按 `order` 配置 `{ name, content, phase? }`，`execution.sandbox` 配置 `{ name, content, phase? }`；`phase` 为 `daemon` 或 `process`，由对应 Extension execution provider 处理。它们属于 instance 执行配置，不是 workspace 路径。
 
 `[workspace].enabled` 只控制 Workspace App/Goal/Wait recovery 子系统，不是默认 workspace path。
 
@@ -115,7 +120,7 @@ logs
 replacement / reconnect
 ```
 
-worker RPC 使用长度前缀 JSON frame。环境握手与工具发现分开：
+Worker transport 使用长度定界 Protobuf Envelope，包含 source/dest 的 host + port 地址。普通 RPC/Event/Stream control packet 的 JSON 在 Envelope 内部；Stream DATA 二进制使用专用 bytes 字段。直接 daemon RPC IPC 的 JSON codec 与这条 transport 不应混为一谈。环境握手与工具发现分开：
 
 ```text
 worker.handshake
@@ -126,18 +131,28 @@ tools.list
 
 ## Core 工具调用链
 
-所有入口最终进入同一条 ToolCall pipeline：
+Control ToolCall Registry 将 definitions、hooks 与 executors 同步安装到各 Instance；每个 Instance 持有自己的共享 ToolCall pipeline 与执行 target。当前主要路径是：
 
 ```text
-input
-  -> route / context workspace
-  -> policy + capability
-  -> approval
-  -> scheduler / queue
-  -> audit
-  -> worker RPC or Control-owned operation
-  -> result / error hints
+ToolCallApi.call
+  -> inbound Review（含 Core Approval，首个 reject 停止）
+  -> inbound Rewrite
+  -> 按改写后的 instance/toolName 解析 Target / Execute callback
+  -> Target Audit scope / input preparation / readiness
+  -> Scheduler reserve / queue / Execute（callback 或 Worker）
+  -> transformResult
+  -> outbound Rewrite / Review
+  -> terminal Audit（host recording）
+  -> caller
 ```
+
+Review 只有 `continue` / `reject`；人工审批由 Review hook 自行等待，不存在 Extension `approve` 决定。等待审批时尚未取得这里的 Scheduler reservation。Rewrite 可替换完整调用值，包含工具、路由和 payload；Host 保留 principal、externalBindings、contextMode、extensionId。两方向都按 hook / id / owner 稳定升序执行，不自动反序。inbound Rewrite 也可直接产生终态而不进入 Execute。
+
+Execute 完成、结果发布完成与 Audit 持久化完成是不同事实，没有统一原子 Commit。Audit input 来自 inbound Rewrite 后的值；部分审计失败会 abandon 记录并保留执行结果，不能把审计成功当作执行前提。`recording = "caller"` 时 Target 不承担 host Audit。
+
+**KNOWN 未解决偏差：** `test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts` 覆盖“真实副作用已写入，随后 adapter 抛出 `retryable: true`”的链路，要求最终不可重试；当前 `ExecutionTarget.ts` 的 `postExecution` 错误仍保留该标志，违背执行后失败不应诱导盲目重试的安全目标。文档修订未修复或重跑该红测。outbound hook delivery failure 则明确为 `outboundHook`、`retryable: false`。调用方不能凭 failed 推断无副作用，也不能自动重试已完成执行。
+
+Secret Extension 使用 Rewrite 展开输入引用并 mask 输出；Host interface 仅向 Secret 提供当前 instance、当前 payload 引用与本次已使用名字对应的 env，不提供任意枚举能力。每次 interface 请求读取当时配置，并非调用全程固定 snapshot；Audit 不能被描述为必然只记录展开前 secret 引用。Comment advice/delivery 写入结果 `payload.comment`，不使用旧 `feedback[]` side-channel。outbound 遇到已退休 Rewrite generation 时可重新绑定同 owner registration，已开始的 hook 不重放。
 
 审批不是 MCP 专属功能；CLI/TUI/MCP 共享同一套策略。
 
@@ -151,19 +166,11 @@ input
 /<instance>/mcp
 ```
 
-当前 MCP server 使用 SDK v2 `createMcpHandler`：
+当前 MCP server 使用 SDK v2 `createMcpHandler`，提供 2026-07-28 stateless per-request handling；两个 handler 均为 `legacy = "reject"`，不接受旧协议 fallback。除 `environ_info` 外的 `tools/call` 使用 SSE / 1 秒 keepalive，其他请求使用 auto / 15 秒 keepalive。Context 是独立应用状态。
 
-```text
-2026-07-28 modern request
-  -> stateless per-request handling
+工具 catalog 合并 Worker schema、固定 Control runtime primitives 与 Extension `mcp.tools` 声明。Extension contribution 变化会同步目录和 executor；instance group/capability policy 不裁剪 `tools/list`。Context-bound `devshell` shim 的 `cli.model-commands` 则由 `[extensions].model` 单独授权。
 
-2025-era request
-  -> stateless legacy fallback
-```
-
-长 `tools/call` 使用 request-scoped SSE + 15 秒 keepalive。这样 transport 可以保持真实阻塞，同时不依赖 protocol session 来承载 portable-devshell 应用状态。
-
-工具 catalog 由 Worker tools 与固定的 Control-owned runtime primitives 合并形成稳定目录；instance 配置不再用 group/capability policy 动态裁剪 `tools/list`。可扩展的 model command 通过 Context-bound `devshell` shim 与 `cli.model-commands` 单独授权。
+Control 按 host:port 持有物理 HTTP Listener，MCP、Web、Artifact 与 Reverse 使用可撤销 lease。同地址可复用 Listener；最后一个 active lease stop 才关闭底层监听，`dispose` 永久撤销该 consumer 的 routes。单个 consumer 退役不等于关闭共享 Listener。
 
 详见 [MCP](mcp.md)。
 
@@ -232,7 +239,7 @@ Control view/share
 cross-instance transfer
 ```
 
-stdout/stderr 等 worker-local artifact 通过 handle 延迟读取；payload/receive 的 bulk bytes 使用 Worker Frame Service，open/begin/finish/close 等生命周期仍走 Worker RPC。图片可以由 Control 转成原生 MCP image content；公开 share 和跨实例 transfer 由 Control 管理配额、lease、hash 与 lifecycle。
+stdout/stderr 等 worker-local artifact 通过 handle 延迟读取；bulk bytes 使用 `artifact` port 的 Packet Stream：`payload.read` 读取 bytes，再从 close message 获取 totalBytes、offset 和 EOF 等 metadata；`receive.write` 写 bytes、finish 输入并等待 close metadata。没有旧 8-byte totalBytes header。open/begin/finish/close 等生命周期仍使用该 port 的 RPC。图片可以由 Control 转成原生 MCP image content；公开 share 和跨实例 transfer 由 Control 管理配额、lease、hash 与 lifecycle。
 
 详见 [Artifact](../tools/artifacts.md)。
 
@@ -245,9 +252,19 @@ WSS
   └── fallback: SSE downstream + HTTPS POST upstream
 ```
 
-两种 transport 都归一为一条 Channel，再由 Frame v1 multiplex `worker.rpc`、Artifact、TCP、process 等 Service。generation 属于 Reverse Channel 生命周期；只有 `worker.rpc` Protocol 使用 request replay 与有界 terminal-response cache 在重连后避免同一个逻辑请求被重复执行；成功与失败 terminal response 都参与 exact replay，其它 logical stream 不跨 generation 恢复。
+两种 carrier 都归一为 Channel，转发到 daemon transport endpoint；Reverse 不按 RPC method 划分 lane。当前传输结构为：
 
-self-managed reverse worker 不由 Control 启动；Control 只接受其连接并管理引用/路由。
+```text
+Provider / Carrier -> Channel
+  -> Frame v1（单个 envelope service stream）
+  -> Endpoint / Route（host + port）
+  -> length-delimited Protobuf Envelope
+  -> Rpc / Event / Stream Packet
+```
+
+CLI↔Control 与 Core↔Worker 共享 Endpoint/Envelope/Packet 基础设施，但 Control hello、admission 与业务 port 的权限契约独立。应用 Stream 在 Packet 层复用，不能把它们画成多个 Frame service。
+
+连接断开会使未完成 RPC 的结果 uncertain、不可自动重试；重连建立新连接，不自动 replay ToolCall。必须先检查操作状态再决定是否重新发起请求，不能依赖旧 `worker.rpc` terminal-response cache 保证。self-managed Reverse Worker 不由 Control 启动，删除 Control registration 也不等于清理远端 daemon/tmux 数据。
 
 详见 [Reverse Worker](../operations/reverse-connections.md)。
 
@@ -259,7 +276,14 @@ self-managed reverse worker 不由 Control 启动；Control 只接受其连接�
 ~/.devshell/control/       Control config/state/audit/context/oauth
 ~/.devshell/<instance>/    instance runtime state
 ~/.devshell/workers/       installed worker generations
+<data-home>/portable-devshell/extensions/       Extension code generations
+<data-home>/portable-devshell/extension-data/   Extension data
+~/.devshell/control/extensions/registry.json    Extension registry
+~/.devshell/control/extensions/state/<id>/      Extension state/config.json
+<runtime-root>/extensions/                      transient activation runtime
 ```
+
+`data-home` 默认是 Unix `$XDG_DATA_HOME` 或 `~/.local/share`；Windows 使用 `$XDG_DATA_HOME` 或 `%LOCALAPPDATA%`。
 
 高频、可重建状态尽量不写成永久历史。例如 Context execution sidecar、临时 workspace data、tmux volatile runtime 会使用专门的 bounded/transient storage，而不是无限增长 Control 主状态文件。
 

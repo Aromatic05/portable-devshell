@@ -11,7 +11,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。发布包已经包含 TypeScript 应用依赖；安装器会预装当前主机对应的 worker，并安装 `devshell` 与受管 `pi` launcher。使用发布包时不需要 pnpm 或 Rust。
+主程序需要 Node.js 24.12.0 或更高版本（Extension Database capability 需要该版本的 SQLite enforcement API）。发布包已经包含 TypeScript 应用依赖；主安装器会预装当前主机对应的 worker，并安装 `devshell`；`pi` launcher 由另行安装的 Agent Extension 发布。使用发布包时不需要 pnpm 或 Rust。
 
 ## 从 GitHub Release 安装
 
@@ -116,7 +116,7 @@ Provider 显式更新使用 `devshell agent provider update <id>`。Pi 的 provi
 
 源码安装需要：
 
-- Node.js 24 或更高版本
+- Node.js 24.12.0 或更高版本（Extension Database capability 需要该版本的 SQLite enforcement API）
 - pnpm 10.13.1
 - rustup 和稳定版 Rust
 

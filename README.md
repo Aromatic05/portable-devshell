@@ -2,7 +2,7 @@
 
 `portable-devshell` 把本地、SSH、容器和反向连接目标统一成可管理的 **instance**，并通过 CLI、TUI 和 MCP 暴露同一套开发环境能力。
 
-一个长期运行的 TypeScript Control daemon 管理实例、配置、审批、审计、Context、Workspace、OAuth 与 HTTP host；每个目标环境运行独立的 Rust worker daemon。所有入口最终经过同一套 worker 工具调用链。
+一个长期运行的 TypeScript Control daemon 管理实例、配置、审批、审计、Context、Workspace、OAuth 与 HTTP host；每个目标环境运行独立的 Rust worker daemon。工具调用共享 Review/Rewrite/Target/Execute/Audit 边界，执行由 Worker 或 Control-owned callback 承担。
 
 ## 主要能力
 
@@ -11,14 +11,14 @@
 - workspace 不持久化到 instance；CLI 操作显式给出路径，MCP 通过 Context 为每个 instance 绑定 workspace。
 - `bash`、`file`、`tmux`、`artifact`、`todo`、Workspace 以及可选跨实例连接。
 - managed tmux task、persistent pane、durable Wait 和 Workspace 自动恢复。
-- MCP TypeScript SDK v2；支持 2026-07-28 语义并保留旧 Streamable HTTP 客户端兼容。
+- MCP TypeScript SDK v2；支持 2026-07-28 语义，拒绝 legacy 协议请求。
 - request-scoped SSE keepalive，使长时间 `tools/call` 不因 HTTP idle timeout 被提前切断。
 - OAuth、Artifact 分享与跨实例传输、分层 Agent Skills、Secret 扫描、运行时 Debug Patch。
 - 全屏 TUI 与完整 Control CLI。
 
 ## 安装
 
-发布包支持 Linux、macOS 和 Windows 的 x86-64 / arm64。主程序需要 Node.js 24 或更高版本；Release 安装不要求 pnpm 或 Rust。
+发布包支持 Linux、macOS 和 Windows 的 x86-64 / arm64。主程序需要 Node.js 24.12.0 或更高版本（Extension Database capability 需要该版本的 SQLite enforcement API）；Release 安装不要求 pnpm 或 Rust。
 
 Unix：
 
@@ -91,7 +91,7 @@ devshell tui
 http://127.0.0.1:17890/<instance>/mcp
 ```
 
-MCP `tools/list` 使用固定 runtime catalog，不再按 instance 配置动态裁剪。模型通过
+MCP `tools/list` 合并 Worker schema、Control runtime primitive 和 Extension `mcp.tools` 声明；Extension contribution 变化会更新 catalog，不再按 instance group/capability 配置裁剪。模型通过
 `bash_run` / `tmux_run` 中的 Context-bound `devshell` 使用 Extension command；可用 root
 由当前 instance 的 `[extensions].model` allowlist 决定：
 
@@ -100,7 +100,7 @@ MCP `tools/list` 使用固定 runtime catalog，不再按 instance 配置动态�
 enabled = true
 
 [extensions]
-model = ["artifact", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
 ```
 
 跨 instance Context attachment 使用固定 MCP runtime primitive `environ_remote`。模型先通过
@@ -116,9 +116,9 @@ Workspace App/Goal/Wait recovery 可以按 instance 独立关闭，而不停止 
 enabled = false
 ```
 
-普通 MCP 客户端可以使用 `explicit` Context；支持稳定 Host metadata 的 ChatGPT endpoint 可使用 `openai-session`，让 model-facing 工具不携带内部 `ctxId`。两种模式最终都解析到 portable-devshell 自己的 Context。
+fresh instance 默认使用 `openai-session`；通用 MCP client 应显式配置 `contextMode = "explicit"`。支持稳定 Host metadata 的 ChatGPT endpoint 可使用 `openai-session`，让 model-facing 工具不携带内部 `ctxId`。两种模式最终都解析到 portable-devshell 自己的 Context。
 
-`tmux_run(wait=block)` 当前产品同步窗口统一为 **180 秒**。MCP HTTP host 使用 request-scoped SSE 和 15 秒 keepalive；如果 task 在 180 秒内结束，tool call 直接返回结果，否则转成 durable Wait，由 Workspace 继续跟踪而不停止 task。
+`tmux_run(wait=block)` 当前产品同步窗口统一为 **180 秒**。除 `environ_info` 外的 `tools/call` 使用 request-scoped SSE 和 1 秒 keepalive；其他请求使用 auto handler，keepalive 为 15 秒；如果 task 在 180 秒内结束，tool call 直接返回结果，否则转成 durable Wait，由 Workspace 继续跟踪而不停止 task。
 
 详细说明见 [MCP](docs/concepts/mcp.md)、[Context](docs/concepts/context.md) 和 [Workspace](docs/concepts/workspace.md)。
 
@@ -135,7 +135,7 @@ listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 ```
 
-instance 再独立选择 `auth = "oauth2"`。
+instance 再独立选择 `auth = "oauth2"`。fresh `devshell init` 默认生成 token，用于浏览器授权页的 registration / authorization 审批；只有配置 `approval = "tui"` 才需走 TUI/CLI 审批。当前使用 CIMD，不开放公共 DCR；已有预注册客户端及其 refresh/revoke 状态继续保留。
 
 参见 [OAuth 与公网暴露](docs/operations/oauth.md) 和 [ChatGPT 公网隧道](docs/operations/chatgpt-tunnels.md)。
 

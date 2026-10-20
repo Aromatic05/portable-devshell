@@ -8,7 +8,7 @@
 devshell init
 ```
 
-对一个空安装，`devshell init` 会一次完成 first run：启动 Control、启用全局 MCP host、生成 OAuth2 approval token、创建默认 local instance `local-pc`，并在 instance enabled 时立即启动它。新建 instance 使用 OAuth2 与 `openai-session` Context mode；fresh Workspace feature switch 默认关闭。
+对一个空安装，`devshell init` 会一次完成 first run：启动 Control、启用全局 MCP host、生成 OAuth2 approval token、创建默认 local instance `local-pc`，并在 instance enabled 时立即启动它。新建 instance 使用 OAuth2 与 `openai-session` Context mode；fresh Workspace feature switch 默认关闭。浏览器 OAuth 授权时使用 init 输出的 approval token 确认 registration / authorization，不要求打开 TUI；既有 `approval = "tui"` 配置仍走 TUI/CLI。
 
 交互终端中，如果 Access Extension 可用，`init` 还会询问公网接入方式：已经有公网入口、Cloudflare Tunnel、SSH reverse，或稍后配置。Access Extension 被移除或不可用时会直接跳过这一步，不把可选插件变成 first run 的失败条件。
 
@@ -119,7 +119,7 @@ resourceName = "local-pc"
 requiredScopes = ["mcp"]
 
 [extensions]
-model = ["artifact", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
 
 [workspace]
 enabled = false
@@ -137,7 +137,7 @@ environ_info(workspace=/absolute/path/on/worker)
 
 开始。
 
-它会建立 portable-devshell Context、prepare 当前 workspace，并在 Host 支持时一起 bootstrap Live Workspace。MCP `tools/list` 不再由 instance group/capability 配置动态裁剪。
+它会建立 portable-devshell Context、prepare 当前 workspace，并在 Host 支持时一起 bootstrap Live Workspace。MCP `tools/list` 合并 Worker schema、Control runtime primitive 和 Extension `mcp.tools`，后者 contribution 变化会更新 catalog；instance group/capability 配置不裁剪目录，`[extensions].model` 单独控制 shell command。当前 endpoint 拒绝 legacy 协议请求，client 必须支持 2026-07-28。
 
 `openai-session` 把内部 `ctxId` 隐藏在 model-facing schema 之外；`explicit` Context mode 则让通用 MCP client 显式携带它。详见 [Context](../concepts/context.md)。
 

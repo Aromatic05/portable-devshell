@@ -30,7 +30,15 @@ listenPort = 17890
 publicBaseUrl = "https://devshell.example.com"
 ```
 
-全局文件不设置 MCP auth。它只确定所有 instance endpoint 共用的 listener 和公网基址。
+endpoint 的 MCP auth 仍由 instance 选择；全局文件同时管理 Listener/public URL 与 OAuth approval 模式、token。fresh `devshell init` 使用 token 模式并输出 approval token，用于浏览器授权页确认。全局配置可以包含：
+
+```toml
+[mcp.oauth2]
+approval = "token"
+token = "<init-generated-approval-token>"
+```
+
+已有全局文件完全缺少 `[mcp.oauth2]` 时保留 `tui` 默认；显式提供 OAuth draft 但未指定 approval 时默认 `token`。不要把这两种路径混为一谈。Control 持有物理 HTTP Listener，OAuth/MCP 使用注入的 route/lease。
 
 ## Instance OAuth 配置
 
@@ -71,12 +79,11 @@ model = ["instance"]
 ```bash
 devshell config get
 devshell instance status demo-local
-devshell tui
 ```
 
 Control 配置 API 会热应用支持的 listener/endpoint 变化，并在确实需要时报告 restart requirement；不要把所有 OAuth 配置变更都固定写成一次完整 Control restart。
 
-进入 TUI 的 `OAuth` 页面处理当前客户端发起的授权请求。provider 会为首次出现的 `client_id` 建立一条 registration 审批（展示客户端名称、redirect URI 主机；全部为 localhost 时给出额外警示），随后才是对应的 authorization 审批。待审批请求有过期时间；不要把审批留在后台长期无人处理。
+fresh init 默认使用 token 审批：在浏览器授权页输入 init 输出的 approval token，确认 registration 与 authorization；TUI 不是必经步骤。显式配置全局 `[mcp.oauth2] approval = "tui"` 时，才在 `devshell tui` 的 OAuth 页面或对应 CLI 接口处理请求。provider 为首次出现的 `client_id` 建立 registration 审批，随后处理 authorization；两者有各自生命周期和过期时间。
 
 Provider 采用 MCP 2026-07-28 的 OAuth Client ID Metadata Document（CIMD）进行客户端身份识别：客户端把 `client_id` 设为自身 HTTPS 元数据文档 URL，provider 直接在授权时获取并校验该文档（`client_id` 必须与 URL 精确一致，redirect URI 必须命中文档声明，SSRF 由内置 socket 防护与策略共同约束）。旧的 Dynamic Client Registration（`/register`）端点已移除。已预先注册的客户端（写入 Client adapter 的静态客户端，包括历史 DCR 已注册的客户端）继续可用；其 `client_id` 不以 `https://` 开头时按预注册处理，已有 token / refresh / revoke 生命周期不受影响，但不能再通过 DCR 新建客户端。新客户端请使用 CIMD，或通过预先配置注册。
 
@@ -123,7 +130,7 @@ OAuth 客户端、授权状态、token 数据和签名密钥保存在：
 - 不缓存 OAuth 与 MCP 响应；
 - 保持 `publicBaseUrl` 对应的 scheme、host 和 path；
 - 支持 MCP 的 request-scoped SSE 流式响应；
-- 关闭 response buffering，确保 15 秒 keepalive frame 能及时到达 Host；
+- 关闭 response buffering，确保长 `tools/call` 的 1 秒 keepalive frame 能及时到达 Host（其他请求为 auto handler / 15 秒 keepalive）；
 - 对长 `tools/call` 配置足够的 read/send timeout。
 
 具体示例见 [ChatGPT 公网隧道](chatgpt-tunnels.md)。
