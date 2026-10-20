@@ -128,3 +128,20 @@ UI 专项的真实 ChatGPT Host、SSH/容器跨机和 Windows psmux 仍有待验
 **R6-04 — Reverse Stress存在已修正的错误观测时序，不是上面R6-03的生产缺陷。** 原集成测试只等Instance snapshot`ready`就断言前代Token已经撤销；实际上`ReverseCredentialStore.withAuthenticatedToken`要在激活后提交持久化，再由Ingress发送`DSR2:ready`。受控cgroup压力初次运行第1轮复现提前观测；测试改为等待`DSR2:ready`，并**保留原旧Token必须拒绝的安全断言**。重跑8/8基础Frame/Worker场景、8/8 Reverse Gateway轮次及真实Rust Reverse载体通过。没有修改生产认证语义。
 
 **未定论**：Control Stream取消探针曾在受限子进程中等待超时，后续清理亦未正常结束；尚不能区分测试时序、收尾资源与实现缺陷，未列为已证实RED。本轮只修改测试/手动CI/文档。前轮已知的OAuth Refresh、Mailing、Context、审批等缺陷未因此自动修复。
+
+## 8. 第七轮完整链路发现的功能断点（2026-10-20）
+
+这两项不是“只测一层就随意推断”的告警。两条Acceptance脚本先分别执行了真实Control、Rust Worker、MCP或Chromium数据流，且有独立磁盘/API证据；再在正常Linux宿主以目标业务断言失败，所有资源留在各自临时根。
+
+**E7-01 / L03 — Comment Extension的Todo访问限流抢先阻断跨端修订恢复。** `acceptance/run-cross-client-chain-smoke.mjs` 先通过CLI真实Worker执行及WebUI Stop/Start、Native/CLI事件一致性。随后一次MCP Todo创建、一次真正内容更新后，第三个携带旧Revision且新的Todo内容的真实`todo_write`没有进入Todo CAS，而被 Comment Extension前置限流拒绝：
+
+```text
+todo.invalid / use_other_tools
+You have performed too many useless operations. Use other tools.
+```
+
+`extensions/comment/src/comment/report/{Policy,Service,State}.ts`使用`COMMENT_TODO_ACCESS_BUCKET_CAPACITY=2`、`COMMENT_TODO_ACCESS_REFILL_INTERVAL_MS=30000`，对`todo_read`和`todo_write`一律计量，不在消耗配额前验证本次更新是否有价值。这会阻断正常多客户端乐观并发校验和后续恢复链。**未证明Todo CAS本身失效**；应评审此人为阻断策略是否符合产品交互要求，而非为让测试全绿暗中睡眠30秒或删掉第三次调用。该链仍为显式非零E2E。
+
+**E7-02 / L01-L04 — 自管理Reverse已停止后删除提交仍留永久Cleanup Debt。** `acceptance/run-provider-chain-smoke.mjs` 在全新临时控制端创建Reverse Instance/Device Code，真Rust Worker enroll并WSS连接，MCP `bash_run`写文件并由SQLite确认；再真实Stop，工具不可用，重新启动后副作用不重播，均通过。但控制侧`deleteInstance`提交配置删除后返回`cleanupPending=true`，错误`Instance ... is self-managed; start it on the remote machine.`；公开`retryCleanupDebt`后`listCleanupDebts`仍有旧Generation `state=pending`。源码的`packages/control/src/instance/editor/retirement/Runtime.ts`在`daemonState=stopped`时不跳过远程退休，而`packages/core/src/instance/runtime/execution/provider/Reverse.ts`严格拒绝自管理远端由Control执行Stop/Start；职责未分离。它阻断同名重建，与前轮本机Local Worker显式Stop可顺利退休不是同一场景。**未修改生产实现或直接放弃Debt**；完整链脚本保留原断言可复现。
+
+参照 [完整功能链验收](functional-chain-acceptance.md) 及 `test/known-bugs/README.md` 独立运行。当前`acceptance/run-chain-matrix.mjs --all`在上述产品缺陷修复前应返回非零，不得通过普通包级测试绿灯覆盖这一结果。

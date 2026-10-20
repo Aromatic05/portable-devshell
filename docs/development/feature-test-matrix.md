@@ -361,3 +361,16 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | R614 | C05/G27 | Original stress checked token before credential commit; now waits protocol DSR2 ready | control/test/integration/ReverseConnectionGateway.test.ts | Retains strict stale-token rejection; 8/8 actual Gateway rounds after test fix |
 
 持续未实测的关键场景：真实远端SSH/Rootless Podman部署，Windows x64/ARM64的本轮原生psmux运行，真实ChatGPT Host里的MCP App，磁盘实际断电/ENOSPC和跨机Artifact传输；不能把上表的Fake CLI或本地WebView测试当成这些平台已通过的依据。
+
+## 13. 第七轮：真实跨Domain功能链整体验收
+
+上一至六轮的单元/集成数量不等于跨Domain整链覆盖。**本轮首次将四条独立、故障可重放的真实链组合为一个可执行矩阵**，公开入口详见 [完整功能链验收与故障台账](functional-chain-acceptance.md)。`acceptance/run-chain-matrix.mjs --all` 会完整运行每条链，单条失败不会跳过其他链，但结果保持非零。
+
+| 功能链 | 真实端到端执行路径 | 失败与恢复注入 | 本轮真实验收状态 |
+|---|---|---|---|
+| **E701 / L07 Artifact** | MCP SDK → Control → Worker A bash_run → Artifact Store → Lease/HTTP → Control Relay → Worker B → Hash → SQLite Audit | 已存在目标拒绝/覆盖重试；Control与两Worker重启、MCP新连接；64 MiB传输部分进度暂停/取消/无残留/重试；Revoke后HTTP410 | **完整通过，Exit 0，清理通过**。另通过正式矩阵 `--only L07` 真实运行；TTL 24h GC及Worker直连未验 |
+| **E702 / L05 Workspace Wait/Reentry** | MCP SDK → Task/Todo → Pause/Resume → 真Worker tmux执行 → Wait持久化 → Control两次重启 → 3次SDK连接 → Reentry Receipt → 最终审计 | 真180秒detached后两次重启，竞态Claim、Attempt重复拒绝、仅一次终端副作用和Wait恢复 | **完整通过，Exit 0，清理通过**；未实际向ChatGPT Host发消息（模拟Rejected报告），Goal新建未验 |
+| **E703 / L03 CLI-Web-Control** | CLI真实执行+Chromium Web Stop/Start → Native Control事件订阅 → MCP Todo/Approval → Rust Worker+SQLite Audit | 已通过前两段：文件副作用1次；Web失败RPC后无副作用、再Stop/Start；Native和CLI事件一致；第三次有意义Todo变更遭前置限流 | **整体未通过，Exit 1**：`todo.invalid / use_other_tools`，阻断后续Revision CAS/审批/Gap/重启场景；并未声明Web/TUI全链通过 |
+| **E704 / L01/L04 Reverse** | Control真实创建 → Device Code → Rust Worker enroll → WSS → MCP Worker bash_run → SQLite → 停机拒绝 → Rust重连/不重播 → Control删除/补偿 → 同名重建 | 错误Device Code拒绝、新码成功；Worker停机时工具不可用、重连后副作用仍仅1次；删除公开Cleanup Retry检查同一旧Generation | **整体未通过，Exit 1**：删除配置提交但 `cleanupPending=true`，公开retry后旧Reverse代仍Pending，无法继续同名重建 |
+
+**当前不是“4/4测试通过”**：仅L07、L05完成链路闭环，L03和L01/L04是通过真实执行发现功能断点。手动 `beta-matrix-extended` workflow新增`chains`选项，**不在PR强制门禁，也尚未在GitHub Runner实测**。全部链仅使用独立临时HOME与本机Worker，未触碰生产用户目录。跨机SSH/Podman、真实ChatGPT Host、Goal创建、原生完整TUI和24h TTL GC仍待独立验收。

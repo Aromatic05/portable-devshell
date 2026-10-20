@@ -94,3 +94,25 @@ pnpm stress:transport         # cgroup-bounded 32 MiB Artifact + eight Reverse c
 ```
 
 The positive stress program now synchronizes the existing old-token-revocation assertion on the protocol's DSR2 ready/credential-commit event rather than the earlier Instance snapshot-ready boundary. This does not address the failed-candidate WSS session contamination regression.
+
+## Seventh-round end-to-end RED chain reproducers
+
+These complete Acceptance runs intentionally return nonzero on the current implementation. Each starts with genuinely working Rust/Control/MCP operations and reaches a product-level blocked state; they are **not part of default PR gates**.
+
+```sh
+# CLI + real Chromium Web + native Control + MCP Todo:
+# after two meaningful Todo writes, the third revision probe is rejected by
+# the Comment Extension's fixed two-access budget before CAS evaluation.
+node acceptance/run-cross-client-chain-smoke.mjs
+
+# Real Reverse Worker WSS, MCP bash_run and SQLite audit pass, but self-managed
+# Worker stopped before Control delete still leaves old-generation cleanup debt
+# after public retryCleanupDebt.
+node acceptance/run-provider-chain-smoke.mjs
+
+# Aggregate is nonzero until both blockers are resolved and the full chains pass.
+# A failure in one chain must never suppress execution of the other chains.
+node acceptance/run-chain-matrix.mjs --all
+```
+
+L07 Artifact and L05 Workflow are genuine full-chain **green** Acceptance programs. See `docs/development/functional-chain-acceptance.md` for the verified E2E boundaries, exact commands and what still requires a real ChatGPT Host or remote provider.

@@ -4,6 +4,21 @@
 
 这份文档只记录**当前可执行的门禁**。不保存“某个历史版本已经通过”的静态结论；Release 是否可交付，应由同一提交上的本地验收与 CI/Release workflow 共同证明。
 
+## 独立完整功能链矩阵
+
+第七轮补充[完整功能链验收](functional-chain-acceptance.md)及独立入口：
+
+```bash
+node acceptance/run-chain-matrix.mjs --list
+node acceptance/run-chain-matrix.mjs --only L07
+node acceptance/run-chain-matrix.mjs --only L05
+node acceptance/run-chain-matrix.mjs --only L03
+node acceptance/run-chain-matrix.mjs --only L01-L04
+node acceptance/run-chain-matrix.mjs --all
+```
+
+这套验收走真实临时 Control、Rust Worker、MCP、SQLite，L03 还走 Chromium WebUI；它独立于一般 Package Unit Test。单条失败不跳过其他链，却让汇总结果非零。**当前 L07 Artifact、L05 Workflow 全链通过；L03 受 Comment Todo 前置限流阻断，L01/L04 Reverse 删除后Cleanup Retry留下旧代债务，两项真实红测。** 手动 `beta-matrix-extended` 的 `chains` 专项会测试这四条，但没有进入普通 PR 门禁，尚未在 GitHub Runner 上实跑。不得用现有单元测试全绿替代整链结果。
+
 ## 完整本地验收
 
 ```bash
