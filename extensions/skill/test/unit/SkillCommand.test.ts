@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -190,4 +190,39 @@ test("Skill commands reject non-owner callers and invalid resource targets", asy
         ),
         /instance name is invalid/u,
     );
+});
+
+
+test("Skill get retries projection with a fresh snapshot of real related files", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "skill-extension-retry-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const directory = join(root, ".agents", "skills", "review");
+    await mkdir(join(directory, "references"), { recursive: true });
+    await writeFile(join(directory, "SKILL.md"), "# Review\n");
+    const related = join(directory, "references", "checklist.md");
+    await writeFile(related, "first revision\n");
+    const options: { events: string[]; projectionFailure?: Error } = {
+        events: [], projectionFailure: new Error("target temporarily unavailable"),
+    };
+    const extension = context(options);
+    const assets = extension.capabilities.assets!;
+    const install = assets.installDirectory.bind(assets);
+    const snapshots: string[] = [];
+    assets.installDirectory = async (sourcePath) => {
+        snapshots.push(await readFile(join(sourcePath, "references", "checklist.md"), "utf8"));
+        return await install(sourcePath);
+    };
+    await assert.rejects(executeSkillCommand(extension, ["get", "review", "remote-one"], invocation(root)), /target temporarily unavailable/u);
+    await writeFile(related, "corrected revision\n");
+    delete options.projectionFailure;
+    const result = await executeSkillCommand(extension, ["get", "review", "remote-one"], invocation(root));
+    assert.equal(result.kind, "json");
+    assert.deepEqual(snapshots, ["first revision\n", "corrected revision\n"]);
+    assert.deepEqual(options.events, [
+        `asset.install:${directory}`, "asset.project:remote-one:managed:review:true",
+        `asset.install:${directory}`, "asset.project:remote-one:managed:review:true",
+    ]);
+    assert.equal(await readFile(related, "utf8"), "corrected revision\n");
+    assert.ok(result.value !== null && typeof result.value === "object" && !Array.isArray(result.value));
+    assert.deepEqual(result.value.projection, { transferredBytes: 123 });
 });
