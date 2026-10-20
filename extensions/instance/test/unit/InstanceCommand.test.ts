@@ -169,6 +169,34 @@ test("Instance model status exposes a remote handle and rejects masked instances
     );
 });
 
+test("Instance logs do not read or watch an instance masked from the current Context", async () => {
+    let reads = 0;
+    let watches = 0;
+    const capability = {
+        ...fakeCapability(),
+        async readLogs() { reads += 1; return []; },
+        async watchEvents() { watches += 1; },
+    } as ExtensionInstanceObserveCapability;
+    await assert.rejects(
+        executeInstanceCommand(capability, ["logs", "masked-test", "-f"], invocation()),
+        /unavailable in the current Context/u,
+    );
+    assert.equal(reads, 0);
+    assert.equal(watches, 0);
+});
+
+test("Instance list hides records whose Context reference disappears during projection", async () => {
+    const result = await executeInstanceCommand(fakeCapability(), ["list"], invocation([], {
+        "local-test": { current: true },
+        "remote-test": undefined,
+        "masked-test": { current: false, handle: "ih-visible" },
+    }));
+    assert.deepEqual(result, {
+        kind: "text",
+        text: "local-test\tready\tready=true\tcurrent=true\nmasked-test\tready\tready=true\thandle=ih-visible\n",
+    });
+});
+
 test("Instance model command has no Context-mutating connect subcommand", async () => {
     await assert.rejects(
         executeInstanceCommand(
