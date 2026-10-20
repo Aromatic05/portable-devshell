@@ -23,7 +23,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
     readonly #validateContext?: (ctxId: string, instance: string, workspace: string) => Promise<void>;
     readonly #sessions = new Set<ExtensionWorkerSessionControl>();
     readonly #opening = new Set<{ instance: string; promise: Promise<ExtensionWorkerSession> }>();
-    readonly #retiring = new Set<string>();
+    readonly #retiring = new Map<string, Promise<void>>();
     #closed = false;
     #closePromise?: Promise<void>;
 
@@ -57,26 +57,47 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
         }
     }
 
-    async retireInstance(instance: string): Promise<void> {
-        this.#retiring.add(instance);
-        try {
-            await Promise.allSettled(
-                [...this.#opening].filter((entry) => entry.instance === instance).map((entry) => entry.promise),
-            );
-            await closeSessions([...this.#sessions].filter((session) => session.instance === instance));
-        } finally {
+    retireInstance(instance: string): Promise<void> {
+        const retiring = this.#retiring.get(instance);
+        if (retiring !== undefined) return retiring;
+        const promise = Promise.resolve().then(() => this.#drain(instance)).finally(() => {
             this.#retiring.delete(instance);
+        });
+        this.#retiring.set(instance, promise);
+        for (const session of this.#sessions) {
+            if (session.instance === instance) session.abort();
         }
+        return promise;
     }
 
     closeAll(): Promise<void> {
         if (this.#closePromise !== undefined) return this.#closePromise;
         this.#closed = true;
-        this.#closePromise = (async () => {
-            await Promise.allSettled([...this.#opening].map((entry) => entry.promise));
-            await closeSessions([...this.#sessions]);
-        })();
+        this.#closePromise = Promise.resolve().then(() => this.#drain()).catch((error: unknown) => {
+            this.#closePromise = undefined;
+            throw error;
+        });
+        for (const session of this.#sessions) session.abort();
         return this.#closePromise;
+    }
+
+    async #drain(instance?: string): Promise<void> {
+        const sessions = new Set([...this.#sessions].filter(
+            (session) => instance === undefined || session.instance === instance,
+        ));
+        // Abort existing calls before waiting for opens; keep every failed release owned.
+        const closing = Promise.allSettled([...sessions].map((session) => session.close()));
+        await Promise.allSettled([...this.#opening].filter(
+            (entry) => instance === undefined || entry.instance === instance,
+        ).map((entry) => entry.promise));
+        const late = await Promise.allSettled([...this.#sessions].filter(
+            (session) => !sessions.has(session) && (instance === undefined || session.instance === instance),
+        ).map((session) => session.close()));
+        const results = [...await closing, ...late];
+        const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1)
+            throw new AggregateError(failures, "Extension Worker sessions failed to close.");
     }
 
     #resolve(name: string | undefined): Instance {
@@ -97,20 +118,6 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
     async #open(instance: Instance, input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession> {
         const sessionId = randomUUID();
         const opened = await instance.openToolSession(input.workspace, sessionId);
-        try {
-            if (input.ctxId !== undefined) {
-                if (this.#validateContext === undefined)
-                    throw new Error("Worker Context binding cannot be validated.");
-                await this.#validateContext(input.ctxId, instance.config.name, opened.workspace);
-            }
-        } catch (error) {
-            await instance.closeToolSession(sessionId);
-            throw error;
-        }
-        if (this.#closed || this.#retiring.has(instance.config.name) || !instance.lifecycle.active) {
-            await instance.closeToolSession(sessionId);
-            throw new Error(`Worker Instance ${instance.config.name} retired while opening a session.`);
-        }
         const session = new ExtensionWorkerSessionControl({
             ctxId: input.ctxId,
             extensionId: this.#extensionId,
@@ -121,6 +128,18 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerRuntime 
             sessionId,
         });
         this.#sessions.add(session);
+        try {
+            if (input.ctxId !== undefined) {
+                if (this.#validateContext === undefined)
+                    throw new Error("Worker Context binding cannot be validated.");
+                await this.#validateContext(input.ctxId, instance.config.name, opened.workspace);
+            }
+            if (this.#closed || this.#retiring.has(instance.config.name) || !instance.lifecycle.active)
+                throw new Error(`Worker Instance ${instance.config.name} retired while opening a session.`);
+        } catch (error) {
+            await session.close();
+            throw error;
+        }
         session.watchRetirement();
         return session;
     }
@@ -218,27 +237,24 @@ class ExtensionWorkerSessionControl implements ExtensionWorkerSession {
         }
     }
 
-    close(): Promise<void> {
-        if (this.#closePromise !== undefined) return this.#closePromise;
+    abort(): void {
         this.#controller.abort(new Error("Extension Worker session closed."));
         this.#unwatch?.();
-        this.#closePromise = (async () => {
-            try {
-                await Promise.allSettled([...this.#calls]);
-                await this.#instance.closeToolSession(this.#sessionId);
-            } finally {
-                this.#onClosed(this);
-                this.#resolveClosed();
-            }
-        })();
+        this.#unwatch = undefined;
+    }
+
+    close(): Promise<void> {
+        if (this.#closePromise !== undefined) return this.#closePromise;
+        this.#closePromise = Promise.resolve().then(async () => {
+            await Promise.allSettled([...this.#calls]);
+            await this.#instance.closeToolSession(this.#sessionId);
+            this.#onClosed(this);
+            this.#resolveClosed();
+        }).catch((error: unknown) => {
+            this.#closePromise = undefined;
+            throw error;
+        });
+        this.abort();
         return this.#closePromise;
     }
-}
-
-async function closeSessions(sessions: readonly ExtensionWorkerSessionControl[]): Promise<void> {
-    const results = await Promise.allSettled(sessions.map(async (session) => await session.close()));
-    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1)
-        throw new AggregateError(failures, "Extension Worker sessions failed to close.");
 }

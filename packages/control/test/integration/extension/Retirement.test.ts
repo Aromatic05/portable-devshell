@@ -27,6 +27,8 @@ import { deferred } from "./Round3Harness.ts";
 function worker(name: string, onCall?: (name: string, input: unknown) => Promise<void>) {
     const opened: string[] = [];
     const released: string[] = [];
+    const releaseAttempts: string[] = [];
+    let release: () => Promise<void> = async () => {};
     const runtime = createToolCallRuntime({ resolveTarget: () => ({
         dispatch: async (request) => {
             await onCall?.(name, request.value.payload);
@@ -47,12 +49,18 @@ function worker(name: string, onCall?: (name: string, input: unknown) => Promise
                     opened.push(id);
                     return { workspace };
                 },
-                async releaseSession(id: string) { released.push(id); },
+                async releaseSession(id: string) {
+                    releaseAttempts.push(id);
+                    await release();
+                    released.push(id);
+                },
                 listTools: () => [{ name: "file_read", description: "Read", inputSchema: { type: "object" } }],
             },
         } as never,
     });
-    return { instance, opened, released, runtime };
+    return { instance, opened, released, releaseAttempts, runtime,
+        setRelease(fn: () => Promise<void>) { release = fn; },
+    };
 }
 
 async function harness(t: test.TestContext, runtime?: InstanceRuntimeTransport, onCall?: (name: string, input: unknown) => Promise<void>) {
@@ -138,6 +146,89 @@ test("install replacement retires both Instance worker sessions and removes its 
     assert.deepEqual([...h.beta.released].sort(), [...h.beta.opened].sort());
     assert.equal(h.alpha.instance.lifecycle.active, true);
     assert.equal(h.beta.instance.lifecycle.active, true);
+});
+
+const workerDeclarations = { "mcp.tools": [{
+    id: "probe_read", description: "Read through the selected Instance",
+    inputSchema: { type: "object" }, outputSchema: { type: "object" },
+}] };
+const workerBody = `export async function activate(context) {
+    const sessions = {};
+    for (const name of ['alpha', 'beta']) sessions[name] = await context.capabilities.workerExecute.openSession({ instance: name, workspace: '/' + name });
+    context.register({ id: 'mcp.tools' }, 'probe_read', async (input, invocation) => ({
+        structuredContent: await sessions[invocation.instance].callTool('file_read', input)
+    }));
+}`;
+
+test("installed Worker release failing once is retried by Instance retirement and reload stays usable", { timeout: 10_000 }, async (t) => {
+    const h = await harness(t);
+    await h.installer.install(await source(h.root, "1.0.0", ["worker.execute"], workerDeclarations, workerBody));
+    const alphaSession = h.alpha.opened.at(-1)!;
+    const betaSession = h.beta.opened.at(-1)!;
+    const mcp = new McpExtensionService(h.host);
+    const invoke = (instance: string) => mcp.callTool("probe_read", { path: instance }, {
+        callId: `retry-${instance}`, instance, workspace: `/${instance}`,
+    });
+    const failure = new Error("transient Worker release failure");
+    h.alpha.setRelease(async () => {
+        h.alpha.setRelease(async () => {});
+        throw failure;
+    });
+    await assert.rejects(h.host.retireInstanceGeneration("alpha"), {
+        message: "Extensions failed to retire host-managed resources for instance alpha.",
+        errors: [new Error("Extension probe failed to retire host-managed resources for instance alpha.", { cause: failure })],
+    });
+    assert.equal(h.alpha.released.includes(alphaSession), false);
+    await assert.rejects(invoke("alpha"), /closed/u);
+    assert.deepEqual((await invoke("beta")).structuredContent, { instance: "beta", input: { path: "beta" } });
+    await h.host.retireInstanceGeneration("alpha");
+    assert.equal(h.alpha.releaseAttempts.filter((id) => id === alphaSession).length, 2);
+    assert.equal(h.alpha.released.filter((id) => id === alphaSession).length, 1);
+    assert.equal(h.beta.released.includes(betaSession), false);
+    await h.host.reload("probe");
+    await h.host.waitForDrain("probe");
+    assert.equal(h.alpha.released.filter((id) => id === alphaSession).length, 1);
+    assert.equal(h.beta.released.filter((id) => id === betaSession).length, 1);
+    assert.deepEqual((await invoke("alpha")).structuredContent, { instance: "alpha", input: { path: "alpha" } });
+    assert.equal(h.alpha.instance.lifecycle.active, true);
+    assert.equal(h.beta.instance.lifecycle.active, true);
+});
+
+test("unload retains failed Worker resources across drains and permits a usable replacement", { timeout: 10_000 }, async (t) => {
+    const h = await harness(t);
+    const installed = await h.installer.install(await source(h.root, "1.0.0", ["worker.execute"], workerDeclarations, workerBody));
+    const oldAlpha = h.alpha.opened.at(-1)!;
+    const oldBeta = h.beta.opened.at(-1)!;
+    h.alpha.setRelease(async () => { throw new Error("Worker release unavailable"); });
+    // Restore the external boundary even if an assertion fails so host.stop can drain.
+    t.after(() => h.alpha.setRelease(async () => {}));
+    await h.host.disable("probe");
+    await assert.rejects(h.host.waitForDrain("probe"), /failed to drain cleanly/u);
+    await assert.rejects(h.host.waitForDrain("probe"), /failed to drain cleanly/u);
+    assert.deepEqual((await h.host.list())[0]!.retired, [{
+        generation: installed.activeGeneration, inFlight: 0, state: "dispose-failed",
+    }]);
+    await assert.rejects(h.host.forget("probe"), /still has active or draining generations/u);
+    assert.equal(h.alpha.released.includes(oldAlpha), false);
+    assert.equal(h.beta.released.filter((id) => id === oldBeta).length, 1);
+    await h.host.enable("probe");
+    const newAlpha = h.alpha.opened.at(-1)!;
+    assert.notEqual(newAlpha, oldAlpha);
+    const mcp = new McpExtensionService(h.host);
+    assert.deepEqual((await mcp.callTool("probe_read", {}, {
+        callId: "replacement", instance: "alpha", workspace: "/alpha",
+    })).structuredContent, { instance: "alpha", input: {} });
+    h.alpha.setRelease(async () => {});
+    await h.host.waitForDrain("probe");
+    assert.deepEqual((await h.host.list())[0]!.retired, []);
+    assert.equal(h.alpha.released.filter((id) => id === oldAlpha).length, 1);
+    assert.equal(h.alpha.released.includes(newAlpha), false);
+    await h.host.disable("probe");
+    await h.host.waitForDrain("probe");
+    await h.host.forget("probe");
+    assert.deepEqual(await h.host.list(), []);
+    assert.deepEqual([...h.alpha.released].sort(), [...h.alpha.opened].sort());
+    assert.deepEqual([...h.beta.released].sort(), [...h.beta.opened].sort());
 });
 
 test("retiring an installed sandbox stream releases its subscription while a send is blocked", { timeout: 10_000 }, async (t) => {

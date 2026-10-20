@@ -7,6 +7,12 @@ import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import { ExtensionWorkerCapabilityControl } from "../../../../../src/extension/api/cap/worker/index.ts";
 import { InstanceRegistry } from "../../../../../src/instance/Registry.ts";
 
+function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+}
+
 interface WorkerCall {
     ctxId?: string;
     extensionId?: string;
@@ -22,10 +28,12 @@ function workerInstance(name = "worker-a") {
     const calls: WorkerCall[] = [];
     const opened: string[] = [];
     const released: string[] = [];
+    const releaseAttempts: string[] = [];
     const listeners = new Set<() => void>();
     let active = true;
     let invoke: (signal?: AbortSignal) => Promise<void> = async () => undefined;
     let prepare: () => Promise<void> = async () => undefined;
+    let release: () => Promise<void> = async () => undefined;
     const instance = {
         config: { name },
         lifecycle: {
@@ -48,7 +56,11 @@ function workerInstance(name = "worker-a") {
                 workspace: `/canonical${workspace}`,
             };
         },
-        async closeToolSession(id: string) { released.push(id); },
+        async closeToolSession(id: string) {
+            releaseAttempts.push(id);
+            await release();
+            released.push(id);
+        },
         toolCallIngress: {
             async call(
                 _instance: string,
@@ -84,8 +96,10 @@ function workerInstance(name = "worker-a") {
         instance,
         opened,
         released,
+        releaseAttempts,
         setInvoke(fn: (signal?: AbortSignal) => Promise<void>) { invoke = fn; },
         setPrepare(fn: () => Promise<void>) { prepare = fn; },
+        setRelease(fn: () => Promise<void>) { release = fn; },
         retire() {
             active = false;
             for (const listener of listeners) listener();
@@ -128,6 +142,146 @@ test("Extension Worker execute and delegate use the Instance ToolCall pipeline w
     assert.equal(worker.opened.length, 2);
     assert.deepEqual(new Set(worker.released), new Set(worker.opened));
     await assert.rejects(execute.openSession({ workspace: "/repo" }), /closed/u);
+});
+
+test("Worker close drains calls and retains failed release for explicit retirement retry", async () => {
+    const worker = workerInstance();
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true, extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]), recording: "caller",
+    });
+    const finishCall = deferred();
+    const started = deferred();
+    worker.setInvoke(async () => { started.resolve(); await finishCall.promise; });
+    const failure = new Error("transient release failure");
+    worker.setRelease(async () => { throw failure; });
+    const session = await capability.openSession({ workspace: "/repo" });
+    let closed = false;
+    void session.closed.then(() => { closed = true; });
+    const call = session.callTool("file_read", {});
+    const rejectedCall = assert.rejects(call, /closed/u);
+    await started.promise;
+    const closing = session.close();
+    assert.equal(session.close(), closing);
+    const rejectedClose = assert.rejects(closing, failure);
+    await assert.rejects(session.callTool("file_read", {}), /closed/u);
+    assert.deepEqual(worker.releaseAttempts, []);
+    finishCall.resolve();
+    await rejectedCall;
+    await rejectedClose;
+    assert.deepEqual(worker.released, []);
+    assert.equal(closed, false);
+    const releasing = deferred();
+    worker.setRelease(async () => await releasing.promise);
+    const retirement = capability.retireInstance("worker-a");
+    const disposing = capability.closeAll();
+    releasing.resolve();
+    await Promise.all([retirement, disposing, session.closed]);
+    assert.deepEqual(worker.releaseAttempts, [worker.opened[0], worker.opened[0]]);
+    assert.deepEqual(worker.released, worker.opened);
+    await session.close();
+    await capability.closeAll();
+    assert.equal(worker.releaseAttempts.length, 2);
+});
+
+test("Worker closeAll retries failed cleanup without releasing successful sessions twice", async () => {
+    const alpha = workerInstance("alpha");
+    const beta = workerInstance("beta");
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true, extensionId: "agent",
+        instances: new InstanceRegistry([alpha.instance, beta.instance]), recording: "caller",
+    });
+    const first = await capability.openSession({ instance: "alpha", workspace: "/a" });
+    const second = await capability.openSession({ instance: "beta", workspace: "/b" });
+    let closed = false;
+    void first.closed.then(() => { closed = true; });
+    const failure = new Error("release unavailable");
+    alpha.setRelease(async () => { throw failure; });
+    await assert.rejects(capability.closeAll(), failure);
+    await second.closed;
+    assert.equal(closed, false);
+    await assert.rejects(capability.openSession({ instance: "beta", workspace: "/b" }), /closed/u);
+    await assert.rejects(capability.closeAll(), failure);
+    assert.equal(alpha.releaseAttempts.length, 2);
+    alpha.setRelease(async () => {});
+    await capability.closeAll();
+    await first.closed;
+    assert.equal(alpha.releaseAttempts.length, 3);
+    assert.equal(beta.releaseAttempts.length, 1);
+});
+
+test("Worker Instance retirement failure remains owned for generation disposal retry", async (t) => {
+    const worker = workerInstance();
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true, extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]), recording: "caller",
+    });
+    const failure = new Error("retirement release failure");
+    worker.setRelease(async () => { throw failure; });
+    const reported = deferred();
+    const warnings = t.mock.method(console, "warn", () => reported.resolve());
+    const session = await capability.openSession({ workspace: "/repo" });
+    let closed = false;
+    void session.closed.then(() => { closed = true; });
+    worker.retire();
+    await reported.promise;
+    assert.equal(warnings.mock.callCount(), 1);
+    assert.equal(warnings.mock.calls[0]!.arguments[1], failure);
+    assert.equal(closed, false);
+    await assert.rejects(session.callTool("file_read", {}), /closed/u);
+    worker.setRelease(async () => {});
+    await Promise.all([capability.closeAll(), capability.retireInstance("worker-a")]);
+    await session.closed;
+    assert.equal(worker.releaseAttempts.length, 2);
+    assert.deepEqual(worker.released, worker.opened);
+    await session.close();
+    assert.equal(worker.releaseAttempts.length, 2);
+});
+
+test("Worker retains a rejected open when its cleanup fails validation", async () => {
+    const worker = workerInstance();
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true, extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]), recording: "caller",
+    });
+    const failure = new Error("pending session release failure");
+    worker.setRelease(async () => { throw failure; });
+    await assert.rejects(capability.openSession({ workspace: "/repo", ctxId: "unvalidated" }), failure);
+    assert.equal(worker.releaseAttempts.length, 1);
+    await assert.rejects(capability.closeAll(), failure);
+    assert.equal(worker.releaseAttempts.length, 2);
+    worker.setRelease(async () => {});
+    await capability.closeAll();
+    assert.equal(worker.releaseAttempts.length, 3);
+    assert.deepEqual(worker.released, worker.opened);
+});
+
+test("Worker retains a late open after failed retirement and coalesces concurrent retirement", async () => {
+    const worker = workerInstance();
+    const started = deferred();
+    const opening = deferred();
+    worker.setPrepare(async () => { started.resolve(); await opening.promise; });
+    const failure = new Error("late session release failure");
+    worker.setRelease(async () => { throw failure; });
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true, extensionId: "agent",
+        instances: new InstanceRegistry([worker.instance]), recording: "caller",
+    });
+    const pending = capability.openSession({ workspace: "/repo" });
+    const rejectedOpen = assert.rejects(pending, failure);
+    await started.promise;
+    const retiring = capability.retireInstance("worker-a");
+    assert.equal(capability.retireInstance("worker-a"), retiring);
+    const rejectedRetirement = assert.rejects(retiring, failure);
+    opening.resolve();
+    await Promise.all([rejectedOpen, rejectedRetirement]);
+    assert.deepEqual(worker.released, []);
+    worker.setRelease(async () => {});
+    await capability.retireInstance("worker-a");
+    assert.deepEqual(worker.released, worker.opened);
+    const attempts = worker.releaseAttempts.length;
+    await capability.closeAll();
+    assert.equal(worker.releaseAttempts.length, attempts);
 });
 
 test("Extension Worker binds ToolCalls to a validated Context without inventing one for independent calls", async () => {

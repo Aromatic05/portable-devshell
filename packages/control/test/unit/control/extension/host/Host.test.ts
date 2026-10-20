@@ -1061,7 +1061,9 @@ test("Extension host reclaims host resources after an Instance generation notifi
     await host.stop();
 });
 
-test("Extension host preserves a fast retirement failure until waitForDrain observes it", async () => {
+test("Extension host retains a failed generation until explicit cleanup really succeeds", async () => {
+    let available = false;
+    let attempts = 0;
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: true, selectedGeneration: "a" } },
         schemaVersion: 1,
@@ -1070,7 +1072,8 @@ test("Extension host preserves a fast retirement failure until waitForDrain obse
         loader: createLoader(
             async (id, name) =>
                 unregisteredGeneration(id, name, async () => {
-                    throw new Error("fast dispose failure");
+                    attempts++;
+                    if (!available) throw new Error("fast dispose failure");
                 }),
             async (id, name) => unregisteredManifest(id, name),
         ),
@@ -1088,6 +1091,15 @@ test("Extension host preserves a fast retirement failure until waitForDrain obse
     await assert.rejects(host.waitForDrain("example"), (error: unknown) =>
         aggregateContains(error, /fast dispose failure/u),
     );
+    await assert.rejects(host.waitForDrain("example"), (error: unknown) =>
+        aggregateContains(error, /fast dispose failure/u),
+    );
+    assert.equal(attempts, 3);
+    assert.deepEqual((await host.list())[0]!.retired, [{ generation: "a", inFlight: 0, state: "dispose-failed" }]);
+    await assert.rejects(host.forget("example"), /still has active or draining generations/u);
+    available = true;
+    await host.waitForDrain("example");
+    assert.equal(attempts, 4);
     await host.forget("example");
     assert.deepEqual(await host.list(), []);
     await host.stop();
@@ -1261,10 +1273,9 @@ test("Extension retirement disposal failures stay out of public snapshot revisio
     }));
     assert.equal(afterRetirement.revision, beforeRetirement.revision);
     assert.equal(afterRetirement.extensions[0]?.state, "active");
-    await assert.rejects(
-        host.waitForDrain("example"),
-        (error: unknown) => aggregateContains(error, /retired generation dispose failure/u),
-    );
+    await host.waitForDrain("example");
+    assert.equal(disposeCount, 2);
+    assert.deepEqual((await host.list())[0]!.retired, []);
     await host.stop();
 });
 

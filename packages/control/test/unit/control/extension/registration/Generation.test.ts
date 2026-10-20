@@ -70,25 +70,39 @@ test("Extension candidate can be retired before it becomes active", async () => 
     assert.equal(generation.state, "disposed");
 });
 
-test("Extension generation surfaces disposal failures without double disposal", async () => {
+test("Extension generation retries failed disposal and shares each in-flight attempt", async () => {
     let disposeCount = 0;
     const failure = new Error("dispose failed");
+    let releaseRetry!: () => void;
+    const retry = new Promise<void>((resolve) => { releaseRetry = resolve; });
     const generation = new ExtensionGeneration({
         dispose: async () => {
             disposeCount += 1;
-            throw failure;
+            if (disposeCount === 1) throw failure;
+            await retry;
         },
         generation: "1.0.0-bad-dispose",
         manifest,
         registrations,
     });
     generation.activate();
-    await assert.rejects(generation.retire(), failure);
+    const first = generation.retire();
+    assert.equal(generation.retire(), first);
+    await assert.rejects(first, failure);
     assert.equal(generation.state, "dispose-failed");
     assert.equal(generation.disposeError, failure);
     assert.equal(disposeCount, 1);
-    await assert.rejects(generation.retire(), failure);
-    assert.equal(disposeCount, 1);
+    const second = generation.retire();
+    assert.notEqual(second, first);
+    assert.equal(generation.retire(), second);
+    assert.throws(() => generation.acquire(), /not active/u);
+    releaseRetry();
+    await second;
+    assert.equal(disposeCount, 2);
+    assert.equal(generation.state, "disposed");
+    assert.equal(generation.disposeError, undefined);
+    assert.equal(generation.retire(), second);
+    assert.equal(disposeCount, 2);
 });
 
 test("faulted runtime lifecycle leases defer disposal without admitting new consumers", async () => {

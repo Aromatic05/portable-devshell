@@ -40,7 +40,7 @@ export class ExtensionGeneration {
     readonly #dispose: () => Promise<void>;
     readonly #instanceGenerationRetired?: ExtensionGenerationOptions["instanceGenerationRetired"];
     readonly #retireInstanceHostResources?: (instance: string) => Promise<void>;
-    readonly #retirement: Promise<void>;
+    #retirement: Promise<void>;
     #disposeError?: unknown;
     #faultError?: unknown;
     #disposeStarted = false;
@@ -57,11 +57,16 @@ export class ExtensionGeneration {
         this.#dispose = options.dispose;
         this.#instanceGenerationRetired = options.instanceGenerationRetired;
         this.#retireInstanceHostResources = options.retireInstanceHostResources;
-        this.#retirement = new Promise<void>((resolve, reject) => {
+        this.#retirement = this.#createRetirement();
+    }
+
+    #createRetirement(): Promise<void> {
+        const retirement = new Promise<void>((resolve, reject) => {
             this.#resolveRetirement = resolve;
             this.#rejectRetirement = reject;
         });
-        void this.#retirement.catch(() => undefined);
+        void retirement.catch(() => undefined);
+        return retirement;
     }
 
     get disposeError(): unknown {
@@ -155,6 +160,12 @@ export class ExtensionGeneration {
 
     retire(): Promise<void> {
         this.#faultListeners.clear();
+        if (this.#state === "dispose-failed") {
+            this.#retirement = this.#createRetirement();
+            this.#disposeStarted = false;
+            this.#state = "draining";
+            this.#maybeDispose();
+        }
         if (
             this.#state === "ready" ||
             this.#state === "active" ||
@@ -177,6 +188,7 @@ export class ExtensionGeneration {
         this.#disposeStarted = true;
         void this.#dispose().then(
             () => {
+                this.#disposeError = undefined;
                 this.#state = "disposed";
                 this.#resolveRetirement();
             },
