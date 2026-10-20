@@ -31,6 +31,7 @@ export class ContainerProvisionExisting implements ContainerProvision {
     readonly #operations: ContainerProvisionOperations;
     readonly #store: ContainerAdoptionStore;
     readonly #owner: string;
+    readonly #previousOwner?: string;
     readonly #expectedGeneration?: string;
     #generation?: string;
     #startedForRuntimeRetire?: ContainerIdentity;
@@ -40,12 +41,13 @@ export class ContainerProvisionExisting implements ContainerProvision {
         this.#config = options.config;
         this.#operations = options.operations;
         this.#store = new ContainerAdoptionStore(options.adoption?.databaseFile);
+        const binding = [options.operations.provider, options.operations.binary, options.config];
         this.#owner = containerAdoptionOwner([
             options.adoption?.owner ?? randomUUID(),
-            options.operations.provider,
-            options.operations.binary,
-            options.config,
+            ...binding,
         ]);
+        this.#previousOwner = options.adoption?.previousOwner === undefined ? undefined
+            : containerAdoptionOwner([options.adoption.previousOwner, ...binding]);
         this.#expectedGeneration = options.adoption?.generation;
         this.#generation = this.#expectedGeneration;
     }
@@ -105,7 +107,10 @@ export class ContainerProvisionExisting implements ContainerProvision {
         await this.#withIdentity(async (container, record, transaction) => {
             if (container?.running) {
                 this.#requireAdopted(record);
-                if (this.#config.adoptLifecycle) await this.#stop(container, "stopContainer");
+                // Worker stop leaves this start identity in use when the
+                // external container's lifecycle is not ours to stop.
+                if (!this.#config.adoptLifecycle) return;
+                await this.#stop(container, "stopContainer");
             }
             transaction.clear();
         });
@@ -129,7 +134,7 @@ export class ContainerProvisionExisting implements ContainerProvision {
             if (this.#retired) return { error: this.#error("Container adoption generation is retired.") };
             const container = await this.#inspect(this.#config.containerName);
             let record = transaction.read();
-            if (record?.owner === this.#owner) {
+            if (record !== undefined && (record.owner === this.#owner || record.owner === this.#previousOwner)) {
                 if (this.#generation !== undefined && this.#generation !== record.generation)
                     return { error: this.#error("Container adoption generation changed.") };
                 if (container === undefined || container.id !== record.containerId || !container.running || container.startedAt !== record.startedAt) {
@@ -137,6 +142,12 @@ export class ContainerProvisionExisting implements ContainerProvision {
                     record = undefined;
                 } else {
                     this.#generation = record.generation;
+                    // Upgrade the old config-hash owner only after its binding
+                    // and the live start identity have both been verified.
+                    if (record.owner !== this.#owner) {
+                        record = { ...record, owner: this.#owner };
+                        transaction.write(record);
+                    }
                 }
             } else {
                 record = undefined;

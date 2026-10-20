@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 export interface ContainerAdoptionIdentity {
     databaseFile: string;
     owner: string;
+    /** Previous config-hash owner, used only for verified in-place migration. */
+    previousOwner?: string;
     generation?: string;
 }
 

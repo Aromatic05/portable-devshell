@@ -58,6 +58,21 @@ test("Existing config ownership and explicit generation cannot borrow another ad
     assert.equal(await f.provision({ ...f.adoption, generation: "generation-1" }).isAvailable(), true);
 });
 
+test("Existing owner migration preserves generation fencing and excludes the previous controller", async (t) => {
+    const f = await existingFixture(t);
+    const previousOwner = "instance-alpha/previous-config";
+    const previous = f.provision({ ...f.adoption, owner: previousOwner, generation: "generation-1" });
+    await previous.ensureReady("start");
+    await assert.rejects(f.provision({ ...f.adoption, previousOwner, generation: "generation-2" }).isAvailable(), /generation changed/u);
+    assert.equal(await previous.isAvailable(), true);
+    const current = f.provision({ ...f.adoption, previousOwner, generation: "generation-1" });
+    assert.equal(await current.isAvailable(), true);
+    await assert.rejects(previous.afterWorkerStop(), /already running/u);
+    await previous.retire();
+    assert.equal(await current.isAvailable(), true);
+    assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId]]);
+});
+
 test("Existing failed start creates no adoption and a stopped-container retry succeeds", async (t) => {
     const f = await existingFixture(t);
     f.fail("startContainer");
@@ -88,12 +103,14 @@ test("Existing failed stop preserves provenance and supports reconstruction and 
     await assert.rejects(f.provision().isAvailable(), /already running/u);
 });
 
-test("Existing without lifecycle adoption preserves external container and clears its marker after worker stop", async (t) => {
+test("Existing without lifecycle adoption preserves external container and its verified marker until retirement", async (t) => {
     const f = await existingFixture(t, false);
     const provision = f.provision();
     await provision.ensureReady("start");
     await provision.afterWorkerStop();
     assert.equal(f.state()?.status, "running");
+    assert.equal(await f.provision().isAvailable(), true);
+    await provision.retire();
     await assert.rejects(f.provision().isAvailable(), /already running/u);
     assert.deepEqual(mutations(f.calls).map(({ args }) => args), [["start", existingId]]);
 });

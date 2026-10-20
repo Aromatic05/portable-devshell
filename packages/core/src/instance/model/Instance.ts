@@ -463,7 +463,10 @@ function toRuntimeOptions(
 ): WorkerRuntimeFactoryOptions {
     const adoption = {
         databaseFile: new InstancePaths(asInstanceName(instance.name), homeDirectory).containerAdoptionDatabaseFile,
-        owner: containerAdoptionOwner(instance),
+        // The provision layer also binds this owner to provider, executable and
+        // container configuration, and verifies the persisted ID/start identity.
+        owner: containerAdoptionOwner({ name: instance.name, provider: instance.provider }),
+        previousOwner: containerAdoptionOwner(instance),
     };
     switch (instance.provider) {
         case "local":

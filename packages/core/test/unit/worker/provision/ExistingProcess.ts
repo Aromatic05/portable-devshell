@@ -8,7 +8,7 @@ const instance = normalizeConfigInstanceDraft({
     name: "adopted",
     provider: "podman",
     podmanBinary: join(root, "fake-provider.mjs"),
-    container: { mode: "existingStoppedContainer", containerName: "configured", adoptLifecycle: true },
+    container: { mode: "existingStoppedContainer", containerName: tag === "new-container-binding" ? "a".repeat(64) : "configured", adoptLifecycle: true },
     env: { ADOPTION_CONFIG_TAG: tag },
 });
 try {

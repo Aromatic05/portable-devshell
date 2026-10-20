@@ -74,10 +74,11 @@ test("Existing integration: full model/factory chain persists adoption across co
     assert.match(refused.stderr, /already running/u);
 });
 
-test("Existing integration: changed configuration and replacement container cannot borrow durable identity", posix, async (t) => {
+test("Existing integration: unrelated configuration resumes but changed container binding and replacement cannot borrow durable identity", posix, async (t) => {
     const f = await fixture(t);
     assert.equal((await f.run("start")).code, 0);
-    const foreignConfig = await f.run("status", "new-config-generation");
+    assert.equal((await f.run("status", "new-config-generation")).code, 0);
+    const foreignConfig = await f.run("status", "new-container-binding");
     assert.equal(foreignConfig.code, 1);
     assert.match(foreignConfig.stderr, /already running/u);
     assert.equal((await f.run("status")).code, 0);
