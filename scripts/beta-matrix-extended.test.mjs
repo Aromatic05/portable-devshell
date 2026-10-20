@@ -113,6 +113,7 @@ test("chains suite runs real AcceptanceFixture programs independently of shared 
     assert.ok(chromium.includes("playwright install --with-deps chromium"));
     assert.ok(chromium.includes("PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1"));
     const run = step("Four complete functional chain acceptance tests");
+    assert.ok(run.includes("set -o pipefail"));
     assert.ok(run.includes("node acceptance/run-chain-matrix.mjs --all 2>&1 | tee"));
     assert.ok(run.includes("inputs.suite == 'chains'"));
     assert.ok(step("Upload isolated Testspace logs").includes("beta-matrix-chains.log"));
