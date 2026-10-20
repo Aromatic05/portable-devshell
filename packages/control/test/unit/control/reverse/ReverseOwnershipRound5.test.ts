@@ -41,8 +41,8 @@ function fixture(t: TestContext, attach: (channel: Channel, generation: number, 
         t.after(() => value.close());
         return { value, received };
     };
-    const identity = (generation: number) => ({ descriptor: instance, generation });
-    const upload = (generation: number, seq: number, text: string) => connections.acceptUpstream(identity(generation), {
+    const identity = (generation: number, credentialId?: string) => ({ descriptor: instance, generation, credentialId });
+    const upload = (generation: number, seq: number, text: string, credentialId?: string) => connections.acceptUpstream(identity(generation, credentialId), {
         generation, frames: [{ seq, frame: Buffer.from(text).toString("base64") }],
     });
     return { connections, channel, identity, upload, leases: () => ({ acquired, released }) };
@@ -154,3 +154,56 @@ test("Round5 lower generation requires explicit credential replacement and subse
     assert.deepEqual(replacement.received, ["replacement owner"]);
     assert.deepEqual(f.leases(), { acquired: 5, released: 5 });
 });
+
+test("same-credential equal-generation SSE overlap is rejected before attach and preserves the active watermark", async (t) => {
+    const attached: Channel[] = [];
+    const f = fixture(t, async (channel) => { attached.push(channel); });
+    const first = f.channel();
+    const ambiguous = f.channel();
+    const retry = f.channel();
+    await f.connections.activate(f.identity(1, "credential"), "sse", first.value);
+    f.upload(1, 1, "before overlap", "credential");
+    await assert.rejects(f.connections.activate(f.identity(1, "credential"), "sse", ambiguous.value, {
+        credentialReplacement: true,
+    }), { code: "reverse.generationInvalid" });
+    assert.deepEqual(attached, [first.value]);
+    assert.equal(ambiguous.value.closed, true);
+    assert.equal(first.value.closed, false);
+    assert.deepEqual(f.upload(1, 2, "after overlap", "credential"), { acceptedThrough: 2, generation: 1 });
+    assert.deepEqual(first.received, ["before overlap", "after overlap"]);
+    assert.deepEqual(ambiguous.received, []);
+    await f.connections.activate(f.identity(2, "credential"), "sse", retry.value);
+    assert.deepEqual(f.upload(2, 1, "fresh route", "credential"), { acceptedThrough: 1, generation: 2 });
+    assert.equal(first.value.closed, true);
+    assert.deepEqual(retry.received, ["fresh route"]);
+    assert.equal(f.leases().acquired, f.leases().released);
+});
+
+for (const previousTransport of ["sse", "wss"] as const) {
+    test(`equal-generation same-credential ${previousTransport} replacement across transports keeps SSE bytes on its physical channel`, { timeout: 5_000 }, async (t) => {
+        const entered = barrier();
+        const release = barrier();
+        t.after(release.resolve);
+        const f = fixture(t, async (channel) => {
+            if (channel === candidate.value) {
+                entered.resolve();
+                await release.promise;
+            }
+        });
+        const first = f.channel();
+        const candidate = f.channel();
+        const transport = previousTransport === "sse" ? "wss" : "sse";
+        await f.connections.activate(f.identity(1, "credential"), previousTransport, first.value);
+        const activation = f.connections.activate(f.identity(1, "credential"), transport, candidate.value, { credentialReplacement: true });
+        await entered.promise;
+        assert.deepEqual(f.upload(1, 1, "SSE reply", "credential"), { acceptedThrough: 1, generation: 1 });
+        assert.deepEqual(first.received, previousTransport === "sse" ? ["SSE reply"] : []);
+        assert.deepEqual(candidate.received, transport === "sse" ? ["SSE reply"] : []);
+        assert.equal(first.value.closed, false);
+        release.resolve();
+        await activation;
+        assert.equal(first.value.closed, true);
+        assert.equal(candidate.value.closed, false);
+        assert.equal(f.leases().acquired, f.leases().released);
+    });
+}

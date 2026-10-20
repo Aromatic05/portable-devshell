@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
@@ -291,7 +292,11 @@ export class ReverseIngress {
         const token = readBearerToken(request.headers.authorization);
         const descriptor = await this.#credentials.authenticate(instance, token);
         return {
-            identity: { descriptor, generation },
+            identity: {
+                descriptor,
+                generation,
+                credentialId: createHash("sha256").update(token).digest("hex"),
+            },
             token,
         };
     }

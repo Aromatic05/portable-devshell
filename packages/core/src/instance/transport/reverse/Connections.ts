@@ -13,6 +13,8 @@ import type { Instance } from "../../model/Instance.js";
 export interface ReverseConnectionIdentity {
     readonly descriptor: Instance;
     readonly generation: number;
+    /** Stable fingerprint of the authenticated credential, never the bearer secret. */
+    readonly credentialId?: string;
 }
 
 export interface ReverseConnectionsOptions {
@@ -24,7 +26,7 @@ export interface ReverseConnectionsOptions {
 interface ActiveReverseConnection {
     channel: Channel;
     closed: boolean;
-    generation: number;
+    identity: ReverseConnectionIdentity;
     transport: ReverseTransport;
 }
 
@@ -129,14 +131,15 @@ export class ReverseConnections {
             }
 
             const name = identity.descriptor.config.name;
-            const current = this.#active.get(name);
-            const pending = this.#candidates.get(name);
-            const active = current?.generation === identity.generation
-                ? current
-                : pending?.generation === identity.generation ? pending : undefined;
+            const active = [this.#active.get(name), this.#candidates.get(name)].find(
+                (connection) => connection !== undefined &&
+                    connection.transport === "sse" &&
+                    connection.identity.descriptor === identity.descriptor &&
+                    connection.identity.generation === identity.generation &&
+                    connection.identity.credentialId === identity.credentialId,
+            );
             if (
                 active === undefined ||
-                active.transport !== "sse" ||
                 !(active.channel instanceof ReverseSseChannel)
             ) {
                 throw createRemoteError({
@@ -187,7 +190,7 @@ export class ReverseConnections {
     ): ActiveReverseConnection {
         const name = identity.descriptor.config.name;
         const previous = this.#active.get(name);
-        const previousGeneration = previous?.generation ?? 0;
+        const previousGeneration = previous?.identity.generation ?? 0;
         if (
             !Number.isSafeInteger(identity.generation) ||
             identity.generation <= 0 ||
@@ -206,10 +209,27 @@ export class ReverseConnections {
             });
         }
 
+        // SSE POSTs carry no physical-channel ID. With the same credential and
+        // generation they cannot distinguish a candidate from its predecessor.
+        // Reject only that ambiguous SSE overlap before starting its handshake;
+        // the existing stream keeps its route and watermark. WSS owns its bytes.
+        if (
+            transport === "sse" && previous?.transport === "sse" &&
+            previous.identity.descriptor === identity.descriptor &&
+            previousGeneration === identity.generation &&
+            previous.identity.credentialId === identity.credentialId
+        ) {
+            throw createRemoteError({
+                code: runtimeErrorCodes.reverseGenerationInvalid,
+                message: "SSE reconnection with the same credential must use a new generation.",
+                retryable: true,
+            });
+        }
+
         const active: ActiveReverseConnection = {
             channel,
             closed: false,
-            generation: identity.generation,
+            identity,
             transport,
         };
         this.#candidates.set(name, active);

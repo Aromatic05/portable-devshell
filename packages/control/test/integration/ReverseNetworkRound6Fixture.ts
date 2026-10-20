@@ -240,7 +240,7 @@ export async function chunkedPost(base: string, token: string, generation: numbe
 }
 
 export async function sse(t: TestContext, base: string, token: string, generation: number,
-    upload?: (frames: UpstreamFrame[]) => Promise<void>, lastEventId = 0) {
+    upload?: (frames: UpstreamFrame[]) => Promise<void>, lastEventId = 0, options: WorkerOptions = {}) {
     const response = await fetch(`${base}/events`, { headers: { ...headers(token, generation), "Last-Event-ID": String(lastEventId) } });
     assert.equal(response.status, 200);
     assert.ok(response.body);
@@ -260,7 +260,7 @@ export async function sse(t: TestContext, base: string, token: string, generatio
             assert.deepEqual(result.body, { acceptedThrough: sequence, generation });
         }
     }, () => undefined);
-    const serving = serve(channel, methods, "r6-alpha").catch((error: unknown) => { errors.push(error); });
+    const serving = serve(channel, methods, "r6-alpha", options).catch((error: unknown) => { errors.push(error); });
     const pumping = (async () => {
         let buffered = "";
         const decoder = new TextDecoder();
