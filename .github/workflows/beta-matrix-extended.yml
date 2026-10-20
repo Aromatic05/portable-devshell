@@ -15,6 +15,8 @@ on:
                     - workflow
                     - recovery
                     - retirement
+                    - browser
+                    - handoff
                     - windows-psmux
 
 permissions:
@@ -47,7 +49,7 @@ jobs:
               if: inputs.suite == 'upgrade'
               run: pnpm testspace upgrade-smoke
             - name: Build isolated Testspace runtime
-              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement'
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement' || inputs.suite == 'browser' || inputs.suite == 'handoff'
               run: |
                   pnpm build
                   pnpm test:prepare
@@ -71,6 +73,14 @@ jobs:
               if: inputs.suite == 'retirement'
               shell: bash
               run: pnpm testspace retirement-smoke 2>&1 | tee "$RUNNER_TEMP/beta-matrix-retirement.log"
+            - name: Real Chromium browser Audit replay and Instance stop-start
+              if: inputs.suite == 'browser'
+              shell: bash
+              run: pnpm acceptance:web 2>&1 | tee "$RUNNER_TEMP/beta-matrix-browser.log"
+            - name: Real 190-second tmux handoff and recovery
+              if: inputs.suite == 'handoff'
+              shell: bash
+              run: pnpm acceptance:tmux-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
             - name: Stop isolated Testspace
               if: always() && (inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement')
               run: pnpm testspace stop
@@ -83,6 +93,8 @@ jobs:
                       ${{ env.DEVSHELL_TESTSPACE_ROOT }}/*.log
                       ${{ runner.temp }}/beta-matrix-recovery.log
                       ${{ runner.temp }}/beta-matrix-retirement.log
+                      ${{ runner.temp }}/beta-matrix-browser.log
+                      ${{ runner.temp }}/beta-matrix-handoff.log
                   if-no-files-found: ignore
 
     windows-psmux:

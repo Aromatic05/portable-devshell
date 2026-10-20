@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/beta-matrix-extended.yml", import.meta.url), "utf8");
-const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "windows-psmux"];
+const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "browser", "handoff", "windows-psmux"];
 
 test("extended beta verification is explicit, not a pull request gate", () => {
     assert.match(workflow, /workflow_dispatch:/u);
@@ -68,4 +68,31 @@ test("retirement manual dispatch builds, runs isolated Worker lifetime test and 
     assert.ok(workflow.indexOf(retirement) < workflow.indexOf("            - name: Stop isolated Testspace"));
     assert.ok(step("Stop isolated Testspace").includes("always()"));
     assert.ok(step("Upload isolated Testspace logs").includes("beta-matrix-retirement.log"));
+});
+
+
+test("browser and long-handoff optional suites use fresh AcceptanceFixture and do not join Testspace", () => {
+    const step = (name) => {
+        const start = workflow.indexOf("            - name: " + name + "\n");
+        assert.ok(start >= 0, "missing suite step: " + name);
+        const end = workflow.indexOf("            - name:", start + 1);
+        return workflow.slice(start, end === -1 ? workflow.length : end);
+    };
+    const build = step("Build isolated Testspace runtime");
+    for (const suite of ["browser", "handoff"]) {
+        assert.ok(build.includes("inputs.suite == '" + suite + "'"));
+        assert.doesNotMatch(step("Start isolated Control and Workers"), new RegExp("inputs\.suite == '" + suite + "'"));
+        assert.doesNotMatch(step("Stop isolated Testspace"), new RegExp("inputs\.suite == '" + suite + "'"));
+    }
+    const browser = step("Real Chromium browser Audit replay and Instance stop-start");
+    assert.ok(browser.includes("inputs.suite == 'browser'"));
+    assert.ok(browser.includes("pnpm acceptance:web 2>&1 | tee"));
+    const handoff = step("Real 190-second tmux handoff and recovery");
+    assert.ok(handoff.includes("inputs.suite == 'handoff'"));
+    assert.ok(handoff.includes("pnpm acceptance:tmux-handoff 2>&1 | tee"));
+    assert.match(step("Upload isolated Testspace logs"), /beta-matrix-browser\.log/u);
+    assert.match(step("Upload isolated Testspace logs"), /beta-matrix-handoff\.log/u);
+    const source = readFileSync(new URL("../acceptance/AcceptanceSupport.mjs", import.meta.url), "utf8");
+    assert.match(source, /createTestTempDirectory\("acceptance"\)/u);
+    assert.match(source, /await rm\(root, \{ force: true, recursive: true \}\)/u);
 });
