@@ -48,6 +48,8 @@
 
 这些验证全部使用隔离临时HOME、SQLite、模拟容器CLI或真实localhost接口，未接入已有生产实例。**尚未实测真实Docker/Podman容器引擎、Windows的JWKS hard-link/ACL和磁盘实际掉电。**原始RED及首次链失败证据在下文保留，不能再当作当前HEAD的失败。
 
+**最终交叉复测**：补充BF修复全部提交后，`pnpm lint`、`pnpm typecheck`（含20条Domain Import规则）全绿；全包矩阵 Exit 0，最新Mailing目标升级改动后另运行完整Comment默认套件 **205/205**；`pnpm test:scripts`为161通过、2跳过。真实 `node acceptance/run-chain-matrix.mjs --all` 重新完成 **L07、L05、L03、L01-L04四链，4/4 Exit 0，failures=[]**，各隔离Fixture清理成功。
+
 **完整链状态**：L01/L04真实Reverse Worker创建、Enroll、断线恢复、退休、同名重建已通过并完成清理。L03在全新临时HOME、真实CLI/MCP/Rust Worker/Chromium下完整退出码为**0**，其六条链分别涵盖工具执行、Web失败RPC恢复、Todo Revision/CAS、执行前Web Approval、Stream Gap和Control重启后持久化一致性；审批副作用恰好一次、重载可恢复、清理完成。另有独立Chromium测试在**尚无ToolCall历史行**时完成Approve与Deny，均通过。2026-10-20的四链聚合 `node acceptance/run-chain-matrix.mjs --all` 已实测 **4/4通过、Exit 0、failures=[]**（L07、L05、L03、L01-L04）。以上并不表示TUI实机、真实Docker/Podman或Windows行为已经完成验收。
 
 ## A. 实际复现且仍待修复

@@ -58,6 +58,8 @@ E7-01解除后，真实L03在前置 `ApprovalService` 审核阶段再次出现�
 
 **四链聚合已经真实通过：**2026-10-20在隔离Linux宿主运行 `node acceptance/run-chain-matrix.mjs --all`，退出码为**0**，报告 `FUNCTIONAL_CHAIN_MATRIX {"ok":true,"completed":4,"failures":[],"testedChains":["L07","L05","L03","L01-L04"]}`。L07验证真Worker Artifact取消恢复，L05完成真实180秒Wait及重启恢复，L03完成六段浏览器/CLI/MCP/SQLite一致性验证，L01/L04完成自管理Reverse删除及同名重建；各Fixture均已清理。该结论只覆盖此四条真实本机链，不代表跨机、Windows/Podman或ChatGPT Host已通过。L02、L06、L08仍由既有 `acceptance:mcp`、`testspace extension-smoke` 与 `upgrade-smoke` 支持。
 
+**补充修复后重新验收：**在BF-01～08（Config不确定提交、Container接管/生命周期、Todo状态、Mailing旧库兼容及OAuth JWKS并发）全部提交以后，同一条完整四链矩阵再次运行，仍然 **Exit 0、4/4 passed、failures=[]**。L03在新版Todo语义下明确报告 `replayNoRevisionChange=true`、`staleRejected=true`，Approval副作用一次；L05再次真实经过180秒Wait与两次Control重启；L01/L04再次完成真实Reverse同名重建和债务清理。脚本完整清理隔离Fixture。该复测不增加对Windows或真实Docker/Podman的覆盖声明。
+
 ### 安全与状态边界
 
 - 全部新链创建随机临时HOME、Runtime和独占Workspace，均不接触生产用户目录和当前运行实例。

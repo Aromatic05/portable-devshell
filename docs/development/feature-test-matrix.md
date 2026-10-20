@@ -374,3 +374,5 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | **E704 / L01/L04 Reverse** | Control真实创建 → Device Code → Rust Worker enroll → WSS → MCP Worker bash_run → SQLite → 停机拒绝 → Rust重连/不重播 → Control删除/补偿 → 同名重建 | 错误Device Code拒绝、新码成功；Worker停机时工具不可用、重连后副作用仍仅1次；Control不对自管理Reverse执行非法Start/Stop，公开Cleanup Debt重试/核对 | **修复后完整通过，Exit 0、Cleanup完成**：删除无旧代Pending债务；同名重建、新凭证Enroll、二次退休闭环通过 |
 
 **四链聚合实际验收4/4通过**：2026-10-20宿主 `node acceptance/run-chain-matrix.mjs --all` 退出0，结果 `ok=true, completed=4, failures=[]`；L07、L05、L03、L01-L04全部独立执行并清理。第七轮初次运行曾只有L07、L05闭环：L03发现Todo访问令牌桶阻断及后续Web执行前Approval入口缺失，L01/L04发现自管理Reverse删除Cleanup Debt断点；上表是修复后的实际复测结论，原始失败证据在对应验收台账保留。手动 `beta-matrix-extended` workflow新增`chains`选项，**不在PR强制门禁，也尚未在GitHub Runner实测**。全部链仅使用独立临时HOME与本机Worker，未触碰生产用户目录。跨机SSH/Podman、真实ChatGPT Host、Goal创建、原生完整TUI和24h TTL GC仍待独立验收。
+
+补充BF修复（详见 `beta-bug-findings.md`）提交后，完整矩阵**第二次从头运行仍4/4 Exit 0，全部Fixture清理成功**。新的无变化Todo更新不产生多余Revision，L03仍覆盖冲突CAS、Web执行前审批和重启持久化一致性。全仓默认包测试、lint、typecheck、脚本测试已通过；最后一笔Mailing旧目标Schema兼容补丁另以完整Comment **205/205**、TypeScript和lint再次验证。
