@@ -286,8 +286,8 @@ impl TerminalManager {
             .replay
             .front()
             .map(|frame| frame.seq)
-            .unwrap_or(state.latest_seq + 1);
-        if input.from_seq + 1 < oldest {
+            .unwrap_or(state.latest_seq.saturating_add(1));
+        if input.from_seq.saturating_add(1) < oldest {
             return Err(RpcError::new(
                 "stream.gap",
                 "Requested remote terminal output is no longer available.",
