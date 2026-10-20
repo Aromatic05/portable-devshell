@@ -43,6 +43,7 @@ import { runTestspaceWebSmoke } from "./testspace/TestspaceWebSmoke.mjs";
 import { runTestspaceUpdateSmoke } from "./testspace/TestspaceUpdateSmoke.mjs";
 import { runTestspaceUpgradeSmoke } from "./testspace/TestspaceUpgradeSmoke.mjs";
 import { runTestspaceRecoverySmoke } from "./testspace/TestspaceRecoverySmoke.mjs";
+import { runTestspaceRetirementSmoke } from "./testspace/TestspaceRetirementSmoke.mjs";
 import { runTestspaceWorkflowSmoke } from "./testspace/TestspaceWorkflowSmoke.mjs";
 import { runTestspaceWorkspaceSmoke } from "./testspace/TestspaceWorkspaceSmoke.mjs";
 import {
@@ -138,6 +139,9 @@ switch (command) {
         break;
     case "recovery-smoke":
         await recoverySmoke();
+        break;
+    case "retirement-smoke":
+        await retirementSmoke();
         break;
     case "workflow-smoke":
         await workflowSmoke();
@@ -485,6 +489,12 @@ async function upgradeSmoke(args) {
         diagnosticsOnly: args.includes("--diagnostics-only"),
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function retirementSmoke() {
+    const state = await requireRunningState();
+    const result = await runTestspaceRetirementSmoke({ runtimeDirectory: stateRuntimeDirectory(state) });
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
 async function recoverySmoke() {
@@ -1154,6 +1164,7 @@ function printCommands(state) {
             "Observe TUI:  pnpm testspace tui",
             "Open Web:     pnpm testspace web",
             "Recovery:     pnpm testspace recovery-smoke (dedicated Testspace only)",
+            "Retirement:   pnpm testspace retirement-smoke (dedicated Testspace only)",
             "Smoke Web:    pnpm testspace web-smoke",
             "Smoke Comment: pnpm testspace comment-smoke",
             "Smoke MCP App: pnpm testspace mcpapp-smoke",
@@ -1176,7 +1187,7 @@ function printUrls(state) {
 function usage(message) {
     process.stderr.write(`${message}\n`);
     process.stderr.write(
-        "Usage: pnpm testspace [start|recovery-smoke|comment-smoke|exec|long-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n",
+        "Usage: pnpm testspace [start|recovery-smoke|retirement-smoke|comment-smoke|exec|long-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n",
     );
     process.exit(2);
 }

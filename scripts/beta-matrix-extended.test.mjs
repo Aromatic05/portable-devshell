@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/beta-matrix-extended.yml", import.meta.url), "utf8");
-const suites = ["upgrade", "extension", "workflow", "recovery", "windows-psmux"];
+const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "windows-psmux"];
 
 test("extended beta verification is explicit, not a pull request gate", () => {
     assert.match(workflow, /workflow_dispatch:/u);
@@ -14,7 +14,7 @@ test("extended beta verification is explicit, not a pull request gate", () => {
 test("extended Testspace commands use private root and always attempt shutdown", () => {
     assert.match(workflow, /DEVSHELL_TESTSPACE_ROOT:\s*\$\{\{ runner\.temp \}\}\/beta-matrix-/u);
     for (const subcommand of [
-        "upgrade-smoke", "extension-smoke", "workflow-smoke", "approval-smoke", "mailing-smoke", "recovery-smoke",
+        "upgrade-smoke", "extension-smoke", "workflow-smoke", "approval-smoke", "mailing-smoke", "recovery-smoke", "retirement-smoke",
     ]) assert.ok(workflow.includes("pnpm testspace " + subcommand));
     assert.match(workflow, /pnpm testspace start --skip-build/u);
     assert.match(workflow, /if: always\(\).*inputs\.suite/u);
@@ -48,4 +48,24 @@ test("recovery manual dispatch builds, starts and always stops the dedicated Tes
     assert.match(step("Stop isolated Testspace"), /pnpm testspace stop/u);
     assert.match(step("Upload isolated Testspace logs"), /\$\{\{ runner\.temp \}\}\/beta-matrix-recovery\.log/u);
     assert.ok(workflow.indexOf(recovery) < workflow.indexOf("            - name: Stop isolated Testspace"));
+});
+
+
+test("retirement manual dispatch builds, runs isolated Worker lifetime test and always stops", () => {
+    const step = (name) => {
+        const start = workflow.indexOf("            - name: " + name + "\n");
+        assert.notEqual(start, -1, "Missing retirement step: " + name);
+        const end = workflow.indexOf("            - name:", start + 1);
+        return workflow.slice(start, end === -1 ? workflow.length : end);
+    };
+    for (const name of ["Build isolated Testspace runtime", "Start isolated Control and Workers", "Stop isolated Testspace"]) {
+        assert.ok(step(name).includes("inputs.suite == 'retirement'"), name + " missing retirement");
+    }
+    const retirement = step("Verify worker retirement after Control restart");
+    assert.ok(retirement.includes("inputs.suite == 'retirement'"));
+    assert.ok(retirement.includes("pnpm testspace retirement-smoke 2>&1 | tee"));
+    assert.ok(retirement.includes("beta-matrix-retirement.log"));
+    assert.ok(workflow.indexOf(retirement) < workflow.indexOf("            - name: Stop isolated Testspace"));
+    assert.ok(step("Stop isolated Testspace").includes("always()"));
+    assert.ok(step("Upload isolated Testspace logs").includes("beta-matrix-retirement.log"));
 });

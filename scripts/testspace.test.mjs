@@ -1252,3 +1252,48 @@ test("recovery real audit runtime drains logs on shutdown and reopens compressed
     assert.deepEqual(await runtime.api.logs.read({ callId: context.callId, ctxId: context.ctxId }), [...committed, next]);
     await runtime.close();
 });
+
+test("retirement-smoke remains manual and never prepares builds or runs for implicit default start", () => {
+    assert.deepEqual(resolveTestspaceInvocation(["retirement-smoke"]), {
+        command: "retirement-smoke", args: [],
+    });
+    assert.deepEqual(resolveTestspaceLaunchPlan(["retirement-smoke"]), {
+        command: "retirement-smoke", prepare: false, runtimeArgv: ["retirement-smoke"],
+    });
+    assert.equal(resolveTestspaceCommand("retirement-smoke"), "retirement-smoke");
+    assert.equal(resolveTestspaceCommand(undefined), "start");
+});
+
+test("retirement-smoke rejects unresolved local Worker cleanup even after config was deleted", async () => {
+    const { assertRetiredInstance } = await import("./testspace/TestspaceRetirementSmoke.mjs");
+    assert.throws(() => assertRetiredInstance({
+        name: "local-worker",
+        result: {
+            appliedChanges: [{ kind: "instance.deleted", target: "local-worker" }],
+            cleanupPending: true,
+            cleanupWarnings: ["Worker runtime retirement failed"],
+        },
+        debts: [{ instance: "local-worker", state: "pending", generationId: "old-generation" }],
+    }), /Worker runtime retirement failed/u);
+});
+
+test("retirement-smoke verifies old-Generation debt instead of hiding it behind a successful delete reply", async () => {
+    const { assertRetiredInstance } = await import("./testspace/TestspaceRetirementSmoke.mjs");
+    assert.throws(() => assertRetiredInstance({
+        name: "local-worker",
+        result: { cleanupPending: false },
+        debts: [{ instance: "local-worker", state: "pending", generationId: "still-live" }],
+    }), /pending generation debt/u);
+});
+
+test("retirement-smoke permits unrelated debts and keeps orphaned records observable", async () => {
+    const { assertRetiredInstance } = await import("./testspace/TestspaceRetirementSmoke.mjs");
+    assert.doesNotThrow(() => assertRetiredInstance({
+        name: "local-worker",
+        result: { cleanupPending: false },
+        debts: [
+            { instance: "other-worker", state: "pending", generationId: "other" },
+            { instance: "local-worker", state: "orphaned", generationId: "orphan" },
+        ],
+    }));
+});
