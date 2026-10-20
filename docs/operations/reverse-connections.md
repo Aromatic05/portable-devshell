@@ -1,8 +1,8 @@
 # 反向 Worker 连接协议
 
-版本：1
+实现审计基线提交：`2287310a`（beta.1）。Frame wire v1；Reverse WSS 支持 Carrier v1/v2，当前优先协商 v2。
 
-Reverse 定义的是 Worker 主动连接 Control 的 **Carrier / Channel** 行为。连接建立后，应用层统一使用 [Transport Frame v1](../development/transport-protocol.md)：一条 Reverse Channel 上 multiplex `worker.rpc`、Artifact、TCP、process 等 Service，不存在第二套 Reverse RPC wire protocol。
+Reverse 定义的是 Worker 主动连接 Control 的 **Carrier / Channel** 行为。连接建立后，统一使用 [Transport 协议](../development/transport-protocol.md)：Channel → Frame v1 的单一 `envelope` Service → 带 source/destination 地址的 Protobuf Envelope → Rpc/Event/Stream Packet。RPC、Artifact、TCP 和 process 在 port / Packet 层复用，不存在第二套 Reverse RPC wire protocol。
 
 ## 拓扑
 
@@ -20,7 +20,10 @@ Worker daemon
                                  Channel bytes
                                        │
                                        ▼
-                                   Frame v1
+                          Frame v1：一个 envelope stream
+                                       │
+                                       ▼
+                          Envelope → Port → Packet
 ```
 
 WSS 与 SSE+POST 只是不同 Carrier 实现；向 Frame 层提供相同的可靠、有序 Channel byte service。底层 message / SSE event boundary 不属于 Frame wire contract。
@@ -33,7 +36,7 @@ WSS 与 SSE+POST 只是不同 Carrier 实现；向 Frame 层提供相同的可�
 - device token 是随机 bearer credential，Control 只保存其 SHA-256；
 - device token 不接受 URL query string 传递；
 - token 可以轮换或撤销；
-- 每次活动 Reverse Channel 使用单调递增的 positive generation。
+- Worker 正常重连分配更高 positive generation；凭据替换存在下文所述的 admission 例外。
 
 ## 生命周期
 
@@ -45,23 +48,33 @@ devshell-worker start --instance <name>
 
 Control 不对 `selfManaged` instance 执行 `start` 或 `stop`。需要停机、重启或应用要求 worker rebuild 的配置时，由目标机器管理 worker 生命周期。
 
+永久清理远端本地实例时，由目标机器 owner 依次执行：
+
+```text
+devshell-worker stop --instance <name>
+devshell-worker retire --instance <name>
+```
+
+`retire` 要求 daemon 已停止；它退役 tmux runtime，并删除配置、Artifact 和日志。普通 stop 不等于 retire；删除 Control 上的 Reverse 注册也不会代替这些远端清理步骤。
+
 Reverse 状态与 daemon 状态分开：
 
 ```text
 enrollment    pending | enrolled | revoked
 availability  offline | online
 transport     wss | sse
-generation    当前活动 Channel 的单调递增正整数
+generation    当前活动 Channel 的正整数（普通重连递增）
 ```
 
 ## 注册流程
 
-1. `control.createReverseDeviceCode(instance)` 创建单次 device code；
-2. worker 向 `POST /reverse/v1/enroll` 提交 code 和平台元数据；
-3. Control 原子消费 code，返回 instance、controller URL 和新 device token；
-4. worker 以 `0600` 权限把实例配置和凭据写入 `~/.devshell/<instance>/`；
-5. worker 把当前二进制安装到 `~/.devshell/workers/<target>/<sha256>/`，更新 `~/.devshell/bin/devshell-worker`，再启动 daemon；
-6. 重复使用、过期或已消费的 code 必须失败。
+1. CLI 请求 Control 的 `@control / connection / createCode`，消息为 `{ "instance": "<name>" }`，取得单次 device code；
+2. Worker 向 `POST /reverse/v1/enroll` 提交 code 和平台元数据；
+3. Control 原子消费 code，返回 instance、controller URL 和新 device token；重复使用、过期或已消费的 code 失败；
+4. Worker 先准备当前二进制，安装到 `~/.devshell/workers/<target>/<sha256>/` 并更新 `~/.devshell/bin/devshell-worker`；
+5. Worker 停止已有 daemon，退役该 instance 的 tmux runtime，再保留原用户配置并更新 Reverse 凭据，以 `0600` 写入配置，启动 daemon。
+
+**重新注册会终止已有持久 pane/task runtime**，不同于普通 Worker restart 的接续流程。用户配置、日志和 Artifact 按实现保留；本地安装失败会尝试恢复旧配置与先前运行状态，但不能据此承诺已经退役的 pane/task 恢复。
 
 CLI 流程：
 
@@ -86,7 +99,9 @@ devshell-worker enroll --controller <publicBaseUrl> --device-code <code> \
 
 worker 每次建立新的 Reverse Channel 前分配更高 generation。generation 持久化在 instance `state/reverse-generation`，并取 configured value、已持久化 value 与当前时间的单调上界，因此 daemon 重启或时钟回退不会回用旧 generation。
 
-Control 只接受高于当前已知 generation 的连接。新的 generation 成功激活后原子替换旧 Channel；旧 Channel 被关闭。token 轮换、撤销或重新注册成功后，旧活动 Channel 也立即失效。
+普通候选的 generation 必须高于当前**活动**连接；这不是 Control 持久化的历史最大值。经过认证的 credential replacement 可以绕过此比较。候选通过应用握手及 peer promotion 后才替换活动 Channel，随后关闭旧 Channel。
+
+重新注册签发新 token 时，Control 暂时保留前一个 token，直到替代凭据成功激活才提交切换；不能把 code 消费成功写成旧连接立即失效。显式 token 轮换或撤销则会立即断开旧连接。预期候选失败应保留前驱可用性，当前 WSS watermark 偏差见下文。
 
 generation 只标识物理 Reverse Channel 生命周期，不是 Frame stream sequence，也不提供 logical stream resume。
 
@@ -104,12 +119,27 @@ GET /reverse/v1/connect
 Authorization: Bearer <device token>
 X-Devshell-Instance: <instance name>
 X-Devshell-Generation: <positive integer>
-Sec-WebSocket-Protocol: devshell-worker-transport.v1
+Sec-WebSocket-Protocol: devshell-worker-transport.v1, devshell-worker-transport.v2
 ```
 
 没有 `control` / `bulk` lane header，也不按 RPC method 选择物理连接。
 
-WebSocket binary message 承载 Channel bytes；text message 被拒绝。当前 writer 通常一次 `Channel.write()` 产生一个 binary message，但 Frame decoder 不依赖 WebSocket message boundary。
+Worker 提供两个 subprotocol；Control 优先选择 `devshell-worker-transport.v2`。v2 的 Worker→Control binary record 为：
+
+```text
+"DSR2" (4 bytes) | session UUID (16 raw bytes) | seq (u64 big-endian) | Frame bytes
+```
+
+Control→Worker binary message 继续携带 Channel bytes，不添加这个 record header。v2 还包含 Control→Worker text 控制消息：
+
+```text
+DSR2:ready
+DSR2:<session 的 32 位十六进制表示>:<seq 的十进制表示>
+```
+
+`ready` 在应用 activation 及凭据提交之后发送；HTTP 101 本身不表示可用。ACK 确认当前 session 已接受的连续 Worker→Control record；相同 session 的旧 seq 只确认、不重复投递，gap 被拒绝，新 session 必须从 1 开始。Worker 保留有界未确认队列，只有有效 ACK 才移除记录；ACK 不是 RPC 完成确认。
+
+协商 v1 时 binary message 直接承载 Channel bytes，text 被拒绝；Worker 收到有效远端 Frame 后才标记 connected。两种 Carrier 模式都使用 Frame v1。Frame decoder 不依赖 WebSocket message boundary。
 
 Frame role 固定为：
 
@@ -130,7 +160,7 @@ Worker  = acceptor
 GET /reverse/v1/events
 ```
 
-使用同样的 Authorization、instance 与 generation header。SSE event：
+使用同样的 Authorization、instance 与 generation header（不发送 WebSocket subprotocol header）。SSE event：
 
 ```text
 id: <downstream sequence>
@@ -161,51 +191,38 @@ SSE 响应禁用代理转换/缓冲，并每 15 秒发送 comment heartbeat。wo
 
 同一 generation 只有一个活动 Reverse Channel；worker 不同时保持 WSS 与 SSE 两套逻辑连接。
 
-## Frame 与 Service
-
-Reverse Channel 建立后直接承载 Frame v1：
+## Frame、Envelope 与 daemon 桥接
 
 ```text
-Reverse Channel
+Reverse WSS / SSE+POST Channel
       │
       ▼
-Frame OPEN / DATA / WINDOW / FIN / RESET
+Frame：OPEN(envelope) / DATA / WINDOW / FIN / RESET
       │
-      ├─ worker.rpc
-      ├─ network.tcp
-      ├─ process.exec
-      ├─ artifact.payload
-      └─ artifact.receive
+      ▼
+Protobuf Envelope：source(host, port) / dest(host, port) / packet
+      │
+      ▼
+Rpc / Event / Stream
+      ├─ core、tool、terminal RPC
+      ├─ artifact：payload.read / receive.write Stream
+      ├─ network：tcp Stream
+      └─ process：exec Stream
 ```
 
-Worker Reverse connector 在 Service 边界只保留一个特殊路径：`worker.rpc` 接入 `ReverseRpcPayload`，因为 RPC 自己拥有跨 generation request replay / dedupe。其它 Service Frame 原样桥接到 daemon `transport` endpoint，由和 controller-managed Worker 相同的 Service dispatcher 处理。
+Reverse connector 将整条字节连接桥接到 daemon transport endpoint，使用与受管 Worker 相同的 Endpoint dispatcher；RPC 没有独立特殊桥接路径，也不另外实现 Artifact/TCP/process。
 
-因此 Reverse 不拥有第二套 Artifact/TCP/process 实现。
+## 断线、恢复与已知偏差
 
-## 断线与恢复
+连接断开后，现有 Packet Stream 失败；Frame 不 replay DATA、不恢复 streamId。下一条连接创建新的 Frame/Envelope stream、WSS session 和序号，ReverseBridge 清理旧 pending/inflight Frame。SSE sequence 或 DSR2 ACK 的去重都不能解释成跨 generation 的业务执行 exactly-once。
 
-Channel 断开时，当前 generation 的所有 Frame logical stream 立即失败。Frame 不 replay DATA，也不恢复 streamId。
+未收到回复的 RPC 可能已经执行成功。当前 TS Rpc 返回 `rpc.resultUncertain`，`retryable: false`；未完成请求不会在新 generation 上无条件重放。调用者应先检查任务或业务状态，再决定是否发起新操作。持久 terminal 的业务 replay/cursor 与重连后重新 attach 是独立契约，不代表旧 transport Stream 恢复。
 
-普通 Service：
+预期安全契约：验证失败或超时的候选应留下仍可工作的前驱，只有成功 promotion 才退休旧链路。
 
-```text
-network.tcp
-process.exec
-artifact.payload
-artifact.receive
-```
+**KNOWN 未解决偏差（beta.1）**：`ReverseIngress.#acceptedWss` 按 descriptor 保存 reliable session/generation watermark，并在候选应用握手完成前更新；候选失败未回滚此 watermark。有效的更高 generation 候选先发送被接受的 reliable record、再拒绝握手时，旧连接可能仍显示 ready，但下一次 RPC reply 会被 `Stale reverse generation frame.` 拒绝，并产生 `rpc.resultUncertain`。不能把“保留前驱对象”描述成已经保证前驱 RPC 可用。
 
-断线后由调用者决定是否重新执行操作。
-
-`worker.rpc` 的恢复语义不同，因为它属于 RPC Protocol：Control 的 `WorkerRpcBridge` 保留未完成 request；更高 generation 建立后，通过新的 `worker.rpc` stream 以原 request identity 重放。worker 端 `ReverseRpcPayload` 维护 in-flight request 集合和有界 terminal-response cache：
-
-- 活动期间相同 request frame 合并；
-- replay cache 保留期间，已完成的相同 request 直接返回第一次 terminal response，不区分成功或失败；
-- cache key 包含 request ID 与完整请求 digest；
-- transport replay 不重新进入 Executor；业务层若需要 semantic retry，必须发起新的 logical request；
-- `tool.call.cancel` 仍可在长工具执行期间被并发处理。
-
-这提供的是**有界 replay horizon 内的 Worker RPC request 级** replay / dedupe，不是 Reverse/Frame raw-byte exactly-once，也不是跨任意历史长度的永久 exactly-once。
+可追踪复现入口为 [ReverseCandidateFailurePoisonsPreviousRound6.test.ts](../../test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts)，配套 `ReverseNetworkRound6Fixture.ts`。无 MemorySocketBoundary 时测试会使用 localhost TCP；受限 sandbox 可能因 EPERM 无法创建监听。本次文档修订只核对源码，未重新运行该红测。此偏差不是目标行为。
 
 ## 当前默认参数
 
@@ -219,14 +236,15 @@ SSE read timeout                      45 秒
 SSE comment heartbeat                 15 秒
 HTTPS POST timeout                    30 秒
 注册/上行 JSON body 上限              1 MiB
-Worker RPC terminal-response cache    1024 条
+WSS 未确认出站 Frame 队列上限          64 条
+Control 候选 activation timeout        20 秒
 ```
 
 这些是当前实现默认值，不属于 Frame wire-level 兼容性要求。
 
 ## Carrier 路由与 Proxy
 
-Reverse 自己的出站路径属于 Carrier 层，不复用 `network.tcp` Service。
+Reverse 自己的出站路径属于 Carrier 层，不复用 `network / tcp` Packet Stream。
 
 显式 `proxyUrl` 当前支持匿名：
 
@@ -275,23 +293,23 @@ reqwest 已启用 `socks` feature，所以这些环境变量也可以使用 SOCK
 
 - OS routing、Tailscale、WireGuard、透明代理等对两种 carrier 都透明；
 - `proxyUrl` 只控制 Reverse Carrier 如何建立 Channel；
-- proxy 信息不进入 Frame OPEN，也不进入 `network.tcp` metadata；
-- 若未来增加 proxy authentication 或 HTTPS proxy，应继续扩展 Reverse Carrier，而不是引入新的 Frame / Service route 语义。
+- proxy 信息不进入 Frame OPEN，也不进入 `network / tcp` open message；
+- 若未来增加 proxy authentication 或 HTTPS proxy，应继续扩展 Reverse Carrier，而不是引入新的 Frame / Packet route 语义。
 
 ## 验收要求
 
-Reverse integration 必须至少覆盖：
+以下是验收要求，不表示本次修订已运行或全部通过；尤其候选失败保留前驱的要求目前有上述 KNOWN red regression：
 
 - WSS 鉴权与更高 generation 原子替换；
-- real Reverse WebSocket 经显式 HTTP CONNECT `proxyUrl` 建立后继续完成完整 Frame/Service 流程；WSS 使用同一预连接 tunnel + `client_tls()` 路径；
+- real Reverse WebSocket 经显式 HTTP CONNECT `proxyUrl` 建立后继续完成完整 Frame/Envelope/Packet 流程；WSS 使用同一预连接 tunnel + `client_tls()` 路径；
 - SSE+POST fallback 和 upstream sequence dedupe；
 - real Rust reverse worker tool call；
-- Control restart 后 RPC/terminal 恢复；
-- sibling Service 与 `worker.rpc` 共用一个 Channel；
-- `network.tcp` 上真实 HTTP request/response；
-- `process.exec` stdin/stdout；
+- Control restart 后新 RPC 可用、旧 RPC uncertain 与 terminal 重新 attach；
+- RPC 与多个 Packet Stream 共用一个 Channel；
+- `network / tcp` 上真实 HTTP request/response；
+- `process / exec` stdin/stdout；
 - Artifact raw data plane；
-- re-enroll 复用持久 credential；
+- re-enroll 凭据 promotion、失败保留前驱实际 RPC 可用性及 tmux runtime 退役；
 - worker 退出后 instance 回到 offline。
 
 ## 错误码

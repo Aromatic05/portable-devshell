@@ -61,13 +61,16 @@ portable-devshell 不尝试把 PowerShell 5.1 和 PowerShell 7 的语法差异�
 
 ## Worker IPC
 
-每个 Windows worker instance 使用独立 Named Pipe：
+每个 Windows Worker instance 使用两条独立 Named Pipe：
 
 ```text
-\\.\pipe\devshell-worker-<user>-<instance>
+RPC:       \\.\pipe\devshell-worker-<user>-<instance>-<runtime-hash>
+Transport: \\.\pipe\devshell-worker-<user>-<instance>-<runtime-hash>-transport
 ```
 
-wire protocol 与 Unix 完全相同，仍然是四字节大端长度前缀加 JSON payload。Named Pipe 只是 transport 替换，不引入第二套 RPC 协议。
+`<user>` 是规范化后的用户名；`<runtime-hash>` 是规范化 runtime directory 路径的 BLAKE3 前 16 个十六进制字符，用来隔离不同 runtime root。不能只按用户名与 instance 拼出旧 pipe 名。路径由 `crates/devshell-worker/src/transport/endpoint/channel/paths.rs` 统一解析。
+
+直接 RPC pipe 使用四字节大端长度前缀 JSON；transport pipe 使用与 Unix `transport.sock` 相同的 [Transport 协议](../development/transport-protocol.md)：Channel → Frame v1 单一 `envelope` Service → 带 source/destination host/port 的 Protobuf Envelope → Rpc/Event/Stream Packet。二进制 Stream DATA 不编码成 JSON/base64。两条 pipe 由 daemon 分别监听，不能把直接 RPC 编码套用于所有 Worker 连接。
 
 ## 发布 target
 

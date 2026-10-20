@@ -8,46 +8,45 @@ Artifact 在 MCP 上只保留图片查看 primitive：
 artifact_viewImage
 ```
 
-`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。`bash_run` 会为超过 recovery 阈值或已经被 Worker 截断的 stdout/stderr 使用内部 ArtifactStore 保留完整输出，并返回 `/.devshell/tool-results/<id>/<stdout|stderr>` 形式的只读路径；模型通过普通 `file_read` 按需读取，不存在独立的 Artifact 文本读取工具。
+`artifact_viewImage` 由 control 提供，并合并到实例 MCP endpoint 的固定工具 catalog。分享和跨实例传输属于 Artifact Extension command，不再作为 MCP tool 暴露。`bash_run` 会为超过 recovery 阈值或已经被 Worker 截断的 stdout/stderr 使用内部 ArtifactStore 保留可恢复输出（仍受 Artifact 存储上限约束），并返回 `/.devshell/tool-results/<id>/<stdout|stderr>` 形式的只读路径；模型通过普通 `file_read` 按需读取，不存在独立的 Artifact 文本读取工具。
 
 本地用户通过 `devshell artifact ...` 使用 Artifact native Extension command。模型要调用同一 domain，必须先由当前 instance 的 `[extensions].model` 允许 `artifact`，然后在 `bash_run` / `tmux_run` 中通过 Context-bound `devshell artifact ...` 调用；不存在从 model command 到 builtin CLI 的 fallback。
 
 ## 图片查看
 
-`artifact_viewImage` 必须且只能接受 `path` 或 `handle` 之一，来源 instance 默认是当前 MCP endpoint 对应的 instance。它通过已有 `artifact.payload.open/read/close` 协议读取来源，因此本地、SSH、容器和反向连接实例不需要新增 worker RPC。
+`artifact_viewImage` 必须且只能接受 `path` 或 `handle` 之一，来源 instance 默认是当前 MCP endpoint 对应的 instance。它通过 Worker 的 `artifact` port 读取来源：RPC `artifact.payload.open` 建立 payload lease，Stream `payload.read` 传二进制数据及 close metadata，RPC `artifact.payload.close` 释放 lease。本地、SSH、容器和反向连接共用此路径。
 
 支持 PNG、JPEG、GIF 和 WebP；格式依据文件魔数判断，不信任扩展名。SVG、目录、空文件、未知格式以及超过 10 MiB 的图片会被拒绝。成功结果包含原生 MCP `ImageContent` 和不含图片字节的结构化元数据；payload lease 无论成功或失败都必须关闭。
 
-Control 同时把已验证的图片按 BLAKE3 内容寻址保存到 `~/.devshell/control/artifacts/images/<hash-prefix>/<hash>.<ext>`。结构化结果只记录 `imageRef`、`blake3`、大小、媒体类型、名称和原始 source；Audit SQLite 不保存 base64 图片正文。Web/TUI 在查看历史 ToolCall 时通过内部 `artifact.readImage(imageRef)` 按需读取该快照，因此原始文件删除或来源 instance 离线后仍可查看已经审计过的图片。
+Control 同时把已验证的图片按 BLAKE3 内容寻址保存到 `~/.devshell/control/artifacts/images/<hash-prefix>/<hash>.<ext>`。结构化结果只记录 `imageRef`、`blake3`、大小、媒体类型、名称和原始 source；Audit SQLite 不保存 base64 图片正文。Web/TUI 在查看历史 ToolCall 时通过内部 `@control / artifact / readImage` RPC（消息携带 `imageRef`）按需读取该快照，因此原始文件删除或来源 instance 离线后仍可查看已经审计过的图片。
 
 ## 内容、引用与租约
 
-Artifact 字节内容与对外暴露的短期 handle 分离保存：
+Worker ArtifactStore 按 handle 保存 stdout/stderr 数据与 metadata，payload lease 独立持久化。当前字段如下（不是独立 `contentId`/reference-count 数据库模型）：
 
 ```text
-ArtifactContent
-  contentId
-  bytes
-  blake3
-  referenceCount 由持久化租约推导
-
-ArtifactReference
+ArtifactReference（工具结果中的引用）
   handle
-  contentId
-  expiresAt
-  state: active | expired | revoked
+  stream: stdout | stderr
+  sourceBytes
+  storedBytes
+  artifactTruncated
+  blake3
+  expiresAtMs
 
-ArtifactLease
+ArtifactMetadata（Worker 持久化记录）
+  version + ArtifactReference 的字段 + createdAtMs
+
+ArtifactLeaseMetadata（Worker 持久化租约）
+  version
   leaseId
-  contentId
-  ownerType: reference | share | transfer
-  ownerId
-  expiresAt
+  handle
+  expiresAtMs
 ```
 
-Artifact 引用过期或被撤销后立即不可访问，即使底层内容尚未删除。只有所有持久化租约都消失后，物理内容才可以删除。分享和传输任务必须先原子取得自己的租约，再返回成功。
+`sourceBytes` 与 `storedBytes` 可不同；`artifactTruncated` 表示 Artifact 本身也可能受存储上限截断，不能承诺所有原始输出都完整保留。handle 过期后不能再取得新 lease；已取得的有效 lease 继续保护数据。Worker 从磁盘 lease metadata 重建按 handle 的内存 lease index，清理时同时考虑引用期限和有效 lease。
 
-control 重启后从持久化租约重建引用计数；单独维护的可变计数器不具有权威性。
+Control 的 share/transfer 持有 Worker payload lease，path 来源则先稳定成 payload snapshot。分享撤销/过期与 transfer 终态负责释放各自资源；这些业务状态不应写成 Worker ArtifactReference 的 `active | expired | revoked` schema。
 
 ## 分享
 
@@ -61,7 +60,7 @@ path
 来源 instance 由 CLI 显式指定。只有 payload 已经稳定后才能创建分享：
 
 - stdout/stderr Artifact：取得内容租约；
-- 普通文件：优先创建 reflink 快照，不支持时复制；
+- 普通文件：复制并计算哈希，形成稳定快照；
 - 目录：生成一个确定性的 `.tar.zst` payload。
 
 分享支持 TTL、显式撤销和可选的成功下载次数上限 `maxDownloads`。成功 GET/Range 下载会增加 `downloadCount`；HEAD、认证失败和无效 Range 不消耗次数。达到上限后 share 进入 `exhausted`，后续下载返回 HTTP 410。
@@ -80,7 +79,7 @@ Cache-Control: private, no-store
 Referrer-Policy: no-referrer
 ```
 
-`HEAD` 不改变分享状态。撤销通过 control RPC、CLI 或 TUI 完成，不新增第四个 MCP 工具。
+`HEAD` 不改变分享状态。撤销通过 control RPC、CLI 或 TUI 完成，不新增分享或传输 MCP 工具。
 
 ## 异步传输
 
@@ -127,7 +126,7 @@ artifactDirectTransfer = true
 
 这个 fast path 使用 Worker 之间的明文 HTTP，只应该在由用户确认可信的 VPC、Tailscale/WireGuard overlay 或等价私网中启用。默认 `false` 时，无论 Worker 是否支持 direct RPC，payload bytes 都继续经 Control relay。
 
-启用后，目标 Worker 为当前 receive 临时打开一个随机 bearer path 的 HTTP receiver，来源 Worker 直接把 raw payload chunk 推到该 receiver；Control 只传递 receiver URL、offset 和 chunk 大小，不再中转 base64 payload 字节。临时 receiver 最长存活 10 分钟，Control 默认申请 5 分钟，并在 transfer 完成或回退时显式关闭。
+启用后，目标 Worker 为当前 receive 临时打开一个随机 bearer path 的 HTTP receiver，来源 Worker 直接把 raw payload chunk 推到该 receiver；Control 只传递 receiver URL、offset 和 chunk 大小，不再中转 payload 字节（当前 relay 使用二进制 Packet Stream，同样没有 base64 payload）。临时 receiver 最长存活 10 分钟，Control 默认申请 5 分钟，并在 transfer 完成或回退时显式关闭。
 
 direct receiver 只广告 loopback、RFC1918、link-local 和 `100.64.0.0/10` overlay 地址，不广告 hostname 或公网地址。若两个 Worker 不在可直接互通的私网 / overlay、目标 Worker 版本较旧，或任意 direct chunk 失败，Control 会关闭 receiver、abort 当前 receive、重新 begin 一个干净 receive，然后自动回落到原有 Control relay。取消和 Control shutdown 不会被当成网络失败触发回落。
 
@@ -197,46 +196,44 @@ xattr
 
 每个 manifest 条目包含类型、相对路径、mode、大小、修改时间；普通文件还包含自己的 BLAKE3。接收端必须在 commit 前同时验证两个校验值。
 
-## 隐藏的 `host` 伪 instance
+## Worker 数据面
 
-只有 Artifact 来源和目标解析认识精确字符串 `host`。它不是合法的受管 instance 名，不出现在实例发现结果中，不写入 MCP schema，也没有 MCP endpoint 或生命周期操作。
+所有 Worker transport 连接都在唯一 Frame `envelope` Service 上承载 Protobuf Envelope；Artifact 使用 `artifact` port，不单独打开 Artifact Frame Service。
 
-用户必须显式要求 Agent 使用 `host`。工具说明不会主动暴露这一能力，但这种知识边界不能替代实际安全校验。
+| 操作 | 类型与名称 | 完成边界 |
+| --- | --- | --- |
+| 建立/关闭下载 lease | RPC `artifact.payload.open` / `artifact.payload.close` | RPC reply |
+| 下载 chunk | Stream `payload.read`，open message 为 `{ payloadId, offsetBytes, maxBytes }` | binary DATA 后的 close metadata |
+| 建立接收 | RPC `artifact.receive.begin` | RPC reply |
+| 上传 chunk | Stream `receive.write`，open message 为 `{ receiveId, offsetBytes }` | 发送 binary DATA、Packet Stream FIN，然后等 close metadata |
+| 校验并提交/放弃 | RPC `artifact.receive.finish` / `artifact.receive.abort` | RPC reply |
 
-### `host` 作为来源
+下载 bytes 前没有八字节长度 header。close message 提供 `payloadId`、`offsetBytes`、`returnedBytes`、`totalBytes`、`eof` 和可选 `nextOffsetBytes`；Core 校验 DATA 总字节数等于 `returnedBytes`。上传 close message 提供 `receiveId`、累计 `receivedBytes` 和 `nextOffsetBytes`，不代替最终 `finish` 的校验与 commit。
 
-当 path 来源的 `instance = "host"` 时，路径从运行 control 的机器读取。Artifact handle 不能使用 `host`，因为 handle 属于具体 worker 的 Artifact store。
+Packet Stream FIN 与底层 Frame FIN 不同；后者结束整条 Envelope 链路。连接丢失且尚未收到 RPC reply 时，结果可能已经提交，返回 `rpc.resultUncertain`、`retryable: false`，不会跨 generation 自动重放；先查询 transfer/接收状态再决定后续操作。完整协议见 [Transport 通信协议](../development/transport-protocol.md)。
 
-host 来源访问使用受管 authority instance 的有效 `security.mode`：
+## 内部 host bridge
 
-- `disabled`：不增加 workspace 边界，但仍拒绝符号链接以及非文件、非目录来源；
-- `workspace`：仅当 authority instance 使用 local provider，且请求路径位于本次请求显式提供的本地 workspace 内时允许。远程或容器上的 workspace 不能被当作 control host 路径。
+`host` 是 Artifact 内部解析使用的伪 instance，不是受管 instance，没有 MCP endpoint、发现结果或 daemon 生命周期。**当前不向普通 CLI、模型或 TUI 开放通用 `host` 来源/目标访问。** 提供真实受管 instance 作为 `--authority` 也不能授权这条路径；用户显式请求 Agent 使用 `host` 同样不会绕过此限制。
 
-当前 MCP endpoint 对应的 instance 默认充当 authority instance。CLI/TUI 使用 `host` 时也必须提供或推导出一个真实受管 authority instance。host 访问事件写入该 authority instance；`host` 本身永远不会成为 instance。
+当前 `ArtifactRuntime.transferHostPath()` 为内部 host-path → Worker 传输临时注册随机 `@host-artifact:…` authority，任务结束后移除。只有此集合中的 authority 才能由 `#resolveEndpoint("host", authority)` 获得内存中的 host store adapter；它不是隐式本地 Rust Worker。内部调用以 local / disabled 模式使用该 adapter，不能推广为依据当前 MCP instance 的 security mode 开放 host 文件系统。
 
-### `host` 作为目标
-
-当 `targetInstance = "host"` 时，目标始终重定向到 control 用户的 `~/Download` 目录。
-
-`targetPath` 只用于建议最终 basename，父路径组件会被丢弃，最终对象必须是 `~/Download` 的直接子项。basename 无效时使用来源默认名称。
-
-host 接收端相对于已打开的 Download 根目录写入或解包，拒绝最终符号链接目标，校验内容，并通过根目录内的临时项完成 commit。
+bridge 内仍有 host 接收至 `~/Download`、收窄 basename 及安全 commit 的实现，但普通管理入口不能据此使用 `targetInstance = "host"`。未来若要开放，应单独定义公开授权契约；当前 schema/解析器可识别字符串不等于已经授权。
 
 ## Control RPC 接口
 
-CLI 和 TUI 使用以下生命周期操作：
+CLI 和 TUI 请求 host `@control`、port `artifact` 上的以下 RPC method；这些是地址与操作名，不是 `control.artifact.*` method 字符串：
 
 ```text
-control.artifact.createShare
-control.artifact.listShares
-control.artifact.revokeShare
-control.artifact.startTransfer
-control.artifact.getTransfer
-control.artifact.listTransfers
-control.artifact.cancelTransfer
+createShare
+revokeShare
+startTransfer
+getTransfer
+cancelTransfer
+snapshot
 ```
 
-这些 RPC 不增加新的 MCP 工具名。
+`snapshot` 返回分享与传输列表；当前 wire 不提供 `listShares` / `listTransfers` method。实时订阅使用 Stream `subscribe`（消息 `{ fromSeq }`），不是 RPC。图片管理另有 `viewImage` / `readImage` RPC。这些操作不增加新的 MCP 工具名。
 
 ## CLI
 
@@ -264,4 +261,4 @@ Artifact 活动显示在 Instances 页对应 instance box 内，不新增顶层�
 取消传输
 ```
 
-两个操作都使用现有确认对话框，默认焦点位于取消按钮。TUI 启动时从 control 拉取已持久化的分享和传输列表，之后通过每实例 `artifact.*` stream event 更新完整记录。
+两个操作都使用现有确认对话框，默认焦点位于取消按钮。TUI 启动时从 control 拉取已持久化的分享和传输列表，之后通过 `artifact` port 的 `subscribe` Packet Stream 接收记录更新。
