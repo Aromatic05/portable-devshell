@@ -3,9 +3,9 @@ import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { createToolCallTargetTransport, type ToolCallDispatchRequest } from "@portable-devshell/shared";
-import { barrier } from "../../packages/core/test/unit/tool/Round4Harness.ts";
-import { round4Control } from "../../packages/control/test/integration/server/transport/Round4Harness.ts";
-import { durableCalls } from "../../packages/core/test/unit/tool/Round6AuditFixture.ts";
+import { barrier } from "../../../../../core/test/unit/tool/Round4Harness.ts";
+import { round4Control } from "./Round4Harness.ts";
+import { durableCalls } from "../../../../../core/test/unit/tool/Round6AuditFixture.ts";
 
 test("round6 RED: duplicate active callId rejection must not overwrite the original caller audit ownership", { timeout: 10_000 }, async (t) => {
     const h = await round4Control(); t.after(() => h.close());
@@ -36,4 +36,9 @@ test("round6 RED: duplicate active callId rejection must not overwrite the origi
     assert.equal(records[0]!.requestId, "original-request");
     assert.equal(records[0]!.status, "completed");
     assert.deepEqual(records[0]!.output, { original: true });
+    // The reservation has ended, but the durable identity must still remain
+    // unique. A later call using this ID cannot replace the stored record.
+    await assert.rejects(target.dispatch(request), /already reserved/);
+    assert.equal(await readFile(path, "utf8"), "once\n");
+    assert.deepEqual(await durableCalls(h), records);
 });

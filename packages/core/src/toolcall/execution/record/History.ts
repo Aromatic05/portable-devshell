@@ -53,6 +53,10 @@ export class ToolCallHistory {
         status: ToolCallRecord["status"] = "running",
         input?: JsonValue,
     ): Promise<void> {
+        // An audit identity may have only one owner, both while running and
+        // after the terminal record was committed.
+        if (this.#activeCalls.has(callId) || this.#store.hasCall(callId))
+            throw new Error(`Tool call ${callId} is already reserved.`);
         this.#activeCalls.set(callId, {
             callId,
             ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),

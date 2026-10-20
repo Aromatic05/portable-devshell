@@ -271,9 +271,24 @@ function toolCallFailure(error: unknown): JsonValue {
             code: failure.code,
             message: failure.message,
             retryable: failure.retryable,
+            ...toolCallExecutionDetails(failure.details),
         },
         result: null,
     } as unknown as JsonValue;
+}
+
+function toolCallExecutionDetails(details: JsonValue | undefined): { details?: JsonValue } {
+    if (details === undefined || details === null ||
+        typeof details !== "object" || Array.isArray(details)) return {};
+    const record = details as Record<string, JsonValue>;
+    const safe: Record<string, JsonValue> = {};
+    if (typeof record.executionCompleted === "boolean")
+        safe.executionCompleted = record.executionCompleted;
+    if (record.failureStage === "postExecution" || record.failureStage === "outboundHook")
+        safe.failureStage = record.failureStage;
+    if (typeof record.callId === "string" && record.callId.length <= 128)
+        safe.callId = record.callId;
+    return Object.keys(safe).length === 0 ? {} : { details: safe };
 }
 
 function toolCallErrorComment(error: unknown): { comment?: readonly string[] } {

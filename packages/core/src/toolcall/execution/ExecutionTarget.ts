@@ -118,7 +118,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
             });
         };
 
-        if (hostRecorded) await recordAudit(() => this.#audit.requested(scope));
+        // Establish audit ownership before asynchronous preparation. A
+        // duplicate ID must fail here rather than abandon another active call.
+        if (hostRecorded) await this.#audit.requested(scope);
         if (request.rejection !== undefined) {
             if (hostRecorded) await recordAudit(() => this.#audit.denied(scope, request.rejection!.code));
             throw createErrorFromBody(request.rejection);
@@ -322,11 +324,24 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         async () => undefined,
                         { executionCompleted: true },
                     ));
-                throw withExecutionOutcome(finalizedTerminal.error, executionCompleted);
+                throw withExecutionOutcome(finalizedTerminal.error, executionCompleted, undefined, callId);
             }
 
             await progressTail;
             const failure = progressFailure ?? error;
+            // AbortSignal.throwIfAborted() throws the signal reason itself.
+            // An interrupted running tool may already have changed state.
+            const interruptedByCaller = signal?.aborted === true &&
+                (failure === signal.reason ||
+                    (failure instanceof Error && failure.name === "AbortError"));
+            const classifiedFailure = interruptedByCaller
+                ? createRemoteError({
+                      code: runtimeErrorCodes.toolCallCancelled,
+                      message: "Tool execution was cancelled by the caller; execution effects may be uncertain.",
+                      retryable: false,
+                      details: { callId },
+                  })
+                : failure;
             const auditFailure = () =>
                 executionCompleted || failureStage !== undefined
                     ? {
@@ -350,14 +365,14 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         async () => undefined,
                         auditFailure(),
                     ));
-                throw withExecutionOutcome(deliveryError, executionCompleted, failureStage);
+                throw withExecutionOutcome(deliveryError, executionCompleted, failureStage, callId);
             }
             let outerFailure: ToolCallOuterError;
             try {
                 outerFailure = await rewriteToolCallError(
                     hooks,
                     callId,
-                    failure,
+                    classifiedFailure,
                     hookValue,
                 );
             } catch (error) {
@@ -377,7 +392,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         auditFailure(),
                     ));
                 }
-                throw withExecutionOutcome(hookError, executionCompleted, failureStage);
+                throw withExecutionOutcome(hookError, executionCompleted, failureStage, callId);
             }
 
             try {
@@ -397,7 +412,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         async () => undefined,
                         auditFailure(),
                     ));
-                throw withExecutionOutcome(error, executionCompleted, failureStage);
+                throw withExecutionOutcome(error, executionCompleted, failureStage, callId);
             }
 
             if (outerFailure.value.kind !== "error") {
@@ -423,7 +438,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 runtimeErrorCodes.providerFailed,
             );
             const errorCode =
-                rawErrorCode === "tool.cancelled"
+                interruptedByCaller || rawErrorCode === "tool.cancelled"
                     ? runtimeErrorCodes.toolCallCancelled
                     : rawErrorCode;
             const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
@@ -437,9 +452,12 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                         errorCode,
                     ));
                 }
-                const normalized = normalizeToolSchedulerError(
-                    outerFailure.error,
-                );
+                // The scheduler can safely retry a never-started request.
+                // Cancellation thrown by an already-running executor has a
+                // different contract: effects may have happened.
+                const normalized = interruptedByCaller
+                    ? classifiedFailure
+                    : normalizeToolSchedulerError(outerFailure.error);
                 throw normalized instanceof Error
                     ? attachToolCallErrorPayload(
                           normalized,
@@ -465,7 +483,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     auditFailure(),
                 ));
             }
-            throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage);
+            throw withExecutionOutcome(outerFailure.error, executionCompleted, failureStage, callId);
         }
     }
 }
@@ -474,6 +492,7 @@ function withExecutionOutcome(
     error: unknown,
     completed: boolean,
     stage?: ToolCallFailureStage,
+    callId?: string,
 ): Error {
     if (!completed && stage === undefined)
         return error instanceof Error ? error : new Error(String(error));
@@ -485,11 +504,12 @@ function withExecutionOutcome(
         details: {
             ...(details !== null && typeof details === "object" && !Array.isArray(details)
                 ? details : {}),
+            ...(callId === undefined ? {} : { callId }),
             executionCompleted: completed,
             ...(stage === undefined ? {} : { failureStage: stage }),
         },
         message: errorMessage(error),
-        retryable: body?.retryable === true,
+        retryable: !completed && body?.retryable === true,
     });
 }
 

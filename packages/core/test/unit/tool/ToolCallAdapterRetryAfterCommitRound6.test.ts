@@ -3,8 +3,8 @@ import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { createRemoteError } from "@portable-devshell/shared";
-import { round4Target } from "../../packages/core/test/unit/tool/Round4Harness.ts";
-import { durableCalls } from "../../packages/core/test/unit/tool/Round6AuditFixture.ts";
+import { round4Target } from "./Round4Harness.ts";
+import { durableCalls } from "./Round6AuditFixture.ts";
 const options = { timeout: 10_000 };
 
 test("round6: asynchronous result adaptation failure durably attributes an already committed effect", options, async (t) => {
@@ -22,9 +22,10 @@ test("round6: asynchronous result adaptation failure durably attributes an alrea
         await readFile(path, "utf8");
         throw createRemoteError({ code: "round6.adapter", message: "adapter unavailable", retryable: true });
     }), (error: unknown) => {
-        const failure = error as { code: string; retryable: boolean; details: { executionCompleted: boolean; failureStage: string } };
+        const failure = error as { code: string; retryable: boolean; details: { executionCompleted: boolean; failureStage: string; callId: string } };
         assert.equal(failure.code, "round6.adapter"); retryable = failure.retryable;
         assert.equal(failure.details.executionCompleted, true); assert.equal(failure.details.failureStage, "postExecution");
+        assert.equal(failure.details.callId, adaptedCallId);
         return true;
     });
     const records = await durableCalls(h); assert.equal(records.length, 1);

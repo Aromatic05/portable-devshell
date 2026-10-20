@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-import type { ToolCallExecutor } from "../../packages/shared/src/index.ts";
-import { authFixture, contextId, resourceUri } from "../../packages/mcp/test/integration/AuthTransportRound4Support.ts";
+import type { ToolCallExecutor } from "@portable-devshell/shared";
+import { authFixture, contextId, resourceUri } from "./AuthTransportRound4Support.ts";
 
 function barrier() {
     let resolve!: () => void;

@@ -118,6 +118,33 @@ test("control tool route turns a thrown error into a structured hint instead of 
     assert.match(String(result.comment[0]), /regenerate the operation/i);
 });
 
+test("control tool route forwards execution metadata but not internal error details", async () => {
+    const handle = callHandler(async () => {
+        throw createRemoteError({
+            code: "tool.adapterFailed",
+            message: "result adaptation failed",
+            retryable: false,
+            details: {
+                callId: "previous-call",
+                executionCompleted: true,
+                failureStage: "postExecution",
+                ctxId: "private-context",
+                stderrTail: "private output",
+            },
+        });
+    });
+    const result = await handle({
+        id: "execution-metadata", name: "call",
+        payload: { input: {}, toolName: "file_edit", workspace: "/workspace" },
+    }, routeContext("result-metadata")) as { error: unknown };
+    assert.deepEqual(result.error, {
+        code: "tool.adapterFailed",
+        message: "result adaptation failed",
+        retryable: false,
+        details: { callId: "previous-call", executionCompleted: true, failureStage: "postExecution" },
+    });
+});
+
 test("control tool stream forwards progress before completing the unchanged final result", async () => {
     const emitted: Array<{ name: string; payload?: JsonValue }> = [];
     let completed: JsonValue | undefined;
