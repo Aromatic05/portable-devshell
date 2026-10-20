@@ -1,693 +1,231 @@
 # ToolCall Boundary
 
-> 状态：设计已冻结，进入实现阶段。
->
-> 本文定义 ToolCall 从外部表示进入可信执行域、再返回外部表示时的统一边界。它与 Transport 一样属于顶层架构，不是 WorkerInstance、MCP 或某一种工具入口的私有实现细节。
+> 当前实现说明，源码审计基线提交：`2287310a`（beta.1）。本文替代旧的“设计已冻结，进入实现阶段”方案；下面的流程、类型和路径以该版本源码为准。标为 **KNOWN BUG / 未解决偏差** 的部分描述当前缺口，不是目标安全契约。
 
-## 1. 目标
+## 1. 职责与 authority
 
-portable-devshell 目前存在多条工具调用路径：
+ToolCall 是共享执行入口，不属于 MCP 或 Worker RPC 的私有包装。Control 的 ToolCall Registry 将 definitions、Review/contributor hooks 和 execute callbacks 安装到各个 Instance；每个 Instance 持有自己的 ToolCall API、hook registry 和 execution target。它与管理 Instance 生命周期的 registry 是不同的组件。
 
-```text
-Worker tool call
-Control-owned MCP tool
-Extension-originated worker call
-trusted internal helper call
-```
+| 所有者 | 当前职责 |
+| --- | --- |
+| Control ToolCall Registry | 同步现有及新增 Instance 的 definitions/hooks/executors；executor 只安装到具有对应注册 definition 的 Instance |
+| Shared Runtime | 生成 callId、入口快照、取得 hook lease、Review、Rewrite、选择 target/executor、释放 lease |
+| Core Approval | 通过 Core Review hook 评估策略和等待人工审批；Extension 不能 grant approval |
+| Instance execution target | 创建 Audit scope、准备输入、Worker readiness、Scheduler reservation/run、调用 executor、结果 adaptation 和发布 |
+| Extension Review/Rewrite | 按声明参与检查或改写；不因此获得 Approval manager、Audit store、Scheduler 或 raw Executor authority |
 
-这些路径对 Approval、Audit、Comment、result/error hint、progress 的处理并不完全一致。新增 ToolCall Boundary 的目标是把所有“从外部 caller 进入 Executor”的调用统一到同一套边界语义中，同时保持 Core authority 与 Extension contribution 的职责分离。
+实现入口：
 
-ToolCall Boundary 只解决四件事：
+- [共享 API](../../packages/shared/src/execution/toolcall/Api.ts)、[Runtime](../../packages/shared/src/execution/toolcall/Runtime.ts)；
+- [Control Registry](../../packages/control/src/toolcall/Registry.ts)、[Instance ingress](../../packages/core/src/instance/model/Instance.ts)；
+- [ExecutionTarget](../../packages/core/src/toolcall/execution/ExecutionTarget.ts)；
+- [Extension ABI](../../packages/extension/src/domain/toolcall.ts)、[Control binding](../../packages/control/src/extension/api/point/toolcall/index.ts)。
 
-```text
-review
-approval
-audit
-rewrite
-```
+## 2. 当前 pipeline
 
-其中：
+正常 `kind=call` 路径如下。箭头表示执行顺序，不表示 Audit、执行和传输之间存在原子提交。
 
 ```text
-review       Extension 可以观察并决定外部 ToolCall 是否允许继续
-approval     Core authority，处理人工审批
-audit        Core authority，记录 ToolCall 生命周期
-rewrite      Extension 只对文本叶子做外部表示 <-> 内部表示替换
+Control ToolCall Registry
+  └─ installs definitions / hooks / execute callbacks into each Instance
+
+Instance.toolCallIngress.call → shared ToolCallApi.call
+  → callId / input snapshot / context copy / acquire hook lease
+  → inbound Review（稳定升序；包括 Core 510-approval 的等待）
+  → inbound Rewrite（完整 ToolCallValue；稳定升序）
+  → 按改写后的 context.instance 选择 target
+    按改写后的 toolName 查找已注册 execute callback
+  → target Audit scope / requested（仅 recording=host）
+  → invocationInput / Worker readiness（callback executor 不检查 Worker readiness）
+  → Scheduler.reserve → queued → reservation.run / running
+  → registered execute callback 或 Worker tool RPC
+  → transformResult
+  → outbound Rewrite → outbound Review → terminal value interpretation
+  → terminal Audit（仅 recording=host，尽力记录）
+  → 返回 payload 或抛出 error → transport delivery
+  → finally release hook lease
 ```
 
-ToolCall Boundary 不把 Tool 的业务语义、Scheduler、Context、Transport 或协议表现层重新包装成新的通用 middleware。
+Progress 在执行期间单独串行经过 outbound Rewrite/Review，再交给 `onProgress`；终态处理会等待已排入的 progress。transport 的发送和关闭仍可能在 target 返回之后失败。
 
-## 2. 顶层位置
+分支不能省略：
 
-ToolCall Boundary 是 Core 的顶层机制。
+- Inbound Review 首次 `reject` 后不运行 inbound Rewrite；原调用交给原 owning target 尝试记录 denied，再抛出 Core rejection。
+- Inbound Rewrite 可以把 `kind` 改成非 `call`。此时 shared Runtime 直接运行 outbound pipeline 并解释终值，不进入 target、Scheduler 或 target Audit。
+- hook acquisition、inbound Rewrite、target resolution 在 target Audit scope 之前失败时，没有统一的 target Audit 兜底。不能声称每次进入 API 都必有持久记录。
+- target 的输入准备、readiness、reserve 失败发生在正常 execution/outbound try 之前；这些错误不能一概声称经过 outbound Rewrite。
 
-目标代码结构：
+## 3. 调用值与快照
+
+Extension 的完整调用值形状如下（类型节选，不是新的 schema）：
+
+```ts
+interface ToolCallValue {
+    context: {
+        instance: string;
+        source: "cli" | "extension" | "mcp" | "tui" | "web";
+        ctxId?: string;
+        operationId?: string;
+        requestId?: string;
+        workspace?: string;
+    };
+    kind: "call" | "error" | "progress" | "result";
+    payload: ExtensionJsonValue;
+    toolName: string;
+}
+```
+
+入口对 `input` 使用 `snapshotJson` 深拷贝并冻结；context 使用对象展开复制并冻结。每次 Review sequence 又对完整 value 做 JSON 快照，各 reviewer 看到相同的只读值。这不等于后续执行永远引用原始 outer input：Rewrite 返回的新值会成为后续处理的输入。context 的入口复制也不应被描述成所有嵌套 Host 字段都深拷贝。
+
+`context.instance` 是显式路由字段。Rewrite 可改变它，也可修改 `toolName`、`ctxId`、workspace、source、payload shape、非字符串值及 kind。target/executor 的选择在 inbound Rewrite 之后；Runtime 不对改写后的调用重新执行 inbound Review/Approval。Review 检查的是改写前调用，不能据此宣称所有改写后的路由和参数都已经被逐项审批。
+
+Host authority 有专门保护：Control binding 从传给 Extension 的 context 中移除 `principal`、`externalBindings`、`contextMode`、`extensionId`，并在接受 Rewrite 返回值时丢弃同名注入、恢复原值。因此完整值改写不是伪造 OAuth principal、外部 session binding 或 Extension origin 的授权；剩余 Context、workspace 与工具权限仍由相应 Host/工具检查承担。
+
+## 4. Review 与 Core Approval
+
+`toolcall.review` 的返回类型只有：
+
+```ts
+interface ToolCallReviewResult {
+    readonly decision: "continue" | "reject";
+    readonly reason?: string;
+    readonly error?: { readonly code: string; readonly details?: ExtensionJsonValue };
+}
+```
+
+Review 按 `hook → id → owner` 的稳定字符串升序执行，遇到首个 `reject` 即停止；全为 `continue` 才继续。没有 `accept/approve` 决定，也没有 `reject > approve > accept` 聚合或 `feedback[]`。首个 rejection 的 reason/error 受顺序影响。
+
+Core 注册 `hook="510-approval", id="approval"`。它在 inbound call 上调用 Approval service：allow 对应 continue，deny 对应 reject，ask 在 hook 内等待决定后返回。因此 Approval 是 Review sequence 中的一项，不是所有 Extension Review 结束后的独立阶段；排在它之后的 reviewer 尚未运行时，审批可能已经发生。
+
+Approval 看到 inbound Rewrite 前的调用摘要。例如输入包含 `${SECRET:GITHUB_TOKEN}` 时，Secret 尚未展开。审批等待发生在 target 的 Scheduler reservation 之前，不占用这次调用的 Scheduler reservation；Instance ingress 的生命周期 lease 则覆盖整个异步审批和后续执行。
+
+审批 action 有窄例外：MCP `mcpapp_action` 的 approve/deny 只有在存在已验证 Context、pending item 与 ctxId/workspace 匹配时才可避免审批自己的决定。它不是通用的审批绕过入口。
+
+Review rejection 的对外顶层 code 固定为 `core.toolCallRejected`，`retryable=false`。Reviewer 的 `error.code/details` 放入 nested cause，例如 Comment 的 `control.modelStopped`，不能替换 Core 顶层 authority。
+
+Outbound Review 在每条 outbound Rewrite sequence 之后观察当时的值；返回的 reject 不改变已形成的结果，异常被捕获并警告。它没有 payload mutation 返回接口，也没有独立 feedback side-channel。它看到的是 Rewrite 的实际输出，不能无条件称为“已安全脱敏的 outer representation”。
+
+## 5. Rewrite 顺序与 generation
+
+`toolcall.rewrite` 接收 invocation（callId、direction、完整 value），返回完整 `ToolCallValue`。Host 不负责一个通用的“path + text → text”叶子协议；Secret 自己遍历字符串，其限制不能推广为所有 Rewrite 的限制。
+
+Review 和 Rewrite 分别排序，两个方向都正序：
 
 ```text
-packages/core/src/
-└── toolcall/
-    ├── Approval.ts
-    ├── Context.ts
-    ├── Execution.ts
-    └── boundary/
-        ├── Review.ts
-        ├── Rewrite.ts
-        └── Sequence.ts
+inbound Review:   hook / id / owner 升序
+inbound Rewrite:  A → B
+outbound Rewrite: A → B
+outbound Review:  hook / id / owner 升序
 ```
 
-不继续保留：
+没有自动反序出栈，也不保证各 Rewrite 可逆。后一个 hook 消费前一个返回的完整值；outbound 可以改变 kind，终值解释会据此返回 payload 或抛出 error。Progress 被改为其他 kind 时可以影响终值，不能把 Rewrite 理解为无副作用的格式化。
+
+单次调用取得 registrations 的 lease，最终统一释放。但若 Rewrite lease 的 generation 已退休，Control binding 会在尚未开始的 outbound invocation 前重新取得同 id registration，并要求 owner 不变；已开始的 hook 不重放。因此不能承诺同一次调用 inbound/outbound 固定同 generation。
+
+## 6. Scheduler、执行与 adaptation
+
+Scheduler 在 Review（含审批）、inbound Rewrite、target 输入准备/readiness 之后才 reserve。它负责本 target 的容量、排队、运行及取消等状态；secret-bearing 输入可能已在 queue wait 前形成。旧方案中“reserve → Approval → queue → Rewrite”不是当前顺序。
+
+`invocationInput(input, callId, finalValue)` 在 reserve 前将 Rewrite 后输入转换为 inner input。`transformResult(result, callId, presentation?)` 在 executor 返回后、outbound Rewrite 前运行。它们仍是独立的 tool-owned adaptation 接口。
+
+Rewrite 本身也承载业务处理：Core Wait hook 修改 numeric `timeMs`、创建 detach 并改写 handoff 结果；Comment 的 Todo access、advice、delivery 也使用 Rewrite。因此不能继续规定“所有业务语义都在 Rewrite 外”。
+
+Worker-backed calls 通过 invoker 发往 Worker；Control-owned operations 通过 `registerExecute` 注册 callback，同样经过 target Scheduler 和 Audit，不依赖 Worker readiness。[Context Tool runtime](../../packages/control/src/context/tool/Runtime.ts) 将 `environ_info/environ_remote` 的准备行为放在 executor 内，先经过共享 pipeline 再执行 touch/prepare/connect。
+
+Extension-originated Worker 调用也使用共享入口，初始 context 携带 `source=extension` 和 `extensionId`。Host 保留 `extensionId`；`source` 本身仍是公开的可改写字段，不能把两者混为同一保护。
+
+Trusted internal helper 使用 [invokeInternal](../../packages/core/src/toolcall/execution/Tool.ts) 直接进入 invoker，留在已有调用的执行域内，不重新发起 Review/Approval/Audit/Rewrite。这是入口选择原则，不是网络重试、持久化故障或进程故障下的全局 exactly-once 承诺。
+
+## 7. Audit、执行事实与 delivery
+
+Audit 是 Core authority，不是 Extension Point；默认 `recording="host"`。`recording="caller"` 时 target 不承担 host Audit，记录责任属于 caller，不能以此推断 caller 一定成功持久化。
+
+正常 target scope 使用 **inbound Rewrite 后、invocationInput 前** 的 toolName、payload 和 context；`inputSummary` 也从这个 payload 生成。Review rejection 则使用未改写的原始调用。完成记录使用 outbound pipeline 后的结果，错误记录保存 error code，部分 command error 会保存改写后的输出。
+
+当前公开 Audit status：
 
 ```text
-worker/instance/tool/call/boundary/...
+queued | running | completed | failed | denied | queueTimeout | cancelled
 ```
 
-原因不是单纯减少目录层级，而是 ToolCall Boundary 的语义本来就不属于 WorkerInstance 私有实现。
-
-与现有顶层架构的关系可以概括为：
+`requested()` 是内部记录动作，初始 history status 为 queued，不是公开 `requested` 状态。典型生命周期为：
 
 ```text
-Core
-├── Transport
-├── ToolCall
-├── Context
-└── ...
+Review rejection → requested → denied
+normal target   → requested → queued → running → completed / failed
+queue exit      → queueTimeout / cancelled
+pre-run failure → failed（存在 active record 时）
 ```
 
-## 3. 外外内内
+这个图描述记录路径，不是完整持久化保证。target 多处通过 `recordAudit` 捕获记录错误、abandon active history 并保留执行结果；`failActive` 也会捕获持久化失败。队列/running event append 另有警告处理。因此返回成功不能证明 Audit 完整，Audit 也不是执行前的 durable commit barrier。
 
-ToolCall Boundary 固定采用“外外内内”结构。
+必须区分三个事实：
+
+| 事实 | 当前含义 |
+| --- | --- |
+| Executor 已返回 | target 将 `executionCompleted=true`；不代表 adaptation、Rewrite 或传输已经完成 |
+| caller payload 已形成 | outbound pipeline 和终值解释完成；随后 transport delivery 仍可能失败 |
+| Audit 已持久化 | 独立的记录行为；可能部分失败或丢失，与前两者不原子提交 |
+
+`status=failed` 不证明没有副作用；取消也不回滚。反过来，`executionCompleted=false` 也不能证明 executor 失败前没有产生部分副作用。
+
+执行后的错误阶段只有 `postExecution | outboundHook`。Outbound hook delivery failure 返回安全的结构化错误，不回传 raw result，不重跑已经失败的 Rewrite；已完成执行时使用 `core.toolResultDeliveryFailed`，包含 callId、executionCompleted、failureStage，固定 `retryable=false`。
+
+**KNOWN BUG：postExecution adapter retry。** `transformResult` 抛错后，`withExecutionOutcome` 当前仍保留原 error 的 `retryable=true`。这违反“已有副作用的执行后失败不能被标为可安全重试”的期望；不能把该行为当作目标契约，也不能只凭 retryable 自动重放此类调用。回归用例 [ToolCallAdapterRetryAfterCommitRound6](../../test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts) 先写入副作用再使 adapter 失败，并要求 retryable=false；源码仍保留缺口。本次文档修订未运行该用例。
+
+**KNOWN 未解决偏差：Audit 丢失与归属。** 当前尽力记录允许执行成功而缺少完整 Audit。另有 [duplicate callId 回归](../../test/known-bugs/ToolCallDuplicateAuditOwnershipRound6.test.ts)：history.started 在 Scheduler duplicate 检查前按 callId 覆盖 active entry，可能破坏原调用归属。该风险有源码链路支持，但本次未动态验证最终 durable record，不能写成已复现的持久化结论。期望仍是保留原调用归属和执行证据。
+
+## 8. Secret 的 scoped Rewrite
+
+Secret 同时具有扫描与 Rewrite；两者安全边界不同，扫描详见 [安全文档](../operations/security.md)。Rewrite 注册为 `hook="100-secret-mask", id="secret"`，引用格式为：
 
 ```text
-                         OUTER
-
-inbound
-    review             Extension
-      ↓
-    approval           Core
-      ↓
-    audit              Core
-      ↓
-    rewrite            Extension
-      ↓
-
-                         INNER
-                        execute
-
-      ↑
-    rewrite            Extension
-      ↑
-    audit              Core
-      ↑
-    review             Extension
-
-outbound
-                         OUTER
+${SECRET:NAME} → 当前 invocation 的 context.instance 对应 env.NAME
 ```
 
-这里的 `audit` 表示 **Core Audit 所观察的表示边界**，不是要求实现成单个前后对称 callback。Audit 可以观察完整生命周期，但持久化的数据必须始终是 outer canonical representation。
+它通过 [readSecretEnvironment](../../packages/extension/src/domain/secret.ts) 使用 `secret.environment`，不是 config/env resource capability。Control 只允许 owner id 为 `secret` 的 Rewrite 使用这个 scoped interface：
 
-三个硬约束：
+| 方向 | 请求 | 返回边界 |
+| --- | --- | --- |
+| inbound | `{ names: [...] }` | 每个名字必须在当前完整 payload 的某个字符串值中有引用；只返回当前 instance 中存在的条目，并记录成功解析的名字 |
+| outbound | 无 input | 只返回本 scope 已成功解析的名字所对应的当前 env 条目 |
 
-1. **Review 永远看到 outer representation。**
-2. **Audit 永远持久化 outer representation。**
-3. **Extension 永远不直接拥有 Approval、Audit 或 Executor authority。**
+接口不接受独立 instance 参数，使用该 hook 输入的 context.instance；但这个 context 可能已被前序 Rewrite 改写，不是最初 instance 的不可变快照。引用检查覆盖整个 payload，不是当前单个叶子，也不扫描对象 key。缺少 env 名字时，Secret expand 会拒绝调用。
 
-## 4. Canonical outer representation
+scope 保存的是 **used names**。每次 interface 请求都重新读取 live config 并复制当时的 env；没有从 inbound 保存到 outbound 的固定 value snapshot。配置变更或后续 Rewrite 改变 instance 都可能改变 outbound 获取的值。
 
-Boundary 接收到的 ToolCall 首先形成 canonical outer representation。
+Secret 自己遍历 payload 的字符串值：inbound expand；outbound 对 result/error/progress 做 mask。只有本调用解析的名字进入集合，普通 `LANG=C`、`NO_COLOR=1` 不会仅因存在于 env 就成为 Secret。非空值按长度降序匹配；相同值按稳定名字选择 canonical placeholder；已知 placeholder 保持不变，未知 placeholder 仍接受 raw value 匹配。
 
-实现上这个 canonical representation 必须在进入共享 Boundary 生命周期时**只生成一次快照**：`input` 做深拷贝并冻结，`ToolCallContext` 复制并冻结。后续 Review、Approval、Audit、Scheduler identity、inbound Rewrite 和 Worker RPC invocation 都必须引用这份稳定快照，不能再次读取 caller 持有的可变对象。
-
-它包含调用本身需要的稳定外部语义，例如：
+在 env/instance 不变且后续 hook 未重新引入原值的正常例子中：
 
 ```text
-toolName
-input
-ctxId
-workspace
-source
-extensionId
-association
-requestId
+input             { header: "Token: ${SECRET:GITHUB_TOKEN}" }
+Review / Approval 看见 placeholder
+Secret inbound    { header: "Token: <env 中的真实值>" }
+target Audit input / Scheduler queue / executor 使用改写后输入
+executor result   { text: "<同一个真实值>" }
+Secret outbound   { text: "${SECRET:GITHUB_TOKEN}" }
+后续 outbound hooks / Review / terminal Audit / caller
 ```
 
-具体字段继续沿用现有 ToolCall 数据模型，不在 Boundary 里建立第二套 ToolCall schema。
+这里的 `<…>` 是说明文字，不是可执行的凭据。
 
-Boundary invocation context 另外携带 owning `instance`，用于 host 侧把 review/rewrite 请求路由到正确的 per-instance state。`instance` 是 Boundary context identity，不写回普通 `ToolCallContext`，也不是可被 Rewrite 修改的 payload 字段。
+**KNOWN 未解决安全偏差：** target Audit input/inputSummary 可能包含展开后的 Secret，当前没有独立原始 outer-input 记录或统一重新 masking 屏障；不能宣称真实值仅存在于 Rewrite 内侧。env 轮换/删除后，outbound 只读当前值，也可能无法遮蔽 inbound 已展开的旧值。此外 Secret 在 outbound 升序中先运行，后续 hook 新增的数据不会再次经过 Secret。目标仍应是阻止 Secret 进入持久化和模型可见通道；上述路径不是对泄漏的认可，本次也没有进行真实 Secret 泄漏实验。
 
-一旦进入 Boundary，同一次调用的 outer representation 不允许被 Review 改写，也不允许 caller 在异步 Review / Approval / queue wait 期间通过原始对象引用改变真正将被执行的调用。
+## 9. Comment 与传输入口
 
-## 5. Review
+Comment 实现位于 [Extension index](../../extensions/comment/src/index.ts)，由自己的 capability/runtime 承担 Comment queue、conversation、pending reply 等业务。`toolcall-gate` Review 对 inbound call、source=mcp、有 ctxId 的调用实施 stop/resume/push/reply deadline 检查。
 
-`toolcall.review` 是 Extension Point。
+Comment 的 `todo-access`、`todo-invalid`、`tool-advice`、`comment-delivery` 等是实际 Rewrite registrations。Advice/delivery 将提示合并到结果 `payload.comment` 数组，结果必须能承载对应 object shape；不是 outbound Review 返回 `feedback[]`。Control 的 Review `requestInterface` 当前一律 unsupported，不存在 `comment.reviewToolCall/comment.feedback` 这两个 Host interface。
 
-Review 的职责是：
+Control 外部 tool transport 的 `call` RPC 与 `callStream` stream 都进入共享 ingress：前者不向 pipeline 传 signal/progress，后者传 cancel signal 并发送 progress，最终 close 携带 terminal payload。它们不同于 target→Worker 的 inner RPC，也不同于 target transport 用于跨边界代理 execute/hook callback 的协议。hook delivery 安全错误不能泛化为所有连接中断都有同样的执行证据。
 
-> 在可信执行域之外观察 canonical outer ToolCall，并返回决定。
+## 10. 核对范围
 
-### 5.1 Inbound Review
+本页按源码修正现行契约，不是下一阶段实施计划，也未引入历史 deprecated API。可定位的回归证据还包括：
 
-Inbound Review 发生在 Approval 和 Rewrite 之前。
+- [Hook 顺序单元测试](../../packages/core/test/unit/tool/Hook.test.ts)：两个方向均为升序；
+- [Pipeline 单元测试](../../packages/core/test/unit/tool/Pipeline.test.ts)：Audit 失败保留执行结果；
+- [Audit/delivery 边界回归](../../test/known-bugs/ToolCallAuditBoundary.test.ts)：call/callStream 在已执行副作用后保留 delivery failure 的执行标记。
 
-概念结果：
-
-```text
-accept
-reject
-approve
-```
-
-含义：
-
-```text
-accept     该 reviewer 不阻止调用
-reject     该调用不得继续进入执行域
-approve    该 reviewer 要求进入 Core Approval
-```
-
-`approve` 的含义是“需要审批”，不是“Extension 批准了调用”。真正的审批 authority 始终属于 Core。
-
-多个 reviewer 的决定按语义聚合：
-
-```text
-reject > approve > accept
-```
-
-注册顺序不得改变最终安全语义。即使未来为了反馈展示需要确定稳定顺序，也不能让顺序改变这个聚合规则。
-
-### 5.2 Outbound Review
-
-Outbound Review 发生在 outbound Rewrite 之后，因此它只能看到已经恢复成 outer representation 的 payload。
-
-它可以产生 Comment、hint 或其他外部反馈，但不得读取 Rewrite 之前的内部 secret-bearing payload。
-
-Review result 的非阻断反馈统一放在 `feedback[]`。Core 对所有 reviewer 的 feedback 按 review invocation 顺序聚合；它不参与 `reject > approve > accept` 的 authority 排序，也不允许修改 ToolCall payload。调用方通过独立 side-channel 消费 feedback，因此 presentation 失败不能反向改变 ToolCall 成功/失败语义。
-
-Outbound Review 仍然不是任意结果 mutation middleware。
-
-### 5.3 Rejection feedback metadata
-
-Review 的安全决定和反馈语义需要分开。
-
-`reject` 的最终 authority 始终属于 Core，因此对外顶层错误固定为：
-
-```text
-core.toolCallRejected
-```
-
-Reviewer 可以附带一个只用于反馈的 `error.code/details`。Core 不允许它替换顶层错误，而是把它保存为 nested cause。这样 Comment 可以保留：
-
-```text
-control.modelStopped
-control.modelReplyRequired
-control.modelResumed
-```
-
-等机器可读反馈，现有 hint resolver 仍可沿 cause chain 生成指导，但 Extension 不能借此伪造 Core authority 或 Audit status。
-
-这里的“注册顺序不得改变最终安全语义”只约束 `reject > approve > accept` 的最终 decision。`reason/error` 是单个最高级 decision 携带的诊断 metadata，第一版不定义多个同级 reviewer 之间的单值合并规则；调用方不得把它当成与注册顺序无关的 authority。需要保留多个 reviewer 的外部反馈时使用 `feedback[]`。
-
-## 6. Approval
-
-Approval 保持 Core authority。
-
-```text
-review
-  ↓
-approval
-  ↓
-rewrite
-```
-
-这个顺序保证 Approval UI 看到的仍是 canonical outer representation。
-
-例如：
-
-```text
-curl -H "Token: ${SECRET:GITHUB_TOKEN}" ...
-```
-
-Approval 只能看到：
-
-```text
-${SECRET:GITHUB_TOKEN}
-```
-
-而不能看到 inbound Rewrite 后的真实 token。
-
-Review 返回 `approve` 时只是把调用送入 Core Approval；Extension 本身不能直接 grant approval。
-
-## 7. Audit
-
-Audit 是 Core lifecycle observer，不是 Extension Point。
-
-Audit 必须覆盖：
-
-```text
-accepted call
-review rejected call
-approval denied / expired / cancelled call
-queued call
-running call
-completed call
-failed call
-```
-
-Boundary 不要求为了 Review 新增一个公开 `requested` status。现有 Audit status 是否需要调整，由实现和持久化模型单独决定，不能为了描述 Boundary 而先扩展状态词汇。
-
-Audit 的核心约束只有一个：
-
-> 持久化的 input / output / error 必须是 outer canonical representation。
-
-因此：
-
-- inbound Rewrite 之前可以记录 input；
-- Executor 内部的 secret-bearing input 不得持久化到 Audit；
-- result/error 必须经过 outbound Rewrite 后才能作为 Audit payload 持久化；
-- Review rejection 也必须留下 Audit lifecycle 记录。
-
-## 8. Rewrite
-
-`toolcall.rewrite` 是 Extension Point。
-
-Rewrite 只允许做 **文本替换**。
-
-Core 负责遍历 ToolCall payload 中的字符串叶子，Extension 只接收字符串位置与字符串内容，并返回替换后的字符串。
-
-这个遍历属于 Boundary 自身的基础设施，不应把 JSON 嵌套深度映射成 JavaScript 调用栈深度。实现使用显式遍历状态；Review 的 canonical clone/freeze 与 Rewrite 都必须能处理深层合法 JSON，而不是依赖递归调用栈。
-
-概念接口：
-
-```text
-path + text -> text
-```
-
-Rewrite 不允许：
-
-```text
-修改 toolName
-增加或删除字段
-改变 JSON shape
-修改 number / boolean / null
-修改 ctxId / workspace / authority
-把一个 ToolCall 替换成另一个 ToolCall
-```
-
-因此 Rewrite 不是 middleware，也不是任意 Json transformer。
-
-适合 Rewrite 的能力包括：
-
-```text
-secret placeholder expand / mask
-path virtualization
-opaque token alias
-credential reference
-external id <-> internal id
-```
-
-### 8.1 Rewrite stack
-
-多个 Rewrite 形成嵌套层次，而不是两套互不相关的 inbound/outbound 顺序。
-
-如果逻辑层次是：
-
-```text
-OUTER
-  rewrite A
-  rewrite B
-INNER
-```
-
-则：
-
-```text
-inbound     A -> B
-outbound    B -> A
-```
-
-也就是严格的入栈 / 出栈关系。
-
-具体 registration 如何声明这个层次，第一版实现前继续沿用 Extension catalog 的稳定标识，不在本文先冻结 `priority`、`direction` 等尚未确认的 public ABI 字段。
-
-同一次 ToolCall 必须固定它取得的 rewrite registrations 及其 Extension generation lease，直到 outbound 完成后再释放。热重载只影响后续 ToolCall，不能让一次调用的 inbound 使用旧 generation、outbound 使用新 generation，否则即使顺序仍是 `A -> B -> B -> A`，也不再是同一个可逆栈。
-
-## 9. Secret 示例
-
-Secret 是 `toolcall.rewrite` 的第一个真实 consumer。第一版不新增独立 vault；placeholder 直接引用当前 instance 已有的 `env`：
-
-```text
-${SECRET:NAME} = current instance env.NAME
-```
-
-`instance.env` 仍然是通用 environment map，不因为配置视图会 redaction 就把其中所有 value 都解释成 Secret。只有 ToolCall inbound 中显式写成 `${SECRET:NAME}` 并成功展开的名字，才进入当前 ToolCall 的 Secret mask set。
-
-Outer ToolCall：
-
-```text
-curl -H "Token: ${SECRET:GITHUB_TOKEN}" ...
-```
-
-Secret Extension 注册：
-
-```text
-toolcall.rewrite / secret
-```
-
-它不获得 config 或 env resource capability。Control 只在一次 `toolcall.rewrite` invocation 内提供：
-
-```text
-secret.environment
-
-inbound  + { names: [...] }
-    -> current leaf 中实际引用且存在于当前 instance env snapshot 的条目
-
-outbound + no input
-    -> 本次 Boundary lease 中此前成功 resolve 过的条目
-```
-
-目标 instance 来自当前 Boundary invocation 的 authoritative context，Extension 不能自行指定。Inbound 允许 Extension 提交 `names`，但 Control 会验证每个 name 的 `${SECRET:NAME}` 确实存在于当前字符串叶；因此 Secret Extension 不能借 rewrite interface 枚举任意 env。
-
-Control 在每个 ToolCall Boundary lease 获取时从 live config 固定一份当前 instance env snapshot。同一调用的 inbound / outbound 始终使用同一份 snapshot；后续 ToolCall 才会看到更新后的 env。因此配置更新不要求重启 Secret Extension，也不会因为调用执行期间配置变化而漏掉已经展开 secret 的 outbound masking。只有 builtin `secret` registration 可以请求该 operation。
-
-Inbound 行为：
-
-```text
-${SECRET:NAME}
-    -> env.NAME
-```
-
-不存在的 `NAME` 直接拒绝本次 ToolCall，不能把 unresolved placeholder 交给 Executor。未被当前字符串引用的普通 env 不会暴露给 Secret Extension，也不会进入 mask set。
-
-Outbound 行为：
-
-- result / error / progress 的所有字符串叶子都经过同一个 Secret Rewrite；
-- 只把本次 ToolCall inbound 已经成功展开的 Secret value 恢复成对应 `${SECRET:NAME}`；
-- `NO_COLOR=1`、`LANG=C` 等未通过 placeholder 引用的普通 env 不会改写正常输出；
-- mask set 中已经存在的 `${SECRET:NAME}` 保持不变，未知 placeholder 不能用来包住并逃逸 raw secret；
-- value 按长度从长到短匹配，避免较短 secret 截断较长 secret；
-- 多个已引用 env key 具有相同 value 时，用稳定 key 顺序选择一个 canonical placeholder。
-
-完整边界：
-
-```text
-outer call
-  ↓
-inbound review
-  sees ${SECRET:GITHUB_TOKEN}
-  ↓
-approval
-  sees ${SECRET:GITHUB_TOKEN}
-  ↓
-audit
-  persists ${SECRET:GITHUB_TOKEN}
-  ↓
-inbound rewrite
-  expands env.GITHUB_TOKEN
-  ↓
-execute
-  sees real token
-  ↓
-outbound rewrite
-  masks token from result/error/progress
-  ↓
-audit
-  persists ${SECRET:GITHUB_TOKEN}
-  ↓
-outbound review
-  sees ${SECRET:GITHUB_TOKEN}
-  ↓
-model / client
-```
-
-因此真实 env value 只存在于 Rewrite 内侧。Review、Approval、Audit 和最终 caller 都只处理 outer representation。
-
-## 10. Scheduler
-
-Scheduler 不是 ToolCall Boundary 的新语义层。
-
-现有 Scheduler 同时负责 admission、pending approval、queue、running 等执行状态，并且 pending approval 会占用已接受容量。因此实现时不能简单把整个 Scheduler 移到 Approval 后面。
-
-允许的实现映射是：
-
-```text
-canonical outer ToolCall
-  ↓
-inbound review
-  ↓
-Scheduler.reserve
-  ↓
-Core Approval
-  ↓
-Scheduler queue / run
-  ↓
-inbound rewrite
-  ↓
-execute
-```
-
-这里 `Scheduler.reserve` 只是 admission bookkeeping，不改变：
-
-```text
-review -> approval -> rewrite -> execute
-```
-
-这一条 outer/inner 权限顺序。
-
-Inbound Rewrite 应尽量靠近真正执行点，避免 secret-bearing inner representation 在 approval wait 或 queue wait 中长期存在。
-
-## 11. Tool-owned semantic adaptation
-
-现有工具调用链中存在 `invocationInput`、`transformResult` 等 tool-owned semantic adaptation。
-
-它们不属于 `toolcall.rewrite`。
-
-两者边界固定为：
-
-```text
-outer representation
-  ↓
-inbound rewrite
-  ↓
-existing tool-owned input adaptation
-  ↓
-execute
-  ↓
-existing tool-owned result adaptation
-  ↓
-outbound rewrite
-  ↓
-outer representation
-```
-
-Rewrite 解决的是外部表示与可信内部表示之间的安全边界；tool-owned adaptation 继续解决具体工具自己的业务语义。
-
-## 12. Result / Error / Progress
-
-Boundary 不能只覆盖最终 result。
-
-所有离开可信执行域、可能被 model/client 看到的 payload 都必须经过 outbound Rewrite：
-
-```text
-progress
-result
-error
-```
-
-否则 secret 可以通过 progress 或 error 绕过 masking。
-
-Audit 不要求持久化每一条 progress，但任何向外发送的 progress 都必须先恢复成 outer representation。
-
-需要区分 **Executor outcome** 和 **outbound publication outcome**。如果 Executor 已经完成，但 `transformResult` 或 outbound Rewrite 之后失败，caller 仍必须得到 non-retryable failure，避免把一个已经可能产生副作用的调用当成可安全重试；同时 Audit 需要保留执行事实：
-
-```text
-executionCompleted = true
-failureStage = postExecution | outboundBoundary
-```
-
-因此 `status = failed` 不等价于“Executor 没有执行成功”。调用方判断是否可重试仍以结构化 error 的 `retryable` 为准，不能只根据 Audit status 推断副作用是否发生。
-
-## 13. Exactly once
-
-核心调用约束：
-
-> 一次调用从 outer caller 跨入 Executor，只通过 ToolCall Boundary 一次。
-
-因此需要区分：
-
-```text
-external entry
-    -> enters Boundary
-
-trusted internal helper
-    -> stays inside current Boundary
-```
-
-不能因为一个工具内部又调用了另一个 trusted helper，就再次触发：
-
-```text
-Approval
-Audit
-Comment budget
-Review
-Rewrite stack
-```
-
-否则会产生双重审批、双重审计和 secret 重复 expand/mask。
-
-## 14. 统一入口
-
-第一阶段覆盖三类 external entry：
-
-### 14.1 Worker tool call
-
-`ToolCallExecution.call()` 是 Worker-backed ToolCall 的正常入口。它在进入共享 Boundary 生命周期前检查 Worker readiness，真正的 Worker RPC invocation 只作为 inner executor。
-
-### 14.2 Control-owned MCP tool
-
-Control-owned MCP tool 通过 `WorkerInstance.callToolOperation()` 进入同一个 `ToolCallExecution` 生命周期。它复用 Review、Scheduler、Approval、Audit 和 Rewrite，但以 Control operation callback 作为 inner executor，因此不依赖 Worker readiness。
-
-operation callback 接收 inbound Rewrite 后的 input；返回值必须经过 outbound Rewrite 后才能进入 Audit 和 MCP structured result。旧的 audit-only operation path 不再存在。
-
-### 14.3 Extension-originated worker call
-
-Extension capability 调用 Worker tool 时已经携带：
-
-```text
-source = extension
-extensionId
-```
-
-它也必须和其他 external entry 一样只经过一次 Boundary。
-
-## 15. Extension API
-
-新增 ToolCall domain Extension Points：
-
-```text
-toolcall.review
-toolcall.rewrite
-```
-
-public ABI 入口位于：
-
-```text
-packages/extension/src/domain/toolcall.ts
-```
-
-Control adapter 位于：
-
-```text
-packages/control/src/control/extension/toolcall/
-├── Binding.ts
-├── Point.ts
-├── Sandbox.ts
-└── interface/
-    ├── Comment.ts
-    ├── Secret.ts
-    └── index.ts
-```
-
-根目录三个文件分别承担同一 domain 下的三个正交职责：
-
-```text
-Point       Extension Point declaration / validation
-Binding     active registrations -> Core Boundary port
-Sandbox     sandbox codec
-```
-
-`interface/` 只包含 invocation-scoped host interfaces。它们不是新的 Extension Points，也不是 resource capabilities；`Binding` 在单次 Boundary lease 内把 authoritative host state 收窄后注入对应 registration。
-
-不新增：
-
-```text
-toolcall.hook
-beforeExecute
-afterExecute
-aroundCall(next)
-generic middleware
-```
-
-Extension 也不获得：
-
-```text
-ApprovalManager
-AuditStore
-Scheduler
-raw Executor
-```
-
-## 16. Comment 的位置
-
-Comment 是 ToolCall Boundary 的第一个真实 consumer，不是 Boundary 本身。
-
-当前 `comment` Extension 注册：
-
-```text
-toolcall.review / comment
-```
-
-Inbound Review 负责：
-
-```text
-#stop
-#resume
-#push
-tool-call reply deadline
-```
-
-Sandboxed Comment Extension 不直接获得 Control、ConversationStore 或 Audit authority，也不新增 resource capability。Control 只在一次 `toolcall.review` invocation 内提供两个窄 interface：
-
-```text
-comment.reviewToolCall
-    -> allow | push | stop | resume
-
-comment.feedback
-    -> string[]
-```
-
-这两个 interface 都不接受 Extension 提供的 instance / ctxId / toolName 参数，而是绑定到当前 Boundary invocation 的 authoritative context；调用结束后 interfacePort 随 invocation id 一起释放。只有 builtin `comment` registration 可以请求这些 operation。
-
-`CommentReview` 自己决定哪些 invocation 适用 Comment 控制语义；当前策略是 inbound `call`、`source=mcp` 且存在 `ctxId`。Control 的 scoped interface 只提供 authoritative Comment capability，不重复判断 direction / kind / source，也不拥有 Comment applicability policy。
-
-实现所有权位于：
-
-```text
-extensions/comment/src/
-├── builtin/
-│   ├── CommentReview.ts
-│   ├── devshell-extension.json
-│   └── index.ts
-├── comment/
-├── conversation/
-├── hint/
-│   ├── Feedback.ts
-│   ├── Hint.ts
-│   ├── Resolver.ts
-│   └── tool/
-└── index.ts
-```
-
-`hint` 规则也由 Comment package 持有，不再属于 `shared`。Result/error Hint 现在由 Comment outbound Review 通过 `feedback[]` 返回；MCP 与 Control Tool Route 只消费 generic ToolCall feedback，不再直接 import Comment 的 resolver。
-
-Conversation、Comment queue/list、pending reply、preferences、routes 与 instance lifecycle 的 runtime ownership 现在由 `CommentExtension` 持有。Control 只有 composition root `ControlRuntimeFactory` 知道 concrete Comment package；Runtime、Route、ToolCall interface 与 MCP Gateway 只依赖各自的窄 Port。`packages/mcp` 不依赖 Comment package，只消费 ToolCall Boundary feedback 与通用 Context Message gateway contract。
-
-Todo 的 enable/rate-limit/report token policy 与 Comment 是不同 authority，继续保留独立的 Todo-only gate；迁移 Comment 不得把 Todo policy 一起吸入 reviewer。
-
-`environ_info` 与 `environ_remote` 也必须和其他 external entry 一样在任何 touch/prepare/connect 等副作用之前进入统一 ToolCall Boundary。
-
-## 17. 实现阶段
-
-实现按以下顺序进行：
-
-```text
-1. 建立 Core ToolCall 顶层目录与 Boundary contract
-2. 用测试冻结 Review / Rewrite / Sequence 语义
-3. 增加 toolcall.review / toolcall.rewrite Extension ABI
-4. 把正常 Worker tool call 接入 Boundary
-5. 统一 result / error / progress outbound path
-6. 消除 Control-owned MCP tool 的 Boundary bypass
-7. 迁移 Comment 为 Boundary 的第一个 review consumer，并迁移 Conversation / Hint 所有权
-8. 使用 Secret 验证 rewrite 的 expand / mask 闭环
-```
-
-每一步都应保持单独可测试、可提交，不为后续阶段提前增加通用抽象。
+测试文件放在 `known-bugs` 下不代表它当前必然失败。本次仅核对这些用例源码与实现；已知安全偏差仍待代码修复，不能通过文档更新视为解决。
