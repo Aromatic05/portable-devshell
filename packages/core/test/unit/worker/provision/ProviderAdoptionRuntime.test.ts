@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ContainerProvisionExisting } from "../../packages/core/src/instance/runtime/provision/container/Existing.ts";
+import { ContainerProvisionExisting } from "../../../../src/instance/runtime/provision/container/Existing.ts";
 
 test("an adopted configured container remains available after runtime object reconstruction", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "adoption-reproducer-"));
