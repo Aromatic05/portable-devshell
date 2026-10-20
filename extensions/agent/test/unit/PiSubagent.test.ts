@@ -285,3 +285,34 @@ test("Pi Subagent runtime reserves fork=true for future full-context cloning", a
         /not supported yet/u,
     );
 });
+
+test("Pi Subagent concurrent children keep independent identity, turns, and tool events", async () => {
+    const harness = fakeRuntime();
+    const first = await harness.runtime.spawn({ name: "review_one", profile: "reviewer", task: "Inspect one" });
+    const second = await harness.runtime.spawn({ name: "review_two", profile: "reviewer", task: "Inspect two" });
+    assert.deepEqual(harness.children.map((child) => child.prompts), [["Inspect one"], ["Inspect two"]]);
+    assert.notEqual(first.agent, second.agent);
+    const baseline = await harness.runtime.poll({ timeoutMs: 0 });
+    harness.children[1]!.emitTool("file_grep");
+    const events = await harness.runtime.poll({ cursor: baseline.cursor, timeoutMs: 0 });
+    assert.equal(events.events.some((event) => event.agent === second.agent && event.detail === "file_grep"), true);
+    assert.equal(events.events.some((event) => event.agent === first.agent && event.detail === "file_grep"), false);
+    harness.children[0]!.resolveTurn("first complete");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const snapshots = await harness.runtime.poll({ timeoutMs: 0 });
+    assert.equal(snapshots.agents.find((agent) => agent.agent === first.agent)?.lastTurn?.result, "first complete");
+    assert.equal(snapshots.agents.find((agent) => agent.agent === second.agent)?.activity, "running");
+});
+
+test("Pi Subagent interrupt aborts only the addressed child and leaves it reusable", async () => {
+    const harness = fakeRuntime();
+    const first = await harness.runtime.spawn({ name: "review_one", profile: "reviewer", task: "Inspect one" });
+    await harness.runtime.spawn({ name: "review_two", profile: "reviewer", task: "Inspect two" });
+    const interrupted = await harness.runtime.manage({ action: "interrupt", agent: first.agent });
+    assert.equal(interrupted.activity, "idle");
+    assert.equal(interrupted.lastTurn?.outcome, "interrupted");
+    assert.equal(harness.children[0]?.aborted, 1);
+    assert.equal(harness.children[1]?.aborted, 0);
+    await harness.runtime.interact({ agent: first.agent, interrupt: false, message: "retry" });
+    assert.deepEqual(harness.children[0]?.prompts, ["Inspect one", "retry"]);
+});
