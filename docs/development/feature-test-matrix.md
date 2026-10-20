@@ -237,11 +237,11 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | G20 | C15-C18 | 真Worker取消、File、PTY/Tmux恢复与输出资源 | worker/beta_ipc_contract.rs + worker_contract.rs | I/P Linux已新增、Rust测试通过 | Rust自动/Tmux专项 | Windows和跨UI高输出待验 |
 | G21 | C24/L03 | Web/TUI并发Revision/操作禁用及权威刷新 | web/test/view/page/Todos.test.tsx + tui/test/interaction/Navigation.test.ts | U/I 已新增、包测试通过 | Package自动 | Web/TUI/CLI三端共享RPC验收待验 |
 | G22 | C30/L06 | 安装Extension持有多个真实Worker后退役旧Generation不串Instance | control/integration/extension/Retirement.test.ts | I 已新增、定向通过 | Package自动 | 真实双Worker与慢Stream关闭待验 |
-| G23 | L08/C25 | 旧发行包→当前版迁移/失败回滚后数据可用 | TestspaceUpgradeSmoke.mjs | E 已有但专项未运行 | 手动Extended CI | 新增workflow_dispatch升级入口；实际Runner待验 |
+| G23 | L08/C25 | v0.7.7→当前发行包迁移、失败回滚，旧版数据仍可用 | `scripts/testspace/TestspaceUpgradeSmoke.mjs` | **E：本轮真实发行包 8/8 场景通过** | 独立 Testspace 运行；GitHub Extended CI 仍待实跑 | 正常升级、Comment恢复、失败启动回滚、坏Audit延后、旧Schema拒绝和3类Context/Instance断连事故均通过；Windows/macOS升级待验 |
 | G24 | L06 | 损坏Extension候选保留旧Generation，恢复后释放旧资源 | TestspaceExtensionSmoke.mjs | E 已有但专项未运行 | 手动Extended CI | 新增extension专项入口；实际Runner待验 |
 | G25 | C17/P | Windows x64/ARM64 PSMUX Pane/Task/PowerShell与Worker重启 | tmux_windows_contract.rs | P 专项待验 | 手动Extended CI | 新增双Windows runner；实际测试未执行 |
 | G26 | C13/H | 真实ChatGPT Fullscreen/Inline/Approval/Reentry/历史卡片恢复 | McpAppReactBrowser.test.ts | H 未验 | 手动Host | 现有Chromium用测试Host替身 |
-| G27 | C06/R | 慢读者、丢包、弱网重连、FD/内存有界 | scripts/stress-transport.mjs | R 专项待验 | 单独手工 | 压力脚本未在本轮运行 |
+| G27 | C06/R | 慢读者、弱网重连、流背压及资源有界 | `scripts/stress-transport.mjs` | **R：已执行；8条Transport压力断言通过，整轮未全绿** | 独立systemd cgroup（MemoryMax 1.5 GiB、CPU 150%） | Reverse WSS第7/8轮观察到前代Token尚可认证，可能是snapshot ready领先最终凭据提交；增补激活完成点确定性测试，整套压力复跑仍待结论 |
 | G28 | C21/X04 | 真实Worker Mailing的提交中断后重启保证Inbox/Index/通知不重复 | extensions/comment/test/unit/Mailing.test.ts | U已有 | Package自动 | 真Worker中途故障注入待验 |
 | G29 | C14 | 两个App Lease争用Claim、人类Pause使旧指令失效 | mcp/mcpapp/Reentry.test.ts | U已有 | Package自动 | 真实Host多iframe竞争待验 |
 | G30 | C20 | 工具已执行而Completion Audit提交失败时重启不出现假成功 | core/tool/Pipeline.test.ts + Provenance.test.ts | U已有 | Package自动 | 完整Control/Worker强制崩溃待验 |
@@ -286,3 +286,32 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | M27 | C17/C18 | Terminal.attach u64::MAX不得溢出、Timeout或误判Gap | crates/devshell-worker/tests/beta_ipc_contract.rs | I | 真实Worker复测通过；已修复 |
 | M28 | L06/C30 | 外层UID与UserNamespace内UID不同，XDG_RUNTIME_DIR仍一致 | scripts/testspace.test.mjs | I/E | 跨进程+独立Testspace通过；已修复 |
 | M29 | C02/C10/C14/C30 | 独立Known-Bugs红测保留真实实现偏差，默认门禁不加载 | test/known-bugs/README.md | I/UI | 独立显式运行并保持红色，见缺陷台账 |
+
+## 10. 第四轮长任务补测与真实验收
+
+本轮增加的是**独立可证伪不变量和实际运行记录**，并不使用测试文件数充当端到端覆盖率。红色缺陷复现均显式运行，尚未修复的行为绝不能为追求全绿改写期望。主要结果见[第四轮缺陷台账](beta-bug-findings.md)。
+
+| 测试组 | 关联 | 独立验证 | 证据入口 | 层级 | 执行结果与仍缺证据 |
+|---|---|---|---|---|---|
+| R401 | L08/C25 | 真实0.7.7升级、Comment/Agent/Audit/Context迁移、失败回滚 | pnpm testspace upgrade-smoke | E | 8/8实际通过，Windows/macOS待验 |
+| R402 | C06/G27 | Frame/Packet背压、多路复用、32MiB真实Worker Artifact及Reverse 8轮压力 | pnpm stress:transport | R | 基础8条全过；Reverse第7轮WSS断言失败，整套未通过 |
+| R403 | C05 | 凭据新代认证前旧Token保留，完成后撤销；失败不误撤销 | control/reverse/TokenActivationBoundaryRound4.test.ts | U/I | 2条实际通过 |
+| R404 | C05/L04 | Reverse旧Generation/Stop期间的Candidate Admission | control/reverse/GenerationAdmissionRound4.test.ts | U/I | 2条实际通过 |
+| R405 | C04/G05-G08 | Podman容器管理、启动与删除故障、Runtime重建 | core/worker/provision/ContainerLifecycleRound4.test.ts | U/I | 4条实际通过；重建归属缺陷红测待修 |
+| R406 | C15-C18 | 真Worker绝对路径/符号链接防逃逸、Bash cwd、文件模式和并发IPC | crates/devshell-worker/tests/beta_round4_boundary.rs | I Linux | 6条真实Worker通过，Windows未验 |
+| R407 | C19/L07 | Artifact后段坏Chunk、Offset/Hash中断、Archive越界和覆盖冲突 | control/artifact/Service.test.ts + Archive.test.ts + ArtifactHttpRoute.test.ts | U/I | 真实HTTP/本地Store已通过，跨机Provider仍待验 |
+| R408 | C07/C08/C20 | 32交错ToolCall、执行后出站失败、Review/Approval/SQLite、RPC重连 | control/integration/server/transport/ToolCallRound4.test.ts | I | 新增10条通过，Error Projection和Service Close独立红测 |
+| R409 | C10/C28/C09 | OAuth双Client、Audience/Scope、Revoke、JWKS复用及SSE Cancel | mcp/test/integration/*Round4.test.ts | I | 16条通过：Memory HTTP +真SDK/OIDC/SQLite；公网TCP待验 |
+| R410 | C21/X04 | Comment/Mailing真SQLite关闭重开、进程异常退出、消息原文和损坏恢复 | extensions/comment/test/unit/*Durability.test.ts | U/I | 新增16条通过，断电/ENOSPC待验 |
+| R411 | C21/X04/G28 | Memory Init/Inherit、Mailing并发与真Rust IPC重启去重 | extensions/comment/test/integration/MemoryIpc.test.ts | I | 真Worker执行通过，已加入Comment默认Package |
+| R412 | C24/L03 | Web Config/Audit/Approval分页、异步刷新和跨Instance操作 | packages/web/test/view/BetaMatrixRound4.test.tsx | U/I | 10条通过；另4条组件级红测 |
+| R413 | C24/L03 | TUI焦点、实例切换、确认Overlay与状态更新 | packages/tui/test/view/BetaMatrixRound4.test.ts | U/I | 7条通过；另3条组件级红测 |
+| R414 | L03/G30 | 真Control/Worker重启、Audit/Todo/日志保持、262条Revision重放/Gap | pnpm testspace recovery-smoke | E | 真实3轮：前置恢复通过，删除cleanupPending后retry仍未清零，整套红 |
+| R415 | C03/G04 | 删除提交后公共Cleanup Retry必须清理旧Worker资源并允许同名重建 | scripts/testspace/TestspaceRecoverySmoke.mjs | E | 真实实例删除补偿失败；作为待修复缺陷 |
+| R416 | C14/C20 | 原生MCP AbortSignal应在SQLite记为cancelled，不是普通failed | test/known-bugs/McpNativeAbortAudit.test.ts | I | 独立红测：CONNECTION_CLOSED |
+| R417 | C20/L02 | Control RPC普通与Stream路径应保留executionCompleted和failureStage | test/known-bugs/ToolCallAuditBoundary.test.ts | I | 独立红测，ApprovalService.close竞态另有红测 |
+| R418 | C21/X04 | Mailing按Instance Scope去重，引用标记不能吞邮件，Ack失败后不重复 | test/known-bugs/CommentMailingDelivery.test.ts | I | 真SQLite/磁盘，4条独立红测 |
+| R419 | C24 | Web Audit页码缩减、迟到详情、同Approval ID不同Instance并发 | test/known-bugs/ui/web-round4-repro.config.ts | UI | 4条组件级红测，1条为Round3重复确认 |
+| R420 | C24 | TUI正在确认时Escape和旧Future不能污染新实例Overlay | test/known-bugs/TuiOverlayLifetime.test.ts | UI | 3条组件级红测，真实远端Host待验 |
+
+仍待真实验收的关键项：Windows x64/ARM64 原生 psmux 会话（G25）；ChatGPT Host OAuth、Approval、Reentry与历史卡片（G26）；真实 SSH/Rootless Podman、跨机 Reverse 弱网和断线（G05–G08/G27）；断电、ENOSPC、持久化故障；真实浏览器 Audit/Revision 长连接行为。脚本存在或内存 HTTP 通过均不能自动关闭这些缺口。

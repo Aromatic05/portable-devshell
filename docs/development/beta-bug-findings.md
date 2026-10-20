@@ -51,3 +51,41 @@ R3-001/002 源码：`packages/control/src/config/store/index.ts`；R3-003/004：
 
 UI 专项的真实 ChatGPT Host、SSH/容器跨机和 Windows psmux 仍有待验项目；见 `docs/development/feature-test-matrix.md` 的 G01–G32 及本轮新增缺口。 
 
+
+## 4. 第四轮新增缺陷与缺口（2026-10-20）
+
+本轮另有 **真实 v0.7.7→1.0.0-beta.1 八场景升级成功、6条真Worker IPC通过、16条MCP/OAuth新集成通过（Memory HTTP）、16条 Comment/Memory 单测加一条真 Worker Mailing IPC通过、10条ToolCall/Audit测试通过、17条Web/TUI新测试通过**。这些通过项不能冲抵下述独立失败证据。
+
+### A. 独立失败复现，仍未修复
+
+| R4 ID | 范围/级别 | 触发、实际结果与不变量 | 版本化失败复现 |
+|---|---|---|---|
+| R4-01 | Provider实例生命周期；U真实实现+Fake容器 | 已配置、由 DevShell 启动的 stopped-container 处于运行状态后重新构造 `ContainerProvisionExisting`，`#adopted` 失效；重建对象错误拒绝为 `core.providerFailed / unsupportedMode=runningContainer`。真实跨Daemon Podman仍待执行 | `test/known-bugs/ProviderAdoptionRuntime.test.ts` |
+| R4-02 | ToolCall公共返回；I真实Audit/Control | 执行器产生一次真实文件副作用后，Outbound Hook 失败；SQLite保留 `executionCompleted=true`，Control普通和Stream RPC错误却丢失 `executionCompleted`、`failureStage`、`callId` 三个结构化字段，上层难以判断禁止重试 | `test/known-bugs/ToolCallAuditBoundary.test.ts`（2条） |
+| R4-03 | Approval API生命周期；I | 在初次持久化等待中 `ApprovalService.close()`，关闭后仍可发布新待审批并接受迟到 `approve`；**仅裸Service复现，真实Instance正常关闭有额外Lease/Retire保护，尚未证明真实Instance关闭可触发** | 同上（1条） |
+| R4-04 | Comment/Mailing耐久；I真SQLite | 通知持久化后Ack写入失败，再打开Mailing/Comment会生成第二条通知 | `test/known-bugs/CommentMailingDelivery.test.ts`（D1） |
+| R4-05 | Mailing作用域；I真SQLite | 同Context连两个Instance且Mail ID相同，实例B的有效通知被实例A的去重错误消费 | 同上（D2） |
+| R4-06 | Mailing正文解析；I真磁盘 | 某邮件正文包含后一封邮件的标记，后者接受并排队，但原文未写入Inbox | 同上（D3） |
+| R4-07 | Mailing失败隔离；I真磁盘 | 已接受Outbox遭后续变更，单个坏发送者阻止此前pending和其他好发送者继续通知 | 同上（D4） |
+| R4-08 | MCP SDK取消审计；I内存HTTP+真OIDC/SQLite | Remote Caller 取消到达执行器，标准 `AbortSignal.throwIfAborted()` 导致Audit `status=failed/error=CONNECTION_CLOSED`，而预期为 `cancelled`；尚未在真实公网TCP/Rust执行器上证明 | `test/known-bugs/McpNativeAbortAudit.test.ts` |
+| R4-09 | Web Audit UI；组件I | Audit列表缩至较少页时页码不收缩、较新真实状态被旧详情盖回、两个Instance同ApprovalId发生错误互锁；另有审批错误文案丢失重复证实Round3旧缺陷 | `test/known-bugs/ui/web-round4-repro.config.ts`（4条红） |
+| R4-10 | TUI确认Overlay；组件I | 实际TuiKeyDispatcher上的Escape能让进行中的危险操作确认框消失；旧Promise Resolve/Reject可以关闭新Instance确认框或注入前实例错误 | `test/known-bugs/TuiOverlayLifetime.test.ts`（3条红） |
+
+对应主要源码：`packages/core/src/instance/runtime/provision/container/Existing.ts`；`packages/shared/src/execution/toolcall/Route.ts`；`packages/core/src/approval/execution/Service.ts`；`extensions/comment/src/mailing/{Service,Store}.ts`；`packages/mcp/src/protocol/Binding.ts` + `packages/core/src/toolcall/execution/ExecutionTarget.ts`；`packages/web/src/view/page/activity/audit/{Page.tsx,tool/Entry.tsx}` 和 `packages/web/src/state/Store.ts`；`packages/tui/src/interaction/{Input.ts,command/Overlay.ts}`。
+
+### B. 真实E2E失败，不得宣称已通过
+
+**R4-11 — Control重启后Instance删除清理债务无法解除。** 使用全新、隔离的 Testspace Root 真正执行 `pnpm testspace recovery-smoke`，完成262次 Config Revision、Gap/Replay、真实 Worker stop/start、Audit/Terminal Logs/Todo持久化、Control restart和新MCP会话执行。最后删除创建的测试Instance时，配置已提交删除，但 `cleanupPending=true`、`cleanupWarnings` 含 `Worker runtime retirement failed`；公开的 `retryCleanupDebt(instanceName)` 调用后同一旧Generation债务仍为 `pending`，无法在清零要求下同名重建。此失败已在多个独立受控Root复现；每轮 `pnpm testspace stop` 均成功，未触碰共享测试或生产系统。证据入口：`scripts/testspace/TestspaceRecoverySmoke.mjs`，隔离手动 `pnpm testspace recovery-smoke`；后续应从 `WorkerCommandClient.retireRuntime` 返回码及底层stderr定位原因，不为测试全绿直接跳过Debt。
+
+**R4-12 — Reverse WSS压力窗口待判定。** `pnpm stress:transport` 受限systemd cgroup运行，8条Transport/Artifact强压基础用例均通过，包括真实Worker 32MiB数据往返；Reverse Gateway前六轮通过，第七轮新Generation已ready，但旧Token仍可认证断言失败，整套退出1。凭据Store的语义是在 `withAuthenticatedToken` operation完成后才移除旧Token，单独增加的同步屏障测试`TokenActivationBoundaryRound4.test.ts` 两条通过。因此当前只能标记为**ready与凭据提交可见性竞态／压力下时序异常，尚未证明未授权连接永久可用**，不得盲目删除原断言或宣布全绿。
+
+### C. 真实已通过与不能宣称的范围
+
+- v0.7.7 真包到 Beta 升级 8/8，包含Audit/Comment/Context/Agent迁移、失败启动回滚、无效Schema拒绝、三类历史事故；仅 Linux 本地。
+- Worker 新增 Linux IPC 6/6；Artifact单元/真实HTTP新用例通过；Comment默认 Package 已接入真 Rust Worker IPC，129/129通过；ToolCall并发/SQLite/回连10条新增通过。
+- MCP/OAuth 16条真 SDK+OIDC/SQLite测试通过，但受原Agent沙箱端口限制采用标明的 `ROUND4_MCP_TRANSPORT=memory`，不是公网真实TCP/ChatGPT Host验收；独立外进程签名/JWKS/revoke探针通过。
+- Web 新增10条真React渲染、TUI新增7条真Dispatcher通过；未覆盖真正的长连接浏览器与真实终端输入设备。
+- 配置混合代、OAuth Refresh Token并发双花、Extension生命周期等第三轮缺陷**没有因增加这些测试而自动修复**。见上文第3轮清单与 `test/known-bugs`。
+
+继续测试时以 `feature-test-matrix.md` 第10节 R401–R420 的未验目标平台和此处独立失败测试为优先级依据；扩充默认单测数量并不能代替真实失败恢复能力。
+
