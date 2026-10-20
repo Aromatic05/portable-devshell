@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+import { inspect } from "node:util";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { deletionFixture } from "../../unit/control/instance/Round5DeletionFixture.ts";
+import { realRetirement, staleWorkerFixture } from "./Round5WorkerFixture.ts";
+
+test("Round5 real Rust retirement is idempotent for a missing process and missing instance root", async (t) => {
+    const home = await createTestTempDirectory("r5-missing");
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const worker = realRetirement(home);
+    const result = await worker.client.retireRuntime();
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.equal(JSON.parse(result.stdout).retired, false);
+    await worker.retirement.retire();
+});
+
+test("Round5 real Rust stale PID rejects retries until explicit Worker stop then debt recovery succeeds", async (t) => {
+    const home = await createTestTempDirectory("r5-stale");
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const worker = await staleWorkerFixture(home);
+    const first = await worker.client.retireRuntime();
+    assert.equal(first.exitCode, 1, JSON.stringify(first));
+    assert.match(first.stderr, /has stale daemon state; stop it before retirement/);
+    t.diagnostic(`Rust retire exit=${first.exitCode} stderr=${first.stderr.trim()}`);
+    assert.equal(await readFile(join(worker.root, "artifacts", "retained.txt"), "utf8"), "must survive failed retirement");
+    const warnings: unknown[][] = [];
+    t.mock.method(console, "warn", (...args: unknown[]) => { warnings.push(args); });
+    const original = await deletionFixture(home, { retireRuntime: () => worker.retirement.retireRuntime() });
+    t.after(() => original.close());
+    const deleted = await original.editor.deleteInstance({ instanceName: original.draft.name }) as Record<string, unknown>;
+    assert.equal(deleted.cleanupPending, true);
+    const [before] = await original.editor.listCleanupDebts();
+    await original.close();
+    const restarted = await deletionFixture(home, { retireRuntime: () => worker.retirement.retireRuntime() }, true);
+    t.after(() => restarted.close());
+    await restarted.editor.reconcileCleanupDebt(original.draft.name);
+    const [after] = await restarted.editor.listCleanupDebts();
+    assert.equal(after!.generationId, before!.generationId);
+    assert.equal(after!.state, "pending");
+    assert.match(after!.reason!, /Worker runtime retirement failed/);
+    assert.ok(warnings.length >= 2);
+    assert.match(inspect(warnings, { depth: 15 }), /has stale daemon state; stop it before retirement/);
+    const stopped = await worker.client.stop();
+    assert.equal(stopped.exitCode, 0, JSON.stringify(stopped));
+    await restarted.editor.reconcileCleanupDebt(original.draft.name);
+    assert.deepEqual(await restarted.editor.listCleanupDebts(), []);
+    await assert.rejects(readFile(join(worker.root, "artifacts", "retained.txt")), { code: "ENOENT" });
+    await restarted.creator.createInstance(original.draft);
+    assert.ok(restarted.registry.get(original.draft.name));
+});
