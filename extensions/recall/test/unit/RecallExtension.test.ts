@@ -215,6 +215,28 @@ test("Recall rejects call limits above the host history bound", async () => {
     );
 });
 
+test("Recall explicit instance queries read only that principal and retain workspace filtering", async () => {
+    const queries: HistoryQuery[] = [];
+    const service = new RecallService(fakeContext(queries));
+    const result = await service.calls({ instance: "other", workspace: "/repo" });
+    assert.deepEqual(result.calls.map((call) => call.instance), ["other"]);
+    assert.deepEqual(queries.map((query) => query.instance), ["other"]);
+    assert.equal(queries[0]?.query?.workspace, "/repo");
+});
+
+test("Recall contexts scoped to one instance never aggregate another instance history", async () => {
+    const queries: HistoryQuery[] = [];
+    const service = new RecallService(fakeContext(queries));
+    const result = await service.contexts({ instance: "local", workspace: "/repo" });
+    assert.equal(result.contexts.length > 0, true);
+    assert.deepEqual(
+        [...new Set(result.contexts.flatMap((context) => context.instances))],
+        ["local"],
+    );
+    assert.deepEqual([...new Set(queries.map((query) => query.instance))], ["local"]);
+    assert.deepEqual(result.issues, []);
+});
+
 function fakeContext(queries: HistoryQuery[]): ExtensionContext {
     return {
         capabilities: {
