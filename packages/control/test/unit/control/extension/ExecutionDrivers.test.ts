@@ -59,3 +59,41 @@ test("Execution refuses a missing selected environment generation without affect
         /provider disabled/u,
     );
 });
+
+test("Execution resolves environment hooks in configured order and acquires only one sandbox", async () => {
+    const acquired: string[] = [];
+    const extensions = {
+        async acquireRegistration(pointId: string, id: string) {
+            acquired.push(`${pointId}/${id}`);
+            return {
+                registration: { binding: { name: id, version: 1, executable: id, args: [] } },
+                lease: { release() {} },
+            };
+        },
+    };
+    const compiled = await resolveExecutionDrivers(extensions as never, {
+        environment: [
+            { order: 200, name: "second", content: {} },
+            { order: 100, name: "first", content: {} },
+        ],
+        sandbox: { name: "bubblewrap", content: { args: ["--die-with-parent"] } },
+    });
+    assert.deepEqual(acquired, [
+        "execution.environment/second",
+        "execution.environment/first",
+    ]);
+    assert.deepEqual(compiled.environment?.map(({ name }) => name), ["second", "first"]);
+    assert.equal((compiled.sandbox as { name: string }).name, "bubblewrap");
+    assert.equal((compiled.sandbox as { driver?: unknown }).driver, undefined);
+});
+
+test("Execution releases a selected provider lease when its descriptor is invalid", async () => {
+    let released = 0;
+    await assert.rejects(resolveExecutionDrivers({
+        acquireRegistration: async () => ({
+            registration: { binding: { name: "spoofed", version: 1 } },
+            lease: { release() { released += 1; } },
+        }),
+    } as never, { sandbox: { name: "chosen", content: {} } }), /invalid driver/u);
+    assert.equal(released, 1);
+});
