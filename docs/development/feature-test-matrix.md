@@ -248,3 +248,41 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 
 | G31 | C09/C10 | 不同 OAuth Principal 不能读写其他 Context 的状态 | mcp/integration/ContextIsolation.test.ts | I 已新增、MCP包测试通过 | Package自动 | 实际 ChatGPT/OAuth Client Header 端到端仍待验 |
 | G32 | C06/C20 | ToolCall 已产生副作用而回复丢失时，重连后不得默默重复执行 | control/integration/server/transport/ControlRpcServer.test.ts | I 已新增、定向通过 | Package自动 | 真 Worker 跨机弱网/审计提交中断仍待验 |
+
+## 9. 第三轮缺陷导向测试矩阵
+
+本轮七个 Codex 长任务按“实现入口→可证伪不变量→故障注入/交错→定向实测→Bug复现”多轮执行。下表是**行为组**而非以文件数量充当覆盖率；同一行的多个断言共享测试入口。优先区分绿色默认回归、独立已知缺陷红测、真实 E2E 和仍缺的目标平台运行证据。
+
+详见 [第三轮实际 Bug 与复现](beta-bug-findings.md)；已证实但尚未修复的红测在仓库内 [Known-Bugs](../../test/known-bugs/README.md)，不会影响正常 Package 默认发现。
+
+| Matrix ID | 功能关联 | 新增可证伪断言 | 具体入口 | 证据层级 | 门禁与实测状态 |
+|---|---|---|---|---|---|
+| M01 | C02/C25 | Recovery本身再次 SIGKILL、半提交/清理失败，保留一致Generation | control/config/persistence/RecoveryInterruption.test.ts | I | 自动Package；新增 |
+| M02 | C05/L04 | Reverse Credential发布/轮换中进程死亡与重启，旧凭据无错误恢复 | control/reverse/CredentialCrash.test.ts | I | 自动Package；新增 |
+| M03 | C03 | 同名Instance删除与新代资源创建交错 | control/instance/GenerationDeletion.test.ts | U/I | 自动Package；新增 |
+| M04 | C25/L08 | SQLite Migration写入/提交异常后的重试幂等 | control/migration/AuditFaultRetry.test.ts | I | 自动Package；新增 |
+| M05 | C30/P01-P12 | Extension Point注册、变更和Capability归属失效分支 | control/extension/Round3Matrix.test.ts | U/I | 自动Package；新增 |
+| M06 | C30/L06 | Extension Host Generation退役、资源/回调生命周期 | control/integration/extension/Round3Lifecycle.test.ts | I | 自动Package；新增 |
+| M07 | C04 | Docker/Podman adopted runtime、Provider重连/命令失败后恢复 | core/worker/Transport.test.ts | U/I | 自动Package；新增 |
+| M08 | C06 | Stream窗口耗尽、多个挂起Reader、FIN/RESET清理与顺序 | shared/transport/frame/Stream.test.ts | U | 自动Package；新增 |
+| M09 | C28 | OIDC Issuer/JWKS/Discovery和资源元数据负例 | mcp/auth/OAuthMetadataRound3.test.ts | U/I | 自动Package；新增 |
+| M10 | C10 | OAuth注册/签名/刷新竞争边界与令牌有效性 | mcp/auth/OAuthRound3.test.ts | U/I | 自动Package；新增 |
+| M11 | C10/L02 | 现有连接上的认证变更与作用域变更 | mcp/auth/OAuthSocketRound3.test.ts | I | 自动Package；新增 |
+| M12 | C09 | Principal+Workspace绑定，多Context参数隔离 | mcp/ContextRound3.test.ts | U/I | 自动Package；新增 |
+| M13 | C13/C14 | MCP App Action Lease领取/释放、多候选并发 | mcp/mcpapp/LeaseRound3.test.ts | U | 自动Package；新增 |
+| M14 | C13 | MCP App Live Snapshot状态与恢复请求序号 | mcp/mcpapp/LiveRound3.test.ts | U/I | 自动Package；新增 |
+| M15 | C14/L05 | Goal/Receipt Reentry领取-校验-汇报负例 | mcp/mcpapp/ReentryRound3.test.ts | U/I | 自动Package；新增 |
+| M16 | X01 | Access Tunnel退役后过期事件不得修改新配置 | extensions/access/test/unit/Runtime.test.ts | U | 自动Package；新增 |
+| M17 | X02 | Agent子进程身份/事件隔离、并发取消恢复 | extensions/agent/test/unit/PiSubagent.test.ts | U/I | 自动Package；新增 |
+| M18 | X03 | Artifact Model跨Workspace来源/目标可见性 | extensions/artifact/test/unit/ArtifactModelCommand.test.ts | U | 自动Package；新增 |
+| M19 | X06 | Instance Model Command遮蔽范围和重建后的列表/日志 | extensions/instance/test/unit/InstanceCommand.test.ts | U | 自动Package；新增 |
+| M20 | X08 | Recall跨Instance/Workspace历史过滤和分页 | extensions/recall/test/unit/RecallExtension.test.ts | U | 自动Package；新增 |
+| M21 | X11 | Storage Downgrade异常/cancel与旧文件保护 | extensions/storage/test/unit/StorageDowngrade.test.ts | U/I | 自动Package；新增 |
+| M22 | C24/L03 | Web Config/Todo/Audit真实渲染、异步状态与操作反馈 | packages/web/test/view/BetaMatrixRound3.test.tsx | U/I | 自动Package；新增 |
+| M23 | C24 | TUI实例/审查界面焦点、选中项与命令响应 | packages/tui/test/view/BetaMatrixRound3.test.ts | U/I | 自动Package；新增 |
+| M24 | C13/L05 | MCP App真实渲染组件的Reentry/Action/Watch与刷新 | packages/mcpapp/src/BetaMatrixRound3.test.tsx | U | 自动Vitest；新增 |
+| M25 | C15-C18 | 真实Rust Worker Bash/File/Terminal取消和最大Seq边界 | crates/devshell-worker/tests/beta_ipc_contract.rs | I/P Linux | Rust Workspace自动；新增 |
+| M26 | L06 | 独立Namespace中Control/Reverse/Extension/Mailing/Workflow/Approval贯通 | pnpm testspace / TestspaceExtensionSmoke.mjs | E | 本轮实跑全流程通过 |
+| M27 | C17/C18 | Terminal.attach u64::MAX不得溢出、Timeout或误判Gap | crates/devshell-worker/tests/beta_ipc_contract.rs | I | 真实Worker复测通过；已修复 |
+| M28 | L06/C30 | 外层UID与UserNamespace内UID不同，XDG_RUNTIME_DIR仍一致 | scripts/testspace.test.mjs | I/E | 跨进程+独立Testspace通过；已修复 |
+| M29 | C02/C10/C14/C30 | 独立Known-Bugs红测保留真实实现偏差，默认门禁不加载 | test/known-bugs/README.md | I/UI | 独立显式运行并保持红色，见缺陷台账 |

@@ -36,6 +36,7 @@
 ## 开发与验收
 
 - [功能与测试矩阵](development/feature-test-matrix.md)：八条主链路、30 组核心能力、12 个 Extension Points、11 个 Extensions 及验收证据。
+- [Beta 缺陷与最小复现](development/beta-bug-findings.md)：第三轮负例、独立红测、已修复问题和待 E2E 确认的风险。
 - [Testspace](development/testspace.md)：完整本地 DevShell + MCP connector 测试环境。
 - [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
 - [Version 与 Compatibility Lifecycle](development/compatibility.md)：产品版本、Protocol、Extension API、persistent schema、update 与 migrate 的独立版本和兼容边界。
