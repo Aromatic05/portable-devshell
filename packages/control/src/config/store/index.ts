@@ -45,6 +45,17 @@ export interface ControlConfigMigrationResult {
     changed: boolean;
 }
 
+/** The new generation is visible, but crash durability is not confirmed. */
+export class ControlConfigCommittedDurabilityError extends AggregateError {
+    constructor(error: unknown) {
+        super(
+            [error],
+            "Control configuration is committed and visible, but its crash durability could not be confirmed; the recovery backup was retained.",
+        );
+        this.name = "ControlConfigCommittedDurabilityError";
+    }
+}
+
 /** Configuration has committed; only removal of the superseded backup failed. */
 export class ControlConfigCommittedCleanupError extends AggregateError {
     constructor(error: unknown) {
@@ -185,17 +196,10 @@ export class ControlConfigStore {
             }
             throw error;
         }
-        // The commit marker is the recovery boundary. Once removal begins,
-        // recovery may observe the new generation; never attempt a rollback
-        // after this point, including when the directory fsync fails.
-        try {
-            await commitConfigTransaction(transaction);
-        } catch (error) {
-            throw new AggregateError(
-                [error],
-                "Control configuration commit could not be finalized; recovery will resolve any remaining transaction marker.",
-            );
-        }
+        // Marker removal publishes the new generation. A failure before it
+        // leaves recovery in charge; a failure syncing its removal must still
+        // publish the visible generation while retaining its recovery backup.
+        await commitConfigTransaction(transaction);
         // Backups are garbage after the marker has been durably removed.
         // A partial recursive deletion must never turn into a rollback.
         try {
@@ -419,11 +423,46 @@ async function rollbackConfigTransaction(
 async function commitConfigTransaction(
     transaction: PreparedConfigTransaction,
 ): Promise<void> {
-    // An orphaned journal is safe to garbage collect only after publication
-    // of this durable commit-intent marker and removal of the global marker.
-    await atomicWriteFile(join(transaction.directory, "committed"), "");
-    await rm(transaction.markerFile, { force: true });
-    await syncDirectory(dirname(transaction.markerFile));
+    try {
+        // This intent permits later GC, but a live global marker still takes
+        // precedence and requires rollback, even when intent is durable.
+        await atomicWriteFile(join(transaction.directory, "committed"), "");
+    } catch (error) {
+        throw new AggregateError(
+            [error],
+            "Control configuration commit could not be finalized; recovery will resolve any remaining transaction marker.",
+        );
+    }
+    try {
+        await rm(transaction.markerFile, { force: true });
+    } catch (error) {
+        // Unlink may have taken effect despite rejection. Only a confirmed
+        // absent marker permits publication; any probe failure stays uncertain.
+        let marker: string | undefined;
+        try {
+            marker = await readOptionalFile(transaction.markerFile);
+        } catch (probeError) {
+            throw new AggregateError(
+                [error, probeError],
+                "Control configuration marker removal outcome could not be determined; the recovery backup was retained.",
+            );
+        }
+        if (marker === undefined) throw new ControlConfigCommittedDurabilityError(error);
+        const expectedMarker = basename(transaction.directory).slice(".config-transaction-".length);
+        throw new AggregateError(
+            [error],
+            marker.trim() === expectedMarker
+                ? "Control configuration commit could not be finalized; recovery will resolve the remaining transaction marker."
+                : "Control configuration transaction marker changed during commit; the recovery backup was retained.",
+        );
+    }
+    try {
+        await syncDirectory(dirname(transaction.markerFile));
+    } catch (error) {
+        // Unlink succeeded: readers see the complete new generation. A power
+        // loss could still restore the marker, so retain all rollback data.
+        throw new ControlConfigCommittedDurabilityError(error);
+    }
 }
 
 async function cleanupCommittedConfigBackups(paths: ControlPathHome): Promise<void> {
@@ -441,6 +480,9 @@ async function cleanupCommittedConfigBackups(paths: ControlPathHome): Promise<vo
             !/^\.config-transaction-[0-9a-f-]{36}$/u.test(entry.name)) continue;
         const directory = join(paths.controlHomeDir, entry.name);
         if (await readOptionalFile(join(directory, "committed")) === undefined) continue;
+        // A prior commit may have unlinked its marker but failed its final
+        // fsync. Confirm that absence is durable before destroying backups.
+        await syncDirectory(paths.controlHomeDir);
         await rm(directory, { recursive: true, force: true });
     }
 }
