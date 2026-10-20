@@ -170,6 +170,30 @@ test("Artifact model transfer status/cancel only operate on current-Context reco
     );
 });
 
+test("Artifact model rejects a same-instance transfer whose source Workspace differs", async () => {
+    const foreignWorkspace = {
+        ...localTransfer("foreign-workspace"),
+        source: { instance: "instance-a", path: "./source.txt", workspace: "/repo/other" },
+    };
+    const cap = capability([]);
+    cap.getTransfer = async () => foreignWorkspace;
+    await assert.rejects(
+        executeArtifactModelCommand(cap, ["transfer", "status", "foreign-workspace"], invocation),
+        /unavailable in the current model Context/u,
+    );
+});
+
+test("Artifact model never cancels a transfer after the capability returns a foreign target", async () => {
+    const calls: unknown[] = [];
+    const cap = capability(calls);
+    cap.getTransfer = async (id) => ({ ...crossTransfer(id), target: { instance: "instance-a", path: "./x", workspace: "/repo/other" } });
+    await assert.rejects(
+        executeArtifactModelCommand(cap, ["transfer", "cancel", "local"], invocation),
+        /unavailable in the current model Context/u,
+    );
+    assert.deepEqual(calls, []);
+});
+
 function share(shareId: string, instance: string, workspace: string) {
     return {
         blake3: "b3",
