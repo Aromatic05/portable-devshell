@@ -97,9 +97,9 @@ export async function realMemory(t: TestContext) {
     const errors: unknown[] = [];
     function newMailing() {
         const service = new MailingService({ worker, contexts, pollMs: 3_600_000,
-            comment: { async queue(_instance, ctxId, text) {
+            comment: { async queue(_instance, ctxId, text, identity) {
                 await beforeNotice?.();
-                await comment.queue({ ctxId, text });
+                await comment.queue({ ctxId, text }, identity);
             } }, onError: (error) => { errors.push(error); } });
         services.push(service);
         return service;

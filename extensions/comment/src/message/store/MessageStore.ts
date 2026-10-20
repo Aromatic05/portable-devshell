@@ -28,6 +28,7 @@ import {
     toMessageEntry,
 } from "./Query.js";
 import { defaultMessageStorageLimits, openMessageDatabase } from "./Schema.js";
+import type { MailingNotificationIdentity } from "../../mailing/Service.js";
 
 export { defaultMessageStorageLimits } from "./Schema.js";
 export type { MessageControlState } from "../MessageControl.js";
@@ -137,10 +138,35 @@ export class MessageStore {
         });
     }
 
-    async insertComment(record: ContextMessageRecord): Promise<void> {
+    async insertComment(record: ContextMessageRecord, identity?: MailingNotificationIdentity): Promise<{
+        record: ContextMessageRecord;
+        queuedEventPending: boolean;
+    }> {
         return await this.#exclusive(async () => {
+            if (identity !== undefined && (identity.instance !== this.#instanceName ||
+                identity.ctxId !== record.ctxId || record.instance !== this.#instanceName || record.status !== "sent" ||
+                notificationParameters(identity).some((value) => typeof value !== "string" || value.length === 0)))
+                throw new Error("Mailing notification identity does not match its Comment scope");
             const database = await this.#open();
+            let admission = { record, queuedEventPending: true };
+            let inserted = false;
             await database.transaction(async (database) => {
+                if (identity !== undefined) {
+                    const receipt = await database.get<{
+                        comment_id: string; created_at: string; text: string; queued_event_recorded: number;
+                    }>(`SELECT comment_id, created_at, text, queued_event_recorded FROM mailing_notifications
+                        WHERE instance = ? AND workspace = ? AND ctx_id = ? AND mail_id = ? AND notification_kind = ?`,
+                        notificationParameters(identity));
+                    if (receipt !== undefined) {
+                        if (receipt.text !== record.text)
+                            throw new Error("Mailing notification payload changed for an existing identity");
+                        // This receipt survives history retention. Replays return
+                        // the original admission without resurrecting a Comment.
+                        admission = { record: { ...record, id: receipt.comment_id, createdAt: receipt.created_at },
+                            queuedEventPending: receipt.queued_event_recorded === 0 };
+                        return;
+                    }
+                }
                 await database.run(
                     `
                 INSERT INTO message_entries(
@@ -173,8 +199,15 @@ export class MessageStore {
                     applyQueuedControl(state, record);
                 }
                 await writeMessageControlState(database, record.ctxId, state);
+                if (identity !== undefined)
+                    await database.run(`INSERT INTO mailing_notifications
+                        (instance, workspace, ctx_id, mail_id, notification_kind, comment_id, created_at, text)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [...notificationParameters(identity), record.id, record.createdAt, record.text]);
+                inserted = true;
             });
-            this.#payloadBytes =
+            if (identity !== undefined) this.#payloadBytes = await readMessagePayloadBytes(database);
+            else if (inserted) this.#payloadBytes =
                 this.#trackedPayloadBytes() +
                 (await readMessageEntryPayloadBytes(
                     database,
@@ -185,6 +218,17 @@ export class MessageStore {
                 database,
                 record.status === "delivered" || record.status === "failed",
             );
+            return admission;
+        });
+    }
+
+    async acknowledgeQueuedEvent(identity: MailingNotificationIdentity): Promise<void> {
+        await this.#exclusive(async () => {
+            const database = await this.#open();
+            const changed = await database.run(`UPDATE mailing_notifications SET queued_event_recorded = 1
+                WHERE instance = ? AND workspace = ? AND ctx_id = ? AND mail_id = ? AND notification_kind = ?`,
+                notificationParameters(identity));
+            if (changed !== 1) throw new Error("Mailing notification receipt is missing during event acknowledgement");
         });
     }
 
@@ -548,6 +592,10 @@ export class MessageStore {
         }
         return this.#payloadBytes;
     }
+}
+
+function notificationParameters(identity: MailingNotificationIdentity): string[] {
+    return [identity.instance, identity.workspace, identity.ctxId, identity.mailId, identity.kind];
 }
 
 function fileSize(path: string): number {

@@ -16,6 +16,7 @@ import {
 } from "../message/MessageControl.js";
 import { MessageStore } from "../message/store/MessageStore.js";
 import { CommentState } from "./CommentState.js";
+import type { MailingNotificationIdentity } from "../mailing/Service.js";
 
 export interface CommentServiceOptions {
     appendEvent(
@@ -43,6 +44,7 @@ export class CommentService {
 
     async queue(
         input: ContextMessageQueueInput,
+        identity?: MailingNotificationIdentity,
     ): Promise<ContextMessageRecord> {
         return await this.#runExclusive(async () => {
             const record = this.#state.queue(
@@ -53,14 +55,19 @@ export class CommentService {
             const previousControlState = await this.#store.readControlState(
                 record.ctxId,
             );
-            await this.#store.insertComment(record);
+            const admission = await this.#store.insertComment(record, identity);
+            if (!admission.queuedEventPending) return admission.record;
             try {
                 await this.#appendEvent(
                     "context.message.queued",
-                    eventData(record),
+                    eventData(admission.record),
                 );
-                return record;
+                if (identity !== undefined) await this.#store.acknowledgeQueuedEvent(identity);
+                return admission.record;
             } catch (error) {
+                // A producer receipt and its Comment are already committed.
+                // Preserve them and retry the wakeup with the same ID on replay.
+                if (identity !== undefined) throw error;
                 await this.#markFailed([record], error);
                 await this.#store.writeControlState(
                     record.ctxId,

@@ -59,6 +59,7 @@ import { resolveToolCallHints } from "./hint/Resolver.js";
 import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
 import { createMailingService, registerMailing, type MailingRuntime } from "./mailing/index.js";
+import type { MailingNotificationIdentity } from "./mailing/Service.js";
 
 export type CommentControlDecision =
     | { readonly kind: "allow" }
@@ -96,7 +97,7 @@ export interface CommentInstanceSource {
 }
 
 export interface CommentPort {
-    queue(instance: string, ctxId: string, text: string): Promise<void>;
+    queue(instance: string, ctxId: string, text: string, identity?: MailingNotificationIdentity): Promise<void>;
     beforeTodoToolCall(
         instance: string,
         ctxId: string,
@@ -187,8 +188,8 @@ export class CommentExtension {
         );
         this.#preferences = preferences;
         const comment: CommentPort = {
-            queue: async (instance, ctxId, text) => {
-                await this.#require(instance).comment.queue({ ctxId, text });
+            queue: async (instance, ctxId, text, identity) => {
+                await this.#require(instance).comment.queue({ ctxId, text }, identity);
             },
             beforeTodoToolCall: async (instance, ctxId, toolName) =>
                 await this.#require(instance).report.beforeTodoToolCall(
@@ -448,7 +449,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ),
     });
     const mailing = createMailingService(context, {
-        queue: async (instance, ctxId, text) => await comment.comment.queue(instance, ctxId, text),
+        queue: async (instance, ctxId, text, identity) => await comment.comment.queue(instance, ctxId, text, identity),
     });
     const gate = createCommentToolCallGate(comment.comment);
     const todoAccess = createCommentTodoAccess(comment.comment);

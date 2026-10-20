@@ -120,7 +120,7 @@ function messageTables(database: DatabaseSync, filePath: string): {
         throw new Error(`Legacy message migration found invalid SQLite data: ${filePath}`);
     }
     const version = database.prepare("PRAGMA user_version").get()?.user_version;
-    if (version !== 1 && version !== 2) {
+    if (version !== 1 && version !== 2 && version !== 3) {
         throw new Error(`Unsupported legacy message database schema ${String(version)}: ${filePath}`);
     }
     const entries = version === 1 ? "conversation_entries" : "message_entries";

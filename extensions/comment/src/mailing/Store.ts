@@ -1,4 +1,5 @@
 import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
+import { hasMailRecord } from "./Protocol.js";
 
 const ROOT = "var/agent-work";
 const MAX_READ_BYTES = 8 * 1024 * 1024;
@@ -114,7 +115,7 @@ export class WorkerMailingFiles implements MailingFiles {
 
     async appendUnique(path: string, marker: string, content: string): Promise<void> {
         const current = await this.read(path);
-        if (current?.includes(marker)) return;
+        if (current !== undefined && hasMailRecord(current, marker, content)) return;
         if (current === undefined) {
             // Create a harmless header first. Always append through a prefixed patch,
             // so user mail bodies cannot impersonate *** End Edit control lines.

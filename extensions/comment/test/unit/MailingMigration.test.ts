@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import test from "node:test";
+import { CommentService } from "../../src/comment/CommentService.ts";
+import { migrateMessageDatabase } from "../../src/message/migration/index.ts";
+import { MessageStore } from "../../src/message/store/MessageStore.ts";
+import { databaseConnection } from "../helpers/Database.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+
+test("Mailing schema upgrade remains compatible with a retained legacy source on the next startup", async (t) => {
+    const root = await createTestTempDirectory("mailing-retained-legacy-source");
+    const sourceFile = join(root, "legacy.sqlite3");
+    const targetFile = join(root, "message.sqlite3");
+    const source = new MessageStore({ filePath: sourceFile, instanceName: "alpha", openDatabase: () => databaseConnection(sourceFile) });
+    const previous = new CommentService({ instanceName: "alpha", store: source, appendEvent: async () => {} });
+    const historical = await previous.queue({ ctxId: "owner", text: "Retained historical source" });
+    await source.close();
+    const old = new DatabaseSync(sourceFile);
+    old.exec("DROP TABLE mailing_notifications; PRAGMA user_version = 2;");
+    old.close();
+    const target = new MessageStore({ filePath: targetFile, instanceName: "alpha", openDatabase: () => databaseConnection(targetFile) });
+    const current = new CommentService({ instanceName: "alpha", store: target, appendEvent: async () => {} });
+    const key = { instance: "alpha", workspace: "/workspace", ctxId: "owner", mailId: "sender#1", kind: "inbox:receiver" };
+    const notice = { ctxId: "owner", text: "New Mail\nFrom: sender\nSubject: Current producer" };
+    const admitted = await current.queue(notice, key);
+    await target.close();
+    t.after(() => target.close());
+    await migrateMessageDatabase({ instance: "alpha", sourceFile, targetFile });
+    await migrateMessageDatabase({ instance: "alpha", sourceFile, targetFile });
+    assert.deepEqual(new Set((await current.list()).map(({ id }) => id)), new Set([historical.id, admitted.id]));
+    assert.equal((await current.queue(notice, key)).id, admitted.id);
+    assert.equal((await current.list()).length, 2);
+});

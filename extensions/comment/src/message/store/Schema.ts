@@ -1,6 +1,6 @@
 import type { ExtensionDatabaseConnection } from "@portable-devshell/extension/database";
 
-export const MESSAGE_DATABASE_SCHEMA_VERSION = 2;
+export const MESSAGE_DATABASE_SCHEMA_VERSION = 3;
 export const defaultMessageStorageLimits = {
     maxBytes: 512 * 1024 * 1024,
     retentionDays: 90,
@@ -12,9 +12,11 @@ export async function openMessageDatabase(
 ): Promise<ExtensionDatabaseConnection> {
     const database = await open();
     try {
+        await database.exec("PRAGMA read_uncommitted = OFF");
+        // Mailing acknowledges a second durable store after this commit.
+        await database.exec("PRAGMA synchronous = FULL");
         await initializeMessageSchema(database, filePath);
         await database.exec("PRAGMA journal_mode = WAL");
-        await database.exec("PRAGMA synchronous = NORMAL");
         return database;
     } catch (error) {
         await database.close();
@@ -28,18 +30,38 @@ async function initializeMessageSchema(
 ): Promise<void> {
     const userVersion = await readMessageSchemaVersion(database, filePath);
     if (userVersion === MESSAGE_DATABASE_SCHEMA_VERSION) {
-        if (!(await tableExists(database, "message_entries"))) {
+        if (!(await tableExists(database, "message_entries")) ||
+            !(await tableExists(database, "message_metadata")) ||
+            !(await tableExists(database, "mailing_notifications"))) {
             throw new Error(
                 `Message database schema version ${MESSAGE_DATABASE_SCHEMA_VERSION} is inconsistent: ` +
-                    "message_entries is missing. Refusing to modify the database.",
+                    "a required table is missing. Refusing to modify the database.",
             );
         }
         return;
     }
 
     await database.transaction(async (database) => {
-        if (userVersion === 1) await migrateVersionOne(database);
-        else await createCurrentSchema(database);
+        if (userVersion === 0) await createCurrentSchema(database);
+        else {
+            if (userVersion === 1) await migrateVersionOne(database);
+            if (!(await tableExists(database, "message_entries")) || !(await tableExists(database, "message_metadata")))
+                throw new Error(`Message database schema version ${userVersion} is inconsistent; refusing to upgrade`);
+        }
+        await database.exec(`
+            CREATE TABLE IF NOT EXISTS mailing_notifications (
+                instance TEXT NOT NULL,
+                workspace TEXT NOT NULL,
+                ctx_id TEXT NOT NULL,
+                mail_id TEXT NOT NULL,
+                notification_kind TEXT NOT NULL,
+                comment_id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                text TEXT NOT NULL,
+                queued_event_recorded INTEGER NOT NULL DEFAULT 0 CHECK(queued_event_recorded IN (0, 1)),
+                PRIMARY KEY(instance, workspace, ctx_id, mail_id, notification_kind)
+            ) STRICT;
+        `);
         await database.exec(
             `PRAGMA user_version = ${MESSAGE_DATABASE_SCHEMA_VERSION}`,
         );

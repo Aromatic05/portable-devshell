@@ -48,6 +48,7 @@ class FakeWorkspace {
     readonly calls: string[] = [];
     readonly globDepths: number[] = [];
     failAppendOnceOn?: string;
+    beforeEdit?: (path: string) => void;
 
     constructor() {
         this.files.set(root + A + "/INDEX.md", "# " + A + "\n");
@@ -87,6 +88,7 @@ class FakeWorkspace {
             const header = /^(\*\*\* (?:Write|Rewrite|Patch) File): (.+)$/u.exec(lines[1]!);
             assert.ok(header, "unexpected file_edit: " + changes);
             const path = header[2]!;
+            this.beforeEdit?.(path);
             if (this.failAppendOnceOn === path) {
                 this.failAppendOnceOn = undefined;
                 throw new Error("simulated Worker disconnect");
@@ -250,7 +252,7 @@ test("Memory inherits legacy Mailing claims without losing accepted message stat
     const stored = JSON.parse(fs.files.get(root + ".mailing/state.json")!) as {
         version: number; bindings: Record<string, string>; accepted: Record<string, string>;
     };
-    assert.equal(stored.version, 2);
+    assert.equal(stored.version, 3);
     assert.deepEqual(stored.bindings, { [A]: "ctx-b" });
     assert.deepEqual(stored.accepted, { "historic#1": "fingerprint" });
 });
@@ -488,7 +490,12 @@ test("Mailing replays mailbox writes after a failed acceptance save and Control 
     await mailing.inherit({ instance, workspace, ctxId: "ctx-b" }, B);
     fs.files.set(outbox, mail("Save interrupted", "Mailbox committed before state"));
     const stateFile = root + ".mailing/state.json";
-    fs.failAppendOnceOn = stateFile;
+    fs.beforeEdit = (path) => {
+        if (path === stateFile && fs.files.get(inbox)?.includes("Mailbox committed before state")) {
+            fs.beforeEdit = undefined;
+            throw new Error("simulated Worker disconnect");
+        }
+    };
     await assert.rejects(mailing.scan({ instance, workspace }), /simulated Worker disconnect/u);
     assert.match(fs.files.get(inbox)!, /Mailbox committed before state/u);
     assert.deepEqual(JSON.parse(fs.files.get(stateFile)!).accepted, {});

@@ -45,8 +45,8 @@ test("R4-D2: one Context on two Instances must receive both scope-local mail not
     const service = new MailingService({
         contexts, pollMs: 3_600_000,
         worker: { openSession: (input) => (input.instance === a.instance ? a.worker : b.worker).openSession(input) },
-        comment: { async queue(instance, ctxId, text) {
-            await (instance === a.instance ? a.comment : b.comment).queue({ ctxId, text });
+        comment: { async queue(instance, ctxId, text, identity) {
+            await (instance === a.instance ? a.comment : b.comment).queue({ ctxId, text }, identity);
         } }, onError: (error) => assert.fail(String(error)),
     });
     t.after(() => service.close());
