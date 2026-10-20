@@ -85,6 +85,12 @@ test("Reentry store compares owner and lifecycle atomically without writing on a
         assert.equal(await store.settle(fixture.directiveId, "old-owner", "accepted"), undefined);
         assert.equal(await store.settle(fixture.directiveId, "new-owner", "accepted"), undefined);
         assert.equal(await readFile(fixture.filePath, "utf8"), persisted);
+        assert.equal(await store.markAttempted(fixture.directiveId, "new-owner"), undefined);
+        assert.equal(await store.beginAttempt(fixture.directiveId, "new-owner"), undefined);
+        assert.equal(await store.confirmDelivery(fixture.directiveId, "old-owner", "new-owner"), undefined);
+        assert.ok(await store.confirmDelivery(fixture.directiveId, "new-owner", "new-owner"));
+        assert.equal(await store.beginAttempt(fixture.directiveId, "old-owner"), undefined);
+        assert.ok(await store.beginAttempt(fixture.directiveId, "new-owner"));
         assert.ok(await store.markAttempted(fixture.directiveId, "new-owner"));
         assert.equal(await store.restoreDelivery(fixture.directiveId, "new-owner"), false);
         assert.ok(await store.beginReport(fixture.directiveId, "new-owner", "accepted"));
@@ -265,6 +271,45 @@ test("Reentry failed attempt write recovers the Instance attempt without grantin
     } finally { await fixture.close(); }
 });
 
+test("Reentry failed attempt reservation never dispatches Instance and leaves the unattempted receipt usable", async () => {
+    const fixture = await betaReentry();
+    try {
+        await fixture.call({ action: "claim" });
+        const before = fixture.executions();
+        await blockPersistence(fixture.filePath);
+        await assert.rejects(fixture.call({ action: "attempt" }));
+        assert.equal(fixture.executions(), before);
+        assert.equal((await fixture.actions.get(fixture.directiveId))?.attemptStarted, undefined);
+        assert.equal((await fixture.goal.read(fixture.context.ctxId))?.continuationUncertain, false);
+        await unblockPersistence(fixture.filePath);
+        assert.equal((await fixture.call({ action: "attempt" }) as { attempted: boolean }).attempted, true);
+    } finally { await fixture.close(); }
+});
+
+test("Reentry failed claim confirmation retains the claiming fence until confirmed release and survives restart", async () => {
+    const fixture = await betaReentry();
+    try {
+        const failing = delivery(fixture, fixture.actions, async (input, execute) => {
+            const result = await execute();
+            if ((input as { action: string }).action === "claim") await blockPersistence(fixture.filePath);
+            return result;
+        });
+        await assert.rejects(failing({ action: "claim" }));
+        assert.equal((await fixture.actions.get(fixture.directiveId))?.status, "claiming");
+        assert.equal((await fixture.goal.read(fixture.context.ctxId))?.continuationPending, false);
+        await unblockPersistence(fixture.filePath);
+        const restarted = new McpAppActionStore({ filePath: fixture.filePath });
+        await restarted.initialize();
+        const call = delivery(fixture, restarted);
+        const before = fixture.executions();
+        assert.deepEqual(await call({ action: "attempt" }), { attempted: false });
+        assert.equal(fixture.executions(), before);
+        assert.equal((await call({ action: "claim", claimId: "replacement-owner" }) as { claimed: boolean }).claimed, true);
+        assert.deepEqual(await call({ action: "attempt" }), { attempted: false });
+        assert.equal((await call({ action: "attempt", claimId: "replacement-owner" }) as { attempted: boolean }).attempted, true);
+    } finally { await fixture.close(); }
+});
+
 test("Reentry failed claim reply after Instance commit confirms release before retry", async () => {
     const fixture = await betaReentry();
     try {
@@ -315,7 +360,7 @@ test("Reentry failed claim cleanup keeps ownership until Instance release is con
             throw new Error("claim reply lost");
         });
         await assert.rejects(failing({ action: "claim" }), /claim reply lost/u);
-        assert.equal((await fixture.actions.get(fixture.directiveId))?.status, "attempting");
+        assert.equal((await fixture.actions.get(fixture.directiveId))?.status, "claiming");
         assert.equal((await fixture.actions.get(fixture.directiveId))?.claimId, fixture.base.claimId);
         assert.equal((await fixture.goal.read(fixture.context.ctxId))?.continuationPending, true);
         assert.deepEqual(await fixture.call({ action: "claim", claimId: "another-host" }), { claimed: false });
@@ -397,6 +442,7 @@ test("Reentry delayed stale validation cannot restore a replacement owner after 
         assert.ok(await fixture.actions.beginDelivery(fixture.directiveId, "replacement-owner"));
         await fixture.goal.continuation(fixture.context.ctxId, { action: "claim", claimId: "replacement-owner",
             goalId: fixture.base.sourceId, userInitiated: true });
+        assert.ok(await fixture.actions.confirmDelivery(fixture.directiveId, "replacement-owner", "replacement-owner"));
         const replacement = await fixture.actions.get(fixture.directiveId);
         resume.resolve();
         assert.equal((await validating as { valid: boolean }).valid, false);
@@ -406,7 +452,7 @@ test("Reentry delayed stale validation cannot restore a replacement owner after 
     } finally { resume.resolve(); await fixture.close(); }
 });
 
-test("Reentry delayed attempt reply cannot grant resume after recovery replaces its receipt owner", async () => {
+test("Reentry delayed attempt reply retains its owner because the durable attempt fence prohibits replacement", async () => {
     const fixture = await betaReentry();
     const entered = deferred();
     const resume = deferred();
@@ -421,16 +467,16 @@ test("Reentry delayed attempt reply cannot grant resume after recovery replaces 
         const attempting = delayed({ action: "attempt" });
         await entered.promise;
         await fixture.goal.continuation(fixture.context.ctxId, { action: "retire" });
-        assert.equal(await fixture.actions.restoreDelivery(fixture.directiveId, fixture.base.claimId), true);
-        assert.ok(await fixture.actions.beginDelivery(fixture.directiveId, "replacement-owner"));
-        await fixture.goal.continuation(fixture.context.ctxId, { action: "claim", claimId: "replacement-owner",
-            goalId: fixture.base.sourceId, userInitiated: true });
-        const replacement = await fixture.actions.get(fixture.directiveId);
+        assert.equal(await fixture.actions.restoreDelivery(fixture.directiveId, fixture.base.claimId), false);
+        assert.equal(await fixture.actions.beginDelivery(fixture.directiveId, "replacement-owner"), undefined);
+        const receipt = await fixture.actions.get(fixture.directiveId);
+        assert.equal(receipt?.attemptStarted, true);
+        assert.equal(receipt?.claimId, fixture.base.claimId);
         resume.resolve();
-        assert.deepEqual(await attempting, { attempted: false });
-        assert.deepEqual(await fixture.actions.get(fixture.directiveId), replacement);
-        assert.equal((await fixture.call({ action: "attempt", claimId: "replacement-owner" }) as { attempted: boolean }).attempted, true);
-        await fixture.call({ action: "report", outcome: "accepted", claimId: "replacement-owner" });
-        assert.equal((await fixture.goal.read(fixture.context.ctxId))?.continuationCount, 1);
+        assert.equal((await attempting as { attempted: boolean }).attempted, true);
+        assert.equal((await fixture.actions.get(fixture.directiveId))?.status, "attempted");
+        assert.deepEqual(await fixture.call({ action: "attempt", claimId: "replacement-owner" }), { attempted: false });
+        assert.deepEqual(await fixture.call({ action: "claim", claimId: "replacement-owner" }), { claimed: false });
+        assert.deepEqual(await fixture.call({ action: "attempt" }), { attempted: false, duplicate: true });
     } finally { resume.resolve(); await fixture.close(); }
 });

@@ -52,7 +52,7 @@ export async function deliverMcpAppReentry(
         return { result, value };
     }
 
-    async function advance(): Promise<McpEndpointResult> {
+    async function advance(queued = false): Promise<McpEndpointResult> {
         const receipt = typeof directiveId === "string"
             ? await ports.actions.get(directiveId) : undefined;
         if (directiveId !== undefined && (receipt?.ctxId !== ctxId || receipt.instance !== ports.instance ||
@@ -60,22 +60,38 @@ export async function deliverMcpAppReentry(
             receipt.effect.intent !== intent || receipt.effect.sourceId !== sourceId))
             throw new Error("Recovery directive is not owned by the current Context.");
         if (action === "claim") {
+            let deliveryOwner = owner;
+            let reserved = false;
             if (intent === "automatic") {
                 if (directiveId !== undefined || typeof sourceId !== "string")
                     throw new Error("Invalid automatic recovery intent.");
             } else {
-                if (typeof directiveId !== "string" || receipt?.status !== "applied" ||
+                if (typeof directiveId !== "string" || receipt === undefined || receipt.attemptStarted ||
+                    !["applied", "claiming", "attempting"].includes(receipt.status) ||
                     (intent !== "goal-resume" && intent !== "goal-retry" && intent !== "task-resume"))
                     return { claimed: false };
-                if (await ports.actions.beginDelivery(directiveId, owner) === undefined)
-                    return { claimed: false };
+                if (receipt.status === "applied") {
+                    if (await ports.actions.beginDelivery(directiveId, owner) === undefined)
+                        return { claimed: false };
+                    reserved = true;
+                } else {
+                    // Concurrent claim contenders already observed this delivery in
+                    // flight. Recovery is a fresh request through the Instance fence.
+                    if (queued || receipt.claimId === undefined || receipt.claimId === owner) return { claimed: false };
+                    deliveryOwner = receipt.claimId;
+                }
             }
             try {
                 const { result, value } = await dispatch(input);
                 if (value.claimed !== true) {
-                    if (typeof directiveId === "string")
+                    if (typeof directiveId === "string" && reserved)
                         await ports.actions.restoreDelivery(directiveId, owner);
-                    return result;
+                    return reserved || directiveId === undefined ? result : { claimed: false };
+                }
+                if (typeof directiveId === "string") {
+                    if (await ports.actions.confirmDelivery(directiveId, deliveryOwner, owner) === undefined)
+                        throw new Error("Recovery receipt ownership changed during Instance claim.");
+                    deliveryOwner = owner;
                 }
                 const snapshot = await ports.view.snapshot(ports.instance, ctxId, workspace);
                 const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
@@ -96,7 +112,7 @@ export async function deliverMcpAppReentry(
                 try {
                     const { value } = await dispatch({ ...payload, action: "release" }, true);
                     if (value.released === true && typeof directiveId === "string")
-                        await ports.actions.restoreDelivery(directiveId, owner);
+                        await ports.actions.restoreDelivery(directiveId, deliveryOwner);
                 } catch { /* Fail closed when release status is uncertain. */ }
                 throw error;
             }
@@ -110,8 +126,11 @@ export async function deliverMcpAppReentry(
                 if (!owned) return { attempted: false };
                 if (receipt.status === "attempted") return { attempted: false, duplicate: true };
                 if (receipt.status !== "attempting") return { attempted: false };
+                if (await ports.actions.beginAttempt(directiveId as string, owner) === undefined)
+                    return { attempted: false };
             }
-            if (action === "release" && (!owned || receipt.status !== "attempting"))
+            if (action === "release" && (!owned || receipt.attemptStarted ||
+                (receipt.status !== "claiming" && receipt.status !== "attempting")))
                 return { released: false };
             if (action === "report" && await ports.actions.beginReport(
                 directiveId as string, owner, outcome as "accepted" | "rejected" | "uncertain",
@@ -126,6 +145,8 @@ export async function deliverMcpAppReentry(
                 !await ports.actions.restoreDelivery(directiveId, owner)) return { released: false };
             if (action === "attempt" && (value.attempted === true || value.duplicate === true) &&
                 await ports.actions.markAttempted(directiveId, owner) === undefined) return { attempted: false };
+            if (action === "attempt" && value.attempted === false && value.duplicate !== true)
+                await ports.actions.cancelAttempt(directiveId, owner);
             if (action === "report" && (value.reported === true || (outcome === "uncertain" && value.uncertain === true)) &&
                 await ports.actions.settle(directiveId, owner, outcome as "accepted" | "rejected" | "uncertain") === undefined)
                 return { reported: false };

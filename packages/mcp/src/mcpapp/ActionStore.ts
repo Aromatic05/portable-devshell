@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { McpAppActionEffect, McpAppResolvedAction } from "./model/Contract.js";
 
-export type McpAppActionReceiptStatus = "prepared" | "applied" | "attempting" | "attempted" | "reporting" | "settled" | "suppressed" | "conflicted";
+export type McpAppActionReceiptStatus = "prepared" | "applied" | "claiming" | "attempting" | "attempted" | "reporting" | "settled" | "suppressed" | "conflicted";
 
 export interface McpAppActionReceipt {
     actionId: string;
@@ -15,6 +15,8 @@ export interface McpAppActionReceipt {
     status: McpAppActionReceiptStatus;
     effect?: McpAppActionEffect;
     claimId?: string;
+    /** Persisted before Instance attempt dispatch; owner loss must not replay it. */
+    attemptStarted?: true;
     outcome?: "accepted" | "rejected" | "uncertain";
     updatedAt: string;
 }
@@ -109,13 +111,13 @@ export class McpAppActionStore {
     }
 
     /** Serialize the Instance round trip as well as the receipt transitions. */
-    async withDelivery<T>(actionId: string, operation: () => Promise<T>): Promise<T> {
+    async withDelivery<T>(actionId: string, operation: (queued: boolean) => Promise<T>): Promise<T> {
         const previous = this.#deliveries.get(actionId);
         let release!: () => void;
         const pending = new Promise<void>((resolve) => { release = resolve; });
         this.#deliveries.set(actionId, pending);
         await previous;
-        try { return await operation(); }
+        try { return await operation(previous !== undefined); }
         finally {
             release();
             if (this.#deliveries.get(actionId) === pending) this.#deliveries.delete(actionId);
@@ -125,14 +127,40 @@ export class McpAppActionStore {
     async beginDelivery(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
         return await this.#transition(actionId, (current) => {
             if (current.status !== "applied" || current.effect === undefined) return undefined;
+            return this.#record({ ...current, status: "claiming", claimId });
+        });
+    }
+
+    /** Transfer ownership only after the Instance has admitted this claimant. */
+    async confirmDelivery(actionId: string, previousClaimId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== previousClaimId || current.attemptStarted ||
+                (current.status !== "claiming" && current.status !== "attempting")) return undefined;
             return this.#record({ ...current, status: "attempting", claimId });
+        });
+    }
+
+    async beginAttempt(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId || current.status !== "attempting") return undefined;
+            if (current.attemptStarted) return current;
+            return this.#record({ ...current, attemptStarted: true });
         });
     }
 
     async markAttempted(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
         return await this.#transition(actionId, (current) => {
-            if (current.claimId !== claimId || current.status !== "attempting") return undefined;
+            if (current.claimId !== claimId || current.status !== "attempting" || !current.attemptStarted) return undefined;
             return this.#record({ ...current, status: "attempted" });
+        });
+    }
+
+    /** Only an explicit Instance refusal can undo the attempt dispatch fence. */
+    async cancelAttempt(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId || current.status !== "attempting" || !current.attemptStarted) return undefined;
+            const { attemptStarted: _attemptStarted, ...unattempted } = current;
+            return this.#record(unattempted);
         });
     }
 
@@ -148,7 +176,8 @@ export class McpAppActionStore {
 
     async restoreDelivery(actionId: string, claimId: string): Promise<boolean> {
         return (await this.#transition(actionId, (current) => {
-            if (current.claimId !== claimId || current.status !== "attempting") return undefined;
+            if (current.claimId !== claimId || current.attemptStarted ||
+                (current.status !== "claiming" && current.status !== "attempting")) return undefined;
             const { outcome: _outcome, claimId: _claimId, ...applied } = current;
             return this.#record({ ...applied, status: "applied" });
         })) !== undefined;
@@ -191,7 +220,9 @@ export class McpAppActionStore {
 
     async pendingDirectives(ctxId: string, instance: string): Promise<McpAppActionEffect[]> {
         return await this.#run(async () => [...this.#receipts.values()]
-            .filter((receipt) => receipt.ctxId === ctxId && receipt.instance === instance && receipt.status === "applied" && receipt.effect !== undefined)
+            .filter((receipt) => receipt.ctxId === ctxId && receipt.instance === instance && receipt.effect !== undefined &&
+                (receipt.status === "applied" || (!receipt.attemptStarted &&
+                    (receipt.status === "claiming" || receipt.status === "attempting"))))
             .map((receipt) => structuredClone(receipt.effect!)));
     }
 
@@ -295,6 +326,6 @@ function isDocument(value: unknown): value is McpAppActionDocument {
     return record.version === 1 && Array.isArray(record.receipts) && record.receipts.every((entry) => {
         if (typeof entry !== "object" || entry === null) return false;
         const receipt = entry as Record<string, unknown>;
-        return (receipt.claimId === undefined || (typeof receipt.claimId === "string" && receipt.claimId.length > 0 && receipt.claimId.length <= 128)) && typeof receipt.actionId === "string" && typeof receipt.ctxId === "string" && typeof receipt.instance === "string" && typeof receipt.resolved === "object" && typeof receipt.status === "string";
+        return (receipt.attemptStarted === undefined || receipt.attemptStarted === true) && (receipt.claimId === undefined || (typeof receipt.claimId === "string" && receipt.claimId.length > 0 && receipt.claimId.length <= 128)) && typeof receipt.actionId === "string" && typeof receipt.ctxId === "string" && typeof receipt.instance === "string" && typeof receipt.resolved === "object" && typeof receipt.status === "string";
     });
 }
