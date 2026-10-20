@@ -282,24 +282,151 @@ test("Mailing source migration markers cannot suppress importing that source's r
     assert.deepEqual(readFileSync(source.file), originalBytes);
 });
 
-test("Mailing v3 receipts cannot be silently dropped when the target has not upgraded yet", async (t) => {
-    const { source, target, migrate } = await migrationFixture(t);
-    const original = await source.service.queue(notice, identity);
-    const current = await target.service.queue({ ctxId: "owner", text: "Current v2 comment" });
-    await source.store.close();
-    await target.store.close();
-    execute(target.file, "DROP TABLE mailing_notifications; PRAGMA user_version = 2;");
-    const originalBytes = readFileSync(source.file);
-    const targetBytes = readFileSync(target.file);
-    await assert.rejects(migrate(), /receipts require an upgraded target/u);
-    assert.deepEqual(readFileSync(target.file), targetBytes);
-    await target.store.list();
-    await target.store.close();
-    await migrate();
-    assert.equal((await target.service.queue(notice, identity)).id, original.id);
-    assert.deepEqual(new Set((await target.service.list()).map(({ id }) => id)), new Set([original.id, current.id]));
-    assert.deepEqual(readFileSync(source.file), originalBytes);
-});
+const legacyTargets = [
+    { name: "v2", entries: "message_entries", metadataQuery: "SELECT * FROM message_metadata ORDER BY key", sentinel: "target metadata",
+        downgrade: "DROP TABLE mailing_notifications; PRAGMA user_version = 2;" },
+    { name: "v1 with metadata", entries: "conversation_entries", metadataQuery: "SELECT * FROM conversation_metadata ORDER BY key", sentinel: "target metadata",
+        downgrade: "DROP TABLE mailing_notifications; ALTER TABLE message_entries RENAME TO conversation_entries; ALTER TABLE message_metadata RENAME TO conversation_metadata; DROP INDEX message_entries_context_time; DROP INDEX message_entries_call; CREATE INDEX conversation_entries_context_time ON conversation_entries(ctx_id, created_at, seq); CREATE INDEX conversation_entries_call ON conversation_entries(call_id) WHERE call_id IS NOT NULL; PRAGMA user_version = 1;" },
+    { name: "v1 without metadata", entries: "conversation_entries", metadataQuery: "SELECT name FROM sqlite_master WHERE name = 'conversation_metadata'", sentinel: "source metadata",
+        downgrade: "DROP TABLE mailing_notifications; ALTER TABLE message_entries RENAME TO conversation_entries; DROP TABLE message_metadata; DROP INDEX message_entries_context_time; DROP INDEX message_entries_call; CREATE INDEX conversation_entries_context_time ON conversation_entries(ctx_id, created_at, seq); CREATE INDEX conversation_entries_call ON conversation_entries(call_id) WHERE call_id IS NOT NULL; PRAGMA user_version = 1;" },
+];
+
+for (const legacy of legacyTargets) {
+    for (const acknowledged of [0, 1]) {
+        test(`Mailing upgrades ${legacy.name} before merging v3 receipts with acknowledgement ${acknowledged}`, async (t) => {
+            const { source, target, migrate } = await migrationFixture(t);
+            const original = await source.service.queue(notice, identity);
+            const current = await target.service.queue({ ctxId: "owner", text: "Existing target comment" });
+            await target.store.appendReport({ ctxId: "owner", callId: "old-call", createdAt: original.createdAt, text: "Existing target report" });
+            await source.store.close();
+            await target.store.close();
+            execute(source.file, `UPDATE mailing_notifications SET queued_event_recorded = ${acknowledged};
+                INSERT INTO message_metadata VALUES ('sentinel', 'source metadata'), ('source-only', 'source value');`);
+            execute(target.file, `INSERT INTO message_metadata VALUES ('sentinel', 'target metadata');
+                CREATE INDEX retained_text_index ON message_entries(text);`);
+            const existingEntries = rows(target.file, "SELECT * FROM message_entries ORDER BY seq");
+            execute(target.file, legacy.downgrade);
+            const originalBytes = readFileSync(source.file);
+
+            // Match refresh(): migration runs before the target store opens.
+            await migrate();
+            assert.deepEqual(rows(target.file, "PRAGMA user_version"), [{ user_version: 3 }]);
+            assert.deepEqual(rows(target.file, "SELECT * FROM message_entries ORDER BY seq LIMIT 2"), existingEntries);
+            assert.deepEqual(rows(target.file, "SELECT * FROM mailing_notifications"), rows(source.file, "SELECT * FROM mailing_notifications"));
+            assert.deepEqual(rows(target.file, "SELECT value FROM message_metadata WHERE key = 'sentinel'"), [{ value: legacy.sentinel }]);
+            assert.deepEqual(rows(target.file, "SELECT value FROM message_metadata WHERE key = 'source-only'"), [{ value: "source value" }]);
+            assert.deepEqual(rows(target.file, `SELECT key, value FROM message_metadata WHERE key IN ('${importMarker}', '${receiptMarker}') ORDER BY key`),
+                [{ key: importMarker, value: "source.sqlite3" }, { key: receiptMarker, value: "source.sqlite3" }]);
+            assert.deepEqual(rows(target.file, "SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name"),
+                [{ name: "message_entries_call" }, { name: "message_entries_context_time" }, { name: "retained_text_index" }]);
+            assert.deepEqual(rows(target.file, "SELECT name FROM pragma_index_info('message_entries_context_time')"),
+                [{ name: "ctx_id" }, { name: "created_at" }, { name: "seq" }]);
+            assert.deepEqual(rows(target.file, "SELECT name FROM pragma_index_info('message_entries_call')"), [{ name: "call_id" }]);
+            assert.equal(rows(target.file, "SELECT partial FROM pragma_index_list('message_entries') WHERE name = 'message_entries_call'")[0]!.partial, 1);
+            await migrate();
+            target.events.length = 0;
+            assert.equal((await target.service.queue(notice, identity)).id, original.id);
+            assert.equal(target.events.length, 1 - acknowledged);
+            assert.deepEqual(new Set((await target.service.list()).map(({ id }) => id)), new Set([original.id, current.id]));
+            assert.deepEqual(new Set((await target.service.consumePending("owner", "consume-upgraded")).messages.map(({ id }) => id)),
+                new Set([original.id, current.id]));
+            await target.store.close();
+            execute(target.file, "DELETE FROM message_entries WHERE kind = 'comment'");
+            await migrate();
+            target.events.length = 0;
+            assert.equal((await target.service.queue(notice, identity)).id, original.id);
+            assert.equal(target.events.length, 0);
+            assert.deepEqual(await target.service.list(), []);
+            assert.equal((await target.store.list()).length, 1);
+            assert.deepEqual(readFileSync(source.file), originalBytes);
+        });
+    }
+
+    test(`Mailing rolls back the ${legacy.name} upgrade, receipts, version and markers on a merge conflict`, async (t) => {
+        const { source, target, migrate } = await migrationFixture(t);
+        await source.service.queue({ ctxId: "owner", text: "Earlier source receipt" }, { ...identity, mailId: "sender#earlier" });
+        const original = await source.service.queue(notice, identity);
+        await target.store.insertComment({ ...original, text: "Conflicting target comment" });
+        await source.store.close();
+        await target.store.close();
+        execute(source.file, "INSERT INTO message_metadata VALUES ('sentinel', 'source metadata')");
+        execute(target.file, `INSERT INTO message_metadata VALUES ('sentinel', 'target metadata');
+            CREATE INDEX retained_text_index ON message_entries(text); ${legacy.downgrade}`);
+        const originalBytes = readFileSync(source.file);
+        const before = legacySnapshot(target.file, legacy);
+        await assert.rejects(migrate(), /Legacy Mailing migration conflict.*rolled back/u);
+        assert.deepEqual(legacySnapshot(target.file, legacy), before);
+        await assert.rejects(migrate(), /Legacy Mailing migration conflict.*rolled back/u);
+        assert.deepEqual(legacySnapshot(target.file, legacy), before);
+        execute(target.file, `DELETE FROM ${legacy.entries} WHERE text = 'Conflicting target comment'`);
+        await migrate();
+        assert.deepEqual(rows(target.file, "PRAGMA user_version"), [{ user_version: 3 }]);
+        assert.equal((await target.service.queue(notice, identity)).id, original.id);
+        assert.equal((await target.service.list()).length, 2);
+        assert.equal(rows(target.file, "SELECT * FROM mailing_notifications").length, 2);
+        assert.deepEqual(readFileSync(source.file), originalBytes);
+    });
+}
+
+function legacySnapshot(file: string, legacy: (typeof legacyTargets)[number]) {
+    return {
+        schema: rows(file, "SELECT * FROM sqlite_master ORDER BY name"),
+        version: rows(file, "PRAGMA user_version"),
+        schemaVersion: rows(file, "PRAGMA schema_version"),
+        entries: rows(file, `SELECT * FROM ${legacy.entries} ORDER BY seq`),
+        metadata: rows(file, legacy.metadataQuery),
+        sequence: rows(file, "SELECT * FROM sqlite_sequence"),
+    };
+}
+
+for (const legacy of legacyTargets.slice(0, 2)) {
+    test(`Mailing upgrades ${legacy.name} with an old entry marker without resurrecting compacted history`, async (t) => {
+        const { source, target, migrate } = await migrationFixture(t);
+        const original = await source.service.queue(notice, identity);
+        await source.store.close();
+        await target.store.insertComment(original);
+        await target.service.consumePending("owner", "delivered-before-old-merge");
+        await target.store.close();
+        execute(target.file, `DELETE FROM message_entries;
+            INSERT INTO message_metadata VALUES ('${importMarker}', 'original-import.sqlite3'); ${legacy.downgrade}`);
+        const originalBytes = readFileSync(source.file);
+        await migrate();
+        assert.deepEqual(rows(target.file, "PRAGMA user_version"), [{ user_version: 3 }]);
+        assert.deepEqual(rows(target.file, `SELECT key, value FROM message_metadata WHERE key IN ('${importMarker}', '${receiptMarker}') ORDER BY key`),
+            [{ key: importMarker, value: "original-import.sqlite3" }, { key: receiptMarker, value: "source.sqlite3" }]);
+        target.events.length = 0;
+        assert.equal((await target.service.queue(notice, identity)).id, original.id);
+        assert.equal(target.events.length, 0);
+        assert.deepEqual(await target.service.list(), []);
+        await target.store.close();
+        const completed = snapshot(target.file);
+        await migrate();
+        assert.deepEqual(snapshot(target.file), completed);
+        assert.deepEqual(readFileSync(source.file), originalBytes);
+    });
+
+    test(`Mailing rolls back the ${legacy.name} upgrade when the receipt completion marker cannot commit`, async (t) => {
+        const { source, target, migrate } = await migrationFixture(t);
+        const original = await source.service.queue(notice, identity);
+        const current = await target.service.queue({ ctxId: "owner", text: "Target retained before interruption" });
+        await source.store.close();
+        await target.store.close();
+        execute(target.file, `CREATE TRIGGER interrupt_upgrade_marker BEFORE INSERT ON message_metadata
+            WHEN NEW.key = '${receiptMarker}' BEGIN SELECT RAISE(ABORT, 'Injected upgrade marker failure'); END;
+            ${legacy.downgrade}`);
+        const originalBytes = readFileSync(source.file);
+        const before = legacySnapshot(target.file, legacy);
+        await assert.rejects(migrate(), /Injected upgrade marker failure/u);
+        assert.deepEqual(legacySnapshot(target.file, legacy), before);
+        execute(target.file, "DROP TRIGGER interrupt_upgrade_marker");
+        await migrate();
+        assert.deepEqual(rows(target.file, "PRAGMA user_version"), [{ user_version: 3 }]);
+        assert.equal((await target.service.queue(notice, identity)).id, original.id);
+        assert.deepEqual(new Set((await target.service.list()).map(({ id }) => id)), new Set([original.id, current.id]));
+        assert.equal(rows(target.file, "SELECT * FROM mailing_notifications").length, 1);
+        assert.deepEqual(readFileSync(source.file), originalBytes);
+    });
+}
 
 test("Mailing can merge into a valid v1 target without metadata before its schema upgrade", async (t) => {
     const { source, target, migrate } = await migrationFixture(t);

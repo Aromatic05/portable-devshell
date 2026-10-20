@@ -87,7 +87,11 @@ function reconcileLegacyMessageDatabase(sourceFile: string, targetFile: string):
         const sourceTables = messageTables(source, sourceFile);
         target.exec("BEGIN IMMEDIATE");
         try {
-            const targetTables = messageTables(target, targetFile);
+            let targetTables = messageTables(target, targetFile);
+            if (sourceTables.notifications && !targetTables.notifications &&
+                source.prepare("SELECT 1 FROM mailing_notifications LIMIT 1").get() !== undefined) {
+                targetTables = upgradeTargetForNotifications(source, target, targetTables);
+            }
             const metadata = targetTables.metadata ?? "conversation_metadata";
             if (targetTables.metadata === undefined) {
                 target.exec(`CREATE TABLE ${metadata} (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`);
@@ -134,9 +138,6 @@ function reconcileLegacyMessageDatabase(sourceFile: string, targetFile: string):
                 for (const receipt of source.prepare(
                     `SELECT ${NOTIFICATION_COLUMNS.join(", ")} FROM mailing_notifications`,
                 ).iterate() as Iterable<NotificationRow>) {
-                    if (!targetTables.notifications) {
-                        throw new Error("Legacy Mailing receipts require an upgraded target message database; refusing to discard receipts.");
-                    }
                     mergeNotification(source, sourceTables.entries, target, targetTables.entries, receipt);
                 }
                 insertMetadata.run(LEGACY_MAILING_IMPORT_MARKER, basename(sourceFile));
@@ -151,6 +152,44 @@ function reconcileLegacyMessageDatabase(sourceFile: string, targetFile: string):
         target?.close();
         source.close();
     }
+}
+
+function upgradeTargetForNotifications(
+    source: DatabaseSync,
+    target: DatabaseSync,
+    tables: ReturnType<typeof messageTables>,
+): ReturnType<typeof messageTables> {
+    // refresh() merges before MessageStore opens the target. Keep its required
+    // v1/v2 upgrade inside the same transaction as receipts and import markers.
+    if (tables.entries === "conversation_entries") {
+        target.exec("ALTER TABLE conversation_entries RENAME TO message_entries");
+        if (tables.metadata !== undefined) {
+            target.exec("ALTER TABLE conversation_metadata RENAME TO message_metadata");
+        } else {
+            createMissingTableFromSource(source, target, "message_metadata");
+        }
+        target.exec(`
+            DROP INDEX IF EXISTS conversation_entries_context_time;
+            DROP INDEX IF EXISTS conversation_entries_call;
+            CREATE INDEX IF NOT EXISTS message_entries_context_time ON message_entries(ctx_id, created_at, seq);
+            CREATE INDEX IF NOT EXISTS message_entries_call ON message_entries(call_id) WHERE call_id IS NOT NULL;
+        `);
+    }
+    createMissingTableFromSource(source, target, "mailing_notifications");
+    target.exec("PRAGMA user_version = 3");
+    return { entries: "message_entries", metadata: "message_metadata", notifications: true };
+}
+
+function createMissingTableFromSource(
+    source: DatabaseSync,
+    target: DatabaseSync,
+    table: "message_metadata" | "mailing_notifications",
+): void {
+    if (target.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined) return;
+    // The source already has the v3 schema. Reuse its table definition instead
+    // of maintaining a second copy of the receipt constraints and defaults.
+    const definition = source.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string };
+    target.exec(definition.sql);
 }
 
 function mergeNotification(
