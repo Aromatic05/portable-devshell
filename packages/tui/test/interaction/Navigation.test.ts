@@ -1593,6 +1593,41 @@ import { selectHeaderSummary } from "../../src/view/projection/View.ts";
         assert.deepEqual(harness.instanceActions(), []);
     });
 
+    test("instance stop confirmation targets the focused instance when another is selected", async () => {
+        const harness = createHarness();
+        harness.domains.setRuntime("beta", {
+            snapshot: {
+                connectionState: "connected",
+                daemonState: "running",
+                lastSeq: 14,
+                name: "beta",
+                ready: true,
+                status: "ready",
+            },
+        });
+        harness.store.setSelectedInstance("beta");
+        harness.store.setSelectedInstance("alpha");
+        const beta = expandBox(harness, "instance:beta");
+        harness.store.setMainFocusId(beta.id);
+        harness.store.setFocusScope("boxDetail");
+        harness.store.setSelectedDetailLine(
+            beta.expandedKey,
+            "instance:beta:button:stop",
+        );
+
+        await harness.dispatch({ type: "focus.activate" });
+        const confirmation = topTuiOverlay(harness.store.getState().interaction.overlays);
+        assert.equal(confirmation?.kind, "confirmation");
+        assert.deepEqual(harness.instanceActions(), []);
+
+        await harness.dispatch({ button: "confirm", type: "confirm.focus" });
+        await harness.dispatch({ type: "confirm.accept" });
+        assert.deepEqual(harness.instanceActions(), [
+            { action: "stop", instance: "beta" },
+        ]);
+        assert.equal(harness.store.getState().ui.selectedInstance, "alpha");
+    });
+
     test("mouse hit regions follow the rendered sidebar, boxes, and overlays", () => {
         const harness = createHarness();
         const viewport = { columns: 120, rows: 40 };
