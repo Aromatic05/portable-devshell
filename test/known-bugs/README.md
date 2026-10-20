@@ -57,4 +57,6 @@ The 2026-10-20 host L01/L04 run completed with exit 0: enrollment, network recov
 
 After the BF-01..08 follow-up fixes, the full chain matrix was re-executed on the isolated Linux host: **4/4 pass, zero failures, exit 0, cleanup complete**. L03 checked that same-content Todo replay leaves its revision unchanged and stale revision conflicts still reject. The final Mailing target-schema migration was retested with the full Comment package (205/205); no real Docker/Podman, Windows or ChatGPT Host was exercised by these tests.
 
+Third-round BF regression follow-ups include `packages/mcp/test/unit/mcpapp/ReentryOwnerLoss.test.ts` for a live Task Claim not being stolen by a competing Host before Attempt, while preserving crash recovery and the five-minute ownership expiry. The first new whole-chain run exposed this gap with L05 failing (3/4). After `4c6fe1a2`, the actual 180-second L05 rerun and the full four-chain matrix both passed (4/4, exit 0); original assertions were retained.
+
 Use a fresh isolated Testspace root for `pnpm testspace recovery-smoke` or `pnpm testspace retirement-smoke` if needed, and always run `pnpm testspace stop`. Never run those scripts on shared `.testspace`, production Control or user `~/.devshell` directories. Older positive manual runs also include `pnpm acceptance:web`, `pnpm acceptance:tmux-handoff` and `pnpm stress:transport`.

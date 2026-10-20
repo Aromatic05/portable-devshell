@@ -46,6 +46,31 @@
 | BF-07 / P2 | 两个OAuth Provider在同一空目录同时首次初始化，各自发布JWKS，持久文件只保留后写者的签名密钥 | 先同步完整私钥临时文件，使用不覆盖hard-link原子发布；竞争者重新读取唯一canonical密钥；SIGKILL、双进程、异常清理回归 | `c8bfa70b` |
 | BF-08 / P2 | 相同Context反复提交无变化的Todo内容，Revision、事件和文件写入无限增长 | CAS核对后对无Checkpoint、完全相同Items和同Context的幂等更新返回原状态；Context接管、Checkpoint、完成归档仍需真实更新。宿主Todo 20/20、Comment 205/205 | `97b178de` |
 
+## 第三轮复查与修复（2026-10-20）
+
+针对BF修复后的次生故障重新注入失败，继续修复11组问题；以下均已按scope提交，并完成各组独立宿主测试。
+
+| 模块 | 复现问题与处理结果 | 提交 | 宿主回归 |
+|---|---|---|---|
+| Config | 活跃写入被升级预检恢复覆盖、单次Instance读取EIO导致无关保存误删、Instance删除缺目录fsync、提交不确定后旧内存不协调；现在跨进程串行恢复、保存加载失败保护记录并对账 | `792c0582` | 142/142 |
+| Todo | rename后目录同步EIO，磁盘新Revision与缓存旧Revision分叉；引入提交结果对账及事件补发 | `2d6f9bd9` | 46/46 |
+| Container | 不同Instance同时接管同一容器、退休失败丢凭据、跳过Runtime退休遗漏清理、物理容器停止时stale PID未清；跨Instance共享持久租约并保留重试状态 | `d3b3b402` | 129/129 |
+| ToolCall | 执行完成后适配器抛`tool.cancelled`却误标可重试；保留执行结果归因和Audit，未开始的队列取消不变 | `11927a38` | 20/20 |
+| Mailing | 首次复制未验证Schema或记录迁移标记；清理临时文件失败误报迁移失败；修复发布与重放边界 | `9a9080f1` | 215/215 |
+| OAuth | 撤销仅送本Runtime，已有其他Runtime长连接仍活跃；COMMIT生效后报错丢通知；增加持久撤销观察 | `889bbf3b` | 31/31 |
+| Approval | 决定已提交、工具已放行但终态事件错误使审批API报失败；Requested事件失败遗留孤儿；提交结果与事件补发分离 | `0b738ffe` | 68/68 |
+| Web/TUI Approval | 迟到旧快照覆盖新批准列表；增加序号、操作和生命周期栅栏 | `5d7ac3f4` | 17/17 |
+| Reentry | Receipt已预约但未尝试，Owner消失后指令永久隐藏；区分持久Claim与Attempt，允许未尝试的恢复 | `2fa744db` | 52/52 |
+| Reentry L05复测 | 长链首次Task Claim成功后，同一个Control中竞争Host仍能在Attempt前抢走Owner；将当前存活Owner的Claim与重启后无主Receipt区分，保持180秒有效窗口及五分钟期满恢复，旧Owner不能再次执行 | `4c6fe1a2` | SQLite回归47/47、MCP包366通过1跳过、真实L05 Exit 0（180117ms） |
+| Reverse SSE | 同代候选上行帧进入前任Connection；按凭据及连接身份隔离候选与旧通道 | `73264ec5` | 23/23 |
+| Extension | Worker Session一次释放失败就丢失清理所有权，后续错误地宣告已关闭；保留资源身份并可重试 | `e44ce79d` | 51/51 |
+
+**已知能力边界：**旧Container数据库若只保存不可逆完整配置哈希，而升级前配置已变化且没有可信原配置证据，无法安全自动确认原Owner；仍拒绝接管未获证明的运行容器。已损坏的旧v4重复标题Todo文件未自动改写。真实Docker/Podman引擎、Windows和物理掉电未在本轮测试中覆盖。
+
+本轮最初的四链聚合验收为3/4：L07、L03、L01/L04通过，L05在首个Task Claim成功后竞争者错误接管而失败。保留这个真实失败作为独立复测证据，而不因原默认测试全绿而忽略。自主修复`4c6fe1a2`后，完整L05单链重新运行，经过真实180秒Wait、两次Control重启、Receipt重放、只执行一次和SQLite核对，Exit 0且隔离Fixture清理完成。
+
+**第三轮最终四链复测：**在`4c6fe1a2`提交后的`main`上重新从头执行`node acceptance/run-chain-matrix.mjs --all`，结果`ok=true, completed=4, failures=[]`、Exit 0。L07、L05、L03、L01/L04均完整执行；L05再次通过两次真实重启与Claim防重复，所有隔离Fixture清理完成。lint、typecheck（20条Domain Import规则）和脚本测试161通过2跳过亦在修复后完成。完整包矩阵中唯一失败发生于并发编辑Recall/Model-command ACL测试期间，失败进程读取了旧断言；当前源码的定向测试47/47、Control全包816通过1跳过、CLI全包80/80均已重新通过。原矩阵执行结果如实保留为失败，不冒充一次成功的完整矩阵。
+
 这些验证全部使用隔离临时HOME、SQLite、模拟容器CLI或真实localhost接口，未接入已有生产实例。**尚未实测真实Docker/Podman容器引擎、Windows的JWKS hard-link/ACL和磁盘实际掉电。**原始RED及首次链失败证据在下文保留，不能再当作当前HEAD的失败。
 
 **最终交叉复测**：补充BF修复全部提交后，`pnpm lint`、`pnpm typecheck`（含20条Domain Import规则）全绿；全包矩阵 Exit 0，最新Mailing目标升级改动后另运行完整Comment默认套件 **205/205**；`pnpm test:scripts`为161通过、2跳过。真实 `node acceptance/run-chain-matrix.mjs --all` 重新完成 **L07、L05、L03、L01-L04四链，4/4 Exit 0，failures=[]**，各隔离Fixture清理成功。

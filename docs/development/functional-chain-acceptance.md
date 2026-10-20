@@ -60,6 +60,10 @@ E7-01解除后，真实L03在前置 `ApprovalService` 审核阶段再次出现�
 
 **补充修复后重新验收：**在BF-01～08（Config不确定提交、Container接管/生命周期、Todo状态、Mailing旧库兼容及OAuth JWKS并发）全部提交以后，同一条完整四链矩阵再次运行，仍然 **Exit 0、4/4 passed、failures=[]**。L03在新版Todo语义下明确报告 `replayNoRevisionChange=true`、`staleRejected=true`，Approval副作用一次；L05再次真实经过180秒Wait与两次Control重启；L01/L04再次完成真实Reverse同名重建和债务清理。脚本完整清理隔离Fixture。该复测不增加对Windows或真实Docker/Podman的覆盖声明。
 
+**第三轮修复的追加L05回归：**合入新Reentry恢复、Container资源租约等11组补丁后，首次四链复跑为3/4：L07、L03及L01/L04成功，但L05在首次Task Claim完成后发现其他Host可立即抢占尚未attempt的同一Receipt（测试第123行）。这一真实回归保留原有断言，单独修复于`4c6fe1a2`：同一Control进程保护存活Owner，进程重启仍允许未尝试指令重新领取，并沿用五分钟认领窗口。追加SQLite定向47/47通过，真实`node acceptance/run-chain-matrix.mjs --only L05`重新经过180117ms Wait、两次Control重启、持久化事件/Audit核对与清理，Exit 0。
+
+在`4c6fe1a2`之后，完整`node acceptance/run-chain-matrix.mjs --all`再次实测 **4/4通过、Exit 0、failures=[]**（L07、L05、L03、L01-L04）。L05在四链聚合运行中也完成两次Control重启、单次工具效果及全部Fixture清理。独立的旧Owner保护和重启接管回归同时纳入默认MCP包测试。
+
 ### 安全与状态边界
 
 - 全部新链创建随机临时HOME、Runtime和独占Workspace，均不接触生产用户目录和当前运行实例。
