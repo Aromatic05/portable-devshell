@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -905,6 +905,45 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         seq: 1,
     });
     await resumed.close();
+});
+
+test("a lost tool RPC reply reports uncertainty and reconnect does not repeat its completed side effect", { timeout: 5_000 }, async (t) => {
+    const harness = await createHarness();
+    t.after(() => harness.cleanup());
+    const directory = await createTestTempDirectory("lost-tool-reply");
+    t.after(() => rm(directory, { force: true, recursive: true }));
+    const marker = join(directory, "completed.json");
+    const endpoint = new Endpoint({
+        connectChannel: (signal) => LocalChannel.connect(harness.socketPath, { signal }),
+    });
+    t.after(() => endpoint.close());
+    const service = new Rpc(await endpoint.connect("@control", "server"));
+    t.after(() => service.close());
+    await service.request("hello", { clientKind: "cli", protocolRange: CONTROL_PROTOCOL_RANGE });
+    const tool = new Rpc(await endpoint.connect("alpha", "tool"));
+    t.after(() => tool.close());
+    let executions = 0;
+    harness.worker.callTool = async () => {
+        executions += 1;
+        await writeFile(marker, JSON.stringify({ executions, status: "completed" }));
+        // Disconnect only after the durable effect, before the handler returns
+        // and Control can send its success reply. Keep the Rpc open so this
+        // exercises physical transport loss rather than Rpc.close().
+        endpoint.close();
+        return { exitCode: 0 };
+    };
+    await assert.rejects(tool.request("call", {
+        toolName: "bash_run", input: { command: "fixture-side-effect" }, workspace: directory,
+    }), { code: "rpc.resultUncertain", retryable: false });
+    assert.deepEqual(JSON.parse(await readFile(marker, "utf8")), { executions: 1, status: "completed" });
+
+    const reconnected = createClient(harness.socketPath, "cli");
+    t.after(() => reconnected.close());
+    await negotiateClient(reconnected, "cli");
+    await reconnected.request("alpha", "tool", "listCalls", {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(executions, 1);
+    assert.deepEqual(JSON.parse(await readFile(marker, "utf8")), { executions: 1, status: "completed" });
 });
 
 test("server.shutdown replies before invoking the shutdown action", async (t) => {
