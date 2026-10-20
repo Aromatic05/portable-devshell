@@ -1,8 +1,6 @@
 import {
     COMMENT_REPORT_BUCKET_CAPACITY,
     COMMENT_REPORT_REFILL_INTERVAL_MS,
-    COMMENT_TODO_ACCESS_BUCKET_CAPACITY,
-    COMMENT_TODO_ACCESS_REFILL_INTERVAL_MS,
     COMMENT_TODO_INVALID_DISABLE_MS,
     COMMENT_TODO_INVALID_LIMIT,
     COMMENT_TODO_INVALID_WINDOW_MS,
@@ -16,19 +14,12 @@ export interface CommentReportBucketState {
     tokens: number;
 }
 
-interface TodoAccessPolicyState {
-    lastRefillAt: number;
-    tokens: number;
-}
-
 interface TodoInvalidPolicyState {
     disabledUntil?: number;
     invalidAt: number[];
 }
 
 export class CommentReportState {
-    readonly #access = new Map<string, TodoAccessPolicyState>();
-    readonly #accessOperations = new Map<string, Promise<void>>();
     readonly #invalid = new Map<string, TodoInvalidPolicyState>();
     readonly #report = new Map<string, CommentReportBucketState>();
     readonly #reportOperations = new Map<string, Promise<void>>();
@@ -68,31 +59,6 @@ export class CommentReportState {
                   }
                 : { invalidAt },
         );
-    }
-
-    async consumeTodoAccess(ctxId: string, now: number): Promise<void> {
-        await this.#withLock(this.#accessOperations, ctxId, async () => {
-            this.assertTodoEnabled(ctxId, now);
-            const current = this.#access.get(ctxId) ?? {
-                lastRefillAt: now,
-                tokens: COMMENT_TODO_ACCESS_BUCKET_CAPACITY,
-            };
-            const refill = refillBucket(
-                current.tokens,
-                current.lastRefillAt,
-                now,
-                COMMENT_TODO_ACCESS_BUCKET_CAPACITY,
-                COMMENT_TODO_ACCESS_REFILL_INTERVAL_MS,
-            );
-            current.lastRefillAt = refill.lastRefillAt;
-            current.tokens = refill.tokens;
-            this.#access.set(ctxId, current);
-            if (current.tokens < 1) {
-                this.recordInvalid(ctxId, now);
-                throw todoUseOtherToolsError();
-            }
-            current.tokens -= 1;
-        });
     }
 
     async withReport<T>(

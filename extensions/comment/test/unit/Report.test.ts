@@ -240,12 +240,12 @@ test("Comment report policy serializes concurrent autonomous reports", async () 
     assert.equal(harness.reports.length, 2);
 });
 
-test("Comment report policy keeps Todo access and report buckets independent", async () => {
+test("Comment report policy permits repeated Todo access without spending report tokens", async () => {
     const harness = createHarness();
 
     await harness.before("todo_read");
     await harness.before("todo_write");
-    await assertUseOtherTools(harness.before("todo_read"));
+    await harness.before("todo_read");
 
     await harness.report("report one");
     await harness.report("report two");
@@ -256,7 +256,7 @@ test("Comment report policy keeps Todo access and report buckets independent", a
     await harness.report("report three");
 });
 
-test("Comment report policy serializes concurrent Todo access", async () => {
+test("Comment report policy admits concurrent Todo access without manufacturing invalid operations", async () => {
     const harness = createHarness();
 
     const results = await Promise.allSettled([
@@ -267,11 +267,11 @@ test("Comment report policy serializes concurrent Todo access", async () => {
 
     assert.equal(
         results.filter((result) => result.status === "fulfilled").length,
-        2,
+        3,
     );
     assert.equal(
         results.filter((result) => result.status === "rejected").length,
-        1,
+        0,
     );
 });
 

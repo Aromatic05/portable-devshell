@@ -51,10 +51,10 @@ export class CommentReportService {
 
     async beforeTodoToolCall(ctxId: string, toolName: string): Promise<void> {
         if (!isTodoTool(toolName)) return;
+        // Domain validation and revision CAS distinguish invalid writes from
+        // useful reads, updates, and conflict recovery; admission only enforces
+        // the existing ban on repeated invalid operations.
         this.#state.assertTodoEnabled(ctxId, this.#now());
-        if (toolName === "todo_read" || toolName === "todo_write") {
-            await this.#state.consumeTodoAccess(ctxId, this.#now());
-        }
     }
 
     recordTodoInvalid(ctxId: string): void {
