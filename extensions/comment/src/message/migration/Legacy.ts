@@ -49,6 +49,7 @@ export async function migrateMessageDatabase(options: {
     const source = new DatabaseSync(sourceFile, { readOnly: true });
     try {
         await backup(source, temporaryFile);
+        completeLegacyCopy(temporaryFile, sourceFile);
         try {
             await link(temporaryFile, targetFile);
         } catch (error) {
@@ -57,9 +58,9 @@ export async function migrateMessageDatabase(options: {
         }
     } finally {
         source.close();
-        await unlink(temporaryFile).catch((error: unknown) => {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        });
+        // The backup name is disposable, including when unlink takes effect
+        // before reporting an error. Cleanup must not invalidate publication.
+        await unlink(temporaryFile).catch(() => {});
     }
 }
 
@@ -76,6 +77,29 @@ const NOTIFICATION_COLUMNS = [
     ...NOTIFICATION_IDENTITY_COLUMNS, "comment_id", "created_at", "text", "queued_event_recorded",
 ] as const;
 type NotificationRow = Record<(typeof NOTIFICATION_COLUMNS)[number], SQLInputValue>;
+
+function completeLegacyCopy(temporaryFile: string, sourceFile: string): void {
+    const copy = new DatabaseSync(temporaryFile);
+    try {
+        // Validate the actual backup snapshot before it can become canonical.
+        const tables = messageTables(copy, sourceFile);
+        const metadata = tables.metadata ?? "conversation_metadata";
+        copy.exec("BEGIN IMMEDIATE");
+        if (tables.metadata === undefined) {
+            copy.exec(`CREATE TABLE ${metadata} (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`);
+        }
+        const imported = copy.prepare(
+            `INSERT INTO ${metadata} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        );
+        // The snapshot already contains every entry and receipt. Mark both
+        // imports before publication so retention remains effective on restart.
+        imported.run(LEGACY_IMPORT_MARKER, basename(sourceFile));
+        imported.run(LEGACY_MAILING_IMPORT_MARKER, basename(sourceFile));
+        copy.exec("COMMIT");
+    } finally {
+        copy.close();
+    }
+}
 
 function reconcileLegacyMessageDatabase(sourceFile: string, targetFile: string): void {
     const source = new DatabaseSync(sourceFile, { readOnly: true });

@@ -69,7 +69,15 @@ test("Comment migrates the actual 0.7.7 conversation.sqlite3 default filename", 
         const target = join(root, "extension-data", "instances", "legacy", "message.sqlite3");
         database(source, 1, [["legacy-comment", "historical-data"]]);
         await migrateMessageDatabase({ instance: "legacy", targetFile: target });
-        assert.deepEqual(snapshot(target, 1), snapshot(source, 1));
+        const original = snapshot(source, 1);
+        assert.deepEqual(snapshot(target, 1), {
+            ...original,
+            metadata: [
+                { key: "migration.legacy-conversation-imported", value: "conversation.sqlite3" },
+                { key: "migration.legacy-mailing-notifications-imported", value: "conversation.sqlite3" },
+                ...original.metadata,
+            ],
+        });
     } finally {
         if (previous === undefined) delete process.env.PORTABLE_DEVSHELL_HOME;
         else process.env.PORTABLE_DEVSHELL_HOME = previous;
