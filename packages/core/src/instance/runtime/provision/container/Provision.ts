@@ -4,6 +4,7 @@ import type { WorkerCommandResult } from "../../execution/Command.js";
 import { ContainerProvisionCompose } from "./Compose.js";
 import { ContainerProvisionExisting } from "./Existing.js";
 import { ContainerProvisionManaged } from "./Managed.js";
+import type { ContainerAdoptionIdentity } from "./Adoption.js";
 
 export type ContainerLifecycleStatus =
     "missing" | "running" | "stopped";
@@ -19,6 +20,8 @@ export interface ContainerProvision {
 
 export interface ContainerProvisionOperations {
     provider: "docker" | "podman";
+    binary?: string;
+    setContainerTarget?(containerId: string): void;
     readContainerStatus(
         containerName: string,
     ): Promise<ContainerLifecycleStatus>;
@@ -30,6 +33,7 @@ export interface ContainerProvisionOperations {
 }
 
 export function createContainerProvision(options: {
+    adoption?: ContainerAdoptionIdentity;
     container: InstanceContainerConfig;
     keepIdUserNamespace: boolean;
     operations: ContainerProvisionOperations;
@@ -50,6 +54,7 @@ export function createContainerProvision(options: {
             });
         case "existingStoppedContainer":
             return new ContainerProvisionExisting({
+                adoption: options.adoption,
                 config: options.container,
                 operations: options.operations,
             });

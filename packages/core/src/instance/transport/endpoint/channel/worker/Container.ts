@@ -17,6 +17,7 @@ export class ContainerConnection implements WorkerConnection {
     #channel: Worker<ContainerConnection>;
     readonly #container: InstanceContainerConfig;
     readonly #process: ProcessRunner;
+    #containerTarget?: string;
 
     constructor(options: ContainerConnectionOptions) {
         this.binary = options.binary;
@@ -49,13 +50,20 @@ export class ContainerConnection implements WorkerConnection {
         return result.stdout.trim() === "running" ? "running" : "stopped";
     }
 
+    setContainerTarget(containerId: string): void {
+        this.#containerTarget = containerId;
+    }
+
     #buildExecArgs(command: readonly string[], environmentKeys: readonly string[] = []): string[] {
         const environmentArgs = environmentKeys.flatMap(key => ["-e", key]);
         const container = this.#container;
         if (container.mode === "compose") {
             return ["compose", "-f", container.compose.file, ...(container.compose.projectName === undefined ? [] : ["-p", container.compose.projectName]), "exec", "-T", ...environmentArgs, container.compose.service, ...command];
         }
-        return ["exec", "-i", ...environmentArgs, container.containerName, ...command];
+        if (container.mode === "existingStoppedContainer" && this.#containerTarget === undefined)
+            throw createRemoteError({ code: runtimeErrorCodes.providerFailed, message: "Existing container execution requires a verified adoption identity.", retryable: false });
+        const target = container.mode === "existingStoppedContainer" ? this.#containerTarget! : container.containerName;
+        return ["exec", "-i", ...environmentArgs, target, ...command];
     }
 
     runCommand(

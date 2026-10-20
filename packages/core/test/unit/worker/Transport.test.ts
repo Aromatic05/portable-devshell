@@ -34,6 +34,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { existingId, existingInspect } from "./provision/ExistingHarness.ts";
 
 function createContainerRuntime(provider: "docker" | "podman", options: Omit<ContainerInstallOptions, "binary" | "provider"> & { binary?: string }) {
     return new ContainerExecution(new ContainerInstall({
@@ -2099,53 +2100,33 @@ test("container retirement leaves compose and user-owned stopped containers inta
 });
 
 test("runtime retirement temporarily starts and restores an adopted stopped container", async () => {
-    const recorder = createSpawnRecorder((call, child, callIndex) => {
-        if (callIndex === 0 && call.args[0] === "inspect") {
-            closeRecordedChild(child, { stdout: "stopped\n" });
+    let status = "stopped";
+    const recorder = createSpawnRecorder((call, child) => {
+        if (call.args[0] === "inspect") {
+            closeRecordedChild(child, { stdout: existingInspect(status) });
             return true;
         }
+        if (call.args[0] === "start") status = "running";
+        if (call.args[0] === "stop") status = "stopped";
         return false;
     });
     const transport = createContainerRuntime("podman", {
-        container: {
-            adoptLifecycle: true,
-            containerName: "user-container",
-            mode: "existingStoppedContainer",
-        },
+        container: { adoptLifecycle: true, containerName: "user-container", mode: "existingStoppedContainer" },
         binary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn,
     });
-
-    const result = await transport.runWorkerCommand("retire", {
-        instanceName: "task-3-adopted",
-    });
-
-    assert.equal(result.exitCode, 0);
-    assert.deepEqual(
-        recorder.calls.map((call) => call.args),
-        [
-            [
-                "inspect",
-                "--type",
-                "container",
-                "--format",
-                "{{.State.Status}}",
-                "user-container",
-            ],
-            ["start", "user-container"],
-            [
-                "exec",
-                "-i",
-                "user-container",
-                "/usr/local/bin/devshell-worker",
-                "retire",
-                "--instance",
-                "task-3-adopted",
-            ],
-            ["stop", "user-container"],
-        ],
-    );
+    assert.equal((await transport.runWorkerCommand("retire", { instanceName: "task-3-adopted" })).exitCode, 0);
+    assert.equal(status, "stopped");
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["inspect", "--type", "container", "user-container"],
+        ["start", existingId],
+        ["inspect", "--type", "container", existingId],
+        ["exec", "-i", existingId, "/usr/local/bin/devshell-worker", "retire", "--instance", "task-3-adopted"],
+        ["inspect", "--type", "container", "user-container"],
+        ["stop", existingId],
+        ["inspect", "--type", "container", existingId],
+    ]);
 });
 
 test("runtime retirement temporarily starts and restores a stopped compose service", async () => {
@@ -2330,82 +2311,42 @@ test("managed container uses an explicit workspace mount without adding a duplic
 });
 
 test("existing stopped container mode adopts and restores the configured lifecycle", async () => {
-    let inspectCount = 0;
+    let status = "stopped";
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, {
-                stdout: inspectCount++ === 0 ? "stopped\n" : "running\n",
-            });
+            closeRecordedChild(child, { stdout: existingInspect(status) });
             return true;
         }
-
+        if (call.args[0] === "start") status = "running";
+        if (call.args[0] === "stop") status = "stopped";
         return false;
     });
     const transport = createContainerRuntime("podman", {
-        container: {
-            adoptLifecycle: true,
-            containerName: "adopted-container",
-            mode: "existingStoppedContainer",
-        },
+        container: { adoptLifecycle: true, containerName: "adopted-container", mode: "existingStoppedContainer" },
         binary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn,
     });
-
-    await transport.runWorkerCommand("start", {
-        instanceName: "task-3-adopted",
-    });
-    await transport.runWorkerCommand("stop", {
-        instanceName: "task-3-adopted",
-    });
-
-    assert.deepEqual(
-        recorder.calls.map((call) => call.args),
-        [
-            [
-                "inspect",
-                "--type",
-                "container",
-                "--format",
-                "{{.State.Status}}",
-                "adopted-container",
-            ],
-            ["start", "adopted-container"],
-            [
-                "exec",
-                "-i",
-                "adopted-container",
-                "/usr/local/bin/devshell-worker",
-                "start",
-                "--instance",
-                "task-3-adopted",
-            ],
-            [
-                "inspect",
-                "--type",
-                "container",
-                "--format",
-                "{{.State.Status}}",
-                "adopted-container",
-            ],
-            [
-                "exec",
-                "-i",
-                "adopted-container",
-                "/usr/local/bin/devshell-worker",
-                "stop",
-                "--instance",
-                "task-3-adopted",
-            ],
-            ["stop", "adopted-container"],
-        ],
-    );
+    await transport.runWorkerCommand("start", { instanceName: "task-3-adopted" });
+    await transport.runWorkerCommand("stop", { instanceName: "task-3-adopted" });
+    assert.equal(status, "stopped");
+    assert.deepEqual(recorder.calls.map((call) => call.args), [
+        ["inspect", "--type", "container", "adopted-container"],
+        ["start", existingId],
+        ["inspect", "--type", "container", existingId],
+        ["exec", "-i", existingId, "/usr/local/bin/devshell-worker", "start", "--instance", "task-3-adopted"],
+        ["inspect", "--type", "container", "adopted-container"],
+        ["exec", "-i", existingId, "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-adopted"],
+        ["inspect", "--type", "container", "adopted-container"],
+        ["stop", existingId],
+        ["inspect", "--type", "container", existingId],
+    ]);
 });
 
 test("podman transport rejects already running existing stopped containers", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stdout: "running\n" });
+            closeRecordedChild(child, { stdout: existingInspect("running") });
             return true;
         }
 
@@ -2548,13 +2489,15 @@ test("adopted container retirement after runtime reconstruction preserves an alr
     let status = "exited";
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, { stdout: status + "\n" });
+            closeRecordedChild(child, { stdout: existingInspect(status) });
             return true;
         }
         if (call.args[0] === "start") status = "running";
         return false;
     });
+    const root = await createTestTempDirectory("adopted-reconstruction");
     const options = {
+        adoption: { databaseFile: join(root, "adoption.sqlite3"), owner: "adopted/config-1" },
         container: { mode: "existingStoppedContainer" as const, containerName: "user-container", adoptLifecycle: true },
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
         spawnFunction: recorder.spawn,
@@ -2566,8 +2509,8 @@ test("adopted container retirement after runtime reconstruction preserves an alr
     assert.equal((await restarted.runWorkerCommand("retire", { instanceName: "adopted" })).exitCode, 0);
     await restarted.retireProviderResources();
     assert.deepEqual(recorder.calls.map(call => call.args), [
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "user-container"],
-        ["exec", "-i", "user-container", "/usr/local/bin/devshell-worker", "retire", "--instance", "adopted"],
+        ["inspect", "--type", "container", "user-container"],
+        ["exec", "-i", existingId, "/usr/local/bin/devshell-worker", "retire", "--instance", "adopted"],
     ]);
 });
 
@@ -2613,7 +2556,7 @@ test("adopted container can be started and stopped repeatedly within one runtime
     let status = "exited";
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, { stdout: `${status}\n` });
+            closeRecordedChild(child, { stdout: existingInspect(status) });
             return true;
         }
         if (call.args[0] === "start") status = "running";
@@ -2631,7 +2574,7 @@ test("adopted container can be started and stopped repeatedly within one runtime
     await runtime.runWorkerCommand("start", { instanceName: "cycle" });
 
     assert.deepEqual(recorder.calls.filter((call) => call.args[0] === "start").map((call) => call.args), [
-        ["start", "cycle"], ["start", "cycle"],
+        ["start", existingId], ["start", existingId],
     ]);
     assert.equal(recorder.calls.filter((call) => call.args[0] === "stop").length, 1);
 });

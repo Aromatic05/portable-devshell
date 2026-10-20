@@ -32,6 +32,7 @@ import { TransportFactory } from "../transport/endpoint/Factory.js";
 import { resolveWorkerInstanceConfig, type WorkerInstanceConfig } from "../runtime/provision/Config.js";
 import { WorkerRuntimeFactory, type WorkerRuntimeFactoryOptions } from "../runtime/provision/Factory.js";
 import { InstancePaths } from "./Paths.js";
+import { containerAdoptionOwner } from "../runtime/provision/container/Adoption.js";
 import { InstanceLifecycle } from "./Lifecycle.js";
 import { toInstanceConfig, type InstanceConfig } from "./Config.js";
 import { createInstanceEventLog, type InstanceEventLog } from "./EventLog.js";
@@ -439,7 +440,7 @@ export function toWorkerConfig(
     }
 
     const provider = WorkerRuntimeFactory.create(
-        toRuntimeOptions(instance),
+        toRuntimeOptions(instance, homeDirectory),
     );
     const transportConnection = new TransportConnection(
         async () =>
@@ -458,7 +459,12 @@ export function toWorkerConfig(
 
 function toRuntimeOptions(
     instance: ControlInstanceConfig,
+    homeDirectory: string,
 ): WorkerRuntimeFactoryOptions {
+    const adoption = {
+        databaseFile: new InstancePaths(asInstanceName(instance.name), homeDirectory).containerAdoptionDatabaseFile,
+        owner: containerAdoptionOwner(instance),
+    };
     switch (instance.provider) {
         case "local":
             return { type: "local" };
@@ -466,12 +472,14 @@ function toRuntimeOptions(
             return { command: instance.ssh.command, type: "ssh" };
         case "docker":
             return {
+                adoption,
                 container: instance.container,
                 dockerBinary: instance.dockerBinary,
                 type: "docker",
             };
         case "podman":
             return {
+                adoption,
                 container: instance.container,
                 podmanBinary: instance.podmanBinary,
                 type: "podman",

@@ -16,6 +16,7 @@ import {
     type SshExecutionOptions,
 } from "../execution/provider/Ssh.js";
 import { ContainerInstall } from "./install/provider/Container.js";
+import type { ContainerAdoptionIdentity } from "./container/Adoption.js";
 
 export interface WorkerRuntimeFactoryLocalOptions extends Omit<
     LocalExecutionOptions,
@@ -36,6 +37,7 @@ export interface WorkerRuntimeFactorySshOptions extends Omit<
 export interface WorkerRuntimeFactoryDockerOptions {
     type: "docker";
     container: InstanceContainerConfig;
+    adoption?: ContainerAdoptionIdentity;
     dockerBinary?: string;
     spawnFunction?: SpawnFunction;
 }
@@ -43,6 +45,7 @@ export interface WorkerRuntimeFactoryDockerOptions {
 export interface WorkerRuntimeFactoryPodmanOptions {
     type: "podman";
     container: InstanceContainerConfig;
+    adoption?: ContainerAdoptionIdentity;
     podmanBinary?: string;
     spawnFunction?: SpawnFunction;
 }
@@ -76,6 +79,7 @@ export class WorkerRuntimeFactory {
                         connection: TransportFactory.create(options).getConnection(),
                         binary: options.dockerBinary ?? "docker",
                         container: options.container,
+                        adoption: options.adoption,
                         provider: "docker",
                         spawnFunction: options.spawnFunction,
                         workerBinary,
@@ -87,6 +91,7 @@ export class WorkerRuntimeFactory {
                         connection: TransportFactory.create(options).getConnection(),
                         binary: options.podmanBinary ?? "podman",
                         container: options.container,
+                        adoption: options.adoption,
                         keepIdUserNamespace: true,
                         provider: "podman",
                         spawnFunction: options.spawnFunction,

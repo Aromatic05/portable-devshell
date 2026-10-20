@@ -8,6 +8,7 @@ export class InstancePaths {
     readonly auditDatabaseFile: string;
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
+    readonly containerAdoptionDatabaseFile: string;
     readonly messageDatabaseFile: string;
     readonly goalsFile: string;
     readonly todoFile: string;
@@ -20,6 +21,7 @@ export class InstancePaths {
         this.homeDirectory = homeDirectory;
         this.instanceRootDir = join(homeDirectory, ".devshell", instanceName);
         this.controlWorkerDir = join(this.instanceRootDir, "control-worker");
+        this.containerAdoptionDatabaseFile = join(this.controlWorkerDir, "container-adoption.sqlite3");
         this.messageDatabaseFile = join(
             this.controlWorkerDir,
             "message.sqlite3",

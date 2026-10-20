@@ -4,8 +4,10 @@ import { ContainerConnection, type ContainerConnectionOptions } from "../../../.
 import { WorkerInstallerRemote } from "../Remote.js";
 import { createCommandContext, createProviderError } from "../../../../transport/endpoint/channel/worker/Error.js";
 import { createContainerProvision, type ContainerProvision } from "../../container/Provision.js";
+import type { ContainerAdoptionIdentity } from "../../container/Adoption.js";
 
 export interface ContainerInstallOptions extends ContainerConnectionOptions {
+    adoption?: ContainerAdoptionIdentity;
     keepIdUserNamespace?: boolean;
     workerBinary?: WorkerBinary;
     connection?: ContainerConnection;
@@ -20,7 +22,7 @@ export class ContainerInstall {
     constructor(options: ContainerInstallOptions) {
         this.connection = options.connection ?? new ContainerConnection(options);
         this.workerBinary = options.workerBinary ?? new WorkerBinary();
-        this.#provision = createContainerProvision({ container: options.container, keepIdUserNamespace: options.keepIdUserNamespace === true, operations: this.connection });
+        this.#provision = createContainerProvision({ adoption: options.adoption, container: options.container, keepIdUserNamespace: options.keepIdUserNamespace === true, operations: this.connection });
         this.#installer = new WorkerInstallerRemote({ connection: this.connection, provider: this.connection.provider });
     }
 

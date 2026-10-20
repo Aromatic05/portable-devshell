@@ -6,6 +6,7 @@ import {
     type ContainerLifecycleStatus,
     type ContainerProvisionOperations,
 } from "../../../../src/instance/runtime/provision/container/Provision.js";
+import { existingInspect } from "./ExistingHarness.ts";
 import type { WorkerCommandResult } from "../../../../src/instance/runtime/execution/Command.js";
 
 function providerFixture(initial: ContainerLifecycleStatus) {
@@ -84,6 +85,7 @@ test("adopted stopped-container lifecycle restores state after runtime retiremen
             provider: "podman",
             async readContainerStatus() { return status; },
             async runProviderCommand(operation): Promise<WorkerCommandResult> {
+                if (operation === "inspectContainerIdentity") return { exitCode: 0, stderr: "", stdout: existingInspect(status), details: {} };
                 calls.push(operation);
                 status = operation === "stopContainer" ? "stopped" : "running";
                 return { exitCode: 0, stderr: "", stdout: "", details: {} };
@@ -109,6 +111,7 @@ test("retirement of an already stopped adopted container brackets runtime work a
             provider: "docker",
             async readContainerStatus() { return status; },
             async runProviderCommand(operation): Promise<WorkerCommandResult> {
+                if (operation === "inspectContainerIdentity") return { exitCode: 0, stderr: "", stdout: existingInspect(status), details: {} };
                 calls.push(operation);
                 status = operation === "stopContainerAfterRetire" ? "stopped" : "running";
                 return { exitCode: 0, stderr: "", stdout: "", details: {} };
