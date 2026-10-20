@@ -1,122 +1,56 @@
-# Beta Known-Bug Reproductions
+# Beta Reproduction and Regression Registry
 
-This directory contains deliberately **failing** tests for independently reproduced implementation defects. They are **not** part of the regular `pnpm test:packages`, `pnpm test:scripts` or Cargo discovery. A nonzero exit is expected **until the implementation is fixed**; do not change the assertions simply to make the tests green.
+This directory preserves opt-in probes and links to former RED assertions. After the 2026-10-20 beta repair batches, the original A–H scenarios are fixed in their owning package suites. **Do not treat the historical RED labels in test names or the round-by-round finding log as the current result.** Keep original causal assertions intact when promoting a regression; never use skip/todo or weaker timing to make a case green.
 
-Run the remaining opt-in non-UI reproducers from the repository root:
+## Remaining opt-in native Worker reproductions
 
-```bash
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/*.test.ts
+Two expensive native cleanup scenarios remain outside regular package discovery but **passed** in an isolated host environment after the retirement repair:
+
+```sh
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ControlCleanupRetryRound5.test.ts test/known-bugs/WorkerRetireStalePidRound5.test.ts
 ```
 
-The third-round remaining cases cover two Extension lifecycle races, one Stream admission race, one OAuth refresh-token race, and two Reentry claim-ownership races. Fixed A/B cases have moved into their owning packages' default suites; this glob includes other unresolved rounds too.
+They use temporary home directories and real Rust/Control IPC. They must not be pointed at running user instances.
 
-For component-boundary UI findings (real rendered components with stubbed Host/domain connections):
+## Promoted normal package regressions
 
-```bash
+| Area | Original fault now covered in default discovery |
+|---|---|
+| Config A | `packages/control/test/unit/control/config/persistence/{ConfigForeignDocument,ConfigPostcommitCleanup,CommittedCleanup}.test.ts` |
+| ToolCall B | `packages/control/test/integration/server/transport/{ToolCallDuplicateAuditOwnershipRound6,ToolCallDeliveryFailure}.test.ts`; `packages/core/test/unit/tool/{ToolCallAdapterRetryAfterCommitRound6,ToolCallCancellationAfterEffect}.test.ts`; `packages/mcp/test/integration/McpNativeAbortAudit.test.ts` |
+| OAuth C | `packages/mcp/test/integration/{OAuthRefreshRaceRound3,OAuthRefreshConcurrentReplayRound5,OAuthMigration,OAuthRefreshRestart}.test.ts`; `packages/mcp/test/unit/auth/OAuthRefresh.test.ts` |
+| Reentry C | `packages/mcp/test/unit/mcpapp/{ReentryClaimOwnershipRound3,ReentryClaimOwnership}.test.ts` |
+| Container adoption D | `packages/core/test/unit/worker/provision/{ProviderAdoptionRuntime,Existing,ExistingIntegration}.test.ts` |
+| Reverse WSS D | `packages/control/test/integration/{ReverseCandidateFailurePoisonsPreviousRound6,ReverseCandidateIsolation}.test.ts` |
+| Extension E | `packages/control/test/integration/extension/{ExtensionLifecycleRace,ExtensionStreamAdmission}.test.ts` and retirement/generation tests |
+| Mailing F | `extensions/comment/test/integration/MailingKnownBugs.test.ts` and `extensions/comment/test/unit/{MailingRecovery,MailingMigration,CommentMailingProducer}.test.ts` |
+| Todo/Approval G | `extensions/comment/test/unit/TodoAccess.test.ts`; `packages/core/test/unit/approval/{CloseRound4,Close}.test.ts` |
+| TUI H | `packages/tui/test/interaction/{TuiOverlayLifetime,Overlay}.test.ts` |
+| MCP App/Web H | MCP App `AppRaces.test.tsx`, Web Config/Audit state tests and component RED files below |
+
+Run the applicable packages through `pnpm test:packages`. For historical bug details see `docs/development/beta-bug-findings.md`.
+
+## Opt-in rendered UI reproductions
+
+These are component-boundary tests with real React rendering and controlled Host/domain inputs; all original cases were green after their corresponding changes. They do not by themselves prove live Chromium or ChatGPT Host integration:
+
+```sh
 node packages/web/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/web-repro.config.ts
-node packages/mcpapp/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/mcpapp-repro.config.ts
-```
-
-These contain 4 Web and 4 MCP App expected-failing cases. They do not establish real ChatGPT Host or production data-path failure. Two speculative Web Config navigation cases were explicitly removed from the retained reproducible set after parent remount behavior disproved the initial hypothesis.
-
-When fixing a bug, run its reproduction first. Once it passes, move it into the owning package's normal regression suite and update `docs/development/beta-bug-findings.md`. Avoid adding `skip`/`todo` markers to hide an open defect.
-
-
-## Fourth-round explicit regressions
-
-These tests are **expected to fail** and are not discovered by any default package or Rust suite. Fix the implementation first and then promote the unchanged assertion to the owning package's ordinary tests.
-
-```sh
-# Provider adopted container state is lost across runtime reconstruction
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ProviderAdoptionRuntime.test.ts
-
-# ApprovalService closure race (still RED)
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ApprovalServiceCloseRound4.test.ts
-
-# Comment/Mailing real SQLite and disk: duplicate, wrong scope, quoted ID, invalid sender
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./extensions/comment/test/RegisterWorkspacePackages.mjs --test --test-isolation=none test/known-bugs/CommentMailingDelivery.test.ts
-
-# Four Web UI and three TUI Overlay rendering/state-machine regressions
 node packages/web/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/web-round4-repro.config.ts
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/TuiOverlayLifetime.test.ts
-```
-
-### Running-system recovery reproduction
-
-For the Control/Worker restart, 262 revision stream and failed committed-delete cleanup retry, set a **brand-new** private Testspace root, start, run `pnpm testspace recovery-smoke`, and always call `pnpm testspace stop` even if it fails. This test currently observes `cleanupPending=true` and a persistent old-Generation debt after public retry. See `docs/development/beta-bug-findings.md`. Never run this restart smoke on shared `.testspace` or live production Control.
-
-
-## Fifth-round opt-in regressions
-
-The following tests are **deliberately red** until product behavior is repaired; run these individually. They are excluded from the normal package and Rust test discovery.
-
-```sh
-# Real Control Unix IPC + real Rust Worker stale PID across Control restart
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ControlCleanupRetryRound5.test.ts
-
-# Isolated native Worker retire and Cleanup Debt after process state becomes stale
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/WorkerRetireStalePidRound5.test.ts
-
-# Real TCP/OAuth concurrent refresh replay; one failed reuse does not revoke issued successor
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/McpRefreshConcurrentReplayRound5.test.ts
-
-# Two real React red regressions: foreign Context reentry claim and stale snapshot overwrite
+node packages/mcpapp/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/mcpapp-repro.config.ts
 node packages/mcpapp/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/mcpapp-round5-repro.config.ts
 ```
 
-For the isolated positive three-phase running-system retirement proof, start a *fresh* dedicated Testspace root, run `pnpm testspace retirement-smoke`, and always run `pnpm testspace stop` (even on failures). It verifies never-started deletion, explicitly stopped Worker deletion, and Control-restarted Worker stopped before deletion, with debt-free same-name recreation. This is not a permanent fix for the automatic cleanup retry RED.
+Two speculative Web Config navigation assertions were removed in the earlier investigation after a real parent remount disproved the proposed failure; they are not counted as confirmed defects.
 
-
-## Sixth-round standalone regressions
-
-The ToolCall Audit ownership and post-execution retry failures are now in default package discovery. Only the Reverse WSS candidate failure remains RED in this section.
+## Isolated full-chain acceptance
 
 ```sh
-# A failed WSS replacement must not poison the retained predecessor's reliable RPC session
-TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ReverseCandidateFailurePoisonsPreviousRound6.test.ts
+node acceptance/run-provider-chain-smoke.mjs       # L01/L04 real Reverse Rust Worker, passed after repair
+node acceptance/run-cross-client-chain-smoke.mjs   # L03 CLI/Chromium/MCP/Todo/Approval
+node acceptance/run-chain-matrix.mjs --all          # L07/L05 plus the above; preserve nonzero exit
 ```
 
-## Promoted A/B regressions (now in default package tests)
+The 2026-10-20 host L01/L04 run completed with exit 0: enrollment, network recovery, durable audit, debt-free delete and same-name re-creation. After the Web pending-approval fix and fresh production Web build, L03 completed **all six chains**, exit 0 and cleanup completed: real CLI/MCP/Worker, failed-Web-RPC recovery, Todo revision conflicts and hard reload, **Web Approval before any ToolCall audit row**, stream gap recovery, and durable final state after Control restart. A separate actual Chromium test in `packages/web/test/browser/PendingApprovals.chromium.mjs` also passed pre-execution Approve and Deny without fabricating audit records. The L03 report explicitly does not exercise TUI.
 
-The original assertions are retained in their owning suites:
-
-- Config recovery: `packages/control/test/unit/control/config/persistence/ConfigForeignDocument.test.ts` and `ConfigPostcommitCleanup.test.ts` in the same directory.
-- Config commit/GC fault injection: `packages/control/test/unit/control/config/persistence/CommittedCleanup.test.ts`.
-- Duplicate Audit ownership: `packages/control/test/integration/server/transport/ToolCallDuplicateAuditOwnershipRound6.test.ts`.
-- Normal/stream delivery metadata: `packages/control/test/integration/server/transport/ToolCallDeliveryFailure.test.ts`.
-- Post-execution retry and running cancellation: `packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts` and `ToolCallCancellationAfterEffect.test.ts`.
-- SDK cancellation via localhost TCP: `packages/mcp/test/integration/McpNativeAbortAudit.test.ts`.
-
-All run as part of `pnpm test:packages`. The ApprovalService close race remains in `test/known-bugs/ApprovalServiceCloseRound4.test.ts`.
-
-Real positive acceptance programs:
-
-```sh
-pnpm acceptance:web             # Chromium Audit survives reload and WebUI Stop/Start
-pnpm acceptance:tmux-handoff   # real 190-second task, 180-second detached handoff
-pnpm stress:transport         # cgroup-bounded 32 MiB Artifact + eight Reverse cycles
-```
-
-The positive stress program now synchronizes the existing old-token-revocation assertion on the protocol's DSR2 ready/credential-commit event rather than the earlier Instance snapshot-ready boundary. This does not address the failed-candidate WSS session contamination regression.
-
-## Seventh-round end-to-end RED chain reproducers
-
-These complete Acceptance runs intentionally return nonzero on the current implementation. Each starts with genuinely working Rust/Control/MCP operations and reaches a product-level blocked state; they are **not part of default PR gates**.
-
-```sh
-# CLI + real Chromium Web + native Control + MCP Todo:
-# after two meaningful Todo writes, the third revision probe is rejected by
-# the Comment Extension's fixed two-access budget before CAS evaluation.
-node acceptance/run-cross-client-chain-smoke.mjs
-
-# Real Reverse Worker WSS, MCP bash_run and SQLite audit pass, but self-managed
-# Worker stopped before Control delete still leaves old-generation cleanup debt
-# after public retryCleanupDebt.
-node acceptance/run-provider-chain-smoke.mjs
-
-# Aggregate is nonzero until both blockers are resolved and the full chains pass.
-# A failure in one chain must never suppress execution of the other chains.
-node acceptance/run-chain-matrix.mjs --all
-```
-
-L07 Artifact and L05 Workflow are genuine full-chain **green** Acceptance programs. See `docs/development/functional-chain-acceptance.md` for the verified E2E boundaries, exact commands and what still requires a real ChatGPT Host or remote provider.
+Use a fresh isolated Testspace root for `pnpm testspace recovery-smoke` or `pnpm testspace retirement-smoke` if needed, and always run `pnpm testspace stop`. Never run those scripts on shared `.testspace`, production Control or user `~/.devshell` directories. Older positive manual runs also include `pnpm acceptance:web`, `pnpm acceptance:tmux-handoff` and `pnpm stress:transport`.

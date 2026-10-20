@@ -15,7 +15,23 @@
 | R6-01 | 已修复：拒绝活跃和历史重复callId覆写原执行审计身份 | `packages/control/test/integration/server/transport/ToolCallDuplicateAuditOwnershipRound6.test.ts` |
 | R6-02 | 已修复：执行后适配/Outbound失败保留callId与failureStage，retryable=false | `packages/core/test/unit/tool/ToolCallAdapterRetryAfterCommitRound6.test.ts` |
 
-R4-03 ApprovalService关闭竞态仍为独立红测（`test/known-bugs/ApprovalServiceCloseRound4.test.ts`），不属于A/B修复范围。其他OAuth、Reverse、Extension、Mailing和UI缺陷状态未改变。原A/B红测迁入默认Package后保持原始业务断言；本节不表示全部跨客户端功能链已通过。
+以上为A/B阶段的修复记录。其他组的后续修复状态以下表为准；第三至第七轮原始RED清单仍作为发现时证据保存，原路径和“仍待修复”表述不再代表当前HEAD。
+
+## C–H修复进展（2026-10-20）
+
+| 组/缺陷 | 当前实现和回归证据 | 提交 |
+|---|---|---|
+| C OAuth，R3-006/R5-02 | Refresh单次原子轮换、重放撤销Token Family及已签发Access；旧OIDC JSON自动事务迁入SQLite，不要求停机后手动转换；原两组并发红测已转入MCP默认套件，宿主真实HTTP、6项Web OAuth及迁移/重启测试通过 | `7b7b84be` |
+| C Reentry，R3-007/008 | 持久Receipt Claim所有权、状态转换与恢复隔离；原2条红测及34条Agent专项、28条宿主测试通过 | `1458b99d` |
+| D退休，R4-11/R5-01/E7-02 | Worker stale PID安全Stop→Retire，Reverse自管理进程不由Control强制Stop/Start；旧Generation Debt保留并可按身份偿还；真实IPC/Rust 11条及L01/L04完整功能链通过 | `d9f73c82` |
+| D Reverse WSS，R6-03 | 候选可靠帧水位按物理连接隔离；前代Session不被失败候选污染；真实WSS回归12条通过 | `d53513eb` |
+| D Existing容器，R4-01 | 保存稳定Container ID、实例所有者、启动代次，重构后验证身份接管，拒绝外部同名容器；32项测试（含5项隔离进程）通过，未做真实Podman硬件/容器引擎验收 | `31486d4b`、`1625e604` |
+| E Extension，R3-003/004/005 | 退休通知和资源清理固定旧Runtime，生命周期Lease及异步Stream Admission栅栏；13条宿主定向测试通过 | `407ff9c7` |
+| F Mailing，R4-04/05/06/07 | Comment队列与全作用域通知Identity同一SQLite事务去重，失败重播、分消息隔离、历史schema升级；完整默认Comment 164/164通过 | `eaa27fee` |
+| G Todo/Approval，E7-01/R4-03 | Todo多次正常访问直接进入Revision CAS；Approval关闭并发阻止晚到批准；原红测及11条独立回归通过，L03的Todo阶段已通过 | `c84131d7`、`0055a8b1` |
+| H MCP App/Web/TUI | Context Snapshot/Action晚到隔离、Web配置草稿和Audit状态隔离、TUI Busy Overlay身份；Web Audit在ToolCall尚未形成记录时独立显示待审批项，按Instance/Context隔离并保留页面级确认和错误恢复；Web包250/250、独立真实Chromium Approve/Deny测试和L03完整六条功能链全部通过 | `239b50cc`、`7f02803b`、`59fd2336`、`808e1d98` |
+
+**完整链状态**：L01/L04真实Reverse Worker创建、Enroll、断线恢复、退休、同名重建已通过并完成清理。L03在全新临时HOME、真实CLI/MCP/Rust Worker/Chromium下完整退出码为**0**，其六条链分别涵盖工具执行、Web失败RPC恢复、Todo Revision/CAS、执行前Web Approval、Stream Gap和Control重启后持久化一致性；审批副作用恰好一次、重载可恢复、清理完成。另有独立Chromium测试在**尚无ToolCall历史行**时完成Approve与Deny，均通过。以上并不表示TUI实机、真实Docker/Podman或Windows行为已经完成验收。
 
 ## A. 实际复现且仍待修复
 
