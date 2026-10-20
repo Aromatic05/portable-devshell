@@ -37,7 +37,7 @@ test("round3 Reentry dispatch failure restores receipt for retry without leaving
         assert.equal((await fixture.goal.read(fixture.context.ctxId))?.continuationPending, false);
         fixture.failClaim(false);
         assert.equal((await fixture.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
-        assert.equal(fixture.executions(), 2);
+        assert.equal(fixture.executions(), 3, "failed claim, confirmed release, successful retry");
     } finally { await fixture.close(); }
 });
 

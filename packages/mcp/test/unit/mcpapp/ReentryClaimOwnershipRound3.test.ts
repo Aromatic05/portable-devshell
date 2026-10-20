@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { betaReentry } from "../../packages/mcp/test/support/BetaReentry.ts";
+import { betaReentry } from "../../support/BetaReentry.ts";
 
 test("stale Host validate must not release the active Host's receipt", async () => {
     const fixture = await betaReentry();

@@ -25,7 +25,8 @@ export async function deliverMcpAppReentry(
     const { action, claimId, intent, sourceId, directiveId, outcome } = input;
     if (!["claim", "validate", "attempt", "report", "release"].includes(String(action)) ||
         typeof claimId !== "string" || !claimId || claimId.length > 128 ||
-        (directiveId !== undefined && (typeof directiveId !== "string" || !directiveId || directiveId.length > 128)))
+        (directiveId !== undefined && (typeof directiveId !== "string" || !directiveId || directiveId.length > 128)) ||
+        (action === "report" && !["accepted", "rejected", "uncertain"].includes(String(outcome))))
         throw new Error("Invalid MCP App recovery request.");
     const context = await ports.context.resolve({
         ctxId, instance: ports.instance, principal: request.principal, touch: false,
@@ -34,100 +35,101 @@ export async function deliverMcpAppReentry(
     if (context.status !== "active" || environment === undefined)
         throw new Error("MCP App recovery Context is unavailable.");
 
-    const receipt = typeof directiveId === "string"
-        ? await ports.actions.get(directiveId) : undefined;
-    if (directiveId !== undefined && (receipt?.ctxId !== ctxId || receipt.instance !== ports.instance ||
-        receipt.effect?.id !== directiveId || receipt.effect.kind !== "reentry" ||
-        receipt.effect.intent !== intent || receipt.effect.sourceId !== sourceId))
-        throw new Error("Recovery directive is not owned by the current Context.");
-    if (action === "claim") {
-        if (intent === "automatic") {
-            if (directiveId !== undefined || typeof sourceId !== "string")
-                throw new Error("Invalid automatic recovery intent.");
-        } else {
-            if (typeof directiveId !== "string" || receipt?.status !== "applied" ||
-                receipt.effect?.intent !== intent || receipt.effect.sourceId !== sourceId ||
-                (intent !== "goal-resume" && intent !== "goal-retry" && intent !== "task-resume"))
-                return { claimed: false };
-            const reserved = await ports.actions.beginDelivery(directiveId);
-            if (reserved === undefined) return { claimed: false };
-        }
-    } else if (receipt !== undefined) {
-        if (action === "validate" && receipt.status !== "attempting")
-            return { valid: false };
-        if (action === "attempt" && receipt.status === "attempted")
-            return { attempted: false, duplicate: true };
-        if (action === "attempt" && receipt.status !== "attempting")
-            return { attempted: false };
-        if (action === "report" && receipt.status !== "attempted")
-            return { reported: false };
-        if (action === "release" && receipt.status !== "attempting")
-            return { released: false };
-    }
+    const payload = input;
+    const owner = claimId;
+    const workspace = environment.workspace;
+    return typeof directiveId === "string"
+        ? await ports.actions.withDelivery(directiveId, advance)
+        : await advance();
 
-    let result: McpEndpointResult;
-    try {
-        result = await ports.dispatch.callTool("mcpapp_reentry", input, request, signal);
+    async function dispatch(payload: JsonValue, cleanup = false) {
+        const result = await ports.dispatch.callTool("mcpapp_reentry", payload, request, cleanup ? undefined : signal);
         if (result instanceof McpNativeToolResult && result.isError)
             throw new Error("Instance recovery request failed.");
-    } catch (error) {
-        if (action === "claim" && typeof directiveId === "string")
-            await ports.actions.restoreDelivery(directiveId).catch(() => undefined);
-        throw error;
+        const value = result instanceof McpNativeToolResult ? result.structuredContent : result;
+        if (typeof value !== "object" || value === null || Array.isArray(value))
+            throw new Error("Invalid Instance recovery result.");
+        return { result, value };
     }
-    const value = result instanceof McpNativeToolResult ? result.structuredContent : result;
-    if (typeof value !== "object" || value === null || Array.isArray(value))
-        throw new Error("Invalid Instance recovery result.");
 
-    if (action === "claim") {
-        if (value.claimed !== true) {
-            if (typeof directiveId === "string")
-                await ports.actions.restoreDelivery(directiveId);
-            return result;
-        }
-        try {
-            const snapshot = await ports.view.snapshot(ports.instance, ctxId, environment.workspace);
-            const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
-            return {
-                ...value,
-                delivery: {
-                    message: intent === "automatic"
-                        ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
-                        : intent === "task-resume"
-                            ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
-                            : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
-                    modelContext: snapshot.modelContext as unknown as JsonValue,
-                },
-            };
-        } catch (error) {
-            // The Host never received a claim response. Release the Instance
-            // claim through ToolCall before making its receipt available again.
+    async function advance(): Promise<McpEndpointResult> {
+        const receipt = typeof directiveId === "string"
+            ? await ports.actions.get(directiveId) : undefined;
+        if (directiveId !== undefined && (receipt?.ctxId !== ctxId || receipt.instance !== ports.instance ||
+            receipt.effect?.id !== directiveId || receipt.effect.kind !== "reentry" ||
+            receipt.effect.intent !== intent || receipt.effect.sourceId !== sourceId))
+            throw new Error("Recovery directive is not owned by the current Context.");
+        if (action === "claim") {
+            if (intent === "automatic") {
+                if (directiveId !== undefined || typeof sourceId !== "string")
+                    throw new Error("Invalid automatic recovery intent.");
+            } else {
+                if (typeof directiveId !== "string" || receipt?.status !== "applied" ||
+                    (intent !== "goal-resume" && intent !== "goal-retry" && intent !== "task-resume"))
+                    return { claimed: false };
+                if (await ports.actions.beginDelivery(directiveId, owner) === undefined)
+                    return { claimed: false };
+            }
             try {
-                const released = await ports.dispatch.callTool("mcpapp_reentry", {
-                    ...input, action: "release",
-                }, request, signal);
-                if (released instanceof McpNativeToolResult && released.isError)
-                    throw new Error("Instance recovery release was rejected.");
-                if (typeof directiveId === "string")
-                    await ports.actions.restoreDelivery(directiveId);
-            } catch { /* Fail closed when release status is uncertain. */ }
-            throw error;
+                const { result, value } = await dispatch(input);
+                if (value.claimed !== true) {
+                    if (typeof directiveId === "string")
+                        await ports.actions.restoreDelivery(directiveId, owner);
+                    return result;
+                }
+                const snapshot = await ports.view.snapshot(ports.instance, ctxId, workspace);
+                const title = snapshot.presentation.work.find((item) => item.id === sourceId)?.title ?? "the current work item";
+                return {
+                    ...value,
+                    delivery: {
+                        message: intent === "automatic"
+                            ? `The existing workspace Goal is due for continuation: ${title}. Review current state and continue its pending steps.`
+                            : intent === "task-resume"
+                                ? `The user resumed the workspace Task: ${title}. Review the current Todo and background work before continuing.`
+                                : `The user resumed the workspace Goal: ${title}. Review the latest state and continue its pending steps.`,
+                        modelContext: snapshot.modelContext as unknown as JsonValue,
+                    },
+                };
+            } catch (error) {
+                // A failed reply may follow a committed Instance claim. Confirm
+                // release before reoffering its receipt, even after cancellation.
+                try {
+                    const { value } = await dispatch({ ...payload, action: "release" }, true);
+                    if (value.released === true && typeof directiveId === "string")
+                        await ports.actions.restoreDelivery(directiveId, owner);
+                } catch { /* Fail closed when release status is uncertain. */ }
+                throw error;
+            }
         }
-    }
 
-    if (typeof directiveId === "string") {
-        if (action === "validate" && value.valid !== true)
-            await ports.actions.restoreDelivery(directiveId);
-        if (action === "attempt" && value.attempted === true)
-            await ports.actions.markAttempted(directiveId);
-        if (action === "report" && typeof outcome === "string" &&
-            ["accepted", "rejected", "uncertain"].includes(outcome)) {
-            const status = outcome as "accepted" | "rejected" | "uncertain";
-            await ports.actions.beginReport(directiveId, status);
-            await ports.actions.settle(directiveId, status);
+        if (receipt !== undefined) {
+            const owned = receipt.claimId === claimId;
+            if (action === "validate" && (!owned || receipt.status !== "attempting"))
+                return { valid: false };
+            if (action === "attempt") {
+                if (!owned) return { attempted: false };
+                if (receipt.status === "attempted") return { attempted: false, duplicate: true };
+                if (receipt.status !== "attempting") return { attempted: false };
+            }
+            if (action === "release" && (!owned || receipt.status !== "attempting"))
+                return { released: false };
+            if (action === "report" && await ports.actions.beginReport(
+                directiveId as string, owner, outcome as "accepted" | "rejected" | "uncertain",
+            ) === undefined) return { reported: false };
         }
-        if (action === "release")
-            await ports.actions.restoreDelivery(directiveId);
+
+        const { result, value } = await dispatch(input);
+        if (typeof directiveId === "string") {
+            if (action === "validate" && value.valid === false)
+                await ports.actions.restoreDelivery(directiveId, owner);
+            if (action === "release" && value.released === true &&
+                !await ports.actions.restoreDelivery(directiveId, owner)) return { released: false };
+            if (action === "attempt" && (value.attempted === true || value.duplicate === true) &&
+                await ports.actions.markAttempted(directiveId, owner) === undefined) return { attempted: false };
+            if (action === "report" && (value.reported === true || (outcome === "uncertain" && value.uncertain === true)) &&
+                await ports.actions.settle(directiveId, owner, outcome as "accepted" | "rejected" | "uncertain") === undefined)
+                return { reported: false };
+        }
+        return result;
     }
-    return result;
 }

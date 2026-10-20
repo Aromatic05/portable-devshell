@@ -14,6 +14,7 @@ export interface McpAppActionReceipt {
     execution?: { callId: string; instance: string; toolName: string; itemId?: string; actionId?: string };
     status: McpAppActionReceiptStatus;
     effect?: McpAppActionEffect;
+    claimId?: string;
     outcome?: "accepted" | "rejected" | "uncertain";
     updatedAt: string;
 }
@@ -34,6 +35,7 @@ export class McpAppActionStore {
     readonly #receipts = new Map<string, McpAppActionReceipt>();
     #initialized: boolean;
     #operation: Promise<void> = Promise.resolve();
+    readonly #deliveries = new Map<string, Promise<void>>();
 
     constructor(options: McpAppActionStoreOptions = {}) {
         this.#filePath = options.filePath;
@@ -106,61 +108,59 @@ export class McpAppActionStore {
         });
     }
 
-    async beginDelivery(actionId: string): Promise<McpAppActionReceipt | undefined> {
-        return await this.#run(async () => {
-            this.#assertInitialized();
-            const current = this.#receipts.get(actionId);
-            if (current === undefined || current.status !== "applied" || current.effect === undefined) return undefined;
-            const next = this.#record({ ...current, status: "attempting" });
-            this.#receipts.set(actionId, next);
-            try {
-                await this.#persist();
-            } catch (error) {
-                this.#receipts.set(actionId, current);
-                throw error;
-            }
-            return structuredClone(next);
+    /** Serialize the Instance round trip as well as the receipt transitions. */
+    async withDelivery<T>(actionId: string, operation: () => Promise<T>): Promise<T> {
+        const previous = this.#deliveries.get(actionId);
+        let release!: () => void;
+        const pending = new Promise<void>((resolve) => { release = resolve; });
+        this.#deliveries.set(actionId, pending);
+        await previous;
+        try { return await operation(); }
+        finally {
+            release();
+            if (this.#deliveries.get(actionId) === pending) this.#deliveries.delete(actionId);
+        }
+    }
+
+    async beginDelivery(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.status !== "applied" || current.effect === undefined) return undefined;
+            return this.#record({ ...current, status: "attempting", claimId });
         });
     }
 
-    async markAttempted(actionId: string): Promise<McpAppActionReceipt> {
-        return (await this.#change(actionId, (current) => {
-            if (current === undefined || current.status !== "attempting") throw new Error("McpApp action delivery was not prepared.");
+    async markAttempted(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId || current.status !== "attempting") return undefined;
             return this.#record({ ...current, status: "attempted" });
-        }))!;
-    }
-
-    async beginReport(actionId: string, outcome: "accepted" | "rejected" | "uncertain"): Promise<McpAppActionReceipt | undefined> {
-        return await this.#run(async () => {
-            this.#assertInitialized();
-            const current = this.#receipts.get(actionId);
-            if (current === undefined || (current.status !== "attempted" && current.status !== "attempting")) return undefined;
-            const next = this.#record({ ...current, status: "reporting", outcome });
-            this.#receipts.set(actionId, next);
-            try {
-                await this.#persist();
-            } catch (error) {
-                this.#receipts.set(actionId, current);
-                throw error;
-            }
-            return structuredClone(next);
         });
     }
 
-    async restoreDelivery(actionId: string): Promise<void> {
-        await this.#change(actionId, (current) => {
-            if (current === undefined || current.status !== "attempting") throw new Error("McpApp action delivery was not in progress.");
-            const { outcome: _outcome, ...applied } = current;
+    async beginReport(actionId: string, claimId: string, outcome: "accepted" | "rejected" | "uncertain"): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId) return undefined;
+            if (current.status === "reporting" && current.outcome === outcome) return current;
+            if (current.status !== "attempted" &&
+                !(current.status === "settled" && current.outcome === "uncertain" && outcome !== "uncertain")) return undefined;
+            return this.#record({ ...current, status: "reporting", outcome });
+        });
+    }
+
+    async restoreDelivery(actionId: string, claimId: string): Promise<boolean> {
+        return (await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId || current.status !== "attempting") return undefined;
+            const { outcome: _outcome, claimId: _claimId, ...applied } = current;
             return this.#record({ ...applied, status: "applied" });
-        });
+        })) !== undefined;
     }
 
-    async settle(actionId: string, outcome: "accepted" | "rejected" | "uncertain"): Promise<McpAppActionReceipt> {
-        return (await this.#change(actionId, (current) => {
-            if (current?.status === "settled" && current.outcome === outcome) return current;
-            if (current === undefined || (current.status !== "reporting" && current.status !== "attempted" && current.status !== "attempting")) throw new Error("McpApp action delivery was not attempted.");
-            return this.#record({ ...current, status: "settled", outcome });
-        }))!;
+    async settle(actionId: string, claimId: string, outcome: "accepted" | "rejected" | "uncertain"): Promise<McpAppActionReceipt | undefined> {
+        return await this.#transition(actionId, (current) => {
+            if (current.claimId !== claimId || current.outcome !== outcome) return undefined;
+            if (current.status === "settled") return current;
+            if (current.status !== "reporting") return undefined;
+            return this.#record({ ...current, status: "settled" });
+        });
     }
 
     async suppressContextPending(ctxId: string): Promise<void> {
@@ -230,6 +230,22 @@ export class McpAppActionStore {
         });
     }
 
+    /** A failed precondition must neither return a receipt nor rewrite storage. */
+    async #transition(actionId: string, update: (current: McpAppActionReceipt) => McpAppActionReceipt | undefined): Promise<McpAppActionReceipt | undefined> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const current = this.#receipts.get(actionId);
+            if (current === undefined) return undefined;
+            const next = update(current);
+            if (next === undefined) return undefined;
+            if (next === current) return structuredClone(current);
+            this.#receipts.set(actionId, next);
+            try { await this.#persist(); }
+            catch (error) { this.#receipts.set(actionId, current); throw error; }
+            return structuredClone(next);
+        });
+    }
+
     async #change(actionId: string, update: (current: McpAppActionReceipt | undefined) => McpAppActionReceipt | undefined): Promise<McpAppActionReceipt | undefined> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -279,6 +295,6 @@ function isDocument(value: unknown): value is McpAppActionDocument {
     return record.version === 1 && Array.isArray(record.receipts) && record.receipts.every((entry) => {
         if (typeof entry !== "object" || entry === null) return false;
         const receipt = entry as Record<string, unknown>;
-        return typeof receipt.actionId === "string" && typeof receipt.ctxId === "string" && typeof receipt.instance === "string" && typeof receipt.resolved === "object" && typeof receipt.status === "string";
+        return (receipt.claimId === undefined || (typeof receipt.claimId === "string" && receipt.claimId.length > 0 && receipt.claimId.length <= 128)) && typeof receipt.actionId === "string" && typeof receipt.ctxId === "string" && typeof receipt.instance === "string" && typeof receipt.resolved === "object" && typeof receipt.status === "string";
     });
 }

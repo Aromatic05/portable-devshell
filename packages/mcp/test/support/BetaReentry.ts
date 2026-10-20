@@ -50,7 +50,7 @@ export async function betaReentry() {
     });
     const base = { ctxId: context.ctxId, directiveId, intent: "goal-resume", sourceId: started.goalId, claimId: "round3-owner-claim" };
     const call = (input: Record<string, JsonValue>, principal = "owner", target = endpoint()) => target.callTool("mcpapp_reentry", { ...base, ...input }, { principal });
-    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal,
+    return { actions, base, call, context, contexts, directiveId, endpoint, filePath, goal, native, todo,
         executions: () => executions, failClaim: (value: boolean) => { failClaim = value; },
         async close() { uninstall(); native.close(); await contexts.close(); },
     };
