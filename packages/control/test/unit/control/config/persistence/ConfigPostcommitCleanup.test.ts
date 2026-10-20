@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
 import test from "node:test";
 import { ControlPathHome, createDefaultControlConfig, normalizeConfigInstanceDraft } from "@portable-devshell/shared";
-import { ControlConfigStore } from "../../packages/control/src/config/store/index.ts";
-import { createTestTempDirectory } from "../TestTempDirectory.ts";
-import { runPersistenceProcess } from "../../packages/control/test/unit/control/config/persistence/CrashProcess.ts";
+import { ControlConfigStore } from "../../../../../src/config/store/index.ts";
+import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+import { runPersistenceProcess } from "./CrashProcess.ts";
 
-const moduleUrl = new URL("../../packages/control/src/config/store/index.ts", import.meta.url).href;
+const moduleUrl = new URL("../../../../../src/config/store/index.ts", import.meta.url).href;
 test("partial recursive backup cleanup must never leave a mixed configuration generation", async (t) => {
     const home = await createTestTempDirectory("partial-commit-cleanup");
     t.after(() => rm(home, { recursive: true, force: true }));

@@ -45,6 +45,17 @@ export interface ControlConfigMigrationResult {
     changed: boolean;
 }
 
+/** Configuration has committed; only removal of the superseded backup failed. */
+export class ControlConfigCommittedCleanupError extends AggregateError {
+    constructor(error: unknown) {
+        super(
+            [error],
+            "Control configuration was committed, but the obsolete transaction backup could not be removed.",
+        );
+        this.name = "ControlConfigCommittedCleanupError";
+    }
+}
+
 export class ControlConfigStore {
     readonly #globalDocument: ControlGlobalTomlDocument;
     readonly #instanceDocument: ControlInstanceTomlDocument;
@@ -127,6 +138,11 @@ export class ControlConfigStore {
     ): Promise<void> {
         const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
+        // Collect previously committed backups on a later write, not during
+        // reads or while an uncommitted transaction marker still exists.
+        await cleanupCommittedConfigBackups(paths).catch((error) => {
+            console.warn("Control configuration backup cleanup deferred:", error);
+        });
         const validated = this.#validator.validate(config);
         const globalSource = this.#tomlCodec.encode(
             this.#globalDocument.encode(validated),
@@ -158,7 +174,6 @@ export class ControlConfigStore {
                     new Set(instanceSources.map((entry) => entry.filePath)),
                     validated,
                 );
-            await commitConfigTransaction(transaction);
         } catch (error) {
             try {
                 await rollbackConfigTransaction(paths, transaction);
@@ -169,6 +184,24 @@ export class ControlConfigStore {
                 );
             }
             throw error;
+        }
+        // The commit marker is the recovery boundary. Once removal begins,
+        // recovery may observe the new generation; never attempt a rollback
+        // after this point, including when the directory fsync fails.
+        try {
+            await commitConfigTransaction(transaction);
+        } catch (error) {
+            throw new AggregateError(
+                [error],
+                "Control configuration commit could not be finalized; recovery will resolve any remaining transaction marker.",
+            );
+        }
+        // Backups are garbage after the marker has been durably removed.
+        // A partial recursive deletion must never turn into a rollback.
+        try {
+            await rm(transaction.directory, { force: true, recursive: true });
+        } catch (error) {
+            throw new ControlConfigCommittedCleanupError(error);
         }
     }
 
@@ -386,9 +419,30 @@ async function rollbackConfigTransaction(
 async function commitConfigTransaction(
     transaction: PreparedConfigTransaction,
 ): Promise<void> {
+    // An orphaned journal is safe to garbage collect only after publication
+    // of this durable commit-intent marker and removal of the global marker.
+    await atomicWriteFile(join(transaction.directory, "committed"), "");
     await rm(transaction.markerFile, { force: true });
     await syncDirectory(dirname(transaction.markerFile));
-    await rm(transaction.directory, { force: true, recursive: true });
+}
+
+async function cleanupCommittedConfigBackups(paths: ControlPathHome): Promise<void> {
+    if (await readOptionalFile(join(paths.controlHomeDir, ".config-transaction")) !== undefined)
+        return;
+    let entries: Array<{ isDirectory(): boolean; name: string }>;
+    try {
+        entries = await readdir(paths.controlHomeDir, { withFileTypes: true });
+    } catch (error) {
+        if (isFileMissingError(error)) return;
+        throw error;
+    }
+    for (const entry of entries) {
+        if (!entry.isDirectory() ||
+            !/^\.config-transaction-[0-9a-f-]{36}$/u.test(entry.name)) continue;
+        const directory = join(paths.controlHomeDir, entry.name);
+        if (await readOptionalFile(join(directory, "committed")) === undefined) continue;
+        await rm(directory, { recursive: true, force: true });
+    }
 }
 
 function parseConfigTransactionManifest(
@@ -417,13 +471,15 @@ function parseConfigTransactionManifest(
 function isSafeInstanceFileList(value: unknown): value is string[] {
     return (
         Array.isArray(value) &&
-        value.every(
-            (entry) =>
-                typeof entry === "string" &&
-                /^[A-Za-z0-9-]+\.toml$/u.test(entry) &&
-                !entry.startsWith("-"),
-        )
+        value.every((entry) => typeof entry === "string" && isSafeInstanceFileName(entry))
     );
+}
+
+function isSafeInstanceFileName(name: string): boolean {
+    // These names come from a directory listing, not the configured Instance
+    // naming scheme. Preserve foreign TOMLs, including Unicode/underscores,
+    // while never allowing manifest entries to escape the Instances directory.
+    return /^[^/\\\0]+\.toml$/u.test(name);
 }
 
 async function listInstanceConfigFiles(directory: string): Promise<string[]> {
@@ -431,7 +487,7 @@ async function listInstanceConfigFiles(directory: string): Promise<string[]> {
         return (
             await readdir(directory, { encoding: "utf8", withFileTypes: true })
         )
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+            .filter((entry) => entry.isFile() && isSafeInstanceFileName(entry.name))
             .map((entry) => entry.name)
             .sort((left, right) => left.localeCompare(right));
     } catch (error) {

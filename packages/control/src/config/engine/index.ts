@@ -21,6 +21,7 @@ import {
 } from "../domain/Registry.js";
 import { ConfigChangeHub } from "../change/Config.js";
 import { diffConfigPaths } from "../Path.js";
+import { ControlConfigCommittedCleanupError } from "../store/index.js";
 import type {
     ConfigEngineOptions,
     ConfigRuntimeChangeSet,
@@ -101,7 +102,14 @@ export class ConfigEngine {
     }
 
     async persist(config: ControlConfig): Promise<void> {
-        await this.#configStore.write(config, this.#homeDirectory);
+        try {
+            await this.#configStore.write(config, this.#homeDirectory);
+        } catch (error) {
+            if (!(error instanceof ControlConfigCommittedCleanupError)) throw error;
+            // The committed generation must still be published to memory and
+            // the runtime. An obsolete backup cannot invalidate the commit.
+            console.warn("Control configuration committed; backup cleanup deferred:", error);
+        }
         this.#setConfig(config);
     }
 

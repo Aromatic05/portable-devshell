@@ -3,9 +3,9 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { ControlPathHome, createDefaultControlConfig } from "@portable-devshell/shared";
-import { ControlConfigStore } from "../../packages/control/src/config/store/index.ts";
-import { createTestTempDirectory } from "../TestTempDirectory.ts";
-import { runPersistenceProcess } from "../../packages/control/test/unit/control/config/persistence/CrashProcess.ts";
+import { ControlConfigStore } from "../../../../../src/config/store/index.ts";
+import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+import { runPersistenceProcess } from "./CrashProcess.ts";
 
 for (const foreignName of ["operator_notes.toml", "部署说明.toml"]) {
     test(`unrecognized ${foreignName} must remain preserved without blocking crash recovery`, async (t) => {
@@ -22,7 +22,7 @@ for (const foreignName of ["operator_notes.toml", "部署说明.toml"]) {
         await new ControlConfigStore().write(config, home);
         assert.equal(await readFile(foreign, "utf8"), "operator-owned unrecognized document");
         config.web.listenPort = 17921;
-        const moduleUrl = new URL("../../packages/control/src/config/store/index.ts", import.meta.url).href;
+        const moduleUrl = new URL("../../../../../src/config/store/index.ts", import.meta.url).href;
         runPersistenceProcess(`
             import fs from 'node:fs/promises';
             import { syncBuiltinESMExports } from 'node:module';
