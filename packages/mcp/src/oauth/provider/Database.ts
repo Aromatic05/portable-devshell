@@ -11,6 +11,11 @@ export interface OidcRecord {
     consumed: number | null;
 }
 
+export interface OidcRevocation {
+    sequence: number;
+    grantId: string;
+}
+
 interface RequestTransaction {
     active: boolean;
     revoked: boolean;
@@ -113,6 +118,17 @@ export class McpOAuthOidcDatabase {
                 }
             } finally { database.close(); }
         } finally { release(); }
+    }
+
+    revocationsSince(sequence: number): OidcRevocation[] {
+        // A separate read connection observes only committed fences, including
+        // other processes and commits whose in-memory callbacks were lost.
+        // Never acquire a writer lock or wait behind a busy writer here.
+        const database = new DatabaseSync(this.#path, { readOnly: true, timeout: 0 });
+        try {
+            return database.prepare("SELECT rowid AS sequence, id AS grantId FROM revoked_grants WHERE rowid > ? ORDER BY rowid")
+                .all(sequence) as unknown as OidcRevocation[];
+        } finally { database.close(); }
     }
 
     async #begin(request: RequestTransaction): Promise<DatabaseSync> {

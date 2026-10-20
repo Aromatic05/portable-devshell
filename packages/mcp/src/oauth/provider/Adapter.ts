@@ -1,7 +1,7 @@
 import type { Adapter, AdapterFactory, AdapterPayload } from "oidc-provider";
 import { errors } from "oidc-provider";
 import type { DatabaseSync } from "node:sqlite";
-import { McpOAuthOidcDatabase, type OidcRecord } from "./Database.js";
+import { McpOAuthOidcDatabase, type OidcRecord, type OidcRevocation } from "./Database.js";
 
 const MAX_CLIENT_RECORDS = 256;
 const MAX_DEFAULT_RECORDS = 4096;
@@ -14,6 +14,7 @@ export function createMcpOAuthOidcAdapterFactory(
     prepare(): Promise<void>;
     transaction<T>(operation: () => Promise<T>, status: () => number): Promise<T>;
     afterCommit(notification: () => void): void;
+    revocationsSince(sequence: number): OidcRevocation[];
 } {
     const store = new McpOAuthOidcDatabase(storageDir, secureStorage, secureFile);
     const factory: AdapterFactory = (name) => new McpOidcAdapter(name, store);
@@ -22,6 +23,7 @@ export function createMcpOAuthOidcAdapterFactory(
         transaction: <T>(operation: () => Promise<T>, status: () => number) =>
             store.transaction(operation, status),
         afterCommit: (notification: () => void) => store.afterCommit(notification),
+        revocationsSince: (sequence: number) => store.revocationsSince(sequence),
     });
 }
 

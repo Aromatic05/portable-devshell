@@ -22,6 +22,7 @@ const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const ID_TOKEN_TTL_SECONDS = 60 * 60;
 const INTERACTION_TTL_SECONDS = 10 * 60;
 const LONG_LIVED_TTL_SECONDS = 90 * 24 * 60 * 60;
+const REVOCATION_POLL_INTERVAL_MS = 1_000;
 
 import type { McpOAuth2Config } from "../Config.js";
 import { McpOAuthApprovalService } from "../interaction/Approval.js";
@@ -77,6 +78,8 @@ export class McpOAuthProviderRuntime {
     readonly #trustProxy: boolean;
     #provider?: Provider;
     #refreshProvider?: () => void;
+    #observeRevocations?: () => void;
+    #revocationTimer?: ReturnType<typeof setInterval>;
     readonly #supportedScopes = new Set<string>();
 
     constructor(options: McpOAuthProviderRuntimeOptions) {
@@ -121,7 +124,17 @@ export class McpOAuthProviderRuntime {
         listener: (revocation: McpOAuthAccessRevocation) => void,
     ): () => void {
         this.#revocationListeners.add(listener);
-        return () => this.#revocationListeners.delete(listener);
+        if (this.#revocationTimer === undefined) {
+            this.#revocationTimer = setInterval(() => this.#checkRevocations(), REVOCATION_POLL_INTERVAL_MS);
+            this.#revocationTimer.unref?.();
+        }
+        return () => {
+            this.#revocationListeners.delete(listener);
+            if (this.#revocationListeners.size === 0) {
+                clearInterval(this.#revocationTimer);
+                this.#revocationTimer = undefined;
+            }
+        };
     }
 
     registerResource(resourceServerUrl: URL, config: McpOAuth2Config): () => void {
@@ -218,6 +231,15 @@ export class McpOAuthProviderRuntime {
             async (path) => await this.#storageSecurity.secureFile(path),
         );
         await adapter.prepare();
+        let revocationSequence = 0;
+        this.#observeRevocations = () => {
+            for (const revocation of adapter.revocationsSince(revocationSequence)) {
+                // Fences are append-only, so the SQLite rowid is a durable
+                // cursor. Advance only after a successful committed read.
+                revocationSequence = revocation.sequence;
+                this.#notifyAccessRevoked({ grantId: revocation.grantId });
+            }
+        };
         const buildProvider = () => {
             const provider = new Provider(
                 stripTrailingSlash(this.#issuerUrl.href),
@@ -341,7 +363,7 @@ export class McpOAuthProviderRuntime {
             });
             provider.on("grant.revoked", (_context, grantId) => {
                 if (typeof grantId === "string") {
-                    adapter.afterCommit(() => this.#notifyAccessRevoked({ grantId }));
+                    adapter.afterCommit(() => this.#checkRevocations());
                 }
             });
             this.#provider = provider;
@@ -436,6 +458,15 @@ export class McpOAuthProviderRuntime {
             grantId: verified.grantId,
             scopes: [...verified.scopes],
         };
+    }
+
+    #checkRevocations(): void {
+        try { this.#observeRevocations?.(); }
+        catch (error) {
+            // A transient read failure must neither close healthy sockets nor
+            // fail an OAuth operation. Leave the cursor for the next poll.
+            console.warn(error instanceof Error ? error : new Error(String(error)));
+        }
     }
 
     #notifyAccessRevoked(revocation: McpOAuthAccessRevocation): void {
