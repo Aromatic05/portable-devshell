@@ -315,3 +315,26 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 | R420 | C24 | TUI正在确认时Escape和旧Future不能污染新实例Overlay | test/known-bugs/TuiOverlayLifetime.test.ts | UI | 3条组件级红测，真实远端Host待验 |
 
 仍待真实验收的关键项：Windows x64/ARM64 原生 psmux 会话（G25）；ChatGPT Host OAuth、Approval、Reentry与历史卡片（G26）；真实 SSH/Rootless Podman、跨机 Reverse 弱网和断线（G05–G08/G27）；断电、ENOSPC、持久化故障；真实浏览器 Audit/Revision 长连接行为。脚本存在或内存 HTTP 通过均不能自动关闭这些缺口。
+
+## 11. 第五轮补测：真实资源回收、WSS 与 MCP HTTP
+
+本轮新增的是实际可证伪行为和独立运行证据，而非仅计数测试文件。普通门禁的通过数量不包含独立已知BUG红测；本地Mock/React也不等于真实跨机与Windows验收。
+
+| 编号 | 关联 | 行为与故障边界 | 证据入口 | 执行层级 | 结果与限制 |
+|---|---|---|---|---|---|
+| R501 | G03/G04 | 隔离Testspace中三种Instance删除/Stop/重启后同名重建 | pnpm testspace retirement-smoke | 真Control/Worker E2E | 3/3通过；已Stop清理 |
+| R502 | G04/C25 | 旧代Cleanup Debt持久化、并发Retry、真Rust Retire/Stop | control/test/{unit/control/instance,integration/server}/Round5* | 本地集成 | 10/10通过，另有独立红测 |
+| R503 | C05/G27 | WSS提交屏障和16代Churn，SSE POST并发去重 | control/test/integration/ReverseTransportRound5.test.ts | 真WSS/SSE | 4/4通过 |
+| R504 | C05/G27 | Reverse Admission候选退役/撤销后拒绝旧代 | control/test/unit/control/reverse/*Round5.test.ts | State/Store单测 | 8/8通过 |
+| R505 | C15-C18 | 真Worker Terminal replay、Tmux、并发Bash取消和FileEdit原子重试 | crates/devshell-worker/tests/beta_round5_ipc.rs | 真Linux IPC | 6/6通过，Windows未验 |
+| R506 | C02/G04 | CLI Delete Pending、Cleanup Retry与Reverse enroll出错提示 | packages/cli/test/command/Round5Lifecycle.test.ts | 命令层测试 | 8/8通过，真实SSH/Podman未验 |
+| R507 | C10/C28 | Bearer scope/audience、双Client、请求体限制、SSE和路由恢复 | mcp/test/integration/Round5NativeHttp.test.ts | 真127.0.0.1 TCP/OIDC/SQLite | 16/16通过 |
+| R508 | C10/C28 | 同Refresh Token并发重放拒绝，但已签发Token仍有效 | test/known-bugs/McpRefreshConcurrentReplayRound5.test.ts | 真TCP红测 | HTTP200非401，独立失败 |
+| R509 | C14/C24 | MCP App Approval/Wait、Revision、Reentry与Context刷新 | mcpapp/src/BetaMatrixRound5.test.tsx | 真React | 13/13通过 |
+| R510 | C14/C24 | 旧Context指令错误Claim和迟到Snapshot覆盖新Context | test/known-bugs/ui/mcpapp-round5-repro.config.ts | React红测 | 2条独立失败，服务端尚未证实可绕过 |
+| R511 | C24/L03 | Web SQLite重启的Audit/Todo/Goal、实例删除Debt提示 | web/test/view/Round5Runtime.test.tsx | 真SQLite+React | 10/10通过；真浏览器Audit交互和恢复未验 |
+| R512 | G04/C25 | 旧Worker PID残留与跨Control重启Cleanup Retry失败 | test/known-bugs/{ControlCleanupRetryRound5,WorkerRetireStalePidRound5}.test.ts | 真Rust+Control IPC红测 | 2条独立失败；显式Stop可恢复 |
+| R513 | C25 | 专用Retirement Smoke不隐瞒未清Debt且仅手动派发 | scripts/testspace.test.mjs | 脚本回归 | 4/4通过 |
+| R514 | C24/L03 | 独占Testspace和真实Chromium CDP检查WebUI加载、在线状态与实例可见 | pnpm testspace web-smoke | 浏览器E2E | 实际通过：online和instanceVisible为true；未启用Audit Reload和实例Start/Stop |
+
+仍未验证：跨机SSH/Podman/Reverse弱网、Windows x64/ARM64原生psmux、真实ChatGPT Host MCP App（Approval/Wait/历史卡片）、跨Worker Artifact超长流、ENOSPC/断电持久化与直接删除正在运行Worker的自动补偿。这些不能因为本轮本地测试通过而消除。

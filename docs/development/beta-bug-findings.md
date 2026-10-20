@@ -89,3 +89,30 @@ UI 专项的真实 ChatGPT Host、SSH/容器跨机和 Windows psmux 仍有待验
 
 继续测试时以 `feature-test-matrix.md` 第10节 R401–R420 的未验目标平台和此处独立失败测试为优先级依据；扩充默认单测数量并不能代替真实失败恢复能力。
 
+
+## 5. 第五轮：真实重启与退休边界、OAuth重放和MCP App恢复（2026-10-20）
+
+**已完成的真实恢复对照**：新独占Linux Testspace按 `pnpm testspace retirement-smoke` 运行三阶段：从未启动实例直接删除、显式停止Worker后删除、Control restart后再次显式停止Worker再删除，三种均返回 `cleanupPending=false`、没有本实例旧代pending债务且允许同名重建（3/3）。所有测试根均已停止和清理。这不代表第四轮“重启后直接删除”已经修复，而是提供明确的可恢复前置条件。
+
+### R5-01：残留PID使已经删除的Instance在重启后反复Cleanup Retry失败
+
+真实Rust Worker的 `retire` 命令在Daemon状态为 `Stale` 时要求先Stop，并以 `has stale daemon state; stop it before retirement` 退出1。`packages/core/src/instance/runtime/provision/Retirement.ts` 将失败归类为Provider错误；`packages/control/src/instance/editor/retirement/Debt.ts` 的默认清理重试不会自动清除此残留状态，跨Control restart也持续保存同一旧Generation Debt。
+
+- **完整本地Control Unix Socket+真实Rust Worker** 独立失败复现：`test/known-bugs/ControlCleanupRetryRound5.test.ts`。
+- **Worker命令和协调器一致性**独立失败复现：`test/known-bugs/WorkerRetireStalePidRound5.test.ts`。
+- 已验证恢复方式：对已确认身份、仅属于隔离测试的Worker显式Stop后，再走Public Cleanup Retry，旧债清零并允许重用名称。**未建议清除任意运行任务或绕过历史清理栅栏**。
+
+### R5-02：Refresh并发重放未撤销已颁发的Access Token
+
+**真实TCP上的OAuth端点与SQLite/OIDC状态**：同一Refresh Token并发发起两次刷新，一次返回HTTP200、一条返回HTTP400 `invalid_grant`；但胜出者拿到的Access Token仍能调用 `resources/list`（HTTP200，安全断言预期HTTP401）。与第三轮已知“两次均成功”和第四轮Memory HTTP回归应区分。独立预期失败：`test/known-bugs/McpRefreshConcurrentReplayRound5.test.ts`。其余16条真127.0.0.1 HTTP、Bearer/Scope/Context、SSE和路由重启回归通过。
+
+### R5-03：MCP App Context切换未隔离旧Reentry与迟到Snapshot
+
+`packages/mcpapp/src/App.tsx` 的React组件级用例重现：Context A的旧Reentry指令在切换至Context B后可以触发由B发起的Claim；A的迟到Snapshot刷新可以覆盖已恢复的B界面。通过真实React交互的两条红色复现：`test/known-bugs/ui/mcpapp-round5-repro.config.ts`。**只证明前端状态机调度错误，尚未证明服务端允许错误Claim，也未经过真实ChatGPT Host**。本轮默认MCP App新增13条正向渲染测试通过。
+
+### 其余未完结项
+
+本轮增加的WSS凭据提交屏障、16代连续替换和SSE POST重试四条真实网络用例，以及八条Store/Ownership断言均已通过；第四轮Reverse第7轮压力异常不能因此被标记修复或彻底排除。先前的Mailing去重、AbortSignal Audit分类、Provider adopted状态和第三轮BUG也未因新测试自动解决。
+
+本轮变更范围是**测试、故障复现与测试文档**，没有修改生产源码或安装运行实例。所有Known-Bugs均保持显式红测，不属于默认期望通过套件。
+

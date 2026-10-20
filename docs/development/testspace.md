@@ -47,6 +47,8 @@ pnpm testspace exec -- <command...>
 
 `extension-smoke` 是单独显式执行的 Extension 生命周期验收：在隔离 Testspace 的 Comment Extension 安装目录中**临时写入无效 Manifest**，验证损坏候选被拒绝但旧 Generation 仍可服务真实 MCP 消息，随后在 `finally` 恢复文件、重新加载并检查订阅回收。它会改变正在运行的 Testspace Extension 状态，因此**不属于默认 `smoke`**；应只在可独占使用的 Testspace 上手动执行。普通 `pnpm test:scripts` 只验证该子命令的路由注册，不执行 Manifest 故障注入。
 
+**第五轮退休专项（手动、独立 Testspace）：** `pnpm testspace retirement-smoke` 使用真实 Control/Worker IPC 分别创建并删除一个从未启动的实例、显式停止Worker后删除、Control重启后显式停止Worker再删除，严格校验 `cleanupPending=false`、无待清旧代债务及同名重建。与下面仍失败的 `recovery-smoke` 不同，这里专门验证了先停止再退休的健康路径。已在全新独占Linux Testspace实跑3/3通过，退出后执行 `pnpm testspace stop`。不要据此声称运行中的Worker直接删除/自动Cleanup Retry已修复。
+
 **第四轮恢复专项（手动、独立 Testspace）：** `pnpm testspace recovery-smoke` 对真实 Control/Worker/MCP 进行 Stream Gap/Replay、262 次配置变更、Worker 与 Control 重启、Audit/日志/Todo 持久化及 Instance 删除重建验证。该专项会主动重启 Testspace Control，必须设置新的 `DEVSHELL_TESTSPACE_ROOT`，运行后执行 `pnpm testspace stop`。**当前 E2E 尚未全绿**：删除配置提交成功，但 Worker 退休失败后 `cleanupPending=true`，显式 `retryCleanupDebt` 仍留下旧代债务。保留失败断言，详见 [Bug 台账](beta-bug-findings.md)。普通 `smoke`、`test:packages` 通过不等于此场景通过。
 
 GitHub Actions 的 **beta-matrix-extended** 工作流提供可手动触发的专项矩阵：`upgrade`、`extension`、`workflow`、`windows-psmux`。前三项在独立 Testspace root 中执行，其中升级使用真实旧发行包和当前候选版本；Windows 专项在 x64/ARM64 原生 Runner 运行完整 psmux Rust 合约。此工作流只支持 `workflow_dispatch`，不自动加入普通 PR 门禁；脚本与工作流静态检查通过**不代表 GitHub Runner 上已经真实执行过**。
