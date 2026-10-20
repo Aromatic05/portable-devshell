@@ -12,18 +12,25 @@ import type {
 import type { ContextApi } from "../../../../../context/Api.js";
 import type { CliExtensionCommandService } from "./index.js";
 
-// This was the exact generated v0.7.x Model-command default, before Comment
-// provided Memory. Custom allowlists remain authoritative and unchanged.
-const LEGACY_MODEL_DEFAULT = ["artifact", "instance", "mcp", "secret", "skill"];
+// Match only historical generated defaults. Never broaden custom allowlists.
+const PRE_MEMORY_MODEL_DEFAULT = ["artifact", "instance", "mcp", "secret", "skill"];
+const PRE_RECALL_MODEL_DEFAULT = ["artifact", "comment", "instance", "mcp", "secret", "skill"];
+
+function matchesModelDefault(allowed: readonly string[], defaults: readonly string[]): boolean {
+    return allowed.length === defaults.length &&
+        defaults.every((id, index) => allowed[index] === id);
+}
 
 export function modelCommandAuthorized(
     allowed: readonly string[],
     command: { id: string; extensionId: string },
 ): boolean {
     if (allowed.includes(command.extensionId)) return true;
-    return command.extensionId === "comment" && command.id === "memory" &&
-        allowed.length === LEGACY_MODEL_DEFAULT.length &&
-        LEGACY_MODEL_DEFAULT.every((id, index) => allowed[index] === id);
+    if (command.extensionId === "comment" && command.id === "memory")
+        return matchesModelDefault(allowed, PRE_MEMORY_MODEL_DEFAULT);
+    return command.extensionId === "recall" && command.id === "recall" &&
+        (matchesModelDefault(allowed, PRE_MEMORY_MODEL_DEFAULT) ||
+            matchesModelDefault(allowed, PRE_RECALL_MODEL_DEFAULT));
 }
 
 /** Connect Worker-owned command sessions to authorized model CLI extensions. */

@@ -119,7 +119,7 @@ resourceName = "local-pc"
 requiredScopes = ["mcp"]
 
 [extensions]
-model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 
 [workspace]
 enabled = false

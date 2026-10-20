@@ -49,7 +49,7 @@ contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
-model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 ```
 
 这是 version 4 fresh defaults 对 Context selector / model Extension ACL 的示例；需要模型显式携带 `ctxId` 的通用 Host 应改用 `contextMode = "explicit"`。MCP `tools/list` 本身合并 Worker、Control primitive 与 Extension `mcp.tools` 声明，不由 `[extensions].model` 裁剪。
@@ -164,7 +164,7 @@ Worker catalog 的 description 只描述 canonical capability 契约；MCP endpo
 model = ["instance", "artifact"]
 ```
 
-当前 bundled 默认是 `artifact / comment / instance / mcp / secret / skill`；独立安装的 Extension（例如 `agent`）需要显式加入。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
+当前 bundled 默认是 `artifact / comment / instance / mcp / recall / secret / skill`；独立安装的 Extension（例如 `agent`）需要显式加入。`environ_info` 会报告当前 Context 实际可用的 model `devshell` root，并提示使用 `devshell --help` / `devshell <command> --help`。model command 找不到或不在 ACL 中时不会 fallback 到原生 builtin CLI。
 
 Artifact 分享与跨实例传输属于 Artifact Extension command，不再是 MCP tool。人类本地使用 `devshell artifact ...`；模型只有在 `artifact` 被当前 instance 的 model Extension ACL 允许时，才能通过 shell/tmux 中的 `devshell artifact ...` 调用。
 

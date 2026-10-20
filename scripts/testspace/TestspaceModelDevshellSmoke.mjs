@@ -71,6 +71,19 @@ export async function runTestspaceModelDevshellSmoke({
         assertExit(instanceList, 0, "model devshell instance list");
         const handle = parseRemoteHandle(instanceList.stdout, remoteInstance);
 
+        const recallHelp = await runBash(client, ctxId, "devshell recall --help");
+        assertExit(recallHelp, 0, "model devshell recall help");
+        if (!String(recallHelp.stdout ?? "").includes("devshell recall")) {
+            throw new Error(`model devshell recall help is invalid: ${JSON.stringify(recallHelp)}`);
+        }
+        for (const command of ["contexts", "calls --limit 3"]) {
+            const recalled = await runBash(client, ctxId, `devshell recall ${command}`);
+            assertExit(recalled, 0, `model devshell recall ${command}`);
+            if (!String(recalled.stdout ?? "").includes(`Workspace: ${workspace}`)) {
+                throw new Error(`model devshell recall ${command} used an unexpected Workspace: ${JSON.stringify(recalled)}`);
+            }
+        }
+
         const help = await client.callTool({
             arguments: { command: "help", ctxId },
             name: "environ_remote",
@@ -198,6 +211,7 @@ export async function runTestspaceModelDevshellSmoke({
             environRemoteMask: true,
             instance,
             instanceStatusExitCode: instanceStatus.exitCode,
+            recallExitCode: recallHelp.exitCode,
             remoteInstance,
             toolCount: names.size,
         };

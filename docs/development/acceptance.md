@@ -124,7 +124,7 @@ instance version 4 中：
 
 - 不存在持久化默认 workspace path；`[workspace].enabled` 只是 Workspace App/Goal/Wait recovery 子系统开关；
 - 不存在 MCP group/capability policy；`tools/list` 使用固定 runtime catalog；
-- `[extensions].model` 是 model Extension command allowlist；当前 bundled 默认是 `artifact / instance / mcp / secret / skill`，独立安装的 `agent` 需要显式加入；
+- `[extensions].model` 是 model Extension command allowlist；当前 bundled 默认是 `artifact / comment / instance / mcp / recall / secret / skill`，独立安装的 `agent` 需要显式加入；
 - MCP 不暴露 `instance_connect`；Instance Extension 的 model `list/status` 只负责 Context-filtered discovery 并返回 opaque remote handle，真正的 Context attachment 使用固定 `environ_remote(command="attach")`；
 - `environ_remote` 使用稳定的 `command + handle? + workspace?` object schema，不把 command vocabulary 编成 enum/union；`help` 返回 authoritative command catalog，`environ_info` 返回紧凑 command hints；
 - `environ_remote(command="mask")` 对当前 Context 做不可撤销的单调权限收缩：masked instance 从 model discovery 消失，已有 attachment 被撤销，所有 routed tool 永久拒绝；不存在 unmask；

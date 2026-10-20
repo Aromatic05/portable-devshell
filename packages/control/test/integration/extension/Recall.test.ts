@@ -196,6 +196,34 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
         truncatedInstances: [],
         workspace: "/repo",
     });
+
+    const modelCommands = new CliExtensionCommandService(host, {
+        surface: "model",
+    });
+    const modelInvocation = {
+        context: { instanceReference: () => undefined as never },
+        ctxId: "ctx-recall",
+        instance: "alpha",
+        requestId: "recall-model-e2e",
+        signal: new AbortController().signal,
+        workspace: "/repo",
+    };
+    const modelCalls = await modelCommands.command(
+        "recall",
+        ["calls", "--limit", "10"],
+        modelInvocation,
+    );
+    assert.equal(modelCalls.kind, "json");
+    assert.deepEqual((modelCalls.value as { calls: { callId: string }[] }).calls
+        .map((call) => call.callId), ["call-recall"]);
+    const modelContexts = await modelCommands.command(
+        "recall",
+        ["contexts"],
+        modelInvocation,
+    );
+    assert.equal(modelContexts.kind, "json");
+    assert.deepEqual((modelContexts.value as { contexts: { ctxId: string }[] }).contexts
+        .map((entry) => entry.ctxId), ["ctx-recall"]);
 });
 
 function toolCall(input: {

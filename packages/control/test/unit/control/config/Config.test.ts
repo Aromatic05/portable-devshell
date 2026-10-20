@@ -123,6 +123,7 @@ test("valid global and instance documents are assembled into canonical config", 
             "comment",
             "instance",
             "mcp",
+            "recall",
             "secret",
             "skill",
         ]);

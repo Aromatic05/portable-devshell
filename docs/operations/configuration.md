@@ -212,7 +212,7 @@ contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
-model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]
 
 [workspace]
 enabled = false
@@ -243,14 +243,14 @@ timeoutMs = 5000
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。fresh instance 默认 `openai-session`，使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外；`explicit` 允许 model-facing 工具显式携带 `ctxId`。旧 version 2/3 instance 未显式配置该字段时迁移为 `explicit`，保持旧版本行为。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
-- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
+- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`，`recall` 授权只读的 `recall`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "recall", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
 - `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；
 - `[alerts].workerMemoryBytes`：worker RSS 阈值，配置时必须为正整数；
 - `[[alerts.scripts]]`：可选自定义 probe。`id` 与 `command` 必须非空，`timeoutMs` 必须为正整数。脚本工作目录为当前 workspace，并收到 `DEVSHELL_ALERT_WORKSPACE`；stdout 应输出由 `{code,text}` 对象组成的 JSON 数组。
 
-当前 Broker 还识别精确匹配旧生成默认值的 `["artifact", "instance", "mcp", "secret", "skill"]`（含顺序）：额外允许 Comment 的 `memory` 命令。其他自定义 allowlist 不会因此自动扩展。这是当前存量配置的特殊处理，不是推荐的新配置格式。
+当前 Broker 还识别精确匹配旧生成默认值的 `["artifact", "instance", "mcp", "secret", "skill"]` 与 `["artifact", "comment", "instance", "mcp", "secret", "skill"]`（含顺序）：两者额外允许 `recall` 命令，前者还允许 Comment 的 `memory` 命令。其他自定义 allowlist 不会因此自动扩展；存量配置文件无需改写。
 
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 

@@ -88,7 +88,7 @@ MCP auth          none
 contextMode       explicit
 approval          allow
 security.mode     workspace
-extensions.model  artifact,comment,instance,mcp,secret,skill
+extensions.model  artifact,comment,instance,mcp,recall,secret,skill
 MCP tools         fixed runtime catalog
 ```
 

@@ -354,6 +354,7 @@ test("model Extension allowlist defaults to the installed builtin model surfaces
         "comment",
         "instance",
         "mcp",
+        "recall",
         "secret",
         "skill",
     ]);
