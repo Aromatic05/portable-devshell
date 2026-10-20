@@ -25,7 +25,7 @@ Capability 不是 contribution，Extension Point 也不是 permission。Transpor
 
 ## Manifest
 
-Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion` 使用 `x.y.z`；Host 接受同一 major 内不高于自身版本的 Extension。旧整数 `5` / `1` 作为迁移兼容分别解释为 `5.0.0` / `1.0.0`：
+Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion` 使用 `x.y.z`；Host 接受同一 major 内不高于自身版本的 Extension。两个字段必须是版本字符串，不接受整数 `5` / `1`：
 
 ```json
 {
@@ -36,7 +36,7 @@ Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion`
     "name": "Example",
     "version": "1.0.0",
     "entry": "index.js",
-    "hostDependencies": [],
+    "hostDependencies": {},
     "capabilities": ["assets", "worker.execute"],
     "config": {
         "default": { "enabled": false },
@@ -57,7 +57,9 @@ Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion`
 ```text
 artifacts
 assets
+config.core
 context.observe
+database
 instance.events.publish
 instance.manage
 instance.observe
@@ -71,9 +73,14 @@ worker.execute
 
 `extensions` 按稳定的 domain-owned Extension Point id 保存静态 declaration。它不授予任何资源权限。
 
-`config` 是可选的静态 Config domain declaration，包含 JSON Schema 与默认 JSON object。它既不是 capability grant，也不是 Extension Point。声明后该 Extension 的 `ExtensionContext` 才会出现 `config`；未声明时 `context.config` 为 `undefined`。Extension-owned Config 值保存在该 Extension 的持久 `stateDirectory` 中，而不是 Control 主 `config.toml`：普通 remove 保留 state，`remove --purge` 才删除。
+`config` 有两种独立声明，可同时使用：
 
-Config domain 的写 authority 绑定当前 published generation。Candidate validation 可以读取并用候选 schema 验证已有值，但 publication 前不能写；generation 切换后旧 generation 的写入会被拒绝。
+- owned config：成对声明 `schema` 与 `default`，获得 `context.config`。值保存在 `stateDirectory/config.json`，不在 Control 主 `config.toml`；普通 remove 保留 state，`remove --purge` 才删除。
+- core config：声明 capability `config.core`，并在 `config.coreAccess` 中列出 path → `"read"` / `"read-write"`，获得 `context.capabilities.configCore`。Host 还检查路径属于 Core-owned domain，且该路径明确 export 了所请求的权限。它不允许任意配置访问，也不允许借此访问其他 Extension 的 owned config。
+
+`config.core` 与 `coreAccess` 必须同时存在；只有 `coreAccess`、没有 `schema/default` 时，不产生 `context.config`。owned config declaration 本身不是 capability grant 或 Extension Point。
+
+Extension-owned Config domain 的写 authority 绑定当前 published generation。Candidate validation 可以读取并用候选 schema 验证已有值，但 publication 前不能写；generation 切换后旧 generation 的写入会被拒绝。
 
 Runtime binding 必须与 manifest declaration 严格对应：未声明 registration、重复 registration、声明后没有 binding、未知 point 或不合法的 domain declaration 都会使 candidate activation 失败。
 
@@ -113,7 +120,9 @@ Install/update 都保留强验证：新的 immutable generation 会实际执行�
 
 显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation，但不会改变 Extension 已有的 `enabled` 状态。`enable` 对 `lazy` Extension 只恢复并校验静态 catalog，对 `eager` Extension 还会立即建立 live activation；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
 
-`comment` 是当前唯一 lifecycle-protected builtin。Conversation、Comment queue、preferences 与 ToolCall Review 共同组成一个宿主拥有的 Comment 子系统，因此不能只关闭它的 generation registration。公共 lifecycle 会拒绝 `disable comment` 与 `remove comment`；启动安装 builtin 时会把旧版本遗留的 disabled Comment registry 状态恢复为 enabled。其他 builtin 仍可正常 disable，并且 disabled 状态会跨 generation 更新与 Control 重启保持不变。
+`comment` 是唯一禁止 disable 的 required builtin；启动安装时会将遗留的 disabled Comment 状态恢复为 enabled。它拥有 Conversation、queue、preferences、ToolCall Review，以及 Memory/Mailing 协调。
+
+Remove 的保护范围更大：Host 的 `BUILTIN_EXTENSION_IDS` 当前列出 `access / artifact / comment / instance / mcp / recall / secret / skill / storage`，公共 remove 拒绝移除这些 id。不要从“随发行包提供”推断其他 id 也受该名单保护。其余可 disable 的 Extension 保留 disabled 状态，跨更新和重启不自动 enable。
 
 ## ExtensionContext
 
@@ -135,7 +144,9 @@ export interface ExtensionModule {
 `ExtensionContext` 的结构是：
 
 ```text
-identity
+id
+generation
+version
 paths
 logger
 capabilities
@@ -240,7 +251,7 @@ close
 
 委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / tmux_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
 
-Agent provider 自己也使用 immutable generation。`devshell agent provider update <absolute-bundle-path>` 是已安装 provider 的显式更新入口，与 provider install 复用同一个 candidate validation / selected-generation 切换事务；已经运行的 Agent 继续持有启动时的 provider handle，新 generation 只影响后续 Agent start。
+Agent provider runtime 由 Agent Extension 自己管理，不能套用 Extension generation 更新事务。`devshell agent provider update <id>` 强制重新安装已知 provider runtime；provider 正被运行中的 Agent 使用时拒绝更新。
 
 ### context.observe
 
@@ -291,6 +302,13 @@ Point identity 使用稳定 namespaced string：
 ```text
 cli.native-commands
 cli.model-commands
+control.routes
+control.streams
+execution.environment
+execution.sandbox
+mcp.tools
+toolcall.review
+toolcall.rewrite
 web.applications
 web.pages
 tui.pages
@@ -304,7 +322,7 @@ Native CLI 的 resolution 明确采用 overlay：先解析 enabled `cli.native-c
 
 Control 的 Extension runtime Host 对 point domain 保持中立：它负责 static catalog、lazy activation、registration acquisition 和 generation lease，但不 import CLI/Web point contract，也不提供 `dispatchCommand`、`dispatchWeb` 之类的 domain-specific dispatch API。取得 lease 后，binding 的类型校验、调用和结果语义由对应 domain service 自己负责。
 
-当前 Control 在 composition 层构造内部 `ExtensionPointRegistry`。CLI/Web 各自注册 point definition：declaration schema、binding shape 和 point-specific resource validation 留在 domain owner；`ExtensionRegistration`、`ExtensionCatalog`、`ExtensionLoader` 只通过 registry 委托。这个 registry 不导出给 Extension，也不是一个 central point-kind enum。
+当前 Control 在 composition 层构造内部 `ExtensionPointRegistry`。各 domain 分别注册 point definition：declaration schema、binding shape 和 point-specific resource validation 留在 domain owner；`ExtensionRegistration`、`ExtensionCatalog`、`ExtensionLoader` 只通过 registry 委托。这个 registry 不导出给 Extension，也不是一个 central point-kind enum。
 
 Sandbox transport 同样保持 domain ownership。Worker `ready` registration 只携带 point id、local id 和 opaque JSON descriptor；generic sandbox runtime 只提供私有 binding invocation bridge，不知道 `cli.command`、`web.files`、`web.endpoint` 这类 point-specific wire kind。CLI/Web 的内部 sandbox codec 负责 descriptor、Worker-side binding invocation 和 Host-side proxy restoration。该 generic bridge 只存在于 Control 私有实现层，不是 public `extension.call` 或 generic RPC ABI。
 
@@ -313,6 +331,8 @@ Control composition 还会校验 host `ExtensionPointRegistry` 与 sandbox codec
 ### Invocation-scoped Host interface
 
 `@portable-devshell/extension/control` 提供普通请求 `control.routes` 和输出流 `control.streams`。两者都声明 `module / operation / scope`，由 Control 接到 shared 的 `host:port` 通信层。Stream binding 接收 `stream.send()`、`stream.close()` 与 invocation `signal`；客户端取消、实例退役和 Extension generation 替换都会结束订阅并释放 generation lease。
+
+Comment 还通过 native/model `memory` 命令、Mailing reconciliation 与 file-edit rewrite trigger 协调 Worker workspace 中 `var/agent-work` 的 Memory/mailbox 文件；这些文件不是 Control 本地数据，也不是全部存入 Host SQLite。
 
 Comment Extension 拥有完整 `message` 端点：实例消息使用 `<instance>:message`，偏好设置使用 `@control:message`。`message.subscribe` 的事件筛选与 `todo_report` 到 `message.changed` 的投影由 Comment 实现；`instance.observe.watchEvents` 的 `onSeed` 提供初始事件与 cursor，初始序列缺口会拒绝订阅。
 
@@ -339,9 +359,14 @@ Public SDK 按 domain subpath 发布 leaf contract：
 @portable-devshell/extension
 @portable-devshell/extension/cli
 @portable-devshell/extension/web
+@portable-devshell/extension/tui
+@portable-devshell/extension/control
+@portable-devshell/extension/execution
+@portable-devshell/extension/mcp
+@portable-devshell/extension/toolcall
 ```
 
-root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要求 Extension 依赖完整 CLI/Web runtime package。
+上面列出 point SDK；其他资源 leaf 包括 `/artifact /asset /config /context /database /instance /process /secret /worker`。`/agent` 与 `/tools` 不是当前 export。root 只导出 core ABI；CLI/Web domain contract 不从 root 聚合，也不要求 Extension 依赖完整 CLI/Web runtime package。
 
 CLI/Web leaf 也只导出 Extension author 需要的 point descriptor、declaration/binding/context/result types。Manifest declaration 的 schema parser 属于 Control 中对应 domain owner 的 host validation implementation，不从 public leaf SDK 导出。
 
@@ -362,7 +387,9 @@ CliCommandResult
 
 两个 point 共用 declaration shape，可以提供 `title`、`summary` 和 `usage`，但 registration/catalog/dispatch state 完全独立。Binding 都由 CLI domain 定义为 argv + invocation context -> CLI result；这是 CLI 自己的 contract，不是 generic Extension RPC。
 
-`CliNativeCommandInvocationContext` 当前包含 `localOwner`、`requestId`、`signal` 和可选 `workingDirectory`，描述本地/远程 native CLI 的 authority、取消和 Control-host path 语义。`CliModelCommandInvocationContext` 刻意只公开 `requestId` 和 `signal`：它不携带 `localOwner`、Control-host cwd 或 raw `ctxId`，因此 Extension 不能把 model invocation 伪装成 native owner invocation。两种 context 都由 CLI leaf contract 拥有，不从 root 导出 generic `ExtensionInvocationContext`。
+`CliNativeCommandInvocationContext` 包含 `localOwner`、`requestId`、`signal`、可选 `workingDirectory` 与 `io`，描述 native CLI 的权限、取消、Control-host cwd 与双向 I/O。
+
+`CliModelCommandInvocationContext` 包含 `requestId`、`signal`、`ctxId?`、`context`、`instance`、`workspace` 与 `io?`。Broker 校验 Context attachment 与父 ToolCall provenance 后注入身份和 workspace；模型 argv 不能选择这些 authority。`context.instanceReference(instance)` 提供该 Context 的只读 instance reference。它不提供 `localOwner` 或 Control-host cwd；Broker 提供的 I/O 不支持交互式输入。两种 context 都归 CLI leaf contract 所有。
 
 Control 内部 static catalog 由 CLI domain 按 state 分别投影。Native discovery 只包含 `cli.native-commands` 的 presentation metadata，不包含 generation 或 runtime binding；本地 CLI 用它在 builtin parser 之前判断 overlay。`devshell <native-extension-command> --help` 因而可以只靠静态 declaration 生成帮助，普通 argv 仍按需取得 generation lease。全局 `devshell --help` 仍不依赖 Control。
 
@@ -420,21 +447,36 @@ Web application 的 HTTP/WebSocket failure 也由 Web host 翻译，而不是把
 
 CLI、Web 与 TUI 因此只共享 Extension lifecycle、Config、generation lease 和 Extension 自己的业务 service，不共享 presentation / invocation contract。没有 public `management.pages`、generic contribution listing 或 runtime binding introspection API。当前 Access 同时实现 CLI、Web page、TUI page 和独立 Web application；Agent provider management 又作为第二个不同业务模型验证了同一组 surface contract，其中 Web page 保持只读，而 local-owner TUI page 可以执行 provider mutation。两者都不需要共享 presentation model。
 
+### Execution、MCP 与 ToolCall points
+
+`execution.environment` 与 `execution.sandbox` 注册 versioned JSON driver descriptor。Control 在 Worker start 时解析所选 generation；环境/cwd 求值在目标 Worker 上执行。环境配置是有序数组，sandbox 是单一选择；内置 `variables` 与 `bubblewrap` 由 Core 处理，Direnv 通过 Extension environment point 提供。字段见[配置参考](../operations/configuration.md)。
+
+`mcp.tools` 使用静态 tool declaration 建立模型可见 catalog，执行时 acquire binding；Comment 的 `todo_report` 属于这一入口。它与 shell shim 的 `cli.model-commands`、`[extensions].model` allowlist 是不同入口。
+
+`toolcall.review` 返回 `continue` / `reject`，按稳定 hook 顺序执行，首个 reject 停止。人工审批由 Core Review hook 等待。`toolcall.rewrite` 接收和返回完整调用值，可改变 tool、payload 与路由；Host 保留 principal、external bindings、context mode 和 extension attribution。两方向都按同一升序执行，不自动反序；outbound 可能重新获取同 owner 的已替换 generation。
+
+当前执行链是 Review（含审批）→ inbound Rewrite → target preparation / Audit scope → Scheduler → Execute / adaptation → outbound Rewrite / Review → terminal Audit。Audit input 来自 inbound Rewrite 后，部分 Audit 写失败不会改变调用结果；不能承诺审计落盘是执行前置屏障。
+
+**KNOWN unresolved deviation：**执行已产生副作用后的 result adaptation error 仍可能保留 `retryable: true`（[回归断言](../../test/known-bugs/ToolCallAdapterRetryAfterCommitRound6.test.ts)要求 false）。应有的安全契约是执行后失败不可暗示安全重试；当前实现尚未满足这一约束。Outbound hook delivery failure 则固定不可重试。这里记录源码与回归断言的差异，不将 unsafe retry 当作设计目标；本次文档修改未重跑该测试。
+
+### database 与 config.core
+
+`database` 提供 Host-owned、generation-scoped SQLite connection，业务 schema 与 migration 归 Extension。路径限定在自身 `dataDirectory`，retirement 关闭连接并回滚未提交事务；详见[Database capability](../development/extension-database.md)。`config.core` 的 grant 与 scoped declaration 规则见上文 Manifest；owned config 不需要该 grant。
+
 ## Generation ownership
 
-Generation 是 runtime ownership root。正常 retirement 的顺序概念上是：
+Generation 是 runtime ownership root。Retirement 先停止新调用并 drain 已有 leases，撤销 registration，再执行清理。当前 sandbox 正常 dispose 与外层 resource cleanup 的顺序是：
 
 ```text
-stop accepting new invocations
--> drain active invocation leases
--> revoke registrations
--> run Extension deactivate() graceful cleanup when possible
--> close Worker sessions
--> terminate managed processes
--> release other host-managed resources
--> terminate sandbox
--> remove runtime directory
+Extension deactivate() (bounded graceful cleanup)
+-> close sandbox-managed Worker sessions
+-> release subscriptions and terminate sandbox
+-> outer cleanup: close database handles / config subscriptions
+-> close managed processes and remaining Worker sessions
+-> remove activation runtime directory
 ```
+
+这是当前实现顺序，不能解释成“所有资源在 sandbox terminate 前已经关闭”。Host 独立持有资源并负责强制回收；清理错误会被收集并上报。
 
 Fault path 可以跳过 Extension-owned cleanup，但不能跳过 Host 对 registrations、sessions、processes 和 sandbox 的强制回收。
 
@@ -466,27 +508,19 @@ ExtensionActivation contribution object
 
 当前 builtin Extension 用来持续验证 public ABI：
 
-```text
-Agent
-    capabilities: worker.delegate, processes
-    extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
-
-Access
-    capabilities: processes
-    extensions: cli.native-commands, web.applications, web.pages, tui.pages
-
-Skill
-    capabilities: assets
-    extensions: cli.native-commands
-
-Secret
-    capabilities: none
-    extensions: cli.native-commands
-
-MCP Client
-    capabilities: none
-    extensions: cli.native-commands
-```
+| Extension | Capabilities | Points |
+| --- | --- | --- |
+| agent | `worker.delegate`, `processes`, `database` | `cli.native-commands`, `cli.model-commands`, `web.applications`, `tui.pages`, `web.pages` |
+| access | `processes`, `config.core` | `cli.native-commands`, `tui.pages`, `web.applications`, `web.pages` |
+| artifact | `artifacts` | `cli.native-commands`, `cli.model-commands` |
+| comment | `database`, `instance.observe`, `instance.events.publish`, `context.observe`, `worker.execute` | `control.streams`, `control.routes`, `mcp.tools`, `toolcall.review`, `toolcall.rewrite`, `cli.native-commands`, `cli.model-commands` |
+| direnv | 无 | `execution.environment` |
+| instance | `instance.observe`, `instance.manage` | `cli.model-commands` |
+| mcp | 无 | `cli.native-commands`, `cli.model-commands` |
+| recall | `context.observe`, `toolcall.history` | `cli.native-commands`, `cli.model-commands` |
+| secret | `worker.execute` | `cli.native-commands`, `cli.model-commands`, `toolcall.rewrite` |
+| skill | `assets`, `worker.execute` | `cli.native-commands`, `cli.model-commands` |
+| storage | 无 | `cli.native-commands` |
 
 Builtin module 不应因为自身需求扩张 core taxonomy。
 

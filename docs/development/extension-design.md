@@ -1,8 +1,10 @@
 # Extension 架构与 ABI 设计
 
-> 状态：核心元模型、static catalog、lazy activation 与 CLI/Web/TUI domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
+> 状态：设计推导与现行实现并存的记录。以下明确写“历史”或“提案”的部分不构成当前可用 API；当前契约以 [Extension ABI](../concepts/extensions.md) 和 HEAD 源码为准。
 >
-> API 5.0.0 已落地 `artifacts / assets / context.observe / instance.observe / instance.manage / instance.events.publish / processes / toolcall.history / worker.execute / worker.delegate` capabilities、`cli.native-commands / cli.model-commands / web.applications / web.pages / tui.pages` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` 与两个精确 terminal notification 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> 已实现 API **5.0.0**、manifest schema **1.1.0**：十二项 capabilities（`artifacts / assets / config.core / context.observe / database / instance.events.publish / instance.manage / instance.observe / processes / toolcall.history / worker.delegate / worker.execute`）；十二个 points（`cli.native-commands / cli.model-commands / control.routes / control.streams / execution.environment / execution.sandbox / mcp.tools / toolcall.review / toolcall.rewrite / web.applications / web.pages / tui.pages`）；generation-owned resources/registrations、static catalog、lazy/eager activation、`activate/deactivate` 与两个精确 terminal notifications。
+>
+> 历史第一阶段范围见第 21–22 节；`agent.providers`、Extension-owned points、`/agent` 和 `/tools` exports 仍为提案。ToolCall 实际顺序与 KNOWN 安全偏差见 [Extension ABI](../concepts/extensions.md#executionmcp-与-toolcall-points)，不能用下文设计原则代替当前执行保证。
 
 ## 1. 设计目标
 
@@ -164,7 +166,7 @@ lifecycle: {
 │                                            │
 │ identity                                   │
 │ entry                                      │
-│ dependencies                               │
+│ hostDependencies (package -> range)        │
 │ capabilities                               │
 │ extension declarations                     │
 └───────────────────┬────────────────────────┘
@@ -183,27 +185,23 @@ lifecycle: {
 ┌──────────────────────┐   ┌────────────────────────┐
 │ Capabilities         │   │ Extension Points       │
 │                      │   │                        │
-│ assets               │   │ CLI-owned points       │
+│ assets / database    │   │ CLI-owned points       │
 │ worker.*             │   │ Web-owned points       │
-│ instance.* / observe │   │ future domain points   │
-│ processes / history  │   │                        │
+│ instance.* / observe │   │ Execution/TUI points   │
+│ config / processes   │   │ Control/ToolCall/MCP    │
 └──────────────────────┘   └────────────────────────┘
 ```
 
 Generation 是 ownership root。
 
-正常关闭时：
+当前正常关闭的分层顺序（fault 路径可能跳过 graceful cleanup）：
 
 ```text
 generation close
-    -> stop accepting new invocations
-    -> drain active invocations
+    -> stop accepting and drain invocations
     -> revoke registrations
-    -> run Extension-owned deactivate cleanup when possible
-    -> close Worker sessions
-    -> close managed processes
-    -> release other generation resources
-    -> terminate sandbox
+    -> sandbox.dispose: bounded deactivate, close sessions, terminate sandbox
+    -> outer cleanup: close database/config, processes, remaining sessions
     -> remove runtime directory
 ```
 
@@ -211,7 +209,7 @@ generation close
 
 ## 4. Manifest
 
-Manifest 只描述安装前和 activation 前可知的静态事实。
+Manifest 只描述安装前和 activation 前可知的静态事实。`apiVersion` / `schemaVersion` 只接受 `x.y.z` 字符串，同 major 且不高于 Host；整数版本会被拒绝。`hostDependencies` 是 bare package root → compatible version range 对象（如 `{}`），不是数组。
 
 概念结构：
 
@@ -219,7 +217,7 @@ Manifest 只描述安装前和 activation 前可知的静态事实。
 Extension Manifest
 ├── identity
 ├── entry
-├── dependencies
+├── hostDependencies (package root -> version range)
 ├── capabilities
 ├── config (optional)
 └── extensions
@@ -259,11 +257,13 @@ privileges
 
 这里的 point id 由 domain 定义，而不是由 Extension core 维护 enum。
 
-`extensions` 这个字段名在实现前仍可做最后一次命名审查，但其**语义位置已经确定**：它描述 Extension Point declarations，不描述 capability。
+`extensions` 已是当前 manifest 字段：它描述 Extension Point declarations，不描述 capability。
 
 ### 4.3 `config`
 
-`config` 声明一个由当前 Extension identity 拥有的持久 Config domain。它包含 JSON Schema 和默认 JSON object，但不授予新的 host resource authority，因此不进入 `capabilities`；它也不是 contribution，因此不进入 `extensions`。
+`config` 可包含两种独立声明：`schema/default` 成对定义 Extension-owned 持久 config，通过 `context.config` 使用；`coreAccess` 定义 Core 配置 path → `read/read-write`，必须同时声明 `config.core` capability，通过 `context.capabilities.configCore` 使用。仅有 coreAccess 不创建 owned config。Host 要求所访问的 Core path 明确 export 相应权限；不能读取其他 Extension 的 owned config。
+
+下面是 owned config 片段，不是完整 manifest：
 
 ```json
 {
@@ -336,7 +336,9 @@ Capability 是：
 ```text
 artifacts
 assets
+config.core
 context.observe
+database
 instance.events.publish
 instance.manage
 instance.observe
@@ -421,15 +423,16 @@ Sandbox 本身仍应拒绝裸 `child_process`，否则 Extension worker 被 term
 
 ### 5.7 Runtime context
 
-目标概念结构：
+当前字段结构：
 
 ```text
 ExtensionContext
-├── identity
+├── id / generation / version
 ├── paths
 ├── logger
 ├── capabilities
-└── registration API
+├── config? (owned schema/default only)
+└── register(point, id, binding)
 ```
 
 其中：
@@ -437,6 +440,8 @@ ExtensionContext
 ```text
 context.capabilities.artifacts
 context.capabilities.assets
+context.capabilities.configCore
+context.capabilities.database
 context.capabilities.contextObserve
 context.capabilities.instanceEventPublish
 context.capabilities.instanceManage
@@ -483,17 +488,7 @@ Control 内部可以维护一个 `ExtensionPointRegistry` 来组合当前已知 
 
 ### 6.2 Stable identity
 
-Point identity 使用稳定 namespaced id：
-
-```text
-cli.native-commands
-cli.model-commands
-web.applications
-web.pages
-tui.pages
-agent.providers
-tools.tools    // 仅示意；具体命名必须由 Tool domain 再审
-```
+当前十二个 point identity 使用稳定 namespaced id，完整清单见本文顶部和[现行 ABI](../concepts/extensions.md#extension-points)。`agent.providers` 与 Tool-domain contribution point 是未来候选，不是已注册 point。
 
 Point id 是协议 identity，不依赖 JavaScript object identity。
 
@@ -649,7 +644,7 @@ export * from Tools
 
 ### 7.2 推荐 domain subpath
 
-建议 Extension SDK 使用显式 domain subpath：
+历史建议使用以下 domain subpath；其中 `/agent` 与 `/tools` **尚未 export**，不得作为可运行 import 示例：
 
 ```text
 @portable-devshell/extension
@@ -713,7 +708,7 @@ Domain point definitions 必须可以安全 bundle。
 因此：
 
 ```ts
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 ```
 
 得到的 runtime descriptor 最终依靠稳定 point id 识别，而不是：
@@ -805,19 +800,25 @@ Control authority 不来自 Worker 自报 Context。每个 model invocation 必�
 
 ```text
 CliNativeCommandInvocationContext
+    io?
     localOwner
     requestId
     signal
     workingDirectory?
 
 CliModelCommandInvocationContext
+    ctxId?
+    context (instanceReference)
+    instance
+    io?
     requestId
     signal
+    workspace
 ```
 
 local-owner CLI 的 working directory 是 native invocation domain 语义，应明确传递。Extension 不得读取 Control daemon 自己的 `process.cwd()` 猜调用者目录。
 
-Model context 刻意不暴露 `localOwner`、Control-host cwd 或 raw `ctxId`。Context/instance/ACL 的 authoritative resolution 留在 model broker/Control 内部，而不是作为 Extension 可以选择或篡改的 public invocation authority。
+Model context 不暴露 `localOwner` 或 Control-host cwd，但当前公开可选 `ctxId` 与只读 `context`、`instance`、`workspace`。这些值由 Broker 在校验父 ToolCall provenance 和 Context attachment 后注入，模型 argv 不能选择其 authority；`io` 支持流式输出，Broker 不支持交互输入。
 
 ### 8.5 不应导出的内容
 
@@ -980,7 +981,7 @@ operation
 
 然后冻结为所有 Extension 都有的 public ABI。
 
-当前 generic `extension.call` 没有证明自己具有跨 domain 的必要性，应在迁移时删除。
+历史 generic `extension.call` 已从当前 public ABI 移除，不是 Agent operations 的入口。
 
 ### 10.2 `agent.providers` 是合理的未来 Extension Point 候选
 
@@ -1018,11 +1019,13 @@ agent.renderers
 
 只有多个独立 Agent provider 对同一种 presentation contract 有真实需求后，才应该定义。
 
-## 11. Tool Domain
+## 11. Tool Domain（通用 point 提案）
+
+> 本节保留通用 Tool-domain point 的设计理由，不能理解为当前没有工具 contribution。当前 `mcp.tools` 已提供 MCP-facing tool declaration/binding，`toolcall.review/rewrite` 也已落地；它们各有 domain contract，不能混作未来通用 Tool point。
 
 Tool contribution 是未来非常有价值、但安全边界较重的候选 Extension Point。
 
-如果开放，应由 Tool Catalog / execution domain 拥有，而不是 MCP domain。
+该通用提案若开放，应由 Tool Catalog / execution domain 拥有；这是提案的 ownership 原则，不否定当前 MCP-owned `mcp.tools`。
 
 原因：
 
@@ -1050,9 +1053,11 @@ cancellation
 provenance
 ```
 
-第一版 Extension Point 迁移不开放该 point，直到 Tool contract 和 security policy 单独审查完成。
+历史第一阶段没有开放此处设想的通用 Tool-domain point；该提案仍不等同于当前已实现的 `mcp.tools`。
 
 ## 12. MCP Domain
+
+> 当前实现：`@portable-devshell/extension/mcp` 已 export `tools`（point `mcp.tools`）。静态 declaration 提供输入/输出 schema、metadata，runtime binding 执行工具，Comment 的 `todo_report` 为实际用例；catalog 随 Extension declaration 更新。它与 `cli.model-commands` 的 shell shim 和 instance model allowlist 独立。以下“不进入第一版”的论述只记录原始范围和尚未实现的 resources/prompts 提案，不描述当前 tools 支持范围。
 
 MCP 是协议/Host domain，不应该成为“所有可调用功能”的垃圾桶。
 
@@ -1065,7 +1070,7 @@ Worker execution
 Artifact operations
 ```
 
-只有某个能力的语义本身就是 MCP-specific 时，才考虑 MCP-owned point，例如未来真正需要第三方扩展：
+原始设计建议仅为 MCP-specific 语义建立 MCP-owned point；当前已扩展为包含 `mcp.tools`。仍可考虑、但尚未实现的其他候选是：
 
 ```text
 MCP resources
@@ -1073,7 +1078,7 @@ MCP prompts
 protocol-specific metadata
 ```
 
-目前没有足够用例，不进入第一版 ABI。
+上述 resources/prompts/metadata 扩展仍是候选；历史第一版未纳入它们。
 
 ## 13. TUI Domain
 
@@ -1162,9 +1167,9 @@ closed
 
 Control-owned registrations、Worker sessions、managed processes 等不能依赖 Extension 的 `deactivate()` 才能回收。
 
-### 16.1 `onInstanceRetire` 应删除
+### 16.1 历史 `onInstanceRetire` 的迁移
 
-当前 Agent 的 `onInstanceRetire` 是 Worker session ownership 不完整的补丁。
+历史 Agent 的 `onInstanceRetire` 是 Worker session ownership 不完整的补丁；当前 public module 不提供该 callback。
 
 目标关系应为：
 
@@ -1258,7 +1263,7 @@ install new immutable generation
 - hot replacement 后旧 generation 仍可按已有 lease drain；
 - last-known-good 只指向通过完整 candidate validation 的 generation。
 
-需要后台常驻的 Extension 使用显式 `activation: "eager"`；普通按需 Extension 使用 `activation: "lazy"`。Activation policy 不引入万能 `onStart` lifecycle hook，Extension 的公共生命周期仍只有 `activate()` / 可选 `deactivate()`。
+需要后台常驻的 Extension 使用显式 `activation: "eager"`；普通按需 Extension 使用 `activation: "lazy"`。Activation policy 不引入万能 `onStart` lifecycle hook，Extension 公共生命周期为 `activate()`、可选 `deactivate()`，以及用于 Extension-owned state 的两个精确 terminal notification；它们不负责 Host resource reclamation。
 
 ## 19. Error 与 Fault Boundary
 
@@ -1304,86 +1309,23 @@ message budget exceeded
 
 只有未来允许第三方 Extension 定义自己的 Extension Points 时，才需要独立研究 point-owner contract versioning。
 
-## 21. 第一阶段实施范围
+## 21. 历史第一阶段范围与当前落地
 
-第一阶段只迁移当前已经存在且必要的功能：
+最初阶段只规划 assets/artifacts、粗粒度 instances/workers、processes 与 CLI/Web/TUI points。`instances/workers` 是历史设计用语，不是现行 grant，不能写进当前 manifest。当前已拆为十二项 capabilities，且增加 Control、Execution、MCP、ToolCall points，见顶部清单。
 
-### Capabilities
+历史迁移目标中的 generic command/rpc/web/lifecycle contribution object、`extension.call` 与 `onInstanceRetire` 不属于当前 API。Generation-owned registrations、Control-owned resources 与两个窄化 terminal notifications 已落实。
 
-```text
-artifacts
-assets
-instances
-processes
-workers
-```
+当前 Agent、Comment、Access、Direnv、Artifact、Instance、MCP、Recall、Secret、Skill、Storage 的 manifest 映射见[现行 builtin 表](../concepts/extensions.md#builtin-extension-映射)。其中 Agent 使用 `database`；Access 同时使用 owned config 和 `config.core`；Skill/Secret 通过 `worker.execute` 提供 model workspace 命令；Comment 注册 control、MCP 和 ToolCall points 并协调 Worker Memory/Mailing。不要把最初五个 builtin 的缩减映射当作当前 manifest。
 
-### Extension Points
+## 22. 仍未实现的提案与明确边界
 
-```text
-cli.native-commands
-cli.model-commands
-web.applications
-web.pages
-tui.pages
-```
+Extension-defined points、`agent.providers` public point、Instance provider plugin、MCP resources/prompts、通用 Tool-domain contribution point 与 runtime optional capability prompt 均不在当前 ABI 中。独立 `/agent`、`/tools` SDK subpath 也没有发布。
 
-### Lifecycle
-
-```text
-remove command/rpc/web/lifecycle/dispose contribution object
-remove generic extension.call public abstraction
-replace onInstanceRetire with Worker session closure ownership
-retain only precise Context-environment / Instance-generation terminal notifications for Extension-owned state
-make registrations generation-owned
-make processes Control-owned
-```
-
-### Builtin Extension 映射
-
-```text
-Agent
-    capabilities: worker.delegate, processes
-    extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
-
-Access
-    capabilities: processes
-    extensions: cli.native-commands, web.applications, web.pages, tui.pages
-
-Skill
-    capabilities: assets
-    extensions: cli.native-commands
-
-Secret
-    capabilities: none
-    extensions: cli.native-commands
-
-MCP Client
-    capabilities: none
-    extensions: cli.native-commands
-```
-
-## 22. 明确不做的事情
-
-第一阶段不做：
-
-```text
-Extension-defined Extension Points
-Agent provider migration
-generic service/RPC API
-TUI plugin UI
-Tool contribution
-MCP-specific contribution
-Instance provider plugin
-runtime optional capability prompt
-OS-level malicious-code sandbox
-```
-
-这些能力都可以在当前元模型上继续增加，不需要提前塞进 ABI。
+TUI 当前已有结构化 `tui.pages`，但没有任意 TUI component/plugin UI；MCP 当前已有 `mcp.tools`，不能继续一概列为“没有 MCP contribution”。完整 OS malicious-code sandbox 不是当前 worker-thread isolation 的保证。
 
 ## 23. API 形状示意
 
-以下只表达结构，不冻结具体 TypeScript 名字。
+以下使用当前公开的 CLI/Web descriptor 名字表达 registration 结构；`context` 与 `implementation` 是示意变量，运行时 binding 必须与完整 manifest declaration 一一对应。
 
 ### Core
 
@@ -1403,10 +1345,10 @@ export async function deactivate(): Promise<void> {
 ### CLI domain
 
 ```ts
-import { commands } from "@portable-devshell/extension/cli";
+import { nativeCommands } from "@portable-devshell/extension/cli";
 
 // bind implementation for a command declared in the manifest
-context.register(commands, "agent", implementation);
+context.register(nativeCommands, "agent", implementation);
 ```
 
 ### Web domain
@@ -1418,7 +1360,7 @@ import { applications } from "@portable-devshell/extension/web";
 context.register(applications, "agent", implementation);
 ```
 
-这里 `commands` 与 `applications` 不需要彼此处于同一 taxonomy；它们分别属于 CLI 与 Web domain。
+这里 `nativeCommands` 与 `applications` 不需要彼此处于同一 taxonomy；它们分别属于 CLI 与 Web domain。
 
 真正必须保持同类的是：
 

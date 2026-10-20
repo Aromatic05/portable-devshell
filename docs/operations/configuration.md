@@ -13,7 +13,7 @@ Windows x86-64
 Windows arm64
 ```
 
-主程序需要 Node.js 24 或更高版本。Windows 提供完整 client 和 worker，`bash_run` 使用 PowerShell，持久化 tmux 工具使用 Worker 内嵌的 psmux；本地 Attach Shell 与 tmux 工具分别建模。
+主程序使用 Node.js 24 系列或更新版本；内置 Comment/Agent 使用的 Database capability 要求 **Node.js ≥24.12.0**（必须提供 SQLite authorizer 与 defensive API），不能使用任意早期 Node 24。Windows 提供完整 client 和 worker，`bash_run` 使用 PowerShell，持久化 tmux 工具使用 Worker 内嵌的 psmux；本地 Attach Shell 与 tmux 工具分别建模。
 
 ## 配置路径
 
@@ -212,7 +212,7 @@ contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
-model = ["artifact", "instance", "mcp", "secret", "skill"]
+model = ["artifact", "comment", "instance", "mcp", "secret", "skill"]
 
 [workspace]
 enabled = false
@@ -243,16 +243,37 @@ timeoutMs = 5000
 - `[mcp].contextMode`：选择 MCP 边界如何解析 portable-devshell Context。fresh instance 默认 `openai-session`，使用稳定 Host metadata 绑定内部 Context，并把 `ctxId` 留在模型 schema 之外；`explicit` 允许 model-facing 工具显式携带 `ctxId`。旧 version 2/3 instance 未显式配置该字段时迁移为 `explicit`，保持旧版本行为。两种模式内部都继续使用 `ctxId` 作为 runtime key；完整语义见 [Context](../concepts/context.md)；
 - `[mcp].token`：仅在 `auth = "token"` 时使用，至少 32 UTF-8 字节；
 - `[mcp].path`：固定为 `/<instance>/mcp`，不可自定义；
-- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension command root。当前 bundled 默认是 `["artifact", "instance", "mcp", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
+- `[extensions].model`：允许当前 instance 上的模型通过 `bash_run` / `tmux_run` 中 Context-bound `devshell` shim 调用的 Extension id allowlist（不是 command 名；例如 `comment` 授权它的 `memory`）。当前 bundled 默认是 `["artifact", "comment", "instance", "mcp", "secret", "skill"]`；独立安装的 Extension 需要显式加入；它不改变 MCP `tools/list`；
 - `[security].mode`：`disabled` 或 `workspace`；
 - `[alerts].intervalMs`：活跃 workspace 的后台 alert probe 周期，至少 `1000` ms；MCP Context 的有效工具调用会刷新该 workspace 的活跃租约，连续 24 小时无有效调用后停止 probe 并移除状态；
 - `[alerts].maxUncommittedChanges`：Git 未提交条目数量阈值，必须为非负整数；
 - `[alerts].workerMemoryBytes`：worker RSS 阈值，配置时必须为正整数；
 - `[[alerts.scripts]]`：可选自定义 probe。`id` 与 `command` 必须非空，`timeoutMs` 必须为正整数。脚本工作目录为当前 workspace，并收到 `DEVSHELL_ALERT_WORKSPACE`；stdout 应输出由 `{code,text}` 对象组成的 JSON 数组。
 
+当前 Broker 还识别精确匹配旧生成默认值的 `["artifact", "instance", "mcp", "secret", "skill"]`（含顺序）：额外允许 Comment 的 `memory` 命令。其他自定义 allowlist 不会因此自动扩展。这是当前存量配置的特殊处理，不是推荐的新配置格式。
+
 Web auth 和 instance MCP auth 完全独立：修改 `[web]` 不会改变任何 instance endpoint；不同 instance 也可以使用不同认证模式和 token。
 
 全局 version 1 配置仅作为旧格式迁移入口读取。旧 `[mcp.auth]` 会在迁移时下沉到 instance，写回后成为全局 version 2；旧 instance version 2/3 会迁移为 version 4，删除旧的持久化 workspace path，并丢弃已经退役的 `[mcp.tools]` group/capability policy。迁移同时保留旧缺省语义：`contextMode = "explicit"`、`[workspace].enabled = true`。version 4 fresh defaults 则分别是 `openai-session` 与 Workspace disabled；`[workspace]` 只接受 `enabled`，不是项目路径。
+
+## Execution providers
+
+Instance 的 `execution` 配置选择 Worker 执行环境与 sandbox；它与 instance transport `provider`、`security.mode` 分别建模。环境是数组，sandbox 只有一个对象：
+
+```toml
+[[execution.environment]]
+order = 100
+name = "variables"
+content = { set = { PROJECT_MODE = "development" } }
+phase = "process"
+```
+
+- `execution.environment[]`：每项必须有 `order`、`name`、`content`；`order` 是 1–999 的整数，在数组内唯一，normalize 后升序执行。
+- `execution.sandbox`：单一 `{ name, content, phase? }`，没有 `order`；不支持 sandbox 数组或链式叠加。
+- `name` 必须匹配 `^[a-z][a-z0-9-]*$`；`content` 是 provider-owned JSON，必须提供且不能是空字符串，具体结构由 provider 校验。
+- 两者 `phase` 都可省略，Worker 默认 `process`；`daemon` 用于启动 Worker daemon 的环境/包装，`process` 用于工具子进程。daemon phase 不随每次工具 cwd 重新求值；Windows 当前拒绝需要 daemon-phase provider 的启动。
+
+`variables` 环境和 `bubblewrap` sandbox 是 Core primitive；其他名字必须解析到 enabled Extension 的 `execution.environment` / `execution.sandbox` registration。Control 在 Worker start 时编译 driver snapshot，目标 Worker 执行求值，Control 不执行 provider 的环境脚本。随包 Direnv 注册 environment driver（运行目标主机 `direnv export json`），不是 Core 内置环境特殊分支。
 
 ## SSH 实例
 
@@ -325,6 +346,20 @@ worker 实体          ~/.devshell/workers/<target>/<sha256>/devshell-worker
 各 target 软链       ~/.devshell/bin/devshell-worker-<target>
 本机默认软链          ~/.devshell/bin/devshell-worker
 ```
+
+## Extension 持久化目录
+
+以下使用默认 Control home；`PORTABLE_DEVSHELL_HOME` 会改变 Control home 下的路径。Extension code/data 另按 data home 解析：优先 `$XDG_DATA_HOME`，Unix 缺省 `~/.local/share`，Windows 缺省 `%LOCALAPPDATA%`（缺省时 `%USERPROFILE%\AppData\Local`）。
+
+```text
+<data home>/portable-devshell/extensions/<id>/<generation>/    immutable code
+<data home>/portable-devshell/extension-data/<id>/             persistent data / owned SQLite
+~/.devshell/control/extensions/registry.json                  selected generation / enabled state
+~/.devshell/control/extensions/state/<id>/config.json          Extension-owned config
+<Control runtime dir>/extensions/<id>/<generation>/run-<UUID>/  one activation incarnation
+```
+
+普通 Extension remove 保留 data/state；`remove --purge` 删除它们。Runtime directory 每次 activation 独立，不应当作持久存储。Core config 的 scoped grant `config.coreAccess` 不会把 Core 值复制到 owned `config.json`；两者 authority 见[Extension ABI](../concepts/extensions.md)。
 
 ## Worker 目标
 
