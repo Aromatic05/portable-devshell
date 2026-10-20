@@ -2344,7 +2344,7 @@ test("instance delete persistence failure performs no destructive cleanup", asyn
     assert.notEqual(registry.get("demo-local"), undefined);
 });
 
-test("instance delete permits failed and stale instances without requiring a provider stop", async () => {
+test("instance delete commits failed and stale local instances while retaining unresolved runtime cleanup", async () => {
     for (const daemonState of ["failed", "stale"] as const) {
         let config = createConfig();
         const workerRetirements: string[] = [];
@@ -2418,7 +2418,9 @@ test("instance delete permits failed and stale instances without requiring a pro
             registry,
         );
 
-        await service.deleteInstance({ instanceName: "demo-local" });
+        const result = await service.deleteInstance({ instanceName: "demo-local" }) as Record<string, unknown>;
+        assert.equal(result.cleanupPending, true);
+        assert.equal((await service.listCleanupDebts())[0]!.state, "pending");
 
         assert.equal(
             config.instances.length,
@@ -2432,8 +2434,8 @@ test("instance delete permits failed and stale instances without requiring a pro
         );
         assert.deepEqual(
             workerRetirements,
-            ["provider"],
-            `${daemonState} should skip runtime cleanup and tolerate provider cleanup failure`,
+            ["runtime", "provider"],
+            `${daemonState} must retain failed runtime cleanup and still attempt provider cleanup`,
         );
     }
 });

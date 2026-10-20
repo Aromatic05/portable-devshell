@@ -29,6 +29,8 @@ export interface InstanceCleanupDebtRecord {
     /** Local cleanup completed; retained solely as an orphan resource record. */
     orphaned?: boolean;
     skipRuntimeRetirement?: boolean;
+    /** Unreleased volatile remote scopes, handed off from the Context ledger. */
+    abandonedContextAlerts?: string[];
 }
 
 export interface InstanceCleanupStatus {
@@ -125,6 +127,29 @@ class InstanceCleanupDebtStore {
         });
     }
 
+    async abandonContextAlerts(instance: string, workspace: string): Promise<void> {
+        await this.#exclusive(async () => {
+            const previous = this.#pendingRecord(instance);
+            if (previous === undefined) throw new Error(`Missing cleanup debt for ${instance}.`);
+            const [id, record] = previous;
+            this.#records.set(id, {
+                ...record,
+                remoteAbandoned: true,
+                abandonedContextAlerts: [...new Set([...(record.abandonedContextAlerts ?? []), workspace])],
+                lastFailure: "Offline self-managed Worker alert scopes require manual cleanup; never replay against a replacement generation.",
+            });
+            let replaced = false;
+            try {
+                await this.#persist(() => { replaced = true; });
+            } catch (error) {
+                // A directory-sync failure after rename must not forget the
+                // handoff and allow a later connection to replay it remotely.
+                if (!replaced) this.#records.set(id, record);
+                throw error;
+            }
+        });
+    }
+
     #pendingRecord(instance: string): [string, InstanceCleanupDebtRecord] | undefined {
         return [...this.#records.entries()].find(([, record]) =>
             record.instance.name === instance && record.orphaned !== true);
@@ -177,7 +202,7 @@ class InstanceCleanupDebtStore {
         }
     }
 
-    async #persist(): Promise<void> {
+    async #persist(onReplaced?: () => void): Promise<void> {
         if (this.#filePath === undefined) return;
         const directory = dirname(this.#filePath);
         await mkdir(directory, { mode: 0o700, recursive: true });
@@ -202,6 +227,7 @@ class InstanceCleanupDebtStore {
             await rm(temporary, { force: true }).catch(() => undefined);
             throw error;
         }
+        onReplaced?.();
         if (process.platform !== "win32") {
             const parent = await open(directory, "r");
             try {
@@ -245,6 +271,10 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
         throw new Error("Invalid cleanup debt creation time.");
     if (record.lastFailure !== undefined && typeof record.lastFailure !== "string")
         throw new Error("Invalid cleanup debt failure description.");
+    if (record.abandonedContextAlerts !== undefined &&
+        (!Array.isArray(record.abandonedContextAlerts) ||
+            !record.abandonedContextAlerts.every((workspace) => typeof workspace === "string")))
+        throw new Error("Invalid abandoned Context alert scopes.");
     return {
         ...(record.generationId === undefined ? {} : { generationId: record.generationId as string }),
         instance,
@@ -253,6 +283,7 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
         ...(record.orphaned === undefined ? {} : { orphaned: record.orphaned as boolean }),
         ...(record.createdAt === undefined ? {} : { createdAt: record.createdAt as string }),
         ...(record.lastFailure === undefined ? {} : { lastFailure: record.lastFailure as string }),
+        ...(record.abandonedContextAlerts === undefined ? {} : { abandonedContextAlerts: record.abandonedContextAlerts as string[] }),
         ...(record.skipRuntimeRetirement === undefined
             ? {}
             : {
@@ -280,6 +311,8 @@ export class InstanceCleanupDebt {
     readonly #syncMcpEndpoint: (instance: string) => Promise<void>;
     readonly #createRuntimeInstance: InstanceEditorCoordinatorOptions["createRuntimeInstance"];
     readonly #finalizeRuntimeInstance: InstanceEditorCoordinatorOptions["finalizeRuntimeInstance"];
+    readonly #detachContextInstance: InstanceEditorCoordinatorOptions["detachContextInstance"];
+    readonly #reconcileContextInstanceCleanup: InstanceEditorCoordinatorOptions["reconcileContextInstanceCleanup"];
 
     constructor(
         options: InstanceEditorCoordinatorOptions,
@@ -303,6 +336,8 @@ export class InstanceCleanupDebt {
         this.#syncMcpEndpoint = syncMcpEndpoint;
         this.#createRuntimeInstance = options.createRuntimeInstance;
         this.#finalizeRuntimeInstance = options.finalizeRuntimeInstance;
+        this.#detachContextInstance = options.detachContextInstance;
+        this.#reconcileContextInstanceCleanup = options.reconcileContextInstanceCleanup;
     }
 
     retainDescriptor(instance: string, descriptor: Instance): void {
@@ -328,6 +363,7 @@ export class InstanceCleanupDebt {
             state: record.orphaned ? "orphaned" : "pending",
             ...(record.createdAt === undefined ? {} : { createdAt: record.createdAt }),
             ...(record.lastFailure === undefined ? {} : { reason: record.lastFailure }),
+            ...(record.abandonedContextAlerts === undefined ? {} : { abandonedContextAlertCount: String(record.abandonedContextAlerts.length) }),
             guidance: record.orphaned
                 ? "Inspect the old remote resource manually; no immutable remote generation identity is available."
                 : "Retry with: devshell instance cleanup retry " + record.instance.name,
@@ -344,6 +380,31 @@ export class InstanceCleanupDebt {
 
     async markRemoteAbandoned(instance: string): Promise<void> {
         await this.#cleanupDebts.markRemoteAbandoned(instance);
+    }
+
+    async reconcileSelfManagedContextCleanup(instance: string, descriptor: Instance): Promise<void> {
+        await this.#reconcileContextInstanceCleanup?.(instance, {
+            releaseReference: (reference) => descriptor.supervision.ownership.releaseReference(reference),
+            releaseAlerts: async (workspace) => {
+                const record = await this.#cleanupDebts.get(instance);
+                if (record === undefined) throw new Error(`Missing cleanup debt for ${instance}.`);
+                // A failed Context-ledger write can retry this handoff. Never
+                // release an already orphaned scope on a later connection.
+                if (record.abandonedContextAlerts?.includes(workspace)) {
+                    // Reconfirm durability even if the earlier rename's sync
+                    // acknowledgement failed before Context could settle.
+                    await this.#cleanupDebts.abandonContextAlerts(instance, workspace);
+                    return;
+                }
+                if (descriptor.supervision.snapshot().ready) {
+                    await descriptor.environment.releaseAlerts(workspace);
+                    return;
+                }
+                // Offline does not prove the daemon stopped. Preserve exact
+                // old scopes before handing them off from the Context ledger.
+                await this.#cleanupDebts.abandonContextAlerts(instance, workspace);
+            },
+        });
     }
 
     reserveCommittedCleanup(instance: string): () => void {
@@ -590,6 +651,13 @@ export class InstanceCleanupDebt {
         record: InstanceCleanupDebtRecord,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
+        if (record.operation === "delete" &&
+            (this.#instanceRegistry.get(record.instance.name) !== undefined ||
+                this.#engine.current.instances.some((entry) => entry.name === record.instance.name))) {
+            // A controller debt ID does not identify a Worker generation.
+            // Never send name-addressed cleanup to a replacement instance.
+            return [this.#cleanupConflict(record.instance.name)];
+        }
         const descriptor =
             this.#cleanupOnlyDescriptors.get(record.instance.name) ??
             this.#createRuntimeInstance(record.instance);
@@ -597,10 +665,12 @@ export class InstanceCleanupDebt {
         if (record.operation === "delete") {
             this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
             try {
-                await this.#prepareContextCleanup(
-                    record.instance.name,
-                    descriptor,
-                );
+                if (descriptor.supervision.managementMode === "selfManaged") {
+                    await this.#detachContextInstance?.(record.instance.name);
+                    await this.reconcileSelfManagedContextCleanup(record.instance.name, descriptor);
+                } else {
+                    await this.#prepareContextCleanup(record.instance.name, descriptor);
+                }
             } catch (error) {
                 failures.push(error);
                 return failures;
@@ -636,9 +706,9 @@ export class InstanceCleanupDebt {
             if (record.remoteAbandoned) workerRetirementSucceeded = true;
             else try {
                 await descriptor.retireWorkerResources(
-                    record.skipRuntimeRetirement === true ||
+                    descriptor.supervision.managementMode === "selfManaged" ||
                         (record.instance.provider !== "local" &&
-                            !record.instance.enabled),
+                            (record.skipRuntimeRetirement === true || !record.instance.enabled)),
                 );
                 workerRetirementSucceeded = true;
             } catch (error) {

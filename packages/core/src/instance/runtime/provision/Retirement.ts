@@ -34,11 +34,22 @@ export class WorkerInstanceRetirement {
 
     async retireRuntime(): Promise<void> {
         if (this.#commandClient === undefined) return;
+        // Native stop owns daemon identity/locking and safely clears stale PID
+        // residue. Retirement itself requires a stopped runtime.
+        const stopped = await this.#commandClient.stop();
+        this.#assertCommandSucceeded(stopped, "stop");
         const result = await this.#commandClient.retireRuntime();
+        this.#assertCommandSucceeded(result, "retirement");
+    }
+
+    #assertCommandSucceeded(
+        result: Awaited<ReturnType<WorkerCommandClient["retireRuntime"]>>,
+        operation: "stop" | "retirement",
+    ): void {
         if (result.exitCode === 0) return;
         throw createRemoteError({
             code: runtimeErrorCodes.providerFailed,
-            message: `Worker runtime retirement failed for instance ${this.#config.name}.`,
+            message: `Worker runtime ${operation} failed for instance ${this.#config.name}.`,
             retryable: false,
             details: toJsonDetails(
                 withInstanceDetails(result.details, this.#config.name),

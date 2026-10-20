@@ -5,9 +5,10 @@ export function assertInstanceDeletable(
     descriptor: Instance | undefined,
 ): boolean {
     if (descriptor === undefined) return false;
+    if (descriptor.supervision.managementMode === "selfManaged") return true;
+    if (descriptor.config.provider === "local") return false;
     const snapshot = descriptor.supervision.snapshot();
-    // A worker's liveness is not a precondition for deleting its Control
-    // registration. Only skip remote retirement when its daemon is unknown or
-    // already failed; active managed workers are retired by the cleanup phase.
+    // Local cleanup must resolve stale residue through native stop/retire.
+    // Unavailable remote runtimes cannot be safely targeted by name alone.
     return ["failed", "stale", "unknown"].includes(snapshot.daemonState);
 }

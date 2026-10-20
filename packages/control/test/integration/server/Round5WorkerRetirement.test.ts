@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { inspect } from "node:util";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { deletionFixture } from "../../unit/control/instance/Round5DeletionFixture.ts";
 import { realRetirement, staleWorkerFixture } from "./Round5WorkerFixture.ts";
@@ -17,7 +16,7 @@ test("Round5 real Rust retirement is idempotent for a missing process and missin
     await worker.retirement.retire();
 });
 
-test("Round5 real Rust stale PID rejects retries until explicit Worker stop then debt recovery succeeds", async (t) => {
+test("Round5 stale PID cleanup recovers through retry after a transient stop failure and restart", async (t) => {
     const home = await createTestTempDirectory("r5-stale");
     t.after(() => rm(home, { recursive: true, force: true }));
     const worker = await staleWorkerFixture(home);
@@ -28,26 +27,39 @@ test("Round5 real Rust stale PID rejects retries until explicit Worker stop then
     assert.equal(await readFile(join(worker.root, "artifacts", "retained.txt"), "utf8"), "must survive failed retirement");
     const warnings: unknown[][] = [];
     t.mock.method(console, "warn", (...args: unknown[]) => { warnings.push(args); });
+    const stop = t.mock.method(worker.client, "stop", async () => ({
+        exitCode: 23, stdout: "", stderr: "transient stop failure", details: {},
+    }) as never);
     const original = await deletionFixture(home, { retireRuntime: () => worker.retirement.retireRuntime() });
     t.after(() => original.close());
     const deleted = await original.editor.deleteInstance({ instanceName: original.draft.name }) as Record<string, unknown>;
     assert.equal(deleted.cleanupPending, true);
     const [before] = await original.editor.listCleanupDebts();
+    assert.match(before!.reason!, /Worker runtime stop failed/);
+    assert.equal(warnings.length, 1);
+    assert.equal(await readFile(join(worker.root, "artifacts", "retained.txt"), "utf8"), "must survive failed retirement");
     await original.close();
+    stop.mock.restore();
     const restarted = await deletionFixture(home, { retireRuntime: () => worker.retirement.retireRuntime() }, true);
     t.after(() => restarted.close());
     await restarted.editor.reconcileCleanupDebt(original.draft.name);
-    const [after] = await restarted.editor.listCleanupDebts();
-    assert.equal(after!.generationId, before!.generationId);
-    assert.equal(after!.state, "pending");
-    assert.match(after!.reason!, /Worker runtime retirement failed/);
-    assert.ok(warnings.length >= 2);
-    assert.match(inspect(warnings, { depth: 15 }), /has stale daemon state; stop it before retirement/);
-    const stopped = await worker.client.stop();
-    assert.equal(stopped.exitCode, 0, JSON.stringify(stopped));
     await restarted.editor.reconcileCleanupDebt(original.draft.name);
     assert.deepEqual(await restarted.editor.listCleanupDebts(), []);
     await assert.rejects(readFile(join(worker.root, "artifacts", "retained.txt")), { code: "ENOENT" });
     await restarted.creator.createInstance(original.draft);
     assert.ok(restarted.registry.get(original.draft.name));
+});
+
+test("Round5 stale PID pointing to an unrelated running process never terminates that process", { timeout: 10000 }, async (t) => {
+    const home = await createTestTempDirectory("r5-reused-pid");
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const worker = await staleWorkerFixture(home);
+    // This test process is live but never owns the isolated Worker's daemon
+    // lock. Signalling it would fail the test, rather than touch another user.
+    await writeFile(join(worker.root, "state", "worker.pid"), `${process.pid}\n`);
+    await worker.retirement.retire();
+    await worker.retirement.retire();
+    assert.equal(process.kill(process.pid, 0), true);
+    await assert.rejects(readFile(join(worker.root, "state", "worker.pid")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(worker.root, "artifacts", "retained.txt")), { code: "ENOENT" });
 });

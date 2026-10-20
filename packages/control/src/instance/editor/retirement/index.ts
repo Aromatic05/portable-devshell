@@ -248,6 +248,7 @@ export class InstanceRetirementCoordinator {
             await this.#reconcileContextCleanup(
                 existing.name,
                 cleanupDescriptor,
+                cleanup,
             );
         } catch (error) {
             failures.push(error);
@@ -309,9 +310,15 @@ export class InstanceRetirementCoordinator {
     async #reconcileContextCleanup(
         instance: string,
         descriptor: InstanceDescriptor,
+        cleanup?: InstanceCleanupDebt,
     ): Promise<void> {
         const reconcile = this.#reconcileContextInstanceCleanup;
         if (reconcile === undefined) return;
+        if (descriptor?.supervision.managementMode === "selfManaged") {
+            if (cleanup === undefined) throw new Error("Context alert cleanup requires a durable retirement record.");
+            await cleanup.reconcileSelfManagedContextCleanup(instance, descriptor);
+            return;
+        }
         let needsRemoteWorker = false;
         const requireWorker = async (): Promise<void> => {
             needsRemoteWorker = true;
