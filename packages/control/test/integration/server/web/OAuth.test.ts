@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -9,6 +9,7 @@ import {
     type McpOAuthApprovalService,
 } from "@portable-devshell/mcp";
 import { TestMcpHost } from "../../../../../mcp/test/ContextRuntime.ts";
+import { createMcpOAuthOidcAdapterFactory } from "../../../../../mcp/src/oauth/provider/Adapter.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     Endpoint,
@@ -222,6 +223,13 @@ test("web oauth2 persists its first-party PKCE client without public registratio
     const proxy = await startLoopbackHttpProxy();
     const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-client-state");
+    const adapterDir = join(storage, "adapter");
+    await mkdir(adapterDir, { recursive: true });
+    const installedClient = { client_id: "installed-beta-client", client_secret: "installed-beta-secret",
+        grant_types: ["authorization_code", "refresh_token"], redirect_uris: ["https://installed.example.test/callback"],
+        response_types: ["code"], scope: "openid offline_access", token_endpoint_auth_method: "client_secret_post" };
+    const priorGeneration = JSON.stringify({ [installedClient.client_id]: { payload: installedClient } });
+    await writeFile(join(adapterDir, "Client.json"), priorGeneration, { mode: 0o600 });
     const runtimes: HttpHost[] = [];
     t.after(async () => {
         await cleanupInOrder(
@@ -276,8 +284,10 @@ test("web oauth2 persists its first-party PKCE client without public registratio
     assert.equal(firstStart.status, 302);
     const firstClientId = new URL(firstStart.headers.get("location")!).searchParams.get("client_id");
     assert.match(firstClientId ?? "", /^devshell-web-[a-f0-9]{64}$/u);
-    const clientState = JSON.parse(await readFile(join(storage, "adapter", "Client.json"), "utf8")) as Record<string, { payload?: { redirect_uris?: string[] } }>;
-    assert.deepEqual(clientState[firstClientId!]?.payload?.redirect_uris, [`${publicBaseUrl}/web/oauth/callback`]);
+    const clients = createMcpOAuthOidcAdapterFactory(adapterDir)("Client");
+    assert.deepEqual((await clients.find(firstClientId!))?.redirect_uris, [`${publicBaseUrl}/web/oauth/callback`]);
+    assert.deepEqual(await clients.find(installedClient.client_id), installedClient);
+    assert.equal(await readFile(join(adapterDir, "Client.json"), "utf8"), priorGeneration);
     assert.deepEqual(await first.protectedResource.approvals.list(), []);
     await first.http.stop();
 

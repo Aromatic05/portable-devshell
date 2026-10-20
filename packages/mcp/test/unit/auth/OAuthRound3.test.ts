@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createMcpOAuthOidcAdapterFactory } from "../../../src/oauth/provider/Adapter.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { betaConfig, betaOAuth, betaResource, oidcRequest, seedAccess, seedRefresh } from "../../support/BetaOAuth.ts";
 
@@ -54,11 +54,11 @@ test("round3 OAuth first-party client identity and refresh survive issuer recons
     let runtime = betaOAuth(directory);
     await runtime.warmup();
     const seeded = await seedRefresh(runtime);
-    const before = await readFile(join(directory, "adapter", "Client.json"), "utf8");
+    const before = await createMcpOAuthOidcAdapterFactory(join(directory, "adapter"))("Client").find(seeded.clientId);
     runtime = betaOAuth(directory);
     await runtime.warmup();
     assert.equal(await runtime.registerFirstPartyWebClient("http://mcp.example.test/callback-a", ["mcp"]), seeded.clientId);
-    assert.deepEqual(await readFile(join(directory, "adapter", "Client.json"), "utf8"), before);
+    assert.deepEqual(await createMcpOAuthOidcAdapterFactory(join(directory, "adapter"))("Client").find(seeded.clientId), before);
     const wrongClient = await runtime.registerFirstPartyWebClient("http://mcp.example.test/callback-b", ["mcp"]);
     const wrong = await oidcRequest(runtime, "/token", { grant_type: "refresh_token", refresh_token: seeded.token, client_id: wrongClient });
     assert.equal(wrong.status, 400);

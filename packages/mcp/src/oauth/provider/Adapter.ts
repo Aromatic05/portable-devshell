@@ -1,325 +1,123 @@
-import { randomUUID } from "node:crypto";
-import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
-
 import type { Adapter, AdapterFactory, AdapterPayload } from "oidc-provider";
-import { isMcpOAuthStorageMissing } from "../Storage.js";
-
-interface StoredRecord {
-    consumed?: number;
-    expiresAt?: number;
-    payload: AdapterPayload;
-}
-
-type StoredState = Record<string, StoredRecord>;
-
-interface SharedAdapterState {
-    readonly lock: AsyncMutex;
-    state?: StoredState;
-}
+import { errors } from "oidc-provider";
+import type { DatabaseSync } from "node:sqlite";
+import { McpOAuthOidcDatabase, type OidcRecord } from "./Database.js";
 
 const MAX_CLIENT_RECORDS = 256;
 const MAX_DEFAULT_RECORDS = 4096;
-const sharedStores = new Map<string, SharedAdapterState>();
 
-export function createMcpOAuthOidcFileAdapterFactory(
+export function createMcpOAuthOidcAdapterFactory(
     storageDir: string,
     secureStorage: (path: string) => Promise<void> = async () => {},
     secureFile: (path: string) => Promise<void> = async () => {},
-): AdapterFactory {
-    let storagePreparation: Promise<void> | undefined;
-    const prepareStorage = async (): Promise<void> => {
-        if (storagePreparation === undefined) {
-            const attempt = secureStorage(storageDir);
-            storagePreparation = attempt;
-            try {
-                await attempt;
-            } catch (error) {
-                if (storagePreparation === attempt) {
-                    storagePreparation = undefined;
-                }
-                throw error;
-            }
-            return;
-        }
-        await storagePreparation;
-    };
-    return (name: string) => {
-        const filePath = join(storageDir, `${name}.json`);
-        let store = sharedStores.get(filePath);
-        if (store === undefined) {
-            store = { lock: new AsyncMutex() };
-            sharedStores.set(filePath, store);
-        }
-        return new McpOidcFileAdapter(
-            filePath,
-            store,
-            name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS,
-            prepareStorage,
-            secureFile,
-        );
-    };
+): AdapterFactory & {
+    prepare(): Promise<void>;
+    transaction<T>(operation: () => Promise<T>, status: () => number): Promise<T>;
+    afterCommit(notification: () => void): void;
+} {
+    const store = new McpOAuthOidcDatabase(storageDir, secureStorage, secureFile);
+    const factory: AdapterFactory = (name) => new McpOidcAdapter(name, store);
+    return Object.assign(factory, {
+        prepare: () => store.prepare(),
+        transaction: <T>(operation: () => Promise<T>, status: () => number) =>
+            store.transaction(operation, status),
+        afterCommit: (notification: () => void) => store.afterCommit(notification),
+    });
 }
 
-class McpOidcFileAdapter implements Adapter {
-    constructor(
-        private readonly filePath: string,
-        private readonly store: SharedAdapterState,
-        private readonly maxRecords: number,
-        private readonly prepareStorage: () => Promise<void>,
-        private readonly secureFile: (path: string) => Promise<void>,
-    ) {}
+class McpOidcAdapter implements Adapter {
+    constructor(private readonly name: string, private readonly store: McpOAuthOidcDatabase) {}
 
     async consume(id: string): Promise<void> {
-        await this.store.lock.runExclusive(async () => {
-            const state = await this.#state();
-            const record = state[id];
-            if (record === undefined) {
-                return;
-            }
-            await this.#commit({
-                ...state,
-                [id]: { ...record, consumed: Math.floor(Date.now() / 1000) },
-            });
+        const consumed = await this.store.run(this.name, (database) => {
+            const result = database.prepare(`
+                UPDATE oidc_records SET consumed = ?
+                WHERE model = ? AND id = ? AND consumed IS NULL
+                    AND (expires_at IS NULL OR expires_at > ?)
+                    AND (grant_id IS NULL OR grant_id NOT IN (SELECT id FROM revoked_grants))
+            `).run(now(), this.name, id, now());
+            if (result.changes === 1) return true;
+            const record = database.prepare("SELECT grant_id FROM oidc_records WHERE model = ? AND id = ?")
+                .get(this.name, id) as { grant_id: string | null } | undefined;
+            if (record?.grant_id && this.name === "RefreshToken") this.#revoke(database, record.grant_id);
+            return false;
         });
+        if (!consumed) throw new errors.InvalidGrant("token already used or revoked");
     }
 
     async destroy(id: string): Promise<void> {
-        await this.store.lock.runExclusive(async () => {
-            const state = await this.#state();
-            if (state[id] === undefined) {
-                return;
-            }
-            const next = { ...state };
-            delete next[id];
-            await this.#commit(next);
+        await this.store.run(this.name, (database) => {
+            database.prepare("DELETE FROM oidc_records WHERE model = ? AND id = ?").run(this.name, id);
         });
     }
 
     async find(id: string): Promise<AdapterPayload | undefined> {
-        return await this.store.lock.runExclusive(async () => {
-            const state = await this.#state();
-            const record = state[id];
-            if (record === undefined) {
-                return undefined;
-            }
-            if (isExpired(record)) {
-                const next = { ...state };
-                delete next[id];
-                await this.#commit(next);
-                return undefined;
-            }
-            return toAdapterPayload(record);
-        });
+        return await this.#find("id", id);
     }
 
     async findByUid(uid: string): Promise<AdapterPayload | undefined> {
-        return await this.#findBy((record) => record.payload.uid === uid);
+        return await this.#find("uid", uid);
     }
 
-    async findByUserCode(
-        userCode: string,
-    ): Promise<AdapterPayload | undefined> {
-        return await this.#findBy(
-            (record) => record.payload.userCode === userCode,
-        );
+    async findByUserCode(userCode: string): Promise<AdapterPayload | undefined> {
+        return await this.#find("user_code", userCode);
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {
-        await this.store.lock.runExclusive(async () => {
-            const current = await this.#state();
-            const pruned = pruneExpiredCopy(current);
-            const state =
-                pruned.state === current ? { ...current } : pruned.state;
-            let changed = pruned.changed;
-            for (const [id, record] of Object.entries(current)) {
-                if (record.payload.grantId === grantId) {
-                    delete state[id];
-                    changed = true;
-                }
-            }
-            if (changed) {
-                await this.#commit(state);
-            }
+        await this.store.run(this.name, (database) => {
+            this.#revoke(database, grantId);
         });
     }
 
-    async upsert(
-        id: string,
-        payload: AdapterPayload,
-        expiresIn: number,
-    ): Promise<void> {
-        await this.store.lock.runExclusive(async () => {
-            const current = await this.#state();
-            const pruned = pruneExpiredCopy(current);
-            const state =
-                pruned.state === current ? { ...current } : pruned.state;
-            if (
-                state[id] === undefined &&
-                Object.keys(state).length >= this.maxRecords
-            ) {
-                throw new Error(
-                    `OIDC ${this.#modelName()} storage limit of ${this.maxRecords} records was reached.`,
-                );
+    #revoke(database: DatabaseSync, grantId: string): void {
+        // Fence saves from stale model instances, including other processes.
+        // Grant IDs are random and never reused; this fence must not expire.
+        database.prepare("INSERT OR IGNORE INTO revoked_grants (id) VALUES (?)").run(grantId);
+        database.prepare("DELETE FROM oidc_records WHERE grant_id = ?").run(grantId);
+        this.store.markRevoked();
+    }
+
+    async upsert(id: string, payload: AdapterPayload, expiresIn?: number): Promise<void> {
+        await this.store.run(this.name, (database) => {
+            const grantId = this.name === "Grant" ? id : payload.grantId ?? null;
+            if (grantId !== null && database.prepare("SELECT id FROM revoked_grants WHERE id = ?").get(grantId)) {
+                throw new errors.InvalidGrant("grant is revoked");
             }
-            state[id] = {
-                expiresAt:
-                    expiresIn > 0
-                        ? Math.floor(Date.now() / 1000) + expiresIn
-                        : undefined,
-                payload: structuredClone(payload),
-            };
-            await this.#commit(state);
+            database.prepare("DELETE FROM oidc_records WHERE expires_at <= ?").run(now());
+            const exists = database.prepare("SELECT id FROM oidc_records WHERE model = ? AND id = ?").get(this.name, id);
+            const count = database.prepare("SELECT count(*) AS count FROM oidc_records WHERE model = ?").get(this.name) as { count: number };
+            const limit = this.name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS;
+            if (!exists && count.count >= limit) {
+                throw new Error(`OIDC ${this.name} storage limit of ${limit} records was reached.`);
+            }
+            database.prepare(`
+                INSERT INTO oidc_records (model, id, payload, expires_at, consumed, grant_id, uid, user_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(model, id) DO UPDATE SET
+                    payload = excluded.payload, expires_at = excluded.expires_at,
+                    consumed = coalesce(oidc_records.consumed, excluded.consumed),
+                    grant_id = excluded.grant_id, uid = excluded.uid, user_code = excluded.user_code
+            `).run(this.name, id, JSON.stringify(payload),
+                expiresIn !== undefined && expiresIn > 0 ? now() + expiresIn : null,
+                typeof payload.consumed === "number" ? payload.consumed : null,
+                grantId, payload.uid ?? null, payload.userCode ?? null);
         });
     }
 
-    async #findBy(
-        predicate: (record: StoredRecord) => boolean,
-    ): Promise<AdapterPayload | undefined> {
-        return await this.store.lock.runExclusive(async () => {
-            const current = await this.#state();
-            const pruned = pruneExpiredCopy(current);
-            const state = pruned.state;
-            const record = Object.values(state).find(predicate);
-            if (pruned.changed) {
-                await this.#commit(state);
-            }
-            return record === undefined ? undefined : toAdapterPayload(record);
+    async #find(column: "id" | "uid" | "user_code", value: string): Promise<AdapterPayload | undefined> {
+        return await this.store.run(this.name, (database) => {
+            const record = database.prepare(`
+                SELECT payload, consumed FROM oidc_records
+                WHERE model = ? AND ${column} = ? AND (expires_at IS NULL OR expires_at > ?)
+                    AND (grant_id IS NULL OR grant_id NOT IN (SELECT id FROM revoked_grants))
+            `).get(this.name, value, now()) as OidcRecord | undefined;
+            if (record === undefined) return undefined;
+            return { ...JSON.parse(record.payload) as AdapterPayload,
+                ...(record.consumed === null ? {} : { consumed: record.consumed }) };
         });
     }
-
-    async #state(): Promise<StoredState> {
-        if (this.store.state === undefined) {
-            this.store.state = await this.#readState();
-        }
-        return this.store.state;
-    }
-
-    async #commit(state: StoredState): Promise<void> {
-        try {
-            await this.#writeState(state);
-            this.store.state = state;
-        } catch (error) {
-            this.store.state = undefined;
-            throw error;
-        }
-    }
-
-    async #readState(): Promise<StoredState> {
-        try {
-            const source = await readFile(this.filePath, "utf8");
-            const value = JSON.parse(source) as unknown;
-            if (!isStoredState(value)) {
-                throw new Error(`Invalid OIDC adapter state: ${this.filePath}`);
-            }
-            return value;
-        } catch (error) {
-            if (isMcpOAuthStorageMissing(error)) {
-                return {};
-            }
-            throw error;
-        }
-    }
-
-    async #writeState(state: StoredState): Promise<void> {
-        const directory = dirname(this.filePath);
-        await mkdir(directory, { mode: 0o700, recursive: true });
-        if (process.platform !== "win32") {
-            await chmod(directory, 0o700);
-        }
-        await this.prepareStorage();
-        const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
-        const file = await open(tempPath, "wx", 0o600);
-        try {
-            await file.writeFile(JSON.stringify(state), "utf8");
-            await file.sync();
-        } catch (error) {
-            await file.close().catch(() => undefined);
-            await rm(tempPath, { force: true }).catch(() => undefined);
-            throw error;
-        }
-        await file.close();
-        try {
-            await this.secureFile(tempPath);
-            await rename(tempPath, this.filePath);
-            if (process.platform !== "win32") {
-                await chmod(this.filePath, 0o600);
-                const directoryHandle = await open(directory, "r");
-                try {
-                    await directoryHandle.sync();
-                } finally {
-                    await directoryHandle.close();
-                }
-            }
-        } catch (error) {
-            await rm(tempPath, { force: true }).catch(() => undefined);
-            throw error;
-        }
-    }
-
-    #modelName(): string {
-        return basename(this.filePath, extname(this.filePath));
-    }
 }
 
-class AsyncMutex {
-    #tail: Promise<void> = Promise.resolve();
-
-    async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
-        const previous = this.#tail;
-        let release!: () => void;
-        this.#tail = new Promise<void>((resolve) => {
-            release = resolve;
-        });
-        await previous;
-        try {
-            return await operation();
-        } finally {
-            release();
-        }
-    }
-}
-
-function pruneExpiredCopy(state: StoredState): {
-    changed: boolean;
-    state: StoredState;
-} {
-    let next = state;
-    for (const [id, record] of Object.entries(state)) {
-        if (isExpired(record)) {
-            if (next === state) next = { ...state };
-            delete next[id];
-        }
-    }
-    return { changed: next !== state, state: next };
-}
-
-function isExpired(record: StoredRecord): boolean {
-    return (
-        typeof record.expiresAt === "number" &&
-        record.expiresAt <= Math.floor(Date.now() / 1000)
-    );
-}
-
-function isStoredState(value: unknown): value is StoredState {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return false;
-    }
-    return Object.values(value).every((record) => {
-        return (
-            typeof record === "object" &&
-            record !== null &&
-            !Array.isArray(record) &&
-            "payload" in record &&
-            typeof record.payload === "object" &&
-            record.payload !== null
-        );
-    });
-}
-
-function toAdapterPayload(record: StoredRecord): AdapterPayload {
-    return structuredClone({
-        ...record.payload,
-        ...(record.consumed === undefined ? {} : { consumed: record.consumed }),
-    });
+function now(): number {
+    return Math.floor(Date.now() / 1000);
 }

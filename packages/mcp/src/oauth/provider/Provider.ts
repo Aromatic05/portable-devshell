@@ -25,7 +25,7 @@ const LONG_LIVED_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 import type { McpOAuth2Config } from "../Config.js";
 import { McpOAuthApprovalService } from "../interaction/Approval.js";
-import { createMcpOAuthOidcFileAdapterFactory } from "./Adapter.js";
+import { createMcpOAuthOidcAdapterFactory } from "./Adapter.js";
 import { fetchPublicOAuthDocument } from "./SafeFetch.js";
 import {
     createMcpOAuthStorageSecurity,
@@ -174,7 +174,7 @@ export class McpOAuthProviderRuntime {
             scope,
             token_endpoint_auth_method: "none" as const,
         };
-        const adapter = createMcpOAuthOidcFileAdapterFactory(
+        const adapter = createMcpOAuthOidcAdapterFactory(
             join(this.#storageDir, "adapter"),
             async (path) => await this.#storageSecurity.secureStorage(path),
             async (path) => await this.#storageSecurity.secureFile(path),
@@ -212,17 +212,17 @@ export class McpOAuthProviderRuntime {
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
         await this.#storageSecurity.secureStorage(this.#storageDir);
+        const adapter = createMcpOAuthOidcAdapterFactory(
+            join(this.#storageDir, "adapter"),
+            async (path) => await this.#storageSecurity.secureStorage(path),
+            async (path) => await this.#storageSecurity.secureFile(path),
+        );
+        await adapter.prepare();
         const buildProvider = () => {
             const provider = new Provider(
                 stripTrailingSlash(this.#issuerUrl.href),
                 {
-                    adapter: createMcpOAuthOidcFileAdapterFactory(
-                        join(this.#storageDir, "adapter"),
-                        async (path) =>
-                            await this.#storageSecurity.secureStorage(path),
-                        async (path) =>
-                            await this.#storageSecurity.secureFile(path),
-                    ),
+                    adapter,
                     clientDefaults: {
                         grant_types: ["authorization_code", "refresh_token"],
                         response_types: ["code"],
@@ -293,6 +293,10 @@ export class McpOAuthProviderRuntime {
                         },
                     },
                     jwks,
+                    // This issuer revokes the complete grant family, including
+                    // access-token revocation through the OIDC endpoint.
+                    revokeGrantPolicy: () => true,
+                    rotateRefreshToken: true,
                     routes: {
                         authorization: "/authorize",
                         end_session: "/session/end",
@@ -324,14 +328,20 @@ export class McpOAuthProviderRuntime {
                 },
             );
             provider.proxy = this.#trustProxy;
+            provider.use(async (ctx, next) => {
+                if (ctx.method === "POST" && /^\/(?:token|revoke)\/?$/iu.test(ctx.path)) {
+                    await adapter.transaction(next, () => ctx.status);
+                } else await next();
+            });
             provider.on("access_token.destroyed", (token) => {
                 if (typeof token.grantId === "string") {
-                    this.#notifyAccessRevoked({ grantId: token.grantId });
+                    const grantId = token.grantId;
+                    adapter.afterCommit(() => this.#notifyAccessRevoked({ grantId }));
                 }
             });
             provider.on("grant.revoked", (_context, grantId) => {
                 if (typeof grantId === "string") {
-                    this.#notifyAccessRevoked({ grantId });
+                    adapter.afterCommit(() => this.#notifyAccessRevoked({ grantId }));
                 }
             });
             this.#provider = provider;

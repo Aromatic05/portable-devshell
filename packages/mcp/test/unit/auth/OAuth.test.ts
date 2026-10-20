@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { McpOAuthInteraction } from "../../../src/oauth/interaction/Interaction.ts";
-import { createMcpOAuthOidcFileAdapterFactory } from "../../../src/oauth/provider/Adapter.ts";
+import { createMcpOAuthOidcAdapterFactory } from "../../../src/oauth/provider/Adapter.ts";
 import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts";
 
 {
@@ -679,7 +679,7 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
                 );
                 assertOwnerOnlyWindowsAcl(
                     await readWindowsAcl(
-                        join(storageDir, "adapter", "AccessToken.json"),
+                        join(storageDir, "adapter", "oidc.sqlite3"),
                     ),
                     false,
                 );
@@ -729,16 +729,9 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
                 new Set(client!.scope?.split(" ")),
                 new Set(["openid", "offline_access"]),
             );
-            const persisted = JSON.parse(
-                await readFile(clientFile, "utf8"),
-            ) as {
-                "claude-code": { payload: { scope?: string } };
-            };
-            assert.equal(
-                persisted["claude-code"].payload.scope,
-                "openid offline_access",
-                "persisted client scopes must not be widened to the resource scopes",
-            );
+            const persisted = await createMcpOAuthOidcAdapterFactory(adapterDir)("Client").find("claude-code");
+            assert.equal(persisted?.scope, "openid offline_access",
+                "persisted client scopes must not be widened to the resource scopes");
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }
@@ -832,10 +825,9 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
                     "https://chatgpt.com/connector_platform_oauth_redirect",
                 ),
             );
-            await assert.rejects(
-                access(join(storageDir, "adapter", "Client.json")),
-                (error: unknown) =>
-                    (error as NodeJS.ErrnoException).code === "ENOENT",
+            assert.equal(
+                await createMcpOAuthOidcAdapterFactory(join(storageDir, "adapter"))("Client").find(clientId),
+                undefined,
             );
         } finally {
             await rm(storageDir, { force: true, recursive: true });
@@ -1261,6 +1253,7 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
                     clientId: "client-revocation-test",
                     exp: now + 3600,
                     grantId: "grant-revocation-test",
+                    jti: "revocable-access",
                     iat: now,
                     kind: "AccessToken",
                     scope: "mcp",
@@ -1456,10 +1449,10 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
         }
     });
 
-    test("OIDC file adapter serializes concurrent updates without losing records", async () => {
+    test("OIDC SQLite adapter serializes concurrent updates without losing records", async () => {
         const storageDir = await createTestTempDirectory("mcp-oauth-adapter");
         const adapter =
-            createMcpOAuthOidcFileAdapterFactory(storageDir)("Client");
+            createMcpOAuthOidcAdapterFactory(storageDir)("Client");
 
         try {
             await Promise.all(
@@ -1479,7 +1472,7 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
             }
             if (process.platform !== "win32") {
                 assert.equal(
-                    (await stat(join(storageDir, "Client.json"))).mode & 0o777,
+                    (await stat(join(storageDir, "oidc.sqlite3"))).mode & 0o777,
                     0o600,
                 );
             }
@@ -1488,12 +1481,12 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
         }
     });
 
-    test("OIDC file adapters prepare shared storage once before model writes", async () => {
+    test("OIDC SQLite adapters prepare shared storage once before model writes", async () => {
         const storageDir = await createTestTempDirectory(
             "mcp-oauth-adapter-security",
         );
         const prepared: string[] = [];
-        const factory = createMcpOAuthOidcFileAdapterFactory(
+        const factory = createMcpOAuthOidcAdapterFactory(
             storageDir,
             async (path) => {
                 prepared.push(path);
@@ -1525,7 +1518,7 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
         }
     });
 
-    test("OIDC file adapters share cached model state and invalidate it after a failed write", async () => {
+    test("OIDC SQLite adapters share durable model state and preserve it after a failed preparation", async () => {
         const storageDir = await createTestTempDirectory(
             "mcp-oauth-adapter-cache",
         );
@@ -1533,11 +1526,11 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
         const secureStorage = async () => {
             if (failStorage) throw new Error("secure storage failed");
         };
-        const first = createMcpOAuthOidcFileAdapterFactory(
+        const first = createMcpOAuthOidcAdapterFactory(
             storageDir,
             secureStorage,
         )("AccessToken");
-        const second = createMcpOAuthOidcFileAdapterFactory(
+        const second = createMcpOAuthOidcAdapterFactory(
             storageDir,
             secureStorage,
         )("AccessToken");
@@ -1566,7 +1559,7 @@ import { McpOAuthProviderRuntime } from "../../../src/oauth/provider/Provider.ts
 
             failStorage = true;
             await assert.rejects(
-                second.upsert(
+                createMcpOAuthOidcAdapterFactory(storageDir, secureStorage)("AccessToken").upsert(
                     "failed",
                     { clientId: "client-failed" } as never,
                     3600,

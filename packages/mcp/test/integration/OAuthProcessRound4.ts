@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { createMcpOAuthOidcAdapterFactory } from "../../src/oauth/provider/Adapter.ts";
 import { importJWK, SignJWT, createLocalJWKSet, jwtVerify } from "jose";
 import { McpOAuthProviderRuntime } from "../../src/oauth/provider/Provider.ts";
 import { McpOAuthApprovalService } from "../../src/oauth/interaction/Approval.ts";
@@ -38,12 +40,16 @@ if (phase === "seed") {
 }
 const redirect = `${http.origin}/restart-client-callback`;
 if (phase === "seed") await runtime.registerFirstPartyWebClient(redirect, ["mcp"]);
-const clientsSource = await readFile(join(directory, "adapter", "Client.json"), "utf8");
-const clientId = Object.keys(JSON.parse(clientsSource))[0];
+const database = new DatabaseSync(join(directory, "adapter", "oidc.sqlite3"), { readOnly: true });
+const clients = database.prepare("SELECT id, payload FROM oidc_records WHERE model = 'Client'").all() as Array<{ id: string; payload: string }>;
+database.close();
+assert.equal(clients.length, 1);
+const clientId = clients[0]!.id;
+const clientsSource = clients[0]!.payload;
 assert.ok(clientId);
 assert.ok(await runtime.provider.Client.find(clientId));
 assert.equal(await runtime.registerFirstPartyWebClient(redirect, ["mcp"]), clientId);
-assert.equal(await readFile(join(directory, "adapter", "Client.json"), "utf8"), clientsSource);
+assert.equal(JSON.stringify(await createMcpOAuthOidcAdapterFactory(join(directory, "adapter"))("Client").find(clientId)), clientsSource);
 assert.ok(signature);
 await jwtVerify(signature, createLocalJWKSet(jwks), { issuer: http.origin, audience: resource.href });
 const verified = await runtime.verifyAccessToken(resource, "restart-live");

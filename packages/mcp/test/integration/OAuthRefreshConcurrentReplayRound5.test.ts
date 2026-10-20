@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authFixture, resourceUri } from "../../packages/mcp/test/integration/Round5NativeHttpFixture.ts";
+import { authFixture, resourceUri } from "./Round5NativeHttpFixture.ts";
 
-// Expected failure: one request wins the concurrent refresh race; the loser is
-// rejected, but its replay must revoke the already-issued successor family.
+// One request wins the concurrent refresh race. Replay must revoke its successor family.
 test("round5 real HTTP concurrent refresh replay revokes winning token but preserves peer", async (t) => {
     const f = await authFixture(t);
     const owner = await f.issue("owner");
