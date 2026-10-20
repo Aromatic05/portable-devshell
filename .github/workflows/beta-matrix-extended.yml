@@ -17,6 +17,7 @@ on:
                     - retirement
                     - browser
                     - handoff
+                    - chains
                     - windows-psmux
 
 permissions:
@@ -49,7 +50,7 @@ jobs:
               if: inputs.suite == 'upgrade'
               run: pnpm testspace upgrade-smoke
             - name: Build isolated Testspace runtime
-              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement' || inputs.suite == 'browser' || inputs.suite == 'handoff'
+              if: inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement' || inputs.suite == 'browser' || inputs.suite == 'handoff' || inputs.suite == 'chains'
               run: |
                   pnpm build
                   pnpm test:prepare
@@ -81,6 +82,18 @@ jobs:
               if: inputs.suite == 'handoff'
               shell: bash
               run: pnpm acceptance:tmux-handoff 2>&1 | tee "$RUNNER_TEMP/beta-matrix-handoff.log"
+            - name: Install Chromium for multi-client chain
+              if: inputs.suite == 'chains'
+              shell: bash
+              run: |
+                  pnpm --filter @portable-devshell/control exec playwright install --with-deps chromium
+                  chromium_path=$(pnpm --filter @portable-devshell/control exec node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath())")
+                  echo "PORTABLE_DEVSHELL_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
+                  echo "PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1" >> "$GITHUB_ENV"
+            - name: Four complete functional chain acceptance tests
+              if: inputs.suite == 'chains'
+              shell: bash
+              run: node acceptance/run-chain-matrix.mjs --all 2>&1 | tee "$RUNNER_TEMP/beta-matrix-chains.log"
             - name: Stop isolated Testspace
               if: always() && (inputs.suite == 'extension' || inputs.suite == 'workflow' || inputs.suite == 'recovery' || inputs.suite == 'retirement')
               run: pnpm testspace stop
@@ -95,6 +108,7 @@ jobs:
                       ${{ runner.temp }}/beta-matrix-retirement.log
                       ${{ runner.temp }}/beta-matrix-browser.log
                       ${{ runner.temp }}/beta-matrix-handoff.log
+                      ${{ runner.temp }}/beta-matrix-chains.log
                   if-no-files-found: ignore
 
     windows-psmux:

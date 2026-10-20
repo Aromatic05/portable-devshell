@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/beta-matrix-extended.yml", import.meta.url), "utf8");
-const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "browser", "handoff", "windows-psmux"];
+const suites = ["upgrade", "extension", "workflow", "recovery", "retirement", "browser", "handoff", "chains", "windows-psmux"];
 
 test("extended beta verification is explicit, not a pull request gate", () => {
     assert.match(workflow, /workflow_dispatch:/u);
@@ -95,4 +95,25 @@ test("browser and long-handoff optional suites use fresh AcceptanceFixture and d
     const source = readFileSync(new URL("../acceptance/AcceptanceSupport.mjs", import.meta.url), "utf8");
     assert.match(source, /createTestTempDirectory\("acceptance"\)/u);
     assert.match(source, /await rm\(root, \{ force: true, recursive: true \}\)/u);
+});
+
+
+test("chains suite runs real AcceptanceFixture programs independently of shared Testspace", () => {
+    const step = (name) => {
+        const start = workflow.indexOf("            - name: " + name + "\n");
+        assert.ok(start >= 0, "missing step: " + name);
+        const end = workflow.indexOf("            - name:", start + 1);
+        return workflow.slice(start, end < 0 ? workflow.length : end);
+    };
+    assert.ok(step("Build isolated Testspace runtime").includes("inputs.suite == 'chains'"));
+    assert.equal(step("Start isolated Control and Workers").includes("inputs.suite == 'chains'"), false);
+    assert.equal(step("Stop isolated Testspace").includes("inputs.suite == 'chains'"), false);
+    const chromium = step("Install Chromium for multi-client chain");
+    assert.ok(chromium.includes("inputs.suite == 'chains'"));
+    assert.ok(chromium.includes("playwright install --with-deps chromium"));
+    assert.ok(chromium.includes("PORTABLE_DEVSHELL_REQUIRE_CHROMIUM=1"));
+    const run = step("Four complete functional chain acceptance tests");
+    assert.ok(run.includes("node acceptance/run-chain-matrix.mjs --all 2>&1 | tee"));
+    assert.ok(run.includes("inputs.suite == 'chains'"));
+    assert.ok(step("Upload isolated Testspace logs").includes("beta-matrix-chains.log"));
 });
