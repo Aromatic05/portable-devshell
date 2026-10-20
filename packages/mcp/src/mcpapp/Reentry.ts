@@ -75,9 +75,11 @@ export async function deliverMcpAppReentry(
                         return { claimed: false };
                     reserved = true;
                 } else {
-                    // Concurrent claim contenders already observed this delivery in
-                    // flight. Recovery is a fresh request through the Instance fence.
-                    if (queued || receipt.claimId === undefined || receipt.claimId === owner) return { claimed: false };
+                    // Persisted unattempted claims may be recovered after Control
+                    // restarts. A live Store must not give an acknowledged owner
+                    // away to a new Host: Task claims have no Goal-level fence.
+                    if (queued || receipt.claimId === undefined || receipt.claimId === owner ||
+                        ports.actions.isLiveDelivery(directiveId, receipt.claimId)) return { claimed: false };
                     deliveryOwner = receipt.claimId;
                 }
             }

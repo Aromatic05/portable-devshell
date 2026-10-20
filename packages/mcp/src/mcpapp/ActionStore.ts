@@ -38,6 +38,10 @@ export class McpAppActionStore {
     #initialized: boolean;
     #operation: Promise<void> = Promise.resolve();
     readonly #deliveries = new Map<string, Promise<void>>();
+    // A confirmed claim in this running Store must not be stolen by a second
+    // Host. Reopening the Store after Control death intentionally has no live
+    // owners, so unattempted persisted claims can be recovered immediately.
+    readonly #liveClaims = new Map<string, { owner: string; expiresAt: number }>();
 
     constructor(options: McpAppActionStoreOptions = {}) {
         this.#filePath = options.filePath;
@@ -71,6 +75,19 @@ export class McpAppActionStore {
             const receipt = this.#receipts.get(actionId);
             return receipt === undefined ? undefined : structuredClone(receipt);
         });
+    }
+
+    isLiveDelivery(actionId: string, claimId: string): boolean {
+        const live = this.#liveClaims.get(actionId);
+        if (live === undefined || live.owner !== claimId) return false;
+        if (this.#now() < live.expiresAt) return true;
+        this.#liveClaims.delete(actionId);
+        return false;
+    }
+
+    #trackLiveDelivery(actionId: string, claimId: string): void {
+        // Match the existing five-minute Goal continuation claim lifetime.
+        this.#liveClaims.set(actionId, { owner: claimId, expiresAt: this.#now() + 5 * 60_000 });
     }
 
     async prepare(ctxId: string, instance: string, resolved: McpAppResolvedAction): Promise<McpAppActionReceipt> {
@@ -125,19 +142,23 @@ export class McpAppActionStore {
     }
 
     async beginDelivery(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
-        return await this.#transition(actionId, (current) => {
+        const receipt = await this.#transition(actionId, (current) => {
             if (current.status !== "applied" || current.effect === undefined) return undefined;
             return this.#record({ ...current, status: "claiming", claimId });
         });
+        if (receipt !== undefined) this.#trackLiveDelivery(actionId, claimId);
+        return receipt;
     }
 
     /** Transfer ownership only after the Instance has admitted this claimant. */
     async confirmDelivery(actionId: string, previousClaimId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
-        return await this.#transition(actionId, (current) => {
+        const receipt = await this.#transition(actionId, (current) => {
             if (current.claimId !== previousClaimId || current.attemptStarted ||
                 (current.status !== "claiming" && current.status !== "attempting")) return undefined;
             return this.#record({ ...current, status: "attempting", claimId });
         });
+        if (receipt !== undefined) this.#trackLiveDelivery(actionId, claimId);
+        return receipt;
     }
 
     async beginAttempt(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
@@ -149,10 +170,12 @@ export class McpAppActionStore {
     }
 
     async markAttempted(actionId: string, claimId: string): Promise<McpAppActionReceipt | undefined> {
-        return await this.#transition(actionId, (current) => {
+        const receipt = await this.#transition(actionId, (current) => {
             if (current.claimId !== claimId || current.status !== "attempting" || !current.attemptStarted) return undefined;
             return this.#record({ ...current, status: "attempted" });
         });
+        if (receipt !== undefined) this.#liveClaims.delete(actionId);
+        return receipt;
     }
 
     /** Only an explicit Instance refusal can undo the attempt dispatch fence. */
@@ -175,21 +198,25 @@ export class McpAppActionStore {
     }
 
     async restoreDelivery(actionId: string, claimId: string): Promise<boolean> {
-        return (await this.#transition(actionId, (current) => {
+        const restored = (await this.#transition(actionId, (current) => {
             if (current.claimId !== claimId || current.attemptStarted ||
                 (current.status !== "claiming" && current.status !== "attempting")) return undefined;
             const { outcome: _outcome, claimId: _claimId, ...applied } = current;
             return this.#record({ ...applied, status: "applied" });
         })) !== undefined;
+        if (restored) this.#liveClaims.delete(actionId);
+        return restored;
     }
 
     async settle(actionId: string, claimId: string, outcome: "accepted" | "rejected" | "uncertain"): Promise<McpAppActionReceipt | undefined> {
-        return await this.#transition(actionId, (current) => {
+        const receipt = await this.#transition(actionId, (current) => {
             if (current.claimId !== claimId || current.outcome !== outcome) return undefined;
             if (current.status === "settled") return current;
             if (current.status !== "reporting") return undefined;
             return this.#record({ ...current, status: "settled" });
         });
+        if (receipt !== undefined) this.#liveClaims.delete(actionId);
+        return receipt;
     }
 
     async suppressContextPending(ctxId: string): Promise<void> {
@@ -245,12 +272,12 @@ export class McpAppActionStore {
         await this.#run(async () => {
             this.#assertInitialized();
             const previous = new Map(this.#receipts);
-            let changed = false;
+            const revokedIds: string[] = [];
             for (const [id, receipt] of this.#receipts) if (matches(receipt)) {
                 this.#receipts.delete(id);
-                changed = true;
+                revokedIds.push(id);
             }
-            if (!changed) return;
+            if (revokedIds.length === 0) return;
             try {
                 await this.#persist();
             } catch (error) {
@@ -258,6 +285,7 @@ export class McpAppActionStore {
                 for (const [id, receipt] of previous) this.#receipts.set(id, receipt);
                 throw error;
             }
+            for (const id of revokedIds) this.#liveClaims.delete(id);
         });
     }
 

@@ -172,6 +172,38 @@ test("SQLite Reentry preserves the Instance claim through the 180s Wait and reco
     assert.equal((await f.readGoal())?.continuationCount, 1);
 });
 
+test("SQLite task-resume refuses takeover of a live confirmed claim but recovers after owner restart", async (t) => {
+    const f = await durableReentry("task-resume"); t.after(() => f.close());
+    assert.equal((await f.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
+    const claimed = await f.actions.get(f.directiveId);
+    assert.equal(claimed?.status, "attempting");
+    assert.equal(claimed.claimId, f.base.claimId);
+    assert.deepEqual(await f.call({ action: "claim", claimId: "competing-host" }), { claimed: false });
+    assert.deepEqual(await f.actions.get(f.directiveId), claimed);
+    assert.equal((await f.call({ action: "attempt" }) as { attempted: boolean }).attempted, true);
+
+    const next = await durableReentry("task-resume"); t.after(() => next.close());
+    assert.equal((await next.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
+    await next.restart();
+    assert.equal((await next.call({ action: "claim", claimId: "replacement-host" }) as { claimed: boolean }).claimed, true);
+    assert.deepEqual(await next.call({ action: "attempt" }), { attempted: false });
+    assert.equal((await next.call({ action: "attempt", claimId: "replacement-host" }) as { attempted: boolean }).attempted, true);
+});
+
+test("SQLite task-resume preserves a live claim for the full 180s handoff and replaces it only after expiry", async (t) => {
+    const f = await durableReentry("task-resume"); t.after(() => f.close());
+    assert.equal((await f.call({ action: "claim" }) as { claimed: boolean }).claimed, true);
+    f.advance(180_000);
+    assert.deepEqual(await f.call({ action: "claim", claimId: "next-host" }), { claimed: false });
+    f.advance(120_001);
+    assert.equal((await f.call({ action: "claim", claimId: "next-host" }) as { claimed: boolean }).claimed, true);
+    assert.deepEqual(await f.call({ action: "attempt" }), { attempted: false });
+    assert.equal((await f.call({ action: "attempt", claimId: "next-host" }) as { attempted: boolean }).attempted, true);
+    assert.deepEqual(await f.call({ action: "attempt", claimId: "next-host" }), { attempted: false, duplicate: true });
+    const attempts = (await f.records()).filter((row) => (row.input as { action?: string }).action === "attempt");
+    assert.equal(attempts.length, 1);
+});
+
 test("SQLite Reentry explicitly refused attempt remains releasable and usable after claim expiry", async (t) => {
     const f = await durableReentry(); t.after(() => f.close());
     await claim(f);
