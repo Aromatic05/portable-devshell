@@ -62,7 +62,7 @@ test("MCP HTTP client remains usable after a tool reports an error", async (t) =
     );
 });
 
-async function startEchoServer(): Promise<TestServer> {
+async function startEchoServer(stall?: { entered(): void; release: Promise<void> }): Promise<TestServer> {
     const mcp = new McpServer({ name: "mcp-extension-test", version: "1.0.0" });
     mcp.registerTool(
         "echo",
@@ -81,6 +81,14 @@ async function startEchoServer(): Promise<TestServer> {
             throw new Error("intentional tool failure");
         },
     );
+
+    if (stall !== undefined) {
+        mcp.registerTool("stall", { description: "Wait for test release" }, async () => {
+            stall.entered();
+            await stall.release;
+            return { content: [{ type: "text", text: "released" }] };
+        });
+    }
 
     const transport = new NodeStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
@@ -131,4 +139,60 @@ async function close(server: HttpServer): Promise<void> {
             error === undefined ? resolve() : reject(error),
         );
     });
+}
+
+
+test("MCP HTTP client aborts a stalled connect and the factory can connect again", { timeout: 8_000 }, async (t) => {
+    const received = deferred();
+    const stalled = createServer((_request, _response) => received.resolve());
+    await listen(stalled);
+    t.after(async () => {
+        stalled.closeAllConnections();
+        await close(stalled);
+    });
+    const address = stalled.address();
+    assert.ok(address !== null && typeof address !== "string");
+    const factory = new McpHttpClientFactory("0.1.0");
+    const abort = new AbortController();
+    const connecting = factory.connect({ name: "stalled", url: `http://127.0.0.1:${address.port}/mcp` }, abort.signal);
+    const rejected = assert.rejects(connecting, /abort|cancel/i);
+    await received.promise;
+    abort.abort();
+    await rejected;
+
+    const server = await startEchoServer();
+    t.after(async () => await server.close());
+    const client = await factory.connect({ name: "recovered", url: server.url }, new AbortController().signal);
+    t.after(async () => await client.close());
+    assert.deepEqual(await client.callTool("echo", { text: "reconnected" }, new AbortController().signal), {
+        content: [{ text: "reconnected", type: "text" }],
+    });
+});
+
+test("MCP HTTP client cancels a stalled call without blocking another call on the same client", { timeout: 8_000 }, async (t) => {
+    const entered = deferred();
+    const release = deferred();
+    const server = await startEchoServer({ entered: () => entered.resolve(), release: release.promise });
+    t.after(async () => {
+        release.resolve();
+        await server.close();
+    });
+    const client = await new McpHttpClientFactory("0.1.0").connect({ name: "echo", url: server.url }, new AbortController().signal);
+    t.after(async () => await client.close());
+    const abort = new AbortController();
+    const rejected = assert.rejects(client.callTool("stall", {}, abort.signal), /abort|cancel/i);
+    await entered.promise;
+    abort.abort();
+    await rejected;
+    assert.deepEqual(await client.callTool("echo", { text: "independent" }, new AbortController().signal), {
+        content: [{ text: "independent", type: "text" }],
+    });
+    release.resolve();
+});
+
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
 }
