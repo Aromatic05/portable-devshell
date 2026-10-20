@@ -10,7 +10,7 @@ import {
 import type { ConfigEngine } from "../engine/index.js";
 import type { ConfigRuntimeChangeSet } from "../engine/Api.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
-import { coupledRuntimeChanges } from "./GlobalPatch.js";
+import { coupledRuntimeChanges } from "../engine/RuntimeChanges.js";
 
 export interface ConfigBatchCleanupStatus {
     cleanupPending: boolean;

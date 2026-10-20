@@ -8,6 +8,7 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import { diffConfigPaths, parseConfigPath, setConfigPathValue } from "../Path.js";
+import { coupledRuntimeChanges } from "../engine/RuntimeChanges.js";
 import type { ConfigEngine } from "../engine/index.js";
 import type { ConfigRuntimeChangeSet } from "../engine/Api.js";
 import type { ConfigApplyChange } from "../engine/Result.js";
@@ -158,19 +159,4 @@ export class ConfigGlobalPatch {
             preflight,
         );
     }
-}
-
-export function coupledRuntimeChanges(
-    previous: ControlConfig,
-    next: ControlConfig,
-    changes: ConfigRuntimeChangeSet,
-): ConfigRuntimeChangeSet {
-    if (!changes.mcp || changes.web) return changes;
-    const oauth2Changed =
-        diffConfigPaths(previous.mcp.oauth2, next.mcp.oauth2, "mcp.oauth2")
-            .length > 0;
-    const webUsesOAuth2 = [previous, next].some(
-        (config) => config.web.enabled && config.web.auth.mode === "oauth2",
-    );
-    return oauth2Changed && webUsesOAuth2 ? { ...changes, web: true } : changes;
 }

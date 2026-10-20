@@ -10,6 +10,7 @@ import {
     rm,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 
 import {
     ConfigInputError,
@@ -32,6 +33,7 @@ import {
 import { ControlInstanceTomlDocument } from "./document/Instance.js";
 import { ControlConfigTomlCodec } from "./TomlCodec.js";
 import type { ConfigRegistry } from "../domain/Registry.js";
+import { ConfigLockCommitError, withConfigLock } from "./Lock.js";
 
 export interface ControlConfigStoreOptions {
     globalDocument?: ControlGlobalTomlDocument;
@@ -67,6 +69,18 @@ export class ControlConfigCommittedCleanupError extends AggregateError {
     }
 }
 
+/** The marker unlink and its status probe both failed; resolve under the lease. */
+export class ControlConfigCommitUncertainError extends AggregateError {
+    constructor(
+        errors: unknown[],
+        readonly reconcile: () => Promise<ControlConfig>,
+        message = "Control configuration marker removal outcome could not be determined; the recovery backup was retained.",
+    ) {
+        super(errors, message);
+        this.name = "ControlConfigCommitUncertainError";
+    }
+}
+
 export class ControlConfigStore {
     readonly #globalDocument: ControlGlobalTomlDocument;
     readonly #instanceDocument: ControlInstanceTomlDocument;
@@ -84,40 +98,51 @@ export class ControlConfigStore {
     }
 
     async readOrCreate(homeDirectory?: string): Promise<ControlConfig> {
-        const config = await this.#read(homeDirectory);
+        const paths = new ControlPathHome(homeDirectory);
+        return await withConfigLock(paths.controlHomeDir, async (database) =>
+            await this.#readOrCreate(paths, database));
+    }
+
+    async #readOrCreate(paths: ControlPathHome, database: DatabaseSync): Promise<ControlConfig> {
+        const config = await this.#read(paths, database);
         if (config !== undefined) return config;
 
         // The global document may have been lost while Instance files survived.
         // Recover usable Instances on the first load, without rewriting their
         // original documents or pruning any files that we could not parse.
         const defaults = createDefaultControlConfig();
-        const instances = await this.#readInstances(new ControlPathHome(homeDirectory), defaults, true);
+        const instances = await this.#readInstances(paths, defaults, database, true);
         defaults.instances = instances;
         if (instances.some((instance) => instance.provider === "reverse")) {
             defaults.mcp.enabled = true;
             console.warn("Restoring reverse Instances with default MCP listener settings; review the public endpoint.");
         }
         const created = this.#validator.validate(defaults);
-        await this.#write(created, homeDirectory, false);
+        await this.#write(created, paths, database, false);
         return created;
     }
 
     async migrate(
         homeDirectory?: string,
     ): Promise<ControlConfigMigrationResult> {
-        await this.#read(homeDirectory);
+        const paths = new ControlPathHome(homeDirectory);
+        await withConfigLock(paths.controlHomeDir, async (database) => {
+            await this.#read(paths, database, false);
+        });
         return { changed: false };
     }
 
     async inspectMigration(
         homeDirectory?: string,
     ): Promise<ControlConfigMigrationResult> {
-        await this.#read(homeDirectory);
+        const paths = new ControlPathHome(homeDirectory);
+        await withConfigLock(paths.controlHomeDir, async (database) => {
+            await this.#read(paths, database, false);
+        });
         return { changed: false };
     }
 
-    async #read(homeDirectory?: string): Promise<ControlConfig | undefined> {
-        const paths = new ControlPathHome(homeDirectory);
+    async #read(paths: ControlPathHome, database: DatabaseSync, trackInstances = true): Promise<ControlConfig | undefined> {
         await recoverConfigTransaction(paths);
         let globalConfig: ControlGlobalConfig | undefined;
 
@@ -134,20 +159,52 @@ export class ControlConfigStore {
 
         if (globalConfig === undefined) return undefined;
 
-        const instances = await this.#readInstances(paths, globalConfig);
+        const instances = await this.#readInstances(paths, globalConfig, trackInstances ? database : undefined);
         return this.#validator.validate({ ...globalConfig, instances });
     }
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
-        await this.#write(config, homeDirectory, true);
+        const paths = new ControlPathHome(homeDirectory);
+        let committedError: ControlConfigCommittedDurabilityError | ControlConfigCommittedCleanupError | undefined;
+        try {
+            await withConfigLock(paths.controlHomeDir, async (database) => {
+                try {
+                    await this.#write(config, paths, database, true);
+                } catch (error) {
+                    if (!(error instanceof ControlConfigCommittedDurabilityError ||
+                        error instanceof ControlConfigCommittedCleanupError)) throw error;
+                    // The TOMLs are visible. Persist their retention knowledge
+                    // even when directory durability or backup GC failed.
+                    committedError = error;
+                }
+            });
+        } catch (error) {
+            if (error instanceof ConfigLockCommitError)
+                throw new ControlConfigCommitUncertainError(
+                    committedError === undefined ? [error] : [committedError, error],
+                    async () => await this.#reconcile(paths),
+                    "Control configuration is visible, but Instance retention metadata could not be committed; reconciliation is required.",
+                );
+            throw error;
+        }
+        if (committedError !== undefined) throw committedError;
+    }
+
+    async #reconcile(paths: ControlPathHome): Promise<ControlConfig> {
+        return await withConfigLock(paths.controlHomeDir, async (database) => {
+            const recovered = await this.#read(paths, database);
+            if (recovered === undefined) throw new Error("Control configuration disappeared during commit reconciliation.");
+            await syncDirectory(paths.controlHomeDir);
+            return recovered;
+        });
     }
 
     async #write(
         config: ControlConfig,
-        homeDirectory: string | undefined,
+        paths: ControlPathHome,
+        database: DatabaseSync,
         pruneStale: boolean,
     ): Promise<void> {
-        const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
         // Collect previously committed backups on a later write, not during
         // reads or while an uncommitted transaction marker still exists.
@@ -168,22 +225,28 @@ export class ControlConfigStore {
 
         await secureDirectory(paths.controlHomeDir);
         await secureDirectory(paths.instancesDir);
+        const protectedFiles = new Set(database.prepare("SELECT file FROM protected_instances").all().map((row) => String(row.file)));
         const transaction = await prepareConfigTransaction(
             paths,
             instanceSources.map((entry) => entry.fileName),
+            protectedFiles,
+            database,
         );
         try {
             await atomicWriteFile(paths.configFile, globalSource);
             // On first global-config creation, recovered Instance documents
             // are existing user data, not files to normalize or overwrite.
             if (pruneStale)
-                for (const entry of instanceSources)
+                for (const entry of instanceSources) {
                     await atomicWriteFile(entry.filePath, entry.source);
+                    database.prepare("DELETE FROM protected_instances WHERE file = ?").run(entry.fileName);
+                }
             if (pruneStale)
                 await this.#removeStaleInstances(
                     paths,
                     new Set(instanceSources.map((entry) => entry.filePath)),
                     validated,
+                    protectedFiles,
                 );
         } catch (error) {
             try {
@@ -199,7 +262,7 @@ export class ControlConfigStore {
         // Marker removal publishes the new generation. A failure before it
         // leaves recovery in charge; a failure syncing its removal must still
         // publish the visible generation while retaining its recovery backup.
-        await commitConfigTransaction(transaction);
+        await commitConfigTransaction(transaction, async () => await this.#reconcile(paths));
         // Backups are garbage after the marker has been durably removed.
         // A partial recursive deletion must never turn into a rollback.
         try {
@@ -212,6 +275,7 @@ export class ControlConfigStore {
     async #readInstances(
         paths: ControlPathHome,
         globalConfig: ControlGlobalConfig,
+        database: DatabaseSync | undefined,
         restoringGlobal = false,
     ): Promise<ControlInstanceConfig[]> {
         let entries: Array<{ isFile(): boolean; name: string }>;
@@ -255,7 +319,9 @@ export class ControlConfigStore {
                 if (instances.some((existing) => existing.name === instance.name))
                     throw new Error("Duplicate Instance name " + instance.name + ".");
                 instances.push(instance);
+                database?.prepare("DELETE FROM protected_instances WHERE file = ?").run(fileName);
             } catch (error) {
+                database?.prepare("INSERT OR IGNORE INTO protected_instances (file) VALUES (?)").run(fileName);
                 // A broken instance file cannot disable unrelated Instances.
                 // Preserve it on subsequent config writes for manual recovery.
                 console.warn("Instance configuration skipped:", attachConfigFile(error, filePath));
@@ -268,6 +334,7 @@ export class ControlConfigStore {
         paths: ControlPathHome,
         activeFiles: ReadonlySet<string>,
         globalConfig: ControlGlobalConfig,
+        protectedFiles: ReadonlySet<string>,
     ): Promise<void> {
         for (const entry of await readdir(paths.instancesDir, {
             encoding: "utf8",
@@ -290,7 +357,9 @@ export class ControlConfigStore {
                 console.warn("Preserving unreadable Instance configuration:", attachConfigFile(error, filePath));
                 continue;
             }
+            if (protectedFiles.has(entry.name)) continue;
             await rm(filePath, { force: true });
+            await syncDirectory(paths.instancesDir);
         }
     }
 }
@@ -310,6 +379,8 @@ interface PreparedConfigTransaction {
 async function prepareConfigTransaction(
     paths: ControlPathHome,
     nextInstances: string[],
+    protectedFiles: Set<string>,
+    database: DatabaseSync,
 ): Promise<PreparedConfigTransaction> {
     const id = randomUUID();
     const directory = join(paths.controlHomeDir, `.config-transaction-${id}`);
@@ -325,13 +396,22 @@ async function prepareConfigTransaction(
             globalSource,
         );
     }
-    const existingInstances = await listInstanceConfigFiles(paths.instancesDir);
-    for (const fileName of existingInstances) {
-        const source = await readFile(
-            join(paths.instancesDir, fileName),
-            "utf8",
-        );
+    const existingInstances: string[] = [];
+    for (const fileName of await listInstanceConfigFiles(paths.instancesDir)) {
+        let source: string;
+        try {
+            source = await readFile(join(paths.instancesDir, fileName), "utf8");
+        } catch (error) {
+            // An unrelated unreadable document is never a write target. Leave
+            // it outside the rollback set and preserve it during stale pruning.
+            if (nextInstances.includes(fileName)) throw error;
+            protectedFiles.add(fileName);
+            database.prepare("INSERT OR IGNORE INTO protected_instances (file) VALUES (?)").run(fileName);
+            console.warn("Preserving unreadable Instance configuration:", error);
+            continue;
+        }
         await atomicWriteFile(join(backupInstancesDirectory, fileName), source);
+        existingInstances.push(fileName);
     }
 
     const manifest: ConfigTransactionManifest = {
@@ -395,6 +475,7 @@ async function rollbackConfigTransaction(
         );
     } else {
         await removeFileIfPresent(paths.configFile);
+        await syncDirectory(paths.controlHomeDir);
     }
 
     const allInstances = new Set([
@@ -415,6 +496,7 @@ async function rollbackConfigTransaction(
             await removeFileIfPresent(target);
         }
     }
+    await syncDirectory(paths.instancesDir);
     await rm(transaction.markerFile, { force: true });
     await syncDirectory(paths.controlHomeDir);
     await rm(transaction.directory, { force: true, recursive: true });
@@ -422,6 +504,7 @@ async function rollbackConfigTransaction(
 
 async function commitConfigTransaction(
     transaction: PreparedConfigTransaction,
+    reconcile: () => Promise<ControlConfig>,
 ): Promise<void> {
     try {
         // This intent permits later GC, but a live global marker still takes
@@ -442,10 +525,7 @@ async function commitConfigTransaction(
         try {
             marker = await readOptionalFile(transaction.markerFile);
         } catch (probeError) {
-            throw new AggregateError(
-                [error, probeError],
-                "Control configuration marker removal outcome could not be determined; the recovery backup was retained.",
-            );
+            throw new ControlConfigCommitUncertainError([error, probeError], reconcile);
         }
         if (marker === undefined) throw new ControlConfigCommittedDurabilityError(error);
         const expectedMarker = basename(transaction.directory).slice(".config-transaction-".length);

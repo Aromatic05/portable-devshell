@@ -9,6 +9,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { ControlConfigValidator } from "./Validator.js";
+import { coupledRuntimeChanges } from "./RuntimeChanges.js";
 import {
     ControlConfigMutationLock,
     type ControlConfigMutationRunner,
@@ -22,6 +23,7 @@ import {
 import { ConfigChangeHub } from "../change/Config.js";
 import { diffConfigPaths } from "../Path.js";
 import {
+    ControlConfigCommitUncertainError,
     ControlConfigCommittedCleanupError,
     ControlConfigCommittedDurabilityError,
 } from "../store/index.js";
@@ -46,6 +48,9 @@ export class ConfigEngine {
     >;
     readonly #setConfig: (config: ControlConfig) => void;
     readonly #validator: ControlConfigValidator;
+    #pendingReconciliation?: ControlConfigCommitUncertainError;
+    #reconciling?: Promise<void>;
+    #reconciliationTimer?: ReturnType<typeof setTimeout>;
 
     constructor(options: ConfigEngineOptions) {
         this.#changeHub = options.changeHub;
@@ -94,7 +99,10 @@ export class ConfigEngine {
     }
 
     async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
-        return await this.#mutationRunner.runExclusive(operation);
+        return await this.#mutationRunner.runExclusive(async () => {
+            await this.#reconcilePending();
+            return await operation();
+        });
     }
 
     async preflight(
@@ -105,6 +113,7 @@ export class ConfigEngine {
     }
 
     async persist(config: ControlConfig): Promise<void> {
+        await this.#reconcilePending();
         try {
             await this.#configStore.write(config, this.#homeDirectory);
         } catch (error) {
@@ -115,10 +124,58 @@ export class ConfigEngine {
             } else if (error instanceof ControlConfigCommittedCleanupError) {
                 console.warn("Control configuration committed; backup cleanup deferred:", error);
             } else {
+                if (error instanceof ControlConfigCommitUncertainError) {
+                    this.#pendingReconciliation = error;
+                    this.#scheduleReconciliation();
+                }
                 throw error;
             }
         }
         this.#setConfig(config);
+    }
+
+    #scheduleReconciliation(): void {
+        if (this.#pendingReconciliation === undefined || this.#reconciliationTimer !== undefined) return;
+        this.#reconciliationTimer = setTimeout(() => {
+            this.#reconciliationTimer = undefined;
+            void this.runExclusive(async () => undefined).catch((error) => {
+                console.warn("Control configuration commit reconciliation deferred:", error);
+                this.#scheduleReconciliation();
+            });
+        }, 1000);
+        this.#reconciliationTimer.unref();
+    }
+
+    async #reconcilePending(): Promise<void> {
+        if (this.#pendingReconciliation === undefined) return;
+        if (this.#reconciling !== undefined) return await this.#reconciling;
+        const pending = this.#pendingReconciliation;
+        this.#reconciling = (async () => {
+            // Recovery may roll back a live marker or load an already committed
+            // generation. Neither outcome may leave later edits based on old memory.
+            const next = await pending.reconcile();
+            const previous = this.#getConfig();
+            this.#pendingReconciliation = undefined;
+            clearTimeout(this.#reconciliationTimer);
+            this.#reconciliationTimer = undefined;
+            if (JSON.stringify(previous) === JSON.stringify(next)) return;
+            this.#setConfig(next);
+            const hotApplied = await this.applyRuntimeOrRestore(previous, next, coupledRuntimeChanges(previous, next, {
+                instanceAuth: JSON.stringify(previous.instances) !== JSON.stringify(next.instances),
+                mcp: JSON.stringify(previous.mcp) !== JSON.stringify(next.mcp),
+                web: JSON.stringify(previous.web) !== JSON.stringify(next.web),
+            }));
+            // Instance lifecycle plans already unwound when the original
+            // request failed. Listener/auth apply cannot rebuild those workers.
+            if (JSON.stringify(previous.instances) !== JSON.stringify(next.instances))
+                this.#markRestartControlRequired();
+            this.finalizeApplyResult(previous, next, [], hotApplied);
+        })();
+        try {
+            await this.#reconciling;
+        } finally {
+            this.#reconciling = undefined;
+        }
     }
 
     async commit(
