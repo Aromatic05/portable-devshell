@@ -5,7 +5,7 @@ import { asInstanceName, createToolCallRuntime, type JsonValue } from "@portable
 import { createAuditRuntime } from "../../../src/audit/index.ts";
 import { WorkerInstanceTool } from "../../../src/toolcall/execution/Tool.ts";
 import { ToolCallHistory } from "../../../src/toolcall/execution/record/History.ts";
-import { WorkerToolCallScheduler } from "../../../src/toolcall/execution/Scheduler.ts";
+import { WorkerToolCallScheduler, type WorkerToolSchedulerLimits } from "../../../src/toolcall/execution/Scheduler.ts";
 import { ApprovalService } from "../../../src/approval/execution/Service.ts";
 import { InstanceApprovalStore } from "../../../src/approval/Store.ts";
 
@@ -17,7 +17,7 @@ export function barrier<T = void>() {
 
 // Real scheduler, terminal audit, and approval persistence. Only the leaf tool
 // implementation is supplied by each test; it can perform actual local I/O.
-export async function round4Target() {
+export async function round4Target(limits: Partial<WorkerToolSchedulerLimits> = {}) {
     const directory = await mkdtemp(join(tmpdir(), "round4-tool-audit-"));
     const databasePath = join(directory, "audit.sqlite3");
     const instanceName = asInstanceName("round4");
@@ -33,6 +33,7 @@ export async function round4Target() {
     const scheduler = new WorkerToolCallScheduler({
         maxRunning: 64, maxRunningPerSession: 64, queueDepth: 128,
         queueDepthPerSession: 128, queueTimeoutMs: 30_000, byTool: {},
+        ...limits,
     });
     const tool = new WorkerInstanceTool({
         appendEvent, assertReady() {}, instanceName, logStore: audit.api.logs,
@@ -45,7 +46,7 @@ export async function round4Target() {
         events: { append: appendEvent }, policy: { mode: "ask" },
     });
     return {
-        directory, databasePath, instanceName, audit, events, history, tool, runtime, approval,
+        directory, databasePath, instanceName, audit, events, history, tool, runtime, approval, scheduler,
         async close() {
             approval.close(); runtime.close(); await scheduler.close(); await audit.close();
             await rm(directory, { recursive: true, force: true });

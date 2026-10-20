@@ -162,6 +162,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
 
         const runningContext = this.#audit.runningContext(scope);
         let toolExecutionSucceeded = false;
+        let executionStarted = false;
         let executionCompleted = false;
         let failureStage: ToolCallFailureStage | undefined;
         let progressTail = Promise.resolve();
@@ -217,6 +218,7 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
 
         try {
             const executed = await reservation.run(async () => {
+                executionStarted = true;
                 if (hostRecorded)
                     await recordAudit(() => this.#audit.running(scope, runningContext));
                 if (execute !== undefined)
@@ -443,7 +445,9 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                     : rawErrorCode;
             const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
 
-            if (nonRunningStatus !== undefined) {
+            // Scheduler-shaped errors from result adaptation are failures
+            // after execution, not evidence that the request never ran.
+            if (nonRunningStatus !== undefined && !executionCompleted && failureStage === undefined) {
                 if (hostRecorded) {
                     await recordAudit(() => this.#audit.nonRunning(
                         scope,
@@ -455,15 +459,16 @@ export class ToolCallExecutionTarget implements ToolCallTarget {
                 // The scheduler can safely retry a never-started request.
                 // Cancellation thrown by an already-running executor has a
                 // different contract: effects may have happened.
-                const normalized = interruptedByCaller
-                    ? classifiedFailure
-                    : normalizeToolSchedulerError(outerFailure.error);
-                throw normalized instanceof Error
-                    ? attachToolCallErrorPayload(
-                          normalized,
-                          outerFailure.payload,
-                      )
-                    : normalized;
+                throw attachToolCallErrorPayload(
+                    withExecutionOutcome(
+                        normalizeToolSchedulerError(outerFailure.error),
+                        executionCompleted,
+                        failureStage,
+                        callId,
+                        executionStarted,
+                    ),
+                    outerFailure.payload,
+                );
             }
 
             if (hostRecorded) {
@@ -493,13 +498,15 @@ function withExecutionOutcome(
     completed: boolean,
     stage?: ToolCallFailureStage,
     callId?: string,
+    started = completed,
 ): Error {
-    if (!completed && stage === undefined)
+    if (!started && !completed && stage === undefined)
         return error instanceof Error ? error : new Error(String(error));
     const body = toRemoteErrorBody(error);
     const details = body?.details;
+    const errorCode = getErrorCode(error, runtimeErrorCodes.providerFailed);
     return createRemoteError({
-        code: getErrorCode(error, runtimeErrorCodes.providerFailed),
+        code: errorCode === "tool.cancelled" ? runtimeErrorCodes.toolCallCancelled : errorCode,
         cause: error,
         details: {
             ...(details !== null && typeof details === "object" && !Array.isArray(details)
@@ -509,7 +516,7 @@ function withExecutionOutcome(
             ...(stage === undefined ? {} : { failureStage: stage }),
         },
         message: errorMessage(error),
-        retryable: !completed && body?.retryable === true,
+        retryable: !started && !completed && body?.retryable === true,
     });
 }
 
