@@ -7,6 +7,7 @@ import {
     type ApprovalEvent,
     type ApprovalDecisionOptions,
     type ApprovalDecisionValue,
+    type ApprovalListResult,
     type ApprovalRequest,
 } from "./Model.js";
 import {
@@ -23,13 +24,20 @@ export interface ApprovalViewModelState {
 }
 
 export class ApprovalViewModel {
+    readonly #deciding = new Set<string>();
     readonly #listeners = new Set<() => void>();
     readonly #transport: ApprovalTransport;
     #generation = 0;
+    #mutation = 0;
+    #readOrder = 0;
+    #appliedRead = 0;
+    #snapshotSeq?: number;
+    #subscribeRequested = false;
     #published: ApprovalViewModelState = emptyState();
     #refreshTimer?: ReturnType<typeof setTimeout>;
     #state: ApprovalViewModelState = emptyState();
     #subscription?: InstanceEventSubscription<ApprovalEvent>;
+    #subscriptionGeneration?: number;
 
     constructor(transport: ApprovalTransport) {
         this.#transport = transport;
@@ -46,21 +54,17 @@ export class ApprovalViewModel {
 
     async load(): Promise<void> {
         const generation = ++this.#generation;
-        const result = await this.#transport.snapshot({
-            pendingOnly: true,
-        });
-        if (generation !== this.#generation) return;
-        this.#apply(result.approvals, result.lastSeq);
-        this.#ensureSubscription(result.lastSeq + 1);
+        // A new load can belong to a restarted instance with a reset cursor.
+        // Keep the rows and stream usable until its first successful snapshot,
+        // but fence old reads and replace the stream from the new cursor.
+        this.#snapshotSeq = undefined;
+        this.#deciding.clear();
+        this.#subscribeRequested = true;
+        await this.#readSnapshot(generation);
     }
 
     async refresh(): Promise<void> {
-        const generation = this.#generation;
-        const result = await this.#transport.snapshot({
-            pendingOnly: true,
-        });
-        if (generation !== this.#generation) return;
-        this.#apply(result.approvals, result.lastSeq);
+        await this.#readSnapshot(this.#generation);
     }
 
     async decide(
@@ -69,6 +73,8 @@ export class ApprovalViewModel {
         options?: ApprovalDecisionOptions,
     ): Promise<ApprovalRequest> {
         const generation = this.#generation;
+        this.#mutation += 1;
+        this.#deciding.add(approvalId);
         this.#remove(approvalId);
         try {
             const decided = await this.#transport.decide(
@@ -76,16 +82,20 @@ export class ApprovalViewModel {
                 decision,
                 options,
             );
-            if (generation === this.#generation)
-                void this.refresh().catch(() => undefined);
             return decided;
         } catch (error) {
             if (generation === this.#generation) {
                 this.#state = { ...this.#state, failure: toError(error) };
                 this.#emit();
-                void this.refresh().catch(() => undefined);
             }
             throw error;
+        } finally {
+            if (generation === this.#generation) {
+                this.#deciding.delete(approvalId);
+                // Reads captured during the decision can still show pending.
+                this.#mutation += 1;
+                void this.refresh().catch(() => undefined);
+            }
         }
     }
 
@@ -95,32 +105,50 @@ export class ApprovalViewModel {
 
     close(): void {
         this.#generation += 1;
-        if (this.#refreshTimer !== undefined) {
-            clearTimeout(this.#refreshTimer);
-            this.#refreshTimer = undefined;
-        }
-        this.#subscription?.stop();
-        this.#subscription = undefined;
+        this.#subscribeRequested = false;
+        this.#stopSubscription();
+        this.#deciding.clear();
+        this.#snapshotSeq = undefined;
         this.#listeners.clear();
         this.#state = emptyState();
         this.#published = this.#state;
     }
 
-    #ensureSubscription(fromSeq: number): void {
-        if (this.#subscription !== undefined) return;
-        this.#subscription = new InstanceEventSubscription<ApprovalEvent>(
+    #stopSubscription(): void {
+        if (this.#refreshTimer !== undefined) {
+            clearTimeout(this.#refreshTimer);
+            this.#refreshTimer = undefined;
+        }
+        const subscription = this.#subscription;
+        this.#subscription = undefined;
+        this.#subscriptionGeneration = undefined;
+        subscription?.stop();
+    }
+
+    #ensureSubscription(fromSeq: number, generation: number): void {
+        if (generation !== this.#generation || !this.#subscribeRequested) return;
+        if (this.#subscriptionGeneration === generation) return;
+        this.#stopSubscription();
+        const subscription: InstanceEventSubscription<ApprovalEvent> = new InstanceEventSubscription<ApprovalEvent>(
             fromSeq,
             {
-                onEvent: () => this.#scheduleRefresh(),
-                onGap: () => this.#recover(),
+                onEvent: () => {
+                    if (this.#subscription === subscription) this.#scheduleRefresh();
+                },
+                onGap: () => this.#subscription === subscription
+                    ? this.#recover(this.#generation)
+                    : undefined,
                 onStatusChange: (status) => {
+                    if (this.#subscription !== subscription) return;
                     this.#state = { ...this.#state, status };
                     this.#emit();
                 },
                 open: (cursor) => this.#transport.subscribe(cursor),
             },
         );
-        this.#subscription.start();
+        this.#subscription = subscription;
+        this.#subscriptionGeneration = generation;
+        subscription.start();
     }
 
     #scheduleRefresh(): void {
@@ -131,16 +159,27 @@ export class ApprovalViewModel {
         }, 100);
     }
 
-    async #recover(): Promise<number | undefined> {
+    async #recover(generation: number): Promise<number | undefined> {
         try {
-            const result = await this.#transport.snapshot({
-                pendingOnly: true,
-            });
-            this.#apply(result.approvals, result.lastSeq);
-            return result.lastSeq + 1;
+            const current = await this.#readSnapshot(generation);
+            if (!current || generation !== this.#generation) return undefined;
+            // A concurrent refresh may have advanced beyond the recovery read.
+            return this.#state.lastSeq + 1;
         } catch {
             return undefined;
         }
+    }
+
+    async #readSnapshot(generation: number): Promise<boolean> {
+        if (generation !== this.#generation) return false;
+        const mutation = this.#mutation;
+        const order = ++this.#readOrder;
+        const result = await this.#transport.snapshot({ pendingOnly: true });
+        if (generation !== this.#generation || mutation !== this.#mutation)
+            return false;
+        this.#apply(result, order);
+        this.#ensureSubscription(this.#state.lastSeq + 1, generation);
+        return generation === this.#generation && mutation === this.#mutation;
     }
 
     #remove(approvalId: string): void {
@@ -153,10 +192,18 @@ export class ApprovalViewModel {
         this.#emit();
     }
 
-    #apply(approvals: ApprovalRequest[], sequence: number): void {
+    #apply(result: ApprovalListResult, order: number): void {
+        const { approvals, lastSeq: sequence } = result;
+        // Sequence wins; request order breaks ties when no event was appended.
+        if (this.#snapshotSeq !== undefined && (
+            sequence < this.#snapshotSeq ||
+            (sequence === this.#snapshotSeq && order < this.#appliedRead)
+        )) return;
+        this.#snapshotSeq = sequence;
+        this.#appliedRead = order;
         this.#state = {
             approvals: approvals.filter(
-                (approval) => approval.status === "pending",
+                (approval) => approval.status === "pending" && !this.#deciding.has(approval.approvalId),
             ),
             failure: undefined,
             lastSeq: sequence,
