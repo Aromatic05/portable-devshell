@@ -237,6 +237,39 @@ test("Storage native command requires local owner and explicit non-destructive d
     }
 });
 
+test("Audit downgrade cleans partial output when a later compressed record is corrupt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-storage-corrupt-row-"));
+    try {
+        const source = join(root, "audit.sqlite3");
+        const output = join(root, "audit-v1.sqlite3");
+        createAuditV2(source);
+        const database = openDatabase(source);
+        try {
+            database.prepare("INSERT INTO audit_records(id, collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .run(3, "logs", 3, 1, JSON.stringify({ callId: "broken" }), Buffer.from("not-zstd"), "zstd");
+        } finally { database.close(); }
+        const before = readFileSync(source);
+        assert.throws(() => downgradeAuditDatabase({ output, source, toVersion: 1 }));
+        assert.deepEqual(readFileSync(source), before);
+        assert.throws(() => readFileSync(output), /ENOENT/u);
+    } finally { await rm(root, { force: true, recursive: true }); }
+});
+
+test("Audit downgrade honors an abort before opening or publishing a target", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-storage-abort-"));
+    try {
+        const source = join(root, "audit.sqlite3");
+        const output = join(root, "audit-v1.sqlite3");
+        createAuditV2(source);
+        const before = readFileSync(source);
+        const controller = new AbortController();
+        controller.abort(new Error("caller cancelled"));
+        assert.throws(() => downgradeAuditDatabase({ output, source, signal: controller.signal, toVersion: 1 }), /caller cancelled/u);
+        assert.deepEqual(readFileSync(source), before);
+        assert.throws(() => readFileSync(output), /ENOENT/u);
+    } finally { await rm(root, { force: true, recursive: true }); }
+});
+
 function createAuditV2(filePath: string): void {
     const database = openDatabase(filePath);
     try {
