@@ -21,3 +21,30 @@ These contain 4 Web and 4 MCP App expected-failing cases. They do not establish 
 
 When fixing a bug, run its reproduction first. Once it passes, move it into the owning package's normal regression suite and update `docs/development/beta-bug-findings.md`. Avoid adding `skip`/`todo` markers to hide an open defect.
 
+
+## Fourth-round explicit regressions
+
+These tests are **expected to fail** and are not discovered by any default package or Rust suite. Fix the implementation first and then promote the unchanged assertion to the owning package's ordinary tests.
+
+```sh
+# Provider adopted container state is lost across runtime reconstruction
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ProviderAdoptionRuntime.test.ts
+
+# Control Call and Stream error metadata + ApprovalService closure race
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/core/test/RegisterWorkspacePackages.mjs --test test/known-bugs/ToolCallAuditBoundary.test.ts
+
+# Comment/Mailing real SQLite and disk: duplicate, wrong scope, quoted ID, invalid sender
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./extensions/comment/test/RegisterWorkspacePackages.mjs --test --test-isolation=none test/known-bugs/CommentMailingDelivery.test.ts
+
+# Native MCP cancellation audit; real SDK/OIDC/SQLite, simulated HTTP (not TCP)
+ROUND4_MCP_TRANSPORT=memory TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/McpNativeAbortAudit.test.ts
+
+# Four Web UI and three TUI Overlay rendering/state-machine regressions
+node packages/web/node_modules/vitest/vitest.mjs run --config test/known-bugs/ui/web-round4-repro.config.ts
+TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --import ./packages/mcp/test/RegisterWorkspacePackages.mjs --test test/known-bugs/TuiOverlayLifetime.test.ts
+```
+
+### Running-system recovery reproduction
+
+For the Control/Worker restart, 262 revision stream and failed committed-delete cleanup retry, set a **brand-new** private Testspace root, start, run `pnpm testspace recovery-smoke`, and always call `pnpm testspace stop` even if it fails. This test currently observes `cleanupPending=true` and a persistent old-Generation debt after public retry. See `docs/development/beta-bug-findings.md`. Never run this restart smoke on shared `.testspace` or live production Control.
+
