@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, relative as relativePath } from "node:path";
+import { createWriteStream } from "node:fs";
+import { createZstdCompress } from "node:zlib";
+import { pipeline } from "node:stream/promises";
 import test from "node:test";
+import { pack } from "tar-stream";
 
 import {
     createArtifactDirectoryArchive,
@@ -45,6 +49,83 @@ test("directory archive treats absolute, relative, and trailing-separator roots 
     }
     assert.deepEqual(manifests[1], manifests[0]);
     assert.deepEqual(manifests[2], manifests[0]);
+});
+
+test("directory archive creation rejects a symbolic link without reading its outside target", async (t) => {
+    const root = await createTestTempDirectory("artifact-archive-symlink");
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const source = join(root, "source");
+    const outside = join(root, "outside-secret.txt");
+    await mkdir(source);
+    await writeFile(outside, "outside bytes", "utf8");
+    await import("node:fs/promises").then(({ symlink }) =>
+        symlink(outside, join(source, "link.txt")),
+    );
+
+    await assert.rejects(
+        createArtifactDirectoryArchive(source, join(root, "archive.tar.zst")),
+        (error: unknown) => (error as { code?: string }).code === "artifact.directoryUnsafe",
+    );
+    assert.equal(await readFile(outside, "utf8"), "outside bytes");
+});
+
+test("directory archive extraction rejects traversal before writing outside the workspace", async (t) => {
+    const root = await createTestTempDirectory("artifact-archive-traversal");
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const output = join(root, "workspace", "unpack");
+    const outside = join(root, "workspace", "escaped.txt");
+    const archivePath = join(root, "malicious.tar.zst");
+    await mkdir(output, { recursive: true });
+    const archive = pack();
+    const writing = pipeline(
+        archive,
+        createZstdCompress(),
+        createWriteStream(archivePath, { flags: "wx" }),
+    );
+    await new Promise<void>((resolve, reject) => {
+        archive.entry(
+            { name: "../escaped.txt", size: 13, type: "file", mode: 0o600 },
+            "malicious data",
+            (error) => (error ? reject(error) : resolve()),
+        );
+    });
+    archive.finalize();
+    await writing;
+
+    await assert.rejects(
+        extractArtifactDirectoryArchive(archivePath, output),
+        (error: unknown) => (error as { code?: string }).code === "artifact.directoryUnsafe",
+    );
+    await assert.rejects(readFile(outside), { code: "ENOENT" });
+    assert.deepEqual(await tree(output), []);
+});
+
+test("directory archive extraction refuses to overwrite an existing workspace file", async (t) => {
+    const root = await createTestTempDirectory("artifact-archive-overwrite");
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    const output = join(root, "unpack");
+    const existing = join(output, "result.txt");
+    const archivePath = join(root, "incoming.tar.zst");
+    await mkdir(output);
+    await writeFile(existing, "user data", "utf8");
+    const archive = pack();
+    const writing = pipeline(
+        archive,
+        createZstdCompress(),
+        createWriteStream(archivePath, { flags: "wx" }),
+    );
+    await new Promise<void>((resolve, reject) => {
+        archive.entry(
+            { name: "result.txt", size: 13, type: "file", mode: 0o600 },
+            "incoming data",
+            (error) => (error ? reject(error) : resolve()),
+        );
+    });
+    archive.finalize();
+    await writing;
+
+    await assert.rejects(extractArtifactDirectoryArchive(archivePath, output));
+    assert.equal(await readFile(existing, "utf8"), "user data");
 });
 
 async function tree(root: string): Promise<string[]> {

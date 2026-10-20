@@ -83,13 +83,32 @@ class MemoryShareEndpoint implements WorkerArtifactApi {
     async abortArtifactReceive(): Promise<void> {}
 }
 
+class BadSecondChunkEndpoint extends MemoryShareEndpoint {
+    #reads = 0;
+
+    override async readArtifactPayload(input: {
+        maxBytes: number;
+        offsetBytes: number;
+        payloadId: string;
+    }) {
+        const chunk = await super.readArtifactPayload(input);
+        this.#reads += 1;
+        return this.#reads === 2
+            ? { ...chunk, offsetBytes: chunk.offsetBytes + 1 }
+            : chunk;
+    }
+}
+
 async function fixture(
     t: TestContext,
     publicBaseUrl?: string,
     maxDownloads?: number,
+    endpointOverride?: WorkerArtifactApi,
 ) {
     const storageDir = await createTestTempDirectory("artifact-http");
-    const endpoint = new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
+    const endpoint =
+        endpointOverride ??
+        new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
     const server = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
@@ -219,6 +238,24 @@ test("artifact HTTP route supports one byte range and rejects invalid or multipl
     });
     assert.equal(outside.status, 416);
     assert.equal(outside.headers.get("content-range"), "bytes */16");
+});
+
+test("artifact HTTP route aborts a corrupted later chunk without committing the download lease", async (t) => {
+    const endpoint = new BadSecondChunkEndpoint(
+        Buffer.alloc(512 * 1024 + 16, 0x5a),
+    );
+    const { downloadUrl, service } = await fixture(t, undefined, 2, endpoint);
+
+    const response = await fetch(downloadUrl);
+    assert.equal(response.status, 200);
+    await assert.rejects(response.arrayBuffer());
+    assert.equal(service.listShares()[0]?.downloadCount, 0);
+    assert.equal(service.listShares()[0]?.state, "active");
+
+    const retry = await fetch(downloadUrl);
+    assert.equal(retry.status, 200);
+    assert.equal((await retry.arrayBuffer()).byteLength, 512 * 1024 + 16);
+    assert.equal(service.listShares()[0]?.downloadCount, 1);
 });
 
 test("artifact HTTP route enforces maxDownloads while HEAD and invalid ranges do not consume it", async (t) => {
