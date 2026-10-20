@@ -47,6 +47,8 @@ pnpm testspace exec -- <command...>
 
 `extension-smoke` 是单独显式执行的 Extension 生命周期验收：在隔离 Testspace 的 Comment Extension 安装目录中**临时写入无效 Manifest**，验证损坏候选被拒绝但旧 Generation 仍可服务真实 MCP 消息，随后在 `finally` 恢复文件、重新加载并检查订阅回收。它会改变正在运行的 Testspace Extension 状态，因此**不属于默认 `smoke`**；应只在可独占使用的 Testspace 上手动执行。普通 `pnpm test:scripts` 只验证该子命令的路由注册，不执行 Manifest 故障注入。
 
+GitHub Actions 的 **beta-matrix-extended** 工作流提供可手动触发的专项矩阵：`upgrade`、`extension`、`workflow`、`windows-psmux`。前三项在独立 Testspace root 中执行，其中升级使用真实旧发行包和当前候选版本；Windows 专项在 x64/ARM64 原生 Runner 运行完整 psmux Rust 合约。此工作流只支持 `workflow_dispatch`，不自动加入普通 PR 门禁；脚本与工作流静态检查通过**不代表 GitHub Runner 上已经真实执行过**。
+
 MCP App Receipt 增长压力测试同样独立于常规单元测试，可显式运行 `pnpm --filter @portable-devshell/mcp test:stress`；它不能代替真实 ChatGPT Host 验收。
 
 活动 connector 默认周期是 2 秒，可通过：

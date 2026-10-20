@@ -209,3 +209,42 @@ Capability 单独验收：`assets`、`artifacts`、`config.core`、`context.obse
 - 有依赖修改的 `extension-smoke`、发行包 `upgrade-smoke`、长达 180 秒的真实 `long-smoke` 需在独立验收环境按需执行（E/R）。
 - 丢包、网络半断开、跨机大文件传输、并发长时间运行、内存和 FD 压力仍属于后续可靠性证据（R）。
 
+## 8. 测试覆盖缺口台账（按独立断言）
+
+状态区分**存在用例、定向验证、默认CI入口、真实目标平台验收**，不能因局部Mock通过就宣称E2E已覆盖。这里的“自动”表示默认测试脚本发现该测试，不代表本轮已在GitHub Runner上运行。缺失专项不应自动阻断无关业务运行。
+
+| Gap ID | 功能 | 需要验证的不变量 | 证据入口（相对模块路径） | 当前层级/状态 | 门禁 | 尚缺证据 |
+|---|---|---|---|---|---|---|
+| G01 | C02 | Config Journal发布、部分Instance替换、旧文件删除后SIGKILL；重启恢复同一完整Generation | control/config/persistence/CrashRecovery.test.ts | I 已新增、定向通过 | Package自动 | 断电/Windows文件系统耐久待验 |
+| G02 | C25 | Context/Audit迁移过程中SIGKILL；重启后保留记录、幂等 | control/migration/Context.test.ts + Audit.test.ts | I 已新增、定向通过 | Package自动 | 跨所有迁移Domain的整包恢复待验 |
+| G03 | C05 | Reverse同实例凭据撤销与新WSS/SSE激活竞争，旧连接无执行权 | control/reverse/ActivationRace.test.ts | I 已新增、定向通过 | Package自动 | 真实公网/弱网仍待验 |
+| G04 | C03 | 同名Instance旧Generation清理不能回收新Worker/Container | control/instance/EditorLifecycle.test.ts + control/integration/server/InstanceDeleteRecovery.test.ts | I 已新增、定向通过 | Package自动 | 真实远端可再次连通的旧资源待验 |
+| G05 | C04 | SSH安装→启动→工具调用→重连与清理 | core/worker/Transport.test.ts | U 已有 | Package自动 | 真实SSH目标E2E未覆盖 |
+| G06 | C04 | Dockerfile镜像复用与构建失败不启动容器；恢复后允许重试 | core/worker/Transport.test.ts | U 已新增、定向通过 | Package自动 | Docker实际创建与握手待验 |
+| G07 | C04 | Compose暂启容器、Retire失败后恢复原运行状态 | core/worker/Transport.test.ts | U 已新增、定向通过 | Package自动 | 真实Compose错误组合待验 |
+| G08 | C04 | Rootless Podman安全变量隔离、keep-id与容器UID继承 | core/worker/Transport.test.ts | U 已新增、定向通过 | Package自动 | Rootless Podman真机验收待验 |
+| G09 | C26/P02 | 伪造Parent ToolCall/Context/Workspace/Task身份证据时Model CLI副作用为零 | control/extension/ModelCommandBroker.test.ts | U 已新增、定向通过 | Package自动 | 真MCP跨Instance父调用待验 |
+| G10 | C27/P06 | Environment Hook有序组合、只选择一个Sandbox、退出资源释放 | control/extension/ExecutionDrivers.test.ts | U 已新增、定向通过 | Package自动 | 自定义Sandbox→Worker真实执行待验 |
+| G11 | C07/C08 | 取消后迟到Approval无法复活ToolCall | core/approval/Service.test.ts | U 已新增、定向通过 | Package自动 | 真MCP长等待/Worker执行组合待验 |
+| G12 | C29 | 一个Context Rewrite失败不污染他人；出站变错误只执行一次 | core/tool/Pipeline.test.ts | U 已新增、定向通过 | Package自动 | 在途Extension热替换待验 |
+| G13 | X09 | 并发Context解析同名不同Secret不会泄露或串值 | secret/SecretRewrite.test.ts | U 已新增、包测试通过 | Package自动 | Extension Sandbox和真Worker待验 |
+| G14 | C10/C28 | OIDC重启后Issuer/JWKS/Client/Token一致，跨资源Audience拒绝 | mcp/integration/OAuthRestart.test.ts + ContextIsolation.test.ts | I 已新增、MCP包测试通过 | Package自动 | 完整重启与公网Host验收待验 |
+| G15 | C06 | RPC已执行、回复丢失后不重复执行；Stream游标正确重播 | shared/transport/ReplayRecovery.test.ts | U 已有 | Package自动 | 真实Worker副作用与Audit恢复待验 |
+| G16 | C19 | Chunk Offset/Hash错误后失败并清理Source Lease和Target Receive | control/artifact/Service.test.ts | U 已新增、定向通过 | Package自动 | 跨Provider大文件/Control重启待验 |
+| G17 | X05/P05 | 真Direnv CLI的Export/Unload、cwd切换、子进程环境继承 | direnv/DirenvCli.test.ts | I 已新增、包测试通过 | Package自动 | 已安装Extension→真Worker待验 |
+| G18 | C12/X07 | MCP Client阻塞Connect/Call后Abort并可恢复新请求 | mcp-extension/McpHttpClient.test.ts | I 已新增、包测试通过 | Package自动 | 实际外部Server ACL组合待验 |
+| G19 | X10 | Skill投影失败后从新快照正确重试 | skill/SkillCommand.test.ts | U/I 已新增、包测试通过 | Package自动 | 跨Worker传输与Model Load待验 |
+| G20 | C15-C18 | 真Worker取消、File、PTY/Tmux恢复与输出资源 | worker/beta_ipc_contract.rs + worker_contract.rs | I/P Linux已新增、Rust测试通过 | Rust自动/Tmux专项 | Windows和跨UI高输出待验 |
+| G21 | C24/L03 | Web/TUI并发Revision/操作禁用及权威刷新 | web/test/view/page/Todos.test.tsx + tui/test/interaction/Navigation.test.ts | U/I 已新增、包测试通过 | Package自动 | Web/TUI/CLI三端共享RPC验收待验 |
+| G22 | C30/L06 | 安装Extension持有多个真实Worker后退役旧Generation不串Instance | control/integration/extension/Retirement.test.ts | I 已新增、定向通过 | Package自动 | 真实双Worker与慢Stream关闭待验 |
+| G23 | L08/C25 | 旧发行包→当前版迁移/失败回滚后数据可用 | TestspaceUpgradeSmoke.mjs | E 已有但专项未运行 | 手动Extended CI | 新增workflow_dispatch升级入口；实际Runner待验 |
+| G24 | L06 | 损坏Extension候选保留旧Generation，恢复后释放旧资源 | TestspaceExtensionSmoke.mjs | E 已有但专项未运行 | 手动Extended CI | 新增extension专项入口；实际Runner待验 |
+| G25 | C17/P | Windows x64/ARM64 PSMUX Pane/Task/PowerShell与Worker重启 | tmux_windows_contract.rs | P 专项待验 | 手动Extended CI | 新增双Windows runner；实际测试未执行 |
+| G26 | C13/H | 真实ChatGPT Fullscreen/Inline/Approval/Reentry/历史卡片恢复 | McpAppReactBrowser.test.ts | H 未验 | 手动Host | 现有Chromium用测试Host替身 |
+| G27 | C06/R | 慢读者、丢包、弱网重连、FD/内存有界 | scripts/stress-transport.mjs | R 专项待验 | 单独手工 | 压力脚本未在本轮运行 |
+| G28 | C21/X04 | 真实Worker Mailing的提交中断后重启保证Inbox/Index/通知不重复 | extensions/comment/test/unit/Mailing.test.ts | U已有 | Package自动 | 真Worker中途故障注入待验 |
+| G29 | C14 | 两个App Lease争用Claim、人类Pause使旧指令失效 | mcp/mcpapp/Reentry.test.ts | U已有 | Package自动 | 真实Host多iframe竞争待验 |
+| G30 | C20 | 工具已执行而Completion Audit提交失败时重启不出现假成功 | core/tool/Pipeline.test.ts + Provenance.test.ts | U已有 | Package自动 | 完整Control/Worker强制崩溃待验 |
+
+| G31 | C09/C10 | 不同 OAuth Principal 不能读写其他 Context 的状态 | mcp/integration/ContextIsolation.test.ts | I 已新增、MCP包测试通过 | Package自动 | 实际 ChatGPT/OAuth Client Header 端到端仍待验 |
+| G32 | C06/C20 | ToolCall 已产生副作用而回复丢失时，重连后不得默默重复执行 | control/integration/server/transport/ControlRpcServer.test.ts | I 已新增、定向通过 | Package自动 | 真 Worker 跨机弱网/审计提交中断仍待验 |
