@@ -37,10 +37,22 @@ export class ApprovalError extends Error {
 }
 
 export interface ApprovalStorePort {
-    append(request: ApprovalRequest): Promise<void>;
+    append(request: ApprovalRecord): Promise<void>;
     delete(approvalId: string): Promise<void>;
-    get(approvalId: string): Promise<ApprovalRequest | undefined>;
-    list(): Promise<ApprovalRequest[]>;
+    get(approvalId: string): Promise<ApprovalRecord | undefined>;
+    list(): Promise<ApprovalRecord[]>;
+}
+
+interface ApprovalEventDelivery {
+    type: ApprovalEventType;
+    data: Record<string, JsonValue>;
+    failure?: { code?: string; message: string };
+}
+
+// The state and its event intent share one store commit. Delivery is at least
+// once: a crash after append but before acknowledgement may replay the event.
+export interface ApprovalRecord extends ApprovalRequest {
+    eventOutbox?: ApprovalEventDelivery[];
 }
 
 export interface ApprovalEventPort {
@@ -61,7 +73,7 @@ export interface ApprovalServiceOptions {
 }
 
 interface PendingApproval {
-    request: ApprovalRequest;
+    request: ApprovalRecord;
     resolve: (value: ApprovalResolution) => void;
     timeout: NodeJS.Timeout;
     removeAbortListener?: () => void;
@@ -145,7 +157,7 @@ export class ApprovalService implements ApprovalApi {
             }
 
             const now = this.#now();
-            const request: ApprovalRequest = {
+            let request: ApprovalRecord = {
                 approvalId: this.#createId(),
                 callId: input.callId,
                 createdAt: new Date(now).toISOString(),
@@ -166,12 +178,14 @@ export class ApprovalService implements ApprovalApi {
                     ? {}
                     : { workspace: input.workspace }),
             };
+            request = enqueueEvent(request, "approval.requested");
             await this.#store.append(request);
 
             if (this.#closed) {
                 const terminal = await this.#cancel(
                     request.approvalId,
                     "approval service closed",
+                    true,
                 );
                 return {
                     decision: "ask",
@@ -214,26 +228,27 @@ export class ApprovalService implements ApprovalApi {
                         once: true,
                     });
             }
-            await this.#events.append("approval.requested", eventData(request));
+            request = await this.#deliverEvents(request);
             if (this.#closed) {
                 await this.#cancel(request.approvalId, "approval service closed");
             }
-            return { decision: "ask", request, awaitDecision };
+            return { decision: "ask", request: publicRequest(request), awaitDecision };
         });
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
         await this.#ensureReady();
         return this.#exclusive(async () => {
+            await this.#replayEvents();
             await this.#pruneTerminal();
-            return this.#store.list();
+            return (await this.#store.list()).map(publicRequest);
         });
     }
 
     async listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
         await this.#ensureReady();
         return [...this.#pending.values()]
-            .map(({ request }) => request)
+            .map(({ request }) => publicRequest(request))
             .filter(
                 (request) => ctxId === undefined || request.ctxId === ctxId,
             );
@@ -241,9 +256,11 @@ export class ApprovalService implements ApprovalApi {
 
     async getApproval(approvalId: string): Promise<ApprovalRequest> {
         await this.#ensureReady();
-        const request = await this.#store.get(approvalId);
-        if (request !== undefined) return request;
-        throw notFound(this.#instance, approvalId);
+        return this.#exclusive(async () => {
+            const request = await this.#store.get(approvalId);
+            if (request !== undefined) return publicRequest(await this.#deliverEvents(request));
+            throw notFound(this.#instance, approvalId);
+        });
     }
 
     async decideApproval(
@@ -289,7 +306,7 @@ export class ApprovalService implements ApprovalApi {
                     ? {}
                     : { remember: input.remember }),
             };
-            const updated: ApprovalRequest = {
+            const updated: ApprovalRecord = {
                 ...request,
                 decision,
                 status: input.decision === "approve" ? "approved" : "denied",
@@ -305,8 +322,8 @@ export class ApprovalService implements ApprovalApi {
                           status: "denied",
                       },
             );
-            await this.#pruneTerminal();
-            return completed;
+            await this.#pruneAfterCommit();
+            return publicRequest(completed);
         });
     }
 
@@ -330,18 +347,20 @@ export class ApprovalService implements ApprovalApi {
     async #cancel(
         approvalId: string,
         reason?: string,
+        unpublished = false,
     ): Promise<ApprovalRequest> {
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
         if (request === undefined) throw notFound(this.#instance, approvalId);
-        if (request.status !== "pending") return request;
+        if (request.status !== "pending") return publicRequest(request);
 
         const updated = {
             ...request,
+            ...(unpublished ? { eventOutbox: [] } : {}),
             status: "cancelled" as const,
             terminalAt: new Date(this.#now()).toISOString(),
         };
-        await this.#complete(
+        const completed = await this.#complete(
             updated,
             {
                 error: cancelled(this.#instance, request.toolName, reason),
@@ -349,15 +368,18 @@ export class ApprovalService implements ApprovalApi {
             },
             reason,
         );
-        await this.#pruneTerminal();
-        return updated;
+        await this.#pruneAfterCommit();
+        return publicRequest(completed);
     }
 
     async #ensureReady(): Promise<void> {
         if (this.#ready === undefined) {
             const ready = (async () => {
                 for (const request of await this.#store.list()) {
-                    if (request.status !== "pending") continue;
+                    if (request.status !== "pending") {
+                        await this.#deliverEvents(request);
+                        continue;
+                    }
                     const status =
                         Date.parse(request.expiresAt) <= this.#now()
                             ? "expired"
@@ -424,7 +446,7 @@ export class ApprovalService implements ApprovalApi {
     async #pruneTerminal(): Promise<void> {
         const cutoff = this.#now() - TERMINAL_MAX_AGE_MS;
         const terminals = (await this.#store.list())
-            .filter((request) => request.status !== "pending")
+            .filter((request) => request.status !== "pending" && !request.eventOutbox?.length)
             .map((request) => ({
                 request,
                 time: Date.parse(
@@ -459,11 +481,12 @@ export class ApprovalService implements ApprovalApi {
     }
 
     async #complete(
-        request: ApprovalRequest,
+        request: ApprovalRecord,
         resolution: ApprovalResolution,
         reason?: string,
-    ): Promise<ApprovalRequest> {
-        await this.#store.append(request);
+    ): Promise<ApprovalRecord> {
+        let committed = enqueueEvent(request, `approval.${resolution.status}`, reason);
+        await this.#store.append(committed);
         // close() is synchronous and can run while a store write is suspended.
         // Fence its acknowledgement before publishing or granting the decision.
         // A write already committed by the store is terminalized as cancellation.
@@ -482,7 +505,8 @@ export class ApprovalService implements ApprovalApi {
                 error: cancelled(this.#instance, request.toolName, reason),
                 status: "cancelled",
             };
-            await this.#store.append(request);
+            committed = enqueueEvent(request, "approval.cancelled", reason);
+            await this.#store.append(committed);
         }
         const pending = this.#pending.get(request.approvalId);
         if (pending !== undefined) {
@@ -492,11 +516,64 @@ export class ApprovalService implements ApprovalApi {
         }
         // The durable transition owns resolution, independently of event I/O.
         pending?.resolve(resolution);
-        await this.#events.append(
-            `approval.${resolution.status}`,
-            eventData(request, request.decision, reason),
-        );
+        return this.#deliverEvents(committed);
+    }
+
+    async #replayEvents(): Promise<void> {
+        for (const request of await this.#store.list()) {
+            if (request.eventOutbox?.length) await this.#deliverEvents(request);
+        }
+    }
+
+    async #deliverEvents(request: ApprovalRecord): Promise<ApprovalRecord> {
+        while (request.eventOutbox?.length) {
+            const event = request.eventOutbox[0]!;
+            const remaining = request.eventOutbox.slice(1);
+            try {
+                await this.#events.append(event.type, {
+                    ...event.data,
+                    ...(event.failure === undefined ? {} : { eventAppendFailure: event.failure }),
+                });
+            } catch (error) {
+                request = { ...request, eventOutbox: [
+                    { ...event, failure: eventFailure(error) }, ...remaining,
+                ] };
+                // The original intent is already durable, even if recording
+                // the diagnostic fails. Event I/O cannot undo authorization.
+                await this.#acknowledgeEvents(request);
+                this.#updatePending(request);
+                return request;
+            }
+            const delivered: ApprovalRecord = { ...request, eventOutbox: remaining };
+            if (remaining.length === 0) delete delivered.eventOutbox;
+            if (!await this.#acknowledgeEvents(delivered)) break;
+            request = delivered;
+        }
+        this.#updatePending(request);
         return request;
+    }
+
+    async #acknowledgeEvents(request: ApprovalRecord): Promise<boolean> {
+        try {
+            await this.#store.append(request);
+            return true;
+        } catch (error) {
+            console.warn("Approval event outbox update failed; preserving committed outcome:", error);
+            return false;
+        }
+    }
+
+    #updatePending(request: ApprovalRecord): void {
+        const pending = this.#pending.get(request.approvalId);
+        if (pending !== undefined) pending.request = request;
+    }
+
+    async #pruneAfterCommit(): Promise<void> {
+        try {
+            await this.#pruneTerminal();
+        } catch (error) {
+            console.warn("Approval retention failed; preserving committed outcome:", error);
+        }
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -621,4 +698,27 @@ function eventData(
     return Object.fromEntries(
         Object.entries(fields).filter(([, value]) => value !== undefined),
     ) as Record<string, JsonValue>;
+}
+
+function enqueueEvent(
+    request: ApprovalRecord,
+    type: ApprovalEventType,
+    reason?: string,
+): ApprovalRecord {
+    return { ...request, eventOutbox: [
+        ...(request.eventOutbox ?? []),
+        { type, data: eventData(request, request.decision, reason) },
+    ] };
+}
+
+function eventFailure(error: unknown): { code?: string; message: string } {
+    return {
+        ...(typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+            ? { code: error.code } : {}),
+        message: error instanceof Error ? error.message : String(error),
+    };
+}
+
+function publicRequest({ eventOutbox: _outbox, ...request }: ApprovalRecord): ApprovalRequest {
+    return request;
 }

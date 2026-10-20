@@ -1,20 +1,18 @@
 import type { StateStore } from "../audit/Api.js";
-import type { ApprovalRequest } from "@portable-devshell/shared";
-
-import type { ApprovalStorePort } from "./execution/Service.js";
+import type { ApprovalRecord, ApprovalStorePort } from "./execution/Service.js";
 
 export class InstanceApprovalStore implements ApprovalStorePort {
-    readonly #store: StateStore<ApprovalRequest>;
+    readonly #store: StateStore<ApprovalRecord>;
 
-    constructor(store: StateStore<ApprovalRequest>) {
+    constructor(store: StateStore<ApprovalRecord>) {
         this.#store = store;
     }
 
-    append(request: ApprovalRequest): Promise<void> {
+    append(request: ApprovalRecord): Promise<void> {
         return this.#store.put(request.approvalId, request);
     }
 
-    get(approvalId: string): Promise<ApprovalRequest | undefined> {
+    get(approvalId: string): Promise<ApprovalRecord | undefined> {
         return this.#store.get(approvalId);
     }
 
@@ -22,7 +20,7 @@ export class InstanceApprovalStore implements ApprovalStorePort {
         return this.#store.delete(approvalId);
     }
 
-    async list(): Promise<ApprovalRequest[]> {
+    async list(): Promise<ApprovalRecord[]> {
         return (await this.#store.list()).sort((left, right) =>
             left.createdAt.localeCompare(right.createdAt),
         );

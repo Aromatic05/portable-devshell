@@ -196,6 +196,7 @@ for (const phase of ["pending", "approved"] as const) {
         assert.equal((await store.get("pipeline"))?.status, "cancelled");
         assert.deepEqual(await service.listPendingApprovals(), []);
         assert.equal(events.includes("approval.approved"), false);
+        assert.equal(events.includes("approval.requested"), phase === "approved");
         const records = await h.history.read();
         assert.equal(records.length, 1);
         assert.equal(records[0]?.status, "denied");
