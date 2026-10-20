@@ -10,6 +10,7 @@ import {
     TODO_MAX_ITEMS,
     TODO_MAX_TEXT_LENGTH,
     TODO_MAX_TITLE_LENGTH,
+    RemoteError,
     createRemoteError,
     runtimeErrorCodes,
 } from "@portable-devshell/shared";
@@ -37,11 +38,37 @@ export interface TodoStoreOptions {
     state: TodoState;
 }
 
+export class TodoCommitError extends RemoteError {
+    constructor(
+        cause: unknown,
+        readonly committed: true | "unknown",
+        filePath: string,
+        phase: "rename" | "directory-sync",
+    ) {
+        super({
+            cause,
+            code: committed === true
+                ? "todo.commitDurabilityUnconfirmed"
+                : "todo.commitUncertain",
+            details: { committed, filePath, phase },
+            message: committed === true
+                ? "Todo update is committed and visible, but crash durability is unconfirmed; read the current revision before making further changes."
+                : "Todo commit outcome is unknown; read the current state before retrying.",
+            retryable: false,
+        });
+        this.name = "TodoCommitError";
+    }
+}
+
 export class TodoStore {
     readonly #filePath: string;
     readonly #instanceName: string;
     readonly #state: TodoState;
     #document?: TodoDocument;
+    #pendingCommit?: {
+        document: TodoDocument;
+        onCommitted?: () => Promise<void>;
+    };
 
     constructor(options: TodoStoreOptions) {
         this.#filePath = options.filePath;
@@ -74,10 +101,21 @@ export class TodoStore {
         return this.read();
     }
 
+    async reconcile(): Promise<void> {
+        const pending = this.#pendingCommit;
+        if (pending === undefined) return;
+        const stored = this.#readFromDisk();
+        this.#document = stored ?? this.#state.emptyDocument();
+        this.#pendingCommit = undefined;
+        if (isDeepStrictEqual(stored, pending.document)) {
+            await pending.onCommitted?.();
+        }
+    }
+
     async write(document: TodoDocument): Promise<TodoDocument> {
+        await this.reconcile();
         const normalized = this.#state.normalizeDocument(document);
-        await this.#writeAtomic(normalized);
-        this.#document = normalized;
+        await this.#commit(normalized);
         return this.read();
     }
 
@@ -86,6 +124,7 @@ export class TodoStore {
             document: TodoDocument,
         ) => TodoDocument | Promise<TodoDocument>,
     ): Promise<TodoDocument> {
+        await this.reconcile();
         const next = await operation(this.read());
         return await this.write(next);
     }
@@ -95,17 +134,23 @@ export class TodoStore {
             document: TodoDocument;
             result: T;
         },
+        onCommitted?: (result: T) => Promise<void>,
     ): Promise<T> {
+        await this.reconcile();
         const current = this.#current();
         const next = operation(current);
         if (next.document !== current) {
-            await this.#writeAtomic(next.document);
-            this.#document = next.document;
+            await this.#commit(next.document, onCommitted === undefined
+                ? undefined
+                : async () => { await onCommitted(structuredClone(next.result)); });
         }
         return structuredClone(next.result);
     }
 
     #current(): TodoDocument {
+        if (this.#pendingCommit !== undefined) {
+            return this.#loadFromDisk();
+        }
         if (this.#document === undefined) {
             cleanupStaleAtomicStateTemps(this.#filePath);
             this.#document = this.#loadFromDisk();
@@ -114,16 +159,17 @@ export class TodoStore {
     }
 
     #loadFromDisk(): TodoDocument {
-        if (!existsSync(this.#filePath)) {
-            return this.#state.emptyDocument();
-        }
+        return this.#readFromDisk() ?? this.#state.emptyDocument();
+    }
 
+    #readFromDisk(): TodoDocument | undefined {
         try {
             const value = JSON.parse(
                 readFileSync(this.#filePath, "utf8"),
             ) as unknown;
             return this.#state.normalizeDocument(value);
         } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
             throw createRemoteError({
                 cause: error,
                 code: runtimeErrorCodes.todoInvalid,
@@ -132,6 +178,27 @@ export class TodoStore {
                 retryable: false,
             });
         }
+    }
+
+    async #commit(
+        document: TodoDocument,
+        onCommitted?: () => Promise<void>,
+    ): Promise<void> {
+        let failure: TodoCommitError | undefined;
+        try {
+            await this.#writeAtomic(document);
+        } catch (error) {
+            if (!(error instanceof TodoCommitError)) throw error;
+            this.#document = undefined;
+            if (error.committed === "unknown") {
+                this.#pendingCommit = { document, onCommitted };
+                throw error;
+            }
+            failure = error;
+        }
+        this.#document = document;
+        await onCommitted?.();
+        if (failure !== undefined) throw failure;
     }
 
     async #writeAtomic(document: TodoDocument): Promise<void> {
@@ -147,13 +214,39 @@ export class TodoStore {
             } finally {
                 await handle.close();
             }
-            await rename(temporary, this.#filePath);
         } catch (error) {
             await unlink(temporary).catch(() => undefined);
             throw error;
         }
 
-        await this.#syncDirectory(directory);
+        try {
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            // A failed rename can have taken effect. Never trust the old cache
+            // until the visible destination has been checked.
+            this.#document = undefined;
+            let stored: TodoDocument | undefined;
+            try {
+                stored = this.#readFromDisk();
+            } catch (probeError) {
+                throw new TodoCommitError(
+                    new AggregateError([error, probeError], "Todo rename and reconciliation failed."),
+                    "unknown", this.#filePath, "rename",
+                );
+            } finally {
+                await unlink(temporary).catch(() => undefined);
+            }
+            if (isDeepStrictEqual(stored, document)) {
+                throw new TodoCommitError(error, true, this.#filePath, "rename");
+            }
+            throw error;
+        }
+
+        try {
+            await this.#syncDirectory(directory);
+        } catch (error) {
+            throw new TodoCommitError(error, true, this.#filePath, "directory-sync");
+        }
     }
 
     async #syncDirectory(directory: string): Promise<void> {

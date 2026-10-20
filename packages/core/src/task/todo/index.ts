@@ -37,11 +37,13 @@ export class TodoService {
     }
 
     async read(input?: TodoReadInput): Promise<TodoReadResult> {
-        await this.#operation;
-        return this.#readDocument(
-            input === undefined ? this.#store.readActive() : this.#store.read(),
-            input,
-        );
+        return await this.#runExclusive(async () => {
+            await this.#store.reconcile();
+            return this.#readDocument(
+                input === undefined ? this.#store.readActive() : this.#store.read(),
+                input,
+            );
+        });
     }
 
     summaries(): ActiveTodoSummary[] {
@@ -63,8 +65,7 @@ export class TodoService {
                     document: transition.document,
                     result: { events: transition.events, value: result },
                 };
-            });
-            await this.#emitEvents(committed.events);
+            }, async (result) => { await this.#emitEvents(result.events); });
             return committed.value;
         });
     }
@@ -91,16 +92,16 @@ export class TodoService {
                     document: transition.document,
                     result: { events: transition.events, value: result },
                 };
-            });
-            await this.#emitEvents(committed.events);
+            }, async (result) => { await this.#emitEvents(result.events); });
             return committed.value;
         });
     }
 
     async cancelAll(): Promise<void> {
         await this.#runExclusive(async () => {
+            await this.#store.reconcile();
             for (const task of this.#store.readActive().active) {
-                const events = await this.#store.transition((document) => {
+                await this.#store.transition((document) => {
                     const transition = this.#state.control(
                         document,
                         task.taskId,
@@ -112,22 +113,20 @@ export class TodoService {
                         document: transition.document,
                         result: transition.events,
                     };
-                });
-                await this.#emitEvents(events);
+                }, async (events) => { await this.#emitEvents(events); });
             }
         });
     }
 
     async delete(taskId: string): Promise<void> {
         await this.#runExclusive(async () => {
-            const events = await this.#store.transition((document) => {
+            await this.#store.transition((document) => {
                 const transition = this.#state.delete(document, taskId);
                 return {
                     document: transition.document,
                     result: transition.events,
                 };
-            });
-            await this.#emitEvents(events);
+            }, async (events) => { await this.#emitEvents(events); });
         });
     }
 
