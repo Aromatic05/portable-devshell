@@ -402,6 +402,51 @@ test("AccessRuntime keeps the earliest retry deadline across endpoints", async (
     }
 });
 
+test("AccessRuntime ignores public URL callbacks from a stopped tunnel generation", async () => {
+    const directory = await createTestTempDirectory("access-runtime-stale-url");
+    const config = new MemoryConfig();
+    await config.update({ "mcp.publicBaseUrl": "http://127.0.0.1:47123" });
+    const provider = new FakeCloudflaredProvider();
+    const runtime = new AccessRuntime(context(directory, config), {
+        providers: [provider],
+        reconcileDelayMs: 60_000,
+    });
+    try {
+        await runtime.upsert({ enabled: true, id: "cf", provider: "cloudflared", target: "mcp", token: "token" });
+        const old = provider.sessions[0]!;
+        await runtime.setEnabled("cf", false);
+        old.setPublicUrl("https://stale.example.test/");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(config.values.get("mcp.publicBaseUrl"), "http://127.0.0.1:47123");
+        assert.equal(runtime.get("cf")?.state, "disabled");
+    } finally {
+        await runtime.dispose();
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
+test("AccessRuntime explicitly reconciles an unexpectedly closed session", async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+    const directory = await createTestTempDirectory("access-runtime-close-retry");
+    const config = new MemoryConfig();
+    const provider = new FakeSshProvider();
+    const runtime = new AccessRuntime(context(directory, config), { providers: [provider], reconcileDelayMs: 60_000 });
+    try {
+        await runtime.upsert(sshEndpoint);
+        provider.sessions[0]!.closeUnexpectedly();
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(runtime.get("ssh-main")?.state, "error");
+        await runtime.reconcile();
+        assert.equal(provider.opens.length, 2);
+        assert.equal(provider.sessions[0]?.stops, 0, "an already closed process needs no stop call");
+        assert.equal(runtime.get("ssh-main")?.state, "running");
+    } finally {
+        await runtime.dispose();
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
 test("Access CLI restricts mutations to the local owner and exposes runtime status", async () => {
     const abort = new AbortController();
     const remote = {
